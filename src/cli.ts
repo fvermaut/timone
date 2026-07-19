@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { Command } from "commander";
 
 import { registerProjectsCommand } from "./commands/projects.js";
+import { registerWorkspaceCommand } from "./commands/workspace.js";
 
 /**
  * Read the package version at runtime. Works both from source (src/cli.ts,
@@ -32,8 +33,9 @@ export function buildProgram(): Command {
     .version(packageVersion());
 
   registerProjectsCommand(program);
+  registerWorkspaceCommand(program);
 
   return program;
 }
 
-buildProgram().parse(process.argv);
+await buildProgram().parseAsync(process.argv);
