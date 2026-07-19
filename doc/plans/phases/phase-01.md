@@ -22,7 +22,7 @@ Everything in Timone hangs off two anchors: the written process (which every sta
 
 The process spec is deliberately written **before** any skill exists — skills conform to the spec, not the other way around. The workspace tooling is the first real code: manifest loading with strict validation, and a sync command that materializes `projects/` from the manifest without ever touching a dirty clone.
 
-The implementation stack (TypeScript, Claude Agent SDK, CLI framework) was decided in the founding grill session; per our own process, that decision is recorded as ADR-0001 in this phase rather than left implicit.
+The founding decisions from the grill session are already recorded as standalone ADRs under `doc/adr/` (0001–0006); this phase consumes them as context — in particular [ADR-0002](../../adr/0002-typescript-claude-agent-sdk.md) (TypeScript + Agent SDK + supporting libraries), which the scaffold implements.
 
 ---
 
@@ -37,6 +37,7 @@ None — first phase. The repo currently contains only `doc/specs/` and this pla
 | Area  | File(s)                                             |
 | ----- | --------------------------------------------------- |
 | Specs | `doc/specs/product-overview.md`, `doc/specs/prd/*`  |
+| ADRs  | `doc/adr/0001`–`0006` (founding decisions)          |
 | Repo  | `.gitignore` (already ignores `projects/`, `tmp/`)  |
 
 ---
@@ -54,7 +55,7 @@ Write the single written definition of the Timone process. One compact table plu
 - **Closing gate** (what approval/check ends the stage)
 - **Owning skill** (name it `timone-<stage>`; Deployment and Maintenance are marked *"stage defined — skill post-MVP"*)
 
-Also include: the artifact conventions summary (`doc/specs/`, `doc/specs/prd/`, `doc/adr/`, `doc/plans/phases/` inside each managed project), the stable-requirement-ID rules, and the ADR significance rule of thumb (*a decision that constrains future phases or is expensive to reverse*).
+Also include: the artifact conventions summary (`doc/specs/`, `doc/specs/prd/`, `doc/adr/`, `doc/plans/phases/` inside each managed project), the stable-requirement-ID rules, and the ADR conventions — significance rule of thumb (*a decision that constrains future phases or is expensive to reverse*), and that ADRs are **standalone artifacts written at decision time**, never scheduled as plan work (the existing `doc/adr/0001`–`0006` are the reference examples).
 
 Source material: `doc/specs/prd/prd-01-process-layer.md` and the `poc-*` skills under `tmp/skills/` (read for behavior, do not copy customer specifics).
 
@@ -67,26 +68,11 @@ Source material: `doc/specs/prd/prd-01-process-layer.md` and the `poc-*` skills 
 
 ---
 
-### Sub-phase 01a.1: ADR-0001 — implementation stack
-
-**[NEW FILE]** `doc/adr/0001-typescript-agent-sdk-cli.md`
-
-Record the founding stack decision (from the 2026-07-19 grill session): TypeScript; Claude Agent SDK for programmatic agent sessions (over shelling out to `claude -p`); commander for the CLI; zod for schema validation; vitest for tests; Node ≥ 22; npm as package manager. Format: Status / Context / Decision / Consequences. Status: `accepted`.
-
-**Dependencies:** 01a (the ADR format convention is defined in the process spec).
-
-#### Agent Validation Steps
-
-- [ ] File follows the ADR format defined in `doc/process.md`
-- [ ] Numbered `0001`, status `accepted`
-
----
-
 ### Sub-phase 01b: TypeScript CLI scaffold
 
 **[NEW FILE]** `package.json`, `tsconfig.json`, `vitest.config.ts`, `src/cli.ts`, `src/index.ts`
 
-> Sub-phase 01a.1 must be complete before starting (the scaffold implements ADR-0001).
+> No dependency on 01a. Implements the stack recorded in [ADR-0002](../../adr/0002-typescript-agent-sdk.md).
 
 - `package.json`: name `timone`, `bin: { "timone": "dist/cli.js" }`, scripts: `build` (tsc), `type-check` (tsc --noEmit), `test` (vitest run), `dev`.
 - `src/cli.ts`: commander program with `--version` and command registry; commands added in later sub-phases.
@@ -210,10 +196,9 @@ npm run type-check
 
 ```
 01a   → (none)      process spec (human-gated)
-01a.1 → 01a         ADR-0001
-01b   → 01a.1       CLI scaffold
+01b   → (none)      CLI scaffold (implements ADR-0002)
 01c   → 01b         manifest loader
 01d   → 01c         projects list
 01e   → 01c         workspace sync
-01f   → 01d, 01e    docs last
+01f   → 01a, 01d, 01e    docs last
 ```
