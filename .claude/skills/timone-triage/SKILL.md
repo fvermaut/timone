@@ -76,6 +76,10 @@ The record carries: date, the request (verbatim), kind, entry point, rationale. 
 ## Rationale
 
 <the one-paragraph rationale>
+
+## Answer
+
+<questions only: the answer given, naming the artifact(s) it was derived from — omit this section for other kinds>
 ```
 
 3. Commit it in the target project (`docs: triage NNN — <kind>`). This record is a process artifact under `doc/` — the only kind of file this skill may cause to be committed; never touch anything outside `doc/…` in the client repo.
