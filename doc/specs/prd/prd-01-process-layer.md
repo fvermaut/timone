@@ -3,7 +3,7 @@
 > **Status:** Active
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-01-process-layer.criteria.md](prd-01-process-layer.criteria.md)
-> **Phases:** [phase-01](../../plans/phases/phase-01.md) (foundations: process spec, manifest, workspace sync — R1, R2, R3 ✓), [phase-02](../../plans/phases/phase-02.md) (stage skills at the root: grill, PRD, ADR — R4, R7, R8, R9, R19 ✓), [phase-03](../../plans/phases/phase-03.md) (standards library content — R18 ✓, R20 partial)
+> **Phases:** [phase-01](../../plans/phases/phase-01.md) (foundations: process spec, manifest, workspace sync — R1, R2, R3 ✓), [phase-02](../../plans/phases/phase-02.md) (stage skills at the root: grill, PRD, ADR — R4, R7, R8, R9, R19 ✓), [phase-03](../../plans/phases/phase-03.md) (standards library content — R18 ✓, R20 partial), [phase-04](../../plans/phases/phase-04.md) (onboarding: `projects add` + `timone-onboard` — R5, R15)
 
 ## Problem
 
