@@ -2,8 +2,16 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { parse as parseYamlText } from "yaml";
 
-import { loadManifest, type Manifest } from "./manifest.js";
+import {
+  addProject,
+  loadManifest,
+  parseManifest,
+  serializeManifest,
+  type Manifest,
+  type ProjectConfig,
+} from "./manifest.js";
 
 let dir: string;
 let counter = 0;
@@ -197,5 +205,77 @@ projects:
     expect(() => loadManifest(file)).toThrowError(
       `Invalid YAML in manifest file "${file}"`,
     );
+  });
+});
+
+const validEntry: ProjectConfig = {
+  repo_url: "git@github.com:fvermaut/scratch-app.git",
+  path: "projects/scratch-app",
+  stack: ["typescript"],
+  bindings: { ticketing: "github" },
+};
+
+describe("addProject", () => {
+  it("adds to an empty manifest and produces a valid single-entry manifest", () => {
+    const empty: Manifest = { projects: {} };
+    const updated = addProject(empty, "scratch-app", validEntry);
+
+    expect(Object.keys(updated.projects)).toEqual(["scratch-app"]);
+    expect(updated.projects["scratch-app"]).toEqual(validEntry);
+  });
+
+  it("throws on a duplicate name, naming the project", () => {
+    const manifest: Manifest = { projects: { "scratch-app": validEntry } };
+    expect(() => addProject(manifest, "scratch-app", validEntry)).toThrowError(
+      /"scratch-app".*already exists/,
+    );
+  });
+
+  it("throws the same field-naming error style as loadManifest for an invalid ticketing value", () => {
+    const empty: Manifest = { projects: {} };
+    const invalidEntry = {
+      ...validEntry,
+      bindings: { ticketing: "jira" },
+    } as unknown as ProjectConfig;
+
+    expect(() => addProject(empty, "scratch-app", invalidEntry)).toThrowError(
+      'Invalid manifest: project "scratch-app": field "bindings.ticketing" must be "github"',
+    );
+  });
+
+  it("does not mutate its input manifest argument", () => {
+    const empty: Manifest = { projects: {} };
+    addProject(empty, "scratch-app", validEntry);
+
+    expect(Object.keys(empty.projects)).toEqual([]);
+  });
+});
+
+describe("serializeManifest", () => {
+  it("round-trips through parseManifest/loadManifest unchanged", () => {
+    const manifest: Manifest = {
+      projects: {
+        "client-alpha": {
+          repo_url: "git@github.com:fvermaut/pilot-app.git",
+          path: "projects/client-alpha",
+          stack: ["typescript", "react"],
+          bindings: { ticketing: "github", preview: "docker" },
+        },
+        "internal-tools": {
+          repo_url: "git@github.com:fvermaut/internal-tools.git",
+          path: "projects/internal-tools",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+      },
+    };
+
+    const yamlText = serializeManifest(manifest);
+
+    expect(parseManifest(parseYamlText(yamlText))).toEqual(manifest);
+
+    const file = join(dir, `manifest-${counter++}.yaml`);
+    writeFileSync(file, yamlText, "utf8");
+    expect(loadManifest(file)).toEqual(manifest);
   });
 });

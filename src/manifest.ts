@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 
 /**
@@ -123,4 +123,36 @@ export function loadManifest(filePath: string): Manifest {
   }
 
   return parseManifest(data);
+}
+
+/**
+ * Add a project entry to a manifest, returning a new `Manifest` (the input
+ * is never mutated). Validates `entry` against the same per-project zod
+ * shape `loadManifest` uses, via {@link parseManifest}, so error messages
+ * share its "project ... field ..." style.
+ *
+ * Throws when `name` already exists in `manifest.projects`, or when `entry`
+ * fails validation.
+ */
+export function addProject(
+  manifest: Manifest,
+  name: string,
+  entry: ProjectConfig,
+): Manifest {
+  if (name in manifest.projects) {
+    throw new Error(`Invalid manifest: project "${name}": already exists`);
+  }
+
+  const candidate = {
+    projects: { ...manifest.projects, [name]: entry },
+  };
+  return parseManifest(candidate);
+}
+
+/**
+ * Serialize a manifest back to YAML text. Does not preserve comments (see
+ * ADR-0008); round-trips through {@link parseManifest} / {@link loadManifest}.
+ */
+export function serializeManifest(manifest: Manifest): string {
+  return stringifyYaml(manifest);
 }
