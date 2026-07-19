@@ -1,6 +1,6 @@
 # Phase 06: Planning — `timone-plan`
 
-> **Status:** Approved for execution by fvermaut 2026-07-19.
+> **Status:** Complete — see [reports/phase-06-complete.md](reports/phase-06-complete.md). Dry-run gate passed by fvermaut 2026-07-19.
 
 > **Companion phases:** [Phase 02](phase-02.md) (skill authoring conventions — the mandatory target-project resolution preamble), [Phase 05](phase-05.md) (the spec-first-then-skill ordering this phase reuses, and the stage-1 routing table that sends chores here). Governing decision: [ADR-0007](../../adr/0007-sessions-at-timone-root.md) — sessions run at the timone root; the skill resolves a target project and writes only under `projects/<name>/`.
 

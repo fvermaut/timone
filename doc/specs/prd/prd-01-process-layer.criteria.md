@@ -114,7 +114,7 @@
 > ✏ Revised 2026-07-19: sub-phases additionally declare their seams under test (consumed by the TDD loop, R16); prefactoring and expand–contract sequencing added to the planning rules.
 
 - **Priority:** MUST
-- **Status:** revised
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN an approved PRD on a managed project

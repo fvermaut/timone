@@ -24,6 +24,7 @@ Sessions run at the timone repo root — never inside a managed project ([ADR-00
 /timone-grill <project-name> <topic or idea to grill>       # stage 2 — requirements interview
 /timone-prd <project-name>                                  # stage 3 — persist the PRD pair
 /timone-adr <project-name> <decision to record>              # stage 4 — architecture decision record
+/timone-plan <project-name> <prd-ref | req IDs | work>       # stage 5 — cut a phase into vertical slices
 ```
 
 `timone-onboard` is the one skill allowed to add a project — it does so via `timone projects add` (below), never by hand-editing `timone.yaml` ([ADR-0008](doc/adr/0008-manifest-writes-via-cli-command.md)). Every other skill validates its target against `timone.yaml`, requires the project to be cloned (`workspace sync` first), and touches only `projects/<name>/…` — the only files any skill ever commits there are process artifacts (`doc/…`, `CONTEXT.md`). See [process.md](process.md) for the full lifecycle these skills implement.
@@ -49,4 +50,4 @@ node dist/cli.js projects update <name> [--repo <url>] [--path <path>] \
 
 ## Status
 
-Phases 01–05 delivered: foundations (process spec, manifest, workspace sync), the document trio (grill/PRD/ADR skills), the standards library (11 entries approved), onboarding (`timone-onboard` + `projects add`), and triage (`timone-triage` + `projects update`). Five stage skills now exist and have been exercised end to end against scratch fixtures. Next: plan, execute, verify, deliver, and improve skills (remaining PRD-01 scope), then the inverted loop (PRD-02).
+Phases 01–06 delivered: foundations (process spec, manifest, workspace sync), the document trio (grill/PRD/ADR skills), the standards library (11 entries approved), onboarding (`timone-onboard` + `projects add`), triage (`timone-triage` + `projects update`), and planning (`timone-plan`). Six stage skills now exist and have been exercised end to end against scratch fixtures. Next: execute, verify, deliver, and improve skills (remaining PRD-01 scope), then the inverted loop (PRD-02).
