@@ -1,0 +1,26 @@
+# Timone Stage Skills — Authoring Conventions
+
+Every skill in this directory implements exactly one stage of [the Timone process](../../doc/process.md). The process spec is normative: when a skill and the spec disagree, the spec wins and the skill gets fixed. Skills contain no client-specific content, ever.
+
+Sessions run at the **timone repo root** ([ADR-0007](../../doc/adr/0007-sessions-at-timone-root.md)); skills operate on a **target project** under `projects/<name>/`.
+
+## Frontmatter rules
+
+- `name`: `timone-<stage>` (e.g. `timone-grill`, `timone-prd`, `timone-adr`).
+- `description`: states the owned stage, when to use it, and trigger phrases; mentions it applies to a managed project.
+- `argument-hint`: starts with `<project-name>`, then the stage-specific input.
+
+## Target-project resolution (required preamble — copy this behavior into every skill)
+
+1. The target project is the one named in the invocation argument or prompt.
+2. If no project is named: read `timone.yaml`, list the project names, and **ask** the user to pick. Never guess.
+3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
+4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
+5. From here on, every file the skill reads or writes lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `doc/process.md`, `standards/`, and `timone.yaml`.
+6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
+
+## Artifact rules
+
+- Artifact paths follow the process spec's conventions section (`projects/<name>/doc/specs/…`, `doc/adr/…`, `doc/plans/…`, `CONTEXT.md`).
+- The only files a skill may cause to be committed in a target project are process artifacts under `doc/` and `CONTEXT.md`. Skill files, harness config, or timone internals never land in a client repo.
+- Stable requirement IDs, ADR numbering, and status lifecycles follow the process spec — skills restate the *behavior*, never invent variants.
