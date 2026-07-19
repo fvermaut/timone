@@ -1,6 +1,6 @@
 # Phase 05: Triage — `timone-triage` + `timone projects update`
 
-> **Status:** In progress — breakdown approved by fvermaut 2026-07-19. Sub-phases 05a, 05b, 05c complete.
+> **Status:** Complete — see [reports/phase-05-complete.md](reports/phase-05-complete.md). Dry-run gate passed by fvermaut 2026-07-19.
 
 > **Companion phases:** [Phase 01](phase-01.md) (CLI/manifest foundations — `projects update` extends them), [Phase 02](phase-02.md) (skill conventions), [Phase 04](phase-04.md) (the `projects add` pattern this phase's CLI work mirrors). Governing decisions: [ADR-0004](../../adr/0004-github-first-adapters.md) (GitHub-first — the issue-backed triage path uses `gh` directly, no adapter layer), [ADR-0008](../../adr/0008-manifest-writes-via-cli-command.md) (manifest writes only via CLI — the reason `projects update` exists at all).
 

@@ -68,7 +68,7 @@
 ## R6 — Triage skill
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** human
 - **Criteria:**
     - GIVEN an incoming request (ticket text or free-form description) on a managed project

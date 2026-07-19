@@ -20,6 +20,7 @@ Sessions run at the timone repo root — never inside a managed project ([ADR-00
 
 ```
 /timone-onboard <project-name> <repo-url>                  # stage 0 — register, clone, doc tree, overview, founding ADRs, standards
+/timone-triage <project-name> <request | issue-ref>         # stage 1 — classify a request, record it, route it
 /timone-grill <project-name> <topic or idea to grill>       # stage 2 — requirements interview
 /timone-prd <project-name>                                  # stage 3 — persist the PRD pair
 /timone-adr <project-name> <decision to record>              # stage 4 — architecture decision record
@@ -40,10 +41,12 @@ node dist/cli.js projects list      # table of managed projects + cloned state
 node dist/cli.js workspace sync     # clone missing, fast-forward clean, skip dirty
 node dist/cli.js projects add <name> --repo <url> --path projects/<name> \
   --stack <comma,list> --ticketing github [--preview docker]   # register a project (used by timone-onboard)
+node dist/cli.js projects update <name> [--repo <url>] [--path <path>] \
+  [--stack <comma,list>] [--ticketing github] [--preview docker]   # correct an existing entry (ADR-0008: never hand-edit)
 ```
 
 `npm test` runs the suite (manifest validation + workspace-sync integration tests on local fixtures).
 
 ## Status
 
-Phases 01–04 delivered: foundations (process spec, manifest, workspace sync), the document trio (grill/PRD/ADR skills), the standards library (11 entries approved), and onboarding (`timone-onboard` + `projects add`). All four document-producing stage skills now exist and have been exercised end to end against scratch fixtures. Next: triage, plan, execute, verify, deliver, and improve skills (remaining PRD-01 scope), then the inverted loop (PRD-02).
+Phases 01–05 delivered: foundations (process spec, manifest, workspace sync), the document trio (grill/PRD/ADR skills), the standards library (11 entries approved), onboarding (`timone-onboard` + `projects add`), and triage (`timone-triage` + `projects update`). Five stage skills now exist and have been exercised end to end against scratch fixtures. Next: plan, execute, verify, deliver, and improve skills (remaining PRD-01 scope), then the inverted loop (PRD-02).
