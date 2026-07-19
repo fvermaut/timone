@@ -12,6 +12,8 @@ Stage 0 is cross-cutting and runs **once per project**, before any other stage s
 
 This skill covers the full onboarding flow for a project that does not yet exist in `timone.yaml`: target intake, the stack + constraints checklist, register + clone, existing-codebase detection, the doc tree, the product overview, the founding ADRs, and the standards artifact — greenfield and existing-codebase repos both, ending on the combined confirmation gate described in "Standards artifact" below.
 
+**Never `cd` into `projects/<name>`, at any step.** Every command and file path in this skill — including inspecting `package.json`, `.eslintrc*`, or the existing `src/` layout during existing-codebase detection — is written relative to the timone repo root, exactly like every other stage skill (see `.claude/skills/README.md`). Reading a file inside the target project does not require changing directory into it (`cat projects/<name>/package.json` works from the root). If your working directory ever drifts from the timone root, every subsequent `projects/<name>/...` path silently double-nests instead of failing loudly — confirm `pwd` matches the timone root before running `mkdir -p` for the doc tree, and after any tool call that might have changed it.
+
 ---
 
 ## Target intake (this skill's own preamble — not the standard one)
