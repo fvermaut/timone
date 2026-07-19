@@ -1,6 +1,6 @@
 # Phase 01: Foundations — Process Spec & Workspace
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-01-complete.md](reports/phase-01-complete.md) and [reports/phase-01-verification.md](reports/phase-01-verification.md).
 
 > First phase of the project — no companion phases. Timone itself is the target codebase (repo root, not a managed project).
 

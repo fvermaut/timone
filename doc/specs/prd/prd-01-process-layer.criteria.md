@@ -6,7 +6,7 @@
 ## R1 — Process specification document
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** human
 - **Criteria:**
     - GIVEN the process spec in the Timone repo
@@ -17,7 +17,7 @@
 ## R2 — Project manifest
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a `timone.yaml` declaring a project with repo URL, local path, stack, and platform bindings
@@ -28,7 +28,7 @@
 ## R3 — Workspace sync
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a manifest project whose local path does not exist
