@@ -28,8 +28,8 @@ No code is written in this phase, so no seams under test are declared; validatio
 
 ## Context & Prerequisites
 
-- **Phase 01** — process spec (`doc/process.md`), manifest loader, `workspace sync`; completion report at [reports/phase-01-complete.md](reports/phase-01-complete.md).
-- **Source material:** `tmp/skills/poc-grill-me/SKILL.md` and `tmp/skills/poc-to-prd/SKILL.md` (behavioral lineage — de-PoC them; the other `tmp/skills/*` are off-limits). `doc/process.md` stages 2–4 are the normative spec.
+- **Phase 01** — process spec (`process.md`), manifest loader, `workspace sync`; completion report at [reports/phase-01-complete.md](reports/phase-01-complete.md).
+- **Source material:** `tmp/skills/poc-grill-me/SKILL.md` and `tmp/skills/poc-to-prd/SKILL.md` (behavioral lineage — de-PoC them; the other `tmp/skills/*` are off-limits). `process.md` stages 2–4 are the normative spec.
 
 ---
 
@@ -43,7 +43,7 @@ The authoring conventions every `timone-*` skill follows:
 
 - **Target-project resolution (the convention from ADR-0007):** accept the project name in the invocation argument; if absent, list manifest projects and ask. Validate against `timone.yaml`; abort with a clear message if unknown or not cloned (suggest `workspace sync`). All subsequent paths are `projects/<name>/…`.
 - Frontmatter rules (name `timone-<stage>`, description with trigger phrases, argument-hint naming the target project).
-- Each skill states which process stage it owns and defers to `doc/process.md` on conflict.
+- Each skill states which process stage it owns and defers to `process.md` on conflict.
 - No client-specific content, ever; artifact paths per the process spec's conventions section.
 
 #### Agent Validation Steps
@@ -59,7 +59,7 @@ The authoring conventions every `timone-*` skill follows:
 
 > Sub-phase 02a must be complete before starting this sub-phase.
 
-Standing context for every session at the timone root: what Timone is (one paragraph), pointer to `doc/process.md` as the process authority, the manifest + `projects/` layout, the target-project convention, and the rule that client repos receive only process artifacts (`doc/`, `CONTEXT.md`) — never harness files.
+Standing context for every session at the timone root: what Timone is (one paragraph), pointer to `process.md` as the process authority, the manifest + `projects/` layout, the target-project convention, and the rule that client repos receive only process artifacts (`doc/`, `CONTEXT.md`) — never harness files.
 
 #### Agent Validation Steps
 
@@ -73,7 +73,7 @@ Standing context for every session at the timone root: what Timone is (one parag
 
 > Sub-phase 02a must be complete before starting this sub-phase.
 
-Port `poc-grill-me`, generalized per `doc/process.md` stage 2: target-project resolution instead of the hardcoded PoC list; one question at a time with a recommended answer; codebase-answerable questions answered from `projects/<name>` code; conclusion = decisions summary + risks + handoff suggestion to `timone-prd`. Adds **glossary maintenance (R19)**: challenge terms conflicting with `projects/<name>/CONTEXT.md`, sharpen fuzzy terms, write resolved terms immediately (create the file lazily; glossary only, no implementation detail).
+Port `poc-grill-me`, generalized per `process.md` stage 2: target-project resolution instead of the hardcoded PoC list; one question at a time with a recommended answer; codebase-answerable questions answered from `projects/<name>` code; conclusion = decisions summary + risks + handoff suggestion to `timone-prd`. Adds **glossary maintenance (R19)**: challenge terms conflicting with `projects/<name>/CONTEXT.md`, sharpen fuzzy terms, write resolved terms immediately (create the file lazily; glossary only, no implementation detail).
 
 #### Agent Validation Steps
 
@@ -89,7 +89,7 @@ Port `poc-grill-me`, generalized per `doc/process.md` stage 2: target-project re
 
 > Sub-phase 02a must be complete before starting this sub-phase.
 
-Port `poc-to-prd` per `doc/process.md` stage 3: two-file pair under `projects/<name>/doc/specs/prd/`, stable `PRD-NN.R<k>` IDs, MUSTs need Given/When/Then + verification hint, requirement list approved before files are written, lazy one-page product overview (confirmed before saving). Include the baseline hook: user-facing functionality gets accessibility acceptance criteria (R20 linkage — the register template gains an accessibility prompt).
+Port `poc-to-prd` per `process.md` stage 3: two-file pair under `projects/<name>/doc/specs/prd/`, stable `PRD-NN.R<k>` IDs, MUSTs need Given/When/Then + verification hint, requirement list approved before files are written, lazy one-page product overview (confirmed before saving). Include the baseline hook: user-facing functionality gets accessibility acceptance criteria (R20 linkage — the register template gains an accessibility prompt).
 
 #### Agent Validation Steps
 
@@ -106,7 +106,7 @@ Port `poc-to-prd` per `doc/process.md` stage 3: two-file pair under `projects/<n
 
 > Sub-phase 02a must be complete before starting this sub-phase.
 
-New skill per `doc/process.md` stage 4: three-part significance test (hard to reverse / surprising without context / real trade-off — all three or no ADR); Status/Date/Context/Decision/Consequences format; next-number allocation under `projects/<name>/doc/adr/`; supersede flow (new record, old status flipped with cross-link, history never edited); the standalone-at-decision-time rule stated explicitly.
+New skill per `process.md` stage 4: three-part significance test (hard to reverse / surprising without context / real trade-off — all three or no ADR); Status/Date/Context/Decision/Consequences format; next-number allocation under `projects/<name>/doc/adr/`; supersede flow (new record, old status flipped with cross-link, history never edited); the standalone-at-decision-time rule stated explicitly.
 
 #### Agent Validation Steps
 

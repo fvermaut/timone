@@ -1,7 +1,7 @@
 # The Timone Process
 
 > The single written definition of the engineering process Timone enforces on every managed project. Stage skills implement this document; when a skill and this spec disagree, the spec wins and the skill gets fixed.
-> Delivered by phase-01 for [PRD-01.R1](specs/prd/prd-01-process-layer.criteria.md).
+> Delivered by phase-01 for [PRD-01.R1](doc/specs/prd/prd-01-process-layer.criteria.md).
 
 ## Stages at a glance
 

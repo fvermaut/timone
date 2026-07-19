@@ -12,7 +12,7 @@
     - GIVEN the process spec in the Timone repo
       WHEN reviewed
       THEN every lifecycle stage (triage, requirements, architecture, planning, implementation, verification, delivery, feedback, deployment, maintenance) is defined with: purpose, produced artifact, closing gate, and owning skill — deployment/maintenance marked "stage defined, skill post-MVP"
-- **Verification hint:** read `doc/process.md` (location TBD) against the stage list above.
+- **Verification hint:** read `process.md` (location TBD) against the stage list above.
 
 ## R2 — Project manifest
 

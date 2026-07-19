@@ -21,7 +21,7 @@ Each entry is drafted by a dedicated research sub-agent working from **high-trus
 
 ## Drafting rules (apply to every sub-phase)
 
-These implement the library discipline from `doc/process.md`:
+These implement the library discipline from `process.md`:
 
 1. **No tool-enforceable rules in prose.** If eslint/tsc/prettier/axe can enforce it, the entry instead names the tool config that should enforce it (a "Tooling" section listing recommended config, to be applied at onboarding) — the guideline text covers only what tools cannot check.
 2. **No commonplaces.** A line true of every project on Earth is deleted. Entries capture choices, patterns, boundaries, and traps specific to how *we* build with this technology.
@@ -42,7 +42,7 @@ Each sub-phase: research → draft the entry file → self-check against the dra
 | 03d | `standards/nextjs.md` | Full-stack Next.js: App Router conventions, server/client component boundaries, data-fetching and caching posture, server actions. Sources: nextjs.org docs |
 | 03e | `standards/prisma-postgresql.md` | Schema/migration discipline, transaction and connection posture, indexing judgement, seed conventions. Sources: Prisma docs, PostgreSQL docs |
 | 03f | `standards/better-auth.md` | Session/config posture, integration with Next.js + Prisma, security defaults worth stating. Sources: better-auth docs |
-| 03g | `standards/testing.md` | The TDD loop as our process defines it (seams, red→green, anti-patterns — align with `doc/process.md` stage 6), what to test at which level, vitest/Playwright posture. Sources: process spec + vitest/Playwright docs |
+| 03g | `standards/testing.md` | The TDD loop as our process defines it (seams, red→green, anti-patterns — align with `process.md` stage 6), what to test at which level, vitest/Playwright posture. Sources: process spec + vitest/Playwright docs |
 | 03h | `standards/docker-compose-local.md` | Local-runtime conventions: compose layout per project, DB lifecycle, env handling, parity with previews. Sources: Docker docs |
 | 03i | `standards/vercel-supabase.md` | Go-to live stack: what belongs on which side, env/secret handling, migration path from local Postgres to Supabase. Sources: Vercel/Supabase docs |
 

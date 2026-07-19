@@ -6,7 +6,7 @@ argument-hint: <project-name> <topic/plan to grill>
 
 # Timone Grill — Requirements Discovery (Stage 2)
 
-Implements stage 2 of [the Timone process](../../../doc/process.md). That spec is normative: if this skill and the spec ever disagree, the spec wins.
+Implements stage 2 of [the Timone process](../../../process.md). That spec is normative: if this skill and the spec ever disagree, the spec wins.
 
 The output of this stage is a **resolved decision tree** (in conversation) plus **inline glossary updates** in the target project's `CONTEXT.md`. The closing gate: all branches resolved and the summary accepted by the human.
 
@@ -16,7 +16,7 @@ The output of this stage is a **resolved decision tree** (in conversation) plus 
 2. If no project is named: read `timone.yaml`, list the project names, and **ask** the user to pick. Never guess.
 3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
 4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
-5. From here on, every file you read or write lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `doc/process.md`, `standards/`, and `timone.yaml`.
+5. From here on, every file you read or write lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `process.md`, `standards/`, and `timone.yaml`.
 6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
 
 ## Prepare: explore before you ask

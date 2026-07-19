@@ -1,6 +1,6 @@
 # Timone Stage Skills — Authoring Conventions
 
-Every skill in this directory implements exactly one stage of [the Timone process](../../doc/process.md). The process spec is normative: when a skill and the spec disagree, the spec wins and the skill gets fixed. Skills contain no client-specific content, ever.
+Every skill in this directory implements exactly one stage of [the Timone process](../../process.md). The process spec is normative: when a skill and the spec disagree, the spec wins and the skill gets fixed. Skills contain no client-specific content, ever.
 
 Sessions run at the **timone repo root** ([ADR-0007](../../doc/adr/0007-sessions-at-timone-root.md)); skills operate on a **target project** under `projects/<name>/`.
 
@@ -16,7 +16,7 @@ Sessions run at the **timone repo root** ([ADR-0007](../../doc/adr/0007-sessions
 2. If no project is named: read `timone.yaml`, list the project names, and **ask** the user to pick. Never guess.
 3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
 4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
-5. From here on, every file the skill reads or writes lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `doc/process.md`, `standards/`, and `timone.yaml`.
+5. From here on, every file the skill reads or writes lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `process.md`, `standards/`, and `timone.yaml`.
 6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
 
 ## Artifact rules

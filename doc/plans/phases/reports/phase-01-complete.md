@@ -4,7 +4,7 @@
 
 ## Summary
 
-All six sub-phases delivered as planned: the process specification (`doc/process.md`), the TypeScript CLI scaffold, the `timone.yaml` manifest schema/loader, `timone projects list`, `timone workspace sync`, and the README. Executed via fresh-context sub-agents per sub-phase, sequentially, with each sub-phase's validation passing before the next started. 18 automated tests (12 manifest, 6 workspace-sync integration on local bare-repo fixtures).
+All six sub-phases delivered as planned: the process specification (`process.md`), the TypeScript CLI scaffold, the `timone.yaml` manifest schema/loader, `timone projects list`, `timone workspace sync`, and the README. Executed via fresh-context sub-agents per sub-phase, sequentially, with each sub-phase's validation passing before the next started. 18 automated tests (12 manifest, 6 workspace-sync integration on local bare-repo fixtures).
 
 ## Requirement Verification
 
@@ -30,7 +30,7 @@ The process spec was amended after its review gate, before phase close (commit `
 
 ## Key Files Changed
 
-- `doc/process.md` — the process specification (amended, approved)
+- `process.md` — the process specification (amended, approved)
 - `src/cli.ts`, `src/manifest.ts`, `src/git.ts`, `src/commands/projects.ts`, `src/commands/workspace.ts` — CLI implementation
 - `src/manifest.test.ts`, `src/workspace.test.ts` — test suites
 - `timone.example.yaml`, `standards/*`, `README.md`

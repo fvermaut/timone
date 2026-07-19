@@ -46,7 +46,7 @@ None — first phase. The repo currently contains only `doc/specs/` and this pla
 
 ### Sub-phase 01a: Process specification document
 
-**[NEW FILE]** `doc/process.md`
+**[NEW FILE]** `process.md`
 
 Write the single written definition of the Timone process. One compact table plus a short section per stage. For **each** stage — Triage, Requirements Discovery (grill), Requirements (PRD), Architecture (ADR), Planning, Implementation, Verification, Delivery, Feedback (improve), Deployment, Maintenance, plus cross-cutting Onboarding — define:
 
@@ -179,7 +179,7 @@ git status --porcelain   # at timone root: projects/ must not appear
 
 > All prior sub-phases must be complete before starting this sub-phase.
 
-Update README: install/build steps, `timone projects list` and `timone workspace sync` usage, pointer to `doc/process.md` and `timone.example.yaml`. Update the Status section.
+Update README: install/build steps, `timone projects list` and `timone workspace sync` usage, pointer to `process.md` and `timone.example.yaml`. Update the Status section.
 
 #### Agent Validation Steps
 
@@ -188,7 +188,7 @@ npm run type-check
 ```
 
 - [ ] Every documented command exists and its shown output matches reality
-- [ ] README links to `doc/process.md` resolve
+- [ ] README links to `process.md` resolve
 
 ---
 

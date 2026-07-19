@@ -4,7 +4,7 @@ Central, per-stack engineering standards injected into agent sessions alongside 
 
 **Authorship model:** agents draft each entry from cited primary sources (see [phase-03](../doc/plans/phases/phase-03.md)); fvermaut reviews and approves. An entry is normative only once approved. (The non-`poc-*` customer skills under `tmp/` are not source material.)
 
-Discipline for every entry (see `doc/process.md`, "The standards library"):
+Discipline for every entry (see `process.md`, "The standards library"):
 
 - Tool-enforceable rules live in tool config — the eslint/tsconfig/prettier setup *is* the standard; never restate it in prose.
 - Capture only what tooling cannot enforce: choices, patterns, boundaries, "never do X here" rules.

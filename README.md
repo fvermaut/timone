@@ -4,7 +4,7 @@
 
 ## Layout
 
-- `doc/process.md` — **the process**: the single written definition of every lifecycle stage, its artifact, gate, and owning skill
+- `process.md` — **the process**: the single written definition of every lifecycle stage, its artifact, gate, and owning skill
 - `doc/specs/product-overview.md` — why Timone exists, goals in priority order, MVP success definition
 - `doc/specs/prd/` — requirements: PRD-01 (the process layer — a skill per lifecycle stage) and PRD-02 (inversion of control — the daemon-driven loop)
 - `doc/adr/` — architecture decision records (founding decisions: 0001–0006)

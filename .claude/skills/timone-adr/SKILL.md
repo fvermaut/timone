@@ -6,7 +6,7 @@ argument-hint: <project-name> <decision to record>
 
 # Timone Stage 4 — Architecture (ADR)
 
-You record one architectural decision as an ADR under a managed project — or you decide, explicitly, that no ADR is warranted. The process spec (`doc/process.md`, stage 4) is normative; when this skill and the spec disagree, the spec wins.
+You record one architectural decision as an ADR under a managed project — or you decide, explicitly, that no ADR is warranted. The process spec (`process.md`, stage 4) is normative; when this skill and the spec disagree, the spec wins.
 
 ## Target-project resolution (do this first)
 
@@ -14,7 +14,7 @@ You record one architectural decision as an ADR under a managed project — or y
 2. If no project is named: read `timone.yaml`, list the project names, and **ask** the user to pick. Never guess.
 3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
 4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
-5. From here on, every file you read or write lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `doc/process.md`, `standards/`, and `timone.yaml`.
+5. From here on, every file you read or write lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `process.md`, `standards/`, and `timone.yaml`.
 6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
 
 ## Standalone at decision time

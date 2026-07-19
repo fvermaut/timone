@@ -6,7 +6,7 @@ argument-hint: '<project-name> then the input — a grill conversation, a BRD pa
 
 # Timone PRD
 
-Implement **stage 3 — Requirements** of [the Timone process](../../../doc/process.md) for one managed project. The process spec is normative: when this skill and the spec disagree, the spec wins.
+Implement **stage 3 — Requirements** of [the Timone process](../../../process.md) for one managed project. The process spec is normative: when this skill and the spec disagree, the spec wins.
 
 The PRD pair is the **single source of truth** for what is being built (ADR-0006). Tickets scope work and point here; they never hold requirement detail.
 
@@ -20,7 +20,7 @@ Pipeline position: `timone-grill` → **`timone-prd`** → `timone-plan` → `ti
 2. If no project is named: read `timone.yaml`, list the project names, and **ask** the user to pick. Never guess.
 3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
 4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
-5. From here on, every file this skill reads or writes lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `doc/process.md`, `standards/`, and `timone.yaml`.
+5. From here on, every file this skill reads or writes lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `process.md`, `standards/`, and `timone.yaml`.
 6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
 
 ---

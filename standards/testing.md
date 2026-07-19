@@ -1,7 +1,7 @@
 # Standards — Testing & TDD
 
 > **Status: Draft — pending review (fvermaut).**
-> Companion to `doc/process.md` stages 5–6, which own the process: seams are declared per sub-phase at planning time, implementation runs red→green at those seams only, and the three anti-patterns (implementation-coupled, tautological, horizontal slicing) are rejected there. This entry is the *how*: what a good test looks like at each seam on our stack (Vitest + Playwright over Next.js / Prisma / Postgres). It does not restate the process spec — when in doubt, the spec wins.
+> Companion to `process.md` stages 5–6, which own the process: seams are declared per sub-phase at planning time, implementation runs red→green at those seams only, and the three anti-patterns (implementation-coupled, tautological, horizontal slicing) are rejected there. This entry is the *how*: what a good test looks like at each seam on our stack (Vitest + Playwright over Next.js / Prisma / Postgres). It does not restate the process spec — when in doubt, the spec wins.
 
 ## What a good test is
 
@@ -66,4 +66,4 @@ Duplicate-coverage rule: "If a higher-level test spots an error and there's no l
 8. Playwright — *Retries* — <https://playwright.dev/docs/test-retries>
 9. Vitest — *Coverage config* — <https://vitest.dev/config/coverage>
 
-Process alignment: `doc/process.md` — stage 5 (seams declared at planning) and stage 6 (red→green loop, anti-patterns, refactoring deferred to delivery review).
+Process alignment: `process.md` — stage 5 (seams declared at planning) and stage 6 (red→green loop, anti-patterns, refactoring deferred to delivery review).
