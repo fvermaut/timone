@@ -19,7 +19,7 @@ You are the front door of the pipeline: every incoming request enters here. You 
 
 ## Input
 
-The request is either **free-form text** (from the argument or prompt) or a **GitHub issue reference** (an issue number or URL). When given an issue ref, fetch its title and body with `gh issue view` — that text is the request. Ambiguous input (can't tell what is being asked at all) → ask one clarifying question; do not guess a classification from noise.
+The request is either **free-form text** (from the argument or prompt) or a **GitHub issue reference** (an issue number or URL). When given an issue ref, first check the same guard as the recording path — the project's `repo_url` in `timone.yaml` is GitHub-hosted (matches `github.com`). Only then fetch its title and body with `gh issue view` (run from `projects/<name>/`) — that text is the request. Non-GitHub `repo_url` → never run `gh`; use whatever request text accompanied the ref (none at all → ask for it). Ambiguous input (can't tell what is being asked at all) → ask one clarifying question; do not guess a classification from noise.
 
 ## Classify
 
@@ -67,7 +67,7 @@ The record carries: date, the request (verbatim), kind, entry point, rationale. 
 - **Date:** YYYY-MM-DD
 - **Kind:** feature | bug | chore | question
 - **Entry point:** timone-<skill> (stage N) | none — answered
-- **Source:** free-form request | issue ref that fell back
+- **Source:** free-form request | issue #N (fell back: `repo_url` not GitHub-hosted)
 
 ## Request
 
