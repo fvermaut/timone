@@ -3,7 +3,7 @@
 > **Status:** Active
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-01-process-layer.criteria.md](prd-01-process-layer.criteria.md)
-> **Phases:** [phase-01](../../plans/phases/phase-01.md) (foundations: process spec, manifest, workspace sync — R1, R2, R3)
+> **Phases:** [phase-01](../../plans/phases/phase-01.md) (foundations: process spec, manifest, workspace sync — R1, R2, R3 ✓), [phase-02](../../plans/phases/phase-02.md) (stage skills at the root: grill, PRD, ADR — R4, R7, R8, R9, R19)
 
 ## Problem
 
@@ -38,6 +38,8 @@ Timone's first deliverable — before any automation — is the complete process
 - *Improve* (R14): triage post-delivery feedback — intent change vs implementation gap — and route the remediation, amending PRDs/ADRs when intent moved.
 
 **Standards and test discipline** *(added 2026-07-19 after the standards/TDD grilling; inspired in part by Matt Pocock's engineering skills)*. Onboarding additionally elicits project constraints into the product overview, records stack choices as founding ADRs, and produces a deliberately thin `doc/standards.md` — applicable central-library entries plus deviations, never restating what tooling enforces; for existing codebases, conventions are observed, not imposed (R15). Timone hosts the central standards library, seeded for the preferred stack with content authored by the human (R18). Implementation follows a TDD red→green loop at seams declared per sub-phase at planning time (R16), and delivery is preceded by a two-axis review — Standards and Spec, separately reported (R17). The grill stage maintains a per-project domain glossary (R19).
+
+**Mandatory accessibility & UI/UX baseline** *(added 2026-07-19)*. The standards library has a **baseline tier** applied to every project with no opt-out: UI/UX guidelines and accessibility — a legal requirement under the European Accessibility Act (EAA, applicable since June 2025), with EN 301 549 / WCAG 2.1 AA as the working baseline. Every onboarded project's `doc/standards.md` includes the baseline unconditionally; PRDs for user-facing functionality carry accessibility acceptance criteria; browser-channel verification includes accessibility checks (R20).
 
 ### Out of scope
 

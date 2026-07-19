@@ -41,14 +41,16 @@
 
 ## R4 — Skills reach project sessions, never project repos
 
+> ✏ Revised 2026-07-19: sessions run at the timone root, not inside `projects/<name>` ([ADR-0007](../../adr/0007-sessions-at-timone-root.md)). The criterion is now target-project resolution + clean client repos.
+
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** revised
 - **Verify-via:** api
 - **Criteria:**
-    - GIVEN a managed project
-      WHEN an agent session is started in its folder (interactively for now)
-      THEN Timone's stage skills are invocable in that session, and no commit produced by any stage adds skill or harness files to the project repo (process artifacts under `doc/` excepted)
-- **Verification hint:** invoke a stage skill from `projects/<name>`; `git log --stat` on produced branches.
+    - GIVEN a session started at the timone root
+      WHEN a stage skill is invoked with (or asked for) a target project
+      THEN the skill validates the target against `timone.yaml`, operates only on that project's `projects/<name>/…` tree, and no commit produced in the target project contains skill or harness files (process artifacts under `doc/` and `CONTEXT.md` excepted)
+- **Verification hint:** from the timone root, run a stage skill against a scratch managed project; `git log --stat` in the scratch repo.
 
 ## R5 — Onboarding skill
 
@@ -205,10 +207,12 @@
 
 ## R18 — Central standards library structure
 
+> ✏ Revised 2026-07-19: the library gains a mandatory **baseline tier** (accessibility, UI/UX) included in every project with no selection — see R20.
+
 - **Priority:** SHOULD
-- **Status:** draft
+- **Status:** revised
 - **Verify-via:** api
-- **Criteria:** Timone's repo hosts `standards/` with per-stack entries (seeded for the preferred stack: TypeScript, Next.js, Prisma/PostgreSQL, better-auth, Docker Compose local, Vercel + Supabase live); content is authored/reviewed by the human — Timone provides structure, injection into sessions, and the selection mechanism consumed by `doc/standards.md`.
+- **Criteria:** Timone's repo hosts `standards/` in two tiers — **baseline** (mandatory for all projects: accessibility, UI/UX) and **stack entries** (selected per project: TypeScript, Next.js, Prisma/PostgreSQL, better-auth, Docker Compose local, Vercel + Supabase live); content is authored/reviewed by the human — Timone provides structure, injection into sessions, and the selection mechanism consumed by `doc/standards.md`.
 
 ## R19 — Domain glossary maintenance
 
@@ -216,3 +220,20 @@
 - **Status:** draft
 - **Verify-via:** human
 - **Criteria:** the grill skill maintains `CONTEXT.md` lazily (created on first resolved term): glossary entries only, no implementation details; conflicting term usage is challenged during the interview and the resolved term recorded immediately.
+
+## R20 — Mandatory accessibility & UI/UX baseline
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN any project being onboarded
+      WHEN `doc/standards.md` is produced
+      THEN it includes the baseline-tier entries (accessibility per EAA / EN 301 549 / WCAG 2.1 AA, and UI/UX) unconditionally — the baseline is not subject to selection or opt-out
+    - GIVEN a PRD covering user-facing functionality
+      WHEN the requirements stage runs
+      THEN the criteria register includes accessibility acceptance criteria derived from the baseline
+    - GIVEN a phase with user-facing deliverables is verified
+      WHEN browser-channel checks are produced
+      THEN they include the baseline accessibility checks (automated scan where tooling exists, HUMAN-CHECK script otherwise)
+- **Verification hint:** onboard a scratch project and draft a PRD with a UI feature; inspect `doc/standards.md` for the baseline entries and the register for a11y criteria.

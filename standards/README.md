@@ -10,7 +10,16 @@ Discipline for every entry (see `doc/process.md`, "The standards library"):
 - Capture only what tooling cannot enforce: choices, patterns, boundaries, "never do X here" rules.
 - If a line would be true of every project on Earth, it doesn't belong.
 
-## Entries
+## Baseline (mandatory — every project, no opt-out)
+
+| Entry | Scope | Status |
+|-------|-------|--------|
+| [baseline/accessibility.md](baseline/accessibility.md) | EAA / EN 301 549 / WCAG 2.1 AA compliance | framing fixed — content to author |
+| [baseline/ui-ux.md](baseline/ui-ux.md) | Cross-project UI/UX invariants | stub — to author |
+
+Every project's `doc/standards.md` includes the baseline unconditionally. Enforcement: PRD accessibility criteria (stage 3), verification checks (stage 7), delivery Standards review (stage 8).
+
+## Stack entries (selected per project)
 
 | Entry | Scope | Status |
 |-------|-------|--------|
