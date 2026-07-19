@@ -1,0 +1,15 @@
+# Managed project workspace — independent client/personal repos, never tracked here
+projects/
+
+# Local scratch (customer skill imports, exported conversations, etc.)
+tmp/
+
+# Local-only Claude Code settings
+.claude/settings.local.json
+
+# Node
+node_modules/
+dist/
+
+# OS
+.DS_Store
