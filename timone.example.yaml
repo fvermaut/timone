@@ -1,0 +1,33 @@
+# timone.yaml — manifest of the projects managed by timone.
+#
+# Each entry under `projects` describes one managed repository:
+#
+#   repo_url   (required)  Git URL of the project repository.
+#   path       (required)  Local checkout location; must start with "projects/".
+#   stack      (required)  Technology tags for the project; may be empty ([]).
+#   bindings   (required)  Integrations used by the project:
+#     ticketing (required)  Ticketing backend. Supported: "github".
+#     preview   (optional)  Preview-environment backend. Supported: "docker".
+#
+# Unknown keys are rejected, so typos fail fast at load time.
+
+projects:
+  # Fully-populated project: ticketing plus Docker-based previews.
+  pilot-app:
+    repo_url: git@github.com:fvermaut/pilot-app.git
+    path: projects/pilot-app
+    stack:
+      - typescript
+      - react
+      - postgres
+    bindings:
+      ticketing: github
+      preview: docker
+
+  # Minimal project: empty stack, no preview binding.
+  internal-tools:
+    repo_url: git@github.com:fvermaut/internal-tools.git
+    path: projects/internal-tools
+    stack: []
+    bindings:
+      ticketing: github

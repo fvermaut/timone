@@ -1,0 +1,201 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { loadManifest, type Manifest } from "./manifest.js";
+
+let dir: string;
+let counter = 0;
+
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "timone-manifest-test-"));
+});
+
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+/** Write YAML to a temp file and return its path. */
+function writeManifest(yamlText: string): string {
+  const file = join(dir, `manifest-${counter++}.yaml`);
+  writeFileSync(file, yamlText, "utf8");
+  return file;
+}
+
+const validYaml = `
+projects:
+  client-alpha:
+    repo_url: git@github.com:fvermaut/pilot-app.git
+    path: projects/client-alpha
+    stack:
+      - typescript
+      - react
+    bindings:
+      ticketing: github
+      preview: docker
+  internal-tools:
+    repo_url: git@github.com:fvermaut/internal-tools.git
+    path: projects/internal-tools
+    stack: []
+    bindings:
+      ticketing: github
+`;
+
+describe("loadManifest", () => {
+  it("parses a valid manifest with typed, accessible fields", () => {
+    const manifest: Manifest = loadManifest(writeManifest(validYaml));
+
+    expect(Object.keys(manifest.projects)).toEqual([
+      "client-alpha",
+      "internal-tools",
+    ]);
+
+    const alpha = manifest.projects["client-alpha"]!;
+    expect(alpha.repo_url).toBe("git@github.com:fvermaut/pilot-app.git");
+    expect(alpha.path).toBe("projects/client-alpha");
+    expect(alpha.stack).toEqual(["typescript", "react"]);
+    expect(alpha.bindings.ticketing).toBe("github");
+    expect(alpha.bindings.preview).toBe("docker");
+  });
+
+  it("rejects a project missing repo_url, naming project and field", () => {
+    const file = writeManifest(`
+projects:
+  client-alpha:
+    path: projects/client-alpha
+    stack: []
+    bindings:
+      ticketing: github
+`);
+    expect(() => loadManifest(file)).toThrowError(
+      'Invalid manifest: project "client-alpha": missing required field "repo_url"',
+    );
+  });
+
+  it("rejects an unknown ticketing value with a readable error", () => {
+    const file = writeManifest(`
+projects:
+  client-alpha:
+    repo_url: git@github.com:fvermaut/pilot-app.git
+    path: projects/client-alpha
+    stack: []
+    bindings:
+      ticketing: jira
+`);
+    expect(() => loadManifest(file)).toThrowError(
+      'Invalid manifest: project "client-alpha": field "bindings.ticketing" must be "github"',
+    );
+  });
+
+  it("rejects an unknown preview value with a readable error", () => {
+    const file = writeManifest(`
+projects:
+  client-alpha:
+    repo_url: git@github.com:fvermaut/pilot-app.git
+    path: projects/client-alpha
+    stack: []
+    bindings:
+      ticketing: github
+      preview: kubernetes
+`);
+    expect(() => loadManifest(file)).toThrowError(
+      'Invalid manifest: project "client-alpha": field "bindings.preview" must be "docker"',
+    );
+  });
+
+  it('rejects a path that does not start with "projects/"', () => {
+    const file = writeManifest(`
+projects:
+  client-alpha:
+    repo_url: git@github.com:fvermaut/pilot-app.git
+    path: apps/client-alpha
+    stack: []
+    bindings:
+      ticketing: github
+`);
+    expect(() => loadManifest(file)).toThrowError(
+      'Invalid manifest: project "client-alpha": field "path": must start with "projects/"',
+    );
+  });
+
+  it("rejects unknown extra keys on a project", () => {
+    const file = writeManifest(`
+projects:
+  client-alpha:
+    repo_url: git@github.com:fvermaut/pilot-app.git
+    path: projects/client-alpha
+    stack: []
+    docker_image: node:22
+    bindings:
+      ticketing: github
+`);
+    expect(() => loadManifest(file)).toThrowError(
+      'Invalid manifest: project "client-alpha": unknown key "docker_image"',
+    );
+  });
+
+  it("rejects unknown extra keys inside bindings", () => {
+    const file = writeManifest(`
+projects:
+  client-alpha:
+    repo_url: git@github.com:fvermaut/pilot-app.git
+    path: projects/client-alpha
+    stack: []
+    bindings:
+      ticketing: github
+      deploy: heroku
+`);
+    expect(() => loadManifest(file)).toThrowError(
+      'Invalid manifest: project "client-alpha": unknown key "deploy" in "bindings"',
+    );
+  });
+
+  it("accepts an empty stack array", () => {
+    const file = writeManifest(`
+projects:
+  bare-bones:
+    repo_url: git@github.com:fvermaut/bare-bones.git
+    path: projects/bare-bones
+    stack: []
+    bindings:
+      ticketing: github
+`);
+    const manifest = loadManifest(file);
+    expect(manifest.projects["bare-bones"]!.stack).toEqual([]);
+  });
+
+  it("accepts a missing preview binding", () => {
+    const manifest = loadManifest(writeManifest(validYaml));
+    expect(manifest.projects["internal-tools"]!.bindings.preview).toBeUndefined();
+  });
+
+  it("rejects an empty repo_url", () => {
+    const file = writeManifest(`
+projects:
+  client-alpha:
+    repo_url: ""
+    path: projects/client-alpha
+    stack: []
+    bindings:
+      ticketing: github
+`);
+    expect(() => loadManifest(file)).toThrowError(
+      'Invalid manifest: project "client-alpha": field "repo_url": must not be empty',
+    );
+  });
+
+  it("throws a clear error naming the path for a missing file", () => {
+    const missing = join(dir, "does-not-exist.yaml");
+    expect(() => loadManifest(missing)).toThrowError(
+      `Cannot read manifest file "${missing}"`,
+    );
+  });
+
+  it("throws a clear error naming the path for invalid YAML", () => {
+    const file = writeManifest("projects: [unclosed");
+    expect(() => loadManifest(file)).toThrowError(
+      `Invalid YAML in manifest file "${file}"`,
+    );
+  });
+});
