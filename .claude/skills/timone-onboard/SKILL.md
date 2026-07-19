@@ -10,7 +10,7 @@ Implements stage 0 of [the Timone process](../../../process.md). That spec is no
 
 Stage 0 is cross-cutting and runs **once per project**, before any other stage skill can operate on it. Its artifact: a manifest entry, the project's doc tree, `doc/specs/product-overview.md` (including constraints), founding ADRs for stack choices, and `doc/standards.md`. The closing gate is a human confirming **both** the product overview and the standards.
 
-This sub-phase covers the **greenfield path**: a project that does not yet exist in `timone.yaml` and is empty or near-empty on the remote. It ends after the founding ADRs are recorded — standards-artifact drafting and the existing-codebase path are covered further down (see the section boundary near the end of this file).
+This skill covers the full onboarding flow for a project that does not yet exist in `timone.yaml`: target intake, the stack + constraints checklist, register + clone, existing-codebase detection, the doc tree, the product overview, the founding ADRs, and the standards artifact — greenfield and existing-codebase repos both, ending on the combined confirmation gate described in "Standards artifact" below.
 
 ---
 
@@ -65,6 +65,20 @@ node dist/cli.js workspace sync
 
 - `projects add` exits 1 on invalid input (e.g. the name already exists, a malformed stack entry, an empty repo URL). Surface the CLI's error message verbatim to the user and **stop** — do not attempt to patch `timone.yaml` by hand to work around it, and do not retry with guessed variations. Let the user correct the input and re-run.
 - `workspace sync` exits 1 if any project fails to sync (e.g. the repo URL is unreachable or invalid — reported as `failed (<git's error line>)`). If `<name>`'s entry fails, surface that line to the user and stop; the manifest entry now exists but the checkout doesn't, so don't proceed to the doc tree or product overview until it's resolved (the user may need to fix the URL and re-run `projects add`/`workspace sync`, or fix access/credentials).
+
+---
+
+## Existing-codebase detection
+
+Before creating the doc tree, determine whether `projects/<name>` is **greenfield** (empty or near-empty — the default assumption the rest of this skill makes) or already carries **substantial code**. Check for common markers:
+
+- An existing `package.json` (or equivalent manifest) that already declares dependencies, not just a bare scaffold.
+- An existing `src/` (or equivalent) directory containing actual source files, not placeholders.
+- Existing lint/format/test config: `.eslintrc*`, `.prettierrc*`, `biome.json`, `vitest.config.*`, `jest.config.*`, or similar.
+
+Two or more of these present → treat it as an **existing codebase**. None present → **greenfield**; continue as the rest of this skill otherwise assumes. If the signal is ambiguous (e.g. exactly one marker present, or the markers disagree with each other), **ask the user to confirm** which path applies rather than guessing.
+
+This determination doesn't change the doc tree, product overview, or founding-ADR steps below — it changes how `doc/standards.md` gets drafted later in this skill (see "Existing-codebase conventions" under "Standards artifact").
 
 ---
 
@@ -123,7 +137,7 @@ is never omitted, even if the user raised no other compliance constraints.>
 
 Populate it from the target intake and the stack + constraints checklist — do not invent content the user hasn't stated.
 
-**Present the full draft to the user and do not save the file until they confirm or correct it.** This is a blocking step: no file write happens until explicit confirmation. If the user requests changes, revise and re-present before saving. This mirrors `timone-prd`'s "lazy product overview, confirm before saving" pattern, but here it is not lazy — onboarding is precisely the stage responsible for producing it.
+**Hold this draft — do not save it yet.** It is presented for confirmation together with `doc/standards.md`, drafted next: one combined confirmation gate covers both artifacts (the stage-0 closing gate is "human confirms the overview **and** the standards" — one gate, not two separate prompts; see "Combined confirmation gate" under "Standards artifact", below). If the user requests changes to the overview at that combined presentation, revise it and re-present both drafts together before saving either. This mirrors `timone-prd`'s "lazy product overview, confirm before saving" pattern, but here it is not lazy — onboarding is precisely the stage responsible for producing it.
 
 ---
 
@@ -171,15 +185,82 @@ Rules, identical to `timone-adr`:
 
 ---
 
-## — End of greenfield-path content (sub-phase 04b) —
+## Standards artifact
 
-> **For 04c:** insert the standards-artifact step (drafting `projects/<name>/doc/standards.md` — baseline + selected stack entries + any deviations) and the existing-codebase path (observing conventions from code instead of imposing them, flagging conflicts with preferred standards for an explicit decision) here, before the closing handoff below. Both still gate on human confirmation per the stage-0 closing gate ("human confirms the overview **and** the standards").
+Draft `projects/<name>/doc/standards.md` next, after the founding ADRs and before either it or the product overview is saved.
 
-## Closing (interim — until 04c adds the standards gate)
+### Baseline (unconditional)
 
-At the end of this sub-phase's scope: the manifest entry exists, the project is cloned, the doc tree is ready, the product overview is confirmed and saved, and the founding ADRs are recorded. Report to the user:
+Every project's `doc/standards.md` includes both entries from `standards/README.md`'s **Baseline** table — currently `baseline/accessibility.md` and `baseline/ui-ux.md` — **unconditionally**. There is no selection step and no opt-out for the baseline, regardless of stack. State this plainly in the drafted file; do not gate it behind any checklist answer or stack choice.
+
+### Stack entries (selected)
+
+Match the project's chosen stack (from the "Stack + constraints intake" checklist above) against the **Scope** column of `standards/README.md`'s **Stack entries** table, and select every entry whose scope the stack touches — e.g. stack includes "Next.js" → select `nextjs.md`; includes "Prisma" or "PostgreSQL" → select `prisma-postgresql.md`; and so on across that table. Only entries marked `Approved` in the Status column are selectable (all entries in the table are `Approved` as of this writing, but a future non-`Approved` entry must not be selected). Do not restate any entry's content in `doc/standards.md` — the project artifact references the central file, it never copies it, per the library's no-duplication discipline (`process.md`, "The standards library").
+
+### Existing-codebase conventions
+
+If the "Existing-codebase detection" step above determined this is an **existing codebase**, run this scan before drafting the file:
+
+- **Linter/formatter config** — read whatever `.eslintrc*`, `.prettierrc*`, `biome.json`, etc. already exist.
+- **Folder structure** — inspect the existing layout: does it already resemble the bulletproof-react feature-folder shape `project-structure.md` recommends, or something else (layered, ad hoc, a different framework's convention)?
+- **Test setup** — existing `vitest.config.*` / `jest.config.*` and any existing test files.
+
+Record what is actually there under `## Deviations`, **as observed** — never silently normalized to match the library defaults, even where the library's recommendation would arguably be better.
+
+**Where an observed convention conflicts with a central-library entry's recommendation — e.g. the existing folder structure doesn't match `project-structure.md`, or an existing eslint config contradicts a Tooling recommendation in some entry — the skill must explicitly flag the conflict and ask the user which wins. It must never silently pick one side.** This is PRD-01.R15's literal second criterion: conventions observed in the code are recorded as-is, and conflicts with the preferred standards are flagged for explicit decision, not silently overridden. Record the user's resolution (keep the observed convention, adopt the library's, or an explicit middle ground) under `## Deviations`, next to the observed fact it resolves.
+
+### Template
+
+```markdown
+# <Project Name> — Standards
+
+> **Status:** Draft — pending confirmation
+> **Source:** Onboarding conversation, <date>
+
+## Baseline (mandatory, no opt-out)
+
+- [Accessibility](../../../standards/baseline/accessibility.md) — EAA / EN 301 549 / WCAG 2.1 AA
+- [UI/UX](../../../standards/baseline/ui-ux.md) — cross-project UI/UX invariants
+
+## Stack entries
+
+<One bullet per selected entry, linking back to the central file, e.g.:>
+- [Next.js](../../../standards/nextjs.md)
+- [Project structure](../../../standards/project-structure.md)
+- <...>
+
+## Deviations
+
+<Empty for a greenfield project. For an existing codebase: one entry per observed
+convention, stated as fact, plus the resolution of any conflict with a library
+entry's recommendation and who/what decided it.>
+```
+
+Link paths are relative from `projects/<name>/doc/standards.md` back to the Timone repo root's `standards/` (three levels up: `doc` → `<name>` → `projects` → root) — referenced, never vendored, into the project.
+
+### Combined confirmation gate
+
+**Present the product-overview draft and the `doc/standards.md` draft to the user together, in the same message, as a single confirmation gate.** Do not save either file until the user confirms both (or approves them after requested edits) — this is the literal stage-0 closing gate: "human confirms the overview **and** the standards," one gate, not two sequential prompts. If the user asks to change only one of the two, revise it, re-present both drafts again (even the unchanged one), and wait for confirmation before saving either.
+
+Once confirmed, save both files.
+
+---
+
+## Closing
+
+A full onboarding run produces:
+
+- A manifest entry (`timone.yaml`) and a clone at `projects/<name>`.
+- The project's doc tree (`doc/specs/`, `doc/specs/prd/`, `doc/adr/`, `doc/plans/phases/`).
+- A confirmed `doc/specs/product-overview.md`, including constraints.
+- Founding ADRs for the stack choices that passed the significance gate (or one-line "no ADR" notes for those that didn't).
+- A confirmed `doc/standards.md` — baseline entries (unconditional), selected stack entries, and recorded deviations (empty for a greenfield project; observed conventions and any flagged, user-resolved conflicts for an existing codebase).
+
+Report to the user:
 
 - The manifest entry and confirmed local path.
 - The product overview file path.
 - Each founding ADR's file path and number (or the one-line "no ADR" note where the gate failed).
-- That the next step is the standards artifact (`doc/standards.md`) — not yet implemented by this skill — after which the project is ready for its first real work (stage 1, `timone-triage`, on an incoming request).
+- The standards artifact file path, its selected stack entries, and — for an existing codebase — any conflicts that were flagged and how the user resolved them.
+
+With both the product overview and the standards confirmed and saved, the project is fully onboarded and ready for its first real work: stage 1 (`timone-triage`) on an incoming request, typically followed by stage 2 (`timone-grill`) and stage 3 (`timone-prd`) for its first feature.
