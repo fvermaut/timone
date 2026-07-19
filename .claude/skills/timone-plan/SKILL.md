@@ -149,11 +149,11 @@ NNc → NNa, NNb      <one-clause purpose>
 
 ## Amending an approved plan
 
-Plans are amended in place, never silently rewritten. Mark every change made after approval with a dated marker, so execution can see what moved:
+Per the spec's amendment rule (stage 5), plans are amended in place, never silently rewritten. Mark every change made after approval with a dated marker, so execution can see what moved:
 
 > ✏ Refined <date>: <what changed and why.>
 
-Sub-phases added mid-phase keep the next free letter and carry the same marker inline. Scope that grows beyond an amendment is a new phase, not a bigger one.
+Sub-phases added mid-phase keep the next free letter and carry the same marker inline. Scope that grows beyond an amendment is a new phase, not a bigger one; post-delivery plan changes belong to `timone-improve` (stage 9), not here.
 
 ## Closing
 
