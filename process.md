@@ -24,7 +24,7 @@
 
 **0 — Onboarding.** Registers a repo in `timone.yaml` (repo URL, path under `projects/`, stack, platform bindings), creates the artifact tree (`doc/specs/`, `doc/specs/prd/`, `doc/adr/`, `doc/plans/phases/`), and drafts the one-page product overview — problem, users, goals, success definition, non-goals, **and constraints** (client policies, hosting, compliance, budget). Stack choices are recorded as **founding ADRs**, never restated elsewhere. Onboarding also produces `doc/standards.md` — deliberately thin: which entries of Timone's central standards library apply, plus project-specific deviations; anything a tool can enforce lives in tool config, not prose. For an **existing** codebase, conventions are *observed* from the code, not imposed — conflicts with preferred standards are flagged for an explicit decision. Gate: human confirms the overview and the standards.
 
-**1 — Triage.** Every incoming request enters here. Routing: feature → stage 2 (or 3 if requirements are already clear); bug or post-delivery observation → stage 9; chore/technical enabler → stage 5, unanchored (see PRD anchoring below); question → answered, no pipeline.
+**1 — Triage.** Every incoming request enters here. Routing: feature → stage 2 (or 3 if requirements are already clear); bug or post-delivery observation → stage 9; chore/technical enabler → stage 5, unanchored (see PRD anchoring below); question → answered, no pipeline. **Recording:** the classification (kind + entry point + one-paragraph rationale) is recorded on the request itself. When the request is a GitHub issue and the project's repo is GitHub-hosted, the record is an issue comment plus a `triage:<kind>` label (via `gh`). Otherwise — free-form request, or non-GitHub remote — it is persisted as `doc/triage/NNN-<slug>.md` in the target project (NNN zero-padded, allocated by scanning existing records) and committed; the fallback is always explicit, never a silent skip.
 
 **2 — Requirements discovery.** Relentless interview: one question at a time, each with a recommended answer; anything answerable from the codebase is answered from the codebase, not asked. Ends with a summary of decisions and risks. Its conclusions are raw material for stage 3 — they evaporate unless persisted. The interview also maintains the project's **domain glossary** (`CONTEXT.md`, created lazily, glossary only — no implementation details): fuzzy terms are sharpened into canonical ones, conflicts with the existing glossary are challenged on the spot, and resolved terms are written down immediately.
 
@@ -57,6 +57,7 @@ doc/
   standards.md                   the "how, written" — thin: applicable library entries + deviations
   plans/phases/phase-NN.md       the "how, planned" — executable phase file
   plans/phases/reports/          completion + verification reports
+  triage/NNN-<slug>.md           stage-1 classification records for requests with no ticket home
 ```
 
 ## The standards library
