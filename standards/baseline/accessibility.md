@@ -1,7 +1,7 @@
 # Baseline — Accessibility (mandatory, all projects)
 
 > **Tier: BASELINE — applies to every managed project, no selection, no opt-out.**
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 
 ## Why this is baseline
 

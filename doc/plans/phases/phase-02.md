@@ -1,6 +1,6 @@
 # Phase 02: Stage Skills at the Root — the Document Trio
 
-> **Status:** Planned. Breakdown approved by fvermaut on 2026-07-19.
+> **Status:** Complete — see [reports/phase-02-complete.md](reports/phase-02-complete.md) and [reports/phase-02-verification.md](reports/phase-02-verification.md).
 
 > **Companion phases:** [Phase 01](phase-01.md) (process spec, manifest, workspace sync — complete). Governing decision: [ADR-0007](../../adr/0007-sessions-at-timone-root.md) — sessions run at the timone root; skills resolve a target project.
 

@@ -1,6 +1,6 @@
 # Standards — TypeScript
 
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 > Scope: language-level practice for our TypeScript projects (Next.js/Prisma/zod apps). Anything a compiler flag or lint rule can enforce lives in the shared tsconfig and is only indexed under [Tooling](#tooling). Baseline: **TypeScript 7**; `strict` has been the compiler default since 6.0 and is the assumed floor.
 
 ## Type design

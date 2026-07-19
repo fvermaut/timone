@@ -1,6 +1,6 @@
 # Standards — Prisma + PostgreSQL
 
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we build with Prisma + PostgreSQL.
 
 Current major (2026-07): **Prisma ORM 7** — Rust-free `prisma-client` generator, `prisma.config.ts`, client generated into the source tree, driver adapters required ([v7 announcement]). **Churn watch:** "Prisma Next" (full-TypeScript rewrite) is the previewed future direction; re-verify on the next major. Supabase matters live in [vercel-supabase.md](vercel-supabase.md).

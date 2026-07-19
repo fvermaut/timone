@@ -1,6 +1,6 @@
 # Standards — Project structure (bulletproof-react)
 
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we structure application code.
 
 Managed projects follow the [bulletproof-react](https://github.com/alan2207/bulletproof-react) feature-folder architecture, adapted for the Next.js App Router (see below). Upstream is framework-generic (it ships react-vite, nextjs-app, and nextjs-pages sample apps — verified current, 2026-07); we take its structure and dependency rules as-is and pin the Next.js-specific placements ourselves.

@@ -44,7 +44,7 @@
 > ✏ Revised 2026-07-19: sessions run at the timone root, not inside `projects/<name>` ([ADR-0007](../../adr/0007-sessions-at-timone-root.md)). The criterion is now target-project resolution + clean client repos.
 
 - **Priority:** MUST
-- **Status:** revised
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a session started at the timone root
@@ -79,7 +79,7 @@
 ## R7 — Grill skill (requirements interview)
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** human
 - **Criteria:**
     - GIVEN a feature idea on any managed project
@@ -90,7 +90,7 @@
 ## R8 — PRD skill
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a concluded interview (or equivalent input) on a managed project
@@ -101,7 +101,7 @@
 ## R9 — ADR skill
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a significant technical decision arising on a managed project
@@ -211,14 +211,14 @@
 > ✏ Revised 2026-07-19 (2): authorship model — content is **drafted by agents** from cited primary sources and **approved by the human**, who reviews but does not write.
 
 - **Priority:** SHOULD
-- **Status:** revised
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:** Timone's repo hosts `standards/` in two tiers — **baseline** (mandatory for all projects: accessibility, UI/UX) and **stack entries** (selected per project: TypeScript, Next.js, Prisma/PostgreSQL, better-auth, Docker Compose local, Vercel + Supabase live); content is drafted by agents from cited primary sources and approved by the human — Timone provides structure, injection into sessions, and the selection mechanism consumed by `doc/standards.md`.
 
 ## R19 — Domain glossary maintenance
 
 - **Priority:** SHOULD
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** human
 - **Criteria:** the grill skill maintains `CONTEXT.md` lazily (created on first resolved term): glossary entries only, no implementation details; conflicting term usage is challenged during the interview and the resolved term recorded immediately.
 

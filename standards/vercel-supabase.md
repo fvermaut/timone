@@ -1,6 +1,6 @@
 # Standards — Vercel + Supabase (go-to live)
 
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 > Scope: the *default* live-deployment stack; per-project deviations go in that project's `doc/standards.md`. Local runtime: `docker-compose-local.md`; data layer: `prisma-postgresql.md`; identity: `better-auth.md`.
 
 ## Division of responsibilities

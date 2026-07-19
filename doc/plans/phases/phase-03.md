@@ -1,6 +1,6 @@
 # Phase 03: Standards Library Content
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-03-complete.md](reports/phase-03-complete.md).
 
 > **Companion phases:** [Phase 01](phase-01.md) (complete — created the library scaffold), [Phase 02](phase-02.md) (independent — may run before, after, or interleaved; the two phases share no files).
 

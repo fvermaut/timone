@@ -1,7 +1,7 @@
 # Baseline — UI/UX (mandatory, all projects)
 
 > **Tier: BASELINE — applies to every managed project, no selection, no opt-out.**
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 
 Cross-project UI/UX invariants (Next.js/React). Project-specific design systems live in each project's `doc/standards.md`. Accessibility is governed by [baseline/accessibility.md](accessibility.md), not restated here.
 

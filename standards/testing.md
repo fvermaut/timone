@@ -1,6 +1,6 @@
 # Standards — Testing & TDD
 
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 > Companion to `process.md` stages 5–6, which own the process (seams declared at planning, red→green at those seams, the three anti-patterns rejected there). This entry is the *how* on our stack (Vitest + Playwright over Next.js / Prisma / Postgres). When in doubt, the spec wins.
 
 ## What a good test is

@@ -1,6 +1,6 @@
 # Standards — Docker Compose (local runtime)
 
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 
 Local-runtime conventions for managed projects (Next.js + PostgreSQL stack). The compose file doubles as the definition the PR-preview adapter runs on our own host ([ADR-0005](../doc/adr/0005-docker-previews-on-own-host.md)); every rule below serves that dual use.
 

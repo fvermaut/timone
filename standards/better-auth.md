@@ -1,6 +1,6 @@
 # Standards — better-auth
 
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 > Scope: authentication with better-auth in our Next.js + Prisma + PostgreSQL stack. Verified against better-auth docs, July 2026 (stable line **1.6.x**; 1.7.0 in RC on `next`). better-auth moves fast — items marked *churn* must be re-verified at onboarding time.
 
 ## Version & upgrade posture

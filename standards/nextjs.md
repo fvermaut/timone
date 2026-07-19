@@ -1,6 +1,6 @@
 # Standards — Next.js (full-stack)
 
-> **Status: Draft — pending review (fvermaut).**
+> **Status: Approved 2026-07-19 (fvermaut).**
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we build with Next.js (full-stack).
 
 Applies to **Next.js 16** (App Router, Turbopack default). Deployment specifics live in [vercel-supabase.md](vercel-supabase.md) — never duplicated here.

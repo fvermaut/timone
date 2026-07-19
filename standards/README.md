@@ -14,8 +14,8 @@ Discipline for every entry (see `process.md`, "The standards library"):
 
 | Entry | Scope | Status |
 |-------|-------|--------|
-| [baseline/accessibility.md](baseline/accessibility.md) | EAA / EN 301 549 / WCAG 2.1 AA compliance | Draft — pending review |
-| [baseline/ui-ux.md](baseline/ui-ux.md) | Cross-project UI/UX invariants | Draft — pending review |
+| [baseline/accessibility.md](baseline/accessibility.md) | EAA / EN 301 549 / WCAG 2.1 AA compliance | Approved 2026-07-19 |
+| [baseline/ui-ux.md](baseline/ui-ux.md) | Cross-project UI/UX invariants | Approved 2026-07-19 |
 
 Every project's `doc/standards.md` includes the baseline unconditionally. Enforcement: PRD accessibility criteria (stage 3), verification checks (stage 7), delivery Standards review (stage 8).
 
@@ -23,12 +23,12 @@ Every project's `doc/standards.md` includes the baseline unconditionally. Enforc
 
 | Entry | Scope | Status |
 |-------|-------|--------|
-| [typescript.md](typescript.md) | Language-level practices | Draft — pending review |
-| [nextjs.md](nextjs.md) | Next.js full-stack | Draft — pending review |
-| [project-structure.md](project-structure.md) | Project structure (bulletproof-react) | Draft — pending review |
-| [shadcn.md](shadcn.md) | UI component library (shadcn/ui) | Draft — pending review |
-| [prisma-postgresql.md](prisma-postgresql.md) | Data layer | Draft — pending review |
-| [better-auth.md](better-auth.md) | Authentication | Draft — pending review |
-| [testing.md](testing.md) | TDD & test quality (seams, anti-patterns) | Draft — pending review |
-| [docker-compose-local.md](docker-compose-local.md) | Local runtime | Draft — pending review |
-| [vercel-supabase.md](vercel-supabase.md) | Go-to live deployment | Draft — pending review |
+| [typescript.md](typescript.md) | Language-level practices | Approved 2026-07-19 |
+| [nextjs.md](nextjs.md) | Next.js full-stack | Approved 2026-07-19 |
+| [project-structure.md](project-structure.md) | Project structure (bulletproof-react) | Approved 2026-07-19 |
+| [shadcn.md](shadcn.md) | UI component library (shadcn/ui) | Approved 2026-07-19 |
+| [prisma-postgresql.md](prisma-postgresql.md) | Data layer | Approved 2026-07-19 |
+| [better-auth.md](better-auth.md) | Authentication | Approved 2026-07-19 |
+| [testing.md](testing.md) | TDD & test quality (seams, anti-patterns) | Approved 2026-07-19 |
+| [docker-compose-local.md](docker-compose-local.md) | Local runtime | Approved 2026-07-19 |
+| [vercel-supabase.md](vercel-supabase.md) | Go-to live deployment | Approved 2026-07-19 |
