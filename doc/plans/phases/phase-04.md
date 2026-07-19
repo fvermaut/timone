@@ -1,6 +1,6 @@
 # Phase 04: Onboarding — `timone projects add` + `timone-onboard`
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-04-complete.md](reports/phase-04-complete.md) and [reports/phase-04-verification.md](reports/phase-04-verification.md).
 
 > **Companion phases:** [Phase 01](phase-01.md) (CLI/manifest foundations), [Phase 02](phase-02.md) (skill conventions, document trio), [Phase 03](phase-03.md) (standards library — this phase is its first real consumer). Governing decision: [ADR-0008](../../adr/0008-manifest-writes-via-cli-command.md) — manifest writes go through a validated CLI command.
 

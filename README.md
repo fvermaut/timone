@@ -9,22 +9,23 @@
 - `doc/specs/prd/` — requirements: PRD-01 (the process layer — a skill per lifecycle stage) and PRD-02 (inversion of control — the daemon-driven loop)
 - `doc/adr/` — architecture decision records (founding decisions: 0001–0007)
 - `doc/plans/phases/` — executable phase plans and their reports
-- `.claude/skills/` — the stage skills (`timone-grill`, `timone-prd`, `timone-adr`, …) — see [.claude/skills/README.md](.claude/skills/README.md) for authoring conventions
+- `.claude/skills/` — the stage skills (`timone-onboard`, `timone-grill`, `timone-prd`, `timone-adr`, …) — see [.claude/skills/README.md](.claude/skills/README.md) for authoring conventions
 - `standards/` — central standards library: a mandatory baseline (accessibility, UI/UX) plus per-stack entries, agent-drafted from primary sources and human-approved
 - `src/` — the Timone CLI (TypeScript, commander)
 - `projects/` *(gitignored)* — managed project repos, declared in `timone.yaml` and materialized by the CLI
 
 ## Working with Timone
 
-Sessions run at the timone repo root — never inside a managed project ([ADR-0007](doc/adr/0007-sessions-at-timone-root.md)). Every stage skill takes a target project: name it in your prompt, or the skill asks. From the root:
+Sessions run at the timone repo root — never inside a managed project ([ADR-0007](doc/adr/0007-sessions-at-timone-root.md)). Bring a new repo under management first; every other stage skill then takes that project as its target — name it in your prompt, or the skill asks. From the root:
 
 ```
-/timone-grill <project-name> <topic or idea to grill>     # stage 2 — requirements interview
-/timone-prd <project-name>                                 # stage 3 — persist the PRD pair
-/timone-adr <project-name> <decision to record>            # stage 4 — architecture decision record
+/timone-onboard <project-name> <repo-url>                  # stage 0 — register, clone, doc tree, overview, founding ADRs, standards
+/timone-grill <project-name> <topic or idea to grill>       # stage 2 — requirements interview
+/timone-prd <project-name>                                  # stage 3 — persist the PRD pair
+/timone-adr <project-name> <decision to record>              # stage 4 — architecture decision record
 ```
 
-Each skill validates the target against `timone.yaml`, requires the project to be cloned (`workspace sync` first), and touches only `projects/<name>/…` — the only files it ever commits there are process artifacts (`doc/…`, `CONTEXT.md`). See [process.md](process.md) for the full lifecycle these skills implement.
+`timone-onboard` is the one skill allowed to add a project — it does so via `timone projects add` (below), never by hand-editing `timone.yaml` ([ADR-0008](doc/adr/0008-manifest-writes-via-cli-command.md)). Every other skill validates its target against `timone.yaml`, requires the project to be cloned (`workspace sync` first), and touches only `projects/<name>/…` — the only files any skill ever commits there are process artifacts (`doc/…`, `CONTEXT.md`). See [process.md](process.md) for the full lifecycle these skills implement.
 
 ## Getting started
 
@@ -37,10 +38,12 @@ cp timone.example.yaml timone.yaml
 
 node dist/cli.js projects list      # table of managed projects + cloned state
 node dist/cli.js workspace sync     # clone missing, fast-forward clean, skip dirty
+node dist/cli.js projects add <name> --repo <url> --path projects/<name> \
+  --stack <comma,list> --ticketing github [--preview docker]   # register a project (used by timone-onboard)
 ```
 
 `npm test` runs the suite (manifest validation + workspace-sync integration tests on local fixtures).
 
 ## Status
 
-Phase 01 (foundations) and phase 02 (document trio: grill/PRD/ADR skills) delivered. Phase 03 (standards library content) delivered — 11 entries approved. Next: onboarding, triage, plan, execute, verify, deliver, and improve skills (remaining PRD-01 scope), then the inverted loop (PRD-02).
+Phases 01–04 delivered: foundations (process spec, manifest, workspace sync), the document trio (grill/PRD/ADR skills), the standards library (11 entries approved), and onboarding (`timone-onboard` + `projects add`). All four document-producing stage skills now exist and have been exercised end to end against scratch fixtures. Next: triage, plan, execute, verify, deliver, and improve skills (remaining PRD-01 scope), then the inverted loop (PRD-02).

@@ -57,7 +57,7 @@
 > ✏ Revised 2026-07-19: onboarding extended — constraints elicited into the product overview, stack choices recorded as founding ADRs, standards artifact produced (see R15). Gate now covers overview **and** standards.
 
 - **Priority:** MUST
-- **Status:** revised
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a repo not yet managed
@@ -172,7 +172,7 @@
 ## R15 — Thin per-project standards artifact
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a project being onboarded (new or existing)
