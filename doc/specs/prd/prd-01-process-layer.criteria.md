@@ -208,11 +208,12 @@
 ## R18 — Central standards library structure
 
 > ✏ Revised 2026-07-19: the library gains a mandatory **baseline tier** (accessibility, UI/UX) included in every project with no selection — see R20.
+> ✏ Revised 2026-07-19 (2): authorship model — content is **drafted by agents** from cited primary sources and **approved by the human**, who reviews but does not write.
 
 - **Priority:** SHOULD
 - **Status:** revised
 - **Verify-via:** api
-- **Criteria:** Timone's repo hosts `standards/` in two tiers — **baseline** (mandatory for all projects: accessibility, UI/UX) and **stack entries** (selected per project: TypeScript, Next.js, Prisma/PostgreSQL, better-auth, Docker Compose local, Vercel + Supabase live); content is authored/reviewed by the human — Timone provides structure, injection into sessions, and the selection mechanism consumed by `doc/standards.md`.
+- **Criteria:** Timone's repo hosts `standards/` in two tiers — **baseline** (mandatory for all projects: accessibility, UI/UX) and **stack entries** (selected per project: TypeScript, Next.js, Prisma/PostgreSQL, better-auth, Docker Compose local, Vercel + Supabase live); content is drafted by agents from cited primary sources and approved by the human — Timone provides structure, injection into sessions, and the selection mechanism consumed by `doc/standards.md`.
 
 ## R19 — Domain glossary maintenance
 
