@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
 
+import { registerProjectsCommand } from "./commands/projects.js";
+
 /**
  * Read the package version at runtime. Works both from source (src/cli.ts,
  * via tsx) and from the build output (dist/cli.js): in either case
@@ -29,7 +31,7 @@ export function buildProgram(): Command {
     .description("Timone — the helm for agentic software development")
     .version(packageVersion());
 
-  // Commands are registered here in later sub-phases.
+  registerProjectsCommand(program);
 
   return program;
 }
