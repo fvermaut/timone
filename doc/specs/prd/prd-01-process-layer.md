@@ -37,11 +37,13 @@ Timone's first deliverable — before any automation — is the complete process
 - *Deliver* (R13): produce the branch and pull request, carrying the verification outcome and linking the driving ticket or requirement.
 - *Improve* (R14): triage post-delivery feedback — intent change vs implementation gap — and route the remediation, amending PRDs/ADRs when intent moved.
 
+**Standards and test discipline** *(added 2026-07-19 after the standards/TDD grilling; inspired in part by Matt Pocock's engineering skills)*. Onboarding additionally elicits project constraints into the product overview, records stack choices as founding ADRs, and produces a deliberately thin `doc/standards.md` — applicable central-library entries plus deviations, never restating what tooling enforces; for existing codebases, conventions are observed, not imposed (R15). Timone hosts the central standards library, seeded for the preferred stack with content authored by the human (R18). Implementation follows a TDD red→green loop at seams declared per sub-phase at planning time (R16), and delivery is preceded by a two-axis review — Standards and Spec, separately reported (R17). The grill stage maintains a per-project domain glossary (R19).
+
 ### Out of scope
 
 - The *deploy* and *maintain* stage skills — defined as stages in the process spec, implemented post-MVP.
 - Everything automated: the daemon, ticket-driven triggering, async comment gates, previews — all of it is [PRD-02](prd-02-inversion-of-control.md), which consumes the skills specified here.
-- Per-stack best-practice skills (Quarkus, NestJS, shadcn, …) — they complement stage skills but are not part of the process layer.
+- Authoring the standards-library *content* — the human writes and reviews it (structure and injection are in scope, R18). The non-`poc-*` customer skills under `tmp/` are explicitly not source material.
 - External/customer-shared spec stores; GitLab/Jira bindings.
 - Migrating the customer `poc-*` monorepo itself onto Timone.
 

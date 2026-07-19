@@ -1,0 +1,76 @@
+# The Timone Process
+
+> The single written definition of the engineering process Timone enforces on every managed project. Stage skills implement this document; when a skill and this spec disagree, the spec wins and the skill gets fixed.
+> Delivered by phase-01 for [PRD-01.R1](specs/prd/prd-01-process-layer.criteria.md).
+
+## Stages at a glance
+
+| # | Stage | Owning skill | Artifact produced | Closing gate |
+|---|-------|--------------|-------------------|--------------|
+| 0 | Onboarding *(cross-cutting, once per project)* | `timone-onboard` | Manifest entry + project doc tree + `doc/specs/product-overview.md` (incl. constraints) + founding ADRs (stack) + `doc/standards.md` | Human confirms the product overview **and** the standards |
+| 1 | Triage | `timone-triage` | Classification record: kind (feature / bug / chore / question) + process entry point + rationale | Classification recorded on the request |
+| 2 | Requirements discovery | `timone-grill` | Resolved decision tree + inline glossary updates (`CONTEXT.md`) | All branches resolved; summary accepted by the human |
+| 3 | Requirements | `timone-prd` | PRD pair: `doc/specs/prd/prd-NN-<slug>.md` + `.criteria.md` | Human approves the requirement list **before** files are written; PRD becomes Active |
+| 4 | Architecture | `timone-adr` | `doc/adr/NNNN-<slug>.md` — standalone, written **at decision time** | ADR status `accepted` |
+| 5 | Planning | `timone-plan` | Phase file: `doc/plans/phases/phase-NN.md` with vertical-slice sub-phases | Human approves the breakdown; no undocumented significant decision (else → stage 4 first) |
+| 6 | Implementation | `timone-execute` | Code on a work branch + sub-agent handoffs + completion report | Every sub-phase's validation steps pass |
+| 7 | Verification | `timone-verify` | Verification report: `doc/plans/phases/reports/phase-NN-verification.md` + updated criteria statuses | All MUST criteria PASS or HUMAN-CHECK, zero regressions, within 2 verify-fix loops |
+| 8 | Delivery | `timone-deliver` | Pull request referencing the driving ticket, carrying the verification outcome | PR open with passing checks; merge stays human |
+| 9 | Feedback | `timone-improve` | Iteration report + amendments (PRD/ADR/plan/report) + remediation | Human confirms the remediation before it is executed |
+| 10 | Deployment *(stage defined — skill post-MVP)* | `timone-deploy` | Release to a target environment + deploy record | Environment-specific checks green |
+| 11 | Maintenance *(stage defined — skill post-MVP)* | `timone-maintain` | Dependency-update and production-issue intake feeding stage 1 | Each intake item triaged |
+
+## Stage notes
+
+**0 — Onboarding.** Registers a repo in `timone.yaml` (repo URL, path under `projects/`, stack, platform bindings), creates the artifact tree (`doc/specs/`, `doc/specs/prd/`, `doc/adr/`, `doc/plans/phases/`), and drafts the one-page product overview — problem, users, goals, success definition, non-goals, **and constraints** (client policies, hosting, compliance, budget). Stack choices are recorded as **founding ADRs**, never restated elsewhere. Onboarding also produces `doc/standards.md` — deliberately thin: which entries of Timone's central standards library apply, plus project-specific deviations; anything a tool can enforce lives in tool config, not prose. For an **existing** codebase, conventions are *observed* from the code, not imposed — conflicts with preferred standards are flagged for an explicit decision. Gate: human confirms the overview and the standards.
+
+**1 — Triage.** Every incoming request enters here. Routing: feature → stage 2 (or 3 if requirements are already clear); bug or post-delivery observation → stage 9; chore/technical enabler → stage 5, unanchored (see PRD anchoring below); question → answered, no pipeline.
+
+**2 — Requirements discovery.** Relentless interview: one question at a time, each with a recommended answer; anything answerable from the codebase is answered from the codebase, not asked. Ends with a summary of decisions and risks. Its conclusions are raw material for stage 3 — they evaporate unless persisted. The interview also maintains the project's **domain glossary** (`CONTEXT.md`, created lazily, glossary only — no implementation details): fuzzy terms are sharpened into canonical ones, conflicts with the existing glossary are challenged on the spot, and resolved terms are written down immediately.
+
+**3 — Requirements.** The PRD pair is the **single source of truth** for what is being built (ADR-0006): a stakeholder-readable narrative free of test machinery, and a formal criteria register. Tickets scope work and point here; they never hold requirement detail.
+
+**4 — Architecture.** ADRs record decisions passing the three-part significance test — **hard to reverse**, **surprising without context**, and **the result of a real trade-off**; if any part is missing, no ADR. They are standalone artifacts created the moment the decision is made — in a grill session, during planning, or mid-execution — **never scheduled as plan work**. Format: Status / Date / Context / Decision / Consequences. Superseding creates a new ADR and flips the old one's status with a cross-link; history is never edited. Reference examples: Timone's own `doc/adr/0001`–`0006`.
+
+**5 — Planning.** A phase is a coherent, end-to-end-testable increment cut into thin vertical slices (schema → API → UI, not layer-by-layer), each sub-phase independently executable by a fresh-context sub-agent with copy-pasteable validation commands. Docs last; seed data second-to-last. Requirements map at phase level, never per sub-phase. Each sub-phase declares its **seams under test** — the public boundaries its tests will observe behaviour at — agreed at planning time; implementation writes tests only at declared seams. Prefactoring comes first when it makes the change easy ("make the change easy, then make the easy change"). Wide mechanical refactors (blast radius across the codebase) are the sanctioned exception to vertical slicing: sequence them as **expand–contract** (add the new form beside the old → migrate call sites in batches → delete the old form). **PRD anchoring:** feature phases list the requirement IDs they deliver; technical/enabler phases may be explicitly stamped un-anchored with human agreement. **ADR gate:** if planned work implies a significant undocumented decision, stop and record the ADR before the plan is written.
+
+**6 — Implementation.** The orchestrator decomposes the phase into per-sub-phase sub-agent runs — fresh context each, only the relevant plan excerpt, prior handoff, and file list. Sequential by default; parallel only for slices sharing zero files. Within a sub-phase the loop is **TDD, red before green**: write a failing test at a declared seam, run it red, implement just enough to go green, repeat — one slice at a time, no speculative features. Anti-patterns are rejected: implementation-coupled tests (break on refactor without behaviour change), tautological assertions (expected value recomputed the code's way), and horizontal slicing (all tests first — bulk tests verify imagined behaviour). Refactoring belongs to the review at delivery, not the red→green loop. Type-check regularly, run single test files during the loop, the full suite once at the end. A sub-phase is complete only when its validation checklist passes. Bounded retries (max 2 per sub-phase), then escalate to the human.
+
+**7 — Verification.** A verifier context that did **not** watch the build checks observable behaviour against the criteria register — trusting only the running app, never source-code intent. Channels: `api` (terminal-checkable, forms the standing regression suite), `browser`, `human` (both reported as HUMAN-CHECK with a precise manual script). Previously verified MUST+api criteria re-run as regression. Max 2 verify-fix loops, then remaining failures go to the human via stage 9.
+
+**8 — Delivery.** Before the PR opens, a **two-axis review** runs as parallel fresh-context sub-agents: **Standards** — does the diff conform to `doc/standards.md` plus a fixed code-smell baseline (repo standards override the baseline; anything tooling enforces is skipped) — and **Spec** — does the diff faithfully implement the PRD, flagging missing requirements, scope creep, and wrong-looking implementations. The axes are reported separately, never merged: standards-clean code can build the wrong thing, and spec-faithful code can break conventions. Work then lands as a pull request: references the driving ticket/requirements, summarizes scope, the verification outcome, and both review reports, follows branch/commit conventions. Merging is a human act (or an explicitly configured auto-merge policy, later).
+
+**9 — Feedback.** Triage the layer first — *does this change what we want (intent) or how it was built (implementation)?* Intent changes amend the PRD (stable IDs, `revised`/`DEPRECATED` markers) before any code moves. Then classify the remediation (bug fix / refinement / plan patch / new sub-phase / new phase / report amendment) and execute after human confirmation.
+
+**10 — Deployment / 11 — Maintenance.** Stages defined so the process is complete end-to-end; their skills are post-MVP (see PRD-01 out-of-scope). Deployment releases a merged state to a target environment via the project's platform bindings. Maintenance turns dependency updates and production issues into triaged intake for stage 1.
+
+## Artifact conventions (inside each managed project)
+
+```
+CONTEXT.md                       the domain glossary — ubiquitous language only, no implementation
+doc/
+  specs/
+    product-overview.md          the "why" — one page incl. constraints, rarely changes
+    prd/prd-NN-<slug>.md         the "what" — narrative (stakeholder-shareable)
+    prd/prd-NN-<slug>.criteria.md  the "what", formal — machine-checkable register
+  adr/NNNN-<slug>.md             the "how, decided" — one decision each (stack = founding ADRs)
+  standards.md                   the "how, written" — thin: applicable library entries + deviations
+  plans/phases/phase-NN.md       the "how, planned" — executable phase file
+  plans/phases/reports/          completion + verification reports
+```
+
+## The standards library
+
+Timone hosts the central standards library under `standards/` in its own repo — per-stack entries (TypeScript, Next.js, Prisma/PostgreSQL, better-auth, …) authored and reviewed by the human, versioned centrally, injected into sessions like the stage skills. Discipline: tool-enforceable rules live in tool config (the eslint/tsconfig/prettier setup *is* the standard); library entries capture only what tooling cannot enforce; a line that would be true of every project on Earth doesn't belong. Each project's `doc/standards.md` selects applicable entries and records deviations — central evolution, project-level exceptions.
+
+## Stable requirement IDs
+
+- Format `PRD-NN.R<k>`. IDs are stable forever: never renumbered, never reused, never deleted.
+- Intent changed → same ID, criteria updated, `Status: revised`, dated marker.
+- No longer applies → `DEPRECATED` with a one-line reason; the block stays.
+- New need → next unused ID.
+- Every MUST has at least one Given/When/Then criterion and a verification hint; a MUST that can't be written testably gets sharpened with the human or downgraded.
+
+## Gates and the human
+
+Every stage's closing gate is either mechanical (validations pass) or human (a decision or review). Human gates are surfaced wherever the human is: interactively today; as ticket/PR comments once the inverted loop (PRD-02) drives these same stages. The daemon orchestrates stage skills — it never reimplements them.

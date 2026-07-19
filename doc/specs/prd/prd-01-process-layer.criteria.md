@@ -52,14 +52,16 @@
 
 ## R5 — Onboarding skill
 
+> ✏ Revised 2026-07-19: onboarding extended — constraints elicited into the product overview, stack choices recorded as founding ADRs, standards artifact produced (see R15). Gate now covers overview **and** standards.
+
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** revised
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a repo not yet managed
       WHEN the onboarding skill runs
-      THEN a valid manifest entry exists, the project's process doc structure is created (`doc/specs/`, `doc/specs/prd/`, `doc/adr/`, `doc/plans/phases/`), and a product overview is drafted and confirmed with the user before saving
-- **Verification hint:** onboard a scratch repo; check manifest entry and created tree.
+      THEN a valid manifest entry exists, the project's process doc structure is created (`doc/specs/`, `doc/specs/prd/`, `doc/adr/`, `doc/plans/phases/`), a product overview including project constraints is drafted, stack choices are recorded as founding ADRs under `doc/adr/`, a standards artifact per R15 is produced, and the user confirms overview and standards before they are saved
+- **Verification hint:** onboard a scratch repo; check manifest entry, created tree, founding ADRs, and `doc/standards.md`.
 
 ## R6 — Triage skill
 
@@ -107,13 +109,15 @@
 
 ## R10 — Plan skill
 
+> ✏ Revised 2026-07-19: sub-phases additionally declare their seams under test (consumed by the TDD loop, R16); prefactoring and expand–contract sequencing added to the planning rules.
+
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** revised
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN an approved PRD on a managed project
       WHEN the plan skill runs
-      THEN a phase file exists under `doc/plans/phases/` with vertical-slice sub-phases, explicit dependencies, file markers, and runnable validation commands per sub-phase; the covered requirement IDs are listed at phase level; and the user approved the breakdown before the file was written
+      THEN a phase file exists under `doc/plans/phases/` with vertical-slice sub-phases, explicit dependencies, file markers, runnable validation commands, and declared seams under test per sub-phase; the covered requirement IDs are listed at phase level; and the user approved the breakdown before the file was written
     - GIVEN the planned work implies a significant undocumented technical decision
       WHEN the plan skill runs
       THEN it stops and routes to the ADR skill before producing the plan
@@ -162,3 +166,53 @@
       WHEN the improve skill runs
       THEN it classifies the layer (intent change vs implementation gap) and the remediation (bug fix / refinement / plan patch / new sub-phase / new phase / report amendment), amends the PRD (stable IDs, revised/deprecated markers) when intent moved, and executes the remediation only after user confirmation
 - **Verification hint:** feed it one bug report and one "works as planned but not what I meant" case; check the two route differently and the PRD is touched only in the second.
+
+## R15 — Thin per-project standards artifact
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a project being onboarded (new or existing)
+      WHEN onboarding completes
+      THEN `doc/standards.md` exists, listing the applicable central-library entries and project-specific deviations, and containing no rule that project tooling (linter, formatter, compiler config) already enforces
+    - GIVEN an existing codebase is onboarded
+      WHEN the standards artifact is drafted
+      THEN conventions observed in the code are recorded as-is and conflicts with the preferred standards are flagged for explicit decision, not silently overridden
+- **Verification hint:** onboard a scratch greenfield repo and an existing repo with a deliberate convention clash; inspect both `doc/standards.md` files.
+
+## R16 — TDD implementation loop
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** human
+- **Criteria:**
+    - GIVEN a phase file whose sub-phases declare seams under test
+      WHEN the execute skill runs a sub-phase
+      THEN tests are written only at the declared seams, each written and run failing (red) before the implementation that makes it pass (green), one slice at a time; refactoring is deferred to the delivery review; the full suite runs once at sub-phase end
+- **Verification hint:** inspect the sub-agent transcript/handoff for a sub-phase: the test-red evidence must precede the implementing change; look for the named anti-patterns (implementation-coupled, tautological, horizontal slicing) in the produced tests.
+
+## R17 — Two-axis delivery review
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a completed, verified phase on a work branch
+      WHEN the deliver skill runs
+      THEN two parallel fresh-context reviews are produced — Standards (diff vs `doc/standards.md` + the smell baseline, skipping tool-enforced rules) and Spec (diff vs the PRD: missing requirements, scope creep, wrong-looking implementations) — reported separately in the PR, never merged into one ranked list
+- **Verification hint:** run delivery on the pilot; check the PR description contains both reports under distinct headings, with spec findings quoting requirement IDs.
+
+## R18 — Central standards library structure
+
+- **Priority:** SHOULD
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:** Timone's repo hosts `standards/` with per-stack entries (seeded for the preferred stack: TypeScript, Next.js, Prisma/PostgreSQL, better-auth, Docker Compose local, Vercel + Supabase live); content is authored/reviewed by the human — Timone provides structure, injection into sessions, and the selection mechanism consumed by `doc/standards.md`.
+
+## R19 — Domain glossary maintenance
+
+- **Priority:** SHOULD
+- **Status:** draft
+- **Verify-via:** human
+- **Criteria:** the grill skill maintains `CONTEXT.md` lazily (created on first resolved term): glossary entries only, no implementation details; conflicting term usage is challenged during the interview and the resolved term recorded immediately.
