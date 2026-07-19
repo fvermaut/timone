@@ -1,0 +1,28 @@
+{
+  "name": "timone",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Timone — the helm for agentic software development",
+  "type": "module",
+  "bin": {
+    "timone": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
