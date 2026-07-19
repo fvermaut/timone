@@ -238,3 +238,17 @@
       WHEN browser-channel checks are produced
       THEN they include the baseline accessibility checks (automated scan where tooling exists, HUMAN-CHECK script otherwise)
 - **Verification hint:** onboard a scratch project and draft a PRD with a UI feature; inspect `doc/standards.md` for the baseline entries and the register for a11y criteria.
+
+## R21 — Handover skill
+
+- **Priority:** SHOULD
+- **Status:** draft
+- **Verify-via:** human
+- **Criteria:**
+    - GIVEN an in-progress session of work (on Timone itself, or on a managed project)
+      WHEN the handover skill runs
+      THEN a dated handover doc is written to `doc/handover/` (meta scope) or `projects/<name>/doc/handover/` (project scope), covering: what's done, what's in flight or blocked, key decisions since the last handover, and the exact next action — with pointers to PRDs/ADRs/phase files/reports rather than restated content
+    - GIVEN a prior handover doc exists for the same scope
+      WHEN a new one is written
+      THEN the prior file is left in place (never deleted or overwritten) and the new file is clearly the latest by filename date
+- **Verification hint:** run the skill mid-session; check the doc references artifacts by path, states a concrete next action, and doesn't duplicate PRD/ADR content.

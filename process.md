@@ -68,6 +68,12 @@ Timone hosts the central standards library under `standards/` in its own repo, i
 
 Content is authored and reviewed by the human, versioned centrally, injected into sessions like the stage skills. Discipline: tool-enforceable rules live in tool config (the eslint/tsconfig/prettier setup *is* the standard); library entries capture only what tooling cannot enforce; a line that would be true of every project on Earth doesn't belong. Each project's `doc/standards.md` = baseline + selected entries + recorded deviations — central evolution, project-level exceptions (the baseline admits none).
 
+## Cross-cutting utilities
+
+Not lifecycle stages of a feature — these apply across sessions and phases rather than within one pass through stages 0–11.
+
+**Handover.** Owning skill: `timone-handover`. Purpose: capture the full state of an in-progress body of work — what's done, what's in flight, key decisions since the last handover, and the exact next action — so a fresh session or a different agent can resume without re-deriving context from the conversation. Two scopes: **meta** (Timone itself — which phases/PRDs are done, what's queued; artifact: `doc/handover/<date>-<slug>.md` in Timone's own repo) and **project** (one managed project's ticket/feature in flight; artifact: `projects/<name>/doc/handover/<date>-<slug>.md`). A handover doc references artifacts by path — PRDs, ADRs, phase files, reports — it never restates their content. Superseded handovers are kept, not deleted (same discipline as ADRs): the newest file for a scope is the current one.
+
 ## Stable requirement IDs
 
 - Format `PRD-NN.R<k>`. IDs are stable forever: never renumbered, never reused, never deleted.
