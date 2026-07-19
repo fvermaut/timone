@@ -28,20 +28,38 @@ A PRD reference, a set of requirement IDs, a triage record path, or a free-form 
 Never plan from the prompt alone. Read, in the target project:
 
 - `doc/specs/prd/*.criteria.md` — the requirement IDs in scope and their current statuses. Quote IDs; never invent them.
+- `doc/specs/prd/prd-NN-*.md` — the narrative, **especially its out-of-scope list**. Scope named there is a prior decision being reopened, not a gap: say so explicitly rather than planning it.
 - `doc/adr/` — decisions already made. A plan that contradicts an accepted ADR is a defect; a plan that *needs* a decision not found here trips the ADR gate below.
+- `doc/triage/` — the record that routed this request, if there is one. It carries the kind (which decides whether the un-anchored path is even open to you) and the entry point triage chose. **If triage routed the request to a stage other than planning and that stage never ran, say so and route there** — you were invoked out of sequence.
 - `CONTEXT.md` — the domain glossary. Use its canonical terms in the plan; a phase file that renames domain concepts corrupts the ubiquitous language.
 - `doc/standards.md` — what the code must conform to, which shapes validation steps.
 - `doc/plans/phases/` — prior phase files and their reports: the next phase number, what already exists, and the house patterns established *in this project*.
+- Timone's own `standards/` — the `Approved` entries for this project's stack, read **unconditionally**, not only as a fallback. They are normative and they routinely decide questions that would otherwise look like open architectural choices.
 
-## The two gates — both terminal
+**When an artifact is absent, that is a finding, not a blank to skip past.** Report which were missing and reason about why. A missing `CONTEXT.md` or an empty `doc/specs/prd/` usually means stages 2–3 never ran — expect the anchoring gate to fire. An empty `doc/adr/` on a project with a committed stack means the founding ADRs stage 0 owes were never recorded; treat stack-touching work as undocumented and expect the ADR gate to fire. A missing `doc/standards.md` means onboarding is incomplete: fall back to the central `standards/` baseline and flag the gap. None of these absences is on its own a reason to abort.
+
+## The two gates
 
 Each gate stops the skill. When one fires you write **no phase file**, state which gate fired and why in one short paragraph, and name the skill to route to. A stopped plan is a valid, complete outcome of this skill — not a failure to work around.
 
-**ADR gate.** If the planned work implies a significant undocumented technical decision — one passing the three-part test (hard to reverse, surprising without context, the result of a real trade-off) — stop and route to `timone-adr`. Record the decision first, then plan. Never resolve the decision inline in the plan's prose, never plan around the gap, and never leave the choice to the executing sub-agent.
+**Evaluate the anchoring gate first, then the ADR gate.** Anchoring is logically prior: you cannot judge whether work implies a significant architectural decision while its scope is still undetermined, and routing someone to record an ADR for a feature that has no requirements wastes a decision on work that may never be approved. If both would fire, route to the **earlier** stage and say the later gate is also outstanding, so it isn't lost.
 
-**Anchoring gate.** Feature work must be anchored to requirement IDs. If the scope is user-visible behaviour with no PRD coverage, stop and route to `timone-grill` (requirements unclear) or `timone-prd` (requirements clear but unpersisted). Never invent requirement IDs, and never write a feature phase whose requirements table is empty.
+**Anchoring gate.** Feature work must be anchored to requirement IDs. Three cases:
 
-Chore / technical-enabler work — what triage routes here — is the sanctioned exception: it proceeds **un-anchored**, with an explicit stamp in the Requirements section naming what it enables and why it isn't PRD-bound. The stamp needs human agreement, which is sought at the same gate as the breakdown itself.
+- **No PRD coverage** — user-visible behaviour the PRD doesn't cover → stop. Route to `timone-grill` when the requirements are genuinely unresolved (open branches: unanswered behaviour questions, undecided edge cases, no agreed acceptance criteria) or to `timone-prd` when they are settled and merely unwritten. When a triage record exists, its rationale usually already says which — prefer it over your own guess; absent any signal, prefer `timone-grill`, since grilling a clear requirement is cheap and persisting an unclear one is not.
+- **Scope contradicts existing requirements** — the request is named in the PRD's out-of-scope list, or reverses an active criterion → stop. This is an intent change, not a gap, and intent changes amend the PRD before any code moves: route to `timone-improve` (stage 9). Never plan work that contradicts an active MUST.
+- **PRD exists but is not `Active`** — the narrative's status line still reads `Draft` → stop. Stage 3's gate is "human approves the requirement list; PRD becomes Active", so a Draft PRD means that gate never closed and the requirements are not ratified. Route to `timone-prd` to close it. (Do not confuse this with the *requirement-level* `Status: draft` in the criteria register — that means "not yet verified" and is the normal state of unbuilt work. The narrative's status is the one that gates planning.)
+- **Covered** — quote the IDs and proceed.
+
+Never invent requirement IDs, and never write a feature phase whose requirements table is empty. Quote IDs in the spec's canonical `PRD-NN.R<k>` form even when the register's own headings use a shorter form — normalizing the format is not inventing the ID.
+
+**ADR gate.** If the planned work implies a significant undocumented technical decision — one passing the three-part test (hard to reverse, surprising without context, the result of a real trade-off) — stop and route to `timone-adr`. "Documented" includes an `Approved` entry in Timone's `standards/` library, not just the project's own ADRs: a choice a normative standard already makes is settled, has no trade-off left in it, and must not be sent to `timone-adr` to be re-decided. Record it in the plan's Goal Description with that reasoning instead. Record the decision first, then plan. Never resolve the decision inline in the plan's prose, never plan around the gap, and never leave the choice to the executing sub-agent.
+
+You often cannot tell what the work implies until you have sketched the cut, so **drafting is allowed before the gates clear — writing is not.** Sketch as far as you need to see the decisions the work forces, then re-check this gate against what the sketch surfaced. What the gate forbids is the *artifact*: no phase file on disk, and no decision resolved inside one.
+
+**The chore exception, and its limit.** Chore / technical-enabler work — what triage routes here — is the sanctioned exception to *anchoring only*: it proceeds **un-anchored**, with an explicit stamp in the Requirements section naming what it enables and why it isn't PRD-bound. The stamp needs human agreement, sought at the same gate as the breakdown itself (workflow step 4), so for chore work the anchoring gate defers rather than terminates.
+
+Triage having routed a chore here **does not pre-clear the ADR gate**. Triage classifies the request's kind; it has no view on whether a decision is owed. Chores are the *most* likely stage-5 input to trip the ADR gate, because a technical enabler is by definition a change of technical direction — a stack adoption, a framework swap, a migration. Check it as carefully here as anywhere.
 
 ## Cutting the phase
 
@@ -51,6 +69,7 @@ The rules are the spec's, restated with no variants:
 - **Independently executable** — a fresh-context sub-agent, given only the plan excerpt, the prior handoff, and the file list, must be able to complete the slice. If a slice only makes sense to someone who watched the previous one, it is cut wrong.
 - **Prefactoring first** — when a change is hard, make the change easy first, then make the easy change. That prefactoring is its own leading sub-phase.
 - **Expand–contract for wide mechanical refactors** — a change with blast radius across the codebase is the sanctioned exception to vertical slicing. Sequence it: add the new form beside the old → migrate call sites in batches → delete the old form. Do not force it into vertical slices.
+- **Greenfield leads with a scaffold** — the first phase of a project with no application yet may open with one non-vertical enabler slice (runtime, database, test harness, lint config) that delivers nothing user-observable. This is a second sanctioned exception, distinct from prefactoring: prefactoring restructures code that exists, a scaffold creates the ground for code to stand on. Keep it to one slice, and make every later slice vertical.
 - **Docs last; seed data second-to-last.**
 - **Requirements map at phase level, never per sub-phase.** The table at the top is the mapping.
 - **Dependencies are explicit** — every sub-phase states what must precede it, and the phase closes with a dependency graph. Slices sharing zero files may run in parallel; say so.
@@ -65,11 +84,13 @@ Every code-carrying sub-phase declares its **seams under test**: the public boun
 
 Prefer seams that survive refactoring — a public function, a route, a CLI command — over internals. A seam chosen at an implementation detail guarantees the implementation-coupled tests stage 6 is required to reject.
 
-Sub-phases carrying no code (documentation, spec amendments, dry-runs) **say so explicitly** — "no code in this sub-phase, so no seams are declared; validation is checklist-based" — rather than omitting the field silently. A missing seams line is indistinguishable from an oversight.
+The line to draw is **behaviour-carrying or not**, which is not the same as code or not. A scaffold slice can add a dozen files and carry no behaviour; declare no seams and say why. A slice whose only real behaviour is an effect — a seed script that must be idempotent, a migration that must be reversible — has its seam at the observable end state (run it twice; the second run changes nothing), not at any function inside it.
+
+Sub-phases carrying no behaviour (documentation, spec amendments, scaffolds, dry-runs) **say so explicitly** — "no behaviour-carrying code in this sub-phase, so no seams are declared; validation is checklist-based" — rather than omitting the field silently. A missing seams line is indistinguishable from an oversight.
 
 ## Numbering
 
-List `projects/<name>/doc/plans/phases/`, take the highest existing `NN`, use the next, zero-padded to two digits. Missing directory → create it, start at `01`. Numbers are **never reused**, even for an abandoned phase. Never renumber existing phase files.
+List `projects/<name>/doc/plans/phases/`, take the highest existing `NN`, use the next, zero-padded to two digits. Missing **or empty** directory → create it if absent, start at `01` (onboarding creates the tree empty, so a first plan lands here, not in the highest-existing branch). Numbers are **never reused**, even for an abandoned phase. Never renumber existing phase files.
 
 ## Phase file template
 
@@ -80,6 +101,7 @@ List `projects/<name>/doc/plans/phases/`, take the highest existing `NN`, use th
 <You write this state, never `Awaiting approval` — approval precedes the write. The line has a third state, `Complete — see [reports/phase-NN-complete.md](…)`, stamped at phase close by stage 6; leave it to them.>
 
 > **Companion phases:** <links to related phase files, each with a one-clause statement of the relationship — what it left behind, or which files it shares.> Governing decisions: <ADR links, each with the reason it binds *this* phase — not a bare citation.>
+<State the absence of either half rather than dropping it — "First phase of the project — no companion phases." still followed by the governing decisions, if any bind. An absent line reads as an oversight; a stated absence reads as checked.>
 
 ## Requirements
 
@@ -141,9 +163,9 @@ NNc → NNa, NNb      <one-clause purpose>
 ## Workflow
 
 1. Resolve the target project, then read the artifacts listed above.
-2. Check both gates. If either fires, stop, route, and write nothing.
+2. Check the anchoring gate, then the ADR gate. If either fires, stop, route, and write nothing. Sketching the cut to inform the ADR check is allowed here; producing a file is not.
 3. Cut the phase and draft the breakdown.
-4. **Present the breakdown to the user and iterate until approved.** The stage gate is explicit: the human approves the breakdown **before** any file is written. Present the sub-phase list with each slice's deliverable, its dependencies, and its seams — enough to judge the cut — plus the un-anchored stamp when it applies. Do not write the file to "show" the plan; the file appearing before approval defeats the gate.
+4. **Present the breakdown to the user and iterate until approved.** The stage gate is explicit: the human approves the breakdown **before** any file is written. Present the sub-phase list with each slice's deliverable, its dependencies, and its seams — enough to judge the cut — plus the un-anchored stamp when it applies. Do not write the file to "show" the plan; the file appearing before approval defeats the gate. Creating the `doc/plans/phases/` directory during the read pass is fine — a directory is not a plan.
 5. Write `projects/<name>/doc/plans/phases/phase-NN.md`, stamping `> **Status:** Approved for execution by <who> <date>.`
 6. Commit it in the target project (`docs: plan phase NN — <theme>`). The phase file is a process artifact under `doc/` — the only kind of file this skill may cause to be committed; never touch anything outside `doc/…` in the client repo.
 
