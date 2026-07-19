@@ -27,7 +27,8 @@ These implement the library discipline from `process.md`:
 2. **No commonplaces.** A line true of every project on Earth is deleted. Entries capture choices, patterns, boundaries, and traps specific to how *we* build with this technology.
 3. **Cited.** Every non-obvious claim links a primary source. A `## Sources` section closes each entry.
 4. **Current.** Verify versions/APIs against the sources at drafting time (2026); flag anything likely to churn.
-5. **Short.** Target ≤ 2 pages per entry — these are injected into agent contexts; length is a cost.
+5. **Short.** Target ~1 page per entry (hard cap 1.5) — these are injected into agent contexts; length is a cost.
+   > ✏ Refined 2026-07-19: was "≤ 2 pages"; fvermaut's review of the first drafts found them too long (typescript called out as overkill).
 6. **Status header** flips from `stub` to `Draft — pending review (fvermaut)`; after the gate, `Approved <date>`.
 
 ## Sub-phases
@@ -45,6 +46,7 @@ Each sub-phase: research → draft the entry file → self-check against the dra
 | 03g | `standards/testing.md` | The TDD loop as our process defines it (seams, red→green, anti-patterns — align with `process.md` stage 6), what to test at which level, vitest/Playwright posture. Sources: process spec + vitest/Playwright docs |
 | 03h | `standards/docker-compose-local.md` | Local-runtime conventions: compose layout per project, DB lifecycle, env handling, parity with previews. Sources: Docker docs |
 | 03i | `standards/vercel-supabase.md` | Go-to live stack: what belongs on which side, env/secret handling, migration path from local Postgres to Supabase. Sources: Vercel/Supabase docs |
+| 03j | `standards/shadcn.md` | *(added 2026-07-19 on review feedback)* shadcn/ui as the standard UI library: copy-in ownership model, theming/tokens, Radix accessibility posture, update discipline. Sources: ui.shadcn.com |
 
 #### Agent Validation Steps (every sub-phase)
 
