@@ -18,16 +18,18 @@
       THEN no pipeline run is created for it
 - **Verification hint:** create a marked and an unmarked issue on the pilot repo; observe status output and issue comments within one poll interval.
 
-## R2 — Daemon-spawned project-scoped sessions
+## R2 — Daemon-spawned sessions resolve a target project
+
+> ✏ Revised 2026-07-20: [ADR-0007](../../adr/0007-sessions-at-timone-root.md) moved all sessions to the timone root, so the criterion is target-project resolution plus clean client repos, not per-project cwd. The ADR instructed this revision on 2026-07-19; PRD-01.R4 received it and this block was missed.
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** revised
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a pipeline stage starts for project X
       WHEN the daemon spawns the agent session
-      THEN its working directory is X's folder, the PRD-01 stage skills are available in-session, and no commit adds harness files to X's repo (process artifacts under `doc/` excepted)
-- **Verification hint:** inspect session config/logs for cwd and skill sources; `git log --stat` on produced branches.
+      THEN the session runs from the timone root with the PRD-01 stage skills available, the target project X is carried in the event context and validated against `timone.yaml`, every file the session touches lies under `projects/X/…`, and no commit adds harness files to X's repo (process artifacts under `doc/` excepted)
+- **Verification hint:** inspect session config/logs for cwd and the resolved target; `git log --stat` on produced branches, asserting only `doc/…` and `CONTEXT.md` paths.
 
 ## R3 — Async clarification gate
 

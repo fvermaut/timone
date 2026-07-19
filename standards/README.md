@@ -9,6 +9,7 @@ Discipline for every entry (see `process.md`, "The standards library"):
 - Tool-enforceable rules live in tool config — the eslint/tsconfig/prettier setup *is* the standard; never restate it in prose.
 - Capture only what tooling cannot enforce: choices, patterns, boundaries, "never do X here" rules.
 - If a line would be true of every project on Earth, it doesn't belong.
+- Agent tooling is CLI-first ([ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md)): an entry adopting an MCP server must name the capability its CLI cannot provide. Silence means the CLI covers it.
 
 ## Baseline (mandatory — every project, no opt-out)
 

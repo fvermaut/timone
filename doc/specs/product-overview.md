@@ -29,7 +29,7 @@ Two milestones, in order:
 ## Architecture pillars (decided)
 
 - Timone's repo holds only orchestration code, skills, and config; projects are independent git repos cloned under a gitignored `projects/` dir, declared in a `timone.yaml` manifest.
-- A TypeScript daemon + CLI on my own hardware, built on the Claude Agent SDK, watches tickets/PRs and spawns project-scoped agent sessions with Timone's lifecycle skills injected (never committed to client repos).
+- A TypeScript daemon + CLI on my own hardware, built on the Claude Agent SDK, watches tickets/PRs and spawns agent sessions from the timone root that resolve a target project (ADR-0007) — Timone's lifecycle skills are versioned with timone and never committed to client repos.
 - Platform bindings are per-project adapters: git host, ticketing, preview target, and (later) spec store.
 - Requirements/specs in each project's repo are the **single source of truth**; tickets scope work and point into them.
 

@@ -1,6 +1,7 @@
 # Standards — Next.js (full-stack)
 
 > **Status: Approved 2026-07-19 (fvermaut).**
+> ✏ Amended 2026-07-20 — **pending approval**: scaffolding via `create-next-app` added; `next-devtools` MCP adopted per ADR-0009.
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we build with Next.js (full-stack).
 
 Applies to **Next.js 16** (App Router, Turbopack default). Deployment specifics live in [vercel-supabase.md](vercel-supabase.md) — never duplicated here.
@@ -59,6 +60,10 @@ Applies to **Next.js 16** (App Router, Turbopack default). Deployment specifics 
 - Route groups `(marketing)` / `(app)` are for layout boundaries (including differing root layouts), not decorative foldering.
 
 ## Tooling
+
+**Scaffold with the generator**: `npx create-next-app@latest <name> --ts --app --src-dir --eslint --use-npm --import-alias "@/*"` — never hand-assemble `package.json`, `tsconfig.json`, or `next.config.ts`. The generator tracks the current major's defaults; hand-rolled configs drift silently. Note `--turbopack` and `--tailwind` are already defaults in 16, and the linter is now a three-way choice (`--eslint` / `--biome` / `--no-linter`). Post-generation deltas we always apply: `cacheComponents: true`, the strict `jsx-a11y` preset and the import-boundary zones from [project-structure.md](project-structure.md), and `server-only` on every server module. Anything else differing from generator output is a deviation and gets recorded in `doc/standards.md`.
+
+**MCP: `next-devtools` is adopted** ([ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md)) — the named gap is live dev-server state (build/runtime errors, logs, resolved routes) exposed via Next 16's built-in `/_next/mcp` endpoint, which no CLI surfaces. It is only useful with a dev server running. Config lives in timone's root `.mcp.json`, never in a client repo.
 
 Enforced by config, not prose: `eslint-config-next` (core-web-vitals) via flat config; generated route/`PageProps`/`RouteContext` types (`next typegen`, checked by `tsc`); the Cache Components build error; `npx @next/codemod` on major upgrades (including `middleware-to-proxy`).
 

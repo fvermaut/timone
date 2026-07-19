@@ -22,7 +22,7 @@ This PRD inverts the control flow: a ticket filed on a managed GitHub project is
 
 ### In scope
 
-**The daemon and the trigger.** A daemon on my own hardware polls the ticketing system of every managed project and picks up tickets marked for Timone (R1). Each pipeline stage runs as an agent session spawned by the daemon, confined to the target project's folder with Timone's skills injected (R2). Work per project is serialized: one active ticket at a time, the rest visibly queued (R10). A status command shows each project's active ticket, stage, and any gate waiting on me (R9).
+**The daemon and the trigger.** A daemon on my own hardware polls the ticketing system of every managed project and picks up tickets marked for Timone (R1). Each pipeline stage runs as an agent session spawned by the daemon from the timone root, resolving its target project from the triggering event (R2, per ADR-0007). Work per project is serialized: one active ticket at a time, the rest visibly queued (R10). A status command shows each project's active ticket, stage, and any gate waiting on me (R9).
 
 **Human gates as comments.** The clarification stage posts its interview questions as ticket comments and resumes when I reply (R3). The PRD pair is committed on a branch and gated on my approval via ticket comment (R4); the phase plan likewise (R5). Execution then runs with sub-phase validation and fresh-context verification, reporting failures to the ticket (R6).
 

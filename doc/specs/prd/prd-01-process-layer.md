@@ -52,6 +52,6 @@ Timone's first deliverable — before any automation — is the complete process
 
 ## Open Questions
 
-- **Skill delivery mechanism:** how skills physically reach a session working under `projects/<name>` without being committed there — user-level skills dir, symlink, or SDK injection (interactive vs daemon may differ). To be settled in the first phase plan.
+- ~~**Skill delivery mechanism:** how skills physically reach a session working under `projects/<name>` without being committed there.~~ **Closed 2026-07-19 by [ADR-0007](../../adr/0007-sessions-at-timone-root.md)**: sessions run at the timone root, so skills are ordinary `.claude/skills/` entries and there is no delivery mechanism at all.
 - **ADR scope threshold:** what counts as "significant" enough for an ADR — needs a working rule of thumb in the process spec (current lean: any decision that constrains future phases or is expensive to reverse).
 - **Process spec granularity:** one page per stage vs one compact table — start compact, grow as skills land.

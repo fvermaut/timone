@@ -1,6 +1,7 @@
 # Standards — better-auth
 
 > **Status: Approved 2026-07-19 (fvermaut).**
+> ✏ Amended 2026-07-20 — **pending approval**: setup path stated as the manual-by-design exception; MCP explicitly not adopted per ADR-0009.
 > Scope: authentication with better-auth in our Next.js + Prisma + PostgreSQL stack. Verified against better-auth docs, July 2026 (stable line **1.6.x**; 1.7.0 in RC on `next`). better-auth moves fast — items marked *churn* must be re-verified at onboarding time.
 
 ## Version & upgrade posture
@@ -47,6 +48,8 @@ Prefer an official plugin over custom code for anything that is an *auth flow* (
 
 ## Tooling
 
+- **Setup is manual here — the deliberate exception.** Unlike every other stack entry, better-auth's [installation guide](https://www.better-auth.com/docs/installation) documents an 8-step manual walkthrough as the default and never mentions `auth init`; the CLI enters only at the schema step. Follow the manual path, then `npx auth@latest generate`. (`auth init` exists with `--name`/`--framework`/`--plugins`/`--database`/`--package-manager`, but what it produces is undocumented — don't adopt it blind.)
+- **No MCP server.** `https://mcp.better-auth.com/mcp` is a documentation-search server, which the CLI-first rule in [ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md) does not count as a capability gap. Not to be confused with better-auth's MCP *plugin*, which makes your own app an OAuth provider for MCP clients — a different thing entirely, adopted only if a PRD asks for it.
 - **Schema drift check (CI):** run `npx auth@latest generate`, fail on git diff — catches upgrades/plugins that changed the auth schema without a migration.
 - **Env validation at boot** (zod or equivalent): `BETTER_AUTH_SECRET` present and ≥ 32 chars, `BETTER_AUTH_URL` set — fail fast, not at first sign-in.
 - **Dependency alerts** (Renovate/Dependabot + advisories) on `better-auth` and all `@better-auth/*` packages.

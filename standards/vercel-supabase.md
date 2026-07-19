@@ -1,6 +1,7 @@
 # Standards — Vercel + Supabase (go-to live)
 
 > **Status: Approved 2026-07-19 (fvermaut).**
+> ✏ Amended 2026-07-20 — **pending approval**: CLI initialization added; Supabase/Vercel MCP explicitly not adopted per ADR-0009.
 > Scope: the *default* live-deployment stack; per-project deviations go in that project's `doc/standards.md`. Local runtime: `docker-compose-local.md`; data layer: `prisma-postgresql.md`; identity: `better-auth.md`.
 
 ## Division of responsibilities
@@ -52,6 +53,10 @@ Default preview mechanism is **timone's own Docker previews** (ADR-0005). Vercel
 - Independent of Supabase: periodic `pg_dump`/CLI `db dump` to owned storage for anything irreplaceable — Supabase's backups live inside the same account whose compromise or closure you'd be recovering from.
 
 ## Tooling
+
+**Initialize with the CLIs**, never by hand: `supabase init` (writes `supabase/config.toml`; it does *not* create `migrations/`, `functions/`, or `tests/`), then `supabase link --project-ref <ref>`; `vercel link` for the project binding and `vercel env pull` for local env. Note `vercel init` is *not* a project scaffolder — it clones an example from Vercel's examples repo.
+
+**No MCP servers.** Both vendors ship official hosted ones (`mcp.supabase.com`, `mcp.vercel.com`), but the CLIs cover the work we actually do — types, migrations, logs, env, deploys — so they fail [ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md)'s named-capability-gap test. If one is ever adopted it becomes the first member of the scoped tier (credentialed, per-project, daemon-only), and Supabase's own guidance is binding: never point it at production, `read_only=true`, and `project_ref` scoped to the one project.
 
 Enforced in config, not prose:
 

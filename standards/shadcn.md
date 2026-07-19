@@ -1,6 +1,7 @@
 # Standards — shadcn/ui (UI component library)
 
 > **Status: Approved 2026-07-19 (fvermaut).**
+> ✏ Amended 2026-07-20 — **pending approval**: CLI is 4.x, not 3.x (`add --diff` now exists); scaffolding command added; the MCP mention removed per [ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md).
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we use shadcn/ui.
 
 shadcn/ui is the standard component layer on our Next.js/React/Tailwind stack. It is explicitly *"not a component library. It is how you build your component library"*: components are **copied into the repo** via a registry + CLI, not installed as a package. Visual invariants (tokens, contrast, focus styles) are governed by [baseline/ui-ux.md](baseline/ui-ux.md) and [baseline/accessibility.md](baseline/accessibility.md); this entry covers how we own, update, and compose the components.
@@ -9,12 +10,12 @@ shadcn/ui is the standard component layer on our Next.js/React/Tailwind stack. I
 
 - **The copied code is ours.** No package update will ever touch `components/ui/`; upstream improvements arrive only when we deliberately re-run `add`. Edit components freely — that is the point of the model — but every non-cosmetic divergence from upstream gets a `// timone:` comment at the change site and a line in the project's `doc/standards.md`. Reason: `npx shadcn add <name>` **overwrites** the local file; unrecorded customizations are silently lost on refresh.
 - **Install via CLI only, never hand-copy from the website.** `components.json` is what makes `add` place files and rewrite imports correctly; hand-copied code drifts from it immediately.
-- **Update posture:** CLI 3.x has no `diff`/`update` command — refreshing a component means re-adding it and re-applying recorded divergences from the diff. Do this on-demand (a bug or a needed feature), not on a schedule; check the [changelog](https://ui.shadcn.com/docs/changelog) at review points. `migrate` codemods (`radix`, `icons`, `rtl`) are the exception: run them as published when they apply.
+- **Update posture:** there is still no `update` command, but CLI 4.x's `add --diff` shows what upstream changed before you overwrite — inspect it first, then re-add and re-apply recorded divergences. Do this on-demand (a bug or a needed feature), not on a schedule; check the [changelog](https://ui.shadcn.com/docs/changelog) at review points. `migrate` codemods (`radix`, `icons`, `rtl`) are the exception: run them as published when they apply.
 
 ## Base primitives
 
 - Since July 2026, **Base UI is the default base** for new projects; Radix and React Aria remain fully supported and components ship for both. New projects take the default; existing Radix projects don't migrate ("You do not need to migrate") unless a needed component is Base-UI-only — then migrate component-by-component, never big-bang.
-- **One base per project.** The base is chosen at `init` (`-b radix|aria`) and recorded in `doc/standards.md`; mixing bases doubles bundle and behavior surface for nothing.
+- **One base per project.** The base is chosen at `init` (`-b base|radix|aria`) and recorded in `doc/standards.md`; mixing bases doubles bundle and behavior surface for nothing.
 
 ## Theming
 
@@ -34,12 +35,16 @@ The headless base gives, **per component instance**: roles/ARIA wiring, keyboard
 
 ## Tooling
 
-Enforced by config, not prose: `components.json` (`style: "new-york"`, `rsc: true`, `tsx: true`, `cssVariables: true`, Tailwind v4 so `tailwind.config` stays blank, aliases matching the `src/` layout in [nextjs.md](nextjs.md)); `init`/`add`/`view`/`search` as the only installation path; the shadcn MCP server for agent sessions that browse/add registry items; `registries` entries in `components.json` if a private registry is ever introduced.
+**Scaffold with the CLI**: `pnpm dlx shadcn@latest init -t next -b base` in an existing Next.js app — never hand-write `components.json` or hand-copy components from the website. The generator writes `components.json`, installs deps, adds the `cn` util, configures the CSS variables and the `@/*` alias. Post-init deltas we always apply: the token pairs the project's design system needs (see Theming), and the `doc/standards.md` line recording the chosen base.
+
+No MCP server: the CLI's `add`/`view`/`search`/`docs` cover registry browsing and installation, so it fails [ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md)'s named-capability-gap test.
+
+Enforced by config, not prose: `components.json` (`style: "new-york"`, `rsc: true`, `tsx: true`, `cssVariables: true`, Tailwind v4 so `tailwind.config` stays blank, aliases matching the `src/` layout in [nextjs.md](nextjs.md)); `init`/`add`/`view`/`search` as the only installation path; `registries` entries in `components.json` if a private registry is ever introduced.
 
 ## Sources
 
 - [Introduction](https://ui.shadcn.com/docs) — "not a component library", open-code distribution, composition, registry (verified current, 2026-07).
 - [components.json](https://ui.shadcn.com/docs/components-json) — fields, immutability of `style`/`baseColor`/`cssVariables`, aliases, `registries`.
 - [Theming](https://ui.shadcn.com/docs/theming) — CSS-variable tokens, background/foreground convention, custom tokens via `@theme inline`, `.dark` overrides.
-- [shadcn CLI](https://ui.shadcn.com/docs/cli) — CLI 3.x command set (`init`, `add`, `view`, `search`, `migrate`, …; no diff/update command).
+- [shadcn CLI](https://ui.shadcn.com/docs/cli) — CLI 4.x command set (`init`, `add`, `view`, `search`, `apply`, `build`, `docs`, `migrate`, `eject`); `init` takes `-t/--template` and `-b/--base`; `add` takes `--diff`/`--dry-run`/`--view`. No `update` command. Package is `shadcn` — `shadcn-ui` has been frozen at 0.9.5 since 2025-06 (abandoned in practice, not formally deprecated). Verified against the npm registry 2026-07-19.
 - [Changelog — Base UI as the Default (2026-07)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) — Base UI default, Radix not deprecated, `-b` flag, no forced migration; [React Aria (2026-07)](https://ui.shadcn.com/docs/changelog/2026-07-react-aria) — React Aria as first-class base.

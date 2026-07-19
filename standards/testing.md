@@ -1,6 +1,7 @@
 # Standards — Testing & TDD
 
 > **Status: Approved 2026-07-19 (fvermaut).**
+> ✏ Amended 2026-07-20 — **pending approval**: Playwright/Vitest scaffolding added; `playwright` MCP adopted, Vitest MCP recorded as nonexistent, per ADR-0009.
 > Companion to `process.md` stages 5–6, which own the process (seams declared at planning, red→green at those seams, the three anti-patterns rejected there). This entry is the *how* on our stack (Vitest + Playwright over Next.js / Prisma / Postgres). When in doubt, the spec wins.
 
 ## What a good test is
@@ -50,6 +51,10 @@ Which boundaries earn tests (agreed at planning, stage 5):
 
 ## Tooling (enforced in config, never restated in prose)
 
+- **Scaffold Playwright with the generator**: `npm init playwright@latest -- --lang TypeScript --gha` — writes `playwright.config.ts` and `tests/`. Churn warning: `create-playwright` last published 2025-10 while Playwright core ships continuously, so verify its output against the current config reference rather than trusting it wholesale.
+- **Vitest has no scaffolder** and its docs treat manual setup as the recommended path: install `vitest`, add the `test` script, write `vitest.config.ts`. (`vitest init browser` exists for browser mode only; its flags and outputs are undocumented.)
+- **MCP: `playwright` is adopted** ([ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md)) — the named gap is live browser state (DOM snapshots, console, network, storage against a running page), which no CLI exposes. Use it for exploratory automation and diagnosing a failing test, **not** as the routine way to write tests: Playwright's own maintainers point routine agent work at `@playwright/cli --skills` on token-efficiency grounds, and the standing red→green loop above is the way tests get written. Config lives in timone's root `.mcp.json`. Both this server and that CLI are pre-1.0 — expect churn.
+- **No Vitest MCP server exists.** `@vitest/mcp` is not published; `vitest-community/mcp` is an unreleased work in progress. Don't adopt a third-party substitute.
 - `vitest.config.ts` — unit/integration split as separate `projects`; `coverage.thresholds` (optionally `autoUpdate` as a ratchet) [9] — the numbers live there, not in any doc; `mockReset: true` so mock state can't leak [5].
 - `playwright.config.ts` — `retries` on CI only, `forbidOnly` on CI, trace on first retry so flaky verdicts arrive with evidence [8].
 
