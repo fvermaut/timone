@@ -150,6 +150,51 @@ export function addProject(
 }
 
 /**
+ * A partial correction to an existing project entry. Only the provided
+ * fields change; `bindings` is itself merged field-by-field.
+ */
+export type ProjectPatch = Partial<Omit<ProjectConfig, "bindings">> & {
+  bindings?: Partial<ProjectConfig["bindings"]>;
+};
+
+/**
+ * Apply a patch to an existing project entry, returning a new `Manifest`
+ * (the input is never mutated). Fields absent from the patch keep their
+ * current values; the merged result is validated via {@link parseManifest},
+ * so error messages share its "project ... field ..." style.
+ *
+ * Throws when `name` does not exist in `manifest.projects` (listing the
+ * known names), or when the merged entry fails validation.
+ */
+export function updateProject(
+  manifest: Manifest,
+  name: string,
+  patch: ProjectPatch,
+): Manifest {
+  const existing = manifest.projects[name];
+  if (existing === undefined) {
+    const known = Object.keys(manifest.projects)
+      .map((key) => `"${key}"`)
+      .join(", ");
+    throw new Error(
+      `Invalid manifest: project "${name}": not found (known projects: ${known})`,
+    );
+  }
+
+  const { bindings: bindingsPatch, ...fieldsPatch } = patch;
+  const merged = {
+    ...existing,
+    ...fieldsPatch,
+    bindings: { ...existing.bindings, ...bindingsPatch },
+  };
+
+  const candidate = {
+    projects: { ...manifest.projects, [name]: merged },
+  };
+  return parseManifest(candidate);
+}
+
+/**
  * Serialize a manifest back to YAML text. Does not preserve comments (see
  * ADR-0008); round-trips through {@link parseManifest} / {@link loadManifest}.
  */

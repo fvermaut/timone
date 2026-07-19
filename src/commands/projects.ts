@@ -4,8 +4,10 @@ import {
   addProject,
   loadManifest,
   serializeManifest,
+  updateProject,
   type Manifest,
   type ProjectConfig,
+  type ProjectPatch,
 } from "../manifest.js";
 
 /** Column headers of the `projects list` table, in display order. */
@@ -63,6 +65,38 @@ interface AddOptions {
   ticketing: string;
   preview?: string;
   manifest: string;
+}
+
+/** Options accepted by `projects update`, as commander parses them. */
+interface UpdateOptions {
+  repo?: string;
+  path?: string;
+  stack?: string;
+  ticketing?: string;
+  preview?: string;
+  manifest: string;
+}
+
+/**
+ * Translate `projects update` flags into a {@link ProjectPatch}, or
+ * `undefined` when no field flag was passed at all.
+ */
+function buildPatch(options: UpdateOptions): ProjectPatch | undefined {
+  const bindings = {
+    ...(options.ticketing !== undefined
+      ? { ticketing: options.ticketing }
+      : {}),
+    ...(options.preview !== undefined ? { preview: options.preview } : {}),
+  } as Partial<ProjectConfig["bindings"]>;
+
+  const patch: ProjectPatch = {
+    ...(options.repo !== undefined ? { repo_url: options.repo } : {}),
+    ...(options.path !== undefined ? { path: options.path } : {}),
+    ...(options.stack !== undefined ? { stack: parseStack(options.stack) } : {}),
+    ...(Object.keys(bindings).length > 0 ? { bindings } : {}),
+  };
+
+  return Object.keys(patch).length > 0 ? patch : undefined;
 }
 
 /** Register the `projects` command group (with `list`) on the program. */
@@ -154,5 +188,52 @@ export function registerProjectsCommand(program: Command): void {
       }
 
       console.log(`Added project "${name}" to ${options.manifest}`);
+    });
+
+  projects
+    .command("update")
+    .description("Correct fields of an existing project in the manifest")
+    .argument("<name>", "project name")
+    .option("--repo <url>", "git repository URL")
+    .option("--path <path>", 'local checkout path (must start with "projects/")')
+    .option("--stack <list>", "comma-separated technology tags")
+    .option("--ticketing <backend>", "ticketing backend")
+    .option("--preview <backend>", "preview-environment backend")
+    .option(
+      "--manifest <path>",
+      "path to the timone manifest file",
+      "timone.yaml",
+    )
+    .action((name: string, options: UpdateOptions) => {
+      const patch = buildPatch(options);
+      if (patch === undefined) {
+        console.error(
+          "Nothing to update: pass at least one of --repo, --path, --stack, --ticketing, --preview",
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      let updated: Manifest;
+      try {
+        const manifest = loadManifest(options.manifest);
+        updated = updateProject(manifest, name, patch);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(message);
+        process.exitCode = 1;
+        return;
+      }
+
+      try {
+        writeFileSync(options.manifest, serializeManifest(updated), "utf8");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(message);
+        process.exitCode = 1;
+        return;
+      }
+
+      console.log(`Updated project "${name}" in ${options.manifest}`);
     });
 }

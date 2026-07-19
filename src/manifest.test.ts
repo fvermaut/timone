@@ -9,8 +9,10 @@ import {
   loadManifest,
   parseManifest,
   serializeManifest,
+  updateProject,
   type Manifest,
   type ProjectConfig,
+  type ProjectPatch,
 } from "./manifest.js";
 
 let dir: string;
@@ -248,6 +250,85 @@ describe("addProject", () => {
     addProject(empty, "scratch-app", validEntry);
 
     expect(Object.keys(empty.projects)).toEqual([]);
+  });
+});
+
+describe("updateProject", () => {
+  const baseManifest = (): Manifest => ({
+    projects: {
+      "scratch-app": {
+        repo_url: "git@github.com:fvermaut/scratch-app.git",
+        path: "projects/scratch-app",
+        stack: ["typescript"],
+        bindings: { ticketing: "github", preview: "docker" },
+      },
+      "scratch-existing": {
+        repo_url: "git@github.com:fvermaut/scratch-existing.git",
+        path: "projects/scratch-existing",
+        stack: ["typescript", "nextjs"],
+        bindings: { ticketing: "github" },
+      },
+    },
+  });
+
+  it("updates one field and preserves every other field", () => {
+    const updated = updateProject(baseManifest(), "scratch-existing", {
+      stack: ["typescript", "nextjs", "tailwind"],
+    });
+
+    const project = updated.projects["scratch-existing"]!;
+    expect(project.stack).toEqual(["typescript", "nextjs", "tailwind"]);
+    expect(project.repo_url).toBe("git@github.com:fvermaut/scratch-existing.git");
+    expect(project.path).toBe("projects/scratch-existing");
+    expect(project.bindings).toEqual({ ticketing: "github" });
+    expect(updated.projects["scratch-app"]).toEqual(
+      baseManifest().projects["scratch-app"],
+    );
+  });
+
+  it("merges bindings partially, preserving fields not in the patch", () => {
+    const updated = updateProject(baseManifest(), "scratch-existing", {
+      bindings: { preview: "docker" },
+    });
+
+    expect(updated.projects["scratch-existing"]!.bindings).toEqual({
+      ticketing: "github",
+      preview: "docker",
+    });
+  });
+
+  it("throws on an unknown project name, listing the valid names", () => {
+    expect(() =>
+      updateProject(baseManifest(), "no-such-project", { stack: [] }),
+    ).toThrowError(
+      'Invalid manifest: project "no-such-project": not found (known projects: "scratch-app", "scratch-existing")',
+    );
+  });
+
+  it("throws the same field-naming error style as loadManifest for an invalid ticketing value", () => {
+    const patch = { bindings: { ticketing: "jira" } } as unknown as ProjectPatch;
+    expect(() =>
+      updateProject(baseManifest(), "scratch-app", patch),
+    ).toThrowError(
+      'Invalid manifest: project "scratch-app": field "bindings.ticketing" must be "github"',
+    );
+  });
+
+  it("does not mutate its input manifest argument", () => {
+    const manifest = baseManifest();
+    updateProject(manifest, "scratch-existing", { stack: ["changed"] });
+
+    expect(manifest).toEqual(baseManifest());
+  });
+
+  it("produces a manifest that round-trips through serializeManifest/loadManifest", () => {
+    const updated = updateProject(baseManifest(), "scratch-existing", {
+      repo_url: "git@github.com:fvermaut/renamed.git",
+    });
+
+    const file = join(dir, `manifest-${counter++}.yaml`);
+    writeFileSync(file, serializeManifest(updated), "utf8");
+    expect(loadManifest(file)).toEqual(updated);
   });
 });
 
