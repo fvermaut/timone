@@ -14,8 +14,8 @@ Discipline for every entry (see `doc/process.md`, "The standards library"):
 
 | Entry | Scope | Status |
 |-------|-------|--------|
-| [baseline/accessibility.md](baseline/accessibility.md) | EAA / EN 301 549 / WCAG 2.1 AA compliance | framing fixed — to draft (03a) |
-| [baseline/ui-ux.md](baseline/ui-ux.md) | Cross-project UI/UX invariants | stub — to draft (03) |
+| [baseline/accessibility.md](baseline/accessibility.md) | EAA / EN 301 549 / WCAG 2.1 AA compliance | Draft — pending review |
+| [baseline/ui-ux.md](baseline/ui-ux.md) | Cross-project UI/UX invariants | Draft — pending review |
 
 Every project's `doc/standards.md` includes the baseline unconditionally. Enforcement: PRD accessibility criteria (stage 3), verification checks (stage 7), delivery Standards review (stage 8).
 
@@ -23,10 +23,10 @@ Every project's `doc/standards.md` includes the baseline unconditionally. Enforc
 
 | Entry | Scope | Status |
 |-------|-------|--------|
-| [typescript.md](typescript.md) | Language-level practices | stub — to draft (03) |
-| [nextjs.md](nextjs.md) | Next.js full-stack | stub — to draft (03) |
-| [prisma-postgresql.md](prisma-postgresql.md) | Data layer | stub — to draft (03) |
-| [better-auth.md](better-auth.md) | Authentication | stub — to draft (03) |
-| [testing.md](testing.md) | TDD & test quality (seams, anti-patterns) | stub — to draft (03) |
-| [docker-compose-local.md](docker-compose-local.md) | Local runtime | stub — to draft (03) |
-| [vercel-supabase.md](vercel-supabase.md) | Go-to live deployment | stub — to draft (03) |
+| [typescript.md](typescript.md) | Language-level practices | Draft — pending review |
+| [nextjs.md](nextjs.md) | Next.js full-stack | Draft — pending review |
+| [prisma-postgresql.md](prisma-postgresql.md) | Data layer | Draft — pending review |
+| [better-auth.md](better-auth.md) | Authentication | Draft — pending review |
+| [testing.md](testing.md) | TDD & test quality (seams, anti-patterns) | Draft — pending review |
+| [docker-compose-local.md](docker-compose-local.md) | Local runtime | Draft — pending review |
+| [vercel-supabase.md](vercel-supabase.md) | Go-to live deployment | Draft — pending review |
