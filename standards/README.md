@@ -25,6 +25,7 @@ Every project's `doc/standards.md` includes the baseline unconditionally. Enforc
 |-------|-------|--------|
 | [typescript.md](typescript.md) | Language-level practices | Draft — pending review |
 | [nextjs.md](nextjs.md) | Next.js full-stack | Draft — pending review |
+| [project-structure.md](project-structure.md) | Project structure (bulletproof-react) | Draft — pending review |
 | [shadcn.md](shadcn.md) | UI component library (shadcn/ui) | Draft — pending review |
 | [prisma-postgresql.md](prisma-postgresql.md) | Data layer | Draft — pending review |
 | [better-auth.md](better-auth.md) | Authentication | Draft — pending review |

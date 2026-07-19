@@ -55,7 +55,7 @@ Applies to **Next.js 16** (App Router, Turbopack default). Deployment specifics 
 
 ## Project structure
 
-- Use `src/`; `src/app/` contains **routing files only** (`page`, `layout`, `route`, `loading`, `error`, metadata). Domain code in `src/lib/` and `src/components/`; route-local helpers may colocate in a private `_folder`.
+- Structure follows [project-structure.md](project-structure.md) (bulletproof-react feature folders); `src/app/` contains **routing files only** (`page`, `layout`, `route`, `loading`, `error`, metadata).
 - Route groups `(marketing)` / `(app)` are for layout boundaries (including differing root layouts), not decorative foldering.
 
 ## Tooling

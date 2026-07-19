@@ -47,6 +47,7 @@ Each sub-phase: research → draft the entry file → self-check against the dra
 | 03h | `standards/docker-compose-local.md` | Local-runtime conventions: compose layout per project, DB lifecycle, env handling, parity with previews. Sources: Docker docs |
 | 03i | `standards/vercel-supabase.md` | Go-to live stack: what belongs on which side, env/secret handling, migration path from local Postgres to Supabase. Sources: Vercel/Supabase docs |
 | 03j | `standards/shadcn.md` | *(added 2026-07-19 on review feedback)* shadcn/ui as the standard UI library: copy-in ownership model, theming/tokens, Radix accessibility posture, update discipline. Sources: ui.shadcn.com |
+| 03k | `standards/project-structure.md` | *(added 2026-07-19 on review feedback)* bulletproof-react structure adapted to Next.js App Router: feature folders, unidirectional dependencies; nextjs.md structure section defers to this. Sources: github.com/alan2207/bulletproof-react |
 
 #### Agent Validation Steps (every sub-phase)
 
