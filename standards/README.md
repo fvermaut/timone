@@ -25,11 +25,11 @@ Every project's `doc/standards.md` includes the baseline unconditionally. Enforc
 | Entry | Scope | Status |
 |-------|-------|--------|
 | [typescript.md](typescript.md) | Language-level practices | Approved 2026-07-19 |
-| [nextjs.md](nextjs.md) | Next.js full-stack | Approved 2026-07-19 |
+| [nextjs.md](nextjs.md) | Next.js full-stack | Approved 2026-07-24 |
 | [project-structure.md](project-structure.md) | Project structure (bulletproof-react) | Approved 2026-07-19 |
-| [shadcn.md](shadcn.md) | UI component library (shadcn/ui) | Approved 2026-07-19 |
-| [prisma-postgresql.md](prisma-postgresql.md) | Data layer | Approved 2026-07-19 |
-| [better-auth.md](better-auth.md) | Authentication | Approved 2026-07-19 |
-| [testing.md](testing.md) | TDD & test quality (seams, anti-patterns) | Approved 2026-07-19 |
+| [shadcn.md](shadcn.md) | UI component library (shadcn/ui) | Approved 2026-07-24 |
+| [prisma-postgresql.md](prisma-postgresql.md) | Data layer | Approved 2026-07-24 |
+| [better-auth.md](better-auth.md) | Authentication | Approved 2026-07-24 |
+| [testing.md](testing.md) | TDD & test quality (seams, anti-patterns) | Approved 2026-07-24 |
 | [docker-compose-local.md](docker-compose-local.md) | Local runtime | Approved 2026-07-19 |
-| [vercel-supabase.md](vercel-supabase.md) | Go-to live deployment | Approved 2026-07-19 |
+| [vercel-supabase.md](vercel-supabase.md) | Go-to live deployment | Approved 2026-07-24 |

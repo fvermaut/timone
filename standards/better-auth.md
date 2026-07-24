@@ -1,7 +1,7 @@
 # Standards — better-auth
 
-> **Status: Approved 2026-07-19 (fvermaut).**
-> ✏ Amended 2026-07-20 — **pending approval**: setup path stated as the manual-by-design exception; MCP explicitly not adopted per ADR-0009.
+> **Status: Approved 2026-07-24 (fvermaut).**
+> ✏ Amended 2026-07-20, approved 2026-07-24: setup path stated as the manual-by-design exception; MCP explicitly not adopted per ADR-0009.
 > Scope: authentication with better-auth in our Next.js + Prisma + PostgreSQL stack. Verified against better-auth docs, July 2026 (stable line **1.6.x**; 1.7.0 in RC on `next`). better-auth moves fast — items marked *churn* must be re-verified at onboarding time.
 
 ## Version & upgrade posture

@@ -1,7 +1,7 @@
 # Standards — shadcn/ui (UI component library)
 
-> **Status: Approved 2026-07-19 (fvermaut).**
-> ✏ Amended 2026-07-20 — **pending approval**: CLI is 4.x, not 3.x (`add --diff` now exists); scaffolding command added; the MCP mention removed per [ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md).
+> **Status: Approved 2026-07-24 (fvermaut).**
+> ✏ Amended 2026-07-20, approved 2026-07-24: CLI is 4.x, not 3.x (`add --diff` now exists); scaffolding command added; the MCP mention removed per [ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md).
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we use shadcn/ui.
 
 shadcn/ui is the standard component layer on our Next.js/React/Tailwind stack. It is explicitly *"not a component library. It is how you build your component library"*: components are **copied into the repo** via a registry + CLI, not installed as a package. Visual invariants (tokens, contrast, focus styles) are governed by [baseline/ui-ux.md](baseline/ui-ux.md) and [baseline/accessibility.md](baseline/accessibility.md); this entry covers how we own, update, and compose the components.

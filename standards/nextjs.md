@@ -1,7 +1,7 @@
 # Standards — Next.js (full-stack)
 
-> **Status: Approved 2026-07-19 (fvermaut).**
-> ✏ Amended 2026-07-20 — **pending approval**: scaffolding via `create-next-app` added; `next-devtools` MCP adopted per ADR-0009.
+> **Status: Approved 2026-07-24 (fvermaut).**
+> ✏ Amended 2026-07-20, approved 2026-07-24: scaffolding via `create-next-app` added; `next-devtools` MCP adopted per ADR-0009.
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we build with Next.js (full-stack).
 
 Applies to **Next.js 16** (App Router, Turbopack default). Deployment specifics live in [vercel-supabase.md](vercel-supabase.md) — never duplicated here.

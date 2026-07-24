@@ -1,7 +1,7 @@
 # Standards — Vercel + Supabase (go-to live)
 
-> **Status: Approved 2026-07-19 (fvermaut).**
-> ✏ Amended 2026-07-20 — **pending approval**: CLI initialization added; Supabase/Vercel MCP explicitly not adopted per ADR-0009.
+> **Status: Approved 2026-07-24 (fvermaut).**
+> ✏ Amended 2026-07-20, approved 2026-07-24: CLI initialization added; Supabase/Vercel MCP explicitly not adopted per ADR-0009.
 > Scope: the *default* live-deployment stack; per-project deviations go in that project's `doc/standards.md`. Local runtime: `docker-compose-local.md`; data layer: `prisma-postgresql.md`; identity: `better-auth.md`.
 
 ## Division of responsibilities

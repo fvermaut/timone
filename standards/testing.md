@@ -1,7 +1,7 @@
 # Standards — Testing & TDD
 
-> **Status: Approved 2026-07-19 (fvermaut).**
-> ✏ Amended 2026-07-20 — **pending approval**: Playwright/Vitest scaffolding added; `playwright` MCP adopted, Vitest MCP recorded as nonexistent, per ADR-0009.
+> **Status: Approved 2026-07-24 (fvermaut).**
+> ✏ Amended 2026-07-20, approved 2026-07-24: Playwright/Vitest scaffolding added; `playwright` MCP adopted, Vitest MCP recorded as nonexistent, per ADR-0009.
 > Companion to `process.md` stages 5–6, which own the process (seams declared at planning, red→green at those seams, the three anti-patterns rejected there). This entry is the *how* on our stack (Vitest + Playwright over Next.js / Prisma / Postgres). When in doubt, the spec wins.
 
 ## What a good test is
