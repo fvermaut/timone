@@ -50,3 +50,56 @@ All six plan assertions pass; `git diff` was read line by line to confirm no oth
 6. **Escalation** — after two failed attempts at a sub-phase's validation, execution stops, starts no dependent sub-phase, and reports the failing validation step with both attempts. The escalation must state the resulting repository state explicitly: the branch sits at the last passing sub-phase and the failing work is uncommitted in the working tree.
 
 Also: `process.md` deliberately carries **no** handoff-note or completion-report template — the spec states required elements and gates only, per the division phases 05 and 06 established. Both templates are 07b's to write, inline in `SKILL.md` (house style, no bundled reference files). The skills-README artifact rule now permits stage-6 code commits, so `timone-execute` does not need to argue for that permission; it should still assert the R4 prohibition (no skill files, harness config or timone internals in a client repo) since 07c regression-tests it.
+
+## 07b — `timone-execute` skill
+
+**Built.** `.claude/skills/timone-execute/SKILL.md` (216 lines): stage 6's skill. It resolves a target project and a phase reference, reads the phase file and any accumulated handoff before touching anything, fires three terminal gates, cuts the work branch, walks the sub-phases in dependency order through fresh contexts under a stated input/output contract, runs the TDD loop at declared seams, gates each transition on the slice's own validation block, appends a handoff section and commits it with the slice's code, then closes the phase with a completion report and the `Status` flip. Two inline fenced templates — handoff-note section and completion report — carry the layouts `process.md` deliberately doesn't.
+
+Section outline: frontmatter → intro → Target-project resolution → Input → Read before you execute → The three gates → The work branch and commits → The sub-agent contract → Walking the sub-phases → The TDD loop inside a slice (R16) → The transition gate and escalation → Handoff-note template → Closing the phase (Status flip + completion-report template) → Workflow → Closing.
+
+**Files touched.**
+
+- `.claude/skills/timone-execute/SKILL.md` — new (directory created).
+- `doc/plans/phases/reports/phase-07-handoffs.md` — this section appended; 07a's section untouched.
+
+**Decisions taken inside the slice.**
+
+- *The phase-close commit is named, because 07a doesn't name it.* The spec's commit convention (`<type>: NNx — <deliverable>`) covers sub-phase commits only, and the completion report plus the `Status` flip are not a sub-phase. The skill messages that commit `docs: close phase NN — <theme>`, mirroring stage 5's `docs: plan phase NN — <theme>`, and says in the same breath that it carries no `NNx`. This is an extension into silence, not a variant of a stated rule — but it is the one place where the skill states a convention `process.md` does not, so 07c should confirm it reads right and 07d can promote it to the spec if fvermaut prefers.
+- *The approval trace is preserved by moving it, not by keeping two lines.* `timone-plan`'s template says the `Status` line has three states, so the flip replaces `Approved for execution by <who> <date>` rather than appending. That would destroy the approval trace the completion report is required to carry, so the skill orders the two writes: copy `<who> <date>` into the report's **Plan** line first, then flip. This is why the required element reads "approved by <who> <date>" in the template.
+- *Execution never writes a criterion `Status`.* 07a's required element is "the requirement IDs delivered and their resulting statuses", which could be read as licensing a register edit. `timone-prd`'s register spec assigns `verified`/`failed` to `timone-verify`, so the skill reports the status as the register reads when execution ends and states outright that execution does not flip it. Timone's own 07d flips R11/R16 by hand, which is a hand-run phase, not a counter-example.
+- *Parallel slices are allowed to run concurrently but not to commit or append concurrently.* The plan permits parallelism where file markers prove zero overlap, and `scratch-app` phase-01 exercises it (01d ∥ 01e). Both would append to the same `phase-NN-handoffs.md`, which no file marker mentions, so the skill serializes the appends and the commits in dependency order. Without this the first real parallel run corrupts the handoff file.
+- *The slice context does not commit; the orchestrator does.* Someone had to own the commit, and the gate owner is the only defensible choice — the commit is the assertion that validation passed. The contract's outputs are therefore a handoff section plus validation evidence, and "evidence that is missing, ambiguous, or doesn't cover an assertion counts as a failed attempt", so a slice can't buy a pass by asserting one.
+- *`standards/testing.md` is pointed at, never restated.* The skill states the loop (red before green, the three anti-patterns by name, refactoring deferred, the rhythm) and explicitly tells the orchestrator not to restate seam selection, mocking or pyramid posture in the slice prompt — that content reaches the slice through the standards library, per the phase's Context & Prerequisites.
+- *Gate 3 is scoped to the plan being unfollowable, not to the plan being improvable.* "Reality contradicts the plan" is easy to over-fire into "I'd have cut this differently". The skill enumerates the qualifying cases (a file the plan says exists doesn't, a declared seam isn't reachable, an assumed dependency is impossible, a validation command can't run) and routes decisions that turn out to be significant to `timone-adr` rather than into the code.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based, as the plan states.
+
+```
+$ head -6 .claude/skills/timone-execute/SKILL.md
+---
+name: timone-execute
+description: Stage 6 (Implementation) of the Timone process — ... "execute phase NN", "implement the plan", ...
+argument-hint: <project-name> <phase-ref: phase-NN or a path to the phase file>
+---
+
+$ grep -n "Awaiting approval\|declared seams\|red\b" .claude/skills/timone-execute/SKILL.md | head -20
+# 20 hits across the description, the gates, the contract, the TDD loop and both templates;
+# "Awaiting approval" appears in gate 1 (line 46).
+
+$ grep -c "timone-verify" .claude/skills/timone-execute/SKILL.md
+2
+
+$ wc -l .claude/skills/timone-execute/SKILL.md
+216
+```
+
+All seven plan assertions pass. Link targets were checked against the repo (`../../../doc/...` from a skill file, matching `timone-onboard`/`timone-grill`); the `Status` flip wording was diffed against `timone-plan/SKILL.md`'s template line 101 by reading it, not from memory.
+
+**What 07c must know.**
+
+- **Run 3 (approval gate) is the cheapest and should go first** — it must produce no branch and no code. Watch that the refusal names *which* route it chose (human vs `timone-plan`); the skill splits on "never approved" vs "amended after approval", and a run that conflates them is a defect.
+- **Run 1 will hit the parallel-append rule at 01d/01e.** The fixture plan explicitly says they share zero files and may run in parallel. If the run serializes them anyway that's acceptable; if it runs them concurrently, check `phase-01-handoffs.md` has exactly one clean section each and the commits are still in dependency order.
+- **01a is the likeliest place the skill is wrong.** It declares no seams, so gate 2 must *pass* it on the strength of its explicit no-behaviour statement — a run that refuses 01a has read the gate too literally. It also carries a human gate (`doc/standards.md` missing, port 5433) that must actually stop and ask, and it is where the "no tests outside declared seams" rule meets a slice whose validation is all shell commands.
+- **The escalation run (run 2) tests a claim the skill makes about repository state**, not just its retry count: "the branch is left at the last passing sub-phase and the failing work is uncommitted in the working tree". Verify that literally with `git status` / `git log`, since nothing in the skill enforces it mechanically — it is a consequence of commit-after-validation that only holds if no slice commits early.
+- **Most likely defects, in order:** (1) the phase-close commit message, invented here (see decisions above); (2) the read pass being heavy enough that the orchestrator skips parts of it under a long six-slice run — the skill has no "read receipt", so 07c should check the run actually read `CONTEXT.md` and the ADRs, since `scratch-app`'s ADR-0001 and glossary carry real constraints (no `user_id`, no `Task`/`Item` rename) that only bite if read; (3) the contract's "nothing else" being honoured in the letter but broken in spirit by an orchestrator that summarizes the phase into the slice prompt.
+- **Resume is untested by the plan's three runs.** The skill treats an existing handoff file plus matching commits as the resume case and a mismatch as gate 3. If a run dies mid-phase for unrelated reasons, that is a free fourth data point — take it.
