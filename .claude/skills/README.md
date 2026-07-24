@@ -22,5 +22,5 @@ Sessions run at the **timone repo root** ([ADR-0007](../../doc/adr/0007-sessions
 ## Artifact rules
 
 - Artifact paths follow the process spec's conventions section (`projects/<name>/doc/specs/…`, `doc/adr/…`, `doc/plans/…`, `CONTEXT.md`).
-- The only files a skill may cause to be committed in a target project are process artifacts under `doc/` and `CONTEXT.md`. Skill files, harness config, or timone internals never land in a client repo.
+- Document stages commit only process artifacts under `doc/` and `CONTEXT.md`. Stage 6 (`timone-execute`) additionally commits the application code and project tooling its approved plan calls for — writing that code *is* the stage. Forbidden in every case: skill files, harness config and timone internals never land in a client repo ([PRD-01.R4](../../doc/specs/prd/prd-01-process-layer.criteria.md)).
 - Stable requirement IDs, ADR numbering, and status lifecycles follow the process spec — skills restate the *behavior*, never invent variants.
