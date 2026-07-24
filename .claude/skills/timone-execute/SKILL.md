@@ -47,7 +47,7 @@ Each gate stops execution. When one fires you write **no code**, create no branc
 
 The same stop protocol covers **every** refusal, not only the three numbered gates: a dirty tree, a divergent branch, or a plan whose validation commands cannot run are all reported the same way — what stopped it, the repository state left behind, and where to route. Report every refusal you found, not just the first: a human who fixes one thing and re-enters only to hit the next wall has been served badly.
 
-**1 — Approval gate.** A phase file not stamped `Approved for execution` is not executable. This covers a file stamped `Awaiting approval`, a file with no `Status` line at all, and a file amended after approval in a way that needs re-approval. Route to the **human** for a plan that was never approved; route to **`timone-plan`** when an amendment is what left the stamp stale. Never execute "just the parts that were approved", and never stamp the file yourself — the stamp is stage 5's gate trace, and writing it here forges the gate.
+**1 — Approval gate.** A phase file not stamped `Approved for execution` is not executable. This covers a file stamped `Awaiting approval`, a file with no `Status` line at all, and a file whose amendment voided the stamp. Per the spec's re-approval rule, an amendment that **reduces** scope keeps the stamp — the human approved more than what remains — while one that **changes or grows** it (a new sub-phase, a new file marker, a changed seam, a new assertion) reverts the file to `Awaiting approval`. A `✏ Refined` marker dated after the approval is therefore not by itself a gate-1 trigger; read what it changed. Route to the **human** for a plan that was never approved; route to **`timone-plan`** when an amendment is what left the stamp stale. Never execute "just the parts that were approved", and never stamp the file yourself — the stamp is stage 5's gate trace, and writing it here forges the gate.
 
 **2 — Undeclared-seams gate.** A sub-phase that carries behaviour but declares no seams under test is unexecutable. Stage 6 writes tests **only** at declared seams, so a slice with none has nowhere to put its first red test — that is a planning defect, not a licence to improvise a seam. Route to `timone-plan` for an in-place `✏ Refined` amendment naming the seam and its red-green cases, then re-enter. A slice that explicitly says it carries no behaviour ("no seams are declared; validation is checklist-based") is the sanctioned case and passes this gate; silence is not the same statement.
 
@@ -78,7 +78,7 @@ Each sub-phase runs in a **fresh context**. The contract is stated as inputs and
 
 1. The **plan excerpt** for that sub-phase, verbatim: its file markers, its dependency statement, its declared seams with their red-green cases, its prose, and its validation block.
 2. The **accumulated handoff file** (`phase-NN-handoffs.md`) as it stands — every prior slice's section, unedited.
-3. The **file list** the slice may create or modify.
+3. The **file list** the slice may create or modify, plus `doc/plans/phases/reports/phase-NN-handoffs.md`, which is granted implicitly — no plan lists it, and every slice must append to it.
 4. **`doc/standards.md`** (or, absent it, the central baseline plus the entries the plan names).
 5. The **declared seams**, restated as the boundary its tests may observe.
 6. The **domain terms from `CONTEXT.md`** the slice will touch, when the project has a glossary. The glossary binds the code, so the context writing that code has to see it — an orchestrator that reads the glossary and hands over a slice blind to it is enforcing a rule nobody downstream can follow.
@@ -112,7 +112,8 @@ The loop the spec mandates, restated with no variants:
   - **Tautological assertions** — the expected value is recomputed the way the code computes it, so the test can only agree with itself. Expected values come from the PRD criterion, a hand-computed example, or a fixed input→output pair.
   - **Horizontal slicing** — all the tests written up front, before any of the implementation exists. Bulk tests verify imagined behaviour.
 - **Refactoring is deferred to the delivery review** (stage 8), not folded into the red→green loop. Leave the code the plan's shape, and note in the handoff what you would refactor.
-- **Rhythm:** type-check regularly, run **single test files** during the loop, and the **full suite once** at sub-phase end.
+- **Rhythm:** type-check regularly where the stack has a type-checker, run **single test files** during the loop, and the **full suite once** at sub-phase end.
+- **Some cases cannot be driven red honestly.** An assertion that nothing happened — no record persisted, no call made — is often vacuously true before the implementation exists, and reordering the cases does not help. Say so plainly rather than manufacturing a red by writing an implementation you know to be wrong. Prove the test is not vacuous instead: mutate the implementation so the assertion *should* fail, record the real failure, revert. A stated green-on-arrival with a mutation probe is honest evidence; a fabricated red is not.
 
 *How* to test on this stack — seam selection, mocking discipline, the pyramid, fixtures, flake posture — is `standards/testing.md`'s, which reaches the slice through the standards library. Do not restate it here or in the slice prompt; the plan already picked the seams, and the standard already decides the rest.
 
