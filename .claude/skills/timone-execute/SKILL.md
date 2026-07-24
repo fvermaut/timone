@@ -31,11 +31,13 @@ Never execute from the plan excerpt alone. Read, in the target project:
 
 - **The phase file, whole**, starting with its `Status` line — that stamp is the entry gate below. Read every sub-phase, not just the first: the dependency graph, the file markers and the declared seams are what let you judge parallelism, and they decide the second gate.
 - **`doc/plans/phases/reports/phase-NN-handoffs.md`, if it exists** — a partially-executed phase is **resumed, not restarted**. Its sections name the slices already done; execution starts at the first slice with no section. Cross-check them against `git log` on the work branch: a handoff section with no matching commit, or a commit with no section, is the third gate firing, not a bookkeeping detail to tidy up.
-- **`doc/standards.md`** — what the code must conform to. Absent → fall back to Timone's central `standards/` baseline plus the entries the plan names, and say so in the completion report.
+- **`doc/standards.md`** — what the code must conform to. Absent → fall back to Timone's central `standards/` baseline plus the entries the plan names, and say so in the completion report. Present but still stamped `Draft` means stage 0's gate never closed: use it, because it is the only record of the project's observed conventions, and report that it is unratified. A file that selects **no** stack entries because the library covers no entry for this project's stack is a real answer, not an empty one — the plan then decides the conventions, and the completion report says so.
 - **`CONTEXT.md`** — the domain glossary. Its terms are the ones the code, schema, and tests must use. Code that renames a domain concept corrupts the ubiquitous language just as surely as a document that does.
 - **The ADRs the plan cites**, under `doc/adr/` — they constrain the implementation, not just the plan. An implementation that contradicts an accepted ADR is a defect even when the plan's prose seems to allow it.
 - **`doc/specs/prd/*.criteria.md`** for the requirement IDs the phase claims — the behaviour the code owes. You never flip a criterion's `Status`: `verified` / `failed` are stage 7's to write.
 - **Timone's own `standards/`** — the `Approved` entries for this project's stack, read **unconditionally**. They are normative, and they routinely decide questions a slice would otherwise treat as an open choice.
+
+Then, before cutting any branch, **check the plan against the repository**: does every file a slice marks `[MODIFY]` actually exist, and can each validation command run **and its stated assertions be satisfied** on this project as it stands? A command that executes cleanly while its assertion can never be true — a linter that is already failing on untouched code, a probe for a condition the slice's own file list forbids delivering — is as much a blocker as one that will not run. This costs one pass and it is the cheapest moment to catch a plan that cannot execute — gate 3 otherwise fires only after a branch exists and a slice has been dispatched. Report every problem you find in one go, not the first one.
 
 **An absent artifact is a finding, not a blank to skip past.** Report which were missing and reason about the consequence — a missing `doc/standards.md` means onboarding is incomplete; an empty `doc/adr/` on a project with a committed stack means stack-touching work is undocumented. None of these absences is on its own a reason to abort.
 
@@ -43,11 +45,15 @@ Never execute from the plan excerpt alone. Read, in the target project:
 
 Each gate stops execution. When one fires you write **no code**, create no branch (or leave the branch exactly where it stood), state which gate fired and why in one short paragraph, and name the skill or the human to route to. A stopped execution is a valid, complete outcome of this skill — not a failure to work around.
 
+The same stop protocol covers **every** refusal, not only the three numbered gates: a dirty tree, a divergent branch, or a plan whose validation commands cannot run are all reported the same way — what stopped it, the repository state left behind, and where to route. Report every refusal you found, not just the first: a human who fixes one thing and re-enters only to hit the next wall has been served badly.
+
 **1 — Approval gate.** A phase file not stamped `Approved for execution` is not executable. This covers a file stamped `Awaiting approval`, a file with no `Status` line at all, and a file amended after approval in a way that needs re-approval. Route to the **human** for a plan that was never approved; route to **`timone-plan`** when an amendment is what left the stamp stale. Never execute "just the parts that were approved", and never stamp the file yourself — the stamp is stage 5's gate trace, and writing it here forges the gate.
 
 **2 — Undeclared-seams gate.** A sub-phase that carries behaviour but declares no seams under test is unexecutable. Stage 6 writes tests **only** at declared seams, so a slice with none has nowhere to put its first red test — that is a planning defect, not a licence to improvise a seam. Route to `timone-plan` for an in-place `✏ Refined` amendment naming the seam and its red-green cases, then re-enter. A slice that explicitly says it carries no behaviour ("no seams are declared; validation is checklist-based") is the sanctioned case and passes this gate; silence is not the same statement.
 
-**3 — Reality-contradicts-the-plan gate.** When execution discovers that the plan cannot be followed as written — a file the plan says exists does not, a declared seam is not reachable, a dependency the plan assumed is impossible, a slice's validation command cannot run at all — **stop and amend the plan** through `timone-plan`'s amendment rule (in place, with a dated `✏ Refined` marker). Never deviate silently, and never resolve a plan-level question inside a slice: a slice context has exactly the plan's excerpt, so any decision it makes is made on less information than the planner had. If the contradiction implies a significant technical decision, that is `timone-adr`'s, recorded at decision time — never inside the code.
+This gate also checks **coverage, not just presence**: a validation checkbox asserting behaviour that none of the slice's declared red-green cases covers is an undeclared seam wearing a checkbox. Executing it would force the slice to either write a test the plan never declared or leave an assertion unmet — both forbidden. Route it to `timone-plan` the same way.
+
+**3 — Reality-contradicts-the-plan gate.** When execution discovers that the plan cannot be followed as written — a file the plan says exists does not, a declared seam is not reachable, a dependency the plan assumed is impossible, a slice's validation command cannot run at all, **or the plan contradicts itself** — its prose and its validation block demanding states that cannot both hold — **stop and amend the plan** through `timone-plan`'s amendment rule (in place, with a dated `✏ Refined` marker). Never deviate silently, and never resolve a plan-level question inside a slice: a slice context has exactly the plan's excerpt, so any decision it makes is made on less information than the planner had. If the contradiction implies a significant technical decision, that is `timone-adr`'s, recorded at decision time — never inside the code.
 
 The first two gates are checked before any branch is created. The third can fire at any moment, including inside a slice; when it does, the branch is left at the last passing sub-phase and the in-flight work stays uncommitted, and you say so.
 
@@ -57,6 +63,8 @@ Per the spec's stage-6 conventions, restated with no variants:
 
 - **One branch per phase**, named `phase-NN-<slug>`, cut from the project's default branch. Take the slug from the phase file's theme.
 - **Refuse to start on a dirty working tree**, and refuse an existing branch of that name carrying divergent commits. Report what is dirty or divergent; do not stash, reset, or rename around it. An existing `phase-NN-<slug>` whose commits match the handoff file is the resume case, not a divergence.
+- **What "dirty" means**, per the spec: tracked modifications, or untracked files that are not the phase's own artifacts. The phase file, `phase-NN-handoffs.md`, the completion report and the ordinary products of a dependency install (`node_modules/`, a lockfile) are **never** the dirt that blocks a start. Without that carve-out the skill would contradict itself — escalation deliberately leaves in-flight work uncommitted, and an escalated phase has to stay resumable. An **uncommitted phase file** is a finding worth reporting (stage 5 owes it a `docs: plan phase NN — <theme>` commit) but it does not block execution.
+- **Installing dependencies is not a slice's deliverable.** When a validation command needs them, install them before dispatching the slice, and say so in the completion report. If the install produces untracked artifacts the project does not ignore, that is a project-tooling gap to report — never something to commit into the slice's commit, and never a reason to skip the validation.
 - **One commit per sub-phase**, made only **after** that sub-phase's validation passes, messaged `` `<type>: NNx — <deliverable>` `` — em dash, lower-case conventional-commit type, sub-phase id as `NNx` (`07a`, `01c`). `git log` alone then answers which slices actually landed.
 - The commit carries the slice's code **and** its handoff section, together. Nothing else.
 - **Never commit skill files, harness config, or timone internals into a managed project** ([PRD-01.R4](../../../doc/specs/prd/prd-01-process-layer.criteria.md)). Application code and project tooling the approved plan calls for are exactly what this stage exists to commit; `.claude/`, `timone.yaml`, and anything from timone's own tree are not.
@@ -73,6 +81,7 @@ Each sub-phase runs in a **fresh context**. The contract is stated as inputs and
 3. The **file list** the slice may create or modify.
 4. **`doc/standards.md`** (or, absent it, the central baseline plus the entries the plan names).
 5. The **declared seams**, restated as the boundary its tests may observe.
+6. The **domain terms from `CONTEXT.md`** the slice will touch, when the project has a glossary. The glossary binds the code, so the context writing that code has to see it — an orchestrator that reads the glossary and hands over a slice blind to it is enforcing a rule nobody downstream can follow.
 
 Nothing else. Not the rest of the phase file, not the PRD, not your reasoning about the phase. Context the plan didn't grant is context the plan can't be held to — and a slice that needed more is evidence the cut was wrong, which is a finding for the handoff and possibly gate 3, not something to patch by handing over extra material.
 
@@ -83,7 +92,7 @@ Nothing else. Not the rest of the phase file, not the PRD, not your reasoning ab
 
 The slice writes code, tests, and its handoff section. It does not create the branch and does not commit. You gate, then you commit.
 
-**Mechanism is an example, never a requirement.** Today the obvious instrument is a sub-agent spawned from this session with that input set as its prompt. PRD-02's daemon will spawn the same contract through the Agent SDK ([ADR-0002](../../../doc/adr/0002-typescript-claude-agent-sdk.md)). Anything that delivers those five inputs and returns those two outputs satisfies stage 6; do not write a spawning mechanism into a slice's requirements, and do not treat one runtime's affordances as part of the contract.
+**Mechanism is an example, never a requirement.** Today the obvious instrument is a sub-agent spawned from this session with that input set as its prompt. PRD-02's daemon will spawn the same contract through the Agent SDK ([ADR-0002](../../../doc/adr/0002-typescript-claude-agent-sdk.md)). Anything that delivers those inputs and returns those two outputs satisfies stage 6; do not write a spawning mechanism into a slice's requirements, and do not treat one runtime's affordances as part of the contract.
 
 ## Walking the sub-phases
 
@@ -195,7 +204,7 @@ Requirement statuses in the register stay untouched: execution delivers the beha
 2. Read the artifacts listed above, including any existing handoff file.
 3. Check gate 1 (approval), then gate 2 (declared seams, across every sub-phase). If either fires, stop, route, and write nothing.
 4. Set up the work branch — or confirm the resume case against `git log` and the handoff file.
-5. For each sub-phase in dependency order: hand the contract's five inputs to a fresh context, run the TDD loop, gate on the validation block, append the handoff section, commit.
+5. For each sub-phase in dependency order: hand the contract's inputs to a fresh context, run the TDD loop, gate on the validation block, append the handoff section, commit.
 6. Close the phase: completion report, `Status` flip, commit.
 7. Report per Closing below.
 
