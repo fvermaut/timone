@@ -2,6 +2,7 @@
 
 > **Status: Approved 2026-07-24 (fvermaut).**
 > ✏ Amended 2026-07-20, approved 2026-07-24: scaffolding via `create-next-app` added; `next-devtools` MCP adopted per ADR-0009.
+> ✏ Amended 2026-07-25 — **pending approval**: `create-next-app` cannot run in place in a managed project (scaffold into a temp dir and copy in); generator-emitted harness files must be deleted before commit. Both proven executing `scratch-app` phase 01.
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we build with Next.js (full-stack).
 
 Applies to **Next.js 16** (App Router, Turbopack default). Deployment specifics live in [vercel-supabase.md](vercel-supabase.md) — never duplicated here.
@@ -62,6 +63,10 @@ Applies to **Next.js 16** (App Router, Turbopack default). Deployment specifics 
 ## Tooling
 
 **Scaffold with the generator**: `npx create-next-app@latest <name> --ts --app --src-dir --eslint --use-npm --import-alias "@/*"` — never hand-assemble `package.json`, `tsconfig.json`, or `next.config.ts`. The generator tracks the current major's defaults; hand-rolled configs drift silently. Note `--turbopack` and `--tailwind` are already defaults in 16, and the linter is now a three-way choice (`--eslint` / `--biome` / `--no-linter`). Post-generation deltas we always apply: `cacheComponents: true`, the strict `jsx-a11y` preset and the import-boundary zones from [project-structure.md](project-structure.md), and `server-only` on every server module. Anything else differing from generator output is a deviation and gets recorded in `doc/standards.md`.
+
+**Scaffold into a temp directory, then copy in — never in place.** A managed project always already contains `CONTEXT.md`, `README.md` and `doc/`, and `create-next-app .` **refuses to run** in a non-empty directory. Generate into an empty temp dir, then copy the output into the repo. Proven on 2026-07-25 executing `scratch-app` phase 01; there is no flag that overrides it.
+
+**Delete what the generators emit for other agents.** `create-next-app` writes `AGENTS.md` and `CLAUDE.md` by default, and `prisma init` writes `.claude/skills/`, `.windsurf/skills/`, `.agents/skills/` and `skills-lock.json`. Every one of those is a harness file that [PRD-01.R4](../doc/specs/prd/prd-01-process-layer.criteria.md) forbids in a client repo. Suppress or delete them **before** the slice's commit — the generator's defaults are not a licence, and nothing else in the pipeline will catch them.
 
 **MCP: `next-devtools` is adopted** ([ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md)) — the named gap is live dev-server state (build/runtime errors, logs, resolved routes) exposed via Next 16's built-in `/_next/mcp` endpoint, which no CLI surfaces. It is only useful with a dev server running. Config lives in timone's root `.mcp.json`, never in a client repo.
 

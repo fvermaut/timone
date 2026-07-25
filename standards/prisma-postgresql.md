@@ -2,6 +2,7 @@
 
 > **Status: Approved 2026-07-24 (fvermaut).**
 > ✏ Amended 2026-07-20, approved 2026-07-24: scaffolding via `prisma init` added; Prisma MCP explicitly not adopted per ADR-0009.
+> ✏ Amended 2026-07-25 — **pending approval**: `prisma.config.ts` has no `directUrl` key (stale instruction corrected); `prisma init` emits agent-harness files that PRD-01.R4 forbids in a client repo. Both proven executing `scratch-app` phase 01.
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we build with Prisma + PostgreSQL.
 
 Current major (2026-07): **Prisma ORM 7** — Rust-free `prisma-client` generator, `prisma.config.ts`, client generated into the source tree, driver adapters required ([v7 announcement]). **Churn watch:** "Prisma Next" (full-TypeScript rewrite) is the previewed future direction; re-verify on the next major. Supabase matters live in [vercel-supabase.md](vercel-supabase.md).
@@ -33,7 +34,7 @@ Current major (2026-07): **Prisma ORM 7** — Rust-free `prisma-client` generato
 - One `PrismaClient` per process, module-level singleton; in Next.js dev, cache on `globalThis` so hot reload doesn't leak pools ([connections docs]).
 - v7: pool size/timeouts configure on the **driver adapter**, not `?connection_limit=` URL params.
 - Serverless: instantiate outside the handler, small pool, no per-invocation `$disconnect()` (defeats container reuse), platform concurrency < `db max_connections ÷ connections per instance`. At any real concurrency, use a pooler instead of tuning this.
-- PgBouncer: transaction mode, `max_prepared_statements > 0`; `?pgbouncer=true` only for PgBouncer < 1.21 ([PgBouncer docs]). Runtime uses the pooled URL; the CLI needs a direct one — wire `directUrl`/`DIRECT_URL` in `prisma.config.ts` from day one (`migrate deploy` through a transaction-mode pooler fails confusingly).
+- PgBouncer: transaction mode, `max_prepared_statements > 0`; `?pgbouncer=true` only for PgBouncer < 1.21 ([PgBouncer docs]). Runtime uses the pooled URL; the CLI needs a direct one. **`prisma.config.ts` has no `directUrl` key** as of `@prisma/config@7.9.0` — verified 2026-07-25, correcting an earlier instruction to wire it there. Supply the direct URL to CLI invocations through the environment instead, and keep `migrate deploy` off a transaction-mode pooler (it fails confusingly).
 
 ## Indexing
 
@@ -52,7 +53,7 @@ Current major (2026-07): **Prisma ORM 7** — Rust-free `prisma-client` generato
 
 ## Tooling
 
-**Scaffold with the CLI**: `npx prisma init --datasource-provider postgresql --output ../generated/prisma`, which writes `prisma/schema.prisma`, `prisma.config.ts`, `.env`, and a `.gitignore` entry — never hand-assemble them. `init` does not interpret existing files, so it is safe in a repo that already has code.
+**Scaffold with the CLI**: `npx prisma init --datasource-provider postgresql --output ../generated/prisma`, which writes `prisma/schema.prisma`, `prisma.config.ts`, `.env`, and a `.gitignore` entry — never hand-assemble them. `init` does not interpret existing files, so it is safe in a repo that already has code. **But it also emits `.claude/skills/`, `.windsurf/skills/`, `.agents/skills/` and `skills-lock.json`** — harness files [PRD-01.R4](../doc/specs/prd/prd-01-process-layer.criteria.md) forbids in a client repo. Delete them before the slice's commit; nothing downstream will catch them.
 
 **No MCP server.** Prisma ships an official one (`https://mcp.prisma.io/mcp` remote, `npx prisma mcp` local), but its tools duplicate the CLI — migrations, introspection, SQL — so it fails [ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md)'s named-capability-gap test. Revisit if hosted Prisma Postgres management ever becomes part of a project's workflow.
 
