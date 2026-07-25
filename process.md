@@ -47,6 +47,7 @@
 ## Artifact conventions (inside each managed project)
 
 ```
+STATUS.md                        the human's status report — plain language, agents write it, never read it
 CONTEXT.md                       the domain glossary — ubiquitous language only, no implementation
 doc/
   specs/
@@ -73,6 +74,8 @@ Content is authored and reviewed by the human, versioned centrally, injected int
 ## Cross-cutting utilities
 
 Not lifecycle stages of a feature — these apply across sessions and phases rather than within one pass through stages 0–11.
+
+**Status reporting.** No owning skill — an obligation on **every** stage. Whenever a stage completes work, it updates `STATUS.md` (at the managed project's root, or Timone's root for Timone's own phases) so the human can see where things stand without reading a phase file. Plain language, no unglossed process jargon, and it always says **which** repository an item belongs to — the commonest confusion is not knowing whether the next action sits on a managed project or on Timone itself. It states what is done, what is in progress, what happens next, and what is waiting on the human. It is written **for** the human and is never an agent's source of truth: the PRD, phase files and reports remain the authorities, and `STATUS.md` must be regenerable from them without loss. A stage that changes a project's state and leaves this file stale has not finished. Requirement: [PRD-01.R22](doc/specs/prd/prd-01-process-layer.criteria.md).
 
 **Handover.** Owning skill: `timone-handover`. Purpose: capture the full state of an in-progress body of work — what's done, what's in flight, key decisions since the last handover, and the exact next action — so a fresh session or a different agent can resume without re-deriving context from the conversation. Two scopes: **meta** (Timone itself — which phases/PRDs are done, what's queued; artifact: `doc/handover/<date>-<slug>.md` in Timone's own repo) and **project** (one managed project's ticket/feature in flight; artifact: `projects/<name>/doc/handover/<date>-<slug>.md`). A handover doc references artifacts by path — PRDs, ADRs, phase files, reports — it never restates their content. Superseded handovers are kept, not deleted (same discipline as ADRs): the newest file for a scope is the current one.
 

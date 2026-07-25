@@ -252,3 +252,22 @@
       WHEN a new one is written
       THEN the prior file is left in place (never deleted or overwritten) and the new file is clearly the latest by filename date
 - **Verification hint:** run the skill mid-session; check the doc references artifacts by path, states a concrete next action, and doesn't duplicate PRD/ADR content.
+
+## R22 — Human-readable status artifact
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** human
+- **Criteria:**
+    - GIVEN a managed project under Timone
+      WHEN any stage completes work on it
+      THEN `projects/<name>/STATUS.md` reflects the new state in plain language — what is done, what is in progress, what happens next, and what is waiting on the human — and states which project it covers, distinguishing that project's own work from Timone's
+    - GIVEN Timone itself
+      WHEN a phase of Timone's own work completes
+      THEN `STATUS.md` at the Timone root does the same for Timone
+    - GIVEN either file
+      THEN it is comprehensible without process knowledge: no bare requirement ID, stage number, phase letter, or process term appears without a plain-language gloss, and any blocked item names **which** repository the blocker lives in
+    - GIVEN either file
+      THEN it is written for the human and never read by an agent as a source of truth — the PRD, phase files and reports remain the authorities, and the status file may be regenerated from them at any time without loss
+- **Verification hint:** hand the file to someone who has never read `process.md` and ask them what happens next and who has to do it. If they cannot answer from the file alone, it fails. Also check that a reader cannot confuse work on a managed project with work on Timone.
+- **Origin:** requested by fvermaut 2026-07-25 — "I'm always a bit lost on what are the next steps, and if they are related to the project, or the timone." The human-gate model depends on the human knowing what is happening; a process the stakeholder cannot follow has gates in name only.
