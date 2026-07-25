@@ -160,7 +160,13 @@ NNc → NNa, NNb      <one-clause purpose>
 ```
 ````
 
-## Workflow
+## Writing failure probes
+
+A probe must be trippable **only by code**. A bare `grep -rE 'confirm|deletedAt' src/` also matches the *comment explaining why the code deliberately does not do that thing* — so a correct implementation with a well-written comment fails, and the cheapest way to pass is to write a worse comment. That is exactly backwards, and it cost three consecutive slices on `scratch-app` phase 01 before it was diagnosed: each time the code was right, the probe matched prose, and the slice was pushed toward degrading its own documentation to satisfy an assertion the plan had written wrong.
+
+So: exclude comments (`| grep -v '^\s*//'`), or better, probe the *parsed* artifact instead of the text — `prisma validate`, a schema query, `tsc --noEmit`, the built output, a test at a declared seam. If no probe can distinguish code from prose, the assertion is not a grep's job; give it to a seam.
+
+Two related traps. A probe that names an API in order to forbid it seeds that string into the plan text, the implementation's comment, and the probe itself — all three then match. And a probe asserting an exit code must state which one and why (`; echo "exit: $?"` with the expected value named), because `grep` exits 1 for "no match" and 2 for "no such directory", and a slice that satisfies the intent while hitting 2 will read as a failure.
 
 1. Resolve the target project, then read the artifacts listed above.
 2. Check the anchoring gate, then the ADR gate. If either fires, stop, route, and write nothing. Sketching the cut to inform the ADR check is allowed here; producing a file is not.
