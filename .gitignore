@@ -11,5 +11,10 @@ tmp/
 node_modules/
 dist/
 
+# Playwright MCP session residue — the server writes console logs and traces into
+# the session cwd, which is the timone root. Untracked residue here would trip the
+# execute skill's dirty-tree rule on the next run.
+.playwright-mcp/
+
 # OS
 .DS_Store

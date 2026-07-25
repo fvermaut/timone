@@ -31,6 +31,8 @@ Never execute from the plan excerpt alone. Read, in the target project:
 
 - **The phase file, whole**, starting with its `Status` line — that stamp is the entry gate below. Read every sub-phase, not just the first: the dependency graph, the file markers and the declared seams are what let you judge parallelism, and they decide the second gate.
 - **`doc/plans/phases/reports/phase-NN-handoffs.md`, if it exists** — a partially-executed phase is **resumed, not restarted**. Its sections name the slices already done; execution starts at the first slice with no *committed* section. Cross-check against `git log` on the work branch, comparing **only `NNx` slice commits** — a work branch legitimately carries commits that are not slices (a stage-5 plan amendment, a stage-0 artifact arriving by merge, the phase-close commit), and those have no handoff section by design. A slice commit with no section, or a committed section with no slice commit, is the third gate firing. **An uncommitted handoff section is not:** it is the trace an escalated slice left behind, since escalation deliberately preserves uncommitted work. That slice is the resume point, and its section gets completed and committed rather than duplicated.
+
+**A section that arrives after its own slice's commit** — a slice context still writing when the commit landed — is folded into the next commit with a line in that commit's body saying which slice it belongs to. Do not rewrite history to place it, and do not leave it dangling for a later slice to sweep up silently. It is also a signal you committed too early; see the transition gate.
 - **`doc/standards.md`** — what the code must conform to. Absent → fall back to Timone's central `standards/` baseline plus the entries the plan names, and say so in the completion report. Present but still stamped `Draft` means stage 0's gate never closed: use it, because it is the only record of the project's observed conventions, and report that it is unratified. A file that selects **no** stack entries because the library covers no entry for this project's stack is a real answer, not an empty one — the plan then decides the conventions, and the completion report says so.
 - **`CONTEXT.md`** — the domain glossary. Its terms are the ones the code, schema, and tests must use. Code that renames a domain concept corrupts the ubiquitous language just as surely as a document that does.
 - **The ADRs the plan cites**, under `doc/adr/` — they constrain the implementation, not just the plan. An implementation that contradicts an accepted ADR is a defect even when the plan's prose seems to allow it.
@@ -98,7 +100,7 @@ The slice writes code, tests, and its handoff section. It does not create the br
 
 ## Walking the sub-phases
 
-**Dependency order**, taken from the plan's dependency graph and each slice's dependency statement. **Sequential by default.** Two slices may run in parallel only when the graph allows it **and** their file markers prove zero file overlap — the plan usually says so outright ("shares no files with NNe and may run in parallel with it"). If you have to reason your way to zero overlap, run them sequentially.
+**Dependency order**, taken from the plan's dependency graph and each slice's dependency statement. **Sequential by default.** Two slices may run in parallel only when the graph allows it, their file markers prove zero file overlap, **and** they share no mutable state outside the repo — the database, a port, a container, anything on the filesystem beyond the working tree. File markers are necessary and *not* sufficient: two slices can touch disjoint files and still collide through the one thing the application persists to. A plan asserting parallelism ("shares no files with NNe and may run in parallel with it") is asserting it about *files*; check the rest yourself, and if you have to reason your way to safety, run them sequentially.
 
 Parallel slices still commit one at a time, in dependency order, each after its own validation passed: both append to the same `phase-NN-handoffs.md`, so serialize the appends and the commits even when the work ran concurrently. Never let two contexts write that file at once.
 
@@ -168,7 +170,11 @@ $ <command>
 
 ## Closing the phase
 
-When the last sub-phase's validation has passed and its commit is in:
+**Before the phase can close, re-run every prior slice's validation, not just the last one's.** The per-slice gate is necessary and not sufficient: a later slice can pass its own block while breaking an earlier slice's committed tests, because each block runs only the commands its own slice cared about. A seed that adds a row, a migration that changes a default, a config change — any of these can turn an earlier green suite red without any command in the current slice noticing. If a prior validation now fails, the phase does **not** close: that is gate 3, and the fix belongs to a plan amendment granting the file to a slice, never to you patching it quietly.
+
+**A slice that passes its own block while breaking an earlier one still gets committed** — its work is sound and validated, and withholding the commit would misrepresent it as failed. Commit it, then report the phase-level inconsistency and stop. What must not happen is closing the phase over the top of it.
+
+When the last sub-phase's validation has passed, its commit is in, and every prior slice's validation still passes:
 
 1. Write `projects/<name>/doc/plans/phases/reports/phase-NN-complete.md` from the template below.
 2. Flip the phase file's `Status` line — replacing it, since the line has one state at a time:
