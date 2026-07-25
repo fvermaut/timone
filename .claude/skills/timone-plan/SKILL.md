@@ -168,6 +168,8 @@ So: exclude comments (`| grep -v '^\s*//'`), or better, probe the *parsed* artif
 
 Two related traps. A probe that names an API in order to forbid it seeds that string into the plan text, the implementation's comment, and the probe itself — all three then match. And a probe asserting an exit code must state which one and why (`; echo "exit: $?"` with the expected value named), because `grep` exits 1 for "no match" and 2 for "no such directory", and a slice that satisfies the intent while hitting 2 will read as a failure.
 
+**Two assertions to stop writing.** "No process artifact under `doc/` was modified by this sub-phase" is unsatisfiable — stage 6 requires every slice to append its handoff section, which is a `doc/` artifact. Write "…other than this sub-phase's own handoff section". And an assertion about the state a command runs against must survive the commands *before* it in the same block: a block that truncates a table and then asserts a seeded row exists is asserting against a state its own earlier line destroyed. Sequence the block, don't just list it.
+
 1. Resolve the target project, then read the artifacts listed above.
 2. Check the anchoring gate, then the ADR gate. If either fires, stop, route, and write nothing. Sketching the cut to inform the ADR check is allowed here; producing a file is not.
 3. Cut the phase and draft the breakdown.
