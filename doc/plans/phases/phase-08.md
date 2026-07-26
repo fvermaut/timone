@@ -1,6 +1,6 @@
 # Phase 08: Verification — `timone-verify`
 
-> **Status:** Awaiting approval
+> **Status:** Approved for execution by fvermaut 2026-07-26
 
 > **Companion phases:** [Phase 02](phase-02.md) (skill authoring conventions — the mandatory target-project resolution preamble, and the artifact rule this phase reconciles a second time), [Phase 06](phase-06.md) (`timone-plan`'s `Status` lifecycle — its `Complete` stamp is this skill's entry gate), [Phase 07](phase-07.md) (its output is this phase's only input: the completion report written "for the next agent" is the stage-6→7 interface, and its dry-run left the runnable fixture R12 requires). Governing decisions: [ADR-0007](../../adr/0007-sessions-at-timone-root.md) (sessions run at the timone root; the skill resolves a target project and works only inside `projects/<name>/`), [ADR-0009](../../adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md) (CLI-first tooling — the `api` channel is terminal probes by construction; the `browser` channel is exactly the gap MCP exists for).
 
