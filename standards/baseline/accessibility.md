@@ -2,6 +2,7 @@
 
 > **Tier: BASELINE — applies to every managed project, no selection, no opt-out.**
 > **Status: Approved 2026-07-19 (fvermaut).**
+> ✏ Amended 2026-07-26, approved 2026-07-26: added the rule for focus after the focused element is *removed* — the one context change the entry did not cover, and the one `scratch-app` hit three times.
 
 ## Why this is baseline
 
@@ -31,6 +32,7 @@ What tooling cannot decide. Criteria numbers refer to WCAG 2.1/2.2.
 
 - DOM order = focus order = visual order (2.4.3) — CSS `order`, `*-reverse`, absolute positioning silently divorce the three.
 - Manage focus at every context change: modal open → focus in, trapped, back to trigger on close; SPA route change → focus or announce the new view's `h1` (2.4.3, 4.1.3).
+- **When the element holding focus is removed — a deleted row, a dismissed card — move focus deliberately.** Left alone, "browsers move focus to the body element, effectively causing a loss of focus within the user interface" ([APG, *Discernible and Predictable Keyboard Focus*][apg-keyboard]): the user is silently returned to the top of the document and must traverse back, every time. Order of preference: the equivalent control in the **next** sibling item; the **previous** sibling when the removed item was last; the collection's create/primary control when it is now empty. The focus move is not the whole answer — announce the removal in a `role="status"` region too (4.1.3), since moving focus tells a screen-reader user where they are but not what just happened.
 - Never remove the focus outline without an equally visible replacement (2.4.7); it is a design token chosen once, not obscured by sticky headers/footers (2.4.11).
 
 ### Forms and errors
@@ -73,3 +75,6 @@ Configured at onboarding per stack; enforced rules live in that config.
 - [WCAG 2.1](https://www.w3.org/TR/WCAG21/) · [WCAG 2.2](https://www.w3.org/TR/WCAG22/)
 - [Using ARIA — the Rules of ARIA use (W3C)](https://www.w3.org/TR/using-aria/)
 - [ARIA Authoring Practices Guide — Read Me First (W3C WAI)](https://www.w3.org/WAI/ARIA/apg/practices/read-me-first/)
+- [ARIA APG — Developing a Keyboard Interface (W3C WAI)](https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/)
+
+[apg-keyboard]: https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/
