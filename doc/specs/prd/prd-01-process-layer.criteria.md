@@ -128,7 +128,7 @@
 ## R11 — Execute skill
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN an approved phase file
@@ -186,7 +186,7 @@
 ## R16 — TDD implementation loop
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** human
 - **Criteria:**
     - GIVEN a phase file whose sub-phases declare seams under test

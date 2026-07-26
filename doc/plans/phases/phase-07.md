@@ -1,6 +1,6 @@
 # Phase 07: Implementation — `timone-execute` + the TDD loop
 
-> **Status:** Approved for execution by fvermaut 2026-07-24.
+> **Status:** Complete — see [reports/phase-07-complete.md](reports/phase-07-complete.md). Approved for execution by fvermaut 2026-07-24; 07c's dry-run gate passed by fvermaut 2026-07-26.
 
 > **Companion phases:** [Phase 02](phase-02.md) (skill authoring conventions — the mandatory target-project resolution preamble, and the artifact rule this phase has to reconcile), [Phase 05](phase-05.md) (the spec-first-then-skill ordering this phase reuses), [Phase 06](phase-06.md) (`timone-plan` — its output is this phase's only input, and its dry-run left the phase file 07c executes). Governing decisions: [ADR-0007](../../adr/0007-sessions-at-timone-root.md) (sessions run at the timone root; the skill resolves a target project and works only inside `projects/<name>/`), [ADR-0009](../../adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md) (CLI-first tooling — 07c is the first time a Timone skill actually *runs* the official scaffolding CLIs the standards entries now name, rather than describing them).
 

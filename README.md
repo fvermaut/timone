@@ -25,6 +25,7 @@ Sessions run at the timone repo root — never inside a managed project ([ADR-00
 /timone-prd <project-name>                                  # stage 3 — persist the PRD pair
 /timone-adr <project-name> <decision to record>              # stage 4 — architecture decision record
 /timone-plan <project-name> <prd-ref | req IDs | work>       # stage 5 — cut a phase into vertical slices
+/timone-execute <project-name> <phase-NN>                    # stage 6 — execute an approved phase, TDD, slice by slice
 ```
 
 `timone-onboard` is the one skill allowed to add a project — it does so via `timone projects add` (below), never by hand-editing `timone.yaml` ([ADR-0008](doc/adr/0008-manifest-writes-via-cli-command.md)). Every other skill validates its target against `timone.yaml`, requires the project to be cloned (`workspace sync` first), and touches only `projects/<name>/…` — the only files any skill ever commits there are process artifacts (`doc/…`, `CONTEXT.md`). See [process.md](process.md) for the full lifecycle these skills implement.
@@ -50,4 +51,4 @@ node dist/cli.js projects update <name> [--repo <url>] [--path <path>] \
 
 ## Status
 
-Phases 01–06 delivered: foundations (process spec, manifest, workspace sync), the document trio (grill/PRD/ADR skills), the standards library (11 entries approved), onboarding (`timone-onboard` + `projects add`), triage (`timone-triage` + `projects update`), and planning (`timone-plan`). Six stage skills now exist and have been exercised end to end against scratch fixtures. Next: execute, verify, deliver, and improve skills (remaining PRD-01 scope), then the inverted loop (PRD-02).
+Phases 01–07 delivered: foundations (process spec, manifest, workspace sync), the document trio (grill/PRD/ADR skills), the standards library (11 entries approved), onboarding (`timone-onboard` + `projects add`), triage (`timone-triage` + `projects update`), planning (`timone-plan`), and implementation (`timone-execute` + the TDD loop). Seven stage skills now exist and have been exercised end to end against scratch fixtures — `timone-execute`'s dry run built a running Next.js + PostgreSQL application from an empty repository. Next: verify, deliver and improve skills, plus the two-axis delivery review (PRD-01.R12–R14, R17), then the inverted loop (PRD-02). [STATUS.md](STATUS.md) carries the plain-language version.
