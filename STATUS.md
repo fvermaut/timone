@@ -16,7 +16,7 @@ Timone makes AI agents follow a real engineering process instead of improvising.
 - **The plumbing** — a manifest of managed projects, a command to clone them into place, and the rule that sessions run here at the Timone root rather than inside a client's repo.
 - **Seven stage skills work and have been tested against throwaway projects:** onboarding a new repo, sorting an incoming request, interviewing you for requirements, writing requirements down, recording architecture decisions, planning work into steps, and — new this weekend — **building the code**.
 - **A standards library** — 11 entries covering the preferred stack, plus two that apply to every project with no opt-out: accessibility (a legal requirement in the EU) and UI/UX.
-- **15 of Timone's 22 requirements are formally verified.**
+- **15 of Timone's 24 requirements are formally verified.**
 
 ## Just finished
 
@@ -59,11 +59,13 @@ Two more are built but not formally signed off: the accessibility baseline, and 
 - **All four standards corrections approved** and now binding.
 - **The database instruction is fixed, and this time it was actually run before being written down.** Two settings, and the generated code loads under plain Node with no workaround; the app's type check and production build both stay green. Every project stops paying a ~25-line tax.
 - **`doc/todo.md` left exactly as it is**, and told to stop showing up as stray residue.
+- **Where focus goes when you delete something is settled** — and settled once for every project rather than once for the to-do app. Delete a row with the keyboard today and you're silently returned to the top of the page; the rule now says focus moves to the next row's equivalent button, the previous row if you deleted the last one, or the "add" box if the list is now empty. The W3C's guidance describes exactly the failure we had. The to-do app doesn't comply yet, and that's recorded against it.
+- **Two loose problems became tracked requirements** instead of notes in this file: repairing a project that's missing a required document, and noticing when the standards library goes stale.
 
 ## Known problems not yet fixed
 
-- **The onboarding skill can't repair a project.** It refuses to run on any project already registered — which is every project that could have a file missing. Found when a project turned out to be missing a required file; the only way to fix it was to override the skill by hand. Needs its own piece of work.
-- **Nothing detects when the standards library drifts out of date.** Four entries were wrong this weekend and only running them found out. There's no mechanism.
+- **The onboarding skill can't repair a project.** It refuses to run on any project already registered — which is every project that could have a file missing. Found when a project turned out to be missing a required file; the only way to fix it was to override the skill by hand. **Now a tracked requirement** (2026-07-26) rather than a loose note, so it gets planned and built like anything else.
+- **Nothing detects when the standards library drifts out of date.** Five entries were wrong this weekend, each correct when written, each found only because something finally ran it. **Now a tracked requirement** (2026-07-26) — but deliberately without a solution attached: version stamps, a re-check schedule, running the instructions in CI, or something else. That gets worked out in an interview session before anyone plans it, because picking a mechanism now would be guessing.
 - **Timone's own phases are planned by hand.** The planning skill only works on managed projects, by choice. So this file's status sections are hand-written, not generated.
 - **The hand-back-to-a-human path has never fired.** Specified, refined twice, never exercised. See "Just finished" above for why, and why chasing it further is a poor use of effort.
 - **Two finished pieces of work on the to-do app are stacked up with nowhere to go.** Both are complete and neither can be delivered, because the stages that check and ship work don't exist yet. They are the first thing the next two skills will unblock.

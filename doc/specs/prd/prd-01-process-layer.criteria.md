@@ -271,3 +271,33 @@
       THEN it is written for the human and never read by an agent as a source of truth — the PRD, phase files and reports remain the authorities, and the status file may be regenerated from them at any time without loss
 - **Verification hint:** hand the file to someone who has never read `process.md` and ask them what happens next and who has to do it. If they cannot answer from the file alone, it fails. Also check that a reader cannot confuse work on a managed project with work on Timone.
 - **Origin:** requested by fvermaut 2026-07-25 — "I'm always a bit lost on what are the next steps, and if they are related to the project, or the timone." The human-gate model depends on the human knowing what is happening; a process the stakeholder cannot follow has gates in name only.
+
+## R23 — Onboarding repair of an already-managed project
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a project already in the manifest and already cloned, missing or holding an unratified stage-0 artifact (`doc/specs/product-overview.md`, the founding ADRs, `doc/standards.md`, or the process doc tree)
+      WHEN onboarding runs in repair mode
+      THEN the missing artifact is produced and the human gate for it is put, **without** the skill refusing on the existing manifest entry or the existing directory, and **without** modifying any stage-0 artifact that is already present and ratified
+    - GIVEN a project whose stage-0 artifacts are all present and ratified
+      WHEN onboarding runs in repair mode
+      THEN it reports that nothing is missing and writes nothing
+    - GIVEN repair mode
+      THEN it never adds a manifest entry — registration remains the new-project path's job, via `timone projects add` ([ADR-0008](../../adr/0008-manifest-writes-via-cli-command.md))
+- **Verification hint:** delete `doc/standards.md` from a scratch fixture and run repair; expect the artifact regenerated and the gate put. Run it again with nothing missing; expect a no-op. Confirm the product overview is not rewritten in either run.
+- **Origin:** found executing `scratch-app` phase 01, 2026-07-25. `timone-onboard` is the sole owner of `doc/standards.md` and refuses both on an existing manifest entry and on an existing directory — correctly, for its stated job of onboarding a repo *not yet managed* (R5). But that makes any project missing a stage-0 artifact unrepairable through the process: the only skill permitted to produce the file refuses to run on every project that could be missing one. `scratch-app`'s backfill only succeeded by overriding both refusals by hand. Recorded as its own requirement 2026-07-26 rather than by re-scoping R5, which is verified and true as written; the missing capability is a different one, and the register's IDs are stable.
+
+## R24 — Standards drift detection
+
+- **Priority:** SHOULD
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN the standards library, whose entries are approved against a stated ecosystem state at a stated date
+      WHEN an entry's instructions no longer hold — a command that cannot run, a version that cannot be installed, a config key that no longer exists, a required option that has appeared
+      THEN the drift is surfaced to the human as a finding naming the entry and what specifically stopped being true, before a project follows the stale instruction
+- **Mechanism: undecided.** Version stamping per entry, a scheduled re-verification, executing each entry's commands in CI, and deriving drift from execution failures are all candidates and none is chosen. **This requirement is not plannable as written** — it goes through stage 2 (`timone-grill`) first, and its criteria are rewritten from that session before any phase consumes it.
+- **Verification hint:** deliberately stale one entry against the live ecosystem and confirm the mechanism reports it, naming the entry and the specific instruction.
+- **Origin:** the weekend of 2026-07-25/26, **five** approved entries were found to contain instructions that do not work — `create-next-app` cannot run in place; TypeScript 7 is uninstallable alongside `eslint-config-next`; `prisma.config.ts` has no `directUrl` key; the generators emit harness files R4 forbids; the Prisma client is unloadable by bare `node` without `importFileExtension`. Each was correct when written and each was discovered only because something finally executed it. Entries bind every managed project, so an undetected stale entry is followed faithfully until someone stubs a toe on it.
