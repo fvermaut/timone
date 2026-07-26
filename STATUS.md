@@ -32,7 +32,7 @@ Closing the phase turned up one last inconsistency, now fixed: the branch fix fr
 
 ## Next up
 
-**The verify skill** — a fresh agent that didn't watch the build checks the app actually does what was promised. This is the natural next step because the to-do app the dry run produced is exactly the fixture it needs: a real list of promises and a real running application to check them against. Nothing had that before.
+**The verify skill — now planned and waiting for your approval.** A fresh agent that didn't watch the build checks the app actually does what was promised. The plan (`doc/plans/phases/phase-08.md`, written 2026-07-26) follows the same four-step shape as the last two: tighten the rulebook first, write the skill, prove it against the to-do app, then update the docs. The proof run is honest by construction: the to-do app has a real known defect — delete an item with the keyboard and your position on the page is silently lost — so the "find a failure, fix it, check again" loop gets tested on a genuine bug nobody planted. The one thing the run will *not* do is the screen-reader listen-through; that stays on your list as a written script, which is exactly what the process says should happen when only a human can check something. Nothing starts until you approve the plan.
 
 ## What's left after this
 
@@ -51,7 +51,7 @@ Two more are built but not formally signed off: the accessibility baseline, and 
 
 ## Waiting on you
 
-**Nothing right now.** Everything on this list was closed on 2026-07-26 — see below.
+**One thing: approve the phase 08 plan** (`doc/plans/phases/phase-08.md`, on Timone itself) so the verify skill can be built. Everything else was closed on 2026-07-26 — see below.
 
 ## Decided on 2026-07-26
 
