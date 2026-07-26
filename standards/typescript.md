@@ -1,10 +1,10 @@
 # Standards — TypeScript
 
 > **Status: Approved 2026-07-19 (fvermaut).**
-> ✏ Amended 2026-07-25 — **pending approval**: the TypeScript 7 baseline is not yet reachable on a Next.js app; pin `^6.x` until the toolchain catches up. Proven executing `scratch-app` phase 01.
+> ✏ Amended 2026-07-25, approved 2026-07-26: the TypeScript 7 baseline is not yet reachable on a Next.js app; pin `^6.x` until the toolchain catches up. Proven executing `scratch-app` phase 01.
 > Scope: language-level practice for our TypeScript projects (Next.js/Prisma/zod apps). Anything a compiler flag or lint rule can enforce lives in the shared tsconfig and is only indexed under [Tooling](#tooling). Baseline **as approved 2026-07-19**: **TypeScript 7**; `strict` has been the compiler default since 6.0 and is the assumed floor.
 >
-> **Pending correction (2026-07-25, not yet approved): on Next.js the floor is 6.x, not 7.** TypeScript 7 is currently unsatisfiable there — `typescript-eslint`, vendored by `eslint-config-next@16.2.11`, peers `typescript <6.1.0` and hard-errors on 7. Pin `typescript@^6.0.3` on Next.js projects and revisit when `eslint-config-next` ships a `typescript-eslint` that accepts 7. Verified 2026-07-25 executing `scratch-app` phase 01. Until this is approved, the TypeScript 7 line above is the normative one and a 6.x pin is a project deviation.
+> **On Next.js the floor is 6.x, not 7** (correction approved 2026-07-26). TypeScript 7 is unsatisfiable there — `typescript-eslint`, vendored by `eslint-config-next@16.2.11`, peers `typescript <6.1.0` and hard-errors on 7. Pin `typescript@^6.0.3` on Next.js projects and revisit when `eslint-config-next` ships a `typescript-eslint` that accepts 7. Verified 2026-07-25 executing `scratch-app` phase 01. The 2026-07-19 TypeScript 7 baseline stands for non-Next.js projects.
 
 ## Type design
 

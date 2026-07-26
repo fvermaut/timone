@@ -2,7 +2,7 @@
 
 > **Status: Approved 2026-07-24 (fvermaut).**
 > ✏ Amended 2026-07-20, approved 2026-07-24: scaffolding via `create-next-app` added; `next-devtools` MCP adopted per ADR-0009.
-> ✏ Amended 2026-07-25 — **pending approval**: `create-next-app` cannot run in place in a managed project (scaffold into a temp dir and copy in); generator-emitted harness files must be deleted before commit. Both proven executing `scratch-app` phase 01.
+> ✏ Amended 2026-07-25, approved 2026-07-26: `create-next-app` cannot run in place in a managed project (scaffold into a temp dir and copy in); generator-emitted harness files must be deleted before commit. Both proven executing `scratch-app` phase 01.
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we build with Next.js (full-stack).
 
 Applies to **Next.js 16** (App Router, Turbopack default). Deployment specifics live in [vercel-supabase.md](vercel-supabase.md) — never duplicated here.

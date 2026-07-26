@@ -7,6 +7,10 @@ tmp/
 # Local-only Claude Code settings
 .claude/settings.local.json
 
+# fvermaut's own scratch list at the root — deliberately not a process artifact,
+# and left untouched by agents. Ignored so it stops reading as untracked residue.
+doc/todo.md
+
 # Node
 node_modules/
 dist/

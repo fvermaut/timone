@@ -2,7 +2,8 @@
 
 > **Status: Approved 2026-07-24 (fvermaut).**
 > ✏ Amended 2026-07-20, approved 2026-07-24: scaffolding via `prisma init` added; Prisma MCP explicitly not adopted per ADR-0009.
-> ✏ Amended 2026-07-25 — **pending approval**: `prisma.config.ts` has no `directUrl` key (stale instruction corrected); `prisma init` emits agent-harness files that PRD-01.R4 forbids in a client repo. Both proven executing `scratch-app` phase 01.
+> ✏ Amended 2026-07-25, approved 2026-07-26: `prisma.config.ts` has no `directUrl` key (stale instruction corrected); `prisma init` emits agent-harness files that PRD-01.R4 forbids in a client repo. Both proven executing `scratch-app` phase 01.
+> ✏ Amended 2026-07-26, approved 2026-07-26: the generated client cannot be loaded by bare `node` without `importFileExtension`. Verified by execution on `scratch-app` 2026-07-26.
 > Rules of this library: nothing tooling already enforces; nothing true of every project on Earth; only choices, patterns, and boundaries specific to how we build with Prisma + PostgreSQL.
 
 Current major (2026-07): **Prisma ORM 7** — Rust-free `prisma-client` generator, `prisma.config.ts`, client generated into the source tree, driver adapters required ([v7 announcement]). **Churn watch:** "Prisma Next" (full-TypeScript rewrite) is the previewed future direction; re-verify on the next major. Supabase matters live in [vercel-supabase.md](vercel-supabase.md).
@@ -57,12 +58,15 @@ Current major (2026-07): **Prisma ORM 7** — Rust-free `prisma-client` generato
 
 **No MCP server.** Prisma ships an official one (`https://mcp.prisma.io/mcp` remote, `npx prisma mcp` local), but its tools duplicate the CLI — migrations, introspection, SQL — so it fails [ADR-0009](../doc/adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md)'s named-capability-gap test. Revisit if hosted Prisma Postgres management ever becomes part of a project's workflow.
 
-Enforced by config at onboarding: generator `provider = "prisma-client"` with explicit `output` in the source tree; `prisma.config.ts` carrying schema path, `migrations.seed`, and the direct-vs-pooled URL split; `previewFeatures` limited to what this entry uses; CI runs `prisma migrate status` (drift check) before `migrate deploy`, and `prisma format` in lint.
+**Generated client, and running it outside a bundler.** The `prisma-client` generator emits TypeScript whose relative imports are **extensionless** by default (`./enums`, `./internal/class`), which Node's ESM resolver cannot resolve — so any entry point run by bare `node` (a seed, a script, a cron job) cannot load the client at all. Set `importFileExtension = "ts"` in the generator block **and** `allowImportingTsExtensions: true` in `tsconfig.json`; generated imports then carry `.ts` and Node's type stripping resolves them directly. Accepted values are `ts | mts | cts | js | mjs | cjs` — `js` is wrong here for the same reason the docs flag it under `tsx`: the resolver will not map a `.js` specifier onto a `.ts` file on disk ([generators reference]). Verified 2026-07-26 on `scratch-app`: bare `node` loads the client with no module hook, and `tsc --noEmit` plus `next build` both stay green. Without this, every such entry point carries a ~25-line `registerHooks` shim.
+
+Enforced by config at onboarding: generator `provider = "prisma-client"` with explicit `output` in the source tree and `importFileExtension = "ts"`; `prisma.config.ts` carrying schema path, `migrations.seed`, and the direct-vs-pooled URL split; `previewFeatures` limited to what this entry uses; CI runs `prisma migrate status` (drift check) before `migrate deploy`, and `prisma format` in lint.
 
 ## Sources
 
 - [v7 announcement]: https://www.prisma.io/blog/announcing-prisma-orm-7-0-0
 - [migrate workflows]: https://www.prisma.io/docs/orm/prisma-migrate/workflows/development-and-production
+- [generators reference]: https://www.prisma.io/docs/orm/prisma-schema/overview/generators (`importFileExtension`, `moduleFormat`, `generatedFileExtension`)
 - [schema reference]: https://www.prisma.io/docs/orm/reference/prisma-schema-reference ([schema reference @updatedAt]: "implemented at Prisma ORM level"; https://github.com/prisma/prisma/issues/6772)
 - [PG enum docs]: https://www.postgresql.org/docs/current/datatype-enum.html
 - [transactions docs]: https://www.prisma.io/docs/orm/prisma-client/queries/transactions

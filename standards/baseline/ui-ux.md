@@ -2,6 +2,7 @@
 
 > **Tier: BASELINE — applies to every managed project, no selection, no opt-out.**
 > **Status: Approved 2026-07-19 (fvermaut).**
+> ✏ Amended 2026-07-26, approved 2026-07-26: the disabled-in-flight rule is scoped to controls whose repeat activation is *unintended*. As written it collided with [baseline/accessibility.md](accessibility.md) — measurably, executing `scratch-app` phase 01 — since disabling a focused control blurs it and focus never returns (WCAG 2.4.3).
 
 Cross-project UI/UX invariants (Next.js/React). Project-specific design systems live in each project's `doc/standards.md`. Accessibility is governed by [baseline/accessibility.md](accessibility.md), not restated here.
 
@@ -22,7 +23,8 @@ Loading, empty, error, and partial-data states are acceptance criteria for every
 ## Interaction and feedback
 
 - Every action gets visible acknowledgment within 0.1 s — pressed state, optimistic update, or pending indicator.
-- Submitting controls go disabled/pending in flight; double-submit must be impossible from the UI.
+- **Submitting controls go disabled/pending in flight where repeat activation is *unintended*** — submit, pay, delete, anything whose second press is an accident. There, double-submit must be impossible from the UI.
+- **Where repeating the action *is* the user's intent — toggles, steppers, quantity +/− — never disable the control.** `disabled` on a focused element blurs it and focus falls to the document, which is a WCAG 2.4.3 failure: a keyboard user who operates one row's toggle must then tab in from the top of the page to reach anything else. [baseline/accessibility.md](accessibility.md) admits no opt-out and outranks this entry. Signal in-flight state on the *container* instead (`aria-busy` on the row or group), and let n activations be n operations, dispatched in order to a consistent end state. Where a control sits on the boundary, ask whether a second press is an accident or a decision — if it is a decision, keep it focusable.
 - Non-blocking success feedback (toast/inline) after every mutation that doesn't already show its result.
 - Prefer undo over confirmation dialogs; reserve dialogs for genuinely irreversible, infrequent operations ([NN/g, Confirmation Dialogs](https://www.nngroup.com/articles/confirmation-dialog/)). Confirmation buttons name the action ("Delete project"), not "Yes/OK".
 - Destructive controls are spatially and visually separated from benign ones — never adjacent in menus, dialogs, or table rows ([NN/g, Proximity of Consequential Options](https://www.nngroup.com/articles/proximity-consequential-options/)).

@@ -51,10 +51,14 @@ Two more are built but not formally signed off: the accessibility baseline, and 
 
 ## Waiting on you
 
-1. **Two of your standards documents contradict each other.** One says buttons should grey out while submitting; the other says never move someone's keyboard focus. Greying out a checkbox someone is standing on does exactly that — we measured it. Both are no-opt-out, so one document has to change.
-2. **A database instruction in the standards library produces something Node can't load.** Costs every project a workaround.
-3. **Four standards corrections are drafted and awaiting your nod** — instructions that turned out not to work when actually run.
-4. **A one-line file called `doc/todo.md` appeared at the Timone root** reading `- ISO standards`. No agent wrote it, so it's presumably yours. Left untouched — say what it's for and it can become a real piece of work, or be deleted.
+**Nothing right now.** Everything on this list was closed on 2026-07-26 — see below.
+
+## Decided on 2026-07-26
+
+- **The two contradicting rules are reconciled.** Controls now grey out while submitting *only where pressing twice would be an accident* — submit, pay, delete. Where pressing twice is what you meant (a checkbox, a quantity stepper), the control stays operable and the "working on it" signal moves to the row around it. The accessibility document was left untouched, because it encodes a legal requirement and carving an exception into it would have been a documented failure rather than a fix.
+- **All four standards corrections approved** and now binding.
+- **The database instruction is fixed, and this time it was actually run before being written down.** Two settings, and the generated code loads under plain Node with no workaround; the app's type check and production build both stay green. Every project stops paying a ~25-line tax.
+- **`doc/todo.md` left exactly as it is**, and told to stop showing up as stray residue.
 
 ## Known problems not yet fixed
 
