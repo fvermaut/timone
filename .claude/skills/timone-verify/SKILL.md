@@ -45,6 +45,8 @@ Your independence is a **closed allowed list**; anything not on it is not read, 
 
 The project's own suite may be run **once**, as a build-health smoke, and reported as exactly that — it is never criterion evidence. All evidence comes from probes you author yourself, from the register's clauses alone, written in scratch space **outside the project tree** and never committed.
 
+**A smoke that contradicts a probe is an instrument alarm, not a footnote.** When the build-health smoke fails on behaviour one of your probes passes — or passes behaviour your probes fail — one of the two instruments is measuring wrong, and the pass may not conclude until you know which. Resolve it instrument-side: re-calibrate your probe and prove what it actually transmits and observes. The suite stays non-evidence either way; what it is here is a tripwire, and filing the contradiction as "a discrepancy for the human" while your verdicts stand is exactly the false-negative path this rule exists to close.
+
 ## The gates
 
 Each gate stops verification. When one fires you write **nothing** into the project, state which gate fired and why in one short paragraph, and name the skill or the human to route to. A stopped verification is a valid, complete outcome of this skill.
@@ -82,6 +84,8 @@ Each criterion carries a `Verify-via` channel; each of its clauses gets its own 
 - **`api`** — terminal-checkable. Author your own probes from the clause alone: HTTP against the running app, direct database readback through the project's own client tooling. Scripts live in scratch space, never in the tree, never committed. This channel forms the standing regression suite.
 - **`browser`** — driven UI checks (Playwright, or the playwright MCP tools). For **user-facing deliverables the baseline leg is unconditional**: the automated accessibility scan (violations are failures — the baseline's rule, enforced here), a keyboard-only pass in which focus assertions are mechanical (where `document.activeElement` lands after each action is a fact, not a judgement), and the baseline's reflow checks. Where tooling cannot reach a baseline requirement, that clause becomes a HUMAN-CHECK with a precise script — never a silent skip, never an assumed pass.
 - **`human`** — reported as **HUMAN-CHECK** with a precise manual script in the template below: setup, numbered steps, the expected observation, where to record the result. Emitting the script *is* this channel's deliverable; performing it is the human's act, on the human's schedule. Never simulate one, never mark one performed on your own authority.
+
+**Calibrate the instrument before trusting it.** A probe that cannot fail is not evidence. Before a probe's verdict counts, show it could have detected the failure it exists to catch — above all when the clause asserts a transformation of input (trimming, normalization, rejection): first prove the probe delivers its input **verbatim** to the app's boundary, because transport tooling silently normalizes (a multipart flag that strips padding, a shell that eats quotes, a client that URL-encodes), and a probe that pre-applies the expected transformation can only agree with the app. This is the verification-side twin of stage 6's tautological-assertion rule: a probe passing on arrival, never having been seen to distinguish conforming from non-conforming behaviour, deserves the same suspicion as a test never seen red.
 
 ## The fix loop
 
