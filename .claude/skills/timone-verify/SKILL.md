@@ -33,7 +33,8 @@ Your independence is a **closed allowed list**; anything not on it is not read, 
 - **The PRD narrative** the register belongs to — for the domain framing the criteria assume, not for extra requirements.
 - **The phase file's `Status` line and requirements header** — the stamp is the entry gate, the header (its requirement IDs, or its un-anchored stamp) is the claimed scope. **Never the sub-phase bodies**: they describe how the thing was built, which is exactly what you must not know.
 - **The completion report, whole** (`doc/plans/phases/reports/phase-NN-complete.md`) — it is the stage-6→7 interface, and its "context for the next agent" section was written for you: run instructions, suite commands, HUMAN-CHECK items carried forward, known-open observations, state left behind. Obey its stated gotchas rather than rediscovering them.
-- **`README.md`, `CONTEXT.md`, `doc/standards.md`** in the target project — operational instructions, the domain's canonical terms, and the conventions record (whose open non-conformances may already predict a failure).
+- **`README.md`, `CONTEXT.md`, `doc/standards.md`, `STATUS.md`** in the target project — operational instructions, the domain's canonical terms, the conventions record (whose open non-conformances may already predict a failure), and the status file you are obliged to update at the end.
+- **The operational configuration that stands the app up rather than implementing it** — compose files, `.env` / `.env.example`, the run and test scripts a package manifest declares. These tell you which port, which credentials, which command; they carry no behaviour under test. Reading the *application* config a criterion's behaviour depends on is a different act and stays forbidden.
 - **Timone's own `standards/` baseline** — the accessibility and UI/UX entries are what the browser channel's baseline leg enforces.
 
 **Never read:**
