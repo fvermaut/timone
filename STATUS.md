@@ -20,6 +20,10 @@ Timone makes AI agents follow a real engineering process instead of improvising.
 
 ## Just finished
 
+**The verify skill is built and proved — and it is waiting on your review** (2026-07-27). The rules, the skill, and four proof runs are done; only the paperwork step remains, and that is deliberately blocked until you sign off. Details in "Waiting on you" below.
+
+## Previously
+
 **The code-writing skill is done and signed off** (2026-07-26). All four parts landed: the rules, the skill, the proof, and your sign-off. Two more requirements are now formally verified, and the phase is closed with its report at `doc/plans/phases/reports/phase-07-complete.md`.
 
 Proving it meant pointing the skill at a throwaway to-do list app (`projects/scratch-app`) and telling it to build the thing from scratch. It did. That took **seven rounds of fixes — roughly 35 defects** — because every real run exposed something the instructions got wrong. That's the dry run doing its job.
@@ -32,7 +36,7 @@ Closing the phase turned up one last inconsistency, now fixed: the branch fix fr
 
 ## Next up
 
-**The verify skill — now planned and waiting for your approval.** A fresh agent that didn't watch the build checks the app actually does what was promised. The plan (`doc/plans/phases/phase-08.md`, written 2026-07-26) follows the same four-step shape as the last two: tighten the rulebook first, write the skill, prove it against the to-do app, then update the docs. The proof run is honest by construction: the to-do app has a real known defect — delete an item with the keyboard and your position on the page is silently lost — so the "find a failure, fix it, check again" loop gets tested on a genuine bug nobody planted. The one thing the run will *not* do is the screen-reader listen-through; that stays on your list as a written script, which is exactly what the process says should happen when only a human can check something. Nothing starts until you approve the plan.
+**Your review of the verify skill, then the delivery skill.** Once you sign off (see "Waiting on you"), the last step of this phase marks two more requirements verified and closes it. After that: the skill that opens the pull request, with two independent reviews attached.
 
 ## What's left after this
 
@@ -51,7 +55,26 @@ Two more are built but not formally signed off: the accessibility baseline, and 
 
 ## Waiting on you
 
-**One thing: approve the phase 08 plan** (`doc/plans/phases/phase-08.md`, on Timone itself) so the verify skill can be built. Everything else was closed on 2026-07-26 — see below.
+**Review the verify skill's proof runs and sign off** — this is the gate written into the plan, and nothing proceeds past it. What to look at, all on Timone itself unless stated:
+
+1. **The verification reports** on the to-do app (`projects/scratch-app`): `doc/plans/phases/reports/phase-01-verification.md` (three passes) and `phase-02-verification.md` (one).
+2. **The two fixes the checker caused to be made** to the to-do app, each by a separate agent that was told only what was wrong, never how it was built.
+3. **One decision:** the second proof run deliberately broke something to see whether the checker would notice. The break and its repair are both still in the to-do app's history. Say if you'd rather they were removed.
+4. **One confirmation:** the screen-reader check on the to-do app is still unperformed, by your choice. The written script is in the phase-01 report whenever you want it.
+
+**Also newly waiting on you, from the to-do app itself** (raised by the checker, not by me): a decision on the 2 ms speed limit that phase 02 set — it passes today but only on a local database, and one reading was seen that would have failed it. Three options are laid out in `projects/scratch-app/doc/plans/phases/reports/phase-02-verification.md`.
+
+Everything else was closed on 2026-07-26 — see below.
+
+## What the proof runs found
+
+Four runs, three rounds of fixes. The one worth your attention:
+
+**The checker's first attempt at the deliberate break returned "everything passes" — and it was wrong.** The requirement says a title typed with spaces around it gets stored without them. To test that, the checker sent a padded title to the app — but the tool it used to send it strips padding itself, before the app ever sees it. So the test performed the very trimming it was supposed to be checking, and could only ever agree. Worse: the app's own test suite was failing on exactly that behaviour at the time, and the checker wrote that contradiction down as a curiosity for you rather than treating it as the alarm it was.
+
+Two rules now close this, and they are the most valuable thing this phase produced: **a check must be shown capable of failing before its "pass" counts**, and **when the app's own tests and the checker disagree, the checker stops and works out which instrument is lying** instead of filing it and moving on. Re-run under those rules, the checker caught the planted break immediately — and found a second, real bug nobody planted: items occasionally not appearing or disappearing on screen after being saved. Both were fixed and re-checked.
+
+The other two rounds: the code-writing skill was handing over an instruction with the phase number missing, which would have stranded any project past its first phase; and the checker's list of "what you may read" was so tight it forbade reading the files that tell it which port the app runs on — a rule that forbids its own instructions trains agents to ignore rules.
 
 ## Decided on 2026-07-26
 
