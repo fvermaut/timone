@@ -150,13 +150,15 @@
 ## R13 — Deliver skill
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a completed and verified phase on a work branch
       WHEN the deliver skill runs
       THEN a pull request exists referencing the driving ticket/requirements, its description summarizes scope and verification outcome, and branch/commit conventions match the process spec
 - **Verification hint:** `gh pr view` on the pilot repo; check cross-links.
+- **Evidence:** ✏ 2026-07-29 verified — phase 09's dry run opened two real pull requests on `scratch-app` ([#1](https://github.com/fvermaut/scratch-app/pull/1) against `main`, [#2](https://github.com/fvermaut/scratch-app/pull/2) stacked on its parent branch), each referencing its requirement IDs in the absence of a ticket home, summarizing scope and the verification outcome, and following the phase's branch/commit conventions. Two terminal refusals were also exercised. Records: `projects/scratch-app/doc/plans/phases/reports/phase-01-delivery.md` and `phase-02-delivery.md`. Gate passed by fvermaut 2026-07-29.
+
 
 ## R14 — Improve skill (feedback triage)
 
@@ -197,13 +199,15 @@
 ## R17 — Two-axis delivery review
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a completed, verified phase on a work branch
       WHEN the deliver skill runs
       THEN two parallel fresh-context reviews are produced — Standards (diff vs `doc/standards.md` + the smell baseline, skipping tool-enforced rules) and Spec (diff vs the PRD: missing requirements, scope creep, wrong-looking implementations) — reported separately in the PR, never merged into one ranked list
 - **Verification hint:** run delivery on the pilot; check the PR description contains both reports under distinct headings, with spec findings quoting requirement IDs.
+- **Evidence:** ✏ 2026-07-29 verified — both axes ran as parallel fresh contexts, blind to each other and to the verification report, and are reported under distinct headings in both PRs and both delivery reports, never merged into one ranked list. Spec findings quote requirement IDs throughout. Six Standards findings and three Spec findings on phase 01; two and two on phase 02, whose Spec axis correctly reported the un-anchored stamp rather than inventing requirements. No finding was applied — stage 8 committed no code. Gate passed by fvermaut 2026-07-29.
+
 
 ## R18 — Central standards library structure
 
@@ -242,7 +246,7 @@
 ## R21 — Handover skill
 
 - **Priority:** SHOULD
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** human
 - **Criteria:**
     - GIVEN an in-progress session of work (on Timone itself, or on a managed project)
@@ -252,11 +256,13 @@
       WHEN a new one is written
       THEN the prior file is left in place (never deleted or overwritten) and the new file is clearly the latest by filename date
 - **Verification hint:** run the skill mid-session; check the doc references artifacts by path, states a concrete next action, and doesn't duplicate PRD/ADR content.
+- **Evidence:** ✏ 2026-07-29 verified — see `doc/plans/phases/reports/phase-09-verification.md`. Five dated meta-scope handovers plus one project-scope on `scratch-app`; every file carries all required elements including an exact next action and references artifacts by path; one commit per file (never modified after creation) and none ever deleted.
+
 
 ## R22 — Human-readable status artifact
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** human
 - **Criteria:**
     - GIVEN a managed project under Timone
@@ -271,6 +277,8 @@
       THEN it is written for the human and never read by an agent as a source of truth — the PRD, phase files and reports remain the authorities, and the status file may be regenerated from them at any time without loss
 - **Verification hint:** hand the file to someone who has never read `process.md` and ask them what happens next and who has to do it. If they cannot answer from the file alone, it fails. Also check that a reader cannot confuse work on a managed project with work on Timone.
 - **Origin:** requested by fvermaut 2026-07-25 — "I'm always a bit lost on what are the next steps, and if they are related to the project, or the timone." The human-gate model depends on the human knowing what is happening; a process the stakeholder cannot follow has gates in name only.
+- **Evidence:** ✏ 2026-07-29 verified after two fix loops — see `doc/plans/phases/reports/phase-09-verification.md`. Checked with the requirement's own instrument: two fresh naive-reader contexts given only the two `STATUS.md` files. Loop 1 found the two files contradicting each other on the current state; loop 2 found the file is branch-local, so no branch held the whole picture and the default branch had no copy at all. Both fixed. **Open, routed to stage 9:** the branch-local property itself is unresolved — a decision, not an edit.
+
 
 ## R23 — Onboarding repair of an already-managed project
 

@@ -10,7 +10,7 @@
 - `doc/adr/` — architecture decision records (founding decisions: 0001–0007)
 - `doc/plans/phases/` — executable phase plans and their reports
 - `.claude/skills/` — the stage skills (`timone-onboard`, `timone-grill`, `timone-prd`, `timone-adr`, …) — see [.claude/skills/README.md](.claude/skills/README.md) for authoring conventions
-- `standards/` — central standards library: a mandatory baseline (accessibility, UI/UX) plus per-stack entries, agent-drafted from primary sources and human-approved
+- `standards/` — central standards library in three tiers: a mandatory baseline (accessibility, UI/UX), per-stack entries, and review references applied by stage 8 (the code-smell list) — agent-drafted from primary sources and human-approved
 - `src/` — the Timone CLI (TypeScript, commander)
 - `projects/` *(gitignored)* — managed project repos, declared in `timone.yaml` and materialized by the CLI
 
@@ -27,6 +27,7 @@ Sessions run at the timone repo root — never inside a managed project ([ADR-00
 /timone-plan <project-name> <prd-ref | req IDs | work>       # stage 5 — cut a phase into vertical slices
 /timone-execute <project-name> <phase-NN>                    # stage 6 — execute an approved phase, TDD, slice by slice
 /timone-verify <project-name> <phase-NN>                     # stage 7 — check a completed phase against the criteria register
+/timone-deliver <project-name> <phase-NN>                    # stage 8 — two-axis review, then open the pull request
 ```
 
 `timone-onboard` is the one skill allowed to add a project — it does so via `timone projects add` (below), never by hand-editing `timone.yaml` ([ADR-0008](doc/adr/0008-manifest-writes-via-cli-command.md)). Every other skill validates its target against `timone.yaml`, requires the project to be cloned (`workspace sync` first), and touches only `projects/<name>/…` — the only files any skill ever commits there are process artifacts (`doc/…`, `CONTEXT.md`). See [process.md](process.md) for the full lifecycle these skills implement.
@@ -52,4 +53,4 @@ node dist/cli.js projects update <name> [--repo <url>] [--path <path>] \
 
 ## Status
 
-Phases 01–08 delivered: foundations (process spec, manifest, workspace sync), the document trio (grill/PRD/ADR skills), the standards library (11 entries approved), onboarding (`timone-onboard` + `projects add`), triage (`timone-triage` + `projects update`), planning (`timone-plan`), implementation (`timone-execute` + the TDD loop), and verification (`timone-verify` + the accessibility baseline's stage-7 leg). Eight stage skills now exist and have been exercised end to end against scratch fixtures — `timone-execute`'s dry run built a running Next.js + PostgreSQL application from an empty repository, and `timone-verify`'s then checked it black-box, caught two regressions and had them fixed. Next: deliver and improve skills, plus the two-axis delivery review (PRD-01.R13, R14, R17), then the inverted loop (PRD-02). [STATUS.md](STATUS.md) carries the plain-language version.
+Phases 01–09 delivered: foundations (process spec, manifest, workspace sync), the document trio (grill/PRD/ADR skills), the standards library (12 entries approved), onboarding (`timone-onboard` + `projects add`), triage (`timone-triage` + `projects update`), planning (`timone-plan`), implementation (`timone-execute` + the TDD loop), verification (`timone-verify` + the accessibility baseline's stage-7 leg), and delivery (`timone-deliver` + the two-axis review + the code-smell reference). **Nine stage skills** now exist and have been exercised end to end against scratch fixtures — `timone-execute`'s dry run built a running Next.js + PostgreSQL application from an empty repository, `timone-verify`'s then checked it black-box and had two regressions fixed, and `timone-deliver`'s opened two real pull requests carrying both review axes. **21 of PRD-01's 24 requirements are verified.** Next: the improve skill (R14), onboarding repair (R23), and standards-drift detection (R24, awaiting a grill session to rewrite its criteria) — then the inverted loop (PRD-02). [STATUS.md](STATUS.md) carries the plain-language version.

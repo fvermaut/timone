@@ -12,7 +12,7 @@ Timone makes AI agents follow a real engineering process instead of improvising.
 
 ## What "done" means here
 
-Timone's own requirements are written down as a numbered list in `doc/specs/prd/prd-01-process-layer.criteria.md` — one file, twenty-four entries, each stating what must be true and how to check it. **A requirement counts as verified only when an agent that did not build the thing has checked it and recorded evidence.** Right now **17 of the 24 are verified.** Four more are finished and waiting on your sign-off right now — see *Waiting on you*. That would make 21.
+Timone's own requirements are written down as a numbered list in `doc/specs/prd/prd-01-process-layer.criteria.md` — one file, twenty-four entries, each stating what must be true and how to check it. **A requirement counts as verified only when an agent that did not build the thing has checked it and recorded evidence.** **21 of the 24 are now verified** — you signed off the last four on 2026-07-29: the delivery skill, the two-review mechanism, the handover writer and this status file.
 
 ## Done
 
@@ -67,10 +67,9 @@ The seventh round is worth singling out: **the rule for choosing where to start 
 
 ## Waiting on you
 
-**Two things on Timone itself:**
+**One thing on Timone itself:**
 
-1. **Read the two pull requests and confirm this delivery skill did its job.** They are on the to-do app but the sign-off is Timone's — the pull requests *are* the evidence that the skill works. Links below.
-2. **Then four more requirements can be marked verified** — the delivery skill, the two-review mechanism, the handover writer (the skill that captures where work stands so a fresh session can pick it up) and this status file — taking Timone from 17 of 24 to 21 of 24.
+1. **Decide where this file should live.** It is stored in version control, so it can differ between lines of development — and on the to-do app it did: the main line had no copy at all, while the two open pieces of work each carried a different one, disagreeing about how much was waiting on you. Both copies were fixed by hand, but nothing stops them drifting apart again. Should this file live only on the main line, or must every stage that writes it reconcile the others? That is a decision rather than an edit, and it is the one thing phase 09 could not settle for you.
 
 **Three things on the to-do app** (`projects/scratch-app`), which has its own status file at `projects/scratch-app/STATUS.md`:
 
