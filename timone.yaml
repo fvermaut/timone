@@ -1,0 +1,30 @@
+projects:
+  scratch-app:
+    repo_url: /Users/fvermaut/dev/timone/tmp/fixtures/scratch-app.git
+    path: projects/scratch-app
+    stack:
+      - typescript
+      - nextjs
+      - prisma
+      - postgresql
+    bindings:
+      ticketing: github
+  scratch-app-2:
+    repo_url: /Users/fvermaut/dev/timone/tmp/fixtures/scratch-app-2.git
+    path: projects/scratch-app-2
+    stack:
+      - typescript
+      - nextjs
+      - prisma
+      - postgresql
+      - better-auth
+    bindings:
+      ticketing: github
+  scratch-existing:
+    repo_url: /Users/fvermaut/dev/timone/tmp/fixtures/scratch-existing.git
+    path: projects/scratch-existing
+    stack:
+      - javascript
+      - express
+    bindings:
+      ticketing: github
