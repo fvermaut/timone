@@ -16,11 +16,13 @@ Timone makes AI agents follow a real engineering process instead of improvising.
 - **The plumbing** — a manifest of managed projects, a command to clone them into place, and the rule that sessions run here at the Timone root rather than inside a client's repo.
 - **Seven stage skills work and have been tested against throwaway projects:** onboarding a new repo, sorting an incoming request, interviewing you for requirements, writing requirements down, recording architecture decisions, planning work into steps, and — new this weekend — **building the code**.
 - **A standards library** — 11 entries covering the preferred stack, plus two that apply to every project with no opt-out: accessibility (a legal requirement in the EU) and UI/UX.
-- **15 of Timone's 24 requirements are formally verified.**
+- **17 of Timone's 24 requirements are formally verified.**
 
 ## Just finished
 
-**The verify skill is built and proved — and it is waiting on your review** (2026-07-27). The rules, the skill, and four proof runs are done; only the paperwork step remains, and that is deliberately blocked until you sign off. Details in "Waiting on you" below.
+**The checking skill is done and signed off** (2026-07-28). All four parts landed: the rules, the skill, the proof runs, and your sign-off. Two more requirements are now formally verified, and the phase is closed with its report at `doc/plans/phases/reports/phase-08-complete.md`.
+
+An agent that never saw how the to-do app was built now checks it against its promises — running the real application, never reading its code or its tests. What it can't check by machine, it writes up as a script for you instead of guessing. What fails, it hands to a separate agent to fix, then re-checks everything from scratch. It took three rounds of fixes, and the second one is the one worth remembering — see below.
 
 ## Previously
 
@@ -36,35 +38,31 @@ Closing the phase turned up one last inconsistency, now fixed: the branch fix fr
 
 ## Next up
 
-**Your review of the verify skill, then the delivery skill.** Once you sign off (see "Waiting on you"), the last step of this phase marks two more requirements verified and closes it. After that: the skill that opens the pull request, with two independent reviews attached.
+**The delivery skill** — opens the pull request, with two independent reviews attached: one asking "does this follow our conventions", one asking "did it build the right thing", reported separately and never merged into one list. The to-do app is ready for it: two phases finished and checked, plus a set of cleanups that phase 01 deliberately postponed *to the delivery review*, so the conventions reviewer has real material waiting. One gap to close first: the "code smell baseline" that review is supposed to check against has never been written.
 
 ## What's left after this
 
-Four stages still have no skill:
+Two stages still have no skill:
 
 | Stage | What it does |
 |---|---|
-| **Verify** | A fresh agent that didn't watch the build checks the app actually does what was promised |
 | **Deliver** | Opens the pull request, with two independent reviews attached |
 | **Feedback** | Takes your "that's not what I meant" and works out whether the requirements were wrong or the code was |
 | *(inside Deliver)* | The two-review mechanism itself — one for conventions, one for whether it built the right thing |
 
-Two more are built but not formally signed off: the accessibility baseline, and the handover writer.
+Two things are built but not formally signed off: the handover writer, and the status file you're reading. Both are cheap to close on any future checking pass.
 
 **Then** the second half of the vision: instead of you typing instructions, a background service watches your tickets and drives these same stages itself, posting questions and results back to the ticket. Nothing on that has started.
 
 ## Waiting on you
 
-**Review the verify skill's proof runs and sign off** — this is the gate written into the plan, and nothing proceeds past it. What to look at, all on Timone itself unless stated:
+**Nothing on Timone itself.** Phase 08 closed on 2026-07-28 with your sign-off.
 
-1. **The verification reports** on the to-do app (`projects/scratch-app`): `doc/plans/phases/reports/phase-01-verification.md` (three passes) and `phase-02-verification.md` (one).
-2. **The two fixes the checker caused to be made** to the to-do app, each by a separate agent that was told only what was wrong, never how it was built.
-3. **One decision:** the second proof run deliberately broke something to see whether the checker would notice. The break and its repair are both still in the to-do app's history. Say if you'd rather they were removed.
-4. **One confirmation:** the screen-reader check on the to-do app is still unperformed, by your choice. The written script is in the phase-01 report whenever you want it.
+**Three things on the to-do app** (`projects/scratch-app`), all raised by the checker and none blocking Timone's own work:
 
-**Also newly waiting on you, from the to-do app itself** (raised by the checker, not by me): a decision on the 2 ms speed limit that phase 02 set — it passes today but only on a local database, and one reading was seen that would have failed it. Three options are laid out in `projects/scratch-app/doc/plans/phases/reports/phase-02-verification.md`.
-
-Everything else was closed on 2026-07-26 — see below.
+1. **The screen-reader check** — still unperformed, by your choice. The script is in `doc/plans/phases/reports/phase-01-verification.md` whenever you want it.
+2. **The 2 ms speed limit** phase 02 set — it passes today but only against a local database, and one reading was seen that would have failed it. Three options in `doc/plans/phases/reports/phase-02-verification.md`.
+3. **A stale line in that app's own standards record**, still listing the keyboard-focus problem as open when the checker fixed and re-verified it.
 
 ## What the proof runs found
 
@@ -90,8 +88,9 @@ The other two rounds: the code-writing skill was handing over an instruction wit
 - **The onboarding skill can't repair a project.** It refuses to run on any project already registered — which is every project that could have a file missing. Found when a project turned out to be missing a required file; the only way to fix it was to override the skill by hand. **Now a tracked requirement** (2026-07-26) rather than a loose note, so it gets planned and built like anything else.
 - **Nothing detects when the standards library drifts out of date.** Five entries were wrong this weekend, each correct when written, each found only because something finally ran it. **Now a tracked requirement** (2026-07-26) — but deliberately without a solution attached: version stamps, a re-check schedule, running the instructions in CI, or something else. That gets worked out in an interview session before anyone plans it, because picking a mechanism now would be guessing.
 - **Timone's own phases are planned by hand.** The planning skill only works on managed projects, by choice. So this file's status sections are hand-written, not generated.
-- **The hand-back-to-a-human path has never fired.** Specified, refined twice, never exercised. See "Just finished" above for why, and why chasing it further is a poor use of effort.
-- **Two finished pieces of work on the to-do app are stacked up with nowhere to go.** Both are complete and neither can be delivered, because the stages that check and ship work don't exist yet. They are the first thing the next two skills will unblock.
+- **The hand-back-to-a-human path has never fired — now true of two skills.** Both the code-writing skill's "I've tried twice and stopped" and the checker's "two repair attempts spent, over to you" are fully specified and have never triggered. Same reasoning both times: provoking them means building a trap designed to defeat a competent agent, which tests my ingenuity rather than the tool. The first real failure on a real project is their test.
+- **Two finished pieces of work on the to-do app are checked but still not shipped.** Both are complete and now verified; neither can be delivered, because the stage that opens pull requests doesn't exist yet. That's the next skill.
+- **The "code smell baseline" doesn't exist.** The delivery review is supposed to check code against our conventions *plus* a fixed list of code smells. That list has never been written, and the next phase needs it.
 
 ## Jargon key
 

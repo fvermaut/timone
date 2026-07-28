@@ -139,7 +139,7 @@
 ## R12 — Verify skill (standalone)
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a project with a criteria register and a runnable app
@@ -225,7 +225,7 @@
 ## R20 — Mandatory accessibility & UI/UX baseline
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN any project being onboarded
