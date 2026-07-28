@@ -20,6 +20,14 @@ Discipline for every entry (see `process.md`, "The standards library"):
 
 Every project's `doc/standards.md` includes the baseline unconditionally. Enforcement: PRD accessibility criteria (stage 3), verification checks (stage 7), delivery Standards review (stage 8).
 
+## Review references (applied by stage 8 to every project, overridable)
+
+| Entry | Scope | Status |
+|-------|-------|--------|
+| [code-smells.md](code-smells.md) | The fixed smell checklist the delivery Standards review checks a diff against | Draft 2026-07-28 |
+
+A project's own `doc/standards.md` overrides this tier on conflict — which is why it is not the mandatory baseline, a tier that admits no exceptions. It is also the sanctioned exception to the universality rule below: a review checklist shared across projects is universal by construction, and a per-project smell list would make two reviews incomparable.
+
 ## Stack entries (selected per project)
 
 | Entry | Scope | Status |
