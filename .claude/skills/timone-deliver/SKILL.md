@@ -50,6 +50,7 @@ You never write the criteria register. Only stage 7 does — including for a che
 - **Determine the base branch, and record why.** If the phase's branch was cut from the project's default branch, the base is the default branch. **If it was stacked on a previous phase's unmerged branch** (stage 6's stacking rule — the completion report says so), the base is **that parent branch**, and the PR body names which PR must merge first. Opening a stacked phase against the default branch would show the parent's commits as this phase's work and make the diff — the thing both axes review — a fiction.
 - **Push the branch to `origin`.** Delivery never merges, never rebases, never force-pushes, and never rewrites history: merge order is the human's.
 - **The diff range is `<base>...<head>`** (three dots — the merge-base). Both axes review that range and nothing else; compute it once and hand it to both.
+- **The review subject is the range's non-process files.** A phase's diff also carries its own process artifacts — the phase file, the handoff notes, the completion and verification reports, the criteria register, `STATUS.md`, `CONTEXT.md`. Those are not what either axis reviews, and "the current content of the files the diff touches" never overrides a read list: a file the diff contains but the axis's list forbids stays unread. Without this the two rules contradict each other, since the verification report is always in the range and always forbidden. A process artifact that *is* on an axis's own list — the criteria register, for Spec — is read from that list, and noticing what the diff did to it is fair game.
 
 ## The two axes
 
@@ -130,7 +131,9 @@ Silence is a valid report. An axis that always finds something is padding, not r
 <Anything the human needs that is neither a finding nor a verdict: the stacked-merge order, a re-delivery iteration marker, prerequisites that were absent.>
 ````
 
-**Re-delivery updates; it never forks.** A branch that already has an open PR gets that PR's body refreshed and a dated **iteration section** appended to this existing report — never a second PR, never a second file. State in the iteration what changed since the last delivery: new commits, re-run axes, findings that appeared or went away.
+**Re-delivery updates; it never forks.** A branch that already has an open PR gets that PR's body refreshed and a dated **iteration section** appended to this existing report — never a second PR, never a second file. State in the iteration what changed since the last delivery: new commits, whether the axes were re-run, findings that appeared or went away.
+
+**An axis is re-run when its subject changed, not when any commit landed.** The subject is the range's non-process files. Your own previous delivery is a commit on this branch, so a rule of "re-run on any new commit" makes every re-delivery re-review the delivery report it just wrote, and the next one re-review that — a loop with no fixed point. When only process artifacts moved since the last delivery, say so in the iteration section, carry the prior findings forward unchanged, and do not spawn the axes. When the subject did change, re-run both and report what appeared or went away.
 
 ## The pull request
 
