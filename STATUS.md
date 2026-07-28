@@ -1,6 +1,6 @@
 # Timone — Status
 
-**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-07-28**.
+**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-07-29**.
 
 > **This file is about Timone itself** — the tool. Each managed project has its own `STATUS.md` file; the to-do app's is at `projects/scratch-app/STATUS.md`. **Every file path in this file lives in the Timone repository unless it says otherwise.** When something here is about a project, it names the project and says so.
 
