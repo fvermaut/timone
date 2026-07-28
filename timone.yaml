@@ -1,6 +1,6 @@
 projects:
   scratch-app:
-    repo_url: /Users/fvermaut/dev/timone/tmp/fixtures/scratch-app.git
+    repo_url: https://github.com/fvermaut/scratch-app.git
     path: projects/scratch-app
     stack:
       - typescript
