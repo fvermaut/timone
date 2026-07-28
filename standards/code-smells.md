@@ -1,6 +1,7 @@
 # Standards — Code-Smell Review Reference
 
-> **Status: Draft 2026-07-28 — awaiting approval.** Not normative until approved.
+> **Status: Approved 2026-07-28 (fvermaut).**
+> ✏ Amended 2026-07-28 before approval, from 09e round 1: the Duplicated-code signal read "the same block", so a repeated one-liner did not trip it and a thrice-restated `updateTag` call went unreported. The row now says a repeated one-liner counts.
 > **Tier: review reference.** Applied by `process.md` stage 8's **Standards** review to every project, and **overridden by that project's `doc/standards.md` on any conflict**. Unlike the mandatory baseline it admits project exceptions; unlike a stack entry it is not selected per project.
 > **Scope: what a reviewer can see in a diff**, without running the code and without knowing the project's history. A smell is a *suspicion*, not a defect — "a certain structure in the code that suggests, sometimes screams for, refactoring" [1]. The reviewer labels it as such; the human decides.
 

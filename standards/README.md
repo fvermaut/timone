@@ -24,7 +24,7 @@ Every project's `doc/standards.md` includes the baseline unconditionally. Enforc
 
 | Entry | Scope | Status |
 |-------|-------|--------|
-| [code-smells.md](code-smells.md) | The fixed smell checklist the delivery Standards review checks a diff against | Draft 2026-07-28 |
+| [code-smells.md](code-smells.md) | The fixed smell checklist the delivery Standards review checks a diff against | Approved 2026-07-28 |
 
 A project's own `doc/standards.md` overrides this tier on conflict — which is why it is not the mandatory baseline, a tier that admits no exceptions. It is also the sanctioned exception to the universality rule below: a review checklist shared across projects is universal by construction, and a per-project smell list would make two reviews incomparable.
 
