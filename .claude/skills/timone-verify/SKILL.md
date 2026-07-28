@@ -95,7 +95,7 @@ Each criterion carries a `Verify-via` channel; each of its clauses gets its own 
 1. Every FAIL (and REGRESSION) in the pass produces a **defect brief** in the template below — written from observation, quoting the register's clause, never speculating about cause in the code.
 2. A **fresh fix context** receives the brief, the repository, and `doc/standards.md`; it implements, commits `fix: verify NN — <criterion-id> <slug>` on the phase's branch, and returns the commit SHA plus a one-paragraph note. You ingest **only the SHA** — never its transcript, never its diff.
 3. **One full re-verify** — everything in scope except already-scripted HUMAN-CHECKs. A fix is a code change made by a context that did not watch the build; nothing short of a full re-run is defensible, because you cannot know what else it touched without reading it.
-4. That brief-fix-reverify cycle is **one loop**. **Max 2 loops after the initial pass.** At exhaustion: remaining failures recorded with evidence, their register lines flipped to `failed`, and the work goes to the human via stage 9 — the report's handed-to-the-human section says exactly what remains and why. (`timone-improve`, stage 9's skill, does not exist yet — phase 09 and later; name it anyway and hand the human the report.)
+4. That brief-fix-reverify cycle is **one loop**. **Max 2 loops after the initial pass.** At exhaustion: remaining failures recorded with evidence, their register lines flipped to `failed`, and the work goes to the human via stage 9 — the report's handed-to-the-human section says exactly what remains and why. (`timone-improve`, stage 9's skill, does not exist yet — it arrives in phase 10; name it anyway and hand the human the report.)
 
 **Mechanism is an example, never a requirement.** Today the obvious instrument for the fix context is a sub-agent spawned from this session with the brief as its prompt; PRD-02's daemon will spawn the same contract through the Agent SDK. Anything that receives those inputs and returns a SHA satisfies the contract.
 
@@ -208,8 +208,6 @@ Report to the user, in this order:
 3. Fix loops consumed, with the fix commit SHAs.
 4. The report's path, and every script waiting on a human.
 5. Anything handed to the human via stage 9.
-6. The next invocation: `/timone-deliver <project>`.
-
-`timone-deliver` (stage 8) does not exist yet — it arrives in phase 09. Name it anyway, as every other stage skill names its successor; a stage that hides the next one leaves the human to remember the process.
+6. The next invocation: `/timone-deliver <project> <phase-NN>` — naming the phase, because delivery refuses to pick one for the user just as you do.
 
 Verification observes and reports. It never fixes with its own hands, never merges, and never opens a PR. Stop here.
