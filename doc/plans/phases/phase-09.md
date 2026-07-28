@@ -227,7 +227,9 @@ git log --stat | grep -E "\.claude/|timone\.yaml"; echo "exit: $? (1 = clean, as
 ```
 
 - [ ] Run 1: PR open against `main`; both axes present under distinct headings and never merged into one list; Spec findings quote requirement IDs; R7's HUMAN-CHECK appears unticked with its script's location; delivery report committed before the PR opened
-- [ ] Run 1: the Standards axis found the three deferred refactorings and committed none of them
+- [ ] Run 1: the deferred refactorings were found and none was committed
+
+   > ✏ Refined 2026-07-28 (from 09e run 1): the assertion **presumed all three deferred items were Standards material, and one is not.** `useOptimistic` on the controlled checkbox is a behaviour concern and was caught by the **Spec** axis against R6's "immediately" clause — the axes' own division working, not a miss. Of the two that are Standards material, the mutex duplication was found and the action wrappers' thrice-copied `updateTag("todos")` was not. That miss was real and instrument-side: `code-smells.md`'s Duplicated-code signal read "the same **block**", so a repeated one-liner did not trip it. The reference now says a repeated one-liner counts, and the axis was re-run against the corrected reference.
 - [ ] Run 2: base branch is `phase-01-to-do-list-vertical`, stated with the merge-order note; the un-anchored case is reported, not invented around
 - [ ] Run 3: refusal names the verification gate and routes to `timone-verify`, having been reached before the platform gate
 - [ ] Run 4: one PR, one delivery report, one appended iteration section

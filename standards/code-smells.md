@@ -41,7 +41,7 @@
 
 | Smell | Signal in the diff | Usually indicates |
 |---|---|---|
-| **Duplicated code** [1] | The same block appearing a second time (tolerable) or a third (not) — the rule of three | An extraction is now cheaper than the copies. **Exception:** test code prefers visible duplication over a homegrown DSL (see `testing.md`) |
+| **Duplicated code** [1] | The same block appearing a second time (tolerable) or a third (not) — the rule of three. **A repeated one-liner counts:** the same call or responsibility restated in every sibling function is a duplicated *decision*, and the copies are what the fourth sibling will forget | An extraction is now cheaper than the copies. **Exception:** test code prefers visible duplication over a homegrown DSL (see `testing.md`) |
 | **Comment as deodorant** [1][3] | A comment explaining *what* the code does rather than *why* it does it | The code needs the name the comment is supplying |
 | **Speculative generality** [1] | An abstraction, hook, option or parameter with exactly one caller and no requirement behind it | Stage 6's "no speculative features", surfacing at review |
 | **Dead code** [1] | A branch no caller can reach, a flag never set to its other value | Removal — but only when tooling did not already flag it |
