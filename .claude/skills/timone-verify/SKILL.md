@@ -184,7 +184,7 @@ Read: <the allowed-list artifacts actually read, by path>. Not read: handoffs, d
 
 ## Status reporting
 
-Before finishing, update the target project's `STATUS.md` — plain language: what was checked, what passed, what failed and got fixed, what is waiting on the human (every unperformed HUMAN-CHECK script belongs there), always naming which repository each item sits in. When verifying Timone's own work, the same obligation lands on Timone's root `STATUS.md`.
+Before finishing, update the target project's `STATUS.md` — **on the project's default branch, never on the phase branch** (`process.md`, Status reporting: every stage rewrites the whole file, so a branch-local copy conflicts the moment a second branch merges). Commit it there as its own `docs: STATUS.md — <theme>` commit, then **return the clone to the phase branch you were on**. Because the file lives on the default branch while the work does not, every item it carries must name which branch and which pull request it belongs to. Content — plain language: what was checked, what passed, what failed and got fixed, what is waiting on the human (every unperformed HUMAN-CHECK script belongs there), always naming which repository each item sits in. When verifying Timone's own work, the same obligation lands on Timone's root `STATUS.md`.
 
 ## Workflow
 

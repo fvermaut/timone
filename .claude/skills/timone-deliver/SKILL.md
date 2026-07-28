@@ -181,7 +181,7 @@ Record the PR URL in the delivery report only if a commit already has to be made
 
 ## Status reporting
 
-Before finishing, update the target project's `STATUS.md` — plain language: what is now open for review, where the PR is, what the two reviews found (separately), what is waiting on the human before merge, and always naming which repository each item sits in. When delivering Timone's own work, the same obligation lands on Timone's root `STATUS.md`.
+Before finishing, update the target project's `STATUS.md` — **on the project's default branch, never on the phase branch** (`process.md`, Status reporting: every stage rewrites the whole file, so a branch-local copy conflicts the moment a second branch merges). Commit it there as its own `docs: STATUS.md — <theme>` commit, then **return the clone to the phase branch you were on**. This is also why the PR body and the delivery report carry the status the PR needs: the PR's own branch never gains a `STATUS.md` edit. Content — plain language: what is now open for review, where the PR is, what the two reviews found (separately), what is waiting on the human before merge, and always naming which repository each item sits in. When delivering Timone's own work, the same obligation lands on Timone's root `STATUS.md`.
 
 ## Workflow
 

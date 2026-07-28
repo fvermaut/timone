@@ -67,15 +67,14 @@ The seventh round is worth singling out: **the rule for choosing where to start 
 
 ## Waiting on you
 
-**One thing on Timone itself:**
+**Nothing on Timone itself.** You settled the last open question on 2026-07-29: this file is written only on a project's main line, never on a working branch. Every stage rewrites the whole file, so two branches editing it collide the moment the second one merges — a collision in the one document meant to tell you where things stand. That rule is now in the rulebook and in the two skills that write it. **The to-do app still carries the old arrangement on both its open branches; fixing that is listed below.**
 
-1. **Decide where this file should live.** It is stored in version control, so it can differ between lines of development — and on the to-do app it did: the main line had no copy at all, while the two open pieces of work each carried a different one, disagreeing about how much was waiting on you. Both copies were fixed by hand, but nothing stops them drifting apart again. Should this file live only on the main line, or must every stage that writes it reconcile the others? That is a decision rather than an edit, and it is the one thing phase 09 could not settle for you.
-
-**Three things on the to-do app** (`projects/scratch-app`), which has its own status file at `projects/scratch-app/STATUS.md`:
+**Four things on the to-do app** (`projects/scratch-app`), which has its own status file at `projects/scratch-app/STATUS.md`:
 
 1. **Pull request #1 — the to-do list itself:** <https://github.com/fvermaut/scratch-app/pull/1>. Six conventions findings, three requirements findings, and one item that cannot be signed off without you (below).
 2. **Pull request #2 — the speed check:** <https://github.com/fvermaut/scratch-app/pull/2>. It sits **on top of** #1, so #1 has to merge first. It also asks you to decide a speed limit: the check demands a list read finish in under 2 milliseconds, which passes comfortably here but was seen to fail once on a busy machine, and the number was never measured — it was guessed.
-3. **Listen to the app with a screen reader** (VoiceOver + Safari) and confirm the controls are announced sensibly. No automated test can settle this; your own accessibility standard says so outright. The step-by-step script is in `doc/plans/phases/reports/phase-01-verification.md` **in the scratch-app repository, not this one**.
+3. **The status file arrangement on that project needs correcting.** Its main line has no copy at all, and the two open branches carry different ones — so merging the second pull request will collide on it. Either I fix it now (one small commit on each open pull request), or it waits and becomes working material for the feedback skill, which is the next thing to build. Your call.
+4. **Listen to the app with a screen reader** (VoiceOver + Safari) and confirm the controls are announced sensibly. No automated test can settle this; your own accessibility standard says so outright. The step-by-step script is in `doc/plans/phases/reports/phase-01-verification.md` **in the scratch-app repository, not this one**.
 
 ## Known problems not yet fixed
 
