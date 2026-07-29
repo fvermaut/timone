@@ -33,7 +33,7 @@ Two independent reviews run before the pull request opens, and **they are delibe
 
 **A twelfth standards entry was written and you approved it:** a fixed list of code smells (`standards/code-smells.md`) — twenty things a reviewer looks for in a change, each with the signal that identifies it. The conventions review had been specified against this list for weeks, and the list had never existed.
 
-**Two pull requests are now open on the to-do app** and waiting for you. Both are listed under *Waiting on you*.
+**Two pull requests were opened on the to-do app. You merged the first on 2026-07-29** — the first work Timone has ever put through the whole process end to end, from an empty repository to merged. The second is still open and listed under *Waiting on you*.
 
 ## What the proof runs found
 
@@ -69,12 +69,11 @@ The seventh round is worth singling out: **the rule for choosing where to start 
 
 **Nothing on Timone itself.** You settled the last open question on 2026-07-29: this file is written only on a project's main line, never on a working branch. Every stage rewrites the whole file, so two branches editing it collide the moment the second one merges — a collision in the one document meant to tell you where things stand. That rule is now in the rulebook and in the two skills that write it. **The to-do app still carries the old arrangement on both its open branches; fixing that is listed below.**
 
-**Four things on the to-do app** (`projects/scratch-app`), which has its own status file at `projects/scratch-app/STATUS.md`:
+**Three things on the to-do app** (`projects/scratch-app`), which has its own status file at `projects/scratch-app/STATUS.md` — now on its main line only:
 
-1. **Pull request #1 — the to-do list itself:** <https://github.com/fvermaut/scratch-app/pull/1>. Six conventions findings, three requirements findings, and one item that cannot be signed off without you (below).
-2. **Pull request #2 — the speed check:** <https://github.com/fvermaut/scratch-app/pull/2>. It sits **on top of** #1, so #1 has to merge first. It also asks you to decide a speed limit: the check demands a list read finish in under 2 milliseconds, which passes comfortably here but was seen to fail once on a busy machine, and the number was never measured — it was guessed.
-3. **The status file arrangement on that project needs correcting.** Its main line has no copy at all, and the two open branches carry different ones — so merging the second pull request will collide on it. Either I fix it now (one small commit on each open pull request), or it waits and becomes working material for the feedback skill, which is the next thing to build. Your call.
-4. **Listen to the app with a screen reader** (VoiceOver + Safari) and confirm the controls are announced sensibly. No automated test can settle this; your own accessibility standard says so outright. The step-by-step script is in `doc/plans/phases/reports/phase-01-verification.md` **in the scratch-app repository, not this one**.
+1. **~~Pull request #1 — the to-do list itself.~~ Merged 2026-07-29.** Its nine review findings were deliberately not acted on; they are the working material the feedback skill will be built against. Nothing was lost by merging.
+2. **Pull request #2 — the speed check:** <https://github.com/fvermaut/scratch-app/pull/2>. Now that #1 has merged, this one points at the main line and merges cleanly. It still asks you to decide a speed limit: the check demands a list read finish in under 2 milliseconds, which passes comfortably here but was seen to fail once on a busy machine, and the number was never measured — it was guessed.
+3. **Listen to the app with a screen reader** (VoiceOver + Safari) and confirm the controls are announced sensibly. No automated test can settle this; your own accessibility standard says so outright. The step-by-step script is in `doc/plans/phases/reports/phase-01-verification.md` **in the scratch-app repository, not this one**. Note this is now merged work with one accessibility requirement still unconfirmed.
 
 ## Known problems not yet fixed
 
@@ -83,7 +82,7 @@ The seventh round is worth singling out: **the rule for choosing where to start 
 - **Nothing detects when the standards library goes out of date.** Five entries were wrong in one weekend, each correct when written, each found only because something finally ran it. Now a tracked requirement — deliberately without a solution attached, because picking a mechanism now would be guessing. It needs an interview session first.
 - **Timone's own work is planned by hand.** The planning skill only works on managed projects, by choice. So this file's sections are hand-written, not generated.
 - **The give-up-and-ask-a-human path has never fired — now true of three skills.** Building, checking and delivering all have a "I've tried and stopped, over to you" route, fully written and never triggered. Same reasoning each time: provoking it means building a trap designed to defeat a competent agent, which tests my ingenuity rather than the tool. The first real failure on real work is its test.
-- **Nothing is merged.** Both pieces of work on the to-do app are finished, checked, and now open for review — but merging is yours and neither has been merged.
+- **The status file was fixed by hand on a live pull request.** The to-do app had no copy on its main line and two divergent copies on its branches — the collision you predicted, which fired the moment the second merge was attempted. All three now agree. What is *not* solved is prevention: the rule is written down, but nothing checks that a stage obeyed it.
 
 ## Jargon key
 

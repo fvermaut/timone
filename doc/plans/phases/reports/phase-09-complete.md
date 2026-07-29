@@ -54,6 +54,8 @@ Also fixed: `timone-verify`'s Closing prescribed `/timone-deliver <project>` wit
 
 **Do not act on those findings by hand.** Stage 8 deliberately did not apply them, and stage 9 is the stage that decides intent-versus-implementation and executes remediation after confirmation.
 
-**Fixture state.** `scratch-app` is now a private GitHub repository (`github.com/fvermaut/scratch-app`) with `main` plus both phase branches pushed; `scratch-app-2` and `scratch-existing` remain on local bare repos and are the standing non-GitHub cases. `gh` 2.96.0 is installed and authenticated as `fvermaut`. Neither PR is merged; merging is fvermaut's and `main` still carries no application code.
+**Fixture state.** `scratch-app` is now a private GitHub repository (`github.com/fvermaut/scratch-app`) with `main` plus both phase branches pushed; `scratch-app-2` and `scratch-existing` remain on local bare repos and are the standing non-GitHub cases. `gh` 2.96.0 is installed and authenticated as `fvermaut`.
+
+> ✏ Amended 2026-07-29, after this report was written: **PR #1 was merged by fvermaut**, so `main` now carries the application. PR #2 was retargeted from the phase-01 branch to `main` and is still open, still carrying the 2 ms budget decision. A process change landed at the same time — **`STATUS.md` is written only on a project's default branch, never on a work branch** (`process.md` § Status reporting) — because every stage rewrites the whole file and two branches editing it collide on merge. `scratch-app` was already in that state and the collision fired on the attempt to merge PR #2; it was resolved by hand in favour of the main-line copy, and `git merge-tree` now reports the branch clean. The stage-7 and stage-8 skills carry the rule.
 
 **Still barred from planning:** R24 (standards-drift detection) until a `timone-grill` session rewrites its criteria. R14 and R23 are plannable.
