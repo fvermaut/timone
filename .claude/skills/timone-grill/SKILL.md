@@ -10,6 +10,8 @@ Implements stage 2 of [the Timone process](../../../process.md). That spec is no
 
 The output of this stage is a **resolved decision tree** (in conversation) plus **inline glossary updates** in the target project's `CONTEXT.md`. The closing gate: all branches resolved and the summary accepted by the human.
 
+**Too big for one session?** If the interview reveals multiple independent unresolved decision areas — research needed between conversations, decisions blocking other decisions — stop and suggest **`timone-wayfind`**, stage 2's at-scale mode: it charts the topic as a map of decision tickets and resolves them one session at a time, wrapping this interview discipline per ticket.
+
 ## Target-project resolution (do this first)
 
 1. The target project is the one named in the invocation argument or prompt.

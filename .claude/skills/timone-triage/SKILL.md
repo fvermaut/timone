@@ -40,7 +40,7 @@ The entry point follows the stage-1 routing table — restated here, no variants
 
 | Kind | Entry point |
 |---|---|
-| feature | **`timone-grill`** (stage 2) — or **`timone-prd`** (stage 3) directly, *only* when the requirements are already unambiguous; skipping grill must be justified in the rationale |
+| feature | **`timone-grill`** (stage 2) — or **`timone-prd`** (stage 3) directly, *only* when the requirements are already unambiguous; skipping grill must be justified in the rationale. When the request spans multiple independent unresolved decision areas, *recommend* **`timone-wayfind`** (stage 2 at scale) in the rationale — the human decides |
 | bug / post-delivery observation | **`timone-improve`** (stage 9) |
 | chore / technical enabler | **`timone-plan`** (stage 5), un-anchored — the phase gets stamped un-anchored per the PRD-anchoring rule, with human agreement at planning time |
 | question | no pipeline entry — **answer it now**, from the project's artifacts (`doc/standards.md`, ADRs, specs, code) rather than from memory |
