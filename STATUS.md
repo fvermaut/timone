@@ -63,7 +63,7 @@ The seventh round is worth singling out: **the rule for choosing where to start 
 
 | Stage | What it does | State |
 |---|---|---|
-| **Feedback** | Takes your "that's not what I meant" and works out whether the requirements were wrong or the code was | **The one real gap.** Next to build. |
+| **Feedback** | Takes your "that's not what I meant" and works out whether the requirements were wrong or the code was | **The one real gap.** The plan for building it is written and waiting for your approval — see *Waiting on you*. |
 | **Deployment** | Releases approved work to a live environment | Deliberately later — defined in `process.md`, the written rulebook every skill obeys, no skill yet |
 | **Maintenance** | Turns dependency updates and production issues into new incoming requests | Deliberately later — defined in `process.md`, the written rulebook every skill obeys, no skill yet |
 
@@ -71,7 +71,9 @@ The seventh round is worth singling out: **the rule for choosing where to start 
 
 ## Waiting on you
 
-**Nothing on Timone itself.** You settled the last open question on 2026-07-29: this file is written only on a project's main line, never on a working branch. Every stage rewrites the whole file, so two branches editing it collide the moment the second one merges — a collision in the one document meant to tell you where things stand. That rule is now in the rulebook and in the two skills that write it. **The to-do app still carries the old arrangement on both its open branches; fixing that is listed below.**
+**One thing on Timone itself: approve the feedback-stage plan** (2026-08-01, `doc/plans/phases/phase-10.md` in the Timone repository). It is the written plan for the last missing skill — the one that takes feedback on delivered work and acts on it. Its two ground rules, for your judgement: the feedback skill **never changes code itself** — it sorts each piece of feedback into *we asked for the wrong thing*, *it was built wrong*, or *the paperwork is wrong*, proposes a response, and moves only after you confirm each item (you can also decline or postpone any of them); and anything that does touch code goes back through the normal build → check → deliver stages, so no change ever lands unchecked. Proving it will finally spend the material saved for exactly this: the nine review findings from the to-do app's first pull request, the old "completed todos reappear" bug report from day one (long since fixed — the skill must recognize that rather than invent work), and one case where a review suggested the *requirements* should change. Nothing else on Timone waits on a human.
+
+**Previously settled:** You settled the last open question on 2026-07-29: this file is written only on a project's main line, never on a working branch. Every stage rewrites the whole file, so two branches editing it collide the moment the second one merges — a collision in the one document meant to tell you where things stand. That rule is now in the rulebook and in the two skills that write it. **The to-do app still carries the old arrangement on both its open branches; fixing that is listed below.**
 
 **Three things on the to-do app** (`projects/scratch-app`), which has its own status file at `projects/scratch-app/STATUS.md` — now on its main line only:
 
