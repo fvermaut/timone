@@ -45,7 +45,7 @@ The entry point follows the stage-1 routing table — restated here, no variants
 | chore / technical enabler | **`timone-plan`** (stage 5), un-anchored — the phase gets stamped un-anchored per the PRD-anchoring rule, with human agreement at planning time |
 | question | no pipeline entry — **answer it now**, from the project's artifacts (`doc/standards.md`, ADRs, specs, code) rather than from memory |
 
-Name the entry-point skill even if it is not implemented yet (`timone-plan`, `timone-improve`): the record describes the process, not what currently exists.
+Name the entry-point skill even if it is not implemented yet (today: `timone-deploy`, `timone-maintain`): the record describes the process, not what currently exists.
 
 ## Record the classification
 

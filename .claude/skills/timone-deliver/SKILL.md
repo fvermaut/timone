@@ -204,8 +204,6 @@ Report to the user, in this order:
 3. Both axes' finding counts, **stated separately** — never a combined total.
 4. The delivery report's path.
 5. Every outstanding HUMAN-CHECK now carried in the PR.
-6. The next invocation, for anything the human wants acted on: `/timone-improve <project> <what to act on>`.
-
-`timone-improve` (stage 9) does not exist yet — it arrives in phase 10. Name it anyway, as every other stage skill names its successor; a stage that hides the next one leaves the human to remember the process.
+6. The next invocation, for anything the human wants acted on: `/timone-improve <project> <what to act on>` — stage 9 names the source it is given and never hunts for one, so name the findings or the report.
 
 Delivery presents and records. It never fixes with its own hands, never merges, and never writes the criteria register. Stop here.

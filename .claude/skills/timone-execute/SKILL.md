@@ -240,6 +240,4 @@ Report to the user, in this order:
 4. The completion report's path.
 5. The next invocation: `/timone-verify <project> <phase-NN>` — naming the phase just executed. Verification refuses to pick a phase for the user, so a handover that omits it strands any project with more than one phase.
 
-`timone-verify` (stage 7) does not exist yet — it arrives in phase 08. Name it anyway, as every other stage skill names its successor; a stage that hides the next one leaves the human to remember the process.
-
 Execution implements. It never verifies its own work and never opens a PR. Stop here.
