@@ -63,9 +63,10 @@ Each ticket is a child of the map, body = the question it resolves, sized to one
 |---|---|---|
 | `research` | AFK | a fresh-context research sub-agent (Explore/general-purpose) reading docs, third-party APIs, knowledge bases; findings posted as the resolution comment, assets linked not pasted |
 | `grilling` | HITL — **the default** | the `timone-grill` interview discipline scoped to the ticket's question: one question at a time, recommended answers, codebase-answerable questions answered from the codebase, glossary maintenance in `CONTEXT.md` throughout |
+| `prototype` | HITL | `timone-prototype` ([ADR-0011](../../../doc/adr/0011-prototype-convention.md)): a cheap, throwaway artifact to react to when "how should it look/behave" is the key question — a `prototype/NN-<slug>` branch served at a preview URL, never merged, deleted once the reaction is recorded; the human's reaction *is* the resolution |
 | `task` | HITL or AFK | manual work that unblocks a decision (signing up for a service, provisioning access, moving data so its shape can be seen) — done by the agent where possible, else handed to the human as a precise checklist; the resolution records what was done and the resulting facts later tickets depend on |
 
-A HITL ticket resolves only through live exchange with the human — never answer the human's side yourself. The `prototype` type is deferred (ADR-0010): when "how should it look/behave" is the key question, say so to the human and leave it in the fog or grill it.
+A HITL ticket resolves only through live exchange with the human — never answer the human's side yourself.
 
 **Claiming:** assign the ticket to yourself **before any work** — the assignee *is* the claim; open + unassigned = unclaimed. **Blocking:** use GitHub's native sub-issue and dependency relationships where `gh`/GraphQL supports them (verify once per repo); where unavailable, fall back loudly to a body line `Blocked by: #N, #M`. The **frontier** is the open, unblocked, unclaimed children. Expect other sessions to be editing the tracker concurrently.
 

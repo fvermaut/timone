@@ -174,14 +174,15 @@ When **any requirement covers user-facing functionality**, the criteria register
 ## Workflow
 
 1. **Draft the requirement list first.** Before writing any file, present the user a numbered list: ID, title, priority, verify-via, one-line criterion summary. Include the proposed out-of-scope list, and flag which requirements are user-facing (and thus carry accessibility criteria).
-2. **Quiz the user:**
+2. **Offer prototype-assisted approval** when the work has a user-facing surface — optional, the human decides. If accepted, invoke `timone-prototype` ([ADR-0011](../../../doc/adr/0011-prototype-convention.md)) to build a cheap throwaway prototype of the proposed requirements and stand it up at a preview URL. Walk the user through it, mapping what they see to requirement IDs, and fold their reactions into the requirement list as edits. **The gate is unchanged** — approval lands on the requirement list, never on the prototype — and every divergence between what the prototype shows and what the list says (error paths, MUST/SHOULD priorities, non-UI requirements, accessibility criteria — the things a prototype under-specifies) is surfaced explicitly before approval is requested.
+3. **Quiz the user:**
     - Are the MUST/SHOULD/NICE assignments right?
     - Is any MUST criterion untestable as written?
     - Is anything missing, or captured that was never agreed?
     - Is the out-of-scope list complete?
     - For user-facing requirements: are the proposed accessibility criteria right?
-3. **Iterate until approved.** The stage gate is explicit: the human approves the requirement list **before** any file is written. Only then write both files.
-4. **Hand off:** suggest running `timone-plan` with a pointer to the new PRD. If the PRD came from a grill session, note that in the narrative's Problem section as the source.
+4. **Iterate until approved.** The stage gate is explicit: the human approves the requirement list **before** any file is written. Only then write both files.
+5. **Hand off:** suggest running `timone-plan` with a pointer to the new PRD. If the PRD came from a grill session, note that in the narrative's Problem section as the source.
 
 ---
 
@@ -195,3 +196,4 @@ When **any requirement covers user-facing functionality**, the criteria register
 - [ ] Out-of-scope section is non-empty (an empty one means scope was never questioned)
 - [ ] User-facing requirements carry accessibility acceptance criteria from the baseline (PRD-01.R20)
 - [ ] User approved the requirement list before files were written
+- [ ] If a prototype assisted the approval: divergences between prototype and list were surfaced before sign-off, and the `prototype/NN-<slug>` branch is deleted (never merged)
