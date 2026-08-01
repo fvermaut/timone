@@ -1,6 +1,6 @@
 # Phase 10: Feedback — `timone-improve` and the remediation loop
 
-> **Status:** Awaiting approval
+> **Status:** Approved for execution by fvermaut 2026-08-01
 
 > **Companion phases:** [Phase 02](phase-02.md) (skill authoring conventions — the mandatory target-project resolution preamble, and the artifact rule this phase reconciles a fourth time), [Phase 05](phase-05.md) (triage's routing table sends "bug / post-delivery observation" here; its fixture records are this phase's oldest intake), [Phase 07](phase-07.md) (the execute machinery every code remediation is dispatched through), [Phase 08](phase-08.md) (stage 7's fix-loop shape, its REGRESSION label — which stage 9 "reads differently" — and its loop-exhaustion route, which lands here), [Phase 09](phase-09.md) (the delivery review whose findings are this phase's richest intake, and the re-delivery iteration mechanics a remediation on an open PR rides). Governing decisions: [ADR-0004](../../adr/0004-github-first-adapter-pair.md) (GitHub-first — when the feedback's source is a PR or issue, the record links back to it), [ADR-0006](../../adr/0006-specs-in-repo-single-source-of-truth.md) (the PRD pair is the single source of truth for intent — which is why intent changes amend it before any code moves, and why the feedback record is a committed artifact rather than PR prose), [ADR-0007](../../adr/0007-sessions-at-timone-root.md) (sessions at the timone root; the skill resolves a target project and works only inside `projects/<name>/`).
 
