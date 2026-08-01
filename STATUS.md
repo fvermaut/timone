@@ -1,6 +1,6 @@
 # Timone — Status
 
-**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-07-29**.
+**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-08-01**.
 
 > **This file is about Timone itself** — the tool. Each managed project has its own `STATUS.md` file; the to-do app's is at `projects/scratch-app/STATUS.md`. **Every file path in this file lives in the Timone repository unless it says otherwise.** When something here is about a project, it names the project and says so.
 
@@ -22,6 +22,8 @@ Timone's own requirements are written down as a numbered list in `doc/specs/prd/
 - **A standards library** — twelve written entries. Ten cover the preferred technology choices; two apply to every project with no exceptions (accessibility, which is a legal requirement in the EU, and visual/interaction design). The twelfth is new today, below.
 
 ## Just finished
+
+**A new skill for big, foggy ideas** (2026-08-01). Until now, digging requirements out of you happened in a single interview sitting — fine for one feature, hopeless for an idea too large to settle in one conversation. The new `timone-wayfind` skill charts such an idea as a **map**: a list of open questions kept on the project's issue tracker, each sized to one working session, with the dependencies between them drawn in so it is always visible which questions are ready to tackle. Sessions then resolve them one at a time — interviewing you, or researching alone — until nothing is left to decide and the requirements get written down the normal way. The map is scratch paper, not the record: any decision that matters is promptly moved into the permanent documents, because tickets organise work and never hold the truth — a rule you set on day one, which this design keeps (the reasoning is recorded in `doc/adr/0010-wayfinder-discovery-maps.md`). It is adapted from a published skill by Matt Pocock, with two deliberate cuts: it never builds anything (building has its own stages), and its "prototype" question type is left out until we decide where throwaway prototypes should live. It has not yet been used on a real idea — the first oversized one is its test.
 
 **The delivery skill is built, and it has opened two real pull requests** (2026-07-28). This was the last stage before feedback.
 
