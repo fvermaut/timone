@@ -1,0 +1,17 @@
+{
+  // Managed projects under projects/ are independent git repos (gitignored here).
+  // VS Code only auto-detects nested repos one level deep by default, so it never
+  // sees projects/<name>/.git — raise the depth and name them explicitly so they
+  // all show up as separate repositories in the Source Control tab.
+  "git.autoRepositoryDetection": true,
+  "git.repositoryScanMaxDepth": 2,
+  "git.scanRepositories": [
+    "projects/scratch-app",
+    "projects/scratch-app-2",
+    "projects/scratch-existing"
+  ],
+  "git.repositoryScanIgnoredFolders": ["node_modules", "dist", "tmp"],
+  // Keep every repo visible in the Source Control view instead of collapsing to
+  // the active one.
+  "scm.alwaysShowRepositories": true
+}

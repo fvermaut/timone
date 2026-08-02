@@ -119,6 +119,8 @@ For each item, one question with **three** answers:
 
 **Everything else you commit — the feedback record, PRD-pair amendments, `STATUS.md` — lands on the project's default branch**, and you **return the clone to the branch you found it on**.
 
+**Push what you commit.** A record that exists only in a local clone is not a committed artifact in any sense the process means: the human reads the default branch on the remote, a PR comment linking a record nobody can open is worse than no comment, and the next stage clones from `origin`. Push the default branch after the last of your commits, before commenting anywhere. Never force-push, never rebase, never touch a branch that is not yours to move.
+
 ## The proposal, and the gate
 
 Present the proposal, then **stop**. Nothing is committed, amended or dispatched before the human answers — not the "obvious" ones, not the record-layer ones.
@@ -154,7 +156,7 @@ Recommend a decision for every item — a proposal with no recommendation makes 
 - **Same ID forever.** Criteria updated **in place**, never renumbered, never reused, never deleted.
 - `Status: revised` — or `DEPRECATED` with a one-line reason, the block staying.
 - A dated `✏ <YYYY-MM-DD>:` marker naming the feedback record.
-- The register's **intent transition lands in the same commit** as the amendment that motivates it. That is your one register write. **You never write a verdict** — `draft` / `verified` / `failed` are stage 7's, always.
+- The register's **intent transition lands in the same commit** as the amendment that motivates it, messaged `docs: amend PRD-NN — <requirement IDs> <what moved>`. That is your one register write. **You never write a verdict** — `draft` / `verified` / `failed` are stage 7's, always.
 - **Then dispatch a verification pass — always, even when no code moves.** A `revised` criterion drops out of the derived regression set until stage 7 re-verifies it against its new wording, so an intent amendment with nothing queued behind it leaves a MUST quietly un-regression-checked. This is an obligation, not a disclosure: say it in the record *and* hand over the invocation. **One carve-out:** when the amendment's follow-on is itself plan work, that chain's own stage-7 leg *is* the pass — record the obligation and name what discharges it, rather than handing over a `/timone-verify` aimed at a phase stage 5 has not created yet.
 
 **Record corrections** you make yourself, on the branch determined above, **naming durable evidence** — a SHA, a report path, a register line — never "corrected per feedback" with nothing behind it. Commit as `docs: correct <artifact> — <what changed>`. The correction's own text should stand on evidence that already exists; the feedback record may be referenced once it is written, but a correction whose only justification is a document that does not exist yet is not evidenced. A correction to *application code* or to a *register evidence note* is not yours: dispatch it, per the class table.
@@ -257,8 +259,8 @@ Before finishing, update the target project's `STATUS.md` — on the **default b
 3. Layer each item, then classify it, each with a one-line rationale. Separate *raised, not named* and *surfaced, not tabled* from the item set.
 4. Present the proposal table and **stop**. Nothing moves before the human answers.
 5. Record every decision verbatim — confirmed, declined and deferred alike.
-6. Amend intent first (PRD pair + the register's intent transition, one commit), then any confirmed record corrections on the branch determined for them.
-7. Write and commit the feedback record; comment the link where the rule above calls for it.
+6. Amend intent first (PRD pair + the register's intent transition, one commit), then any confirmed record corrections on the branch determined for them. **An item confirmed as "none" executes nothing here** — its close is the record entry, and steps 6 and 8 simply have no work for it.
+7. Write and commit the feedback record; push the default branch; comment the link where the rule above calls for it.
 8. Dispatch: `/timone-plan` per anchoring posture, `/timone-verify` for verification passes — including the one every intent amendment owes. Never stage 6 directly.
 9. Update `STATUS.md`.
 10. Report per Closing below.
@@ -281,9 +283,9 @@ Then **stop**. Do not write the record, do not number a directory into existence
 
 **Ending C — the human has decided and you have executed.** Report, in this order:
 
-1. The feedback record's path.
+1. The feedback record's path **and its commit SHA**.
 2. The per-item tally: confirmed / declined / deferred.
-3. Every amendment committed, with its SHA and what it changed.
+3. Every commit this pass made, with its SHA and what it changed — amendments, record corrections, and the `STATUS.md` refresh alike. A pass that amended nothing still made commits; report them rather than reporting "none". Say explicitly that the default branch was pushed.
 4. Every dispatch, as the exact invocation handed over, with the chain that follows — stages 6 → 7 → 8 for plan work, stage 7 alone for a verification pass.
 5. Everything closed with a degenerate outcome, and the evidence cited for it.
 
