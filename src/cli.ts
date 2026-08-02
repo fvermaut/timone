@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
 
+import { registerDaemonCommand } from "./commands/daemon.js";
 import { registerProjectsCommand } from "./commands/projects.js";
 import { registerWorkspaceCommand } from "./commands/workspace.js";
 
@@ -34,6 +35,7 @@ export function buildProgram(): Command {
 
   registerProjectsCommand(program);
   registerWorkspaceCommand(program);
+  registerDaemonCommand(program);
 
   return program;
 }
