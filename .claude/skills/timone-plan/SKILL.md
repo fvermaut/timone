@@ -57,7 +57,14 @@ Never invent requirement IDs, and never write a feature phase whose requirements
 
 You often cannot tell what the work implies until you have sketched the cut, so **drafting is allowed before the gates clear — writing is not.** Sketch as far as you need to see the decisions the work forces, then re-check this gate against what the sketch surfaced. What the gate forbids is the *artifact*: no phase file on disk, and no decision resolved inside one.
 
-**The chore exception, and its limit.** Chore / technical-enabler work — what triage routes here — is the sanctioned exception to *anchoring only*: it proceeds **un-anchored**, with an explicit stamp in the Requirements section naming what it enables and why it isn't PRD-bound. The stamp needs human agreement, sought at the same gate as the breakdown itself (workflow step 4), so for chore work the anchoring gate defers rather than terminates.
+**The un-anchored exception, and its limit.** Two kinds of work proceed **un-anchored**, with an explicit stamp in the Requirements section naming what it delivers and why it isn't PRD-bound. The stamp needs human agreement, sought at the same gate as the breakdown itself (workflow step 4), so for both the anchoring gate defers rather than terminates.
+
+- **Chore / technical-enabler work** — what triage routes here.
+- **Refinement work dispatched by stage 9** — the delivery Standards axis's native output, which `process.md` stage 9 makes explicitly un-anchored: *"riding as un-anchored work protected by the regression set"*. It arrives from a feedback record, not a triage record, and its class is `refinement`, not `chore` — do not turn it away for failing to be a chore.
+
+**When the work is un-anchored, derive the regression set and say what it does not cover.** "Protected by the regression set" is a promise, and it is not always worth much: the set is *derived* — every criterion with priority MUST, verify-via `api`, and status `verified` — so a `browser` criterion is outside it however solid it looks, and a criterion stage 9 has just marked `revised` has left it. Compute it from the register at planning time, state it in the Goal Description, and name the behaviour this phase could break that **no criterion in that set watches**. Where the real protection turns out to be a single test, make that test a hard gate in the validation steps rather than a courtesy. A refinement is by construction work where nothing is currently failing — which means nothing is currently watching either.
+
+**A phase may be narrower than the dispatch that produced it.** When the human bounds the work to fewer items than stage 9 confirmed, carry the survivors into the phase file as an explicit queued-items table naming what is *not* being done and why. Narrowing silently leaves stage 8 reviewing against a scope no artifact records.
 
 Triage having routed a chore here **does not pre-clear the ADR gate**. Triage classifies the request's kind; it has no view on whether a decision is owed. Chores are the *most* likely stage-5 input to trip the ADR gate, because a technical enabler is by definition a change of technical direction — a stack adoption, a framework swap, a migration. Check it as carefully here as anywhere.
 
@@ -111,8 +118,8 @@ List `projects/<name>/doc/plans/phases/`, take the highest existing `NN`, use th
 | -- | -------- | ---------------------- |
 | PRD-NN.R<k> | MUST | <the criterion, compressed to one line> |
 
-<For chore/enabler work only — replace the table with, or add below it:>
-**Un-anchored enabler work (agreed <date>):** <what it is, what gap it closes, and why it is not PRD-bound. Name the human who agreed.>
+<For un-anchored work — chore/enabler, or a stage-9 refinement — replace the table with, or add below it:>
+**Un-anchored <enabler | refinement> work (agreed <date>, <who>):** <what it is, what gap it closes, and why it is not PRD-bound. For a refinement, name the feedback record and item it closes.>
 
 ## Goal Description
 
