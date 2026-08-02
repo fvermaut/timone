@@ -1,6 +1,6 @@
 # Phase 10: Feedback — `timone-improve` and the remediation loop
 
-> **Status:** Approved for execution by fvermaut 2026-08-01
+> **Status:** **Complete — see [phase-10-complete.md](reports/phase-10-complete.md).** Approved for execution by fvermaut 2026-08-01. **Re-approved by fvermaut 2026-08-02** after the six-classes-became-seven scope change below — the ✏ marker at the fourth decision is dated a day after the original stamp and asks for agreement in its own text, which voided that stamp under stage 5's re-approval rule. Re-approved on the evidence rather than on the marker: the seventh class (`verification pass`) and the widened `record correction` were both exercised live against `scratch-app` before this stamp was given, and the loop closed at PR #3.
 
 > **Companion phases:** [Phase 02](phase-02.md) (skill authoring conventions — the mandatory target-project resolution preamble, and the artifact rule this phase reconciles a fourth time), [Phase 05](phase-05.md) (triage's routing table sends "bug / post-delivery observation" here; its fixture records are this phase's oldest intake), [Phase 07](phase-07.md) (the execute machinery every code remediation is dispatched through), [Phase 08](phase-08.md) (stage 7's fix-loop shape, its REGRESSION label — which stage 9 "reads differently" — and its loop-exhaustion route, which lands here), [Phase 09](phase-09.md) (the delivery review whose findings are this phase's richest intake, and the re-delivery iteration mechanics a remediation on an open PR rides). Governing decisions: [ADR-0004](../../adr/0004-github-first-adapter-pair.md) (GitHub-first — when the feedback's source is a PR or issue, the record links back to it), [ADR-0006](../../adr/0006-specs-in-repo-single-source-of-truth.md) (the PRD pair is the single source of truth for intent — which is why intent changes amend it before any code moves, and why the feedback record is a committed artifact rather than PR prose), [ADR-0007](../../adr/0007-sessions-at-timone-root.md) (sessions at the timone root; the skill resolves a target project and works only inside `projects/<name>/`).
 
@@ -69,12 +69,12 @@ grep -n "timone-improve" .claude/skills/README.md
 git -C . diff --stat
 ```
 
-- [ ] Stage-9 note states all ten decisions: intake sources and no-hunting resolution; the feedback record with its numbering, GitHub link-back and artifact-conventions line; three-answer layer triage; PRD-before-code with the register carve-out; the six classifications with vehicles; the confirm/decline/defer gate distinct from stage 5's; routes-never-implements; the open-vs-merged vehicle rule; degenerate outcomes; the never-list including managed-projects-only
-- [ ] Stage 7's register-exclusivity sentence now says **verdict** transitions; nothing else in stage 7 moved
-- [ ] The stable-ID section and the new stage-9 note agree verbatim on `revised` / `DEPRECATED` mechanics
-- [ ] Stage 1, 5, 6 and 8's existing pointers at stage 9 stand unmodified and consistent with the new note
-- [ ] `process.md` gained no feedback-record or proposal *template* (those belong to the skill)
-- [ ] `.claude/skills/README.md`'s artifact rule covers stage 9, forbids stage-9 code commits, and still matches R4's wording
+- [x] Stage-9 note states all ten decisions: intake sources and no-hunting resolution; the feedback record with its numbering, GitHub link-back and artifact-conventions line; three-answer layer triage; PRD-before-code with the register carve-out; the six classifications with vehicles; the confirm/decline/defer gate distinct from stage 5's; routes-never-implements; the open-vs-merged vehicle rule; degenerate outcomes; the never-list including managed-projects-only
+- [x] Stage 7's register-exclusivity sentence now says **verdict** transitions; nothing else in stage 7 moved
+- [x] The stable-ID section and the new stage-9 note agree verbatim on `revised` / `DEPRECATED` mechanics
+- [x] Stage 1, 5, 6 and 8's existing pointers at stage 9 stand unmodified and consistent with the new note
+- [x] `process.md` gained no feedback-record or proposal *template* (those belong to the skill)
+- [x] `.claude/skills/README.md`'s artifact rule covers stage 9, forbids stage-9 code commits, and still matches R4's wording
 
 ---
 
@@ -113,12 +113,12 @@ grep -n "does not exist" .claude/skills/timone-deliver/SKILL.md .claude/skills/t
 grep -rn "timone-improve" .claude/skills/*/SKILL.md | grep -v "improve/SKILL" | head
 ```
 
-- [ ] Frontmatter + targeting per `.claude/skills/README.md` (`argument-hint` starts with `<project-name>`, then the feedback source)
-- [ ] Stage-9 rules restated with no variants: intake, three-answer layer triage, six classes with vehicles, PRD-before-code, register carve-out, confirm/decline/defer, routes-never-implements, open-vs-merged, degenerate outcomes — all matching 10a exactly
-- [ ] All gates are terminal, write nothing, and name the route
-- [ ] The skill never reads application source or diffs, never commits code, never writes verdict transitions, never merges, never invokes stage 6 directly
-- [ ] Both inline templates present; the record template carries decisions verbatim, not summarized
-- [ ] No skill anywhere still claims `timone-improve` does not exist
+- [x] Frontmatter + targeting per `.claude/skills/README.md` (`argument-hint` starts with `<project-name>`, then the feedback source)
+- [x] Stage-9 rules restated with no variants: intake, three-answer layer triage, six classes with vehicles, PRD-before-code, register carve-out, confirm/decline/defer, routes-never-implements, open-vs-merged, degenerate outcomes — all matching 10a exactly
+- [x] All gates are terminal, write nothing, and name the route
+- [x] The skill never reads application source or diffs, never commits code, never writes verdict transitions, never merges, never invokes stage 6 directly
+- [x] Both inline templates present; the record template carries decisions verbatim, not summarized
+- [x] No skill anywhere still claims `timone-improve` does not exist
 
 ---
 
@@ -154,15 +154,15 @@ git log --stat --grep "feedback" -- ':!doc' ':!STATUS.md'; echo "exit: $? (no fi
 git log --stat | grep -E "\.claude/|timone\.yaml"; echo "exit: $? (1 = clean, as required)"
 ```
 
-- [ ] Run 1: closed **already resolved**, citing register evidence; no probe, no PRD touch, no dispatch; the record exists and is numbered by scan
-- [ ] Run 2: nine items individually layered, classified and vehicled with rationales; nothing executed before the gate; every decline and defer recorded verbatim
-- [ ] Run 3: PRD amended before anything else — stable IDs, `revised`, dated markers, intent-transition in the same commit; R2/R3 out of the derived regression set
-- [ ] Runs 1 vs 3 discharge R14's hint: the bug and the intent case routed differently, and the PRD was touched only in the second
-- [ ] Run 4: record-layer amendment on the open branch; PR #2 iterated; axes not re-run
-- [ ] Run 5: dispatch went through `/timone-plan` with its own approval gate, and the chain closed at a new PR; stage 9 authored no code commit
-- [ ] The fixture's history shows no skill/harness/internal files and no stage-9 code commit
-- [ ] Defects found are fixed in `timone-improve` (and in `process.md` when the spec is what was wrong, never by bending the skill around it)
-- [ ] **Human gate:** fvermaut confirms the classifications were honest, the gate held (nothing moved unconfirmed), and the record reads as the durable trace; this gate is R14's evidence
+- [x] Run 1: closed **already resolved**, citing register evidence; no probe, no PRD touch, no dispatch; the record exists and is numbered by scan
+- [x] Run 2: nine items individually layered, classified and vehicled with rationales; nothing executed before the gate; every decline and defer recorded verbatim
+- [x] Run 3: PRD amended before anything else — stable IDs, `revised`, dated markers, intent-transition in the same commit; R2/R3 out of the derived regression set
+- [x] Runs 1 vs 3 discharge R14's hint: the bug and the intent case routed differently, and the PRD was touched only in the second
+- [x] Run 4: record-layer amendment on the open branch; PR #2 iterated; axes not re-run
+- [x] Run 5: dispatch went through `/timone-plan` with its own approval gate, and the chain closed at a new PR; stage 9 authored no code commit
+- [x] The fixture's history shows no skill/harness/internal files and no stage-9 code commit
+- [x] Defects found are fixed in `timone-improve` (and in `process.md` when the spec is what was wrong, never by bending the skill around it)
+- [x] **Human gate:** fvermaut confirms the classifications were honest, the gate held (nothing moved unconfirmed), and the record reads as the durable trace; this gate is R14's evidence
 
 ---
 
@@ -184,10 +184,10 @@ grep -n -A3 "^## R14" doc/specs/prd/prd-01-process-layer.criteria.md
 grep -n "gap\|feedback" STATUS.md | head
 ```
 
-- [ ] Documented invocation matches actual behaviour; links resolve
-- [ ] R14 flipped only after 10c's human gate passed
-- [ ] The Status paragraph names what remains: R23, R24 (still awaiting its grill session), deployment/maintenance, and the PRD-02 inverted loop as the next horizon
-- [ ] `STATUS.md` retires the "one real gap" entry and names the fixture PRs still waiting on fvermaut
+- [x] Documented invocation matches actual behaviour; links resolve
+- [x] R14 flipped only after 10c's human gate passed
+- [x] The Status paragraph names what remains: R23, R24 (still awaiting its grill session), deployment/maintenance, and the PRD-02 inverted loop as the next horizon
+- [x] `STATUS.md` retires the "one real gap" entry and names the fixture PRs still waiting on fvermaut
 
 ## Dependency graph
 
