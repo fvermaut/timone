@@ -42,10 +42,12 @@ Three dispositions, and every run needs all three:
 | | What it is | Where it goes |
 |---|---|---|
 | **Item** | what the invocation named — a finding, a batch of findings, a record, the feedback text | the proposal table; triaged, classified, decided |
-| **Raised, not named** | other findings the *source document* carries that the invocation did not name | listed **by reference only** in the record; not triaged, not classified. Naming one is a separate intake |
+| **Raised, not named** | other work the *source document* names, or that the process has already routed to stage 9, that this invocation did not name — numbered findings, unnumbered items awaiting the human, a triage record routed here and never actioned | listed **by reference only** in the record; not triaged, not classified. Naming one is a separate intake |
 | **Surfaced, not tabled** | a defect **nobody** raised, noticed while reading the cited artifacts | one line each in the record, as candidate intakes. Never triaged, never proposed, never acted on |
 
-**Bound the surfaced list:** one line each, and nothing already recorded as open somewhere the human reads — if `STATUS.md` or a verification report already carries it, say where it is tracked instead of restating it. A surfaced list many times the size of the item set is noise, and noise is how a real find gets missed.
+**Bound the surfaced list:** one line each, and nothing already recorded as open somewhere the human reads — if `STATUS.md` or a verification report already carries it, say where it is tracked instead of restating it. A surfaced list many times the size of the item set is noise, and noise is how a real find gets missed. **`STATUS.md`'s own staleness is never a surfaced defect** — refreshing it is this stage's closing obligation, so fixing it is the workflow, not an item.
+
+**Reading `STATUS.md` to check what is already tracked is not reading it as a source of truth.** The prohibition is on taking it as evidence about the project; checking whether the human has already been told something is a different question, and the bound above depends on it.
 
 ## What you read
 
@@ -55,7 +57,8 @@ Three dispositions, and every run needs all three:
 - **Live state beats what the source claims about it.** A report written while a PR was open still says it is open. Check, and let the check win — taking the source's word for it is how a remediation gets aimed at a merged branch. Record what the check returned; it is usually what decides the vehicle.
 - **Never: application source, diffs of code, `git show` of a hunk, the committed test suite.** Whether the code behaves is stage 7's question, answered with stage 7's instruments. **Source quoted inside an artifact you were told to read is not a loophole and not a violation:** read the report, judge the report's claim, and do not open the file it quotes. Where a claim's truth matters and only the code could settle it, the class is **verification pass** — say so rather than reading the code yourself.
 - **Never run a fresh behaviour probe.** When an intake needs evidence about behaviour, cite the evidence the register and reports already hold.
-- **A correction carried in the source is part of the source, and it can change the vehicle.** When a report's own note reverses or qualifies a finding — the deliverer caught it after writing it — that note is the finding's current state. Classify what the source *actually says*, not its headline: the same finding read on its headline and read with its reversal lands in different classes, with different owners. Read every report to its end before classifying anything in it.
+- **A correction carried in the source can change the item's subject, class, owner and evidence — not merely its emphasis.** When a report's own note reverses or qualifies a finding, that note is the finding's current state: read on its headline the same finding may dispatch to another stage, and read with its reversal be a correction you make yourself. **Read every report to its end before classifying anything in it**, and read the reversals in the reports it *cites* too — the note that overturns a finding is not always in the same document.
+- **A note that disclaims amending the report still establishes facts.** Delivery reports carry their axes verbatim and say so, which puts the deliverer's note in formal tension with the finding above it. Resolve it on evidence, never on authority: when the note's substance is independently checkable — a SHA's ancestry, a verification report's re-verify, a register line — check it and follow what you find. When it is not, the class is **verification pass**, because an unverifiable disagreement about behaviour is stage 7's to settle, not yours to arbitrate.
 
 ## Layer triage — first, and item by item
 
@@ -73,9 +76,16 @@ For each item, one question with **three** answers:
 
 **The layer describes the claim, judged against the artifacts as they stand** — what the reporter is asserting *about*, not whether they are right. When the claim turns out not to hold, the layer is still where it would have landed, and the **outcome** records why it didn't: an item can be honestly layered `implementation` and closed `already resolved` in the same breath.
 
+**Two tiebreaks, because that rule alone gives opposite answers on the items that matter most:**
+
+- **When no criterion covers the item, the layer is `intent`** — however the reporter framed it. A complaint about behaviour nobody ever specified is a request to specify it, and remediating it first would build against a standard nobody agreed to. Check the register before layering anything as `implementation`: if you cannot name the criterion the behaviour offends, you are looking at an intent item wearing an implementation's clothes.
+- **When what is missing is *evidence* rather than behaviour or wording, the layer is `record`** — the register accurately records a MUST as unverified, nothing misdescribes anything, and the deficiency is in what has been checked. That is the layer for every **verification pass** item, including an unperformed HUMAN-CHECK.
+
 **One item is one thing the human decides on.** A numbered finding is one item, even when it carries several suggested remediations — including ones that straddle layers. **The row's cells describe the remediation you recommend**; alternatives go beneath it in prose, each with its price, so the human is choosing rather than ratifying. Splitting one finding into three rows, two of which you recommend declining, manufactures items to decline.
 
-**Number the proposal 1..N and carry the source's own reference inside each Item cell** ("Standards 2 — …", "Spec 1 — …"). Two axes each numbered from 1 is exactly the collision gate 2 exists to prevent; do not reintroduce it in your own table.
+**Number the proposal 1..N and carry the source's own reference inside each Item cell** ("Standards 2 — …", "Spec 1 — …"). Two axes each numbered from 1 is exactly the collision gate 2 exists to prevent; do not reintroduce it in your own table. Your numbers will not match the source's, and that is the trade — the record's own numbering is what every later reference uses, so the source reference has to travel inside the cell.
+
+**A true finding you recommend declining keeps its real class.** Class describes what the remediation *would be*; the recommendation describes whether it is worth doing. "Refinement, recommended decline" is a coherent and common row — do not stretch a degenerate outcome over a finding that holds, and do not invent a criterion to quote for *working as intended* when the register is simply silent on the subject.
 
 **When the source's headline is what you are contradicting**, state the item in its corrected direction and name the reversal inside the cell. An Item cell that repeats a claim you are about to call false misleads the person deciding.
 
@@ -105,7 +115,7 @@ For each item, one question with **three** answers:
 | a phase whose **PR is open** | on that phase: plan amendment per stage 5, execution on the same branch, stage 7 re-verifies, stage 8 re-delivers as an **iteration of the existing PR** |
 | **merged** work | a **new phase file, new branch, new PR** — merged work is history, and history is never rewritten |
 
-**Record corrections land on the default branch**, or on a phase branch whose **PR is still open** when the correction belongs to that phase's work — say which and why. "Open" means an open PR, not a branch that still exists: a merged phase's branch lingers, and correcting a file there puts it where nobody reads. When only one candidate exists, say so rather than performing a choice. A process-artifact-only change does not re-run the delivery axes (stage 8's subject rule) — say that in the hand-back so re-delivery does not spawn them.
+**Record corrections land on the default branch**, or on the next relevant branch when one has an **open PR** — the spec allows both, so say which and why. "Open" means an open PR, not a branch that still exists: a merged phase's branch lingers, and correcting a file there puts it where nobody reads. When only one candidate exists, say so rather than performing a choice. A process-artifact-only change does not re-run the delivery axes (stage 8's subject rule) — say that in the hand-back so re-delivery does not spawn them.
 
 **Everything else you commit — the feedback record, PRD-pair amendments, `STATUS.md` — lands on the project's default branch**, and you **return the clone to the branch you found it on**.
 
@@ -131,7 +141,7 @@ The human's answer per item is **confirm, decline, or defer**:
 
 - **Confirm** — it moves, by the vehicle stated. **For an item classed "none", confirm confirms the close**: the three words answer your *proposal*, not a vehicle. Say in the row what confirming will actually cause, so no one mistakes it for authorising work.
 - **Decline** — it does not move, ever, for this intake. Record the human's reason **verbatim**. Never re-argue a decline. Declining a "none" item means the human rejects your diagnosis: the item stays open, their reason recorded, and the vehicle is usually a **verification pass** — they have seen something the artifacts do not hold.
-- **Defer** — it does not move now. Record it verbatim too; the record is what makes a deferred item findable later, which is the difference between deferring and dropping.
+- **Defer** — it does not move now. Record it verbatim too; the record is what makes a deferred item findable later, which is the difference between deferring and dropping. **A defer wants a trigger** — the condition that should bring it back ("when a third e2e spec exists"). Record the trigger beside the reason; a defer with no trigger is a drop with better manners.
 
 **This gate is yours, not stage 5's.** It answers *"is this the right response to the feedback?"* — right layer, right class, right scope. Plan work you dispatch still faces stage 5's own approval, which answers *"is this breakdown executable?"*.
 
@@ -145,7 +155,7 @@ Recommend a decision for every item — a proposal with no recommendation makes 
 - `Status: revised` — or `DEPRECATED` with a one-line reason, the block staying.
 - A dated `✏ <YYYY-MM-DD>:` marker naming the feedback record.
 - The register's **intent transition lands in the same commit** as the amendment that motivates it. That is your one register write. **You never write a verdict** — `draft` / `verified` / `failed` are stage 7's, always.
-- **Then dispatch a verification pass — always, even when no code moves.** A `revised` criterion drops out of the derived regression set until stage 7 re-verifies it against its new wording, so an intent amendment with nothing queued behind it leaves a MUST quietly un-regression-checked. This is an obligation, not a disclosure: say it in the record *and* hand over the invocation.
+- **Then dispatch a verification pass — always, even when no code moves.** A `revised` criterion drops out of the derived regression set until stage 7 re-verifies it against its new wording, so an intent amendment with nothing queued behind it leaves a MUST quietly un-regression-checked. This is an obligation, not a disclosure: say it in the record *and* hand over the invocation. **One carve-out:** when the amendment's follow-on is itself plan work, that chain's own stage-7 leg *is* the pass — record the obligation and name what discharges it, rather than handing over a `/timone-verify` aimed at a phase stage 5 has not created yet.
 
 **Record corrections** you make yourself, on the branch determined above, **naming durable evidence** — a SHA, a report path, a register line — never "corrected per feedback" with nothing behind it. Commit as `docs: correct <artifact> — <what changed>`. The correction's own text should stand on evidence that already exists; the feedback record may be referenced once it is written, but a correction whose only justification is a document that does not exist yet is not evidenced. A correction to *application code* or to a *register evidence note* is not yours: dispatch it, per the class table.
 
@@ -157,7 +167,7 @@ Recommend a decision for every item — a proposal with no recommendation makes 
 
 then name the chain that follows: stage 6 executes, stage 7 verifies, stage 8 delivers.
 
-- **One dispatch per anchoring posture.** Refinements ride **un-anchored**; a bug fix is **anchored** on the requirement it restores. Stage 5 cannot cut one phase that is both, so confirmed items of both kinds produce **two** `/timone-plan` invocations — say which items are in each.
+- **One dispatch per anchoring posture, per phase.** Refinements ride **un-anchored**; a bug fix is **anchored** on the requirement it restores. Stage 5 cannot cut one phase that is both, so confirmed items of both kinds produce **two** `/timone-plan` invocations — say which items are in each. Two items anchored on *different* requirements do not necessarily share a dispatch either; when pricing an alternative, say whether it joins an existing dispatch or adds one.
 - **Verification-pass vehicles go to stage 7**, not stage 5: `/timone-verify <project> <phase-NN>`, naming the criteria to re-check and why.
 - **A HUMAN-CHECK needs a human, and saying so is part of the dispatch.** Stage 7 cannot perform one; dispatched with nobody available, it returns the item unchanged. State in the Scope cell what the human personally has to do and on what equipment, so the cost is visible rather than hidden behind "stage 7 handles it".
 - **You never invoke stage 6 directly** — planning's gate is not yours to skip — and you never commit application code.
@@ -194,7 +204,7 @@ Close the intake, citing the evidence that already exists — never a fresh prob
 
 | # | Item | Layer | Class | Vehicle | Scope | Recommended | Decision |
 |---|---|---|---|---|---|---|---|
-| 1 | <one line> | intent / implementation / record | <class or "none"> | <vehicle> | <how big> | confirm / decline / defer | confirm / decline / defer |
+| 1 | <one line, carrying the source's own reference> | intent / implementation / record | <class or "none"> | <vehicle> | <how big> | confirm / decline / defer | confirm / decline / defer — with a defer's trigger |
 
 ### <n>. <item>
 
