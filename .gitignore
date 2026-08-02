@@ -11,6 +11,10 @@ tmp/
 # and left untouched by agents. Ignored so it stops reading as untracked residue.
 doc/todo.md
 
+# Daemon machine state — runs, queue positions, cursors. One machine, one
+# daemon (ADR-0003): this is local state, never a process artifact.
+.timone/
+
 # Node
 node_modules/
 dist/
