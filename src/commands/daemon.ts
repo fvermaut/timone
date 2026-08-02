@@ -7,6 +7,7 @@ import type { TicketingAdapter } from "../adapters/ticketing.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { AgentSessionSpawner, agentSdkRuntime } from "../daemon/session.js";
+import { GuardrailObserver } from "../daemon/hooks.js";
 
 /** Options accepted by `timone daemon`, as commander parses them. */
 interface DaemonOptions {
@@ -97,13 +98,22 @@ export function registerDaemonCommand(program: Command): void {
       }
 
       const adapter = new GitHubTicketingAdapter();
+      const log = (message: string): void => console.log(message);
+      const guardrails = new GuardrailObserver({
+        root: process.cwd(),
+        store,
+        adapter,
+        log,
+      });
       const spawner = new AgentSessionSpawner({
         manifest,
         store,
         adapter,
         runtime: agentSdkRuntime,
         root: process.cwd(),
-        log: (message) => console.log(message),
+        beforeSession: (run, target) => guardrails.before(run, target),
+        afterSession: (run, target) => guardrails.after(run, target),
+        log,
       });
 
       process.exitCode = await runDaemon({

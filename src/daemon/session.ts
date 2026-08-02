@@ -44,7 +44,11 @@ export interface AgentSessionSpawnerOptions {
   runtime: SessionRuntime;
   /** The timone root; every session runs here (ADR-0007). */
   root: string;
-  /** Post-session guardrail checks (R15); wired by 11e. */
+  /**
+   * Guardrail bracket (R15): `beforeSession` records the state of the world
+   * before the session touches it, `afterSession` judges what changed.
+   */
+  beforeSession?: (run: Run, project: TicketingProject) => Promise<void>;
   afterSession?: (run: Run, project: TicketingProject) => Promise<void>;
   log?: (message: string) => void;
 }
@@ -165,6 +169,15 @@ export class AgentSessionSpawner implements SessionSpawner {
     }
 
     const ticket = await adapter.getTicket(project, run.ticket);
+
+    if (this.options.beforeSession !== undefined) {
+      try {
+        await this.options.beforeSession(run, project);
+      } catch (error) {
+        this.log(`pre-session snapshot failed for ${run.id}: ${oneLine(error)}`);
+      }
+    }
+
     const started = await runtime.start({
       cwd: root,
       prompt: triagePrompt(project, ticket),
