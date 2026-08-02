@@ -133,6 +133,17 @@ Not lifecycle stages of a feature — these apply across sessions and phases rat
 - New need → next unused ID.
 - Every MUST has at least one Given/When/Then criterion and a verification hint; a MUST that can't be written testably gets sharpened with the human or downgraded.
 
-## Gates and the human
+## Gates, conversations and the human
 
-Every stage's closing gate is either mechanical (validations pass) or human (a decision or review). Human gates are surfaced wherever the human is: interactively today; as ticket/PR comments once the inverted loop (PRD-02) drives these same stages. The daemon orchestrates stage skills — it never reimplements them.
+Every stage's closing gate is either mechanical (validations pass) or human (a decision or review). Human interaction comes in two kinds, each with its own medium ([ADR-0012](doc/adr/0012-conversation-channels.md)):
+
+- **Gates** are single decisions with one CTA — approve a PRD, approve a plan, confirm/decline/defer a feedback item. A gate decision is expressed as a **ticket or PR reply, the sole write-path for decisions**; a chat channel may notify, deep-link, or later relay a decision, but the relay posts it onto the ticket, and the loop reads one surface.
+- **Conversations** are multi-turn interviews — grilling, wayfinder sessions, prototype walk-throughs. They run on a **conversation channel** behind one adapter seam: a chat application, or the universal fallback, a **terminal takeover** — the ticket carries a CTA naming a `timone takeover` command that resolves what the ticket is waiting on and spawns the right stage session. An acceptance that *concludes* a conversation (accepting the grill summary) is an in-conversation act; the session posts the accepted outcome to the ticket as the record. Transcripts are not process artifacts and nothing may cite them; truth lands in the PRD, ADRs and `CONTEXT.md` as always.
+
+**The harness routes; the human never does.** The human is assumed to know nothing about this process. Every request — ticket, comment, or raw terminal prompt — is classified and routed through stage 1 by the harness, and no surface ever requires the human to name a stage, a skill, or a process concept. This binds interactive sessions today exactly as it binds the daemon: a session receiving a raw request about a managed project runs triage first and invokes the routed skill itself.
+
+**Every message to a human ends with a CTA** — one explicit, visually set-off statement (its own line or bullet) of what the human is being asked to do. A message that asks nothing says so ("no action needed").
+
+**Every human wait is a session boundary** ([ADR-0013](doc/adr/0013-stateless-session-reentry.md)): sessions are never held open across a gate or an unanswered CTA; resumption re-enters statelessly from the committed artifacts and the ticket thread.
+
+The daemon orchestrates stage skills — it never reimplements them.

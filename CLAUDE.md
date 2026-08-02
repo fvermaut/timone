@@ -5,6 +5,7 @@ Timone is the meta-project steering agentic development across independent clien
 ## The essentials
 
 - **The process** is defined in [process.md](process.md) — the single normative definition of every lifecycle stage, its artifact, and its gate. Stage skills under `.claude/skills/` implement it.
+- **The harness routes, the human never does:** assume the human knows nothing about the process. A raw request concerning a managed project goes through `timone-triage` first, and the session invokes the routed stage skill itself — never require the human to name a stage or skill (naming one explicitly remains their right, not their duty). Every message addressed to the human ends with an explicit CTA on its own line or bullet.
 - **Managed projects** are declared in `timone.yaml` and live as independent git repos under `projects/` (gitignored here). Materialize with `node dist/cli.js workspace sync`; inspect with `node dist/cli.js projects list`.
 - **Target project:** every stage skill operates on one managed project — named in the prompt, or asked for; in daemon-triggered sessions it comes from the event. Skills touch only `projects/<name>/…`.
 - **Client repos receive only process artifacts** (`doc/…`, `CONTEXT.md`). Never commit skills, harness files, or timone internals into a managed project.
