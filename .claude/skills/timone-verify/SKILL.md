@@ -78,6 +78,8 @@ A pass covers, and the report lists, both of:
 
 Stand the app up **in its production form** where the stack distinguishes one — a production build, never the dev server. The dev server forgives what production does not (unbuilt assets, lazy prerendering, development-only error overlays), and every one of those forgivenesses is a way to verify a behaviour the user will never receive. The completion report's run instructions are the recipe; its stated gotchas (seed ordering, ports, hostnames) are binding operational facts. When build order matters to what a page shows — prerendering, caching, revalidation windows — say in the report what order you used and why.
 
+**The server command does not return, so never run it in the foreground.** `npm start`, `npm run dev` and their equivalents block until killed: run them detached (backgrounded), then wait for the port to answer before probing — poll with `curl` rather than sleeping a fixed time. A verifier that runs the server in the foreground hangs until something kills it, and produces no report and no evidence at all, which is indistinguishable from the pass having failed. Every other command in a verification pass — the build, the seed, the database bring-up, the probes themselves — returns normally. Kill the server when the pass ends.
+
 ## The channels
 
 Each criterion carries a `Verify-via` channel; each of its clauses gets its own outcome.
