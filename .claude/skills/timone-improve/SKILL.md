@@ -93,12 +93,13 @@ For each item, one question with **three** answers:
 
 | Class | It is | Vehicle |
 |---|---|---|
-| **bug fix** | behaviour diverges from an **unchanged** requirement (a REGRESSION arriving from stage 7 defaults here) | plan work → stages 6 → 7 → 8 |
+| **bug fix** | behaviour diverges from the requirement it must satisfy — one left **unchanged** (a REGRESSION arriving from stage 7 defaults here), or one this pass has just **established** by amending intent | plan work → stages 6 → 7 → 8, anchored on that requirement |
 | **refinement** | the requirement is met, the quality is improvable — the delivery Standards axis's native output | plan work, **un-anchored**, protected by the regression set |
 | **plan patch** | an existing plan file is wrong, and a stage-5 amendment can still reach it | stage 5's amendment rules, re-approval semantics included |
 | **new sub-phase** | scope grows within a phase whose branch is still open | stage 5 amends that phase; the next free letter, dated ✏ marker |
 | **new phase** | scope grows beyond one phase | stage 5 writes a new phase file |
 | **record correction** | a committed **process artifact** misdescribes reality — anything under `doc/`, plus `CONTEXT.md` and `STATUS.md` | a docs-only correction **you** make, naming the evidence for it |
+| *(record layer, artifact outside that set)* | the misdescribing artifact is source, schema, config or `README.md` | **refinement**, dispatched — the row reads `record` / `refinement` on purpose, and is not a classification error |
 | **verification pass** | the artifacts cannot settle it and only observed behaviour can — an unperformed HUMAN-CHECK on a `draft` requirement, a criterion left `revised` by an intent amendment, a register evidence note overstating what was checked | dispatched to **stage 7**, which owns every verdict and every claim about behaviour |
 | **none** | no remediation at all | nothing moves; the item closes with a degenerate outcome and its evidence cited |
 
@@ -143,7 +144,7 @@ The human's answer per item is **confirm, decline, or defer**:
 
 - **Confirm** — it moves, by the vehicle stated. **For an item classed "none", confirm confirms the close**: the three words answer your *proposal*, not a vehicle. Say in the row what confirming will actually cause, so no one mistakes it for authorising work.
 - **Decline** — it does not move, ever, for this intake. Record the human's reason **verbatim**. Never re-argue a decline. Declining a "none" item means the human rejects your diagnosis: the item stays open, their reason recorded, and the vehicle is usually a **verification pass** — they have seen something the artifacts do not hold.
-- **Defer** — it does not move now. Record it verbatim too; the record is what makes a deferred item findable later, which is the difference between deferring and dropping. **A defer wants a trigger** — the condition that should bring it back ("when a third e2e spec exists"). Record the trigger beside the reason; a defer with no trigger is a drop with better manners.
+- **Defer** — it does not move now. Record it verbatim too; the record is what makes a deferred item findable later, which is the difference between deferring and dropping. **A defer wants a trigger** — the condition that should bring it back ("when a third e2e spec exists"). Record the trigger beside the reason, **and carry it into `STATUS.md`**: a trigger living only in a feedback record is watched by nobody, and a defer nobody is watching is a drop with better manners.
 
 **This gate is yours, not stage 5's.** It answers *"is this the right response to the feedback?"* — right layer, right class, right scope. Plan work you dispatch still faces stage 5's own approval, which answers *"is this breakdown executable?"*.
 
@@ -155,8 +156,10 @@ Recommend a decision for every item — a proposal with no recommendation makes 
 
 - **Same ID forever.** Criteria updated **in place**, never renumbered, never reused, never deleted.
 - `Status: revised` — or `DEPRECATED` with a one-line reason, the block staying.
-- A dated `✏ <YYYY-MM-DD>:` marker naming the feedback record.
+- A dated `✏ <YYYY-MM-DD>:` marker naming the feedback record. **This is a deliberate forward reference** — intent moves before anything else, so the amendment commit precedes the record commit and names a file that lands moments later in the same pass. It is the one place a forward reference is allowed, and it obliges you: a pass that amends intent and then fails to commit its record has left a dangling citation in the source of truth.
+- **When the finding cites more than one requirement, amend the one whose verification channel could observe the gap.** A criterion verified `api` at the service is not where a browser-observable defect lives, and anchoring the follow-on work on both gives one behaviour two owners.
 - The register's **intent transition lands in the same commit** as the amendment that motivates it, messaged `docs: amend PRD-NN — <requirement IDs> <what moved>`. That is your one register write. **You never write a verdict** — `draft` / `verified` / `failed` are stage 7's, always.
+- **Check what the amendment just un-protected.** A `revised` criterion leaves the derived regression set, so any *other* confirmed item riding un-anchored "protected by the regression set" loses that protection — and the item nearest the amended requirement is exactly the one most likely to need it. Name the interaction in the record, and **sequence the anchored dispatch first**: its stage-7 leg restores the verdict and the regression set with it. When they cannot be sequenced, say plainly in the un-anchored hand-over which criterion is not covering it.
 - **Then dispatch a verification pass — always, even when no code moves.** A `revised` criterion drops out of the derived regression set until stage 7 re-verifies it against its new wording, so an intent amendment with nothing queued behind it leaves a MUST quietly un-regression-checked. This is an obligation, not a disclosure: say it in the record *and* hand over the invocation. **One carve-out:** when the amendment's follow-on is itself plan work, that chain's own stage-7 leg *is* the pass — record the obligation and name what discharges it, rather than handing over a `/timone-verify` aimed at a phase stage 5 has not created yet.
 
 **Record corrections** you make yourself, on the branch determined above, **naming durable evidence** — a SHA, a report path, a register line — never "corrected per feedback" with nothing behind it. Commit as `docs: correct <artifact> — <what changed>`. The correction's own text should stand on evidence that already exists; the feedback record may be referenced once it is written, but a correction whose only justification is a document that does not exist yet is not evidenced. A correction to *application code* or to a *register evidence note* is not yours: dispatch it, per the class table.
@@ -170,7 +173,8 @@ Recommend a decision for every item — a proposal with no recommendation makes 
 then name the chain that follows: stage 6 executes, stage 7 verifies, stage 8 delivers.
 
 - **One dispatch per anchoring posture, per phase.** Refinements ride **un-anchored**; a bug fix is **anchored** on the requirement it restores. Stage 5 cannot cut one phase that is both, so confirmed items of both kinds produce **two** `/timone-plan` invocations — say which items are in each. Two items anchored on *different* requirements do not necessarily share a dispatch either; when pricing an alternative, say whether it joins an existing dispatch or adds one.
-- **Verification-pass vehicles go to stage 7**, not stage 5: `/timone-verify <project> <phase-NN>`, naming the criteria to re-check and why.
+- **Verification-pass vehicles go to stage 7**, not stage 5: `/timone-verify <project> <phase-NN> — <the criteria or clauses to re-check>, <any constraint on running them>`. The scope belongs *in the invocation*, not only in prose beside it: a bare `/timone-verify <project> <phase-NN>` tells stage 7 to re-verify the whole phase, which is rarely what a feedback item asked for.
+- **When the carve-out applies, the owed pass still gets a line in the Dispatch section** — named, and saying what discharges it ("item 8's pass is dispatch B's own stage-7 leg, re-verifying all of R6 against the amended text"). An obligation recorded only as narrative is one nobody can check was met.
 - **A HUMAN-CHECK needs a human, and saying so is part of the dispatch.** Stage 7 cannot perform one; dispatched with nobody available, it returns the item unchanged. State in the Scope cell what the human personally has to do and on what equipment, so the cost is visible rather than hidden behind "stage 7 handles it".
 - **You never invoke stage 6 directly** — planning's gate is not yours to skip — and you never commit application code.
 
