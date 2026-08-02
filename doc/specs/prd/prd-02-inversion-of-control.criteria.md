@@ -31,19 +31,21 @@
       THEN the session runs from the timone root with the PRD-01 stage skills available, the target project X is carried in the event context and validated against `timone.yaml`, every file the session touches lies under `projects/X/…`, and no commit adds harness files to X's repo (process artifacts under `doc/` excepted)
 - **Verification hint:** inspect session config/logs for cwd and the resolved target; `git log --stat` on produced branches, asserting only `doc/…` and `CONTEXT.md` paths.
 
-## R3 — Async clarification gate
+## R3 — Async clarification via a conversation
+
+> ✏ Revised 2026-08-02: the grill session on the conversation medium ([ADR-0012](../../adr/0012-conversation-channels.md)) moved conversations off ticket-comment ping-pong — clarification is a conversation on the project's conversation channel, not a comment thread; the ticket records the CTA and the outcome.
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** revised
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a picked-up ticket with open questions
       WHEN the clarification stage runs
-      THEN the interview questions are posted as issue comments, `timone status` shows a waiting gate, and no further stage runs
-    - GIVEN a human reply arrives on a waiting ticket
-      WHEN the next poll cycle completes
-      THEN the pipeline resumes incorporating the reply
-- **Verification hint:** file a deliberately vague ticket; answer via comment; watch status transition waiting → running.
+      THEN a conversation is opened on the project's conversation channel — for the terminal channel, a ticket comment carrying a CTA with the exact takeover command — `timone status` shows a waiting gate, and no further stage runs
+    - GIVEN the conversation concludes with the human accepting the summary
+      WHEN the session closes
+      THEN the accepted outcome summary is posted on the ticket and the pipeline resumes incorporating it
+- **Verification hint:** file a deliberately vague ticket; take over via the posted CTA; run the interview to acceptance; watch the summary land on the ticket and status transition waiting → running.
 
 ## R4 — PRD gate on the ticket
 
@@ -137,3 +139,48 @@
 - **Status:** draft
 - **Verify-via:** api
 - **Criteria:** when a PR with a running preview is closed or merged, its stack is stopped and removed within one poll cycle; re-opening the PR recreates it on demand.
+
+## R13 — Harness-owned routing
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a process-naive ticket on a managed project — plain language, naming no stage, skill, or process concept
+      WHEN the daemon picks it up
+      THEN triage classifies and routes it, the classification with rationale is posted on the ticket, and at no point does any surface require the human to name a stage or skill
+    - GIVEN an interactive timone-root session receives a raw request concerning a managed project
+      WHEN the session starts work
+      THEN it routes the request through triage first and invokes the routed stage skill itself — the same contract as the daemon path
+- **Verification hint:** file tickets written in deliberately naive language ("the button looks wrong on my phone"); inspect routing comments; in a terminal session, state a raw request and confirm triage fires without any skill being named.
+
+## R14 — Conversation channel seam with terminal takeover
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a stage needs a conversation and the project's channel is the terminal
+      WHEN the conversation is opened
+      THEN the ticket receives a comment whose CTA carries a copy-pasteable `timone takeover <project>#<ticket>` command
+    - GIVEN the takeover command runs
+      WHEN the CLI resolves the ticket
+      THEN it determines what the ticket is waiting on, spawns the correct stage session itself with the event context, and the session re-enters statelessly from the artifacts and the ticket thread ([ADR-0013](../../adr/0013-stateless-session-reentry.md)) — the human names no skill
+    - GIVEN the channel implementation
+      WHEN a second medium is added
+      THEN it plugs in behind the same interface (open a conversation for project/ticket/stage, exchange turns, conclude with an outcome) without changes to the stages that use it
+- **Verification hint:** run takeover on a ticket waiting on clarification; complete the conversation; inspect the seam for a second-implementation point (a fake channel in tests suffices as the second medium).
+
+## R15 — Post-session guardrail hooks
+
+- **Priority:** SHOULD
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a daemon-spawned stage session completes
+      WHEN the guardrail hooks run
+      THEN violations of the deterministic rules — commits left unpushed, `STATUS.md` written anywhere but the default branch, files touched outside `projects/<target>/` (process artifacts excepted per R2) — are posted loudly on the ticket and the run is flagged in `timone status`
+    - GIVEN a clean session
+      WHEN the hooks run
+      THEN they stay silent
+- **Verification hint:** force each violation in a scripted session against the pilot repo; confirm one loud ticket comment per violation and a flagged status; confirm a clean run posts nothing.
