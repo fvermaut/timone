@@ -98,7 +98,7 @@ For each item, one question with **three** answers:
 | **plan patch** | an existing plan file is wrong, and a stage-5 amendment can still reach it | stage 5's amendment rules, re-approval semantics included |
 | **new sub-phase** | scope grows within a phase whose branch is still open | stage 5 amends that phase; the next free letter, dated ✏ marker |
 | **new phase** | scope grows beyond one phase | stage 5 writes a new phase file |
-| **record correction** | a committed **process artifact** misdescribes reality — anything under `doc/`, plus `CONTEXT.md` and `STATUS.md` | a docs-only correction **you** make, naming the evidence for it |
+| **record correction** | a committed **process artifact** misdescribes reality — the system, or what another artifact says — anything under `doc/`, plus `CONTEXT.md` and `STATUS.md` | a docs-only correction **you** make, naming the evidence for it |
 | *(record layer, artifact outside that set)* | the misdescribing artifact is source, schema, config or `README.md` | **refinement**, dispatched — the row reads `record` / `refinement` on purpose, and is not a classification error |
 | **verification pass** | the artifacts cannot settle it and only observed behaviour can — an unperformed HUMAN-CHECK on a `draft` requirement, a criterion left `revised` by an intent amendment, a register evidence note overstating what was checked | dispatched to **stage 7**, which owns every verdict and every claim about behaviour |
 | **none** | no remediation at all | nothing moves; the item closes with a degenerate outcome and its evidence cited |
@@ -162,7 +162,12 @@ Recommend a decision for every item — a proposal with no recommendation makes 
 - **Check what the amendment just un-protected.** A `revised` criterion leaves the derived regression set, so any *other* confirmed item riding un-anchored "protected by the regression set" loses that protection — and the item nearest the amended requirement is exactly the one most likely to need it. Name the interaction in the record, and **sequence the anchored dispatch first**: its stage-7 leg restores the verdict and the regression set with it. When they cannot be sequenced, say plainly in the un-anchored hand-over which criterion is not covering it.
 - **Then dispatch a verification pass — always, even when no code moves.** A `revised` criterion drops out of the derived regression set until stage 7 re-verifies it against its new wording, so an intent amendment with nothing queued behind it leaves a MUST quietly un-regression-checked. This is an obligation, not a disclosure: say it in the record *and* hand over the invocation. **One carve-out:** when the amendment's follow-on is itself plan work, that chain's own stage-7 leg *is* the pass — record the obligation and name what discharges it, rather than handing over a `/timone-verify` aimed at a phase stage 5 has not created yet.
 
-**Record corrections** you make yourself, on the branch determined above, **naming durable evidence** — a SHA, a report path, a register line — never "corrected per feedback" with nothing behind it. Commit as `docs: correct <artifact> — <what changed>`. The correction's own text should stand on evidence that already exists; the feedback record may be referenced once it is written, but a correction whose only justification is a document that does not exist yet is not evidenced. A correction to *application code* or to a *register evidence note* is not yours: dispatch it, per the class table.
+**Record corrections** you make yourself, on the branch determined above. Commit as `docs: correct <artifact> — <what changed>`. A correction to *application code* or to a *register evidence note* is not yours: dispatch it, per the class table.
+
+- **The evidence goes in the corrected artifact**, as a dated marker in whatever convention that file already uses — a SHA, a report path, a register line. Never "corrected per feedback" with nothing behind it, and never evidence that lives only in the record: the file has to defend itself to someone who never opens `doc/feedback/`.
+- **The marker may name the feedback record**, exactly as an intent amendment's does and under the same obligation — corrections precede the record in the same pass, so this is a forward reference by construction, and a pass that corrects without then committing its record leaves a dangling citation. The correction's own SHA goes back into the record.
+- **Preserve what you replace when a human wrote it.** A dated grant, deviation or ratification records a decision someone made; silently rewriting it erases that the decision was once justified differently. Quote the old wording inside the marker and say why it was wrong.
+- **Correct only what was named, even when the same file holds another known-stale line.** The file you are correcting is exactly where the "while I'm here" temptation is strongest, and the item-set rule does not soften because the fix would be cheap.
 
 **Everything else you dispatch.** Hand plan-file vehicles over as an explicit invocation:
 
@@ -220,11 +225,13 @@ Close the intake, citing the evidence that already exists — never a fresh prob
 
 <This is the proposal's table plus a Decision column — the same columns, so nothing is lost in transcription. **Recommended** stays next to **Decision**: it is the only trace of whether stage 9's diagnoses are any good, and it earns its place precisely where the human overruled one. **Scope** stays because an estimate the human relied on is worth keeping when it turns out wrong.>
 
-## Amendments
+## Amendments and corrections
 
-- `<path>` — <what changed: R6's criteria plus `Status: revised` and its dated marker> — `<sha>`
+- **PRD amendment** — `<path>` — <R6's criteria plus `Status: revised` and its dated marker> — `<sha>`
+- **Record correction** — `<path>` — <what the artifact said, what it says now, the evidence named in it> — `<sha>`
+- **Branch** — <which branch each landed on, and why that one; "sole candidate" when it was>
 
-<"None." when the pass amended nothing.>
+<"None." against either kind the pass did not make. A pass that corrected without amending says so, rather than reporting "None." over a file it changed.>
 
 ## Dispatch
 
