@@ -3,8 +3,10 @@ import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
 import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
+import type { TicketingAdapter } from "../adapters/ticketing.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
+import { AgentSessionSpawner, agentSdkRuntime } from "../daemon/session.js";
 
 /** Options accepted by `timone daemon`, as commander parses them. */
 interface DaemonOptions {
@@ -14,28 +16,14 @@ interface DaemonOptions {
   state?: string;
 }
 
-/**
- * Placeholder spawner used until 11d wires the Agent SDK. It refuses
- * loudly rather than pretending a session ran: the poll loop records the
- * refusal against the project and carries on.
- */
-const unwiredSpawner: SessionSpawner = {
-  async spawn() {
-    throw new Error(
-      "no session runtime is wired yet — the run stays picked up and will be retried",
-    );
-  },
-};
-
 export interface RunDaemonOptions {
   manifest: Manifest;
   store: RunStore;
   intervalMs: number;
   once: boolean;
+  adapter: TicketingAdapter;
   spawner: SessionSpawner;
   log?: (message: string) => void;
-  /** Resolves when the loop should stop; omitted means "run forever". */
-  stop?: Promise<void>;
 }
 
 /**
@@ -45,14 +33,13 @@ export interface RunDaemonOptions {
  */
 export async function runDaemon(options: RunDaemonOptions): Promise<number> {
   const log = options.log ?? ((message: string) => console.log(message));
-  const adapter = new GitHubTicketingAdapter();
   let failures = 0;
 
   for (;;) {
     const result = await pollOnce({
       manifest: options.manifest,
       store: options.store,
-      adapter,
+      adapter: options.adapter,
       spawner: options.spawner,
       log,
     });
@@ -109,12 +96,23 @@ export function registerDaemonCommand(program: Command): void {
         return;
       }
 
+      const adapter = new GitHubTicketingAdapter();
+      const spawner = new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime: agentSdkRuntime,
+        root: process.cwd(),
+        log: (message) => console.log(message),
+      });
+
       process.exitCode = await runDaemon({
         manifest,
         store,
         intervalMs: interval * 1000,
         once: options.once === true,
-        spawner: unwiredSpawner,
+        adapter,
+        spawner,
       });
     });
 }
