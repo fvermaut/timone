@@ -70,6 +70,7 @@ npm run type-check
 **[MODIFY]** `src/daemon/runs.ts` — runs gain `stage`, `waitingKind`, `gateCursor`, `branch`; the holds-the-project rule per the decision above.
 **[MODIFY]** `src/daemon/runs.test.ts` — the rule's new cases.
 **[MODIFY]** `timone.yaml` — the two fixture projects leave the manifest (housekeeping decision above).
+**[MODIFY]** `src/commands/status.ts`, `status.test.ts` — ✏ **Refined 2026-08-03:** a defect the rule change itself creates. `timone status` rendered *one* busy run per project (`runs.find`), which was correct while everything parked held the project. With several tickets able to wait at once it would show one and hide the rest — exactly what this command exists to prevent. Scope-reducing correction of a defect execution found, so the approval stamp stands.
 
 **Seams under test (TDD):** the graph as pure transitions — a `feature` classification routes to clarification, a `chore` straight to planning, a `question` terminates; an approval advances a waiting run exactly one stage; a change request re-enters the *same* stage carrying the feedback; a run without a branch does not hold its project while parked, and holds it from the moment it has one; two branchless runs may park side by side while only one session runs.
 

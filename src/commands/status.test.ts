@@ -73,6 +73,62 @@ describe("renderStatus", () => {
     expect(line).toMatch(/approval on the ticket/);
   });
 
+  it("shows every waiting ticket, not just the first", () => {
+    // Several tickets can now wait at once: a run that holds no work branch
+    // holds no project either. A status line that showed one of them would
+    // hide the rest of what the reader is being asked for.
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "clarification",
+        waitingOn: "an answer about how it should behave",
+      }),
+      run({
+        project: "scratch-app",
+        ticket: 7,
+        status: "parked",
+        stage: "clarification",
+        waitingOn: "an answer about the wording",
+      }),
+    ];
+    const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
+
+    expect(line).toMatch(/#6/);
+    expect(line).toMatch(/#7/);
+    expect(line).toMatch(/an answer about how it should behave/);
+    expect(line).toMatch(/an answer about the wording/);
+  });
+
+  it("shows the running ticket alongside the ones that are waiting", () => {
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        waitingOn: "an answer",
+      }),
+      run({ project: "scratch-app", ticket: 7, status: "active", stage: "requirements" }),
+    ];
+    const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
+
+    expect(line).toMatch(/#7.*working on it now/);
+    expect(line).toMatch(/#6.*waiting on you/);
+  });
+
+  it("names every waiting ticket in the closing line", () => {
+    const runs = [
+      run({ project: "scratch-app", ticket: 6, status: "parked", waitingOn: "an answer" }),
+      run({ project: "other-app", ticket: 2, status: "parked", waitingOn: "approval" }),
+    ];
+    const lastLine =
+      renderStatus(manifest, runs, { stateExists: true }).trimEnd().split("\n").at(-1) ?? "";
+
+    expect(lastLine).toMatch(/scratch-app #6/);
+    expect(lastLine).toMatch(/other-app #2/);
+  });
+
   it("shows how many tickets are queued behind the active one", () => {
     const runs = [
       run({ project: "scratch-app", ticket: 7, status: "active" }),

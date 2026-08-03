@@ -5,41 +5,49 @@ import type { Command } from "commander";
 import { loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 
-/** Statuses that mean the project is busy with that ticket. */
-const OCCUPYING = ["picked-up", "active", "parked"];
+/** Statuses that mean a session is running, or about to. */
+const RUNNING = ["picked-up", "active"];
 
 export interface RenderStatusOptions {
   /** False when the daemon has never written a state file. */
   stateExists: boolean;
 }
 
-/** What one project's line says after its name. */
+/** One run's phrase: the ticket, how far it got, and what it is doing. */
+function describeRun(run: Run): string {
+  const stage = run.stage === undefined ? "" : ` (${run.stage})`;
+  const what =
+    run.status === "parked"
+      ? `waiting on you: ${run.waitingOn ?? "an answer"}`
+      : run.status === "active"
+        ? "working on it now"
+        : "picked up, about to start";
+
+  const flags =
+    run.flags.length === 0
+      ? ""
+      : ` ⚠ ${run.flags.length} automatic check(s) failed — see the ticket`;
+
+  return `#${run.ticket}${stage} — ${what}${flags}`;
+}
+
+/**
+ * What one project's line says after its name.
+ *
+ * **Every** waiting ticket is named, not just the first. Since phase 12 a run
+ * that owns no work branch holds no project either, so a project can have
+ * several tickets waiting on the reader at once — and a line showing one of
+ * them would hide most of what is being asked of them, which is the one thing
+ * this command exists to prevent.
+ */
 function describeProject(project: string, runs: Run[]): string {
   const mine = runs.filter((run) => run.project === project);
-  const busy = mine.find((run) => OCCUPYING.includes(run.status));
+  const running = mine.filter((run) => RUNNING.includes(run.status));
+  const parked = mine.filter((run) => run.status === "parked");
   const queued = mine.filter((run) => run.status === "queued");
 
-  const parts: string[] = [];
-
-  if (busy === undefined) {
-    parts.push("idle");
-  } else {
-    const stage = busy.stage === undefined ? "" : ` (${busy.stage})`;
-    if (busy.status === "parked") {
-      parts.push(
-        `#${busy.ticket}${stage} — waiting on you: ${busy.waitingOn ?? "an answer"}`,
-      );
-    } else if (busy.status === "active") {
-      parts.push(`#${busy.ticket}${stage} — working on it now`);
-    } else {
-      parts.push(`#${busy.ticket}${stage} — picked up, about to start`);
-    }
-    if (busy.flags.length > 0) {
-      parts.push(
-        `⚠ ${busy.flags.length} automatic check(s) failed — see the ticket`,
-      );
-    }
-  }
+  const parts = [...running, ...parked].map(describeRun);
+  if (parts.length === 0) parts.push("idle");
 
   if (queued.length > 0) {
     const numbers = queued.map((run) => `#${run.ticket}`).join(", ");
