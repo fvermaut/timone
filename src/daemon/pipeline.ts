@@ -76,8 +76,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     processStage: 5,
     waits: "gate",
     ownsBranch: true,
-    /** Flipped to true by 12f, for the same reason. */
-    built: false,
+    built: true,
     next: "execution",
   },
   execution: {

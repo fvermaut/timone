@@ -10,6 +10,13 @@ export interface SpawnContext {
   stage?: PipelineStage;
   /** The human's words, when a gate sent the stage back to do it again. */
   feedback?: string;
+  /**
+   * The approval that resumed this run. Its stage's artifact has to record
+   * it before anything moves on: the reply lives on the ticket, but the
+   * artifact is the record (ADR-0006), and a gate whose outcome exists only
+   * in a comment thread is one the next stage cannot see.
+   */
+  approval?: { stage: PipelineStage; by: string; at: string };
 }
 
 /**
@@ -248,9 +255,22 @@ async function resolveWait(
 
   if (run.waitingKind === "gate") {
     const thread = await adapter.getTicket(project, run.ticket);
-    const transition = readGate(stage, readGateDecision(thread, cursor));
+    const decision = readGateDecision(thread, cursor);
+    const transition = readGate(stage, decision);
 
-    if (transition.kind === "advance") return { stage: transition.stage };
+    if (transition.kind === "advance") {
+      return {
+        stage: transition.stage,
+        approval:
+          decision?.kind === "approve"
+            ? {
+                stage,
+                by: decision.comment.author,
+                at: decision.comment.createdAt,
+              }
+            : undefined,
+      };
+    }
     if (transition.kind === "repeat") {
       return { stage: transition.stage, feedback: transition.feedback };
     }

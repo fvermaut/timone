@@ -469,7 +469,18 @@ describe("pollOnce — resuming a run whose human answered", () => {
     });
 
     expect(result.resumed).toEqual(["scratch-app#6"]);
-    expect(contexts).toEqual([{ stage: "planning" }]);
+    // It advances *and* carries who approved and when, so the artifact can
+    // record the gate rather than leaving the trace on the ticket alone.
+    expect(contexts).toEqual([
+      {
+        stage: "planning",
+        approval: {
+          stage: "requirements",
+          by: "fvermaut",
+          at: "2026-08-03T11:00:00Z",
+        },
+      },
+    ]);
   });
 
   it("re-runs the same stage on a change request, carrying the words", async () => {

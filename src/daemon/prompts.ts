@@ -12,6 +12,7 @@ export const PROMPTED_STAGES = [
   "triage",
   "clarification",
   "requirements",
+  "planning",
 ] as const;
 
 export interface PromptContext {
@@ -136,7 +137,68 @@ export function stagePrompt(
       return clarificationPrompt(context);
     case "requirements":
       return requirementsPrompt(context);
+    case "planning":
+      return planningPrompt(context);
   }
+}
+
+/** A human's approval of a gate, as the artifact must record it. */
+export interface RecordedApproval {
+  /** The stage whose artifact the approval belongs to. */
+  stage: (typeof PROMPTED_STAGES)[number];
+  /** Who approved, as the ticket recorded them. */
+  by: string;
+  /** When, as the ticket recorded it. */
+  at: string;
+}
+
+/** What each gated stage's artifact must say once the human has approved it. */
+const APPROVAL_RECORD: Partial<
+  Record<(typeof PROMPTED_STAGES)[number], { artifact: string; what: string }>
+> = {
+  requirements: {
+    artifact: "the PRD pair under `doc/specs/prd/`",
+    what: "set the PRD's status to Active, as stage 3's closing gate requires",
+  },
+  planning: {
+    artifact: "the phase file under `doc/plans/phases/`",
+    what:
+      "replace its `Status:` line with `Approved for execution by <who> <date>`, " +
+      "which is the written trace of stage 5's gate and the thing stage 6 " +
+      "refuses to start without",
+  },
+};
+
+/**
+ * The instruction for the short session that writes an approval into the
+ * artifact it belongs to.
+ *
+ * The approval happens on the ticket, but the artifact is the record
+ * (ADR-0006), and a gate whose outcome lives only in a comment thread is a
+ * gate the next stage cannot see. This is what turns a reply into the stamp
+ * the process reads.
+ */
+export function approvalRecordPrompt(
+  approval: RecordedApproval,
+  context: PromptContext,
+): string {
+  const spec = APPROVAL_RECORD[approval.stage];
+
+  return [
+    `**${approval.by} approved this on ${approval.at}.** Record that, and nothing else.`,
+    "",
+    ticketBlock(context),
+    "",
+    reentryBlock(),
+    "",
+    `Work on the branch \`${context.branch ?? "the run's work branch"}\`. In`,
+    `${spec?.artifact ?? "the artifact this stage produced"}: ${spec?.what ?? "record the approval"},`,
+    `naming ${approval.by} and the date ${approval.at}. Commit and **push** it.`,
+    "",
+    "That is the whole task. Do not revise the artifact's content, do not start",
+    "the next stage, and do not comment on the ticket — the approval was given,",
+    "not requested, and the machinery says what happens next.",
+  ].join("\n");
 }
 
 /**
@@ -286,6 +348,45 @@ function clarificationPrompt(context: PromptContext): string {
     "whatever the glossary gained.",
     "",
     writingBlock(),
+  ].join("\n");
+}
+
+/**
+ * Stage 5: cut the approved requirements into a phase of thin vertical
+ * slices, on the same branch, gated exactly as the requirements were.
+ */
+function planningPrompt(context: PromptContext): string {
+  const { ticket, branch } = context;
+
+  return [
+    `Plan the work for ticket #${ticket.number} on **${context.project.name}**.`,
+    "",
+    ticketBlock(context),
+    feedbackBlock(context.feedback),
+    "",
+    reentryBlock(),
+    "",
+    `**Stay on the branch \`${branch ?? "the run's work branch"}\`** — the approved`,
+    "requirements are already committed there, and they are what you are",
+    "planning against. Read them; do not re-derive them from this ticket.",
+    "",
+    "Run stage 5 for this ticket. If the planned work implies a significant",
+    "decision nobody has written down, stop and record that decision first —",
+    "stage 4 exists for exactly that, and a plan resting on an undocumented",
+    "choice is a plan nobody can review.",
+    "",
+    "**Commit the phase file on that branch and push it.** Stamp its `Status:`",
+    "line `Awaiting approval` — the human has not approved it yet, and a file",
+    "claiming otherwise would let the next stage start on nobody's authority.",
+    "",
+    "Then post one comment on the ticket describing, in plain words, what you",
+    "propose to build and in what order — the shape of the work, not a list of",
+    "file names. Do **not** ask them to approve it: the machinery posts the",
+    "approval request itself, immediately after yours.",
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
   ].join("\n");
 }
 

@@ -93,6 +93,12 @@ const GATED: Partial<
     label: "what I understood you're asking for",
     onApproval: "work out how to build it and come back with a plan.",
   },
+  planning: {
+    headline: "Here's how I propose to build it.",
+    where: "doc/plans/phases",
+    label: "the plan, in full",
+    onApproval: "start building it in that order.",
+  },
 };
 
 /**

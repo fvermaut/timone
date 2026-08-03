@@ -26,6 +26,7 @@ import {
 import type { SessionSpawner, SpawnContext } from "./poll.js";
 import {
   PROMPTED_STAGES,
+  approvalRecordPrompt,
   conversationSubject,
   stagePrompt,
   workBranch,
@@ -180,6 +181,11 @@ export class AgentSessionSpawner implements SessionSpawner {
     let stage: PipelineStage = context.stage ?? run.stage ?? "triage";
     let feedback = context.feedback;
 
+    if (context.approval !== undefined) {
+      const recorded = await this.recordApproval(run, project, context.approval);
+      if (!recorded) return;
+    }
+
     for (;;) {
       if (!isBuilt(stage)) {
         await this.park(run, project, stage);
@@ -295,6 +301,47 @@ export class AgentSessionSpawner implements SessionSpawner {
     if (transition.kind !== "advance") return undefined;
 
     return transition.stage;
+  }
+
+  /**
+   * Write an approval into the artifact it belongs to, before the run moves
+   * on. Returns false when the recording session failed, in which case the
+   * run has already been failed and the ticket told.
+   *
+   * A short session of its own rather than a line appended to the next
+   * stage's prompt: the next stage may not be built, and an approval that
+   * only lands when the following stage happens to run is an approval that
+   * disappears whenever the pipeline stops.
+   */
+  private async recordApproval(
+    run: Run,
+    project: TicketingProject,
+    approval: NonNullable<SpawnContext["approval"]>,
+  ): Promise<boolean> {
+    const { store, adapter, runtime, root } = this.options;
+    if (!isPrompted(approval.stage)) return true;
+
+    const ticket = await adapter.getTicket(project, run.ticket);
+    const prompt = approvalRecordPrompt(
+      { stage: approval.stage, by: approval.by, at: approval.at },
+      { project, ticket, branch: store.get(run.id)?.branch },
+    );
+
+    const started = await runtime.start({ cwd: root, prompt });
+    const active = store.activate(run.id, started.sessionId);
+    this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
+
+    const outcome = await started.completed;
+    if (!outcome.ok) {
+      const reason = `could not record the approval: ${outcome.error ?? "the session ended without a result"}`;
+      const failed = store.fail(run.id, reason);
+      await adapter.postComment(project, run.ticket, failedComment(reason));
+      await this.guardrails(failed, project);
+      return false;
+    }
+
+    await this.guardrails(active, project);
+    return true;
   }
 
   /**

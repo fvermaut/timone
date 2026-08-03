@@ -14,6 +14,7 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
+import { gateCommentFor } from "./gate-comment.js";
 import { RunStore, type Run } from "./runs.js";
 import {
   AgentSessionSpawner,
@@ -904,5 +905,231 @@ describe("the requirements gate", () => {
     }).spawn(store.get(run.id)!, project, { stage: "requirements" });
 
     expect(store.get(run.id)?.branch).toBe("timone/7-something-else");
+  });
+});
+
+describe("the plan gate", () => {
+  /** A run parked on the requirements gate, branch and all. */
+  function atRequirementsGate(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "requirements",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  it("uses one gate mechanism for both stages, not a second copy", () => {
+    // Asserted by construction: the two stages supply their own words, but
+    // the part the human is actually judged on — the word to reply and the
+    // rule that anything else is a change — is the same text both times.
+    const forRequirements = gateCommentFor("requirements", project, "b", ["x"])!;
+    const forPlanning = gateCommentFor("planning", project, "b", ["x"])!;
+    const rule = (body: string) => body.trimEnd().split("\n").at(-1);
+
+    expect(rule(forRequirements)).toBe(rule(forPlanning));
+    expect(rule(forRequirements)).toMatch(/isn't `approve`/);
+    for (const body of [forRequirements, forPlanning]) {
+      expect(body).toContain("**What I need from you:** read it and reply on this ticket.");
+    }
+  });
+
+  it("links the plan where the plan actually lives", () => {
+    expect(gateCommentFor("planning", project, "timone/7-slow", [])).toContain(
+      "https://github.com/fvermaut/scratch-app/tree/timone/7-slow/doc/plans/phases",
+    );
+  });
+
+  it("has no gate comment for a stage that has no gate", () => {
+    expect(gateCommentFor("triage", project, "b", [])).toBeUndefined();
+    expect(gateCommentFor("clarification", project, "b", [])).toBeUndefined();
+  });
+
+  it("tells the planning session to stamp the file as not yet approved", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+    const run = atRequirementsGate(store);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(run, project, { stage: "planning" });
+
+    expect(requests[0].prompt).toContain("Awaiting approval");
+    expect(requests[0].prompt).toMatch(/stay on the branch/i);
+  });
+
+  it("parks awaiting the building that is not built, and says so", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    const run = atRequirementsGate(store);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(run, project, { stage: "planning", approval: undefined });
+
+    // Planning ran, its gate went up, and the run waits on the human — the
+    // park at execution comes only once they approve.
+    const parked = store.get(run.id);
+    expect(parked?.stage).toBe("planning");
+    expect(parked?.waitingKind).toBe("gate");
+    expect(comments.at(-1)?.body).toContain("Here's how I propose to build it.");
+  });
+});
+
+describe("recording an approval in the artifact", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  function atPlanningGate(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "planning",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  it("writes the stamp stage 6 refuses to start without", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atPlanningGate(store), project, {
+      stage: "execution",
+      approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    const [recording] = requests;
+    expect(recording.prompt).toContain("Approved for execution by <who> <date>");
+    expect(recording.prompt).toContain("fvermaut");
+    expect(recording.prompt).toContain("2026-08-03T12:00:00Z");
+    expect(recording.prompt).toContain("timone/7-the-page-feels-slow");
+  });
+
+  it("records it before the run moves on, not after", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atPlanningGate(store), project, {
+      stage: "execution",
+      approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    // One session — the recording one. Execution is not built, so the run
+    // then parks there and says so.
+    expect(requests).toHaveLength(1);
+    expect(store.get("scratch-app#7")?.stage).toBe("execution");
+    expect(comments.at(-1)?.body).toMatch(/isn't built yet/i);
+  });
+
+  it("tells the recording session to change nothing else and say nothing", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atPlanningGate(store), project, {
+      stage: "execution",
+      approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    expect(requests[0].prompt).toMatch(/do not revise the artifact's content/i);
+    expect(requests[0].prompt).toMatch(/do not comment on the ticket/i);
+  });
+
+  it("stops the run when the approval cannot be recorded", async () => {
+    // Advancing anyway would leave the next stage looking at an artifact that
+    // says nobody approved it.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime({ ok: false, error: "push rejected" });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atPlanningGate(store), project, {
+      stage: "execution",
+      approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    expect(store.get("scratch-app#7")?.status).toBe("failed");
+    expect(store.get("scratch-app#7")?.failure).toMatch(/could not record the approval/);
+    expect(comments.at(-1)?.body).toMatch(/push rejected/);
+  });
+
+  it("records a requirements approval the same way", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+    const run = pickedUpRun(store);
+    store.activate(run.id, "s");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer",
+      kind: "gate",
+      stage: "requirements",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(store.get(run.id)!, project, {
+      stage: "planning",
+      approval: { stage: "requirements", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    expect(requests[0].prompt).toMatch(/status to Active/i);
   });
 });
