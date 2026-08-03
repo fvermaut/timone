@@ -11,11 +11,11 @@ import type {
 } from "../adapters/ticketing.js";
 import type { Manifest } from "../manifest.js";
 import { RunStore } from "../daemon/runs.js";
+import { takeoverPrompt } from "../daemon/prompts.js";
 import {
   parseTarget,
   resolveTakeover,
   runTakeover,
-  takeoverPrompt,
   type ProcessLauncher,
 } from "./takeover.js";
 
@@ -149,7 +149,7 @@ describe("resolveTakeover", () => {
       waitingOn: "your approval of what I wrote down",
       kind: "gate",
       stage: "requirements",
-      gateCursor: "2026-08-03T10:00:00Z",
+      waitCursor: "2026-08-03T10:00:00Z",
     });
 
     const resolution = resolveTakeover(
@@ -239,40 +239,20 @@ describe("resolveTakeover", () => {
   });
 });
 
-describe("takeoverPrompt", () => {
-  const prompt = takeoverPrompt("scratch-app", "clarification", thread);
-
-  it("carries the ticket in the words it was written in", () => {
-    expect(prompt).toContain("the message box is hard to use on mobile");
-    expect(prompt).toContain("typing in the box is fiddly on my phone");
-  });
-
-  it("separates the voices, since the account name cannot", () => {
-    expect(prompt).toMatch(/Timone \(you\), earlier[\s\S]*Picked this up\./);
-    expect(prompt).toMatch(/fvermaut \(a person\)[\s\S]*it's worse in landscape/);
-  });
-
-  it("names the stage being resumed and the project to touch", () => {
-    expect(prompt).toContain("clarification");
-    expect(prompt).toContain("projects/scratch-app/");
-  });
-
-  it("says the session carries nothing over, so it rebuilds from artifacts", () => {
-    expect(prompt).toMatch(/nothing was carried over/i);
-  });
-
-  it("requires an accepted summary on the ticket, and no transcript anywhere", () => {
-    expect(prompt).toMatch(/accepted summary to the ticket/i);
-    expect(prompt).toMatch(/not an artifact/i);
-  });
-
-  it("forbids asking the human to name a stage or a skill", () => {
-    expect(prompt).toMatch(/never ask them to name a stage/i);
+describe("the prompt a takeover starts from", () => {
+  // What the prompt must contain is `prompts.test.ts`'s business — it is the
+  // same prompt the daemon would use. What matters here is that the command
+  // hands over that prompt and not one of its own.
+  it("is the stage's own prompt, for the stage the ticket is waiting at", () => {
+    expect(takeoverPrompt("scratch-app", "clarification", thread)).toContain(
+      "the message box is hard to use on mobile",
+    );
   });
 
   it("copes with a ticket nobody has replied to", () => {
-    expect(takeoverPrompt("scratch-app", "clarification", { ...thread, comments: [] }))
-      .toContain("(no replies yet)");
+    expect(
+      takeoverPrompt("scratch-app", "clarification", { ...thread, comments: [] }),
+    ).toContain("(no replies yet)");
   });
 });
 

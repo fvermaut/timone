@@ -1,6 +1,16 @@
 import type { Manifest } from "../manifest.js";
 import type { TicketingAdapter, TicketingProject } from "../adapters/ticketing.js";
+import { readConversationRecord, readGateDecision } from "./gates.js";
+import { concludeConversation, readGate, type PipelineStage } from "./pipeline.js";
 import type { Run, RunStore } from "./runs.js";
+
+/** What a spawn is resuming, when it is resuming something. */
+export interface SpawnContext {
+  /** Start at this stage rather than the run's recorded one. */
+  stage?: PipelineStage;
+  /** The human's words, when a gate sent the stage back to do it again. */
+  feedback?: string;
+}
 
 /**
  * The hand-off to a spawned agent session. Declared here rather than in the
@@ -9,7 +19,11 @@ import type { Run, RunStore } from "./runs.js";
  * implementation of this interface.
  */
 export interface SessionSpawner {
-  spawn(run: Run, project: TicketingProject): Promise<void>;
+  spawn(
+    run: Run,
+    project: TicketingProject,
+    context?: SpawnContext,
+  ): Promise<void>;
 }
 
 export interface PollDeps {
@@ -28,6 +42,8 @@ export interface PollResult {
   queued: string[];
   /** Run ids handed to the spawner this cycle. */
   spawned: string[];
+  /** Run ids whose human wait was answered and which resumed this cycle. */
+  resumed: string[];
   /** One readable line per project that failed; the cycle continued. */
   errors: string[];
 }
@@ -78,8 +94,8 @@ function oneLine(error: unknown): string {
 /**
  * Run one poll cycle over every project in the manifest: list the marked
  * tickets, register the ones not already tracked, acknowledge each exactly
- * once, and hand the project's occupying run to the spawner if no session
- * is attached to it yet.
+ * once, resume any parked run whose human has answered, and hand the
+ * project's occupying run to the spawner if no session is attached to it yet.
  *
  * Nothing here throws: a project whose tracker misbehaves is reported in
  * `errors` and the remaining projects are still polled. The acknowledgement
@@ -93,6 +109,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
     pickedUp: [],
     queued: [],
     spawned: [],
+    resumed: [],
     errors: [],
   };
 
@@ -117,7 +134,7 @@ async function pollProject(
   result: PollResult,
   log: (message: string) => void,
 ): Promise<void> {
-  const { store, adapter, spawner } = deps;
+  const { store, adapter } = deps;
 
   const tickets = await adapter.listMarkedTickets(project);
   for (const ticket of tickets) {
@@ -140,13 +157,17 @@ async function pollProject(
     }
   }
 
+  await resumeAnswered(project, deps, result, log);
+
   // Hand off whatever now holds the project, if nothing is running it yet.
-  // Promotion out of the queue happens in the store when a run ends, so a
-  // ticket queued in an earlier cycle starts here without being re-acked.
+  // `promoteQueue` is what starts a run left queued behind a park that no
+  // longer holds anything — promotion is otherwise a side effect of the run
+  // ahead moving, and nothing moved.
+  store.promoteQueue(project.name);
   const occupier = store.occupyingRun(project.name);
   if (occupier !== undefined && occupier.status === "picked-up") {
     try {
-      await spawner.spawn(occupier, project);
+      await deps.spawner.spawn(occupier, project);
       result.spawned.push(occupier.id);
       log(`spawn  ${occupier.id}`);
     } catch (error) {
@@ -155,4 +176,96 @@ async function pollProject(
       log(`error  ${line}`);
     }
   }
+}
+
+/**
+ * Resume every parked run whose human has answered.
+ *
+ * The ticket is the one surface this reads (ADR-0012): a gate's answer is the
+ * human's reply, and a conversation's is the record the session posted when
+ * it concluded. Both are found relative to the cursor stored when the run
+ * parked, so nothing said before the question can answer it.
+ *
+ * Only one run resumes per cycle per project, because sessions serialize. The
+ * rest keep waiting and are picked up by a later cycle in the order they
+ * parked — no answer is lost by being second.
+ */
+async function resumeAnswered(
+  project: TicketingProject,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
+
+  for (const run of store.parkedRuns(project.name)) {
+    if (store.runningRun(project.name) !== undefined) return;
+    if (run.stage === undefined || run.waitCursor === undefined) continue;
+
+    const holder = store.occupyingRun(project.name);
+    if (holder !== undefined && holder.id !== run.id) continue;
+
+    let context: SpawnContext | undefined;
+    try {
+      context = await resolveWait(run, project, adapter);
+    } catch (error) {
+      const line = `${project.name}: could not read #${run.ticket}: ${oneLine(error)}`;
+      result.errors.push(line);
+      log(`error  ${line}`);
+      continue;
+    }
+    if (context === undefined) continue;
+
+    try {
+      await deps.spawner.spawn(run, project, context);
+      result.resumed.push(run.id);
+      log(`resume ${run.id} → ${context.stage ?? run.stage}`);
+    } catch (error) {
+      const line = `${project.name}: could not resume #${run.ticket}: ${oneLine(error)}`;
+      result.errors.push(line);
+      log(`error  ${line}`);
+    }
+    return;
+  }
+}
+
+/**
+ * What a parked run should do now, or undefined while it is still waiting.
+ *
+ * A change request returns the *same* stage with the human's words; an
+ * approval or an accepted conversation returns the next one. Nothing else
+ * moves a run — an unanswered gate and an abandoned conversation both look
+ * like silence, and silence is not an answer.
+ */
+async function resolveWait(
+  run: Run,
+  project: TicketingProject,
+  adapter: TicketingAdapter,
+): Promise<SpawnContext | undefined> {
+  const stage = run.stage;
+  const cursor = run.waitCursor;
+  if (stage === undefined || cursor === undefined) return undefined;
+
+  if (run.waitingKind === "gate") {
+    const thread = await adapter.getTicket(project, run.ticket);
+    const transition = readGate(stage, readGateDecision(thread, cursor));
+
+    if (transition.kind === "advance") return { stage: transition.stage };
+    if (transition.kind === "repeat") {
+      return { stage: transition.stage, feedback: transition.feedback };
+    }
+    return undefined;
+  }
+
+  if (run.waitingKind === "conversation") {
+    const thread = await adapter.getTicket(project, run.ticket);
+    const record = readConversationRecord(thread, cursor);
+    const transition = concludeConversation(stage, {
+      accepted: record !== undefined,
+    });
+
+    return transition.kind === "advance" ? { stage: transition.stage } : undefined;
+  }
+
+  return undefined;
 }

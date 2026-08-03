@@ -11,6 +11,7 @@ import {
   ownsBranch,
   readGate,
   routeAfterTriage,
+  runsUnattended,
   stageAfter,
   waitFor,
   type PipelineStage,
@@ -103,14 +104,24 @@ describe("the stage graph", () => {
     expect(ownsBranch("execution")).toBe(true);
   });
 
-  it("knows which stages this phase actually built", () => {
+  it("knows which stages can actually be run right now", () => {
+    // A stage the graph calls built but nothing can run is a lie the daemon
+    // acts on: it would start a session with no prompt. Each flips as the
+    // slice that builds it lands — requirements in 12e, planning in 12f.
     expect(isBuilt("triage")).toBe(true);
     expect(isBuilt("clarification")).toBe(true);
-    expect(isBuilt("requirements")).toBe(true);
-    expect(isBuilt("planning")).toBe(true);
     // Building and acting on a bug report are phase 13's and later.
     expect(isBuilt("execution")).toBe(false);
     expect(isBuilt("feedback")).toBe(false);
+  });
+
+  it("leaves the conversation stage to a human-opened session", () => {
+    // A conversation needs someone at the keyboard; the daemon's sessions
+    // run with nobody there.
+    expect(runsUnattended("clarification")).toBe(false);
+    expect(runsUnattended("triage")).toBe(true);
+    expect(runsUnattended("requirements")).toBe(true);
+    expect(runsUnattended("planning")).toBe(true);
   });
 
   it("describes every stage it can route to", () => {

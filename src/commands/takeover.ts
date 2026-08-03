@@ -7,7 +7,7 @@ import type { TicketingAdapter, TicketThread } from "../adapters/ticketing.js";
 import { loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, runId, type Run } from "../daemon/runs.js";
 import type { PipelineStage } from "../daemon/pipeline.js";
-import { takeoverCommand } from "../channels/terminal.js";
+import { PROMPTED_STAGES, takeoverPrompt } from "../daemon/prompts.js";
 
 /** A parsed `<project>#<ticket>` target. */
 export interface TakeoverTarget {
@@ -147,69 +147,6 @@ export function resolveTakeover(
 }
 
 /**
- * Build the instruction the interactive session starts from.
- *
- * It is a router, not a memory ([ADR-0013](../../doc/adr/0013-stateless-session-reentry.md)):
- * the session is handed the project, the ticket with its thread, and which
- * stage it is resuming — and rebuilds everything else from the artifacts. If
- * that is not enough to continue, the deficiency is in the artifacts, which
- * is the point.
- */
-export function takeoverPrompt(
-  project: string,
-  stage: PipelineStage,
-  ticket: TicketThread,
-): string {
-  const thread =
-    ticket.comments.length === 0
-      ? "(no replies yet)"
-      : ticket.comments
-          .map((comment) => {
-            const who = comment.fromTimone
-              ? "Timone (you), earlier"
-              : `${comment.author} (a person)`;
-            return `--- ${who}, at ${comment.createdAt} ---\n${comment.body}`;
-          })
-          .join("\n\n");
-
-  return [
-    `You are resuming work on the managed project **${project}**, at the`,
-    `**${stage}** stage. A human has just opened this session by running`,
-    `\`${takeoverCommand(project, ticket.number)}\` — they are at the keyboard now,`,
-    "and this is a conversation with them, not a batch job.",
-    "",
-    `Project: ${project} — touch only \`projects/${project}/…\`.`,
-    `Ticket: #${ticket.number} — ${ticket.title}`,
-    `URL: ${ticket.url}`,
-    `Filed by: ${ticket.author}`,
-    "",
-    "--- the ticket, in the words it was written in ---",
-    ticket.body,
-    "--- end of ticket ---",
-    "",
-    "Replies so far, oldest first. Timone posts under the same account as the",
-    "human, so the author name does not tell you apart from them — the labels",
-    "below do:",
-    "",
-    thread,
-    "",
-    "You are running at the timone root. Follow `process.md` and `CLAUDE.md`,",
-    "and rebuild whatever else you need from the committed artifacts and the",
-    "thread above — nothing was carried over from the session that parked this.",
-    "",
-    "Run the stage that owns this work and hold the conversation it calls for.",
-    "The human knows nothing about the process: never ask them to name a stage",
-    "or a skill, and never make them repeat something the ticket already says.",
-    "",
-    "When you have what you need, summarize what you agreed, get their explicit",
-    "acceptance of that summary, and post the accepted summary to the ticket as",
-    "the record. The conversation itself is not an artifact and nothing may",
-    "cite it. If they leave without accepting, say so on the ticket and change",
-    "nothing else.",
-  ].join("\n");
-}
-
-/**
  * Resolve the ticket, then hand the terminal to an interactive session.
  *
  * The session is the `claude` CLI with stdio inherited, not the daemon's
@@ -240,8 +177,20 @@ export async function runTakeover(
     name: target.project,
     repoUrl: deps.manifest.projects[target.project].repo_url,
   };
+  if (!(PROMPTED_STAGES as readonly string[]).includes(resolution.stage)) {
+    log(
+      `${target.project} #${target.ticket} is waiting at a stage I can't hold a ` +
+        "conversation for yet. Nothing has changed.",
+    );
+    return 1;
+  }
+
   const thread = await deps.adapter.getTicket(project, target.ticket);
-  const prompt = takeoverPrompt(target.project, resolution.stage, thread);
+  const prompt = takeoverPrompt(
+    target.project,
+    resolution.stage as (typeof PROMPTED_STAGES)[number],
+    thread,
+  );
 
   log(`Picking up ${target.project} #${target.ticket} — over to you.`);
   return deps.launcher.run("claude", [prompt], { cwd: deps.root });

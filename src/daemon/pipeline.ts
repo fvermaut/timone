@@ -69,14 +69,17 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     processStage: 3,
     waits: "gate",
     ownsBranch: true,
-    built: true,
+    // Flipped to true by 12e, which is what builds it. A stage the graph
+    // calls built but nothing can run is a lie the daemon would act on.
+    built: false,
     next: "planning",
   },
   planning: {
     processStage: 5,
     waits: "gate",
     ownsBranch: true,
-    built: true,
+    /** Flipped to true by 12f, for the same reason. */
+    built: false,
     next: "execution",
   },
   execution: {
@@ -163,6 +166,18 @@ export function ownsBranch(stage: PipelineStage): boolean {
 /** Whether the machinery for `stage` exists yet. */
 export function isBuilt(stage: PipelineStage): boolean {
   return STAGES[stage].built;
+}
+
+/**
+ * Whether the daemon starts this stage itself.
+ *
+ * Derived rather than declared, because it *is* the same fact: a stage whose
+ * wait is a conversation has no unattended work to do — the conversation is
+ * the work, and it needs someone at the keyboard. Recording it twice would
+ * let the two drift.
+ */
+export function runsUnattended(stage: PipelineStage): boolean {
+  return waitFor(stage) !== "conversation";
 }
 
 /** The `process.md` stage number, for messages that need to be precise. */

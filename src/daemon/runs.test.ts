@@ -273,14 +273,14 @@ describe("the holds-the-project rule", () => {
       waitingOn: "approval on the ticket",
       kind: "gate",
       stage: "requirements",
-      gateCursor: "2026-08-03T10:00:00Z",
+      waitCursor: "2026-08-03T10:00:00Z",
     });
 
     expect(store.get(run.id)).toMatchObject({
       waitingOn: "approval on the ticket",
       waitingKind: "gate",
       stage: "requirements",
-      gateCursor: "2026-08-03T10:00:00Z",
+      waitCursor: "2026-08-03T10:00:00Z",
       branch: "timone/7-reset-password",
     });
   });
@@ -377,7 +377,7 @@ describe("persistence", () => {
       waitingOn: "approval on the ticket",
       kind: "gate",
       stage: "requirements",
-      gateCursor: "2026-08-03T10:00:00Z",
+      waitCursor: "2026-08-03T10:00:00Z",
     });
 
     const reopened = RunStore.open(path);

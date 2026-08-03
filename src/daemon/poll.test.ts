@@ -1,14 +1,16 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
-import type {
-  Ticket,
-  TicketingAdapter,
-  TicketingProject,
-  TicketThread,
+import {
+  CONVERSATION_RECORD_MARKER,
+  MACHINE_MARKER,
+  type Ticket,
+  type TicketingAdapter,
+  type TicketingProject,
+  type TicketThread,
 } from "../adapters/ticketing.js";
 import { RunStore, type Run } from "./runs.js";
 import { pollOnce, type SessionSpawner } from "./poll.js";
@@ -316,5 +318,320 @@ describe("pollOnce — resilience", () => {
 
     expect(result.errors.some((error) => /alpha/.test(error))).toBe(true);
     expect(store.occupyingRun("beta")?.ticket).toBe(2);
+  });
+});
+
+describe("pollOnce — resuming a run whose human answered", () => {
+  /** A thread whose comments the test controls. */
+  function threadedAdapter(comments: TicketThread["comments"]): {
+    adapter: TicketingAdapter;
+    posted: PostedComment[];
+  } {
+    const posted: PostedComment[] = [];
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments };
+      },
+      async postComment(project, number, body): Promise<void> {
+        posted.push({ project: project.name, number, body });
+      },
+      async applyLabel(): Promise<void> {},
+    };
+    return { adapter, posted };
+  }
+
+  const invitation = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\ncome and talk to me`,
+    createdAt: "2026-08-03T10:00:00Z",
+    fromTimone: true,
+  };
+
+  /** A run parked on a conversation opened at `invitation`. */
+  function parkedOnConversation(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    return store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: invitation.createdAt,
+    });
+  }
+
+  /** A run parked on a gate opened at `invitation`. */
+  function parkedOnGate(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-message-box");
+    return store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "requirements",
+      waitCursor: invitation.createdAt,
+    });
+  }
+
+  it("advances a conversation the session recorded as accepted", async () => {
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter } = threadedAdapter([
+      invitation,
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\n---\n\n${CONVERSATION_RECORD_MARKER}\n\nwe agreed the send button is the problem`,
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: true,
+      },
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(spawned).toHaveLength(1);
+  });
+
+  it("leaves a conversation nobody concluded exactly where it was", async () => {
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter } = threadedAdapter([invitation]);
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(result.resumed).toEqual([]);
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#6")?.status).toBe("parked");
+  });
+
+  it("does not read an unmarked machine comment as a concluded conversation", async () => {
+    // The session posts "we didn't finish" when the human walks away. It is
+    // Timone's, and after the cursor, and it must still not advance anything.
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter } = threadedAdapter([
+      invitation,
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\nwe didn't finish that conversation`,
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: true,
+      },
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(spawned).toEqual([]);
+  });
+
+  it("advances a gate the human approved", async () => {
+    const store = newStore();
+    parkedOnGate(store);
+    const { adapter } = threadedAdapter([
+      invitation,
+      {
+        author: "fvermaut",
+        body: "approve",
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: false,
+      },
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+    const contexts: unknown[] = [];
+    const recording: SessionSpawner = {
+      async spawn(run, project, context) {
+        await spawner.spawn(run, project, context);
+        contexts.push(context);
+      },
+    };
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: recording,
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(contexts).toEqual([{ stage: "planning" }]);
+  });
+
+  it("re-runs the same stage on a change request, carrying the words", async () => {
+    const store = newStore();
+    parkedOnGate(store);
+    const { adapter } = threadedAdapter([
+      invitation,
+      {
+        author: "fvermaut",
+        body: "it's not about phones, it's about losing the draft",
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: false,
+      },
+    ]);
+    const contexts: unknown[] = [];
+    const recording: SessionSpawner = {
+      async spawn(_run, _project, context) {
+        contexts.push(context);
+      },
+    };
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: recording,
+    });
+
+    expect(contexts).toEqual([
+      {
+        stage: "requirements",
+        feedback: "it's not about phones, it's about losing the draft",
+      },
+    ]);
+  });
+
+  it("never reads its own comment as the human's approval", async () => {
+    // The trap the machine marker exists to close: Timone quoting the word
+    // "approve" back at the ticket must not approve Timone's own work.
+    const store = newStore();
+    parkedOnGate(store);
+    const { adapter } = threadedAdapter([
+      invitation,
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\napprove`,
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: true,
+      },
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(spawned).toEqual([]);
+  });
+
+  it("ignores an answer written before the question was asked", async () => {
+    const store = newStore();
+    parkedOnGate(store);
+    const { adapter } = threadedAdapter([
+      {
+        author: "fvermaut",
+        body: "approve",
+        createdAt: "2026-08-03T09:00:00Z",
+        fromTimone: false,
+      },
+      invitation,
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(spawned).toEqual([]);
+  });
+
+  it("resumes one run per cycle, because sessions serialize", async () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 6);
+    store.activate(first.run.id, "s1");
+    store.park(first.run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: invitation.createdAt,
+    });
+    const second = store.register("scratch-app", 7);
+    store.activate(second.run.id, "s2");
+    store.park(second.run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: invitation.createdAt,
+    });
+
+    const record = {
+      author: "fvermaut",
+      body: `${MACHINE_MARKER}\n\n${CONVERSATION_RECORD_MARKER}\n\nagreed`,
+      createdAt: "2026-08-03T11:00:00Z",
+      fromTimone: true,
+    };
+    const { adapter } = threadedAdapter([invitation, record]);
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(result.resumed).toHaveLength(1);
+    expect(spawned).toHaveLength(1);
+  });
+
+  it("starts a run left queued behind a park that no longer holds anything", async () => {
+    // The exact ledger phase 11 left on disk: #4 parked holding the project
+    // under the old rule, #6 queued behind it forever. Written as a file
+    // rather than built through the store, because the store would never
+    // produce this shape again — only a restart onto an old one can.
+    const dir = mkdtempSync(join(tmpdir(), "timone-poll-legacy-"));
+    tempDirs.push(dir);
+    const path = join(dir, ".timone", "state.json");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 1,
+        runs: [
+          {
+            id: "scratch-app#4",
+            project: "scratch-app",
+            ticket: 4,
+            status: "parked",
+            stage: "triage",
+            waitingOn: "the next stage to be built",
+            flags: [],
+            createdAt: "2026-08-02T18:29:31.940Z",
+            updatedAt: "2026-08-02T18:32:29.650Z",
+          },
+          {
+            id: "scratch-app#6",
+            project: "scratch-app",
+            ticket: 6,
+            status: "queued",
+            flags: [],
+            createdAt: "2026-08-02T18:32:57.787Z",
+            updatedAt: "2026-08-02T18:32:57.787Z",
+          },
+        ],
+      }),
+    );
+
+    const store = RunStore.open(path);
+    expect(store.get("scratch-app#6")?.status).toBe("queued");
+
+    const { adapter } = threadedAdapter([]);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(spawned.map((run) => run.ticket)).toEqual([6]);
+    expect(store.get("scratch-app#4")?.status).toBe("parked");
   });
 });

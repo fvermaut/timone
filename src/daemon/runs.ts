@@ -30,11 +30,17 @@ const RUNNING: readonly RunStatus[] = ["picked-up", "active"];
 /** Statuses a run never leaves. */
 const TERMINAL: readonly RunStatus[] = ["done", "failed"];
 
-/** Every transition the store will make; anything else is a bug, loudly. */
+/**
+ * Every transition the store will make; anything else is a bug, loudly.
+ *
+ * `active → active` is a real move, not a no-op: a run that clears one stage
+ * and starts the next without a human in between re-activates under a new
+ * session id, since each stage is its own session.
+ */
 const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   queued: ["picked-up"],
   "picked-up": ["active", "failed"],
-  active: ["parked", "done", "failed"],
+  active: ["active", "parked", "done", "failed"],
   parked: ["active", "done", "failed"],
   done: [],
   failed: [],
@@ -60,10 +66,11 @@ const runSchema = z.strictObject({
   /** Which *kind* of wait that is — what an arriving answer may resolve. */
   waitingKind: z.enum(["gate", "conversation"]).optional(),
   /**
-   * The instant the open gate's comment was posted. Replies at or before it
-   * belong to an earlier question and cannot answer this one.
+   * The instant the wait was opened — the gate comment, or the invitation to
+   * a conversation. Anything at or before it belongs to an earlier question
+   * and cannot answer this one.
    */
-  gateCursor: z.string().optional(),
+  waitCursor: z.string().optional(),
   /**
    * The work branch this run owns, once it has one. Its presence is what
    * makes a parked run hold its project — see {@link RunStore}.
@@ -105,8 +112,8 @@ export interface ParkOptions {
   kind?: "gate" | "conversation";
   /** The stage it parked at, when parking moves it. */
   stage?: PipelineStage;
-  /** For a gate: the instant the gate comment was posted. */
-  gateCursor?: string;
+  /** The instant the wait was opened; answers before it are not answers to it. */
+  waitCursor?: string;
 }
 
 /**
@@ -244,18 +251,37 @@ export class RunStore {
       run.sessionId = sessionId;
       run.waitingOn = undefined;
       run.waitingKind = undefined;
-      run.gateCursor = undefined;
+      run.waitCursor = undefined;
     });
   }
 
   /** Park a run against a human wait, naming what it waits for. */
   park(id: string, options: ParkOptions): Run {
     return this.transition(id, "parked", (run) => {
-      run.waitingOn = options.waitingOn;
-      run.waitingKind = options.kind;
-      run.gateCursor = options.gateCursor;
-      if (options.stage !== undefined) run.stage = options.stage;
+      applyPark(run, options);
     });
+  }
+
+  /**
+   * Change what an already-parked run is waiting for.
+   *
+   * Distinct from {@link park} on purpose. Parking is a run stopping, and
+   * doing that twice is the double-flip bug the lifecycle refuses. This is a
+   * different event: the run's wait was answered, it moved on, and what it
+   * now waits for is not what it waited for before. Giving it its own name
+   * keeps the refusal that matters while allowing the move that is real.
+   */
+  repark(id: string, options: ParkOptions): Run {
+    const run = this.mutable(id);
+    if (run.status !== "parked") {
+      throw new Error(
+        `Run ${id} is ${run.status}, not parked — use park() to stop a run`,
+      );
+    }
+    applyPark(run, options);
+    run.updatedAt = this.now();
+    this.persist();
+    return { ...run };
   }
 
   /**
@@ -409,6 +435,14 @@ export class RunStore {
 /** One run per ticket — the id is what makes re-pickup a no-op. */
 export function runId(project: string, ticket: number): string {
   return `${project}#${ticket}`;
+}
+
+/** Write a wait onto a run. Shared by {@link RunStore.park} and `repark`. */
+function applyPark(run: Run, options: ParkOptions): void {
+  run.waitingOn = options.waitingOn;
+  run.waitingKind = options.kind;
+  run.waitCursor = options.waitCursor;
+  if (options.stage !== undefined) run.stage = options.stage;
 }
 
 /**

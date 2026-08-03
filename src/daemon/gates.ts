@@ -1,4 +1,8 @@
-import type { TicketComment, TicketThread } from "../adapters/ticketing.js";
+import {
+  CONVERSATION_RECORD_MARKER,
+  type TicketComment,
+  type TicketThread,
+} from "../adapters/ticketing.js";
 
 /**
  * The words a human may reply with to approve. The gate comment tells them
@@ -62,6 +66,45 @@ export function readGateDecision(
   }
 
   return undefined;
+}
+
+/**
+ * Find the record of a concluded conversation posted after `cursor`, or
+ * undefined while none has been.
+ *
+ * The mirror image of {@link readGateDecision}: there, the human's own words
+ * decide, and Timone's are skipped; here the record is Timone's by
+ * construction — it is the session writing down what was agreed in a
+ * conversation the daemon never saw. Only a comment carrying
+ * {@link CONVERSATION_RECORD_MARKER} counts, so a conversation the human
+ * abandoned leaves the run waiting exactly as it should.
+ */
+export function readConversationRecord(
+  thread: TicketThread,
+  cursor: string,
+): TicketComment | undefined {
+  const after = instant(cursor);
+
+  return thread.comments.find(
+    (comment) =>
+      comment.fromTimone &&
+      instant(comment.createdAt) > after &&
+      comment.body.includes(CONVERSATION_RECORD_MARKER),
+  );
+}
+
+/**
+ * When the gate this run is waiting on was opened: the newest comment Timone
+ * posted, since the gate comment is always one of its own.
+ *
+ * Deliberately *not* the newest comment of any kind. A human who replies in
+ * the moment between the session posting and the daemon reading would
+ * otherwise land past the cursor and have their answer silently ignored.
+ */
+export function waitCursorFrom(thread: TicketThread): string {
+  const mine = thread.comments.filter((comment) => comment.fromTimone);
+  const newest = mine.at(-1);
+  return newest?.createdAt ?? thread.createdAt;
 }
 
 /**

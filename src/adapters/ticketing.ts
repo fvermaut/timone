@@ -20,6 +20,19 @@ export const MARK_LABEL = "timone";
 export const MACHINE_MARKER =
   "🤖 **Timone** · automatic message — written by the machine, not by the account it appears under";
 
+/**
+ * The line an accepted conversation record carries, under the machine marker.
+ *
+ * A conversation concludes inside the conversation, but the *record* of it
+ * lands on the ticket — and the ticket is the one surface the loop reads
+ * ([ADR-0012](../../doc/adr/0012-conversation-channels.md)). This marker is
+ * what lets the daemon tell "we agreed this" from everything else a session
+ * might post. Matching on prose instead would make the pipeline's advance
+ * depend on wording nobody knew was load-bearing.
+ */
+export const CONVERSATION_RECORD_MARKER =
+  "✅ **Agreed** · the record of a conversation, accepted by the human";
+
 /** Put the machine header on a comment body, unless it already carries one. */
 export function stampMachineComment(body: string): string {
   return body.startsWith(MACHINE_MARKER)

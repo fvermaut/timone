@@ -1,14 +1,29 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
 import type { Manifest } from "../manifest.js";
-import {
-  MACHINE_MARKER,
-  type TicketingAdapter,
-  type TicketingProject,
-  type TicketThread,
+import type {
+  TicketingAdapter,
+  TicketingProject,
+  TicketThread,
 } from "../adapters/ticketing.js";
-import type { SessionSpawner } from "./poll.js";
-import type { Run, RunStore } from "./runs.js";
+import {
+  inviteToConversation,
+  type ConversationChannel,
+} from "../channels/conversation.js";
+import { TerminalChannel } from "../channels/terminal.js";
+import { waitCursorFrom } from "./gates.js";
+import {
+  classificationFromLabels,
+  isBuilt,
+  processStage,
+  routeAfterTriage,
+  runsUnattended,
+  waitFor,
+  type PipelineStage,
+} from "./pipeline.js";
+import type { SessionSpawner, SpawnContext } from "./poll.js";
+import { PROMPTED_STAGES, conversationSubject, stagePrompt } from "./prompts.js";
+import type { ParkOptions, Run, RunStore } from "./runs.js";
 
 /** What the spawner asks a runtime to run. */
 export interface SessionRequest {
@@ -45,6 +60,8 @@ export interface AgentSessionSpawnerOptions {
   runtime: SessionRuntime;
   /** The timone root; every session runs here (ADR-0007). */
   root: string;
+  /** Where multi-turn conversations happen. Defaults to the terminal. */
+  channel?: ConversationChannel;
   /**
    * Guardrail bracket (R15): `beforeSession` records the state of the world
    * before the session touches it, `afterSession` judges what changed.
@@ -54,88 +71,27 @@ export interface AgentSessionSpawnerOptions {
   log?: (message: string) => void;
 }
 
-/**
- * Build the session's instruction. Two rules shape it:
- *
- * - **The session classifies; the spawner does not.** The daemon knows only
- *   that a ticket was marked. Deciding what kind of request it is belongs to
- *   stage 1, run by an agent that has read the raw text — so this prompt
- *   carries the text and the instruction to classify, never a verdict.
- * - **The human's words are quoted, never paraphrased.** A naive ticket body
- *   is the evidence triage works from; summarizing it here would hand the
- *   session a pre-digested version of the thing it is supposed to read.
- */
-export function triagePrompt(
-  project: TicketingProject,
-  ticket: TicketThread,
-): string {
-  // Who said what matters more than it looks: Timone posts under a person's
-  // account, so the author line is the same for both. Attribution here comes
-  // from the marker, never from the login.
-  const thread =
-    ticket.comments.length === 0
-      ? ""
-      : [
-          "",
-          "Replies on the ticket, oldest first. Note who wrote each one — Timone",
-          "posts under the same account as the human, so the author name does not",
-          "tell you apart from them:",
-          ...ticket.comments.map((comment) => {
-            const who = comment.fromTimone
-              ? "Timone (you), earlier"
-              : `${comment.author} (a person)`;
-            return `\n--- ${who}, at ${comment.createdAt} ---\n${comment.body}`;
-          }),
-          "",
-        ].join("\n");
-
-  return [
-    `A ticket was filed on the managed project **${project.name}** and marked for Timone.`,
-    "",
-    `Project: ${project.name} — touch only \`projects/${project.name}/…\`.`,
-    `Ticket: #${ticket.number} — ${ticket.title}`,
-    `URL: ${ticket.url}`,
-    `Filed by: ${ticket.author}`,
-    "",
-    "--- the ticket, in the words it was written in ---",
-    ticket.body,
-    "--- end of ticket ---",
-    thread,
-    "You are running at the timone root. Follow `process.md` and `CLAUDE.md`.",
-    "",
-    "**This request has not been classified.** Classify it yourself by running",
-    "stage 1 on the raw text above — do not assume what kind of request it is,",
-    "and do not act on it beyond classifying it.",
-    "",
-    "Record the outcome the way the process requires: the classification and its",
-    `rationale as a comment on ticket #${ticket.number}, and a \`triage:<kind>\` label`,
-    "on the issue. Write the comment for someone who knows nothing about this",
-    "process — no stage numbers, no skill names — and end it with an explicit",
-    "line saying what, if anything, is being asked of them.",
-    "",
-    "**Every comment you post on the ticket must start with this exact line,**",
-    "followed by a blank line, `---` and a blank line, then your text. You are",
-    "posting through a person's GitHub account: without it the thread reads as",
-    "though they wrote your words, and neither they nor a later session can tell",
-    "your output from theirs.",
-    "",
-    MACHINE_MARKER,
-    "",
-    "Then stop. The stages that would follow are not built yet; the run will be",
-    "parked after you finish.",
-  ].join("\n");
-}
-
-/** The comment posted when a run parks at the end of triage. */
-export function parkedComment(): string {
+/** The comment posted when a run reaches a stage this phase has not built. */
+export function parkedComment(stage: PipelineStage): string {
   return [
     "**That's as far as I can take this one for now.**",
     "",
-    "I've worked out what kind of request this is and written it above. Acting on",
-    "it — asking you the questions it raises, then planning and building it — is",
-    "the next piece of machinery being built, and it isn't ready yet.",
+    `Everything up to this point is done and written on this ticket. What comes`,
+    `next — process stage ${processStage(stage)} — is machinery that isn't built yet.`,
     "",
     "**What I need from you:** nothing right now — this ticket keeps its place and picks up from here once that machinery lands.",
+  ].join("\n");
+}
+
+/** The comment posted when a question has been answered and nothing follows. */
+export function answeredComment(): string {
+  return [
+    "**Answered above — and that's the whole of it.**",
+    "",
+    "This one was a question rather than something to build, so there's nothing",
+    "to plan and nothing to make. I'm closing my side of it.",
+    "",
+    "**What I need from you:** nothing — reopen or file a new ticket if you want something built.",
   ].join("\n");
 }
 
@@ -153,15 +109,39 @@ export function failedComment(reason: string): string {
   ].join("\n");
 }
 
+/** The comment posted when triage finished without recording a classification. */
+export function unclassifiedComment(): string {
+  return [
+    "**I couldn't work out what kind of request this is.**",
+    "",
+    "I read it and finished without reaching a conclusion I could act on, which",
+    "is my failure and not yours.",
+    "",
+    "**What I need from you:** re-mark this ticket to make me try again, or add a line saying what you're after.",
+  ].join("\n");
+}
+
 /** Reduce an error to one readable line. */
 function oneLine(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.split("\n")[0];
 }
 
+/** Whether `stage` is one the prompts module knows how to instruct. */
+function isPrompted(
+  stage: PipelineStage,
+): stage is (typeof PROMPTED_STAGES)[number] {
+  return (PROMPTED_STAGES as readonly string[]).includes(stage);
+}
+
 /**
- * Starts one agent session per picked-up run and drives that run's state
- * from the session's lifecycle.
+ * Drives a run through the pipeline until it reaches a human wait.
+ *
+ * One session per stage, and the run walks on by itself between stages that
+ * need no human — a stage boundary is not a session boundary, a *wait* is
+ * (ADR-0013). So triage flowing into planning happens in one pass, while
+ * anything needing an answer stops, parks, and is resumed by a later poll
+ * from the artifacts and the thread.
  *
  * Two invariants live here rather than in the prompt, because a prompt is a
  * request and an invariant is not: the target project must be declared in
@@ -170,13 +150,19 @@ function oneLine(error: unknown): string {
  */
 export class AgentSessionSpawner implements SessionSpawner {
   private readonly log: (message: string) => void;
+  private readonly channel: ConversationChannel;
 
   constructor(private readonly options: AgentSessionSpawnerOptions) {
     this.log = options.log ?? (() => {});
+    this.channel = options.channel ?? new TerminalChannel();
   }
 
-  async spawn(run: Run, project: TicketingProject): Promise<void> {
-    const { manifest, store, adapter, runtime, root } = this.options;
+  async spawn(
+    run: Run,
+    project: TicketingProject,
+    context: SpawnContext = {},
+  ): Promise<void> {
+    const { manifest } = this.options;
 
     if (!(project.name in manifest.projects)) {
       throw new Error(
@@ -184,7 +170,57 @@ export class AgentSessionSpawner implements SessionSpawner {
       );
     }
 
-    const ticket = await adapter.getTicket(project, run.ticket);
+    let stage: PipelineStage = context.stage ?? run.stage ?? "triage";
+    let feedback = context.feedback;
+
+    for (;;) {
+      if (!isBuilt(stage)) {
+        await this.park(run, project, stage);
+        return;
+      }
+
+      if (!runsUnattended(stage)) {
+        await this.openConversation(run, project, stage);
+        return;
+      }
+
+      const outcome = await this.runStage(run, project, stage, feedback);
+      if (!outcome.ok) return;
+      feedback = undefined;
+
+      const next = await this.afterStage(run, project, stage, outcome.ticket);
+      if (next === undefined) return;
+      stage = next;
+      this.options.store.setStage(run.id, stage);
+      this.log(`stage  ${run.id} → ${stage}`);
+    }
+  }
+
+  /** Run one stage's session. Returns the ticket as it stood afterwards. */
+  private async runStage(
+    run: Run,
+    project: TicketingProject,
+    stage: PipelineStage,
+    feedback: string | undefined,
+  ): Promise<{ ok: true; ticket: TicketThread } | { ok: false }> {
+    const { store, adapter, runtime, root } = this.options;
+
+    if (!isPrompted(stage)) {
+      // A stage the graph calls built and the prompts module cannot instruct
+      // is a wiring mistake, and failing loudly beats running a blank session.
+      const reason = `no prompt exists for the ${stage} stage`;
+      store.fail(run.id, reason);
+      await adapter.postComment(project, run.ticket, failedComment(reason));
+      return { ok: false };
+    }
+
+    const before = await adapter.getTicket(project, run.ticket);
+    const prompt = stagePrompt(stage, {
+      project,
+      ticket: before,
+      classification: classificationFromLabels(before.labels),
+      feedback,
+    });
 
     if (this.options.beforeSession !== undefined) {
       try {
@@ -194,36 +230,138 @@ export class AgentSessionSpawner implements SessionSpawner {
       }
     }
 
-    const started = await runtime.start({
-      cwd: root,
-      prompt: triagePrompt(project, ticket),
-    });
-    store.activate(run.id, started.sessionId);
-    this.log(`session ${started.sessionId} started for ${run.id}`);
+    const started = await runtime.start({ cwd: root, prompt });
+    const active = store.activate(run.id, started.sessionId);
+    this.log(`session ${started.sessionId} started for ${run.id} (${stage})`);
 
     const outcome = await started.completed;
 
-    let finished: Run;
-    if (outcome.ok) {
-      finished = store.park(run.id, {
-        waitingOn: "the next stage to be built",
-        stage: "triage",
-      });
-      await adapter.postComment(project, run.ticket, parkedComment());
-    } else {
+    if (!outcome.ok) {
       const reason = outcome.error ?? "the session ended without a result";
-      finished = store.fail(run.id, reason);
+      const failed = store.fail(run.id, reason);
       await adapter.postComment(project, run.ticket, failedComment(reason));
+      await this.guardrails(failed, project);
+      return { ok: false };
     }
 
-    // Guardrails report; they never decide whether the run succeeded, and a
-    // broken check must not take the daemon down with it.
-    if (this.options.afterSession !== undefined) {
-      try {
-        await this.options.afterSession(finished, project);
-      } catch (error) {
-        this.log(`post-session checks failed for ${run.id}: ${oneLine(error)}`);
-      }
+    await this.guardrails(active, project);
+    return { ok: true, ticket: await adapter.getTicket(project, run.ticket) };
+  }
+
+  /**
+   * What the run does now that `stage`'s session has finished: the next stage
+   * to run, or undefined when the run has stopped for good or for now.
+   */
+  private async afterStage(
+    run: Run,
+    project: TicketingProject,
+    stage: PipelineStage,
+    ticket: TicketThread,
+  ): Promise<PipelineStage | undefined> {
+    const { store, adapter } = this.options;
+
+    if (waitFor(stage) === "gate") {
+      const cursor = waitCursorFrom(ticket);
+      store.park(run.id, {
+        waitingOn: "your answer on the ticket",
+        kind: "gate",
+        stage,
+        waitCursor: cursor,
+      });
+      this.log(`parked ${run.id} at ${stage}, waiting on a reply`);
+      return undefined;
+    }
+
+    // The only remaining wait-free stage is triage, and what follows it is
+    // the classification it just recorded — read back off the ticket, because
+    // the label is where the process says the record lives.
+    const kind = classificationFromLabels(ticket.labels);
+    if (kind === undefined) {
+      store.fail(run.id, "triage recorded no classification");
+      await adapter.postComment(project, run.ticket, unclassifiedComment());
+      return undefined;
+    }
+
+    const transition = routeAfterTriage(kind);
+    if (transition.kind === "finish") {
+      store.complete(run.id);
+      await adapter.postComment(project, run.ticket, answeredComment());
+      this.log(`done   ${run.id} — ${transition.reason}`);
+      return undefined;
+    }
+    if (transition.kind !== "advance") return undefined;
+
+    return transition.stage;
+  }
+
+  /** Invite the human into a conversation, and park until they conclude it. */
+  private async openConversation(
+    run: Run,
+    project: TicketingProject,
+    stage: PipelineStage,
+  ): Promise<void> {
+    const { store, adapter } = this.options;
+
+    const ticket = await adapter.getTicket(project, run.ticket);
+    const opened = await inviteToConversation(this.channel, {
+      project: project.name,
+      ticket: run.ticket,
+      stage,
+      subject: conversationSubject(ticket),
+    });
+
+    await adapter.postComment(project, run.ticket, opened.comment);
+    const after = await adapter.getTicket(project, run.ticket);
+
+    this.stop(run, {
+      waitingOn: opened.waitingOn,
+      kind: "conversation",
+      stage,
+      waitCursor: waitCursorFrom(after),
+    });
+    this.log(`parked ${run.id} at ${stage}, waiting on a conversation`);
+  }
+
+  /** Park a run at a stage nothing can run yet, and say so on the ticket. */
+  private async park(
+    run: Run,
+    project: TicketingProject,
+    stage: PipelineStage,
+  ): Promise<void> {
+    const { adapter } = this.options;
+
+    const parked = this.stop(run, {
+      waitingOn: "the next stage to be built",
+      stage,
+    });
+    await adapter.postComment(project, run.ticket, parkedComment(stage));
+    this.log(`parked ${run.id} at ${stage} — not built yet`);
+    await this.guardrails(parked, project);
+  }
+
+  /**
+   * Put a run into a wait, whether it was running or already waiting for
+   * something else. A resumed run that advances into a stage nothing can run
+   * yet never became active, so what changes is its wait, not its state.
+   */
+  private stop(run: Run, options: ParkOptions): Run {
+    const { store } = this.options;
+    const current = store.get(run.id);
+    return current?.status === "parked"
+      ? store.repark(run.id, options)
+      : store.park(run.id, options);
+  }
+
+  /**
+   * Guardrails report; they never decide whether the run succeeded, and a
+   * broken check must not take the daemon down with it.
+   */
+  private async guardrails(run: Run, project: TicketingProject): Promise<void> {
+    if (this.options.afterSession === undefined) return;
+    try {
+      await this.options.afterSession(run, project);
+    } catch (error) {
+      this.log(`post-session checks failed for ${run.id}: ${oneLine(error)}`);
     }
   }
 }
