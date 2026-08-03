@@ -8,11 +8,40 @@ import { z } from "zod";
  */
 export const MARK_LABEL = "timone";
 
+/**
+ * The header every machine-written comment carries.
+ *
+ * Timone posts through whatever credentials the machine has, so its comments
+ * appear under a person's account. Without this line a thread reads as if the
+ * human wrote their own acknowledgements and their own verdicts — and worse,
+ * a session reading the thread back cannot tell its own words from theirs,
+ * which is exactly what a gate decided by ticket replies must never confuse.
+ */
+export const MACHINE_MARKER =
+  "🤖 **Timone** · automatic message — written by the machine, not by the account it appears under";
+
+/** Put the machine header on a comment body, unless it already carries one. */
+export function stampMachineComment(body: string): string {
+  return body.startsWith(MACHINE_MARKER)
+    ? body
+    : `${MACHINE_MARKER}\n\n---\n\n${body}`;
+}
+
+/** True when a comment body was written by Timone rather than by a person. */
+export function isMachineComment(body: string): boolean {
+  return body.trimStart().startsWith(MACHINE_MARKER);
+}
+
 /** One comment in a ticket's thread. */
 export const ticketCommentSchema = z.strictObject({
   author: z.string(),
   body: z.string(),
   createdAt: z.string(),
+  /**
+   * Whether Timone wrote this comment. Derived from {@link MACHINE_MARKER},
+   * never from the author — the author is the account the machine borrows.
+   */
+  fromTimone: z.boolean(),
 });
 
 /** A ticket as the process sees it — no tracker-specific fields. */
@@ -59,7 +88,10 @@ export interface TicketingAdapter {
   /** One ticket with its comment thread. */
   getTicket(project: TicketingProject, number: number): Promise<TicketThread>;
 
-  /** Append a comment to a ticket's thread. */
+  /**
+   * Append a comment to a ticket's thread. Implementations stamp it with
+   * {@link MACHINE_MARKER}: marking is not the caller's job to remember.
+   */
   postComment(
     project: TicketingProject,
     number: number,

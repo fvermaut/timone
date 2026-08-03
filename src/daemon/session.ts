@@ -1,10 +1,11 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
 import type { Manifest } from "../manifest.js";
-import type {
-  TicketingAdapter,
-  TicketingProject,
-  TicketThread,
+import {
+  MACHINE_MARKER,
+  type TicketingAdapter,
+  type TicketingProject,
+  type TicketThread,
 } from "../adapters/ticketing.js";
 import type { SessionSpawner } from "./poll.js";
 import type { Run, RunStore } from "./runs.js";
@@ -68,16 +69,23 @@ export function triagePrompt(
   project: TicketingProject,
   ticket: TicketThread,
 ): string {
+  // Who said what matters more than it looks: Timone posts under a person's
+  // account, so the author line is the same for both. Attribution here comes
+  // from the marker, never from the login.
   const thread =
     ticket.comments.length === 0
       ? ""
       : [
           "",
-          "Replies on the ticket, oldest first:",
-          ...ticket.comments.map(
-            (comment) =>
-              `\n--- ${comment.author} at ${comment.createdAt} ---\n${comment.body}`,
-          ),
+          "Replies on the ticket, oldest first. Note who wrote each one — Timone",
+          "posts under the same account as the human, so the author name does not",
+          "tell you apart from them:",
+          ...ticket.comments.map((comment) => {
+            const who = comment.fromTimone
+              ? "Timone (you), earlier"
+              : `${comment.author} (a person)`;
+            return `\n--- ${who}, at ${comment.createdAt} ---\n${comment.body}`;
+          }),
           "",
         ].join("\n");
 
@@ -104,6 +112,14 @@ export function triagePrompt(
     "on the issue. Write the comment for someone who knows nothing about this",
     "process — no stage numbers, no skill names — and end it with an explicit",
     "line saying what, if anything, is being asked of them.",
+    "",
+    "**Every comment you post on the ticket must start with this exact line,**",
+    "followed by a blank line, `---` and a blank line, then your text. You are",
+    "posting through a person's GitHub account: without it the thread reads as",
+    "though they wrote your words, and neither they nor a later session can tell",
+    "your output from theirs.",
+    "",
+    MACHINE_MARKER,
     "",
     "Then stop. The stages that would follow are not built yet; the run will be",
     "parked after you finish.",

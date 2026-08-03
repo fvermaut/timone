@@ -4,11 +4,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
-import type {
-  Ticket,
-  TicketingAdapter,
-  TicketingProject,
-  TicketThread,
+import {
+  MACHINE_MARKER,
+  type Ticket,
+  type TicketingAdapter,
+  type TicketingProject,
+  type TicketThread,
 } from "../adapters/ticketing.js";
 import { RunStore, type Run } from "./runs.js";
 import {
@@ -174,6 +175,7 @@ describe("spawn configuration", () => {
           author: "fvermaut",
           body: "it's worst on the archive page",
           createdAt: "2026-08-01T10:00:00Z",
+          fromTimone: false,
         },
       ],
     });
@@ -188,6 +190,61 @@ describe("spawn configuration", () => {
     }).spawn(pickedUpRun(store), project);
 
     expect(requests[0].prompt).toContain("it's worst on the archive page");
+  });
+
+  it("tells the session to mark the comments it writes as the machine's", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(pickedUpRun(store), project);
+
+    expect(requests[0].prompt).toContain(MACHINE_MARKER);
+  });
+
+  it("shows the session which thread comments are its own, not the human's", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      comments: [
+        {
+          author: "fvermaut",
+          body: "Picked this up.",
+          createdAt: "2026-08-01T10:00:00Z",
+          fromTimone: true,
+        },
+        {
+          author: "fvermaut",
+          body: "it's worst on the archive page",
+          createdAt: "2026-08-01T11:00:00Z",
+          fromTimone: false,
+        },
+      ],
+    });
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(pickedUpRun(store), project);
+
+    const { prompt } = requests[0];
+    const machineLine = prompt
+      .split("\n")
+      .find((line) => line.includes("Picked this up.") || line.includes("---"));
+    expect(machineLine).toBeDefined();
+    // Both comments carry the same author; the prompt must still separate them.
+    expect(prompt).toMatch(/Timone \(you\), earlier/);
+    expect(prompt).toMatch(/fvermaut \(a person\)/);
   });
 });
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { MARK_LABEL, type TicketingProject } from "./ticketing.js";
+import {
+  MACHINE_MARKER,
+  MARK_LABEL,
+  type TicketingProject,
+} from "./ticketing.js";
 import {
   GitHubTicketingAdapter,
   repoSlug,
@@ -190,6 +194,7 @@ describe("getTicket", () => {
         author: "timone-bot",
         body: "picked this up",
         createdAt: "2026-08-02T10:05:00Z",
+        fromTimone: false,
       },
     ]);
   });
@@ -199,20 +204,67 @@ describe("getTicket", () => {
     const thread = await new GitHubTicketingAdapter({ run }).getTicket(alpha, 7);
     expect(thread.comments).toEqual([]);
   });
+
+  it("tells its own comments from the human's, whatever the author says", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify(
+        ghIssue({
+          comments: [
+            {
+              author: { login: "fvermaut" },
+              body: `${MACHINE_MARKER}\n\n---\n\nPicked this up.`,
+              createdAt: "2026-08-02T10:05:00Z",
+            },
+            {
+              author: { login: "fvermaut" },
+              body: "it's worse on the archive page",
+              createdAt: "2026-08-02T10:10:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const thread = await new GitHubTicketingAdapter({ run }).getTicket(alpha, 7);
+
+    // Both comments are authored by the same account — only the marker separates them.
+    expect(thread.comments.map((comment) => comment.author)).toEqual([
+      "fvermaut",
+      "fvermaut",
+    ]);
+    expect(thread.comments.map((comment) => comment.fromTimone)).toEqual([
+      true,
+      false,
+    ]);
+  });
 });
 
 describe("postComment", () => {
-  it("posts the body verbatim through gh", async () => {
+  it("marks every comment as the machine's, above the body", async () => {
     const { run, calls } = fakeRunner("");
     const body = "Picked this up.\n\n**What I need from you:** nothing yet.";
 
     await new GitHubTicketingAdapter({ run }).postComment(alpha, 7, body);
 
     expect(calls[0].args.slice(0, 3)).toEqual(["issue", "comment", "7"]);
-    expect(calls[0].args[calls[0].args.indexOf("--body") + 1]).toBe(body);
+    const posted = calls[0].args[calls[0].args.indexOf("--body") + 1];
+    expect(posted.startsWith(MACHINE_MARKER)).toBe(true);
+    expect(posted).toContain(body);
+    expect(posted.trimEnd().endsWith("nothing yet.")).toBe(true);
     expect(calls[0].args[calls[0].args.indexOf("--repo") + 1]).toBe(
       "fvermaut/scratch-app",
     );
+  });
+
+  it("does not stack a second marker on an already-marked body", async () => {
+    const { run, calls } = fakeRunner("");
+    const body = `${MACHINE_MARKER}\n\n---\n\nalready marked`;
+
+    await new GitHubTicketingAdapter({ run }).postComment(alpha, 7, body);
+
+    const posted = calls[0].args[calls[0].args.indexOf("--body") + 1];
+    expect(posted).toBe(body);
+    expect(posted.split(MACHINE_MARKER)).toHaveLength(2);
   });
 });
 

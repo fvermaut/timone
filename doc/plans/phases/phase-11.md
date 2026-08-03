@@ -30,6 +30,7 @@ The first executable slice of the inverted loop, end to end: a ticket filed in p
 - **Daemon state lives outside git:** `.timone/state.json` at the timone root, gitignored — runs, queue positions, last-seen cursors. One machine, one daemon (ADR-0003); no locking beyond a pid check.
 - **Sessions are spawned via the Claude Agent SDK** (ADR-0002 — the dependency enters here), from the timone root, with the event context (project, ticket) injected; the session's instruction is to run triage on the ticket per R13, not to be told what the ticket "is".
 - **The daemon is a foreground process** (`timone daemon`) for this phase — launchd/pm2 wrapping is operational polish, not a requirement.
+- ✏ **Refined 2026-08-03 (defect found at 11g's gate, stamp retained):** **every machine-written ticket comment carries a marker line** (`MACHINE_MARKER`), and attribution is read from that marker, never from the author. Timone posts through the human's `gh` credentials, so without it the thread reads as though they wrote their own acknowledgements and their own verdicts — and a session reading the thread back cannot tell its own words from theirs. That last part is the load-bearing half: ADR-0012 makes ticket replies the decision write-path, so phase 12 would otherwise be able to read Timone's own comment as the human's approval. Three places hold it: the adapter stamps everything it posts (11a), the spawned session is instructed to stamp what it posts itself (11d), and `getTicket` returns `fromTimone` per comment so the prompt can separate the two voices (11a + 11d). **A real bot identity** (GitHub App, `timone[bot]`) is the proper fix and is deferred to its own slice — it needs credentials from the human. **Also deferred, and deliberately not done here:** making the marker a process-wide convention in `process.md` and the stage skills, so interactive sessions mark their comments too — a meta-level process change, which gets a grill first.
 
 ## Context & Prerequisites
 
@@ -60,6 +61,8 @@ npm run type-check
 - [ ] Interface exposes exactly the four capabilities; no GitHub type leaks through it
 - [ ] All `gh` calls flow through the injected runner; tests never touch the network
 - [ ] A malformed `gh` response fails loudly with the raw payload in the error
+- [ ] ✏ Refined 2026-08-03: every posted comment is stamped as the machine's, and a stamped comment is not stamped twice
+- [ ] ✏ Refined 2026-08-03: `fromTimone` separates Timone's comments from the human's when both carry the same author
 
 ---
 
@@ -133,6 +136,7 @@ npm ls @anthropic-ai/claude-agent-sdk
 - [ ] Spawner refuses a project absent from `timone.yaml` (R2's validation clause)
 - [ ] The prompt tells the session to classify — it never tells it the classification
 - [ ] Run state transitions are driven by session lifecycle events, once each
+- [ ] ✏ Refined 2026-08-03: the prompt instructs the session to mark the comments it posts, and labels each thread comment as the human's or Timone's own
 
 ---
 

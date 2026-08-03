@@ -3,7 +3,9 @@ import { promisify } from "node:util";
 import { z } from "zod";
 
 import {
+  isMachineComment,
   MARK_LABEL,
+  stampMachineComment,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
@@ -240,6 +242,7 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
         author: comment.author.login,
         body: comment.body,
         createdAt: comment.createdAt,
+        fromTimone: isMachineComment(comment.body),
       })),
     };
   }
@@ -256,7 +259,7 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
       "--repo",
       repoSlug(project.repoUrl),
       "--body",
-      body,
+      stampMachineComment(body),
     ]);
   }
 
