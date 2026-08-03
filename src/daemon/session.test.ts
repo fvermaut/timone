@@ -348,7 +348,7 @@ describe("run lifecycle", () => {
     expect(store.get(run.id)?.status).toBe("parked");
     expect(comments).toHaveLength(1);
     // And a second exit flip is refused by the store, not merely avoided here.
-    expect(() => store.park(run.id, "again")).toThrow(/parked/);
+    expect(() => store.park(run.id, { waitingOn: "again" })).toThrow(/parked/);
   });
 
   it("runs the post-session checks after the session, not before", async () => {

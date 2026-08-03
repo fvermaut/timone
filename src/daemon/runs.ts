@@ -2,14 +2,15 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
+import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
+
 /**
- * A run's lifecycle. `queued` is where a pickup lands while another run
- * occupies the project; the rest is the plan's `picked-up → active →
- * parked | done | failed`.
+ * A run's lifecycle. `queued` is where a pickup lands while another run holds
+ * the project; the rest is the plan's `picked-up → active → parked | done |
+ * failed`.
  *
- * `parked` — waiting on a human — is deliberately **not** terminal: the
- * ticket is still the project's active ticket until someone answers, so a
- * parked run keeps holding the project against R10.
+ * `parked` — waiting on a human — is deliberately **not** terminal: the run
+ * is unfinished and will resume where it stopped.
  */
 export type RunStatus =
   | "queued"
@@ -19,8 +20,12 @@ export type RunStatus =
   | "done"
   | "failed";
 
-/** Statuses that mean the project is busy: a queued pickup waits behind them. */
-const OCCUPYING: readonly RunStatus[] = ["picked-up", "active", "parked"];
+/**
+ * Statuses that occupy the one-session-at-a-time slot. A session is either
+ * about to start or running, and two of those on one project would have two
+ * agents in one working copy.
+ */
+const RUNNING: readonly RunStatus[] = ["picked-up", "active"];
 
 /** Statuses a run never leaves. */
 const TERMINAL: readonly RunStatus[] = ["done", "failed"];
@@ -48,10 +53,22 @@ const runSchema = z.strictObject({
     "done",
     "failed",
   ]),
-  /** Lifecycle stage the session reached, for `timone status`. */
-  stage: z.string().optional(),
+  /** Lifecycle stage the run has reached, for `timone status` and for resuming. */
+  stage: z.enum([...PIPELINE_STAGES]).optional(),
   /** What a parked run is waiting for, in the human's terms. */
   waitingOn: z.string().optional(),
+  /** Which *kind* of wait that is — what an arriving answer may resolve. */
+  waitingKind: z.enum(["gate", "conversation"]).optional(),
+  /**
+   * The instant the open gate's comment was posted. Replies at or before it
+   * belong to an earlier question and cannot answer this one.
+   */
+  gateCursor: z.string().optional(),
+  /**
+   * The work branch this run owns, once it has one. Its presence is what
+   * makes a parked run hold its project — see {@link RunStore}.
+   */
+  branch: z.string().optional(),
   /** Agent SDK session identifier, once one has been spawned. */
   sessionId: z.string().optional(),
   /** Why a failed run failed. */
@@ -80,15 +97,40 @@ export function defaultStatePath(root: string): string {
   return join(root, ".timone", "state.json");
 }
 
+/** Options for parking a run against a human wait. */
+export interface ParkOptions {
+  /** What it is waiting for, in the human's terms. */
+  waitingOn: string;
+  /** Which kind of wait it is, when the daemon will resume it from an answer. */
+  kind?: "gate" | "conversation";
+  /** The stage it parked at, when parking moves it. */
+  stage?: PipelineStage;
+  /** For a gate: the instant the gate comment was posted. */
+  gateCursor?: string;
+}
+
 /**
  * The daemon's run ledger: which ticket each project is working, what is
  * queued behind it, and how each run ended. Persisted to `.timone/state.json`
  * (gitignored — it is machine state, never a process artifact) and written
  * atomically after every mutation, so a crash never leaves a half-file.
  *
- * The one-active-run-per-project rule of R10 is an invariant this store
- * enforces: callers cannot activate a second run on a busy project, and a
- * pickup on a busy project is queued rather than refused.
+ * **Two rules, not one**, and keeping them apart is what phase 12 changed:
+ *
+ * - **One running session per project, always.** Two agents in one working
+ *   copy is the collision R10 exists to prevent, so a run may only enter
+ *   `picked-up` or `active` while no other run of that project is in either.
+ * - **A parked run holds its project only once it owns a work branch.**
+ *   Triage and clarification touch no repository — a ticket waiting there for
+ *   an answer blocks nothing, and several may wait at once. From the moment a
+ *   run claims a branch it holds the project until it reaches a terminal
+ *   state, because from then on two runs would be two branches of work on the
+ *   same repository.
+ *
+ * Phase 11 had only the first rule and applied it to parked runs too, which
+ * meant one unanswered question froze a project indefinitely. Both rules are
+ * enforced here rather than by callers: a rule about a shared resource that
+ * lives in the caller is a rule the next caller will not know about.
  */
 export class RunStore {
   private constructor(
@@ -121,15 +163,36 @@ export class RunStore {
   }
 
   /**
-   * The run currently holding `project` — picked up, active or parked.
-   * Undefined when the project is idle.
+   * The run currently holding `project`: one whose session is running or
+   * about to, or one parked on a work branch it owns. Undefined when the
+   * project is free — including when runs are parked awaiting answers at a
+   * stage that touches no repository.
    */
   occupyingRun(project: string): Run | undefined {
     const run = this.state.runs.find(
-      (candidate) =>
-        candidate.project === project && OCCUPYING.includes(candidate.status),
+      (candidate) => candidate.project === project && holdsProject(candidate),
     );
     return run === undefined ? undefined : { ...run };
+  }
+
+  /**
+   * The run occupying `project`'s single session slot — running, or picked up
+   * and awaiting a spawn. Undefined when no session is in flight, however
+   * many runs are parked.
+   */
+  runningRun(project: string): Run | undefined {
+    const run = this.state.runs.find(
+      (candidate) =>
+        candidate.project === project && RUNNING.includes(candidate.status),
+    );
+    return run === undefined ? undefined : { ...run };
+  }
+
+  /** Every run of `project` parked on a human, in pickup order. */
+  parkedRuns(project: string): Run[] {
+    return this.state.runs
+      .filter((run) => run.project === project && run.status === "parked")
+      .map((run) => ({ ...run }));
   }
 
   /** Runs waiting behind the occupying one, in pickup order. */
@@ -171,19 +234,48 @@ export class RunStore {
     return { run: { ...run }, created: true };
   }
 
-  /** Mark a run as running under `sessionId`. */
+  /**
+   * Mark a run as running under `sessionId`. A resuming run stops waiting:
+   * whatever it was parked on has been answered, and leaving the wait behind
+   * would let a later poll try to resolve it twice.
+   */
   activate(id: string, sessionId: string): Run {
     return this.transition(id, "active", (run) => {
       run.sessionId = sessionId;
+      run.waitingOn = undefined;
+      run.waitingKind = undefined;
+      run.gateCursor = undefined;
     });
   }
 
   /** Park a run against a human wait, naming what it waits for. */
-  park(id: string, waitingOn: string, stage?: string): Run {
+  park(id: string, options: ParkOptions): Run {
     return this.transition(id, "parked", (run) => {
-      run.waitingOn = waitingOn;
-      if (stage !== undefined) run.stage = stage;
+      run.waitingOn = options.waitingOn;
+      run.waitingKind = options.kind;
+      run.gateCursor = options.gateCursor;
+      if (options.stage !== undefined) run.stage = options.stage;
     });
+  }
+
+  /**
+   * Record the work branch a run owns. From here on it holds its project
+   * even while parked, so this is a claim on a shared resource and not a
+   * setter: the project must be free of other holders when it is made.
+   */
+  claimBranch(id: string, branch: string): Run {
+    const run = this.mutable(id);
+    const holder = this.occupyingRun(run.project);
+    if (holder !== undefined && holder.id !== id) {
+      throw new Error(
+        `Run ${id} cannot claim a branch on ${run.project}: run ${holder.id} ` +
+          `(${holder.status}) already holds it`,
+      );
+    }
+    run.branch = branch;
+    run.updatedAt = this.now();
+    this.persist();
+    return { ...run };
   }
 
   /** Finish a run, promoting whatever is queued behind it. */
@@ -202,12 +294,25 @@ export class RunStore {
   }
 
   /** Record which lifecycle stage a run reached. */
-  setStage(id: string, stage: string): Run {
+  setStage(id: string, stage: PipelineStage): Run {
     const run = this.mutable(id);
     run.stage = stage;
     run.updatedAt = this.now();
     this.persist();
     return { ...run };
+  }
+
+  /**
+   * Promote the oldest queued run of `project` if the project is free, and
+   * return it. The poll loop calls this each cycle: promotion normally
+   * happens as a side effect of the run ahead moving, but a ledger written
+   * under the old rule — where every parked run held its project — can hold
+   * a queued run behind a park that no longer blocks anything.
+   */
+  promoteQueue(project: string): Run | undefined {
+    this.promoteHead(project);
+    this.persist();
+    return this.runningRun(project);
   }
 
   /** Record a guardrail violation against a run (R15). */
@@ -227,8 +332,10 @@ export class RunStore {
   }
 
   /**
-   * Move a run to `next`, refusing illegal transitions and refusing to make
-   * a project doubly busy. Promotes the queue head when the run ends.
+   * Move a run to `next`, refusing illegal transitions and refusing to break
+   * either rule above. Promotes the queue head whenever this move frees the
+   * project — which is at the end of a run, and also when a branchless run
+   * parks, since that releases the session slot while holding nothing.
    */
   private transition(
     id: string,
@@ -244,12 +351,20 @@ export class RunStore {
       );
     }
 
-    if (OCCUPYING.includes(next)) {
-      const occupier = this.occupyingRun(run.project);
-      if (occupier !== undefined && occupier.id !== id) {
+    if (RUNNING.includes(next)) {
+      const running = this.runningRun(run.project);
+      if (running !== undefined && running.id !== id) {
         throw new Error(
-          `Project ${run.project} is already occupied by run ${occupier.id} ` +
-            `(${occupier.status}) — one active ticket per project`,
+          `Project ${run.project} already has a session for run ${running.id} ` +
+            `(${running.status}) — one session per project at a time`,
+        );
+      }
+
+      const holder = this.occupyingRun(run.project);
+      if (holder !== undefined && holder.id !== id) {
+        throw new Error(
+          `Project ${run.project} is held by run ${holder.id} ` +
+            `(${holder.status}, branch ${holder.branch}) — one work branch at a time`,
         );
       }
     }
@@ -258,14 +373,21 @@ export class RunStore {
     apply(run);
     run.updatedAt = this.now();
 
-    if (TERMINAL.includes(next)) this.promoteHead(run.project);
+    if (TERMINAL.includes(next) || next === "parked") {
+      this.promoteHead(run.project);
+    }
 
     this.persist();
     return { ...run };
   }
 
-  /** Move the oldest queued run of `project` into `picked-up`, if idle. */
+  /**
+   * Move the oldest queued run of `project` into `picked-up`, if the project
+   * is free. "Free" is both rules at once: nothing running, and nothing
+   * parked on a branch.
+   */
   private promoteHead(project: string): void {
+    if (this.runningRun(project) !== undefined) return;
     if (this.occupyingRun(project) !== undefined) return;
     const head = this.state.runs.find(
       (run) => run.project === project && run.status === "queued",
@@ -287,6 +409,15 @@ export class RunStore {
 /** One run per ticket — the id is what makes re-pickup a no-op. */
 export function runId(project: string, ticket: number): string {
   return `${project}#${ticket}`;
+}
+
+/**
+ * Whether a run holds its project against every other ticket: its session is
+ * running or about to, or it is parked on a work branch it owns.
+ */
+function holdsProject(run: Run): boolean {
+  if (RUNNING.includes(run.status)) return true;
+  return run.status === "parked" && run.branch !== undefined;
 }
 
 /**

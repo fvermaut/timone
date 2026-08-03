@@ -205,7 +205,10 @@ export class AgentSessionSpawner implements SessionSpawner {
 
     let finished: Run;
     if (outcome.ok) {
-      finished = store.park(run.id, "the next stage to be built", "triage");
+      finished = store.park(run.id, {
+        waitingOn: "the next stage to be built",
+        stage: "triage",
+      });
       await adapter.postComment(project, run.ticket, parkedComment());
     } else {
       const reason = outcome.error ?? "the session ended without a result";

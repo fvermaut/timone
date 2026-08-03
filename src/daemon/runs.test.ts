@@ -97,17 +97,201 @@ describe("the one-active-run invariant", () => {
   it("refuses transitions the lifecycle does not allow", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
-    expect(() => store.park(run.id, "the human")).toThrow(/picked-up/);
+    expect(() => store.park(run.id, { waitingOn: "the human" })).toThrow(
+      /picked-up/,
+    );
   });
 
-  it("keeps a parked run occupying its project", () => {
+  it("keeps a parked run holding its project once it owns a branch", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-1");
-    store.park(run.id, "approval on the ticket");
+    store.claimBranch(run.id, "timone/7-reset-password");
+    store.park(run.id, { waitingOn: "approval on the ticket", kind: "gate" });
 
     expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
     expect(store.register("scratch-app", 8).run.status).toBe("queued");
+  });
+});
+
+describe("the holds-the-project rule", () => {
+  /** A run parked at a stage that touches no repository. */
+  function parkedBranchless(store: RunStore, ticket: number): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.activate(run.id, `session-${ticket}`);
+    store.park(run.id, { waitingOn: "an answer", kind: "conversation" });
+    return run.id;
+  }
+
+  it("lets a branchless parked run go, so one unanswered ticket cannot freeze a project", () => {
+    const store = newStore();
+    parkedBranchless(store, 7);
+
+    expect(store.occupyingRun("scratch-app")).toBeUndefined();
+    expect(store.register("scratch-app", 8).run.status).toBe("picked-up");
+  });
+
+  it("starts holding the project the moment a run claims a branch", () => {
+    const store = newStore();
+    const id = parkedBranchless(store, 7);
+
+    expect(store.occupyingRun("scratch-app")).toBeUndefined();
+    store.claimBranch(id, "timone/7-reset-password");
+
+    expect(store.occupyingRun("scratch-app")?.id).toBe(id);
+    expect(store.register("scratch-app", 8).run.status).toBe("queued");
+  });
+
+  it("parks several branchless runs side by side", () => {
+    const store = newStore();
+    parkedBranchless(store, 7);
+    parkedBranchless(store, 8);
+    parkedBranchless(store, 9);
+
+    const parked = store
+      .runsFor("scratch-app")
+      .filter((run) => run.status === "parked");
+    expect(parked.map((run) => run.ticket)).toEqual([7, 8, 9]);
+    expect(store.queue("scratch-app")).toEqual([]);
+  });
+
+  it("still runs one session at a time, however many runs are parked", () => {
+    const store = newStore();
+    parkedBranchless(store, 7);
+    const second = store.register("scratch-app", 8);
+    store.activate(second.run.id, "session-8");
+
+    // #7's answer arrives while #8's session is mid-flight: it has to wait
+    // its turn, because sessions serialize even when nothing is held.
+    const third = store.register("scratch-app", 9);
+    expect(third.run.status).toBe("queued");
+    expect(() => store.activate("scratch-app#7", "session-7b")).toThrow(
+      /scratch-app#8/,
+    );
+  });
+
+  it("frees the session slot when a branchless run parks", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    const second = store.register("scratch-app", 8);
+    store.activate(first.run.id, "session-1");
+
+    store.park(first.run.id, { waitingOn: "an answer", kind: "conversation" });
+
+    expect(store.get(second.run.id)?.status).toBe("picked-up");
+  });
+
+  it("does not promote the queue behind a run that parked holding a branch", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    const second = store.register("scratch-app", 8);
+    store.activate(first.run.id, "session-1");
+    store.claimBranch(first.run.id, "timone/7-reset-password");
+
+    store.park(first.run.id, { waitingOn: "approval", kind: "gate" });
+
+    expect(store.get(second.run.id)?.status).toBe("queued");
+    expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
+  });
+
+  it("promotes the queue when a branch-holding run finally ends", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    const second = store.register("scratch-app", 8);
+    store.activate(first.run.id, "session-1");
+    store.claimBranch(first.run.id, "timone/7-reset-password");
+    store.park(first.run.id, { waitingOn: "approval", kind: "gate" });
+
+    store.complete(first.run.id);
+
+    expect(store.get(second.run.id)?.status).toBe("picked-up");
+  });
+
+  it("enforces the rule in the store rather than trusting its callers", () => {
+    // Claiming a branch is a claim on a shared resource, so the store checks
+    // it rather than trusting the caller to have looked first.
+    const store = newStore();
+    const first = parkedBranchless(store, 7);
+    const second = store.register("scratch-app", 8);
+    store.activate(second.run.id, "session-8");
+
+    expect(() => store.claimBranch(first, "timone/7-reset-password")).toThrow(
+      /scratch-app#8/,
+    );
+  });
+
+  it("refuses to resume a parked run while another holds the project on a branch", () => {
+    const store = newStore();
+    // #7 waits for an answer holding nothing, so #8 gets picked up, claims a
+    // branch and parks on its own gate.
+    const first = parkedBranchless(store, 7);
+    const second = store.register("scratch-app", 8);
+    store.activate(second.run.id, "session-8");
+    store.claimBranch(second.run.id, "timone/8-export");
+    store.park(second.run.id, { waitingOn: "approval", kind: "gate" });
+
+    // #7's answer now arrives. Its session slot is free, but the repository
+    // is not: it waits until #8 is finished with it.
+    expect(() => store.activate(first, "session-7b")).toThrow(
+      /scratch-app#8.*timone\/8-export/,
+    );
+  });
+
+  it("promotes a run left queued behind a park that no longer holds anything", () => {
+    // Exactly the ledger phase 11 leaves behind: one parked run that held
+    // its project under the old rule, and one queued behind it.
+    const path = statePath();
+    const store = newStore(path);
+    const first = store.register("scratch-app", 4);
+    const second = store.register("scratch-app", 6);
+    store.activate(first.run.id, "session-4");
+    store.park(first.run.id, { waitingOn: "the next stage", stage: "triage" });
+    // The park itself already promotes; a reopened store must reach the same
+    // conclusion from the file alone.
+    expect(store.get(second.run.id)?.status).toBe("picked-up");
+
+    const reopened = RunStore.open(path);
+    expect(reopened.promoteQueue("scratch-app")?.ticket).toBe(6);
+  });
+
+  it("promotes nothing while the project is held", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    const second = store.register("scratch-app", 8);
+    store.activate(first.run.id, "session-1");
+
+    expect(store.promoteQueue("scratch-app")?.ticket).toBe(7);
+    expect(store.get(second.run.id)?.status).toBe("queued");
+  });
+
+  it("records what a parked run is waiting for, and where the gate starts", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/7-reset-password");
+    store.park(run.id, {
+      waitingOn: "approval on the ticket",
+      kind: "gate",
+      stage: "requirements",
+      gateCursor: "2026-08-03T10:00:00Z",
+    });
+
+    expect(store.get(run.id)).toMatchObject({
+      waitingOn: "approval on the ticket",
+      waitingKind: "gate",
+      stage: "requirements",
+      gateCursor: "2026-08-03T10:00:00Z",
+      branch: "timone/7-reset-password",
+    });
+  });
+
+  it("clears what a run waits on once it resumes", () => {
+    const store = newStore();
+    const id = parkedBranchless(store, 7);
+    store.activate(id, "session-1b");
+
+    expect(store.get(id)?.waitingOn).toBeUndefined();
+    expect(store.get(id)?.waitingKind).toBeUndefined();
   });
 });
 
@@ -188,7 +372,13 @@ describe("persistence", () => {
     const first = store.register("scratch-app", 7);
     store.register("scratch-app", 8);
     store.activate(first.run.id, "session-1");
-    store.park(first.run.id, "approval on the ticket");
+    store.claimBranch(first.run.id, "timone/7-reset-password");
+    store.park(first.run.id, {
+      waitingOn: "approval on the ticket",
+      kind: "gate",
+      stage: "requirements",
+      gateCursor: "2026-08-03T10:00:00Z",
+    });
 
     const reopened = RunStore.open(path);
 
