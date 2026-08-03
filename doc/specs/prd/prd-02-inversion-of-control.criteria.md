@@ -40,6 +40,7 @@
 
 - **Priority:** MUST
 - **Status:** revised
+    - ✏ 2026-08-03 **partial evidence, not a verdict.** [Phase 12](../../plans/phases/phase-12.md) built this, and the first clause was watched live on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6): the pipeline reached the clarification stage on its own, posted a CTA carrying a copy-pasteable `timone takeover scratch-app#6`, named no stage and no skill, and parked on the conversation; a second poll cycle changed nothing, so the wait holds. **The concluding clause — the interview run to acceptance and the accepted summary landing on the ticket — has not been observed**, because it needs the human at the keyboard. Stays `revised` until 12g's gate.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a picked-up ticket with open questions
@@ -54,6 +55,8 @@
 
 - **Priority:** MUST
 - **Status:** draft
+    - ✏ 2026-08-03 **built, unobserved.** [Phase 12](../../plans/phases/phase-12.md) 12e implements both clauses and they are unit-proven (branch claimed before the session starts, gate comment linking the artifact on the branch, approval advancing exactly one stage, change request re-entering the same stage with the human's words). **No live round-trip has run**, because it begins with the conversation R3 is waiting on. Left `draft`.
+    - ✏ 2026-08-03 **a divergence from `process.md`, recorded rather than resolved.** Stage 3 of `process.md` gates *before* files are written; this criterion says commit on a branch then gate. Built to this criterion — the later and more specific decision, made for the async context, where the human reviews the real register instead of a paraphrase. Correcting `process.md` is a meta-level change and needs a grill session first.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN clarification concluded
@@ -68,6 +71,7 @@
 
 - **Priority:** MUST
 - **Status:** draft
+    - ✏ 2026-08-03 **built, unobserved.** [Phase 12](../../plans/phases/phase-12.md) 12f implements it through the *same* gate mechanism as R4 — asserted by construction, not by comment. It also adds what the criterion implies but does not say: an approval given on the ticket is written back into the phase file as its `Approved for execution by <who> <date>` stamp, by a short session of its own, because stage 6 refuses to start without it and a gate whose outcome lives only in a comment thread is one the next stage cannot see. **No live round-trip.** Left `draft`.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN an approved PRD
@@ -166,6 +170,7 @@
 
 - **Priority:** MUST
 - **Status:** draft
+    - ✏ 2026-08-03 **two clauses of three have evidence; the middle one does not.** *Clause 1* observed live on `scratch-app` #6 — the opened conversation's ticket comment carries the copy-pasteable command in a fenced block. *Clause 3* is unit-proven: a fake channel drives `inviteToConversation` / `recordConversationOutcome` unchanged, which is the second implementation the hint asks for. *Clause 2* — takeover resolving a waiting ticket and spawning the right stage session — is only **half** observed: every refusal path was run live against the real ledger (a park it cannot resume, an untracked ticket, an unknown project, a malformed target, all with the right guidance), but the success path was not, since it hands the terminal to an interactive session. Left `draft`.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a stage needs a conversation and the project's channel is the terminal
