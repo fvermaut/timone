@@ -7,7 +7,8 @@
 ## R1 — Ticket pickup
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
+    - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate, against `scratch-app`. Both clauses are discriminating and were observed in the same cycle: [#4](https://github.com/fvermaut/scratch-app/issues/4) carried the `timone` label and produced a run plus exactly one acknowledgement comment; [#5](https://github.com/fvermaut/scratch-app/issues/5), filed in the same session without the label, ended the cycle with **0 comments and 0 labels**. `timone status` listed the run. A third cycle over the same tickets posted nothing and created nothing — idempotency across cycles, which the criterion does not demand but a poll loop cannot be trusted without.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN the daemon is running and a managed project has an open GitHub issue marked for Timone
@@ -23,7 +24,9 @@
 > ✏ Revised 2026-07-20: [ADR-0007](../../adr/0007-sessions-at-timone-root.md) moved all sessions to the timone root, so the criterion is target-project resolution plus clean client repos, not per-project cwd. The ADR instructed this revision on 2026-07-19; PRD-01.R4 received it and this block was missed.
 
 - **Priority:** MUST
-- **Status:** revised
+- **Status:** verified
+    - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. Clause by clause: **runs from the timone root** — the spawner's cwd is the root by construction and refuses to be anything else; live session `f8982c83` ran there; **stage skills available** — that session invoked stage 1 and produced a classification, which it could not have done otherwise; **target carried and validated** — the event context names the project and the spawner refuses one absent from `timone.yaml` (unit-proven on an undeclared target, live-resolved on `scratch-app`); **no harness files in the client repo** — `git log --stat` over `scratch-app`'s entire history matches no `.claude/` or `timone.yaml` path.
+    - ✏ 2026-08-03 **known limit of the evidence.** The "every file the session touches lies under `projects/X/…`" clause was satisfied by a session that **wrote no files at all** — triage records itself as an issue comment, so containment held vacuously rather than being tested. The guardrail hook that would catch a straying session ran and reported clean, but on the same empty evidence. A session that actually writes into a project — phase 13's execution path — is what makes this clause discriminating.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a pipeline stage starts for project X
@@ -111,14 +114,17 @@
 ## R9 — Status visibility
 
 - **Priority:** SHOULD
-- **Status:** draft
+- **Status:** verified
+    - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. `timone status` was read at every transition of the live run and matched each one. The all-in-one-glance line at the end of the proof read: `scratch-app  #4 (triage) — waiting on you: the next stage to be built  ·  1 queued (#6)`, which answers all three of the criterion's questions — which ticket, which stage, who is waited on — plus queue depth. A run with a failed guardrail rendered `⚠ 1 automatic check(s) failed — see the ticket`. With no state file at all the command prints guidance naming `timone daemon`, not a stack trace.
 - **Verify-via:** api
 - **Criteria:** `timone status` lists every managed project with its active ticket, current stage, and any gate waiting for human input, in one glance.
 
 ## R10 — Serialized work per project
 
 - **Priority:** SHOULD
-- **Status:** draft
+- **Status:** verified
+    - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. [#6](https://github.com/fvermaut/scratch-app/issues/6) was filed while `#4`'s run was active; the next cycle registered it as `queued`, posted an acknowledgement that names what it waits behind ("I'm already working on #4 … It's next in line"), and `timone status` showed both. No session was spawned for it. One active run per project is an invariant the run store enforces rather than a convention callers follow: activating a second run on a busy project throws.
+    - ✏ 2026-08-03 **known limit of the evidence.** The "started only when the active run reaches a terminal state" half was **not** observed live — `#4` parks awaiting the stage phase 12 builds and has never reached a terminal state, so promotion never fired in the pilot. It is proven only by unit test (`src/daemon/runs.test.ts`: promotion on `done`, on `failed`, in pickup order, and not at all when the queue is empty). Live evidence arrives with phase 12, when runs can finish.
 - **Verify-via:** api
 - **Criteria:** while a project has an active pipeline run, additional marked tickets are visibly queued and started only when the active run reaches a terminal state.
 
@@ -144,6 +150,8 @@
 
 - **Priority:** MUST
 - **Status:** draft
+    - ✏ 2026-08-03 **first clause verified; the requirement is not.** The daemon path was proven at [phase 11](../../plans/phases/phase-11.md)'s 11g gate: [#4](https://github.com/fvermaut/scratch-app/issues/4) was filed in deliberately naive language ("the page feels slow when I add many items"), and the spawned session classified it as a **bug** with a written rationale, applied `triage:bug`, and posted a comment that names no stage, no skill and no process concept — it even reasoned about *why* the call was close (no latency requirement exists, but "shows immediately" does) and connected the ticket to work already agreed on 2026-08-02. The spawner is structurally incapable of pre-classifying: its prompt carries the ticket's raw text and the literal string `triage:<kind>`, never a verdict, and a unit test asserts the absence.
+    - ✏ 2026-08-03 **the second clause has no evidence.** "An interactive timone-root session routes a raw request through triage first" is in force in `CLAUDE.md` and `process.md` but has never been observed. Being written down is not evidence. It costs nothing to obtain — the next raw request fvermaut states in a terminal session either routes through triage without a skill being named, or it does not — but until that is watched and recorded, this requirement stays `draft`.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a process-naive ticket on a managed project — plain language, naming no stage, skill, or process concept
@@ -174,7 +182,9 @@
 ## R15 — Post-session guardrail hooks
 
 - **Priority:** SHOULD
-- **Status:** draft
+- **Status:** verified
+    - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. Both clauses observed against `scratch-app`: a scripted session that committed and never pushed produced **one** loud ticket comment naming the branch and the commit, and the run was flagged in `timone status` (`⚠ 1 automatic check(s) failed`); the clean re-run immediately after, on the same ticket, posted **nothing** — silence asserted, not assumed. Hook failures flag a run but never crash the daemon, and the checks are pure functions over injected git evidence, so each rule can be shown red.
+    - ✏ 2026-08-03 **known limit of the evidence.** Only the **unpushed** rule fired live. `STATUS.md` placement and path containment were shown capable of failing only in the test suite — by neutering each check in turn and confirming its violating fixtures went red (9 tests fell over). No live session has yet committed a file at all, so neither rule has met real evidence; phase 13's execution path is what will supply it.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a daemon-spawned stage session completes
