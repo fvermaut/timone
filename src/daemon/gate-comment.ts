@@ -1,4 +1,6 @@
+import type { TicketingProject } from "../adapters/ticketing.js";
 import { APPROVAL_TOKENS } from "./gates.js";
+import type { PipelineStage } from "./pipeline.js";
 
 /** The literal word the CTA asks for — the parser's first token, never a copy. */
 export const APPROVAL_WORD = APPROVAL_TOKENS[0];
@@ -59,4 +61,69 @@ export function gateComment(input: GateCommentInput): string {
   );
 
   return lines.join("\n");
+}
+
+/**
+ * The web address of `path` on `branch`, derived from the clone URL.
+ *
+ * GitHub-shaped, because GitHub is the only ticketing binding that exists
+ * (ADR-0004) and a gate comment has to link somewhere a person can click. A
+ * clone URL that is not GitHub-shaped yields undefined, and the gate comment
+ * simply names the branch instead of guessing at a URL.
+ */
+export function branchUrl(
+  project: TicketingProject,
+  branch: string,
+  path: string,
+): string | undefined {
+  const match = /^(?:https:\/\/github\.com\/|git@github\.com:)(.+?)(?:\.git)?$/.exec(
+    project.repoUrl.trim(),
+  );
+  if (match === null) return undefined;
+  return `https://github.com/${match[1]}/tree/${branch}/${path}`;
+}
+
+/** What each gated stage puts in front of the human, and what follows it. */
+const GATED: Partial<
+  Record<PipelineStage, { headline: string; where: string; label: string; onApproval: string }>
+> = {
+  requirements: {
+    headline: "I've written down what I think you're asking for.",
+    where: "doc/specs/prd",
+    label: "what I understood you're asking for",
+    onApproval: "work out how to build it and come back with a plan.",
+  },
+};
+
+/**
+ * The gate comment for a stage, or undefined for a stage with no gate.
+ *
+ * The daemon posts this, not the session that did the work: the CTA has to
+ * match what {@link readGateDecision} accepts, exactly, every time. A session
+ * asked to write its own approval request would eventually word it in a way
+ * the parser does not recognise, and the human would be answering a question
+ * nobody was listening to.
+ */
+export function gateCommentFor(
+  stage: PipelineStage,
+  project: TicketingProject,
+  branch: string,
+  summary: string[],
+): string | undefined {
+  const spec = GATED[stage];
+  if (spec === undefined) return undefined;
+
+  const url = branchUrl(project, branch, spec.where);
+
+  return gateComment({
+    headline: spec.headline,
+    summary: [
+      ...summary,
+      ...(url === undefined
+        ? [`It's committed on the branch \`${branch}\`, under \`${spec.where}\`.`]
+        : []),
+    ],
+    artifacts: url === undefined ? [] : [{ label: spec.label, url }],
+    onApproval: spec.onApproval,
+  });
 }

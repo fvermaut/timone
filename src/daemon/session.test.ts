@@ -459,10 +459,9 @@ describe("resuming a parked run", () => {
       root: "/root",
     }).spawn(store.get(run.id)!, project, { stage: "requirements" });
 
-    // The requirements stage is not built yet, so it parks there rather than
-    // silently doing the previous stage over again.
+    // It ran the requirements stage, not the clarification one it stopped in.
     expect(store.get(run.id)?.stage).toBe("requirements");
-    expect(requests).toEqual([]);
+    expect(requests[0].prompt).toMatch(/Write down what ticket #7/);
   });
 
   it("hands the human's words to the stage that has to do it again", async () => {
@@ -708,5 +707,202 @@ describe("run lifecycle", () => {
     }).spawn(run, project);
 
     expect(store.get(run.id)?.status).toBe("parked");
+  });
+});
+
+describe("the requirements gate", () => {
+  /** A ticket already through triage and clarification. */
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\n${CONVERSATION_RECORD_MARKER}\n\nwe agreed the list should page`,
+        createdAt: "2026-08-03T09:30:00Z",
+        fromTimone: true,
+      },
+    ],
+  };
+
+  /** A run resumed straight into the requirements stage. */
+  function atRequirements(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  it("claims a work branch before the session starts, not after", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const claimed: (string | undefined)[] = [];
+    const { runtime } = fakeRuntime({
+      work: () => {
+        claimed.push(store.get("scratch-app#7")?.branch);
+      },
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    // The branch existed while the session ran: a session that cut one on a
+    // project another run held would collide before the ledger knew.
+    expect(claimed).toEqual(["timone/7-the-page-feels-slow"]);
+  });
+
+  it("holds the project from the moment it owns a branch", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(store.occupyingRun("scratch-app")?.id).toBe("scratch-app#7");
+    expect(store.register("scratch-app", 9).run.status).toBe("queued");
+  });
+
+  it("tells the session which branch to work on, and to push it", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(requests[0].prompt).toContain("timone/7-the-page-feels-slow");
+    expect(requests[0].prompt).toMatch(/push/i);
+  });
+
+  it("hands the session what the conversation settled", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(requests[0].prompt).toContain("we agreed the list should page");
+  });
+
+  it("posts the approval request itself, linking the artifact on the branch", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    const gate = comments.at(-1)!.body;
+    expect(gate).toContain(
+      "https://github.com/fvermaut/scratch-app/tree/timone/7-the-page-feels-slow/doc/specs/prd",
+    );
+    expect(gate).toContain("`approve`");
+    expect(gate.trimEnd().split("\n").at(-1)).toMatch(/isn't `approve`/);
+  });
+
+  it("forbids the session from inventing its own approval instruction", async () => {
+    // Two sets of instructions in one thread tell the human two different
+    // things, and only one of them is the one being listened for.
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(requests[0].prompt).toMatch(/do \*\*not\*\* ask\s+them to approve it/i);
+  });
+
+  it("parks on the gate with a cursor past its own request", async () => {
+    const store = newStore();
+    const { adapter, ticket: live } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    const parked = store.get("scratch-app#7");
+    expect(parked?.status).toBe("parked");
+    expect(parked?.waitingKind).toBe("gate");
+    expect(parked?.stage).toBe("requirements");
+    expect(parked?.waitCursor).toBe(live.comments.at(-1)?.createdAt);
+  });
+
+  it("names the branch when the clone URL is not one it can link into", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(atRequirements(store), { name: "scratch-app", repoUrl: "/tmp/local.git" }, {
+      stage: "requirements",
+    });
+
+    expect(comments.at(-1)!.body).toContain("timone/7-the-page-feels-slow");
+  });
+
+  it("keeps the branch it already owns rather than cutting a second one", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    const run = atRequirements(store);
+    store.claimBranch(run.id, "timone/7-something-else");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(store.get(run.id)!, project, { stage: "requirements" });
+
+    expect(store.get(run.id)?.branch).toBe("timone/7-something-else");
   });
 });

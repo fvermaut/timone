@@ -110,6 +110,7 @@ describe("the stage graph", () => {
     // slice that builds it lands — requirements in 12e, planning in 12f.
     expect(isBuilt("triage")).toBe(true);
     expect(isBuilt("clarification")).toBe(true);
+    expect(isBuilt("requirements")).toBe(true);
     // Building and acting on a bug report are phase 13's and later.
     expect(isBuilt("execution")).toBe(false);
     expect(isBuilt("feedback")).toBe(false);

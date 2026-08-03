@@ -8,7 +8,11 @@ import { takeoverCommand } from "../channels/terminal.js";
 import type { Classification } from "./pipeline.js";
 
 /** The stages that have a prompt. Extended as stages are built. */
-export const PROMPTED_STAGES = ["triage", "clarification"] as const;
+export const PROMPTED_STAGES = [
+  "triage",
+  "clarification",
+  "requirements",
+] as const;
 
 export interface PromptContext {
   project: TicketingProject;
@@ -17,6 +21,8 @@ export interface PromptContext {
   classification?: Classification;
   /** The human's words, when a gate sent this stage back to redo its work. */
   feedback?: string;
+  /** The work branch this run owns, at the stages that own one. */
+  branch?: string;
   /** True when a human opened this session themselves and is waiting in it. */
   interactive?: boolean;
 }
@@ -128,7 +134,75 @@ export function stagePrompt(
       return triagePrompt(context);
     case "clarification":
       return clarificationPrompt(context);
+    case "requirements":
+      return requirementsPrompt(context);
   }
+}
+
+/**
+ * The work branch a ticket's run owns, from the requirements stage on.
+ *
+ * Named from the ticket rather than from the phase, because at this point
+ * there is no phase yet — and a human scanning branches should be able to
+ * tell which ticket each one belongs to without opening it.
+ */
+export function workBranch(ticket: TicketThread): string {
+  const slug = ticket.title
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/, "");
+  return `timone/${ticket.number}${slug === "" ? "" : `-${slug}`}`;
+}
+
+/**
+ * Stage 3: write down what is being asked for, and commit it where the human
+ * can read it.
+ *
+ * The order here — commit, then gate — is [PRD-02.R4](../../doc/specs/prd/prd-02-inversion-of-control.criteria.md)'s,
+ * and it differs from `process.md` stage 3's "approve the list before files
+ * are written". On a work branch the cost of writing first is a branch nobody
+ * merges, and what the human then reviews is the real criteria register
+ * rather than a paraphrase of it. The divergence is deliberate and recorded;
+ * see the phase-12 completion report.
+ */
+function requirementsPrompt(context: PromptContext): string {
+  const { ticket, branch } = context;
+
+  return [
+    `Write down what ticket #${ticket.number} on **${context.project.name}** is asking for.`,
+    "",
+    ticketBlock(context),
+    feedbackBlock(context.feedback),
+    "",
+    reentryBlock(),
+    "",
+    `**Work on the branch \`${branch ?? "the run's work branch"}\`**, cut from the`,
+    "project's default branch — create it if it does not exist, and do all of",
+    "this stage's work there. Nothing goes on the default branch.",
+    "",
+    "Run stage 3 for this ticket. Its input is what the thread above already",
+    "settled — the conversation record is the agreed statement of the problem,",
+    "and re-asking what it answers wastes the human's time. Where the record is",
+    "silent and the requirement cannot be written testably, say so plainly in",
+    "your summary rather than inventing an answer.",
+    "",
+    "**Commit the PRD pair on that branch and push it.** Committed and pushed",
+    "are not the same claim: a commit that exists only here is invisible to the",
+    "person who has to read it, and this stage is not finished until it is on",
+    "the remote.",
+    "",
+    "Then post one comment on the ticket summarizing, in plain words, what you",
+    "understood they want — the substance, not a file listing. Do **not** ask",
+    "them to approve it and do not invent an approval instruction: the",
+    "machinery posts the approval request itself, immediately after yours, and",
+    "two different sets of instructions would tell them two different things.",
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
+  ].join("\n");
 }
 
 /** Stage 1: work out what kind of request this is, and record it. */

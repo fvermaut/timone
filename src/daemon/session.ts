@@ -11,10 +11,12 @@ import {
   type ConversationChannel,
 } from "../channels/conversation.js";
 import { TerminalChannel } from "../channels/terminal.js";
+import { gateCommentFor } from "./gate-comment.js";
 import { waitCursorFrom } from "./gates.js";
 import {
   classificationFromLabels,
   isBuilt,
+  ownsBranch,
   processStage,
   routeAfterTriage,
   runsUnattended,
@@ -22,7 +24,12 @@ import {
   type PipelineStage,
 } from "./pipeline.js";
 import type { SessionSpawner, SpawnContext } from "./poll.js";
-import { PROMPTED_STAGES, conversationSubject, stagePrompt } from "./prompts.js";
+import {
+  PROMPTED_STAGES,
+  conversationSubject,
+  stagePrompt,
+  workBranch,
+} from "./prompts.js";
 import type { ParkOptions, Run, RunStore } from "./runs.js";
 
 /** What the spawner asks a runtime to run. */
@@ -184,6 +191,8 @@ export class AgentSessionSpawner implements SessionSpawner {
         return;
       }
 
+      await this.claimBranch(run, stage);
+
       const outcome = await this.runStage(run, project, stage, feedback);
       if (!outcome.ok) return;
       feedback = undefined;
@@ -220,6 +229,7 @@ export class AgentSessionSpawner implements SessionSpawner {
       ticket: before,
       classification: classificationFromLabels(before.labels),
       feedback,
+      branch: store.get(run.id)?.branch,
     });
 
     if (this.options.beforeSession !== undefined) {
@@ -261,14 +271,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { store, adapter } = this.options;
 
     if (waitFor(stage) === "gate") {
-      const cursor = waitCursorFrom(ticket);
-      store.park(run.id, {
-        waitingOn: "your answer on the ticket",
-        kind: "gate",
-        stage,
-        waitCursor: cursor,
-      });
-      this.log(`parked ${run.id} at ${stage}, waiting on a reply`);
+      await this.openGate(run, project, stage);
       return undefined;
     }
 
@@ -292,6 +295,63 @@ export class AgentSessionSpawner implements SessionSpawner {
     if (transition.kind !== "advance") return undefined;
 
     return transition.stage;
+  }
+
+  /**
+   * Give the run its work branch, at the first stage that owns one.
+   *
+   * This is the moment it starts holding its project — so it happens before
+   * the session starts, not after. A session that cut a branch on a project
+   * another run was already working would have made the collision before the
+   * ledger ever heard about it.
+   */
+  private async claimBranch(run: Run, stage: PipelineStage): Promise<void> {
+    const { store, adapter } = this.options;
+    if (!ownsBranch(stage)) return;
+    if (store.get(run.id)?.branch !== undefined) return;
+
+    const ticket = await adapter.getTicket(
+      { name: run.project, repoUrl: "" },
+      run.ticket,
+    );
+    const branch = workBranch(ticket);
+    store.claimBranch(run.id, branch);
+    this.log(`branch ${run.id} → ${branch}`);
+  }
+
+  /**
+   * Post the approval request and park on it.
+   *
+   * The daemon writes this comment, never the session that did the work: the
+   * CTA has to be worded exactly as the decision reader accepts it, and a
+   * session asked to invent its own would eventually word it otherwise —
+   * leaving the human answering a question nothing was listening for.
+   */
+  private async openGate(
+    run: Run,
+    project: TicketingProject,
+    stage: PipelineStage,
+  ): Promise<void> {
+    const { store, adapter } = this.options;
+    const branch = store.get(run.id)?.branch ?? "the work branch";
+
+    const comment = gateCommentFor(stage, project, branch, [
+      "I've written it up and put it on a branch, so you can read the real thing",
+      "rather than my description of it.",
+    ]);
+
+    if (comment !== undefined) {
+      await adapter.postComment(project, run.ticket, comment);
+    }
+
+    const after = await adapter.getTicket(project, run.ticket);
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage,
+      waitCursor: waitCursorFrom(after),
+    });
+    this.log(`parked ${run.id} at ${stage}, waiting on a reply`);
   }
 
   /** Invite the human into a conversation, and park until they conclude it. */

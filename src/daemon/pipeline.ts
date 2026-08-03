@@ -69,9 +69,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     processStage: 3,
     waits: "gate",
     ownsBranch: true,
-    // Flipped to true by 12e, which is what builds it. A stage the graph
-    // calls built but nothing can run is a lie the daemon would act on.
-    built: false,
+    built: true,
     next: "planning",
   },
   planning: {

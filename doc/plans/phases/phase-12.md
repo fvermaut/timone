@@ -146,6 +146,8 @@ npm run type-check
 
 **Seams under test (TDD):** the run gains its branch at this stage and therefore starts holding the project; the gate comment links the committed artifact; an approval advances to planning; a change request re-runs the requirements stage carrying the human's words; the guardrails' unpushed check is what catches a stage that committed and did not push.
 
+> ✏ **Refined 2026-08-03 — a conflict execution found, flagged not resolved.** `process.md` stage 3 gates on *"human approves the requirement list **before** files are written"*; [PRD-02.R4](../../specs/prd/prd-02-inversion-of-control.criteria.md) says the PRD pair *"is committed on a branch, a summary comment linking to it is posted, and the pipeline waits for approval"* — commit first, then gate. Both are approved artifacts and they disagree. **Built to R4**, since it is the later and more specific decision, made for exactly this async context: on a work branch nobody merges, writing first costs nothing, and the human then reviews the real criteria register instead of a paraphrase of it. **Not resolved here.** Correcting `process.md` is a meta-level process change and gets a grill session first; until then the divergence is written down rather than smoothed over. Carried to the completion report and the open questions.
+
 > Sub-phases 12a–12d must be complete before starting this sub-phase.
 
 #### Agent Validation Steps
