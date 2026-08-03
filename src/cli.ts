@@ -7,6 +7,7 @@ import { Command } from "commander";
 import { registerDaemonCommand } from "./commands/daemon.js";
 import { registerProjectsCommand } from "./commands/projects.js";
 import { registerStatusCommand } from "./commands/status.js";
+import { registerTakeoverCommand } from "./commands/takeover.js";
 import { registerWorkspaceCommand } from "./commands/workspace.js";
 
 /**
@@ -38,6 +39,7 @@ export function buildProgram(): Command {
   registerWorkspaceCommand(program);
   registerDaemonCommand(program);
   registerStatusCommand(program);
+  registerTakeoverCommand(program);
 
   return program;
 }
