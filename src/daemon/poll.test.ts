@@ -637,12 +637,86 @@ describe("pollOnce — resuming a run whose human answered", () => {
     const store = RunStore.open(path);
     expect(store.get("scratch-app#6")?.status).toBe("queued");
 
-    const { adapter } = threadedAdapter([]);
+    // Unclassified, so #4 has nothing to be resumed *into* — this test is
+    // about the queue moving, not about the park being picked back up.
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(4), ticket(6)] });
     const { spawner, spawned } = fakeSpawner();
 
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
     expect(spawned.map((run) => run.ticket)).toEqual([6]);
     expect(store.get("scratch-app#4")?.status).toBe("parked");
+  });
+});
+
+describe("pollOnce — runs parked before the machinery existed", () => {
+  /** The shape phase 11 left: parked at triage, waiting on nothing. */
+  function parkedAwaitingMachinery(store: RunStore, labels: string[]): Run {
+    const { run } = store.register("scratch-app", 4);
+    store.activate(run.id, "session-11");
+    void labels;
+    return store.park(run.id, {
+      waitingOn: "the next stage to be built",
+      stage: "triage",
+    });
+  }
+
+  function labelledAdapter(labels: string[]): TicketingAdapter {
+    const base = ticket(4, { labels });
+    return {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [] };
+      },
+      async postComment(): Promise<void> {},
+      async applyLabel(): Promise<void> {},
+    };
+  }
+
+  it("picks a run back up once the stage it was waiting for exists", async () => {
+    const store = newStore();
+    parkedAwaitingMachinery(store, ["timone", "triage:feature"]);
+    const adapter = labelledAdapter(["timone", "triage:feature"]);
+    const contexts: unknown[] = [];
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#4"]);
+    expect(contexts).toEqual([{ stage: "clarification" }]);
+  });
+
+  it("leaves it parked when what follows still isn't built", async () => {
+    const store = newStore();
+    parkedAwaitingMachinery(store, ["timone", "triage:bug"]);
+    const adapter = labelledAdapter(["timone", "triage:bug"]);
+    const { spawner, spawned } = fakeSpawner();
+
+    // A bug routes to the feedback stage, which is phase 13's and later.
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#4")?.status).toBe("parked");
+  });
+
+  it("leaves it parked when the ticket carries no classification to route on", async () => {
+    const store = newStore();
+    parkedAwaitingMachinery(store, ["timone"]);
+    const adapter = labelledAdapter(["timone"]);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(spawned).toEqual([]);
   });
 });

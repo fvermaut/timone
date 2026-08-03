@@ -124,6 +124,8 @@ node dist/cli.js takeover --help
 
 **Seams under test (TDD):** prompt construction per stage — the clarification prompt carries the ticket, the thread with voices separated, the classification and the instruction to open a conversation, never a pre-supposed answer; the concluding write posts the accepted summary to the ticket; a conversation that ends without acceptance leaves the run waiting rather than advancing.
 
+> ✏ **Refined 2026-08-03:** the resume path also has to pick up the runs **phase 11 parked** — `waitingKind` unset, stopped at triage because the stage after it did not exist. Without it every ticket parked before this phase stays parked forever and the only fix is someone editing `.timone/state.json` by hand, which is the state `scratch-app` #4 is actually in. A defect execution found; the approval stamp stands.
+
 > Sub-phases 12a, 12b and 12c must be complete before starting this sub-phase.
 
 #### Agent Validation Steps

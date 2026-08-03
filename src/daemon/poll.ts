@@ -1,7 +1,15 @@
 import type { Manifest } from "../manifest.js";
 import type { TicketingAdapter, TicketingProject } from "../adapters/ticketing.js";
 import { readConversationRecord, readGateDecision } from "./gates.js";
-import { concludeConversation, readGate, type PipelineStage } from "./pipeline.js";
+import {
+  classificationFromLabels,
+  concludeConversation,
+  isBuilt,
+  readGate,
+  routeAfterTriage,
+  stageAfter,
+  type PipelineStage,
+} from "./pipeline.js";
 import type { Run, RunStore } from "./runs.js";
 
 /** What a spawn is resuming, when it is resuming something. */
@@ -207,7 +215,7 @@ async function resumeAnswered(
 
   for (const run of store.parkedRuns(project.name)) {
     if (store.runningRun(project.name) !== undefined) return;
-    if (run.stage === undefined || run.waitCursor === undefined) continue;
+    if (run.stage === undefined) continue;
 
     const holder = store.occupyingRun(project.name);
     if (holder !== undefined && holder.id !== run.id) continue;
@@ -250,8 +258,21 @@ async function resolveWait(
   adapter: TicketingAdapter,
 ): Promise<SpawnContext | undefined> {
   const stage = run.stage;
+  if (stage === undefined) return undefined;
+
+  // A park with no kind of wait is not waiting on a human at all: it is a run
+  // phase 11 stopped because the stage after it did not exist. Now that some
+  // of them do, those runs pick up where they stopped — otherwise every
+  // ticket parked before this phase would stay parked forever, and the fix
+  // would be someone editing the ledger by hand.
+  if (run.waitingKind === undefined) {
+    const thread = await adapter.getTicket(project, run.ticket);
+    const next = whatFollows(stage, thread.labels);
+    return next !== undefined && isBuilt(next) ? { stage: next } : undefined;
+  }
+
   const cursor = run.waitCursor;
-  if (stage === undefined || cursor === undefined) return undefined;
+  if (cursor === undefined) return undefined;
 
   if (run.waitingKind === "gate") {
     const thread = await adapter.getTicket(project, run.ticket);
@@ -288,4 +309,21 @@ async function resolveWait(
   }
 
   return undefined;
+}
+
+/**
+ * The stage that follows `stage` for a ticket carrying `labels`. After
+ * triage that depends on the classification; everywhere else the graph
+ * already knows.
+ */
+function whatFollows(
+  stage: PipelineStage,
+  labels: readonly string[],
+): PipelineStage | undefined {
+  if (stage !== "triage") return stageAfter(stage);
+
+  const kind = classificationFromLabels(labels);
+  if (kind === undefined) return undefined;
+  const transition = routeAfterTriage(kind);
+  return transition.kind === "advance" ? transition.stage : undefined;
 }
