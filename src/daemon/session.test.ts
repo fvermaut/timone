@@ -73,6 +73,20 @@ interface PostedComment {
 }
 
 /**
+ * What the real GitHub adapter needs before it can address a repository. It
+ * throws without it; a fake that did not would let a caller pass a project it
+ * assembled itself, with the URL left blank, and nothing would notice until
+ * the daemon ran for real.
+ */
+function requireResolvable(target: TicketingProject): void {
+  if (target.repoUrl.trim() === "") {
+    throw new Error(
+      `Cannot derive a GitHub owner/repo from repo_url "" (project ${target.name})`,
+    );
+  }
+}
+
+/**
  * A ticket the fakes can actually change, because the pipeline reads the
  * ticket back after every session: the classification lives on a label, and
  * a stale fake would make the daemon look broken in tests and fine in life.
@@ -94,10 +108,15 @@ function fakeAdapter(initial: TicketThread = thread): {
     async listMarkedTickets(): Promise<Ticket[]> {
       return [ticket];
     },
-    async getTicket(): Promise<TicketThread> {
+    async getTicket(target): Promise<TicketThread> {
+      // The real adapter resolves owner/repo from the clone URL and throws
+      // without one. A fake that shrugged at a blank project let a caller
+      // ship exactly that — so this one refuses too.
+      requireResolvable(target);
       return { ...ticket, labels: [...ticket.labels], comments: [...ticket.comments] };
     },
-    async postComment(_project, number, body): Promise<void> {
+    async postComment(target, number, body): Promise<void> {
+      requireResolvable(target);
       const stamped = stampMachineComment(body);
       comments.push({ number, body });
       ticket.comments.push({

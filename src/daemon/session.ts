@@ -197,7 +197,7 @@ export class AgentSessionSpawner implements SessionSpawner {
         return;
       }
 
-      await this.claimBranch(run, stage);
+      await this.claimBranch(run, project, stage);
 
       const outcome = await this.runStage(run, project, stage, feedback);
       if (!outcome.ok) return;
@@ -352,15 +352,16 @@ export class AgentSessionSpawner implements SessionSpawner {
    * another run was already working would have made the collision before the
    * ledger ever heard about it.
    */
-  private async claimBranch(run: Run, stage: PipelineStage): Promise<void> {
+  private async claimBranch(
+    run: Run,
+    project: TicketingProject,
+    stage: PipelineStage,
+  ): Promise<void> {
     const { store, adapter } = this.options;
     if (!ownsBranch(stage)) return;
     if (store.get(run.id)?.branch !== undefined) return;
 
-    const ticket = await adapter.getTicket(
-      { name: run.project, repoUrl: "" },
-      run.ticket,
-    );
+    const ticket = await adapter.getTicket(project, run.ticket);
     const branch = workBranch(ticket);
     store.claimBranch(run.id, branch);
     this.log(`branch ${run.id} → ${branch}`);
