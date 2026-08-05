@@ -19,13 +19,20 @@ export const PIPELINE_STAGES = [
   "requirements",
   "planning",
   "execution",
+  "verification",
+  "delivery",
   "feedback",
 ] as const;
 
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
 
-/** What a stage waits for once its session has done its work. */
-export type WaitKind = "gate" | "conversation" | "none";
+/**
+ * What a stage waits for once its session has done its work. `review` is the
+ * wait at the end of the line: the work sits as an open pull request, and
+ * what resolves it is a human's review comment, merge, or close — read off
+ * the PR thread, never off the ticket.
+ */
+export type WaitKind = "gate" | "conversation" | "review" | "none";
 
 interface StageSpec {
   /** The stage of `process.md` this is, for anyone comparing the two. */
@@ -83,7 +90,26 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     processStage: 6,
     waits: "none",
     ownsBranch: true,
+    // Flips as phase 13's slices land: 13c supplies the prompt.
     built: false,
+    next: "verification",
+  },
+  verification: {
+    processStage: 7,
+    waits: "none",
+    ownsBranch: true,
+    // Flips as phase 13's slices land: 13d supplies the prompt.
+    built: false,
+    next: "delivery",
+  },
+  delivery: {
+    processStage: 8,
+    waits: "review",
+    ownsBranch: true,
+    // Flips as phase 13's slices land: 13e supplies the prompt.
+    built: false,
+    // Nothing follows in the graph: the run ends at the pull request, whose
+    // merge or close is a terminal event on the run, not a stage.
   },
   feedback: {
     processStage: 9,

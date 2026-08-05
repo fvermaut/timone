@@ -32,3 +32,35 @@ $ npm test                      → 14 files, 334 tests passed
 Checklist: seam stays tracker-agnostic (nothing GitHub-shaped in `ticketing.ts` types) ✓; a machine PR comment can never read as human (marker-derived `fromTimone`, asserted against same-login comments) ✓; the widening is exactly three capabilities ✓.
 
 **What the next sub-phase must know.** 13b needs no adapter work — but its `readStageOutcome` should live beside `readGateDecision` in `gates.ts` patterns, and the outcome marker constant belongs in `ticketing.ts` next to `CONVERSATION_RECORD_MARKER`. When 13e/13f need PR fakes with actual threads, extend the `noPullRequests` pattern locally rather than teaching every fake about PRs.
+
+## 13b — the pipeline learns the back half
+
+**Built.** The stage graph gained `verification` (process stage 7) and `delivery` (process stage 8): execution → verification → delivery, all three owning the branch; delivery waits on the new kind `review`, and nothing follows it in the graph — the PR's merge or close is a terminal event on the run, not a stage. Two outcome markers (`STAGE_DONE_MARKER`, `STAGE_HANDED_MARKER`) joined their siblings in `ticketing.ts`, read by the new `readStageOutcome(thread, cursor)`. Runs carry `pr`, park on `review`, and persist both. `timone status` renders the back half in plain words ("building", "checking the result") and names the pull request a review wait points at.
+
+**Files touched.**
+
+- `src/daemon/pipeline.ts` — three stages added to `PIPELINE_STAGES` and the graph; `WaitKind` gained `review`.
+- `src/adapters/ticketing.ts` — the two stage-outcome marker constants.
+- `src/daemon/outcomes.ts` + `outcomes.test.ts` — new; the third cursor-relative reader.
+- `src/daemon/gates.ts` — `instant()` exported for the sibling reader.
+- `src/daemon/runs.ts`, `runs.test.ts` — `pr` field, `review` wait kind, `recordPullRequest`.
+- `src/commands/status.ts`, `status.test.ts` — `STAGE_LABELS` map and the review-wait phrase.
+
+**Decisions taken inside the slice.**
+
+- **`built` stays `false` for all three new stages.** The first full-suite run caught me flipping them in this slice: a phase-12 test rightly insists a stage the graph calls built but nothing can run is a lie the daemon acts on (an approval-recording run would have advanced into a promptless execution stage and failed). Each stage flips as the slice supplying its prompt lands — 13c, 13d, 13e — exactly as `requirements` and `planning` did in phase 12.
+- *A comment carrying both outcome markers reads as handed-to-human* — the safe direction; a wrongly stopped pipeline costs a retry, a wrongly advanced one builds on nothing.
+- *A human comment can never be a stage outcome*, whatever it quotes — the mirror of 12a's gate trap, asserted with a `fromTimone: false` comment containing the marker verbatim.
+- *The review-wait status line reads the PR number off the ledger* (`run.pr`), not off the recorded `waitingOn` prose, so the pointer survives a terse park message.
+- *Front-half stage names stay as they are* on status lines — they shipped under R9's sign-off; only the back half gets the plain-word map, since "execution" answers less than "building".
+
+**Validation evidence.** Red first: 8 outcome tests failed on the missing module, 6 pipeline tests on the missing stages, 3 runs tests on the missing field/kind, 2 status tests on the raw stage names. Green after:
+
+```
+$ npm test              → 15 files, 352 tests passed
+$ npm run type-check    → clean
+```
+
+Checklist: stages map to `process.md` 6/7/8 by assertion ✓; a run parked on review holds its project until `complete()` and the queue promotes then ✓; status explains every new state without process jargon (asserted `not.toMatch(/execution|verification/)`) ✓.
+
+**What the next sub-phase must know.** 13c flips `execution.built` and must update the phase-12 session test that expects an approved plan to park at "not built yet" — that park disappears the moment execution runs for real. `readStageOutcome` needs the wait cursor captured *before* the stage session starts (the pre-session ticket state), not after, or the outcome comment itself lands behind the cursor.

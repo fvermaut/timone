@@ -134,9 +134,11 @@ function isApproval(body: string): boolean {
 /**
  * Parse a timestamp for ordering. An unparseable one sorts before everything,
  * so a malformed cursor makes the gate read comments rather than swallow them
- * — the failure mode is a visible wrong answer, not a silent stall.
+ * — the failure mode is a visible wrong answer, not a silent stall. Exported
+ * for the other cursor-relative readers (`outcomes.ts`), which must order
+ * comments by exactly the same rule.
  */
-function instant(value: string): number {
+export function instant(value: string): number {
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
 }

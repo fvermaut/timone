@@ -64,7 +64,7 @@ const runSchema = z.strictObject({
   /** What a parked run is waiting for, in the human's terms. */
   waitingOn: z.string().optional(),
   /** Which *kind* of wait that is — what an arriving answer may resolve. */
-  waitingKind: z.enum(["gate", "conversation"]).optional(),
+  waitingKind: z.enum(["gate", "conversation", "review"]).optional(),
   /**
    * The instant the wait was opened — the gate comment, or the invitation to
    * a conversation. Anything at or before it belongs to an earlier question
@@ -76,6 +76,12 @@ const runSchema = z.strictObject({
    * makes a parked run hold its project — see {@link RunStore}.
    */
   branch: z.string().optional(),
+  /**
+   * The pull request the run's delivery opened, once one exists. What a
+   * `review` wait is waiting on; kept on the run so `timone status` and the
+   * poll loop name the PR without re-asking the tracker.
+   */
+  pr: z.number().int().positive().optional(),
   /** Agent SDK session identifier, once one has been spawned. */
   sessionId: z.string().optional(),
   /** Why a failed run failed. */
@@ -109,7 +115,7 @@ export interface ParkOptions {
   /** What it is waiting for, in the human's terms. */
   waitingOn: string;
   /** Which kind of wait it is, when the daemon will resume it from an answer. */
-  kind?: "gate" | "conversation";
+  kind?: "gate" | "conversation" | "review";
   /** The stage it parked at, when parking moves it. */
   stage?: PipelineStage;
   /** The instant the wait was opened; answers before it are not answers to it. */
@@ -299,6 +305,15 @@ export class RunStore {
       );
     }
     run.branch = branch;
+    run.updatedAt = this.now();
+    this.persist();
+    return { ...run };
+  }
+
+  /** Record the pull request a run's delivery opened. */
+  recordPullRequest(id: string, pr: number): Run {
+    const run = this.mutable(id);
+    run.pr = pr;
     run.updatedAt = this.now();
     this.persist();
     return { ...run };

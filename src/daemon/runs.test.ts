@@ -424,3 +424,53 @@ describe("persistence", () => {
     expect(() => RunStore.open(path)).toThrow(/state\.json/);
   });
 });
+
+describe("the pull request on a run", () => {
+  it("records the pull request a delivered run is waiting on", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+
+    const updated = store.recordPullRequest(run.id, 9);
+
+    expect(updated.pr).toBe(9);
+  });
+
+  it("persists the pull request and the review wait across a reopen", () => {
+    const path = statePath();
+    const store = newStore(path);
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    store.recordPullRequest(run.id, 9);
+    store.park(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "delivery",
+      waitCursor: "2026-08-06T10:00:00Z",
+    });
+
+    const reopened = RunStore.open(path).get(run.id);
+
+    expect(reopened?.pr).toBe(9);
+    expect(reopened?.waitingKind).toBe("review");
+    expect(reopened?.stage).toBe("delivery");
+  });
+
+  it("holds the project while parked on a review, and frees it on completion", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    store.recordPullRequest(run.id, 9);
+    store.park(run.id, { waitingOn: "your review", kind: "review", stage: "delivery" });
+
+    // A queued ticket stays queued behind the open pull request…
+    const { run: queued } = store.register("scratch-app", 8);
+    expect(queued.status).toBe("queued");
+
+    // …and starts the moment the PR's merge completes the run (R10).
+    store.complete(run.id);
+    expect(store.get(queued.id)?.status).toBe("picked-up");
+  });
+});

@@ -9,6 +9,7 @@ import {
   concludeConversation,
   isBuilt,
   ownsBranch,
+  processStage,
   readGate,
   routeAfterTriage,
   runsUnattended,
@@ -107,14 +108,51 @@ describe("the stage graph", () => {
   it("knows which stages can actually be run right now", () => {
     // A stage the graph calls built but nothing can run is a lie the daemon
     // acts on: it would start a session with no prompt. Each flips as the
-    // slice that builds it lands — requirements in 12e, planning in 12f.
+    // slice that builds it lands — requirements in 12e, planning in 12f,
+    // the back half across phase 13.
     expect(isBuilt("triage")).toBe(true);
     expect(isBuilt("clarification")).toBe(true);
     expect(isBuilt("requirements")).toBe(true);
     expect(isBuilt("planning")).toBe(true);
-    // Building and acting on a bug report are phase 13's and later.
+    // The back half exists in the graph from 13b but flips built only as the
+    // slice supplying each stage's prompt lands: execution in 13c,
+    // verification in 13d, delivery in 13e.
     expect(isBuilt("execution")).toBe(false);
+    expect(isBuilt("verification")).toBe(false);
+    expect(isBuilt("delivery")).toBe(false);
+    // Acting on a bug-classified ticket is stage 9's daemon path — not built.
     expect(isBuilt("feedback")).toBe(false);
+  });
+
+  it("runs execution → verification → delivery, and nothing follows delivery", () => {
+    expect(stageAfter("execution")).toBe("verification");
+    expect(stageAfter("verification")).toBe("delivery");
+    // Nothing follows delivery in the graph: the run ends at the PR, whose
+    // merge or close is a terminal event, not a stage.
+    expect(stageAfter("delivery")).toBeUndefined();
+  });
+
+  it("maps the back half onto process.md stages 6, 7 and 8", () => {
+    expect(processStage("execution")).toBe(6);
+    expect(processStage("verification")).toBe(7);
+    expect(processStage("delivery")).toBe(8);
+  });
+
+  it("waits on nothing through the build and check, then on a review", () => {
+    expect(waitFor("execution")).toBe("none");
+    expect(waitFor("verification")).toBe("none");
+    expect(waitFor("delivery")).toBe("review");
+  });
+
+  it("holds the branch through the whole back half", () => {
+    expect(ownsBranch("verification")).toBe(true);
+    expect(ownsBranch("delivery")).toBe(true);
+  });
+
+  it("runs the whole back half unattended", () => {
+    expect(runsUnattended("execution")).toBe(true);
+    expect(runsUnattended("verification")).toBe(true);
+    expect(runsUnattended("delivery")).toBe(true);
   });
 
   it("leaves the conversation stage to a human-opened session", () => {

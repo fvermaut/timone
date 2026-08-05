@@ -3,22 +3,46 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
+import type { PipelineStage } from "../daemon/pipeline.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 
 /** Statuses that mean a session is running, or about to. */
 const RUNNING = ["picked-up", "active"];
+
+/**
+ * Plain words for the stages whose bare names would read as jargon. The
+ * front half's names shipped with R9 and read fine on a status line; the
+ * back half earns a phrase, because "execution" answers less than "building"
+ * for the reader this command exists for.
+ */
+const STAGE_LABELS: Partial<Record<PipelineStage, string>> = {
+  execution: "building",
+  verification: "checking the result",
+  delivery: "delivering",
+};
 
 export interface RenderStatusOptions {
   /** False when the daemon has never written a state file. */
   stateExists: boolean;
 }
 
+/** What a parked run is waiting for. A review wait names its pull request
+ * from the ledger, so the line points at the place the reader must go even
+ * when the recorded `waitingOn` text is terser. */
+function describeWait(run: Run): string {
+  if (run.waitingKind === "review" && run.pr !== undefined) {
+    return `waiting on you: your review of pull request #${run.pr}`;
+  }
+  return `waiting on you: ${run.waitingOn ?? "an answer"}`;
+}
+
 /** One run's phrase: the ticket, how far it got, and what it is doing. */
 function describeRun(run: Run): string {
-  const stage = run.stage === undefined ? "" : ` (${run.stage})`;
+  const stage =
+    run.stage === undefined ? "" : ` (${STAGE_LABELS[run.stage] ?? run.stage})`;
   const what =
     run.status === "parked"
-      ? `waiting on you: ${run.waitingOn ?? "an answer"}`
+      ? describeWait(run)
       : run.status === "active"
         ? "working on it now"
         : "picked up, about to start";

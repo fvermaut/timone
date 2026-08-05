@@ -207,3 +207,43 @@ describe("renderStatus", () => {
     expect(lastLine).toMatch(/What I need from you:/);
   });
 });
+
+describe("renderStatus — the back half of the pipeline", () => {
+  it("describes the building and checking stages in plain words", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({ project: "scratch-app", ticket: 6, status: "active", stage: "execution" }),
+        run({ project: "other-app", ticket: 2, status: "active", stage: "verification" }),
+      ],
+      { stateExists: true },
+    );
+
+    expect(lineFor(output, "scratch-app")).toMatch(/building/);
+    expect(lineFor(output, "other-app")).toMatch(/checking the result/);
+    expect(output).not.toMatch(/execution|verification/);
+  });
+
+  it("names the pull request a review wait is waiting on", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 6,
+          status: "parked",
+          stage: "delivery",
+          waitingKind: "review",
+          waitingOn: "your review",
+          pr: 9,
+          branch: "timone/6-fiddly-box",
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    const line = lineFor(output, "scratch-app");
+    expect(line).toMatch(/waiting on you/i);
+    expect(line).toMatch(/pull request #9/);
+  });
+});

@@ -33,6 +33,25 @@ export const MACHINE_MARKER =
 export const CONVERSATION_RECORD_MARKER =
   "✅ **Agreed** · the record of a conversation, accepted by the human";
 
+/**
+ * The line a stage's closing comment carries when its work is done and the
+ * pipeline may move on. Phase 13's back half runs stages whose sessions do
+ * real, fallible work; the daemon judges them by the artifact they owe *and*
+ * this record ([phase 13](../../doc/plans/phases/phase-13.md)'s outcome
+ * rule, extending ADR-0014 from gates to outcomes) — never by an exit code,
+ * which is how a gate once opened over nothing.
+ */
+export const STAGE_DONE_MARKER =
+  "🏁 **Step finished** · written by the machine when a stage completed its work";
+
+/**
+ * {@link STAGE_DONE_MARKER}'s sibling for the other honest ending: the stage
+ * stopped inside its bounds — a failed slice, an exhausted fix loop — and a
+ * person has to look. The comment carrying it is the report R6 requires.
+ */
+export const STAGE_HANDED_MARKER =
+  "🙋 **Needs a person** · written by the machine when a stage stopped and is asking for help";
+
 /** Put the machine header on a comment body, unless it already carries one. */
 export function stampMachineComment(body: string): string {
   return body.startsWith(MACHINE_MARKER)
