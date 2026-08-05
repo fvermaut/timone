@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type {
+  PullRequest,
+  PullRequestThread,
   Ticket,
   TicketingAdapter,
   TicketingProject,
@@ -214,6 +216,21 @@ interface PostedComment {
   body: string;
 }
 
+/**
+ * The seam's pull-request surface, for fakes in tests where none exists.
+ * Reading a thread throws so a test that unexpectedly reaches for one fails
+ * at the reach, not on an empty answer.
+ */
+const noPullRequests = {
+  async findPullRequest(): Promise<PullRequest | undefined> {
+    return undefined;
+  },
+  async getPullRequestThread(): Promise<PullRequestThread> {
+    throw new Error("no pull request exists in this test");
+  },
+  async postPullRequestComment(): Promise<void> {},
+};
+
 function fakeAdapter(): {
   adapter: TicketingAdapter;
   comments: PostedComment[];
@@ -230,6 +247,7 @@ function fakeAdapter(): {
       comments.push({ number, body });
     },
     async applyLabel(): Promise<void> {},
+    ...noPullRequests,
   };
   return { adapter, comments };
 }

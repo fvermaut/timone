@@ -79,6 +79,46 @@ export type Ticket = z.infer<typeof ticketSchema>;
 export type TicketThread = z.infer<typeof ticketThreadSchema>;
 
 /**
+ * Where a pull request stands, as the process reads it: `merged` is the
+ * terminal state that completes a run, `closed` (without merging) the one
+ * that declines it, and `open` is a run still waiting on its review.
+ */
+export const PR_STATES = ["open", "merged", "closed"] as const;
+
+/** A pull request as the process sees it — no tracker-specific fields. */
+export const pullRequestSchema = z.strictObject({
+  number: z.number().int().positive(),
+  title: z.string(),
+  url: z.string(),
+  state: z.enum(PR_STATES),
+});
+
+/**
+ * One comment on a pull request. A ticket comment, plus — where the tracker
+ * can thread a reply under it — the id to hand back as `replyTo`. Undefined
+ * means the surface is flat there (GitHub's PR conversation, review
+ * summaries); a reply still lands on the PR, just unthreaded.
+ */
+export const pullRequestCommentSchema = ticketCommentSchema.extend({
+  replyTo: z.string().optional(),
+});
+
+/**
+ * A pull request with everything said on it — conversation comments, review
+ * summaries and inline review comments — as one thread, oldest first. One
+ * merged sequence on purpose: the review loop reads "what did the human say
+ * since the cursor", and which GitHub surface they said it on is not the
+ * process's business.
+ */
+export const pullRequestThreadSchema = pullRequestSchema.extend({
+  comments: z.array(pullRequestCommentSchema),
+});
+
+export type PullRequest = z.infer<typeof pullRequestSchema>;
+export type PullRequestComment = z.infer<typeof pullRequestCommentSchema>;
+export type PullRequestThread = z.infer<typeof pullRequestThreadSchema>;
+
+/**
  * The subset of a managed project an adapter needs: its manifest name (for
  * error messages and run keys) and its clone URL (which the implementation
  * resolves to whatever the tracker addresses repositories by).
@@ -91,8 +131,11 @@ export interface TicketingProject {
 /**
  * The seam between the process and whatever tracks tickets. Real interface
  * from day one per ADR-0004: GitHub is the first implementation, not the
- * shape. Four capabilities, and no more — anything a stage needs beyond
- * these is a deliberate widening of the seam, not an incidental one.
+ * shape. Seven capabilities, and no more — anything a stage needs beyond
+ * these is a deliberate widening of the seam, not an incidental one. The
+ * last three are phase 13's widening: delivery and the review loop live on
+ * pull requests, and the PR is stage 8's artifact (ADR-0004), so reading
+ * and answering it is the ticketing seam's business, not a second adapter's.
  */
 export interface TicketingAdapter {
   /** Open tickets carrying the mark label, oldest first. */
@@ -116,5 +159,34 @@ export interface TicketingAdapter {
     project: TicketingProject,
     number: number,
     label: string,
+  ): Promise<void>;
+
+  /**
+   * The pull request whose head is `branch`, or undefined when none exists.
+   * When the branch has several, the liveliest wins: open, then merged,
+   * then closed — a stale closed PR must not hide the one under review.
+   */
+  findPullRequest(
+    project: TicketingProject,
+    branch: string,
+  ): Promise<PullRequest | undefined>;
+
+  /** One pull request with everything said on it, as one thread. */
+  getPullRequestThread(
+    project: TicketingProject,
+    number: number,
+  ): Promise<PullRequestThread>;
+
+  /**
+   * Say something on a pull request, stamped with {@link MACHINE_MARKER}
+   * exactly as ticket comments are. With `replyTo` (a comment's
+   * {@link PullRequestComment.replyTo}), the reply threads under that
+   * comment; without it, it lands on the PR conversation.
+   */
+  postPullRequestComment(
+    project: TicketingProject,
+    number: number,
+    body: string,
+    replyTo?: string,
   ): Promise<void>;
 }

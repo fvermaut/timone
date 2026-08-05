@@ -6,6 +6,9 @@ import {
   isMachineComment,
   MARK_LABEL,
   stampMachineComment,
+  type PullRequest,
+  type PullRequestComment,
+  type PullRequestThread,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
@@ -107,6 +110,59 @@ const ghIssueWithCommentsSchema = ghIssueSchema.extend({
 const LIST_FIELDS = "number,title,body,labels,url,author,createdAt";
 /** `gh issue view` additionally carries the thread. */
 const VIEW_FIELDS = `${LIST_FIELDS},comments`;
+
+/** How `gh` spells a pull request's state, mapped to how the process does. */
+const GH_PR_STATES = {
+  OPEN: "open",
+  MERGED: "merged",
+  CLOSED: "closed",
+} as const;
+
+const ghPullStateSchema = z.enum(
+  Object.keys(GH_PR_STATES) as [keyof typeof GH_PR_STATES],
+);
+
+/** The pull-request shape `gh pr list`/`gh pr view` return. */
+const ghPullSchema = z.looseObject({
+  number: z.number().int().positive(),
+  title: z.string(),
+  url: z.string(),
+  state: ghPullStateSchema,
+});
+
+/** A PR review summary as `gh pr view --json reviews` returns it. */
+const ghReviewSchema = z.looseObject({
+  author: ghAuthorSchema,
+  body: z.string(),
+  submittedAt: z.string().optional(),
+});
+
+const ghPullWithThreadSchema = ghPullSchema.extend({
+  comments: z.array(ghCommentSchema),
+  reviews: z.array(ghReviewSchema),
+});
+
+/** An inline review comment as the REST `pulls/N/comments` endpoint returns it. */
+const ghInlineCommentSchema = z.looseObject({
+  id: z.number(),
+  in_reply_to_id: z.number().optional(),
+  user: ghAuthorSchema,
+  body: z.string(),
+  created_at: z.string(),
+});
+
+/** The JSON fields requested for pull requests. */
+const PR_FIELDS = "number,title,url,state";
+const PR_VIEW_FIELDS = `${PR_FIELDS},comments,reviews`;
+
+function toPullRequest(pull: z.infer<typeof ghPullSchema>): PullRequest {
+  return {
+    number: pull.number,
+    title: pull.title,
+    url: pull.url,
+    state: GH_PR_STATES[pull.state],
+  };
+}
 
 /**
  * Parse `gh` stdout as JSON against `schema`, failing loudly with the raw
@@ -276,6 +332,149 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
       repoSlug(project.repoUrl),
       "--add-label",
       label,
+    ]);
+  }
+
+  async findPullRequest(
+    project: TicketingProject,
+    branch: string,
+  ): Promise<PullRequest | undefined> {
+    const slug = repoSlug(project.repoUrl);
+    const raw = await this.run("gh", [
+      "pr",
+      "list",
+      "--repo",
+      slug,
+      "--head",
+      branch,
+      "--state",
+      "all",
+      "--json",
+      PR_FIELDS,
+      "--limit",
+      String(this.pageLimit),
+    ]);
+
+    const pulls = parseGhJson(
+      z.array(ghPullSchema),
+      raw,
+      `listing pull requests for ${slug} head ${branch}`,
+    );
+    if (pulls.length === 0) return undefined;
+
+    // The liveliest PR wins: a stale closed one must not hide the one under
+    // review. Within a state, the newest (highest number) is the answer.
+    const rank: Record<PullRequest["state"], number> = {
+      open: 0,
+      merged: 1,
+      closed: 2,
+    };
+    return pulls
+      .map(toPullRequest)
+      .sort((a, b) => rank[a.state] - rank[b.state] || b.number - a.number)[0];
+  }
+
+  async getPullRequestThread(
+    project: TicketingProject,
+    number: number,
+  ): Promise<PullRequestThread> {
+    const slug = repoSlug(project.repoUrl);
+
+    const viewRaw = await this.run("gh", [
+      "pr",
+      "view",
+      String(number),
+      "--repo",
+      slug,
+      "--json",
+      PR_VIEW_FIELDS,
+    ]);
+    const pull = parseGhJson(
+      ghPullWithThreadSchema,
+      viewRaw,
+      `reading ${slug}!${number}`,
+    );
+
+    // Inline review comments live behind a REST endpoint `gh pr view` does
+    // not surface; `--paginate` so a long review is never silently cut off.
+    const inlineRaw = await this.run("gh", [
+      "api",
+      "--paginate",
+      `repos/${slug}/pulls/${number}/comments`,
+    ]);
+    const inline = parseGhJson(
+      z.array(ghInlineCommentSchema),
+      inlineRaw,
+      `reading inline review comments on ${slug}!${number}`,
+    );
+
+    const comments: PullRequestComment[] = [
+      ...pull.comments.map((comment) => ({
+        author: comment.author.login,
+        body: comment.body,
+        createdAt: comment.createdAt,
+        fromTimone: isMachineComment(comment.body),
+      })),
+      // A review's summary text is a comment; a review that carried none
+      // (inline remarks only, or a bare verdict) contributes nothing here.
+      ...pull.reviews
+        .filter(
+          (review) => review.body !== "" && review.submittedAt !== undefined,
+        )
+        .map((review) => ({
+          author: review.author.login,
+          body: review.body,
+          createdAt: review.submittedAt as string,
+          fromTimone: isMachineComment(review.body),
+        })),
+      // Replying threads under the *root* of an inline thread, so a reply
+      // to a reply names the same root its sibling does.
+      ...inline.map((comment) => ({
+        author: comment.user.login,
+        body: comment.body,
+        createdAt: comment.created_at,
+        fromTimone: isMachineComment(comment.body),
+        replyTo: String(comment.in_reply_to_id ?? comment.id),
+      })),
+    ];
+
+    return {
+      ...toPullRequest(pull),
+      comments: comments.sort((a, b) =>
+        a.createdAt.localeCompare(b.createdAt),
+      ),
+    };
+  }
+
+  async postPullRequestComment(
+    project: TicketingProject,
+    number: number,
+    body: string,
+    replyTo?: string,
+  ): Promise<void> {
+    const slug = repoSlug(project.repoUrl);
+    const stamped = stampMachineComment(body);
+
+    if (replyTo === undefined) {
+      await this.run("gh", [
+        "pr",
+        "comment",
+        String(number),
+        "--repo",
+        slug,
+        "--body",
+        stamped,
+      ]);
+      return;
+    }
+
+    await this.run("gh", [
+      "api",
+      "--method",
+      "POST",
+      `repos/${slug}/pulls/${number}/comments/${replyTo}/replies`,
+      "-f",
+      `body=${stamped}`,
     ]);
   }
 }

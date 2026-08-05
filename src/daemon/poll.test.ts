@@ -7,6 +7,8 @@ import type { Manifest } from "../manifest.js";
 import {
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
+  type PullRequest,
+  type PullRequestThread,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
@@ -74,6 +76,21 @@ interface PostedComment {
  * list call returns. Every comment posted is recorded. `failing` names
  * projects whose list call throws.
  */
+/**
+ * The seam's pull-request surface, for fakes in tests where none exists.
+ * Reading a thread throws so a test that unexpectedly reaches for one fails
+ * at the reach, not on an empty answer.
+ */
+const noPullRequests = {
+  async findPullRequest(): Promise<PullRequest | undefined> {
+    return undefined;
+  },
+  async getPullRequestThread(): Promise<PullRequestThread> {
+    throw new Error("no pull request exists in this test");
+  },
+  async postPullRequestComment(): Promise<void> {},
+};
+
 function fakeAdapter(
   marked: Record<string, Ticket[]>,
   failing: string[] = [],
@@ -100,6 +117,7 @@ function fakeAdapter(
       comments.push({ project: project.name, number, body });
     },
     async applyLabel(): Promise<void> {},
+    ...noPullRequests,
   };
   return { adapter, comments };
 }
@@ -340,6 +358,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
         posted.push({ project: project.name, number, body });
       },
       async applyLabel(): Promise<void> {},
+      ...noPullRequests,
     };
     return { adapter, posted };
   }
@@ -672,6 +691,7 @@ describe("pollOnce — runs parked before the machinery existed", () => {
       },
       async postComment(): Promise<void> {},
       async applyLabel(): Promise<void> {},
+      ...noPullRequests,
     };
   }
 

@@ -9,6 +9,8 @@ import {
   MACHINE_MARKER,
   isMachineComment,
   stampMachineComment,
+  type PullRequest,
+  type PullRequestThread,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
@@ -91,6 +93,21 @@ function requireResolvable(target: TicketingProject): void {
  * ticket back after every session: the classification lives on a label, and
  * a stale fake would make the daemon look broken in tests and fine in life.
  */
+/**
+ * The seam's pull-request surface, for fakes in tests where none exists.
+ * Reading a thread throws so a test that unexpectedly reaches for one fails
+ * at the reach, not on an empty answer.
+ */
+const noPullRequests = {
+  async findPullRequest(): Promise<PullRequest | undefined> {
+    return undefined;
+  },
+  async getPullRequestThread(): Promise<PullRequestThread> {
+    throw new Error("no pull request exists in this test");
+  },
+  async postPullRequestComment(): Promise<void> {},
+};
+
 function fakeAdapter(initial: TicketThread = thread): {
   adapter: TicketingAdapter;
   comments: PostedComment[];
@@ -129,6 +146,7 @@ function fakeAdapter(initial: TicketThread = thread): {
     async applyLabel(_project, _number, label): Promise<void> {
       if (!ticket.labels.includes(label)) ticket.labels.push(label);
     },
+    ...noPullRequests,
   };
   return { adapter, comments, ticket };
 }
