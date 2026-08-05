@@ -117,7 +117,7 @@ describe("the stage graph", () => {
     // The back half exists in the graph from 13b but flips built only as the
     // slice supplying each stage's prompt lands: execution in 13c,
     // verification in 13d, delivery in 13e.
-    expect(isBuilt("execution")).toBe(false);
+    expect(isBuilt("execution")).toBe(true);
     expect(isBuilt("verification")).toBe(false);
     expect(isBuilt("delivery")).toBe(false);
     // Acting on a bug-classified ticket is stage 9's daemon path — not built.

@@ -7,6 +7,8 @@ import type { Manifest } from "../manifest.js";
 import {
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
+  STAGE_DONE_MARKER,
+  STAGE_HANDED_MARKER,
   isMachineComment,
   stampMachineComment,
   type PullRequest,
@@ -1118,7 +1120,7 @@ describe("recording an approval in the artifact", () => {
 
   it("records it before the run moves on, not after", async () => {
     const store = newStore();
-    const { adapter, comments } = fakeAdapter(settled);
+    const { adapter } = fakeAdapter(settled);
     const { runtime, requests } = fakeRuntime();
 
     await new AgentSessionSpawner({
@@ -1128,16 +1130,18 @@ describe("recording an approval in the artifact", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
+      planStatusProbe: async () => "Approved for execution by fvermaut",
     }).spawn(atPlanningGate(store), project, {
       stage: "execution",
       approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
     });
 
-    // One session — the recording one. Execution is not built, so the run
-    // then parks there and says so.
-    expect(requests).toHaveLength(1);
-    expect(store.get("scratch-app#7")?.stage).toBe("execution");
-    expect(comments.at(-1)?.body).toMatch(/isn't built yet/i);
+    // Two sessions, in that order: the recording one first, and only then
+    // the execution the approval unblocked — an approval recorded after the
+    // build started would vanish whenever the pipeline stopped between them.
+    expect(requests).toHaveLength(2);
+    expect(requests[0].prompt).toContain("2026-08-03T12:00:00Z");
+    expect(requests[1].prompt).toContain(STAGE_DONE_MARKER);
   });
 
   it("tells the recording session to change nothing else and say nothing", async () => {
@@ -1379,5 +1383,140 @@ describe("every committing session is watched", () => {
     });
 
     expect(order.slice(0, 2)).toEqual(["baseline", "checked"]);
+  });
+});
+
+describe("the execution stage", () => {
+  /** A run holding its branch, resumed at execution after plan approval. */
+  function atExecution(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "the building to start",
+      stage: "planning",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  /** A session that closes with the given outcome marker on the ticket. */
+  function buildingRuntime(
+    adapter: TicketingAdapter,
+    marker: string,
+    text: string,
+  ): ReturnType<typeof fakeRuntime> {
+    return fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${marker}\n\n${text}`);
+      },
+    });
+  }
+
+  it("advances to verification when the plan flipped and the session said done", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime } = buildingRuntime(adapter, STAGE_DONE_MARKER, "Built all slices.");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      planStatusProbe: async () => "Complete — see reports/phase-04-complete.md",
+    }).spawn(atExecution(store), project, { stage: "execution" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.stage).toBe("verification");
+    // Verification is not built until 13d, so the run parks there and says so.
+    expect(run?.status).toBe("parked");
+    expect(comments.at(-1)?.body).toMatch(/isn't built yet/i);
+  });
+
+  it("fails the run when the session said done but the plan never flipped", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime } = buildingRuntime(adapter, STAGE_DONE_MARKER, "Built it.");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      planStatusProbe: async () => "Approved for execution by fvermaut 2026-08-05",
+    }).spawn(atExecution(store), project, { stage: "execution" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.status).toBe("failed");
+    expect(run?.failure).toMatch(/phase file/i);
+    expect(comments.at(-1)?.body).toMatch(/went wrong/i);
+  });
+
+  it("fails the run when the plan flipped but no outcome was recorded", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      planStatusProbe: async () => "Complete — see reports/phase-04-complete.md",
+    }).spawn(atExecution(store), project, { stage: "execution" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.status).toBe("failed");
+    expect(run?.failure).toMatch(/outcome/i);
+  });
+
+  it("stops quietly when the session handed the work to a person", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime } = buildingRuntime(
+      adapter,
+      STAGE_HANDED_MARKER,
+      "Slice 04c failed twice; both attempts below.",
+    );
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      planStatusProbe: async () => "Approved for execution by fvermaut 2026-08-05",
+    }).spawn(atExecution(store), project, { stage: "execution" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.status).toBe("failed");
+    // The session's own comment is the report; the daemon adds nothing on top.
+    expect(comments.at(-1)?.body).toContain("failed twice");
+  });
+
+  it("hands the session the execution prompt on the run's branch", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = buildingRuntime(adapter, STAGE_DONE_MARKER, "done");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      planStatusProbe: async () => "Complete — see reports/phase-04-complete.md",
+    }).spawn(atExecution(store), project, { stage: "execution" });
+
+    expect(requests[0].prompt).toContain("timone/7-the-page-feels-slow");
+    expect(requests[0].prompt).toContain(STAGE_DONE_MARKER);
   });
 });

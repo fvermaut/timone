@@ -740,3 +740,53 @@ describe("pollOnce — runs parked before the machinery existed", () => {
     expect(spawned).toEqual([]);
   });
 });
+
+describe("pollOnce — a run parked at an unbuilt stage resumes at that stage", () => {
+  /** The shape 12f left scratch-app#6 in: parked *at* execution, which could
+   * not run — not parked *after* it. Distinct from the phase-11 vintage above,
+   * where the recorded stage had already run. */
+  function parkedAtExecution(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-12");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    return store.park(run.id, {
+      waitingOn: "the next stage to be built",
+      stage: "execution",
+    });
+  }
+
+  it("resumes at execution itself, never at the stage after it", async () => {
+    // The trap: once execution has a successor in the graph, a resume that
+    // asks "what follows?" would skip the build entirely and start
+    // verification on code nobody wrote.
+    const store = newStore();
+    parkedAtExecution(store);
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [] };
+      },
+      async postComment(): Promise<void> {},
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+    };
+    const contexts: unknown[] = [];
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(contexts).toEqual([{ stage: "execution" }]);
+  });
+});

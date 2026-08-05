@@ -64,3 +64,34 @@ $ npm run type-check    → clean
 Checklist: stages map to `process.md` 6/7/8 by assertion ✓; a run parked on review holds its project until `complete()` and the queue promotes then ✓; status explains every new state without process jargon (asserted `not.toMatch(/execution|verification/)`) ✓.
 
 **What the next sub-phase must know.** 13c flips `execution.built` and must update the phase-12 session test that expects an approved plan to park at "not built yet" — that park disappears the moment execution runs for real. `readStageOutcome` needs the wait cursor captured *before* the stage session starts (the pre-session ticket state), not after, or the outcome comment itself lands behind the cursor.
+
+## 13c — the execution stage (R6, first half)
+
+**Built.** The daemon can now run stage 6 unattended. `PROMPTED_STAGES` gained `execution`; its prompt stays on the run's branch (ADR-0015 cited in the prompt itself), makes the phase file's own `Status:` stamp the authority on whether building may start, and closes with exactly one ticket comment carrying one of the two outcome markers. After the session, the daemon judges the stage by its two witnesses — the outcome comment and the phase file's status read off the branch (`gitPlanStatus`, behind the `planStatusProbe` seam) — and only the honest pair advances to verification. A handed-to-human outcome fails the run without daemon commentary (the session's comment is the report); every mismatched pair fails it loudly as a wiring defect.
+
+**Files touched.**
+
+- `src/daemon/prompts.ts` — `executionPrompt`, plus `outcomeBlock` (shared by 13d/13e's prompts).
+- `src/daemon/outcomes.ts` — `outcomeCursorFrom` (newest comment as the session starts).
+- `src/daemon/session.ts` — `planStatusProbe` seam + `gitPlanStatus`; `runStage` reads the outcome; `afterWorkStage` (the two-witness judgment, shared shape for 13d); `planStatus`.
+- `src/daemon/pipeline.ts` — `execution.built` → true.
+- `src/daemon/poll.ts` — the resume-semantics fix below.
+- Tests: `prompts.test.ts`, `session.test.ts` (new describe + the reworked approval-ordering test), `poll.test.ts` (new describe), `pipeline.test.ts` (flip).
+
+**Decisions taken inside the slice.**
+
+- **A defect found while wiring, worth the slice's weight: the resume path would have skipped execution entirely.** Phase 11's parks recorded the stage that had already *run* (triage — resume reads what follows off the labels); 12f's park at execution recorded the stage that *could not run*. The old resume asked "what follows?" for both — harmless while `stageAfter(execution)` was undefined, but the moment 13b gave execution a successor, resuming `scratch-app` #6 would have started **verification on code nobody wrote**. `resolveWait` now distinguishes the two vintages: a non-triage kind-less park resumes at its own stage once built. Pinned by a test named for the trap.
+- *The outcome cursor is the newest comment of any author at session start* (`outcomeCursorFrom`), not the machine-comment cursor gates use — an outcome must be newer than everything already said, and only machine comments can be outcomes anyway.
+- *On handed-to-human the daemon posts nothing* — the session's closing comment is R6's required failure report, and a second daemon comment would say the same thing with less detail.
+- *`gitPlanStatus` reads the newest `phase-NN.md`* on the branch (lexical sort — zero-padded numbers), and parses the first line containing `Status:` — verified against the live format on `scratch-app`'s branch (`> **Status:** Approved for execution by fvermaut 2026-08-05T18:02:22Z.`).
+
+**Validation evidence.** Red first: 4 prompt tests (no execution prompt), 5 session tests (no outcome judgment), 1 poll test (the resume trap — it computed `verification`), 1 reworked phase-12 test. Green after:
+
+```
+$ npm test              → 15 files, 370 tests passed
+$ npm run type-check    → clean
+```
+
+Checklist: only the artifact-and-marker pair advances ✓ (four combinations asserted, one advances); the escalation comment names the failing slice and both attempts — instructed by the prompt, asserted as marker presence, live evidence at 13h ✓; the prompt names the run's branch and the amended skill agrees ✓.
+
+**What the next sub-phase must know.** 13d reuses `afterWorkStage` with a report-exists artifact check and must add `verification` to `PROMPTED_STAGES` — note the every-prompt `it.each` tests assert `ticketBlock` presence, and the verification prompt deliberately withholds the thread, so those tests need a threaded-stages subset rather than blanket `PROMPTED_STAGES`.

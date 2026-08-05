@@ -260,12 +260,18 @@ async function resolveWait(
   const stage = run.stage;
   if (stage === undefined) return undefined;
 
-  // A park with no kind of wait is not waiting on a human at all: it is a run
-  // phase 11 stopped because the stage after it did not exist. Now that some
-  // of them do, those runs pick up where they stopped — otherwise every
-  // ticket parked before this phase would stay parked forever, and the fix
-  // would be someone editing the ledger by hand.
+  // A park with no kind of wait is not waiting on a human at all: it is a
+  // run stopped because a stage's machinery did not exist. Two vintages of
+  // that park meet here, and they recorded different things: phase 11 parked
+  // runs whose recorded stage had already *run* (triage, with what follows
+  // read off the labels); every later park records the stage that could not
+  // run, and resuming must run *that stage itself* — asking "what follows?"
+  // would skip it, and for a park at execution that means verifying code
+  // nobody wrote.
   if (run.waitingKind === undefined) {
+    if (stage !== "triage") {
+      return isBuilt(stage) ? { stage } : undefined;
+    }
     const thread = await adapter.getTicket(project, run.ticket);
     const next = whatFollows(stage, thread.labels);
     return next !== undefined && isBuilt(next) ? { stage: next } : undefined;

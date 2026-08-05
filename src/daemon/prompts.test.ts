@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
+  STAGE_DONE_MARKER,
+  STAGE_HANDED_MARKER,
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
@@ -167,5 +169,33 @@ describe("takeoverPrompt", () => {
     expect(prompt).toContain(ticket.body);
     expect(prompt).toMatch(/Timone \(you\), earlier/);
     expect(prompt).toContain("timone takeover scratch-app#6");
+  });
+});
+
+describe("the execution prompt", () => {
+  const prompt = stagePrompt("execution", {
+    ...context,
+    branch: "timone/6-typing-in-the-box",
+  });
+
+  it("stays on the run's branch and never cuts a new one", () => {
+    expect(prompt).toContain("timone/6-typing-in-the-box");
+    expect(prompt).toMatch(/never a new one/i);
+  });
+
+  it("leaves the entry gate to the artifact, never asserting approval", () => {
+    // The stamp is the authority (ADR-0014): the prompt names what to check,
+    // and must not itself claim the check has passed.
+    expect(prompt).toContain("Approved for execution");
+    expect(prompt).not.toMatch(/plan (is|was|has been) approved/i);
+  });
+
+  it("carries both outcome markers, verbatim", () => {
+    expect(prompt).toContain(STAGE_DONE_MARKER);
+    expect(prompt).toContain(STAGE_HANDED_MARKER);
+  });
+
+  it("asks for exactly one closing comment", () => {
+    expect(prompt).toMatch(/exactly one comment/i);
   });
 });

@@ -18,6 +18,7 @@ import {
 import { TerminalChannel } from "../channels/terminal.js";
 import { gateCommentFor } from "./gate-comment.js";
 import { waitCursorFrom } from "./gates.js";
+import { outcomeCursorFrom, readStageOutcome, type StageOutcome } from "./outcomes.js";
 import {
   classificationFromLabels,
   isBuilt,
@@ -25,6 +26,7 @@ import {
   processStage,
   routeAfterTriage,
   runsUnattended,
+  stageAfter,
   waitFor,
   type PipelineStage,
 } from "./pipeline.js";
@@ -80,6 +82,16 @@ export interface AgentSessionSpawnerOptions {
    * did-this-stage-produce-anything check is testable without a real repo.
    */
   repoProbe?: (repoDir: string, branch: string) => Promise<string | undefined>;
+  /**
+   * Reads the `Status:` line of the newest phase file on a branch. The
+   * artifact half of execution's outcome check — the stage's own closing act
+   * is flipping this line to `Complete` — behind a seam for the same reason
+   * as {@link repoProbe}.
+   */
+  planStatusProbe?: (
+    repoDir: string,
+    branch: string,
+  ) => Promise<string | undefined>;
   /**
    * Guardrail bracket (R15): `beforeSession` records the state of the world
    * before the session touches it, `afterSession` judges what changed.
@@ -155,6 +167,43 @@ export function unclassifiedComment(): string {
     "",
     "**What I need from you:** re-mark this ticket to make me try again, or add a line saying what you're after.",
   ].join("\n");
+}
+
+/**
+ * The `Status:` line of the newest phase file on `branch`, or undefined when
+ * the branch carries none. Newest by number, because that is the file the
+ * planning stage just committed and the one execution was told to build.
+ */
+async function gitPlanStatus(
+  repoDir: string,
+  branch: string,
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["ls-tree", "-r", "--name-only", branch, "--", "doc/plans/phases"],
+      { cwd: repoDir },
+    );
+    const newest = stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => /^doc\/plans\/phases\/phase-\d+\.md$/.test(line))
+      .sort()
+      .at(-1);
+    if (newest === undefined) return undefined;
+
+    const { stdout: content } = await execFileAsync(
+      "git",
+      ["show", `${branch}:${newest}`],
+      { cwd: repoDir },
+    );
+    const line = content
+      .split("\n")
+      .find((candidate) => candidate.includes("Status:"));
+    return line?.replace(/^.*Status:\*{0,2}\s*/, "").trim();
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -258,6 +307,7 @@ export class AgentSessionSpawner implements SessionSpawner {
         stage,
         outcome.ticket,
         outcome.producedWork,
+        outcome.outcome,
       );
       if (next === undefined) return;
       stage = next;
@@ -277,7 +327,13 @@ export class AgentSessionSpawner implements SessionSpawner {
     stage: PipelineStage,
     feedback: string | undefined,
   ): Promise<
-    { ok: true; ticket: TicketThread; producedWork: boolean } | { ok: false }
+    | {
+        ok: true;
+        ticket: TicketThread;
+        producedWork: boolean;
+        outcome: StageOutcome | undefined;
+      }
+    | { ok: false }
   > {
     const { store, adapter, runtime, root } = this.options;
 
@@ -321,11 +377,72 @@ export class AgentSessionSpawner implements SessionSpawner {
     const headAfter = await this.branchHead(project, branch);
 
     await this.guardrails(active, project);
+    const after = await adapter.getTicket(project, run.ticket);
     return {
       ok: true,
-      ticket: await adapter.getTicket(project, run.ticket),
+      ticket: after,
       producedWork: headAfter !== undefined && headAfter !== headBefore,
+      outcome: readStageOutcome(after, outcomeCursorFrom(before)),
     };
+  }
+
+  /**
+   * Judge an unattended work stage by its two witnesses: the outcome its
+   * session recorded on the ticket, and the artifact it owes on the branch.
+   * Only the honest pair — a done marker over a real artifact — advances;
+   * a handed-to-human outcome stops without commentary (the session's own
+   * comment is the report); every other combination is a wiring defect the
+   * run fails loudly on, because a stage that says one thing and shows
+   * another cannot be built upon in either direction.
+   */
+  private async afterWorkStage(
+    run: Run,
+    project: TicketingProject,
+    stage: PipelineStage,
+    outcome: StageOutcome | undefined,
+    artifact: () => Promise<{ ok: boolean; observed: string }>,
+  ): Promise<PipelineStage | undefined> {
+    const { store, adapter } = this.options;
+
+    if (outcome?.kind === "handed-to-human") {
+      store.fail(
+        run.id,
+        `the ${stage} stage stopped and handed the work to you — see the ticket`,
+      );
+      this.log(`handed ${run.id} — ${stage} stopped, see the ticket`);
+      return undefined;
+    }
+
+    const evidence = await artifact();
+    if (outcome?.kind === "advanced" && evidence.ok) {
+      return stageAfter(stage);
+    }
+
+    const reason =
+      outcome === undefined
+        ? `the ${stage} stage ended without recording an outcome, and ${evidence.observed}`
+        : `the ${stage} stage said it finished, but ${evidence.observed}`;
+    store.fail(run.id, reason);
+    await adapter.postComment(project, run.ticket, failedComment(reason));
+    this.log(`failed ${run.id} — ${reason}`);
+    return undefined;
+  }
+
+  /** The phase file's status text on `branch`, or undefined without one. */
+  private async planStatus(
+    project: TicketingProject,
+    branch: string | undefined,
+  ): Promise<string | undefined> {
+    if (branch === undefined) return undefined;
+    const probe = this.options.planStatusProbe ?? gitPlanStatus;
+    try {
+      return await probe(
+        join(this.options.root, "projects", project.name),
+        branch,
+      );
+    } catch {
+      return undefined;
+    }
   }
 
   /** The work branch's tip, or undefined when there is no branch yet. */
@@ -352,12 +469,26 @@ export class AgentSessionSpawner implements SessionSpawner {
     stage: PipelineStage,
     ticket: TicketThread,
     producedWork: boolean,
+    outcome: StageOutcome | undefined,
   ): Promise<PipelineStage | undefined> {
     const { store, adapter } = this.options;
 
     if (waitFor(stage) === "gate") {
       await this.openGate(run, project, stage, producedWork);
       return undefined;
+    }
+
+    if (stage === "execution") {
+      return this.afterWorkStage(run, project, stage, outcome, async () => {
+        const status = await this.planStatus(
+          project,
+          store.get(run.id)?.branch,
+        );
+        return {
+          ok: status !== undefined && /^Complete\b/.test(status),
+          observed: `the phase file's status is "${status ?? "not found"}"`,
+        };
+      });
     }
 
     // The only remaining wait-free stage is triage, and what follows it is

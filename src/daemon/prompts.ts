@@ -1,6 +1,8 @@
 import {
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
+  STAGE_DONE_MARKER,
+  STAGE_HANDED_MARKER,
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
@@ -13,6 +15,7 @@ export const PROMPTED_STAGES = [
   "clarification",
   "requirements",
   "planning",
+  "execution",
 ] as const;
 
 export interface PromptContext {
@@ -139,7 +142,85 @@ export function stagePrompt(
       return requirementsPrompt(context);
     case "planning":
       return planningPrompt(context);
+    case "execution":
+      return executionPrompt(context);
   }
+}
+
+/**
+ * The two honest endings of an unattended work stage, as instruction text.
+ * Shared by every back-half prompt: the closing comment is half of how the
+ * daemon judges the stage (the artifact is the other half), so the markers
+ * are quoted verbatim rather than described.
+ */
+function outcomeBlock(done: string, handed: string): string {
+  return [
+    "Then close with **exactly one comment on the ticket**, and make its first",
+    "content line one of these two, exactly as written:",
+    "",
+    `${STAGE_DONE_MARKER}`,
+    "",
+    `— ${done}`,
+    "",
+    `${STAGE_HANDED_MARKER}`,
+    "",
+    `— ${handed}`,
+    "",
+    "That line is how the machinery knows how this ended. A session that posts",
+    "neither leaves the ticket looking abandoned, and a session that posts the",
+    "first without having done the work asks the machinery to build on nothing.",
+  ].join("\n");
+}
+
+/**
+ * Stage 6: build what the approved phase file says, on the branch that
+ * carries it.
+ *
+ * The prompt names the stamp to check and never claims the check has passed:
+ * the artifact is the authority on its own approval (ADR-0014), and a prompt
+ * asserting it would let a mis-resumed run build an unapproved plan on the
+ * daemon's say-so.
+ */
+function executionPrompt(context: PromptContext): string {
+  const { ticket, branch } = context;
+
+  return [
+    `Build what was planned for ticket #${ticket.number} on **${context.project.name}**.`,
+    "",
+    ticketBlock(context),
+    feedbackBlock(context.feedback),
+    "",
+    reentryBlock(),
+    "",
+    `**Stay on the branch \`${branch ?? "the run's work branch"}\`** — the`,
+    "requirements and the phase file this run produced are committed there, and",
+    "the code goes on the same branch, never a new one ([ADR-0015](doc/adr/0015-branch-per-driving-unit.md)).",
+    "",
+    "What to build is the newest phase file under `doc/plans/phases/` on that",
+    "branch, and **its own `Status:` line is the authority on whether you may",
+    "build it**: run stage 6 on it only if it is stamped",
+    "`Approved for execution`. Anything else — stop, say so on the ticket, and",
+    "treat nothing in this prompt as permission.",
+    "",
+    "Run stage 6 to the letter: slices in dependency order, the TDD loop at the",
+    "declared seams, one commit per sub-phase after its validation passes,",
+    "handoffs and the completion report where the stage requires them, and",
+    "**push everything you commit**. When the phase is done, flip the phase",
+    "file's `Status:` line to `Complete — see <report>`, exactly as the stage",
+    "requires — that flip is half of how the machinery reads your outcome.",
+    "",
+    outcomeBlock(
+      "every slice landed and validated. Follow it with a plain-words account " +
+        "of what was built and where it lives.",
+      "you stopped inside the stage's own bounds — a slice failed twice, the " +
+        "plan cannot execute as written. Follow it with which step failed and " +
+        "both attempts, in words a person can act on.",
+    ),
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
+  ].join("\n");
 }
 
 /** A human's approval of a gate, as the artifact must record it. */

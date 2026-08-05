@@ -25,6 +25,15 @@ export type StageOutcome =
  * a wrongly stopped pipeline costs a retry while a wrongly advanced one
  * builds on nothing.
  */
+/**
+ * The instant from which a stage's outcome may be read: the newest comment
+ * on the ticket as the stage's session starts. The session's closing comment
+ * is necessarily later; everything already said necessarily is not.
+ */
+export function outcomeCursorFrom(thread: TicketThread): string {
+  return thread.comments.at(-1)?.createdAt ?? thread.createdAt;
+}
+
 export function readStageOutcome(
   thread: TicketThread,
   cursor: string,
