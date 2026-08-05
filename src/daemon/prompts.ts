@@ -222,12 +222,11 @@ export function workBranch(ticket: TicketThread): string {
  * Stage 3: write down what is being asked for, and commit it where the human
  * can read it.
  *
- * The order here — commit, then gate — is [PRD-02.R4](../../doc/specs/prd/prd-02-inversion-of-control.criteria.md)'s,
- * and it differs from `process.md` stage 3's "approve the list before files
- * are written". On a work branch the cost of writing first is a branch nobody
- * merges, and what the human then reviews is the real criteria register
- * rather than a paraphrase of it. The divergence is deliberate and recorded;
- * see the phase-12 completion report.
+ * The order here — commit, then gate — is [ADR-0014](../../doc/adr/0014-artifact-first-gates.md)'s,
+ * and the skill this prompt drives now says the same thing. It did not always:
+ * both skills used to gate before writing, and the disagreement between that
+ * and PRD-02.R4 was settled by grilling it rather than by whichever session
+ * happened to read which instruction first.
  */
 function requirementsPrompt(context: PromptContext): string {
   const { ticket, branch } = context;
@@ -250,10 +249,12 @@ function requirementsPrompt(context: PromptContext): string {
     "silent and the requirement cannot be written testably, say so plainly in",
     "your summary rather than inventing an answer.",
     "",
-    "**Commit the PRD pair on that branch and push it.** Committed and pushed",
-    "are not the same claim: a commit that exists only here is invisible to the",
-    "person who has to read it, and this stage is not finished until it is on",
-    "the remote.",
+    "**Commit the PRD pair on that branch and push it**, with the narrative",
+    "stamped `Draft`. Writing before the approval is correct and is what the",
+    "stage now asks for — the human approves the committed register, not a",
+    "paraphrase of it. Committed and pushed are not the same claim: a commit",
+    "that exists only here is invisible to the person who has to read it, and",
+    "this stage is not finished until it is on the remote.",
     "",
     "Then post one comment on the ticket summarizing, in plain words, what you",
     "understood they want — the substance, not a file listing. Do **not** ask",
@@ -378,6 +379,9 @@ function planningPrompt(context: PromptContext): string {
     "**Commit the phase file on that branch and push it.** Stamp its `Status:`",
     "line `Awaiting approval` — the human has not approved it yet, and a file",
     "claiming otherwise would let the next stage start on nobody's authority.",
+    "Writing the file before the approval is correct and is what the stage now",
+    "asks for: the human judges the real plan, with its seams and its",
+    "validation blocks, not a summary of one that does not exist yet.",
     "",
     "Then post one comment on the ticket describing, in plain words, what you",
     "propose to build and in what order — the shape of the work, not a list of",

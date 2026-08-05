@@ -55,7 +55,7 @@ Never invent requirement IDs, and never write a feature phase whose requirements
 
 **ADR gate.** If the planned work implies a significant undocumented technical decision — one passing the three-part test (hard to reverse, surprising without context, the result of a real trade-off) — stop and route to `timone-adr`. "Documented" includes an `Approved` entry in Timone's `standards/` library, not just the project's own ADRs: a choice a normative standard already makes is settled, has no trade-off left in it, and must not be sent to `timone-adr` to be re-decided. Record it in the plan's Goal Description with that reasoning instead. Record the decision first, then plan. Never resolve the decision inline in the plan's prose, never plan around the gap, and never leave the choice to the executing sub-agent.
 
-You often cannot tell what the work implies until you have sketched the cut, so **drafting is allowed before the gates clear — writing is not.** Sketch as far as you need to see the decisions the work forces, then re-check this gate against what the sketch surfaced. What the gate forbids is the *artifact*: no phase file on disk, and no decision resolved inside one.
+You often cannot tell what the work implies until you have sketched the cut, so **drafting is allowed before the gates clear — writing is not.** Sketch as far as you need to see the decisions the work forces, then re-check this gate against what the sketch surfaced. What the gate forbids is the *artifact*: no phase file on disk, and no decision resolved inside one. **These are the entry gates, and they are the exception to [ADR-0014](../../../doc/adr/0014-artifact-first-gates.md), not a contradiction of it:** a stage doing its work writes the file first and gates on it, but a stage that has correctly declined to do the work writes nothing.
 
 **The un-anchored exception, and its limit.** Two kinds of work proceed **un-anchored**, with an explicit stamp in the Requirements section naming what it delivers and why it isn't PRD-bound. The stamp needs human agreement, sought at the same gate as the breakdown itself (workflow step 4), so for both the anchoring gate defers rather than terminates.
 
@@ -104,8 +104,8 @@ List `projects/<name>/doc/plans/phases/`, take the highest existing `NN`, use th
 ````markdown
 # Phase NN: <Theme> — <the concrete deliverables>
 
-> **Status:** Approved for execution by <who> <date>.
-<You write this state, never `Awaiting approval` — approval precedes the write. The line has a third state, `Complete — see [reports/phase-NN-complete.md](…)`, stamped at phase close by stage 6; leave it to them.>
+> **Status:** Awaiting approval.
+<You write this state — the artifact comes first and the gate is taken against it ([ADR-0014](../../../doc/adr/0014-artifact-first-gates.md)). It becomes `Approved for execution by <who> <date>` once the human has approved the committed file, and that flip is the written trace of the gate. The line has a fourth state, `Complete — see [reports/phase-NN-complete.md](…)`, stamped at phase close by stage 6; leave it to them.>
 
 > **Companion phases:** <links to related phase files, each with a one-clause statement of the relationship — what it left behind, or which files it shares.> Governing decisions: <ADR links, each with the reason it binds *this* phase — not a bare citation.>
 <State the absence of either half rather than dropping it — "First phase of the project — no companion phases." still followed by the governing decisions, if any bind. An absent line reads as an oversight; a stated absence reads as checked.>
@@ -180,9 +180,9 @@ Two related traps. A probe that names an API in order to forbid it seeds that st
 1. Resolve the target project, then read the artifacts listed above.
 2. Check the anchoring gate, then the ADR gate. If either fires, stop, route, and write nothing. Sketching the cut to inform the ADR check is allowed here; producing a file is not.
 3. Cut the phase and draft the breakdown.
-4. **Present the breakdown to the user and iterate until approved.** The stage gate is explicit: the human approves the breakdown **before** any file is written. Present the sub-phase list with each slice's deliverable, its dependencies, and its seams — enough to judge the cut — plus the un-anchored stamp when it applies. Do not write the file to "show" the plan; the file appearing before approval defeats the gate. Creating the `doc/plans/phases/` directory during the read pass is fine — a directory is not a plan.
-5. Write `projects/<name>/doc/plans/phases/phase-NN.md`, stamping `> **Status:** Approved for execution by <who> <date>.`
-6. Commit it in the target project (`docs: plan phase NN — <theme>`). The phase file is a process artifact under `doc/` — the only kind of file this skill may cause to be committed; never touch anything outside `doc/…` in the client repo.
+4. Write `projects/<name>/doc/plans/phases/phase-NN.md`, stamping `> **Status:** Awaiting approval.` — **the artifact comes first, and the gate is taken against it** ([ADR-0014](../../../doc/adr/0014-artifact-first-gates.md)). The human judges the real file, with its seams and its validation blocks, rather than a summary of a plan that does not exist yet. This does **not** loosen the two gates above: a stage that has correctly declined still writes nothing at all.
+5. Commit and push it in the target project (`docs: plan phase NN — <theme>`). The phase file is a process artifact under `doc/` — the only kind of file this skill may cause to be committed; never touch anything outside `doc/…` in the client repo. Committed and pushed are not the same claim, and an unpushed plan is invisible to the person who has to approve it.
+6. **Ask for approval against the committed file, and iterate until it is approved.** Lead with what a reader needs to judge the cut — each slice's deliverable, its dependencies, its seams, plus the un-anchored stamp when it applies — and link the file rather than pasting it. Where the work is daemon-driven the approval arrives as a ticket reply (ADR-0012); in a hand-run session it is the conversation itself. **A change request rewrites the file in place**, keeping its `Awaiting approval` stamp. On approval, flip the stamp to `Approved for execution by <who> <date>` and commit that flip: stage 6 refuses to start without it, so a plan approved only in conversation is a plan nothing can execute.
 
 ## Amending an approved plan
 

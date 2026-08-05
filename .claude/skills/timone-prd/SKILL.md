@@ -181,7 +181,7 @@ When **any requirement covers user-facing functionality**, the criteria register
     - Is anything missing, or captured that was never agreed?
     - Is the out-of-scope list complete?
     - For user-facing requirements: are the proposed accessibility criteria right?
-4. **Iterate until approved.** The stage gate is explicit: the human approves the requirement list **before** any file is written. Only then write both files.
+4. **Write the pair, then gate on it** ([ADR-0014](../../../doc/adr/0014-artifact-first-gates.md)). Write both files on the work branch with the narrative stamped `Draft`, commit and push them, and ask for approval **against the committed register** — not against a paraphrase of it in conversation. The register's precision is the whole reason it exists; summarising it for approval approves a different object from the one that gets kept (ADR-0006). Where the work is daemon-driven the approval arrives as a ticket reply (ADR-0012); in a hand-run session it is the conversation itself. **A change request re-enters this stage**, which rewrites the pair in place — renumbering requirement IDs freely, because until the gate closes nothing is ratified and IDs are not yet stable. On approval, flip the narrative to `Active`: that flip is the gate's written trace, and until it happens stage 5 will refuse to plan against the PRD.
 5. **Hand off:** suggest running `timone-plan` with a pointer to the new PRD. If the PRD came from a grill session, note that in the narrative's Problem section as the source.
 
 ---
@@ -195,5 +195,6 @@ When **any requirement covers user-facing functionality**, the criteria register
 - [ ] Every MUST ID is referenced in the narrative's In-scope section
 - [ ] Out-of-scope section is non-empty (an empty one means scope was never questioned)
 - [ ] User-facing requirements carry accessibility acceptance criteria from the baseline (PRD-01.R20)
-- [ ] User approved the requirement list before files were written
+- [ ] The pair was committed and pushed on a work branch, stamped `Draft`, **before** approval was requested — and approval was asked against the committed register, not a summary of it
+- [ ] On approval, the narrative was flipped to `Active` and that flip committed; a change request instead rewrote the pair in place, renumbering IDs freely
 - [ ] If a prototype assisted the approval: divergences between prototype and list were surfaced before sign-off, and the `prototype/NN-<slug>` branch is deleted (never merged)
