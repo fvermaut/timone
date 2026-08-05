@@ -123,3 +123,32 @@ $ npm run type-check    → clean
 Checklist: the verification prompt withholds the thread — shown by assertion ✓; a failed pass never advances, its evidence on the ticket via the session's handed comment ✓; the daemon reads outcomes, never writes a report or register ✓ (no write path exists in the daemon).
 
 **What the next sub-phase must know.** 13e's artifact witness is the PR via `findPullRequest` — not a branch probe — and must call `store.recordPullRequest` before parking on `review` so status and the poll loop can name it. The delivery park needs a wait cursor over the *PR thread* (13a's `getPullRequestThread`), not the ticket thread.
+
+## 13e — the delivery stage (R7)
+
+**Built.** The daemon runs stage 8 unattended and parks the run on its pull request. The delivery prompt drives the skill to the letter — entry gates, two-axis review, delivery report committed before the PR opens, PR from the run's branch referencing the ticket, cross-links both ways, never merging. The daemon's artifact witness is **the pull request itself**, asked of the tracker via 13a's `findPullRequest` (a branch probe cannot prove a PR exists): done marker + an *open* PR parks the run on `review` with `recordPullRequest` and a cursor at the PR thread's newest comment; anything else fails loudly, and handed-to-human fails quietly with the session's comment as the report. `timone takeover` on a review park redirects to the PR by number.
+
+**Files touched.**
+
+- `src/daemon/prompts.ts` — `deliveryPrompt`; `PROMPTED_STAGES` gained `delivery`.
+- `src/daemon/session.ts` — `afterDelivery` (PR-as-artifact judgment, the park, the cursor).
+- `src/commands/takeover.ts` — the review-park redirect.
+- `src/daemon/pipeline.ts` — `delivery.built` → true; the whole back half now runs.
+- Tests: `prompts.test.ts`, `session.test.ts` (new describe; 13d's advance test rolled forward to assert the hand-off into the delivery prompt), `takeover.test.ts`, `pipeline.test.ts`.
+
+**Decisions taken inside the slice.**
+
+- *The park's cursor is the PR thread's newest comment at park time* (empty-string floor when the thread is bare — `instant("")` sorts before everything, so every later comment counts). Only what the human says after the park can wake the run.
+- *An open PR is required, not just any PR* — `findPullRequest` returning a closed or merged PR at delivery time is not a deliverable under review, and parking on it would wait on a surface nobody will visit.
+- *The daemon posts no park comment of its own* — the session's closing comment already links the PR and says what happens next; the ledger's `waitingOn` carries the pointer for `timone status`.
+
+**Validation evidence.** Red first: 4 prompt tests, 3 session tests, 1 takeover test. Green after:
+
+```
+$ npm test              → 15 files, 399 tests passed
+$ npm run type-check    → clean
+```
+
+Checklist: the PR is the artifact checked — a moved branch tip is not enough ✓ (no branch probe in `afterDelivery` at all); the parked run knows its PR and `timone status` says it ✓ (13b's rendering + `recordPullRequest`); takeover redirects to the PR rather than opening anything ✓.
+
+**What the next sub-phase must know.** 13f resolves the review park in `poll.ts`: `run.waitingKind === "review"` with `run.pr` set, reading the PR thread via `getPullRequestThread` — merged → `complete` (queue promotes), closed → `complete` with a declined note on the ticket, a human comment past `waitCursor` → the remediation cycle. The remediation prompt should reuse `feedbackBlock`'s shape but with the review comment(s) as the words, and re-delivery must find the *same* PR — `findPullRequest` already prefers open PRs, and the PR number on the run is the check.

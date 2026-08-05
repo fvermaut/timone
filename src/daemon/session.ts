@@ -467,6 +467,63 @@ export class AgentSessionSpawner implements SessionSpawner {
     return undefined;
   }
 
+  /**
+   * Judge the delivery and park the run on its review. Delivery's artifact
+   * is the pull request itself (ADR-0004) — a branch probe cannot prove one
+   * exists, so the tracker is asked directly. The park's cursor sits at the
+   * PR thread's newest comment: only what the human says after the park can
+   * wake the run.
+   */
+  private async afterDelivery(
+    run: Run,
+    project: TicketingProject,
+    outcome: StageOutcome | undefined,
+  ): Promise<void> {
+    const { store, adapter } = this.options;
+
+    if (outcome?.kind === "handed-to-human") {
+      store.fail(
+        run.id,
+        "the delivery stage stopped and handed the work to you — see the ticket",
+      );
+      this.log(`handed ${run.id} — delivery stopped, see the ticket`);
+      return;
+    }
+
+    const branch = store.get(run.id)?.branch;
+    const pr =
+      branch === undefined
+        ? undefined
+        : await adapter.findPullRequest(project, branch);
+    const open = pr !== undefined && pr.state === "open";
+
+    if (outcome?.kind !== "advanced" || !open) {
+      // A park on a review nobody can perform is a gate over nothing —
+      // the 12f rule wearing stage 8's clothes.
+      const observed = open
+        ? `pull request #${pr.number} exists`
+        : "no open pull request exists for the branch";
+      const reason =
+        outcome === undefined
+          ? `the delivery stage ended without recording an outcome, and ${observed}`
+          : `the delivery stage said it finished, but ${observed}`;
+      store.fail(run.id, reason);
+      await adapter.postComment(project, run.ticket, failedComment(reason));
+      this.log(`failed ${run.id} — ${reason}`);
+      return;
+    }
+
+    store.recordPullRequest(run.id, pr.number);
+    const thread = await adapter.getPullRequestThread(project, pr.number);
+    store.park(run.id, {
+      waitingOn: `your review of pull request #${pr.number}`,
+      kind: "review",
+      stage: "delivery",
+      waitCursor: thread.comments.at(-1)?.createdAt ?? "",
+    });
+    this.log(`parked ${run.id} at delivery, waiting on PR #${pr.number}`);
+  }
+
   /** The phase file's status text on `branch`, or undefined without one. */
   private async planStatus(
     project: TicketingProject,
@@ -561,6 +618,11 @@ export class AgentSessionSpawner implements SessionSpawner {
               : "no verification report exists on the branch",
         };
       });
+    }
+
+    if (stage === "delivery") {
+      await this.afterDelivery(run, project, outcome);
+      return undefined;
     }
 
     // The only remaining wait-free stage is triage, and what follows it is

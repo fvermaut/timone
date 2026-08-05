@@ -371,3 +371,28 @@ describe("runTakeover", () => {
     expect(asked).toEqual([]);
   });
 });
+
+describe("a ticket waiting on a pull-request review", () => {
+  it("redirects to the pull request instead of opening anything", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    store.recordPullRequest(run.id, 9);
+    store.park(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "delivery",
+    });
+
+    const resolution = resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store },
+    );
+
+    expect(resolution.kind).toBe("answer-on-ticket");
+    if (resolution.kind === "answer-on-ticket") {
+      expect(resolution.message).toMatch(/pull request #9/);
+    }
+  });
+});

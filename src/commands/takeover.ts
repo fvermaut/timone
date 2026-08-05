@@ -134,6 +134,16 @@ export function resolveTakeover(
     };
   }
 
+  if (run.waitingKind === "review") {
+    return {
+      kind: "answer-on-ticket",
+      message:
+        `${target.project} #${target.ticket} isn't waiting for a conversation — ` +
+        `its work is open as pull request #${run.pr ?? "?"}, waiting for your ` +
+        "review. Comment or merge there, and I'll carry on from what you do.",
+    };
+  }
+
   if (run.waitingKind !== "conversation" || run.stage === undefined) {
     return {
       kind: "nothing-to-do",

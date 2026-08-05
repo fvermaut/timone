@@ -104,8 +104,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     processStage: 8,
     waits: "review",
     ownsBranch: true,
-    // Flips as phase 13's slices land: 13e supplies the prompt.
-    built: false,
+    built: true,
     // Nothing follows in the graph: the run ends at the pull request, whose
     // merge or close is a terminal event on the run, not a stage.
   },

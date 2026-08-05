@@ -17,6 +17,7 @@ export const PROMPTED_STAGES = [
   "planning",
   "execution",
   "verification",
+  "delivery",
 ] as const;
 
 export interface PromptContext {
@@ -147,7 +148,52 @@ export function stagePrompt(
       return executionPrompt(context);
     case "verification":
       return verificationPrompt(context);
+    case "delivery":
+      return deliveryPrompt(context);
   }
+}
+
+/**
+ * Stage 8: present the finished work for human judgement, as a pull request.
+ */
+function deliveryPrompt(context: PromptContext): string {
+  const { ticket, branch } = context;
+
+  return [
+    `Present the finished work for ticket #${ticket.number} on **${context.project.name}** for review.`,
+    "",
+    ticketBlock(context),
+    feedbackBlock(context.feedback),
+    "",
+    reentryBlock(),
+    "",
+    `**Stay on the branch \`${branch ?? "the run's work branch"}\`** — it carries`,
+    "the verified work, the reports, and everything stage 8 reads.",
+    "",
+    "Run stage 8 for this phase, to the letter: its entry gates (a phase",
+    "stamped complete, a verification report whose gate passed), the two-axis",
+    "review as parallel fresh contexts, the delivery report committed on the",
+    "branch **before** the pull request opens, and then the pull request",
+    `itself — opened **from that branch**, referencing ticket #${ticket.number}, its body`,
+    "carrying the scope and the verification outcome as the stage requires.",
+    "**Never merge** — merging is the human's act, and the pull request exists",
+    "to let them take it.",
+    "",
+    "Then post one comment on the ticket with a link to the pull request, in",
+    "plain words — the ticket links the pull request, the pull request",
+    "references the ticket, and a reader starting from either finds the other.",
+    "",
+    outcomeBlock(
+      "the pull request is open with the delivery report committed. Follow it " +
+        "with the PR's address and one sentence on what the reviewer will find.",
+      "delivery was refused — an entry gate turned it away, or the platform " +
+        "would not take the pull request. Follow it with what refused and why.",
+    ),
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
+  ].join("\n");
 }
 
 /**

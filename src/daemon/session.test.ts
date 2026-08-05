@@ -1555,8 +1555,12 @@ describe("the verification stage", () => {
 
   it("advances to delivery when the report exists and the session said done", async () => {
     const store = newStore();
-    const { adapter, comments } = fakeAdapter();
-    const { runtime } = checkingRuntime(adapter, STAGE_DONE_MARKER, "All criteria pass.");
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = checkingRuntime(
+      adapter,
+      STAGE_DONE_MARKER,
+      "All criteria pass.",
+    );
 
     await new AgentSessionSpawner({
       manifest,
@@ -1569,11 +1573,11 @@ describe("the verification stage", () => {
         "doc/plans/phases/reports/phase-04-verification.md",
     }).spawn(atVerification(store), project, { stage: "verification" });
 
-    const run = store.get("scratch-app#7");
-    expect(run?.stage).toBe("delivery");
-    // Delivery is not built until 13e, so the run parks there and says so.
-    expect(run?.status).toBe("parked");
-    expect(comments.at(-1)?.body).toMatch(/isn't built yet/i);
+    // The clean pass hands straight into a delivery session — recognisable
+    // by the prompt that opens the pull request.
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    expect(requests[1].prompt).toMatch(/pull request/i);
+    expect(store.get("scratch-app#7")?.stage).toBe("delivery");
   });
 
   it("fails the run when the session said done but no report exists", async () => {
@@ -1620,5 +1624,134 @@ describe("the verification stage", () => {
     expect(run?.status).toBe("failed");
     // The session's own comment is R6's failure report; nothing is added.
     expect(comments.at(-1)?.body).toContain("both loops");
+  });
+});
+
+describe("the delivery stage", () => {
+  function atDelivery(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.setStage(run.id, "delivery");
+    store.park(run.id, {
+      waitingOn: "the delivery to start",
+      stage: "delivery",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  const openPr = {
+    number: 9,
+    title: "Fix the box",
+    url: "https://github.com/fvermaut/scratch-app/pull/9",
+    state: "open" as const,
+  };
+
+  /** The fake adapter with a pull-request surface that has a PR to find. */
+  function adapterWithPr(pr: typeof openPr | undefined) {
+    const base = fakeAdapter();
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async findPullRequest() {
+        return pr;
+      },
+      async getPullRequestThread() {
+        if (pr === undefined) throw new Error("no PR");
+        return {
+          ...pr,
+          comments: [
+            {
+              author: "fvermaut",
+              body: "opening comment",
+              createdAt: "2026-08-06T09:00:00Z",
+              fromTimone: true,
+            },
+          ],
+        };
+      },
+    };
+    return { ...base, adapter };
+  }
+
+  function deliveringRuntime(
+    adapter: TicketingAdapter,
+    marker: string,
+    text: string,
+  ): ReturnType<typeof fakeRuntime> {
+    return fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${marker}\n\n${text}`);
+      },
+    });
+  }
+
+  it("parks on the review, knowing its pull request, when the PR exists", async () => {
+    const store = newStore();
+    const { adapter } = adapterWithPr(openPr);
+    const { runtime } = deliveringRuntime(adapter, STAGE_DONE_MARKER, "PR is open.");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(atDelivery(store), project, { stage: "delivery" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.status).toBe("parked");
+    expect(run?.waitingKind).toBe("review");
+    expect(run?.pr).toBe(9);
+    expect(run?.waitingOn).toMatch(/pull request #9/);
+    // The cursor sits at the PR thread's newest comment, so only what the
+    // human says after the park can wake the run.
+    expect(run?.waitCursor).toBe("2026-08-06T09:00:00Z");
+  });
+
+  it("fails the run when the session said done but no pull request exists", async () => {
+    // The 12f rule wearing stage 8's clothes: the PR is the artifact, and a
+    // park on a review nobody can perform is a gate over nothing.
+    const store = newStore();
+    const { adapter, comments } = adapterWithPr(undefined);
+    const { runtime } = deliveringRuntime(adapter, STAGE_DONE_MARKER, "Done!");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(atDelivery(store), project, { stage: "delivery" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.status).toBe("failed");
+    expect(run?.failure).toMatch(/pull request/i);
+    expect(comments.at(-1)?.body).toMatch(/went wrong/i);
+  });
+
+  it("stops quietly when the session handed the delivery to a person", async () => {
+    const store = newStore();
+    const { adapter, comments } = adapterWithPr(undefined);
+    const { runtime } = deliveringRuntime(
+      adapter,
+      STAGE_HANDED_MARKER,
+      "The verification gate refused delivery; details on the branch.",
+    );
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(atDelivery(store), project, { stage: "delivery" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.status).toBe("failed");
+    expect(comments.at(-1)?.body).toContain("refused delivery");
   });
 });

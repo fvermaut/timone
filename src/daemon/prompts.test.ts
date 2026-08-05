@@ -242,3 +242,30 @@ describe("the verification prompt", () => {
     expect(prompt).toMatch(/did not watch the build/i);
   });
 });
+
+describe("the delivery prompt", () => {
+  const prompt = stagePrompt("delivery", {
+    ...context,
+    branch: "timone/6-typing-in-the-box",
+  });
+
+  it("opens the pull request from the run's branch, referencing the ticket", () => {
+    expect(prompt).toContain("timone/6-typing-in-the-box");
+    expect(prompt).toMatch(/pull request/i);
+    expect(prompt).toContain("#6");
+  });
+
+  it("requires the cross-links both ways", () => {
+    // R7: the PR references the ticket, and the ticket links the PR.
+    expect(prompt).toMatch(/ticket.*links|link.*on the ticket/i);
+  });
+
+  it("carries both outcome markers, verbatim", () => {
+    expect(prompt).toContain(STAGE_DONE_MARKER);
+    expect(prompt).toContain(STAGE_HANDED_MARKER);
+  });
+
+  it("never merges — that stays a human act", () => {
+    expect(prompt).toMatch(/never merge/i);
+  });
+});

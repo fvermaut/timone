@@ -119,7 +119,7 @@ describe("the stage graph", () => {
     // verification in 13d, delivery in 13e.
     expect(isBuilt("execution")).toBe(true);
     expect(isBuilt("verification")).toBe(true);
-    expect(isBuilt("delivery")).toBe(false);
+    expect(isBuilt("delivery")).toBe(true);
     // Acting on a bug-classified ticket is stage 9's daemon path — not built.
     expect(isBuilt("feedback")).toBe(false);
   });
