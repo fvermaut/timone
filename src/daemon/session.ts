@@ -93,6 +93,14 @@ export interface AgentSessionSpawnerOptions {
     branch: string,
   ) => Promise<string | undefined>;
   /**
+   * Finds the newest phase's verification report on a branch, returning its
+   * path or undefined. The artifact half of verification's outcome check.
+   */
+  verificationReportProbe?: (
+    repoDir: string,
+    branch: string,
+  ) => Promise<string | undefined>;
+  /**
    * Guardrail bracket (R15): `beforeSession` records the state of the world
    * before the session touches it, `afterSession` judges what changed.
    */
@@ -201,6 +209,37 @@ async function gitPlanStatus(
       .split("\n")
       .find((candidate) => candidate.includes("Status:"));
     return line?.replace(/^.*Status:\*{0,2}\s*/, "").trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The newest phase's verification report on `branch` — its path when the
+ * file exists there, undefined otherwise. "Newest phase" is resolved the
+ * same way {@link gitPlanStatus} resolves it, so the two witnesses of the
+ * back half always talk about the same phase.
+ */
+async function gitVerificationReport(
+  repoDir: string,
+  branch: string,
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["ls-tree", "-r", "--name-only", branch, "--", "doc/plans/phases"],
+      { cwd: repoDir },
+    );
+    const files = stdout.split("\n").map((line) => line.trim());
+    const newest = files
+      .filter((line) => /^doc\/plans\/phases\/phase-\d+\.md$/.test(line))
+      .sort()
+      .at(-1);
+    if (newest === undefined) return undefined;
+
+    const phase = /phase-(\d+)\.md$/.exec(newest)?.[1];
+    const report = `doc/plans/phases/reports/phase-${phase}-verification.md`;
+    return files.includes(report) ? report : undefined;
   } catch {
     return undefined;
   }
@@ -445,6 +484,23 @@ export class AgentSessionSpawner implements SessionSpawner {
     }
   }
 
+  /** The verification report's path on `branch`, or undefined without one. */
+  private async verificationReport(
+    project: TicketingProject,
+    branch: string | undefined,
+  ): Promise<string | undefined> {
+    if (branch === undefined) return undefined;
+    const probe = this.options.verificationReportProbe ?? gitVerificationReport;
+    try {
+      return await probe(
+        join(this.options.root, "projects", project.name),
+        branch,
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   /** The work branch's tip, or undefined when there is no branch yet. */
   private async branchHead(
     project: TicketingProject,
@@ -487,6 +543,22 @@ export class AgentSessionSpawner implements SessionSpawner {
         return {
           ok: status !== undefined && /^Complete\b/.test(status),
           observed: `the phase file's status is "${status ?? "not found"}"`,
+        };
+      });
+    }
+
+    if (stage === "verification") {
+      return this.afterWorkStage(run, project, stage, outcome, async () => {
+        const report = await this.verificationReport(
+          project,
+          store.get(run.id)?.branch,
+        );
+        return {
+          ok: report !== undefined,
+          observed:
+            report !== undefined
+              ? `the verification report is ${report}`
+              : "no verification report exists on the branch",
         };
       });
     }

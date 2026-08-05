@@ -48,18 +48,27 @@ const ticket: TicketThread = {
 const context: PromptContext = { project, ticket, classification: "feature" };
 
 /**
+ * The stages whose prompt carries the ticket and its thread. Every prompted
+ * stage except verification, whose independence is exactly the absence of
+ * that context — asserted in its own block below.
+ */
+const THREADED_STAGES = PROMPTED_STAGES.filter(
+  (stage) => stage !== "verification",
+);
+
+/**
  * The rules that hold for every prompt, whichever stage it belongs to. New
  * stages inherit them by existing, which is the point of listing the prompts
  * rather than the tests.
  */
 describe("every stage prompt", () => {
-  it.each(PROMPTED_STAGES)("%s carries the ticket in the words it was written in", (stage) => {
+  it.each(THREADED_STAGES)("%s carries the ticket in the words it was written in", (stage) => {
     const prompt = stagePrompt(stage, context);
     expect(prompt).toContain(ticket.body);
     expect(prompt).toContain(ticket.title);
   });
 
-  it.each(PROMPTED_STAGES)("%s separates the voices in the thread", (stage) => {
+  it.each(THREADED_STAGES)("%s separates the voices in the thread", (stage) => {
     // Timone posts under the human's account, so the login cannot tell them
     // apart and the prompt has to.
     const prompt = stagePrompt(stage, context);
@@ -197,5 +206,39 @@ describe("the execution prompt", () => {
 
   it("asks for exactly one closing comment", () => {
     expect(prompt).toMatch(/exactly one comment/i);
+  });
+});
+
+describe("the verification prompt", () => {
+  const prompt = stagePrompt("verification", {
+    ...context,
+    branch: "timone/6-typing-in-the-box",
+  });
+
+  it("withholds the ticket's text and its thread — independence by construction", () => {
+    // Stage 7 checks behaviour from a context that did not watch the build.
+    // The thread holds execution's own account of what it built, and the
+    // ticket's prose holds the request in the reporter's framing; the
+    // register is the only authority on expected behaviour, so the prompt
+    // hands over neither.
+    expect(prompt).not.toContain(ticket.body);
+    expect(prompt).not.toContain(ticket.title);
+    expect(prompt).not.toContain("it's worse in landscape");
+    expect(prompt).not.toMatch(/Timone \(you\), earlier/);
+  });
+
+  it("still names the project, the ticket number and the branch", () => {
+    expect(prompt).toContain("projects/scratch-app/");
+    expect(prompt).toContain("#6");
+    expect(prompt).toContain("timone/6-typing-in-the-box");
+  });
+
+  it("carries both outcome markers, verbatim", () => {
+    expect(prompt).toContain(STAGE_DONE_MARKER);
+    expect(prompt).toContain(STAGE_HANDED_MARKER);
+  });
+
+  it("says why the context is empty, so the session does not go looking", () => {
+    expect(prompt).toMatch(/did not watch the build/i);
   });
 });

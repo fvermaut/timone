@@ -1415,8 +1415,12 @@ describe("the execution stage", () => {
 
   it("advances to verification when the plan flipped and the session said done", async () => {
     const store = newStore();
-    const { adapter, comments } = fakeAdapter();
-    const { runtime } = buildingRuntime(adapter, STAGE_DONE_MARKER, "Built all slices.");
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = buildingRuntime(
+      adapter,
+      STAGE_DONE_MARKER,
+      "Built all slices.",
+    );
 
     await new AgentSessionSpawner({
       manifest,
@@ -1426,13 +1430,14 @@ describe("the execution stage", () => {
       root: "/root",
       repoProbe: movingProbe(),
       planStatusProbe: async () => "Complete — see reports/phase-04-complete.md",
+      verificationReportProbe: async () =>
+        "doc/plans/phases/reports/phase-04-verification.md",
     }).spawn(atExecution(store), project, { stage: "execution" });
 
-    const run = store.get("scratch-app#7");
-    expect(run?.stage).toBe("verification");
-    // Verification is not built until 13d, so the run parks there and says so.
-    expect(run?.status).toBe("parked");
-    expect(comments.at(-1)?.body).toMatch(/isn't built yet/i);
+    // The build's honest pair hands straight into a verification session —
+    // recognisable by the one prompt built without the ticket's text.
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    expect(requests[1].prompt).toMatch(/without having watched/i);
   });
 
   it("fails the run when the session said done but the plan never flipped", async () => {
@@ -1518,5 +1523,102 @@ describe("the execution stage", () => {
 
     expect(requests[0].prompt).toContain("timone/7-the-page-feels-slow");
     expect(requests[0].prompt).toContain(STAGE_DONE_MARKER);
+  });
+});
+
+describe("the verification stage", () => {
+  /** A run holding its branch, advanced to verification after the build. */
+  function atVerification(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.setStage(run.id, "verification");
+    store.park(run.id, {
+      waitingOn: "the checking to start",
+      stage: "verification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  function checkingRuntime(
+    adapter: TicketingAdapter,
+    marker: string,
+    text: string,
+  ): ReturnType<typeof fakeRuntime> {
+    return fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${marker}\n\n${text}`);
+      },
+    });
+  }
+
+  it("advances to delivery when the report exists and the session said done", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime } = checkingRuntime(adapter, STAGE_DONE_MARKER, "All criteria pass.");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      verificationReportProbe: async () =>
+        "doc/plans/phases/reports/phase-04-verification.md",
+    }).spawn(atVerification(store), project, { stage: "verification" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.stage).toBe("delivery");
+    // Delivery is not built until 13e, so the run parks there and says so.
+    expect(run?.status).toBe("parked");
+    expect(comments.at(-1)?.body).toMatch(/isn't built yet/i);
+  });
+
+  it("fails the run when the session said done but no report exists", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime } = checkingRuntime(adapter, STAGE_DONE_MARKER, "All pass.");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      verificationReportProbe: async () => undefined,
+    }).spawn(atVerification(store), project, { stage: "verification" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.status).toBe("failed");
+    expect(run?.failure).toMatch(/report/i);
+  });
+
+  it("stops without advancing when the gate did not pass", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime } = checkingRuntime(
+      adapter,
+      STAGE_HANDED_MARKER,
+      "Two criteria still fail after both loops; the report has the evidence.",
+    );
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      verificationReportProbe: async () =>
+        "doc/plans/phases/reports/phase-04-verification.md",
+    }).spawn(atVerification(store), project, { stage: "verification" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.status).toBe("failed");
+    // The session's own comment is R6's failure report; nothing is added.
+    expect(comments.at(-1)?.body).toContain("both loops");
   });
 });

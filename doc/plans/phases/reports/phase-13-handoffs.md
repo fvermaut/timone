@@ -95,3 +95,31 @@ $ npm run type-check    → clean
 Checklist: only the artifact-and-marker pair advances ✓ (four combinations asserted, one advances); the escalation comment names the failing slice and both attempts — instructed by the prompt, asserted as marker presence, live evidence at 13h ✓; the prompt names the run's branch and the amended skill agrees ✓.
 
 **What the next sub-phase must know.** 13d reuses `afterWorkStage` with a report-exists artifact check and must add `verification` to `PROMPTED_STAGES` — note the every-prompt `it.each` tests assert `ticketBlock` presence, and the verification prompt deliberately withholds the thread, so those tests need a threaded-stages subset rather than blanket `PROMPTED_STAGES`.
+
+## 13d — the verification stage (R6, second half)
+
+**Built.** The daemon runs stage 7 as a fresh session whose prompt is the one prompt built **without** `ticketBlock`: no ticket text, no thread, an explicit instruction not to go looking, and the statement of why the context is empty. It names only the project, ticket number and branch; the register on the branch is the authority. The daemon judges it by `afterWorkStage` with the report's existence as the artifact witness (`gitVerificationReport`, behind `verificationReportProbe`): done + report advances to delivery; handed-to-human (gate failed, loops spent) fails the run with the session's own comment as R6's report; mismatches fail loudly.
+
+**Files touched.**
+
+- `src/daemon/prompts.ts` — `verificationPrompt`; `PROMPTED_STAGES` gained `verification`.
+- `src/daemon/session.ts` — `verificationReportProbe` seam + `gitVerificationReport` (resolves "newest phase" identically to `gitPlanStatus`, so the two witnesses always discuss the same phase); the verification branch of `afterStage`.
+- `src/daemon/pipeline.ts` — `verification.built` → true.
+- Tests: `prompts.test.ts` (the `THREADED_STAGES` split + the independence block), `session.test.ts` (new describe; 13c's advance test now asserts the hand-off into the verification prompt, since the park it previously expected no longer exists), `pipeline.test.ts` (flip).
+
+**Decisions taken inside the slice.**
+
+- *Independence is asserted, not reviewed:* the every-prompt `it.each` blocks split into `THREADED_STAGES` (all but verification) and a dedicated block asserting the verification prompt contains neither the ticket body, title, nor any thread text. The prompt also tells the session **not** to read the ticket — withholding without forbidding would leave a curious session one `gh issue view` from contaminated context.
+- *The prompt keeps `feedbackBlock`* even though nothing sends verification back with human words today — the block renders empty when unused, and the uniform shape keeps the shared prompt tests honest.
+- *The artifact witness is existence, not content.* The daemon never parses the report's verdicts — the session's outcome marker carries pass/fail, and a daemon that read verdict tables would be reimplementing stage 7's judgment (the skill owns it). Existence is what distinguishes "checked and reported" from "said done over nothing", which is all the 12f rule requires.
+
+**Validation evidence.** Red first: 4 prompt tests (no verification prompt), 3 session tests (no verification judgment). Green after:
+
+```
+$ npm test              → 15 files, 383 tests passed
+$ npm run type-check    → clean
+```
+
+Checklist: the verification prompt withholds the thread — shown by assertion ✓; a failed pass never advances, its evidence on the ticket via the session's handed comment ✓; the daemon reads outcomes, never writes a report or register ✓ (no write path exists in the daemon).
+
+**What the next sub-phase must know.** 13e's artifact witness is the PR via `findPullRequest` — not a branch probe — and must call `store.recordPullRequest` before parking on `review` so status and the poll loop can name it. The delivery park needs a wait cursor over the *PR thread* (13a's `getPullRequestThread`), not the ticket thread.

@@ -97,8 +97,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     processStage: 7,
     waits: "none",
     ownsBranch: true,
-    // Flips as phase 13's slices land: 13d supplies the prompt.
-    built: false,
+    built: true,
     next: "delivery",
   },
   delivery: {

@@ -16,6 +16,7 @@ export const PROMPTED_STAGES = [
   "requirements",
   "planning",
   "execution",
+  "verification",
 ] as const;
 
 export interface PromptContext {
@@ -144,7 +145,64 @@ export function stagePrompt(
       return planningPrompt(context);
     case "execution":
       return executionPrompt(context);
+    case "verification":
+      return verificationPrompt(context);
   }
+}
+
+/**
+ * Stage 7: check what was built, from a context that did not watch the
+ * build.
+ *
+ * The one prompt built without {@link ticketBlock}, on purpose: the thread
+ * holds execution's own account of what it built, and the ticket's prose
+ * holds the request in the reporter's framing — both are exactly what stage
+ * 7's independence excludes. The criteria register on the branch is the only
+ * authority on expected behaviour, and the skill's closed read list does the
+ * rest. Statelessness (ADR-0013) makes the fresh context free; this function
+ * is about what the prompt *withholds*.
+ */
+function verificationPrompt(context: PromptContext): string {
+  const { ticket, branch } = context;
+
+  return [
+    `Check what was just built for ticket #${ticket.number} on **${context.project.name}**,`,
+    "**without having watched it being built.**",
+    "",
+    `Project: ${context.project.name} — touch only \`projects/${context.project.name}/…\`.`,
+    feedbackBlock(context.feedback),
+    "",
+    "You are running at the timone root. Follow `process.md` and `CLAUDE.md`.",
+    "",
+    "**You have no memory of any earlier session on this ticket — nothing was carried over.**",
+    "And that is deliberate: this stage checks observable behaviour from a",
+    "context that did not watch the build. This prompt carries neither the",
+    "ticket's text nor its thread, and you must not go and read them — the",
+    "criteria register is the only authority on what the software should do,",
+    "and the stage's own closed read list is the whole of what you may open.",
+    "",
+    `Work against the branch \`${branch ?? "the run's work branch"}\`. The phase`,
+    "to verify is the newest phase file under `doc/plans/phases/` on that",
+    "branch; its own status line tells you whether it is yours to verify.",
+    "",
+    "Run stage 7 on it to the letter: the register's criteria per channel, the",
+    "independence rules, the bounded verify-fix loops, the report with its",
+    "required elements, and the register flips in the same commit as the",
+    "report — on that branch, committed and **pushed**.",
+    "",
+    outcomeBlock(
+      "the pass concluded and the gate passed — every MUST criterion PASS or " +
+        "HUMAN-CHECK, zero unresolved regressions, within the loops. Follow it " +
+        "with the verdict table in plain words, HUMAN-CHECKs called out.",
+      "the pass concluded and the gate did not pass — loops exhausted, or a " +
+        "check BLOCKED. Follow it with what failed, the evidence, and where " +
+        "the report lives.",
+    ),
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
+  ].join("\n");
 }
 
 /**
