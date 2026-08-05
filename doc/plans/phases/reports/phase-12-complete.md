@@ -2,7 +2,7 @@
 
 - **Date:** 2026-08-05
 - **Plan:** [phase-12.md](../phase-12.md), approved for execution by fvermaut 2026-08-03
-- **Requirements delivered:** PRD-02 **R3, R4, R5, R14** → `verified`. **R13** stays `draft` — its interactive clause was still not observed; see below.
+- **Requirements delivered:** PRD-02 **R3, R4, R5, R13, R14** → `verified`. R13 closed on 2026-08-05 when fvermaut ran its last clause; see 12g step 5.
 - **Tests:** 318 green. `type-check` clean.
 
 ## What it does now
@@ -46,7 +46,7 @@ Against `projects/scratch-app`, one `--once` per step.
 | 2 — R4, change request then approval | **Observed, in that order.** A criticism re-ran the *same* stage carrying his words; `approve` then advanced it and recorded the approval on the PRD. |
 | 3 — R5, the same on the phase file | **Observed after two defects were fixed.** `phase-04.md` committed `Awaiting approval`, approved, stamped `Approved for execution by fvermaut 2026-08-05T18:02:22Z`. |
 | 4 — the gate trap | **Observed.** A machine comment whose first line is the bare word `approve`, posted after the open gate's cursor, moved nothing. |
-| 5 — R13's interactive clause | **Not observed.** Still needs a raw request typed in a fresh terminal session. R13 stays `draft`. |
+| 5 — R13's interactive clause | **Observed by fvermaut.** A raw request in a fresh timone-root session routed through triage and then invoked the stage that classification pointed at, naming nothing. Carries a written limit: an interactive session leaves no artifact, so this is his report rather than an inspection. |
 | 6 — the holds-the-project rule | **Observed, both halves.** `#4` and `#6` parked side by side while neither owned a branch; once `#6` owned one, a newly marked `#8` queued behind it and said so. `#8` was a test fixture and is closed. |
 
 `git log --stat --all` on `scratch-app` matches no `.claude/` or `timone.yaml` path.
@@ -73,7 +73,7 @@ An asymmetry worth recording: `timone-plan` was **stricter than the spec it impl
 
 ## For the next agent
 
-- **R13's second clause costs one prompt** and is the only thing 12g left unobserved: state a raw request about a managed project in a fresh terminal session at the timone root and confirm it routes through triage without a skill being named.
+- **Interactive sessions leave no trace.** R13's second clause could only be verified from fvermaut's direct report, because an interactive run produces no ticket comment, no label and no commit. Nobody else can re-check it. The marker-as-convention question is what would fix that.
 - **Phase 13 is execution → verification → PR** (R6, R7, R11). `scratch-app` #6 is parked at exactly its entry point, on branch `timone/6-typing-in-the-box-is-fiddly-on-my-phone`, with an approved PRD and an approved five-slice `phase-04.md` waiting. It is the natural first input.
 - **`#4` is parked at triage** classified `triage:bug`, waiting for stage 9's daemon path, which is not built. It holds no project.
 - **No supported recovery path exists for a failed run.** `register` is idempotent per ticket, so re-marking a ticket whose run ended does nothing. Worth a slice.

@@ -1,15 +1,15 @@
 # Handover — Timone — 2026-08-05
 
-> Prior handover: [2026-08-03-phase-12-built-awaiting-live-gate.md](2026-08-03-phase-12-built-awaiting-live-gate.md) — its "Exact next action" (fvermaut runs 12g's six steps) is **done bar one step**; read this file instead.
+> Prior handover: [2026-08-03-phase-12-built-awaiting-live-gate.md](2026-08-03-phase-12-built-awaiting-live-gate.md) — its "Exact next action" (fvermaut runs 12g's six steps) is **done**; read this file instead.
 
 ## Snapshot
 
-**Phase 12 is complete and signed off.** A ticket now goes from raw text to an approved plan without anyone naming a stage or a skill: triage classifies it, a feature opens a conversation in the human's own terminal, and the requirements and then the plan are each committed on a work branch and gated on a ticket reply, with the approval written back into the artifact as its stamp. Proven live on `scratch-app` #6 with fvermaut in the loop, change requests included. **PRD-02 R3, R4, R5, R14 `verified`; R13 still `draft`.** 318 tests green, `type-check` clean, `main` pushed.
+**Phase 12 is complete and signed off.** A ticket now goes from raw text to an approved plan without anyone naming a stage or a skill: triage classifies it, a feature opens a conversation in the human's own terminal, and the requirements and then the plan are each committed on a work branch and gated on a ticket reply, with the approval written back into the artifact as its stamp. Proven live on `scratch-app` #6 with fvermaut in the loop, change requests included. **PRD-02 R3, R4, R5, R13, R14 all `verified`** — every requirement this phase claimed. 318 tests green, `type-check` clean, `main` pushed.
 
 ## Done this session
 
 - **12a–12f built and committed**, one commit each ([completion report](../plans/phases/reports/phase-12-complete.md) has the table).
-- **12g passed** — five of six steps observed live. See the report for what each proved.
+- **12g passed in full** — all six steps. See the report for what each proved.
 - **[ADR-0014](../adr/0014-artifact-first-gates.md)** recorded after a grill: gated stages write their artifact first and gate on it. Amended `process.md` (both gates, the status lifecycle, the ID-stability clock), `timone-prd`, `timone-plan`, and both daemon prompts.
 - **Five defects found and fixed outside the slice bodies**, each a dated `✏ Refined` amendment on the plan: `timone status` hiding all but the first waiting ticket, no way to resume the runs phase 11 parked, a branch claimed against a blank project, a gate opened over an artifact that was never written, and an approval-recording session running with no guardrail baseline.
 - **Register flipped where evidence reached**, with the limits written in rather than implied.
@@ -18,7 +18,6 @@
 
 - **`scratch-app` #6 is parked at execution**, holding branch `timone/6-typing-in-the-box-is-fiddly-on-my-phone`, with an approved PRD pair and an approved five-slice `phase-04.md`. It is phase 13's natural first input and sits exactly at its entry point.
 - **`scratch-app` #4 is parked at triage**, classified `triage:bug`, waiting on stage 9's daemon path. Holds no project.
-- **R13's second clause** is the only thing 12g left unobserved.
 
 ## Decisions made this session
 
@@ -30,10 +29,11 @@
 
 ## Exact next action
 
-**Phase 13: execution → verification → pull request** (PRD-02 R6, R7, R11). It is hand-planned like every Timone-self phase. `scratch-app` #6 is parked at its entry point with everything it needs. **Before planning it, settle R13's second clause** — it costs one sentence: in a fresh session at the timone root, state a raw request about a managed project and confirm it routes through triage without a skill being named. If it passes, flip R13 to `verified` with the evidence; if it doesn't, that is phase 13's first defect.
+**Plan phase 13: execution → verification → pull request** (PRD-02 R6, R7, R11), hand-planned like every Timone-self phase. `scratch-app` #6 is parked at exactly its entry point, holding an approved PRD pair and an approved five-slice `phase-04.md` on `timone/6-typing-in-the-box-is-fiddly-on-my-phone`. Nothing else is outstanding on phase 12.
 
 ## Open questions
 
+- **Interactive sessions leave no trace.** R13's second clause could only be verified from fvermaut's report — an interactive run produces no ticket comment, no label, no commit, so nobody else can re-check it. Related to the marker-as-convention question below.
 - **No supported recovery path for a failed or mis-parked run.** `register` is idempotent per ticket, so re-marking a ticket whose run ended does nothing, and `.timone/state.json` had to be hand-edited three times during 12g. A `timone retry`-shaped slice would close it.
 - **A real bot identity** (GitHub App, `timone[bot]`) — still needs a credential from fvermaut. The marker is what exists until then.
 - **The marker as a process-wide convention** — interactive stage sessions still post unmarked comments. Needs a grill.
