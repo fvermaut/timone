@@ -12,6 +12,8 @@ Two things follow from that, and they govern everything below. **You commit docu
 
 **Managed projects only.** Feedback on Timone itself stays hand-run, as Timone's own planning already is. Asked to improve Timone, say so and stop.
 
+**Not this skill's intake: a concrete change-requesting review comment on an open Timone PR** ([ADR-0016](../../../doc/adr/0016-review-remediation-rides-the-verify-fix-shape.md)). Such a comment is already the human's confirmation, and its remediation rides the verify-fix shape — a fresh fix context commits `fix: review — <slug>` on the PR branch, stage 7 re-verifies, stage 8 refreshes the same PR, a threaded reply closes the loop — never this skill's proposal table. The boundary: a fix that can be made without touching the PRD pair or the criteria register is that remediation; a comment that would move a requirement is **intent** and belongs here, full path — proposal, confirmation gate, feedback record. Handed one that reads as a plain remediation, say so and route it rather than triaging it.
+
 ## Target-project resolution (do this first)
 
 1. The target project is the one named in the invocation argument or prompt. **The invocation is `<project-name> <feedback source>`: the first token is the project, the remainder is the source.**
