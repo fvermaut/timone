@@ -1,6 +1,6 @@
 # Timone — Status
 
-**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-08-05**.
+**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-08-05** (evening — the phase 13 plan is written and waiting on you).
 
 > **This file is about Timone itself** — the tool. Each managed project has its own `STATUS.md` file; the to-do app's is at `projects/scratch-app/STATUS.md`. **Every file path in this file lives in the Timone repository unless it says otherwise.** When something here is about a project, it names the project and says so.
 
@@ -120,7 +120,9 @@ The seventh round is worth singling out: **the rule for choosing where to start 
 
 ## Waiting on you
 
-**Nothing on Timone itself is waiting on you.** ~~The one-sentence check.~~ **Done 2026-08-05** — you typed a plain request in a fresh session and watched it get sorted first, and then acted on, without naming anything. That closes the last unproven promise from the previous sign-off. One honest caveat, written down rather than glossed: a session you run yourself leaves no ticket, no label and no commit behind, so **that particular check rests on your word and nobody else can go back and re-read it**. Giving those sessions a trace of their own is on the list below.
+**Approve the plan for the next chunk of work: the machine builds, checks and delivers by itself.** The plan is written and committed at `doc/plans/phases/phase-13.md` (2026-08-05). It covers the three missing pieces of the automatic loop: executing an approved plan unattended, having a separate fresh session check the result, and opening the pull request — plus acting on your review comments on that pull request, and a `timone retry` command so a failed run can be restarted without hand-editing files. The to-do app's ticket #6 is sitting exactly at this machinery's entry point with its approved plan, so approving this is what lets that ticket become a pull request. **Two contradictions between the plan and the written rulebook are flagged inside it rather than quietly resolved** — same as last time, they'll need a sit-down decision from you: which branch built work lives on, and whether a review comment from you counts as permission to change code. Read the plan and reply here (or just say "approve phase 13") — anything else you say is treated as a change to make.
+
+**Previously:** ~~nothing on Timone itself was waiting on you.~~ ~~The one-sentence check.~~ **Done 2026-08-05** — you typed a plain request in a fresh session and watched it get sorted first, and then acted on, without naming anything. That closes the last unproven promise from the previous sign-off. One honest caveat, written down rather than glossed: a session you run yourself leaves no ticket, no label and no commit behind, so **that particular check rests on your word and nobody else can go back and re-read it**. Giving those sessions a trace of their own is on the list below.
 
 ~~The sign-off for the asking-and-waiting machinery.~~ **Done on 2026-08-05** — you ran all of it: the conversation in your terminal, the deliberate criticism that sent the requirements step back to be redone, the approval that moved it on, the same round trip on the plan, and the attempt to make the machine approve its own work (it couldn't). What that proved, and what it found, is in "What the proof runs found" below.
 
