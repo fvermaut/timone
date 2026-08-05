@@ -1,6 +1,6 @@
 # Phase 12: Gates, conversations and takeover
 
-> **Status:** Approved for execution by fvermaut 2026-08-03. Hand-planned 2026-08-03, as all Timone-self phases are (`/timone-plan` targets managed projects only); the plan skill's shape rules — thin vertical slices, declared seams, per-slice validation — are followed, not the instrument.
+> **Status:** Complete — see [reports/phase-12-complete.md](reports/phase-12-complete.md). Approved for execution by fvermaut 2026-08-03; 12g's live gate passed 2026-08-05. Hand-planned 2026-08-03, as all Timone-self phases are (`/timone-plan` targets managed projects only); the plan skill's shape rules — thin vertical slices, declared seams, per-slice validation — are followed, not the instrument.
 
 > **Second phase of [PRD-02](../../specs/prd/prd-02-inversion-of-control.md).** Governing decisions: [ADR-0012](../../adr/0012-conversation-channels.md) (gates on tickets, conversations on channels — this phase *is* that ADR), [ADR-0013](../../adr/0013-stateless-session-reentry.md) (every human wait is a session boundary), [ADR-0009](../../adr/0009-cli-first-agent-tooling-mcp-for-the-gap.md) (CLI-first), [ADR-0007](../../adr/0007-sessions-at-timone-root.md) (sessions at the timone root), [ADR-0004](../../adr/0004-github-first-adapter-pair.md) (the channel seam must be real from day one). Builds directly on [phase 11](phase-11.md), whose runs all park exactly where this phase picks them up.
 

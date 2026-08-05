@@ -39,8 +39,8 @@
 > ✏ Revised 2026-08-02: the grill session on the conversation medium ([ADR-0012](../../adr/0012-conversation-channels.md)) moved conversations off ticket-comment ping-pong — clarification is a conversation on the project's conversation channel, not a comment thread; the ticket records the CTA and the outcome.
 
 - **Priority:** MUST
-- **Status:** revised
-    - ✏ 2026-08-03 **partial evidence, not a verdict.** [Phase 12](../../plans/phases/phase-12.md) built this, and the first clause was watched live on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6): the pipeline reached the clarification stage on its own, posted a CTA carrying a copy-pasteable `timone takeover scratch-app#6`, named no stage and no skill, and parked on the conversation; a second poll cycle changed nothing, so the wait holds. **The concluding clause — the interview run to acceptance and the accepted summary landing on the ticket — has not been observed**, because it needs the human at the keyboard. Stays `revised` until 12g's gate.
+- **Status:** verified
+    - ✏ 2026-08-05 verified by fvermaut at [phase 12](../../plans/phases/phase-12.md)'s 12g gate, on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6). Clause by clause: **conversation opened** — the pipeline reached the clarification stage on its own and posted a CTA carrying a copy-pasteable `timone takeover scratch-app#6`, naming no stage and no skill; `timone status` showed it waiting, and a second poll cycle changed nothing, so the wait holds rather than re-firing. **Concluded and resumed** — fvermaut ran the command, held the interview to acceptance, and the accepted summary landed on the ticket carrying `CONVERSATION_RECORD_MARKER`; the next cycle read that record and advanced the run to the requirements stage. The summary the interview produced was substantive rather than a transcript: it split the request into two changes and said which one was not being built.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a picked-up ticket with open questions
@@ -54,9 +54,9 @@
 ## R4 — PRD gate on the ticket
 
 - **Priority:** MUST
-- **Status:** draft
-    - ✏ 2026-08-03 **built, unobserved.** [Phase 12](../../plans/phases/phase-12.md) 12e implements both clauses and they are unit-proven (branch claimed before the session starts, gate comment linking the artifact on the branch, approval advancing exactly one stage, change request re-entering the same stage with the human's words). **No live round-trip has run**, because it begins with the conversation R3 is waiting on. Left `draft`.
-    - ✏ 2026-08-03 **a divergence from `process.md`, recorded rather than resolved.** Stage 3 of `process.md` gates *before* files are written; this criterion says commit on a branch then gate. Built to this criterion — the later and more specific decision, made for the async context, where the human reviews the real register instead of a paraphrase. Correcting `process.md` is a meta-level change and needs a grill session first.
+- **Status:** verified
+    - ✏ 2026-08-05 verified by fvermaut at [phase 12](../../plans/phases/phase-12.md)'s 12g gate, on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6). **First clause** — the requirements stage claimed the branch `timone/6-typing-in-the-box-is-fiddly-on-my-phone`, committed and pushed the PRD pair to it, posted a plain-language summary, and the daemon posted the approval request linking the artifact on that branch; the run parked waiting. **Second clause, both directions and in that order** — fvermaut replied with a criticism first ("not sure about introducing the new edit button") and the next cycle re-ran the *same* stage carrying those words (commit `d8ff53d`, withdrawing what he questioned) rather than advancing; he then replied `approve` and the following cycle recorded the approval on the PRD (`4f00941`, status `Active`) and advanced to planning.
+    - ✏ 2026-08-05 **the divergence recorded here on 2026-08-03 is resolved**, by the grill of 2026-08-05 and [ADR-0014](../../adr/0014-artifact-first-gates.md): every gated stage now writes its artifact first and gates on it, and `process.md` and both skills were amended to match. This criterion stands as written and is no longer in conflict with anything.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN clarification concluded
@@ -70,8 +70,9 @@
 ## R5 — Plan gate on the ticket
 
 - **Priority:** MUST
-- **Status:** draft
-    - ✏ 2026-08-03 **built, unobserved.** [Phase 12](../../plans/phases/phase-12.md) 12f implements it through the *same* gate mechanism as R4 — asserted by construction, not by comment. It also adds what the criterion implies but does not say: an approval given on the ticket is written back into the phase file as its `Approved for execution by <who> <date>` stamp, by a short session of its own, because stage 6 refuses to start without it and a gate whose outcome lives only in a comment thread is one the next stage cannot see. **No live round-trip.** Left `draft`.
+- **Status:** verified
+    - ✏ 2026-08-05 verified by fvermaut at [phase 12](../../plans/phases/phase-12.md)'s 12g gate, on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6). The planning stage committed `doc/plans/phases/phase-04.md` to the same branch stamped `Awaiting approval` (`9630fe3`), posted a summary, and was gated by the *same* mechanism as R4 — one code path, two stages, asserted by construction in the tests as well as observed here. fvermaut replied `approve`; the next cycle wrote that approval into the phase file as `Approved for execution by fvermaut 2026-08-05T18:02:22Z` (`e7a348c`) and parked the run at execution, saying plainly on the ticket that building is not built yet.
+    - ✏ 2026-08-05 **the first attempt at this criterion failed live, and the failure is the reason it can now be trusted.** The planning session obeyed `timone-plan`'s then-current "approve before any file is written" rule, wrote nothing, and reported success — and the daemon posted an approval request for a plan that did not exist. Two defects: the daemon opened a gate on the session's exit code rather than on the artifact's existence (fixed — it now compares the work branch's tip and refuses to gate over nothing), and two skills contradicted this criterion (resolved by [ADR-0014](../../adr/0014-artifact-first-gates.md)). The verification above is of the re-run after both fixes.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN an approved PRD
@@ -169,8 +170,10 @@
 ## R14 — Conversation channel seam with terminal takeover
 
 - **Priority:** MUST
-- **Status:** draft
-    - ✏ 2026-08-03 **two clauses of three have evidence; the middle one does not.** *Clause 1* observed live on `scratch-app` #6 — the opened conversation's ticket comment carries the copy-pasteable command in a fenced block. *Clause 3* is unit-proven: a fake channel drives `inviteToConversation` / `recordConversationOutcome` unchanged, which is the second implementation the hint asks for. *Clause 2* — takeover resolving a waiting ticket and spawning the right stage session — is only **half** observed: every refusal path was run live against the real ledger (a park it cannot resume, an untracked ticket, an unknown project, a malformed target, all with the right guidance), but the success path was not, since it hands the terminal to an interactive session. Left `draft`.
+- **Status:** verified
+    - ✏ 2026-08-05 verified by fvermaut at [phase 12](../../plans/phases/phase-12.md)'s 12g gate. **Clause 1** — the opened conversation's ticket comment carries the copy-pasteable command in a fenced block (`scratch-app` #6). **Clause 2** — fvermaut ran `timone takeover scratch-app#6` with no other argument; it resolved what the ticket was waiting on from the ledger, spawned the clarification session itself, and that session re-entered from the artifacts and the thread alone. Its refusal paths were exercised live against the real ledger too: a park it cannot resume, an untracked ticket, an unknown project and a malformed target each refused with specific guidance, and a ticket waiting on a *gate* was told to answer on the ticket instead of being handed an interview. **Clause 3** — a fake channel drives `inviteToConversation` / `recordConversationOutcome` unchanged, which is the second implementation the hint asks for.
+    - ✏ 2026-08-05 **known limit of the evidence.** Only one channel implementation exists in production — the terminal. The seam's second implementation is a test fake, which is what the verification hint accepts, but no second *medium* (Slack) has been built against it, so the claim is that the seam admits one, not that one has shipped.
+    - ✏ 2026-08-03 **superseded by the entry above; kept for the record.** At the time: **two clauses of three have evidence; the middle one does not.** *Clause 1* observed live on `scratch-app` #6 — the opened conversation's ticket comment carries the copy-pasteable command in a fenced block. *Clause 3* is unit-proven: a fake channel drives `inviteToConversation` / `recordConversationOutcome` unchanged, which is the second implementation the hint asks for. *Clause 2* — takeover resolving a waiting ticket and spawning the right stage session — is only **half** observed: every refusal path was run live against the real ledger (a park it cannot resume, an untracked ticket, an unknown project, a malformed target, all with the right guidance), but the success path was not, since it hands the terminal to an interactive session. Left `draft`.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a stage needs a conversation and the project's channel is the terminal
