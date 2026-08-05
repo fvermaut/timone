@@ -474,3 +474,44 @@ describe("the pull request on a run", () => {
     expect(store.get(queued.id)?.status).toBe("picked-up");
   });
 });
+
+describe("retry", () => {
+  it("re-arms a failed run keeping its branch, stage and pull request", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    store.recordPullRequest(run.id, 9);
+    store.setStage(run.id, "execution");
+    store.fail(run.id, "died mid-slice");
+
+    const rearmed = store.retry(run.id);
+
+    expect(rearmed.status).toBe("picked-up");
+    expect(rearmed.stage).toBe("execution");
+    expect(rearmed.branch).toBe("timone/6-fiddly-box");
+    expect(rearmed.pr).toBe(9);
+    expect(rearmed.failure).toBeUndefined();
+  });
+
+  it("refuses to retry anything that is not failed", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+
+    expect(() => store.retry(run.id)).toThrow(/not failed/);
+  });
+
+  it("refuses when another run has since claimed the project", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    store.fail(run.id, "died");
+    const { run: next } = store.register("scratch-app", 8);
+    store.activate(next.id, "s2");
+
+    expect(() => store.retry(run.id)).toThrow(/scratch-app#8|session/);
+    expect(store.get(run.id)?.status).toBe("failed");
+  });
+});

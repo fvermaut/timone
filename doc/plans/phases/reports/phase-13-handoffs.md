@@ -182,3 +182,30 @@ $ npm run type-check    → clean
 Checklist: only a human wakes a parked review ✓ (machine-comment test); remediated work is re-verified before the PR refreshes ✓ (graph assertion + session test); one PR per run ✓ (re-delivery's artifact check finds the same open PR; `recordPullRequest` re-records the same number).
 
 **What the next sub-phase must know.** 13g (`timone retry`) needs a `failed → picked-up`-shaped transition in `runs.ts` (`TRANSITIONS.failed` is currently empty) and must keep the branch, stage and `pr` fields intact; refusals follow 12c's discipline — say what the ticket *is* doing. The retried run should resume at `run.stage` via the normal spawn path.
+
+## 13g — `timone retry`, the supported way back
+
+**Built.** `timone retry <project>#<ticket>` re-arms a failed run at the stage it failed — `failed → picked-up` is now a legal transition, the only road out of failure, keeping branch, stage and pull request while clearing the failure. The next daemon cycle picks the run up through the normal spawn path. Everything that is not a failed run refuses with a sentence about what the ticket *is* doing (12c's refusal discipline), and the store's own guards refuse a retry when the project has moved on to another run.
+
+**Files touched.**
+
+- `src/commands/retry.ts` + `retry.test.ts` — new; `src/cli.ts` — registered.
+- `src/daemon/runs.ts`, `runs.test.ts` — `retry()`, the `failed: ["picked-up"]` transition.
+
+**Decisions taken inside the slice.**
+
+- *`done` stays a dead end* — retry resurrects failures, never history; a finished ticket is told to file a new one.
+- *The re-arm rides the existing transition guards* rather than new checks: entering `picked-up` already refuses when another run holds the session slot or the project, which is exactly the "moved on" case — one rule, enforced where it always was.
+- *`parseTarget` is imported from takeover*, not copied — same argument, same refusals.
+
+**Validation evidence.** Red first: 6 command tests and 3 store tests failed on the missing method/command. Green after:
+
+```
+$ npm test                          → 16 files, 429 tests passed
+$ npm run type-check                → clean
+$ node dist/cli.js retry --help     → usage printed
+```
+
+Checklist: only a failed run re-arms ✓; a re-armed run keeps branch, stage and ticket history ✓; nothing in 13h requires hand-editing the ledger ✓ (the kill-and-retry step uses this command).
+
+**What the next sub-phase must know.** 13h is the live proof — no code. The daemon binary needs `planStatusProbe`/`verificationReportProbe` left as their real git implementations (the daemon command passes no probes, so the defaults apply — verify `src/commands/daemon.ts` wires nothing that would override them).

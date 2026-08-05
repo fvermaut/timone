@@ -43,7 +43,9 @@ const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   active: ["active", "parked", "done", "failed"],
   parked: ["active", "done", "failed"],
   done: [],
-  failed: [],
+  // The one road out of failure is `timone retry`, which re-arms the run at
+  // the stage it failed. `done` stays a dead end: finished work is history.
+  failed: ["picked-up"],
 };
 
 const runSchema = z.strictObject({
@@ -354,6 +356,26 @@ export class RunStore {
     this.promoteHead(project);
     this.persist();
     return this.runningRun(project);
+  }
+
+  /**
+   * Re-arm a failed run at the stage it failed, keeping its branch, stage
+   * and pull request — they are what "picking up where it stopped" means.
+   * The transition guards still apply: a project that has moved on to
+   * another run refuses, because re-arming would put two sets of work on
+   * one repository.
+   */
+  retry(id: string): Run {
+    const run = this.mutable(id);
+    if (run.status !== "failed") {
+      throw new Error(
+        `Run ${id} is ${run.status}, not failed — only a failed run can be retried`,
+      );
+    }
+    return this.transition(id, "picked-up", (rearmed) => {
+      rearmed.failure = undefined;
+      rearmed.sessionId = undefined;
+    });
   }
 
   /** Record a guardrail violation against a run (R15). */
