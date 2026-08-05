@@ -1755,3 +1755,131 @@ describe("the delivery stage", () => {
     expect(comments.at(-1)?.body).toContain("refused delivery");
   });
 });
+
+describe("the remediation stage", () => {
+  function atRemediation(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.recordPullRequest(run.id, 9);
+    store.setStage(run.id, "remediation");
+    store.park(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "remediation",
+      waitCursor: "2026-08-06T10:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  const openPr = {
+    number: 9,
+    title: "Fix the box",
+    url: "https://github.com/fvermaut/scratch-app/pull/9",
+    state: "open" as const,
+  };
+
+  function adapterWithPrThread() {
+    const base = fakeAdapter();
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async findPullRequest() {
+        return openPr;
+      },
+      async getPullRequestThread() {
+        return {
+          ...openPr,
+          comments: [
+            {
+              author: "fvermaut",
+              body: "the reply the session just posted",
+              createdAt: "2026-08-06T13:00:00Z",
+              fromTimone: true,
+            },
+          ],
+        };
+      },
+    };
+    return { ...base, adapter };
+  }
+
+  it("re-verifies after a fix lands — nothing reaches the PR unchecked", async () => {
+    const store = newStore();
+    const { adapter } = adapterWithPrThread();
+    const { runtime, requests } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${STAGE_DONE_MARKER}\n\nRenamed it.`);
+      },
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      verificationReportProbe: async () =>
+        "doc/plans/phases/reports/phase-04-verification.md",
+    }).spawn(atRemediation(store), project, { stage: "remediation" });
+
+    // The fix hands into a fresh verification session (the thread-less
+    // prompt), exactly as a first build does.
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    expect(requests[1].prompt).toMatch(/without having watched/i);
+  });
+
+  it("re-parks on the review when the session only replied, changing nothing", async () => {
+    const store = newStore();
+    const { adapter } = adapterWithPrThread();
+    // A probe that reports the branch did not move: the session's whole act
+    // was a clarifying reply in the PR thread.
+    const { runtime } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${STAGE_DONE_MARKER}\n\nAsked a question instead.`);
+      },
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: async () => "same-sha",
+    }).spawn(atRemediation(store), project, { stage: "remediation" });
+
+    const run = store.get("scratch-app#7");
+    expect(run?.status).toBe("parked");
+    expect(run?.waitingKind).toBe("review");
+    // The cursor advanced past the session's own reply, so only what the
+    // human says next can wake it again.
+    expect(run?.waitCursor).toBe("2026-08-06T13:00:00Z");
+  });
+
+  it("fails quietly when the remediation handed the work to a person", async () => {
+    const store = newStore();
+    const { adapter, comments } = adapterWithPrThread();
+    const { runtime } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(
+          project,
+          7,
+          `${STAGE_HANDED_MARKER}\n\nThis comment moves a requirement; it needs the full path.`,
+        );
+      },
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(atRemediation(store), project, { stage: "remediation" });
+
+    expect(store.get("scratch-app#7")?.status).toBe("failed");
+    expect(comments.at(-1)?.body).toContain("moves a requirement");
+  });
+});

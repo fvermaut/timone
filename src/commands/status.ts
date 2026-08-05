@@ -19,6 +19,7 @@ const STAGE_LABELS: Partial<Record<PipelineStage, string>> = {
   execution: "building",
   verification: "checking the result",
   delivery: "delivering",
+  remediation: "acting on your review",
 };
 
 export interface RenderStatusOptions {

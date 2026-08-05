@@ -124,6 +124,13 @@ describe("the stage graph", () => {
     expect(isBuilt("feedback")).toBe(false);
   });
 
+  it("sends a remediation through the full check again — never straight back to the PR", () => {
+    // ADR-0016's invariant: nothing lands on the pull request unverified.
+    expect(stageAfter("remediation")).toBe("verification");
+    expect(ownsBranch("remediation")).toBe(true);
+    expect(isBuilt("remediation")).toBe(true);
+  });
+
   it("runs execution → verification → delivery, and nothing follows delivery", () => {
     expect(stageAfter("execution")).toBe("verification");
     expect(stageAfter("verification")).toBe("delivery");

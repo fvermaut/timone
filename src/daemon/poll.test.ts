@@ -790,3 +790,146 @@ describe("pollOnce — a run parked at an unbuilt stage resumes at that stage", 
     expect(contexts).toEqual([{ stage: "execution" }]);
   });
 });
+
+describe("pollOnce — a run parked on a pull-request review", () => {
+  function parkedOnReview(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    store.recordPullRequest(run.id, 9);
+    return store.park(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "delivery",
+      waitCursor: "2026-08-06T10:00:00Z",
+    });
+  }
+
+  function reviewAdapter(
+    state: "open" | "merged" | "closed",
+    comments: PullRequestThread["comments"],
+  ): { adapter: TicketingAdapter; posted: PostedComment[] } {
+    const posted: PostedComment[] = [];
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [] };
+      },
+      async postComment(project, number, body): Promise<void> {
+        posted.push({ project: project.name, number, body });
+      },
+      async applyLabel(): Promise<void> {},
+      async findPullRequest() {
+        return {
+          number: 9,
+          title: "Fix the box",
+          url: "https://github.com/fvermaut/scratch-app/pull/9",
+          state,
+        };
+      },
+      async getPullRequestThread() {
+        return {
+          number: 9,
+          title: "Fix the box",
+          url: "https://github.com/fvermaut/scratch-app/pull/9",
+          state,
+          comments,
+        };
+      },
+      async postPullRequestComment(): Promise<void> {},
+    };
+    return { adapter, posted };
+  }
+
+  it("completes the run and promotes the queue when the PR merged", async () => {
+    const store = newStore();
+    parkedOnReview(store);
+    const { run: queued } = store.register("scratch-app", 8);
+    expect(queued.status).toBe("queued");
+    const { adapter, posted } = reviewAdapter("merged", []);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(store.get("scratch-app#6")?.status).toBe("done");
+    expect(posted.some((comment) => /merged/i.test(comment.body))).toBe(true);
+    // R10's live half in miniature: the terminal state is what starts the
+    // next ticket.
+    expect(store.get("scratch-app#8")?.status).not.toBe("queued");
+    void spawned;
+  });
+
+  it("completes the run as declined when the PR was closed unmerged", async () => {
+    const store = newStore();
+    parkedOnReview(store);
+    const { adapter, posted } = reviewAdapter("closed", []);
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(store.get("scratch-app#6")?.status).toBe("done");
+    expect(posted.some((comment) => /without merging/i.test(comment.body))).toBe(true);
+  });
+
+  it("spawns a remediation carrying the human's words on a new review comment", async () => {
+    const store = newStore();
+    parkedOnReview(store);
+    const { adapter } = reviewAdapter("open", [
+      {
+        author: "fvermaut",
+        body: "Please rename this variable, it shadows the prop.",
+        createdAt: "2026-08-06T12:00:00Z",
+        fromTimone: false,
+        replyTo: "501",
+      },
+    ]);
+    const contexts: unknown[] = [];
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(contexts).toMatchObject([
+      {
+        stage: "remediation",
+        feedback: expect.stringContaining("shadows the prop"),
+      },
+    ]);
+  });
+
+  it("stays parked on machine comments and on comments before the cursor", async () => {
+    const store = newStore();
+    parkedOnReview(store);
+    const { adapter } = reviewAdapter("open", [
+      {
+        author: "fvermaut",
+        body: "an earlier human remark",
+        createdAt: "2026-08-06T09:00:00Z",
+        fromTimone: false,
+      },
+      {
+        author: "fvermaut",
+        body: "machine bookkeeping after the cursor",
+        createdAt: "2026-08-06T12:00:00Z",
+        fromTimone: true,
+      },
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#6")?.status).toBe("parked");
+  });
+});

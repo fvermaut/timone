@@ -21,6 +21,7 @@ export const PIPELINE_STAGES = [
   "execution",
   "verification",
   "delivery",
+  "remediation",
   "feedback",
 ] as const;
 
@@ -107,6 +108,16 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     built: true,
     // Nothing follows in the graph: the run ends at the pull request, whose
     // merge or close is a terminal event on the run, not a stage.
+  },
+  remediation: {
+    // ADR-0016's carve-out of stage 9: a concrete review comment is
+    // confirmed intake, and its fix rides the verify-fix shape — so what
+    // follows a remediation is a full verification, then re-delivery.
+    processStage: 9,
+    waits: "none",
+    ownsBranch: true,
+    built: true,
+    next: "verification",
   },
   feedback: {
     processStage: 9,

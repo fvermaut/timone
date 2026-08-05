@@ -468,6 +468,60 @@ export class AgentSessionSpawner implements SessionSpawner {
   }
 
   /**
+   * Judge a remediation. Three honest endings, because ADR-0016 gives the
+   * session three paths: a fix committed (the branch moved) re-verifies —
+   * nothing reaches the PR unchecked; a reply with nothing committed goes
+   * straight back to waiting on the review — a clarifying question is not a
+   * change and re-verifying nothing would be theatre; handed-to-human stops
+   * as everywhere else.
+   */
+  private async afterRemediation(
+    run: Run,
+    project: TicketingProject,
+    outcome: StageOutcome | undefined,
+    producedWork: boolean,
+  ): Promise<PipelineStage | undefined> {
+    const { store, adapter } = this.options;
+
+    if (outcome?.kind === "handed-to-human") {
+      store.fail(
+        run.id,
+        "the remediation stopped and handed the work to you — see the ticket",
+      );
+      this.log(`handed ${run.id} — remediation stopped, see the ticket`);
+      return undefined;
+    }
+
+    if (outcome?.kind === "advanced" && producedWork) {
+      return "verification";
+    }
+
+    if (outcome?.kind === "advanced") {
+      const pr = store.get(run.id)?.pr;
+      if (pr !== undefined) {
+        const thread = await adapter.getPullRequestThread(project, pr);
+        store.park(run.id, {
+          waitingOn: `your review of pull request #${pr}`,
+          kind: "review",
+          stage: "remediation",
+          waitCursor: thread.comments.at(-1)?.createdAt ?? "",
+        });
+        this.log(`parked ${run.id} — replied on PR #${pr}, waiting again`);
+        return undefined;
+      }
+    }
+
+    const reason =
+      outcome === undefined
+        ? "the remediation ended without recording an outcome"
+        : "the remediation said it finished, but the run has lost its pull request";
+    store.fail(run.id, reason);
+    await adapter.postComment(project, run.ticket, failedComment(reason));
+    this.log(`failed ${run.id} — ${reason}`);
+    return undefined;
+  }
+
+  /**
    * Judge the delivery and park the run on its review. Delivery's artifact
    * is the pull request itself (ADR-0004) — a branch probe cannot prove one
    * exists, so the tracker is asked directly. The park's cursor sits at the
@@ -623,6 +677,10 @@ export class AgentSessionSpawner implements SessionSpawner {
     if (stage === "delivery") {
       await this.afterDelivery(run, project, outcome);
       return undefined;
+    }
+
+    if (stage === "remediation") {
+      return this.afterRemediation(run, project, outcome, producedWork);
     }
 
     // The only remaining wait-free stage is triage, and what follows it is

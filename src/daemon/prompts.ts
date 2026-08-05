@@ -18,6 +18,7 @@ export const PROMPTED_STAGES = [
   "execution",
   "verification",
   "delivery",
+  "remediation",
 ] as const;
 
 export interface PromptContext {
@@ -150,7 +151,65 @@ export function stagePrompt(
       return verificationPrompt(context);
     case "delivery":
       return deliveryPrompt(context);
+    case "remediation":
+      return remediationPrompt(context);
   }
+}
+
+/**
+ * ADR-0016's fix context: act on a review comment the human left on the open
+ * pull request.
+ *
+ * The comment is confirmed intake — the human named the change themselves —
+ * and the defect brief at once. The boundary the prompt draws is the ADR's:
+ * a fix that would touch the PRD pair or the criteria register is intent,
+ * not remediation, and gets a reply instead of a commit.
+ */
+function remediationPrompt(context: PromptContext): string {
+  const { ticket, branch } = context;
+
+  return [
+    `A reviewer commented on the open pull request for ticket #${ticket.number} on **${context.project.name}**.`,
+    "",
+    ticketBlock(context),
+    feedbackBlock(context.feedback),
+    "",
+    reentryBlock(),
+    "",
+    "The words above under “what they replied” are a **review comment from the",
+    "pull request**, and they are your instruction: the human named the change",
+    "themselves, which is what authorises acting on it without asking again.",
+    "",
+    `**Stay on the branch \`${branch ?? "the run's work branch"}\`** — the pull`,
+    "request's head. Judge the comment first, and take exactly one of these",
+    "three paths:",
+    "",
+    "- **A concrete change that touches neither the PRD pair nor the criteria",
+    "  register** — make it: a focused commit on that branch, messaged",
+    "  `fix: review — <slug>`, **pushed**, and a reply on the pull request's",
+    "  own thread saying what you did. Nothing else changes — the reports and",
+    "  the plan stay as they are; re-checking is the machinery's next move,",
+    "  not yours.",
+    "- **A comment that would move a requirement** — that is a change of",
+    "  intent, and it takes the full path, not a quiet fix. Reply on the pull",
+    "  request explaining that, commit nothing.",
+    "- **A comment you would have to guess at** — vague, several readings,",
+    "  scope beyond this pull request. Ask, in a reply on the pull request,",
+    "  and commit nothing.",
+    "",
+    outcomeBlock(
+      "you took one of the three paths to its end — the fix committed and " +
+        "pushed with the reply posted, or the reply posted with nothing " +
+        "committed. Follow it with which path and why, in one plain sentence.",
+      "you could not take any path — the branch is gone, the pull request is " +
+        "not what the ticket says, something structural. Follow it with what " +
+        "you found.",
+    ),
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
+  ].join("\n");
 }
 
 /**

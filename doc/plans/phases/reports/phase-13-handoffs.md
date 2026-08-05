@@ -152,3 +152,33 @@ $ npm run type-check    → clean
 Checklist: the PR is the artifact checked — a moved branch tip is not enough ✓ (no branch probe in `afterDelivery` at all); the parked run knows its PR and `timone status` says it ✓ (13b's rendering + `recordPullRequest`); takeover redirects to the PR rather than opening anything ✓.
 
 **What the next sub-phase must know.** 13f resolves the review park in `poll.ts`: `run.waitingKind === "review"` with `run.pr` set, reading the PR thread via `getPullRequestThread` — merged → `complete` (queue promotes), closed → `complete` with a declined note on the ticket, a human comment past `waitCursor` → the remediation cycle. The remediation prompt should reuse `feedbackBlock`'s shape but with the review comment(s) as the words, and re-delivery must find the *same* PR — `findPullRequest` already prefers open PRs, and the PR number on the run is the check.
+
+## 13f — the review loop on the pull request (R11, minus the preview)
+
+**Built.** A run parked on its review now resolves from the PR thread each cycle: **merged** completes the run (the ticket hears "done", the queue promotes — R10's terminal-state promotion finally has a code path that fires outside a unit test), **closed unmerged** completes it as declined and says so plainly, **a human comment past the cursor** spawns a `remediation` — a new pipeline stage carrying ADR-0016's fix context. The remediation prompt hands the session the comment as confirmed intake with the ADR's three paths spelled out (concrete fix → `fix: review — <slug>` + threaded reply; requirement-moving → reply, no commit; ambiguous → ask, no commit). Its judgment has three honest endings: a fix that moved the branch re-enters **verification** (nothing reaches the PR unchecked — from there the existing 13d→13e chain re-verifies and refreshes the same PR); a reply-only pass re-parks on the review with the cursor advanced past its own reply; handed-to-human fails quietly. Machine comments on the PR never wake the run.
+
+**Files touched.**
+
+- `src/daemon/pipeline.ts` — `remediation` stage (processStage 9, ADR-0016's carve-out; next: verification).
+- `src/daemon/prompts.ts` — `remediationPrompt`.
+- `src/daemon/poll.ts` — `concludeReview` (terminal states, `mergedComment` / `closedUnmergedComment`, `PollResult.completed`), the review branch of `resolveWait` (human words after the cursor, joined).
+- `src/daemon/session.ts` — `afterRemediation`.
+- `src/commands/status.ts` — `remediation` renders as "acting on your review".
+- Tests: `poll.test.ts` (4), `prompts.test.ts` (5), `session.test.ts` (3), `pipeline.test.ts` (the ADR-0016 invariant assertion).
+
+**Decisions taken inside the slice.**
+
+- **A reply-only remediation re-parks directly rather than riding verify → deliver.** ADR-0016's cycle exists so no *change* lands unverified; a clarifying question changes nothing, and re-running a full verification pass to re-park would be theatre. The discriminator is `producedWork` — the same branch-tip evidence 12f introduced — so the session cannot claim a fix happened without the branch showing it.
+- *All human comments since the cursor travel together*, joined with separators, so two review comments left in one sitting become one remediation rather than two racing ones.
+- *Terminal review handling lives in the poll loop* (`concludeReview`), not the spawner — a merge is not a stage outcome, and spawning a session to observe it would put an agent between a terminal fact and the ledger.
+
+**Validation evidence.** Red first: 4 poll tests (review parks never resolved), 5 prompt tests (no remediation prompt), 3 session tests (no remediation judgment). Green after:
+
+```
+$ npm test              → 15 files, 420 tests passed
+$ npm run type-check    → clean
+```
+
+Checklist: only a human wakes a parked review ✓ (machine-comment test); remediated work is re-verified before the PR refreshes ✓ (graph assertion + session test); one PR per run ✓ (re-delivery's artifact check finds the same open PR; `recordPullRequest` re-records the same number).
+
+**What the next sub-phase must know.** 13g (`timone retry`) needs a `failed → picked-up`-shaped transition in `runs.ts` (`TRANSITIONS.failed` is currently empty) and must keep the branch, stage and `pr` fields intact; refusals follow 12c's discipline — say what the ticket *is* doing. The retried run should resume at `run.stage` via the normal spawn path.

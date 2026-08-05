@@ -1,6 +1,6 @@
 import type { Manifest } from "../manifest.js";
 import type { TicketingAdapter, TicketingProject } from "../adapters/ticketing.js";
-import { readConversationRecord, readGateDecision } from "./gates.js";
+import { instant as instantOf, readConversationRecord, readGateDecision } from "./gates.js";
 import {
   classificationFromLabels,
   concludeConversation,
@@ -59,8 +59,35 @@ export interface PollResult {
   spawned: string[];
   /** Run ids whose human wait was answered and which resumed this cycle. */
   resumed: string[];
+  /** Run ids that reached a terminal state this cycle (a PR merged or closed). */
+  completed: string[];
   /** One readable line per project that failed; the cycle continued. */
   errors: string[];
+}
+
+/** The comment posted on the ticket when its pull request was merged. */
+export function mergedComment(pr: number): string {
+  return [
+    "**Merged — this one is done.**",
+    "",
+    `The work for this ticket went in with pull request #${pr}. The branch has`,
+    "served its purpose, and this ticket's journey ends here.",
+    "",
+    "**What I need from you:** nothing — file a new ticket for anything else.",
+  ].join("\n");
+}
+
+/** The comment posted when the pull request was closed without merging. */
+export function closedUnmergedComment(pr: number): string {
+  return [
+    "**The pull request was closed without merging.**",
+    "",
+    `Pull request #${pr} for this ticket was closed rather than merged, so I'm`,
+    "treating this work as declined and stepping away from it. The branch and",
+    "everything on it stay where they are.",
+    "",
+    "**What I need from you:** nothing — re-mark this ticket if you want the work picked back up.",
+  ].join("\n");
 }
 
 /**
@@ -125,6 +152,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
     queued: [],
     spawned: [],
     resumed: [],
+    completed: [],
     errors: [],
   };
 
@@ -220,6 +248,20 @@ async function resumeAnswered(
     const holder = store.occupyingRun(project.name);
     if (holder !== undefined && holder.id !== run.id) continue;
 
+    // A review park is the one wait that can end the run outright — a PR
+    // merged or closed is a terminal event, not a stage to spawn.
+    if (run.waitingKind === "review") {
+      try {
+        const ended = await concludeReview(run, project, deps, result, log);
+        if (ended) return;
+      } catch (error) {
+        const line = `${project.name}: could not read PR for #${run.ticket}: ${oneLine(error)}`;
+        result.errors.push(line);
+        log(`error  ${line}`);
+        continue;
+      }
+    }
+
     let context: SpawnContext | undefined;
     try {
       context = await resolveWait(run, project, adapter);
@@ -242,6 +284,35 @@ async function resumeAnswered(
     }
     return;
   }
+}
+
+/**
+ * End a review-parked run if its pull request reached a terminal state.
+ * Returns true when the run ended (the ticket has been told and the queue
+ * promoted); false when the PR is still open and the wait continues.
+ */
+async function concludeReview(
+  run: Run,
+  project: TicketingProject,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<boolean> {
+  const { store, adapter } = deps;
+  if (run.pr === undefined) return false;
+
+  const pr = await adapter.getPullRequestThread(project, run.pr);
+  if (pr.state === "open") return false;
+
+  store.complete(run.id);
+  await adapter.postComment(
+    project,
+    run.ticket,
+    pr.state === "merged" ? mergedComment(pr.number) : closedUnmergedComment(pr.number),
+  );
+  result.completed.push(run.id);
+  log(`done   ${run.id} — PR #${pr.number} ${pr.state}`);
+  return true;
 }
 
 /**
@@ -312,6 +383,25 @@ async function resolveWait(
     });
 
     return transition.kind === "advance" ? { stage: transition.stage } : undefined;
+  }
+
+  if (run.waitingKind === "review") {
+    if (run.pr === undefined) return undefined;
+    const pr = await adapter.getPullRequestThread(project, run.pr);
+
+    // Only a human wakes a parked review. The machine's own bookkeeping —
+    // outcome comments, threaded replies — lands on the same surface, and a
+    // loop that answered itself would remediate forever.
+    const words = pr.comments
+      .filter(
+        (comment) =>
+          !comment.fromTimone && instantOf(comment.createdAt) > instantOf(cursor),
+      )
+      .map((comment) => comment.body.trim())
+      .filter((body) => body !== "");
+    if (words.length === 0) return undefined;
+
+    return { stage: "remediation", feedback: words.join("\n\n---\n\n") };
   }
 
   return undefined;

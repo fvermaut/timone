@@ -269,3 +269,34 @@ describe("the delivery prompt", () => {
     expect(prompt).toMatch(/never merge/i);
   });
 });
+
+describe("the remediation prompt", () => {
+  const prompt = stagePrompt("remediation", {
+    ...context,
+    branch: "timone/6-typing-in-the-box",
+    feedback: "Please rename this variable, it shadows the prop.",
+  });
+
+  it("carries the review comment as the defect brief", () => {
+    expect(prompt).toContain("shadows the prop");
+  });
+
+  it("commits with the review-fix convention on the same branch", () => {
+    expect(prompt).toContain("fix: review");
+    expect(prompt).toContain("timone/6-typing-in-the-box");
+  });
+
+  it("draws the ADR-0016 boundary: requirement-moving comments are not fixes", () => {
+    expect(prompt).toMatch(/criteria register|PRD/);
+    expect(prompt).toMatch(/reply|ask/i);
+  });
+
+  it("carries both outcome markers, verbatim", () => {
+    expect(prompt).toContain(STAGE_DONE_MARKER);
+    expect(prompt).toContain(STAGE_HANDED_MARKER);
+  });
+
+  it("answers on the pull request's own thread", () => {
+    expect(prompt).toMatch(/pull request/i);
+  });
+});
