@@ -180,6 +180,16 @@ function classifyingRuntime(
   });
 }
 
+/**
+ * A branch-tip probe reporting that the session moved the branch on. Stages
+ * that owe an artifact are gated on this, so any test exercising a gate has
+ * to say whether work happened — silence would mean "nothing was committed".
+ */
+function movingProbe(): () => Promise<string> {
+  let calls = 0;
+  return async () => (calls++ === 0 ? "sha-before" : "sha-after");
+}
+
 /** A picked-up run on scratch-app#7. */
 function pickedUpRun(store: RunStore): Run {
   return store.register("scratch-app", 7).run;
@@ -213,6 +223,7 @@ describe("spawn configuration", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(pickedUpRun(store), project);
 
     const { prompt } = requests[0];
@@ -233,6 +244,7 @@ describe("spawn configuration", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(pickedUpRun(store), project);
 
     const { prompt } = requests[0];
@@ -262,6 +274,7 @@ describe("spawn configuration", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(pickedUpRun(store), project);
 
     expect(requests[0].prompt).toContain("it's worst on the archive page");
@@ -278,6 +291,7 @@ describe("spawn configuration", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(pickedUpRun(store), project);
 
     expect(requests[0].prompt).toContain(MACHINE_MARKER);
@@ -310,6 +324,7 @@ describe("spawn configuration", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(pickedUpRun(store), project);
 
     // Both comments carry the same author; the prompt must still separate them.
@@ -354,6 +369,7 @@ describe("routing after triage", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project);
 
     const parked = store.get(run.id);
@@ -376,6 +392,7 @@ describe("routing after triage", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project);
 
     expect(store.get(run.id)?.branch).toBeUndefined();
@@ -394,6 +411,7 @@ describe("routing after triage", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project);
 
     expect(store.get(run.id)?.status).toBe("done");
@@ -412,6 +430,7 @@ describe("routing after triage", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project);
 
     const parked = store.get(run.id);
@@ -432,6 +451,7 @@ describe("routing after triage", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project);
 
     expect(store.get(run.id)?.status).toBe("failed");
@@ -449,6 +469,7 @@ describe("routing after triage", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(pickedUpRun(store), project);
 
     // Triage ran; the clarification stage is a conversation, so no second
@@ -477,6 +498,7 @@ describe("resuming a parked run", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(store.get(run.id)!, project, { stage: "requirements" });
 
     // It ran the requirements stage, not the clarification one it stopped in.
@@ -503,6 +525,7 @@ describe("resuming a parked run", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(store.get(run.id)!, project, {
       stage: "triage",
       feedback: "it's not a bug, the whole page is like that",
@@ -552,6 +575,7 @@ describe("the conversation invitation", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project);
 
     const invitation = ticket.comments.at(-1)!;
@@ -598,6 +622,7 @@ describe("run lifecycle", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project);
 
     const finished = store.get(run.id);
@@ -620,6 +645,7 @@ describe("run lifecycle", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(pickedUpRun(store), project);
 
     const body = comments.at(-1)!.body;
@@ -640,6 +666,7 @@ describe("run lifecycle", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project);
 
     const finished = store.get(run.id);
@@ -660,6 +687,7 @@ describe("run lifecycle", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project);
 
     expect(store.get(run.id)?.status).toBe("parked");
@@ -774,6 +802,7 @@ describe("the requirements gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
     // The branch existed while the session ran: a session that cut one on a
@@ -792,6 +821,7 @@ describe("the requirements gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
     expect(store.occupyingRun("scratch-app")?.id).toBe("scratch-app#7");
@@ -809,6 +839,7 @@ describe("the requirements gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
     expect(requests[0].prompt).toContain("timone/7-the-page-feels-slow");
@@ -826,6 +857,7 @@ describe("the requirements gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
     expect(requests[0].prompt).toContain("we agreed the list should page");
@@ -842,6 +874,7 @@ describe("the requirements gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
     const gate = comments.at(-1)!.body;
@@ -865,6 +898,7 @@ describe("the requirements gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
     expect(requests[0].prompt).toMatch(/do \*\*not\*\* ask\s+them to approve it/i);
@@ -881,6 +915,7 @@ describe("the requirements gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
     const parked = store.get("scratch-app#7");
@@ -901,6 +936,7 @@ describe("the requirements gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atRequirements(store), { name: "scratch-app", repoUrl: "/tmp/local.git" }, {
       stage: "requirements",
     });
@@ -921,6 +957,7 @@ describe("the requirements gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(store.get(run.id)!, project, { stage: "requirements" });
 
     expect(store.get(run.id)?.branch).toBe("timone/7-something-else");
@@ -986,6 +1023,7 @@ describe("the plan gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project, { stage: "planning" });
 
     expect(requests[0].prompt).toContain("Awaiting approval");
@@ -1004,6 +1042,7 @@ describe("the plan gate", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(run, project, { stage: "planning", approval: undefined });
 
     // Planning ran, its gate went up, and the run waits on the human — the
@@ -1046,6 +1085,7 @@ describe("recording an approval in the artifact", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atPlanningGate(store), project, {
       stage: "execution",
       approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
@@ -1069,6 +1109,7 @@ describe("recording an approval in the artifact", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atPlanningGate(store), project, {
       stage: "execution",
       approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
@@ -1092,6 +1133,7 @@ describe("recording an approval in the artifact", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atPlanningGate(store), project, {
       stage: "execution",
       approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
@@ -1114,6 +1156,7 @@ describe("recording an approval in the artifact", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(atPlanningGate(store), project, {
       stage: "execution",
       approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
@@ -1144,11 +1187,179 @@ describe("recording an approval in the artifact", () => {
       adapter,
       runtime,
       root: "/root",
+      repoProbe: movingProbe(),
     }).spawn(store.get(run.id)!, project, {
       stage: "planning",
       approval: { stage: "requirements", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
     });
 
     expect(requests[0].prompt).toMatch(/status to Active/i);
+  });
+});
+
+describe("a gate is never opened over nothing", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  function atRequirements(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  /** A probe reporting a branch tip that never moves. */
+  const stuckProbe = async (): Promise<string> => "sha-unchanged";
+
+  /** A probe reporting a tip that moves once the session has run. */
+  function movingProbe(): () => Promise<string> {
+    let calls = 0;
+    return async () => (calls++ === 0 ? "sha-before" : "sha-after");
+  }
+
+  it("refuses to ask for approval of a document the stage never wrote", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: stuckProbe,
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    const body = comments.at(-1)!.body;
+    expect(body).not.toContain("`approve`");
+    expect(body).toMatch(/nothing for you to approve/i);
+  });
+
+  it("fails the run rather than parking it on a gate nobody can answer", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: stuckProbe,
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    const finished = store.get("scratch-app#7");
+    expect(finished?.status).toBe("failed");
+    expect(finished?.failure).toMatch(/without committing anything to gate/);
+  });
+
+  it("opens the gate normally when the branch did move", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(comments.at(-1)!.body).toContain("`approve`");
+    expect(store.get("scratch-app#7")?.waitingKind).toBe("gate");
+  });
+
+  it("treats a branch that did not exist before as work, once it does", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    let calls = 0;
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: async () => (calls++ === 0 ? undefined : "sha-first"),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(comments.at(-1)!.body).toContain("`approve`");
+  });
+
+  it("says nothing has moved on, so earlier answers still stand", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: stuckProbe,
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    const body = comments.at(-1)!.body;
+    expect(body).toMatch(/still stands/i);
+    expect(body.trimEnd().split("\n").at(-1)).toMatch(/What I need from you:/);
+  });
+});
+
+describe("every committing session is watched", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  it("takes a baseline before the approval-recording session, not only after", async () => {
+    // Without one the checks are silently disarmed on a session that commits
+    // and pushes — which is exactly the session they exist to watch.
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    const run = pickedUpRun(store);
+    store.activate(run.id, "s");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer",
+      kind: "gate",
+      stage: "planning",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    const order: string[] = [];
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      beforeSession: async () => {
+        order.push("baseline");
+      },
+      afterSession: async () => {
+        order.push("checked");
+      },
+    }).spawn(store.get(run.id)!, project, {
+      stage: "execution",
+      approval: { stage: "planning", by: "fvermaut", at: "2026-08-04T22:39:09Z" },
+    });
+
+    expect(order.slice(0, 2)).toEqual(["baseline", "checked"]);
   });
 });

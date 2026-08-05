@@ -1,4 +1,9 @@
+import { execFile } from "node:child_process";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+
+const execFileAsync = promisify(execFile);
 
 import type { Manifest } from "../manifest.js";
 import type {
@@ -71,6 +76,11 @@ export interface AgentSessionSpawnerOptions {
   /** Where multi-turn conversations happen. Defaults to the terminal. */
   channel?: ConversationChannel;
   /**
+   * Reads a branch's tip in a project checkout. Behind a seam so the
+   * did-this-stage-produce-anything check is testable without a real repo.
+   */
+  repoProbe?: (repoDir: string, branch: string) => Promise<string | undefined>;
+  /**
    * Guardrail bracket (R15): `beforeSession` records the state of the world
    * before the session touches it, `afterSession` judges what changed.
    */
@@ -118,6 +128,24 @@ export function failedComment(reason: string): string {
 }
 
 /** The comment posted when triage finished without recording a classification. */
+export function producedNothingComment(stage: PipelineStage): string {
+  return [
+    "**I stopped without writing anything down, and that's mine to fix.**",
+    "",
+    `The step I just ran (${stage}) was supposed to leave a document on this`,
+    "ticket's branch for you to read and approve. It didn't.",
+    "",
+    "So there is **nothing for you to approve**, and I would rather say that than",
+    "ask you to sign off on a blank.",
+    "",
+    "Nothing has moved on, and every answer you have already given on this ticket",
+    "still stands.",
+    "",
+    "**What I need from you:** nothing right now — this needs fixing at my end, and I'll come back here when it is.",
+  ].join("\n");
+}
+
+/** The comment posted when triage finished without recording a classification. */
 export function unclassifiedComment(): string {
   return [
     "**I couldn't work out what kind of request this is.**",
@@ -127,6 +155,27 @@ export function unclassifiedComment(): string {
     "",
     "**What I need from you:** re-mark this ticket to make me try again, or add a line saying what you're after.",
   ].join("\n");
+}
+
+/**
+ * A branch's tip sha in `repoDir`, or undefined when the branch does not
+ * exist. Missing is a legitimate answer, not an error: before the first stage
+ * that owns one, there is no branch.
+ */
+async function gitBranchHead(
+  repoDir: string,
+  branch: string,
+): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-parse", "--verify", `refs/heads/${branch}`],
+      { cwd: repoDir },
+    );
+    return stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Reduce an error to one readable line. */
@@ -203,7 +252,13 @@ export class AgentSessionSpawner implements SessionSpawner {
       if (!outcome.ok) return;
       feedback = undefined;
 
-      const next = await this.afterStage(run, project, stage, outcome.ticket);
+      const next = await this.afterStage(
+        run,
+        project,
+        stage,
+        outcome.ticket,
+        outcome.producedWork,
+      );
       if (next === undefined) return;
       stage = next;
       this.options.store.setStage(run.id, stage);
@@ -211,13 +266,19 @@ export class AgentSessionSpawner implements SessionSpawner {
     }
   }
 
-  /** Run one stage's session. Returns the ticket as it stood afterwards. */
+  /**
+   * Run one stage's session. Returns the ticket as it stood afterwards, and
+   * whether the session actually moved the work branch on — which is the only
+   * evidence the daemon has that a stage owing an artifact produced one.
+   */
   private async runStage(
     run: Run,
     project: TicketingProject,
     stage: PipelineStage,
     feedback: string | undefined,
-  ): Promise<{ ok: true; ticket: TicketThread } | { ok: false }> {
+  ): Promise<
+    { ok: true; ticket: TicketThread; producedWork: boolean } | { ok: false }
+  > {
     const { store, adapter, runtime, root } = this.options;
 
     if (!isPrompted(stage)) {
@@ -238,13 +299,10 @@ export class AgentSessionSpawner implements SessionSpawner {
       branch: store.get(run.id)?.branch,
     });
 
-    if (this.options.beforeSession !== undefined) {
-      try {
-        await this.options.beforeSession(run, project);
-      } catch (error) {
-        this.log(`pre-session snapshot failed for ${run.id}: ${oneLine(error)}`);
-      }
-    }
+    await this.snapshot(run, project);
+
+    const branch = store.get(run.id)?.branch;
+    const headBefore = await this.branchHead(project, branch);
 
     const started = await runtime.start({ cwd: root, prompt });
     const active = store.activate(run.id, started.sessionId);
@@ -260,8 +318,28 @@ export class AgentSessionSpawner implements SessionSpawner {
       return { ok: false };
     }
 
+    const headAfter = await this.branchHead(project, branch);
+
     await this.guardrails(active, project);
-    return { ok: true, ticket: await adapter.getTicket(project, run.ticket) };
+    return {
+      ok: true,
+      ticket: await adapter.getTicket(project, run.ticket),
+      producedWork: headAfter !== undefined && headAfter !== headBefore,
+    };
+  }
+
+  /** The work branch's tip, or undefined when there is no branch yet. */
+  private async branchHead(
+    project: TicketingProject,
+    branch: string | undefined,
+  ): Promise<string | undefined> {
+    if (branch === undefined) return undefined;
+    const probe = this.options.repoProbe ?? gitBranchHead;
+    try {
+      return await probe(join(this.options.root, "projects", project.name), branch);
+    } catch {
+      return undefined;
+    }
   }
 
   /**
@@ -273,11 +351,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     project: TicketingProject,
     stage: PipelineStage,
     ticket: TicketThread,
+    producedWork: boolean,
   ): Promise<PipelineStage | undefined> {
     const { store, adapter } = this.options;
 
     if (waitFor(stage) === "gate") {
-      await this.openGate(run, project, stage);
+      await this.openGate(run, project, stage, producedWork);
       return undefined;
     }
 
@@ -326,6 +405,11 @@ export class AgentSessionSpawner implements SessionSpawner {
       { stage: approval.stage, by: approval.by, at: approval.at },
       { project, ticket, branch: store.get(run.id)?.branch },
     );
+
+    // This session commits and pushes like any other, so it gets the same
+    // guardrail bracket. Without a baseline the checks cannot judge it, and
+    // an unpushed approval stamp is exactly the failure they exist to catch.
+    await this.snapshot(run, project);
 
     const started = await runtime.start({ cwd: root, prompt });
     const active = store.activate(run.id, started.sessionId);
@@ -379,9 +463,23 @@ export class AgentSessionSpawner implements SessionSpawner {
     run: Run,
     project: TicketingProject,
     stage: PipelineStage,
+    producedWork: boolean,
   ): Promise<void> {
     const { store, adapter } = this.options;
     const branch = store.get(run.id)?.branch ?? "the work branch";
+
+    // A gate over nothing is the one failure a gate must never have. If the
+    // stage committed nothing, the link would 404 and a reply of `approve`
+    // would advance the pipeline past a step nobody did — so say so plainly
+    // and stop, rather than asking for a signature on a blank.
+    if (!producedWork) {
+      const reason = `the ${stage} stage finished without committing anything to gate`;
+      const failed = store.fail(run.id, reason);
+      await adapter.postComment(project, run.ticket, producedNothingComment(stage));
+      this.log(`failed ${run.id} — ${reason}`);
+      await this.guardrails(failed, project);
+      return;
+    }
 
     const comment = gateCommentFor(stage, project, branch, [
       "I've written it up and put it on a branch, so you can read the real thing",
@@ -458,6 +556,20 @@ export class AgentSessionSpawner implements SessionSpawner {
     return current?.status === "parked"
       ? store.repark(run.id, options)
       : store.park(run.id, options);
+  }
+
+  /**
+   * Record the state of the world before a session touches it. Every session
+   * that can commit gets one — a missing baseline silently disarms the checks
+   * on exactly the session that needed watching.
+   */
+  private async snapshot(run: Run, project: TicketingProject): Promise<void> {
+    if (this.options.beforeSession === undefined) return;
+    try {
+      await this.options.beforeSession(run, project);
+    } catch (error) {
+      this.log(`pre-session snapshot failed for ${run.id}: ${oneLine(error)}`);
+    }
   }
 
   /**

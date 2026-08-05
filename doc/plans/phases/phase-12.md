@@ -171,6 +171,11 @@ npm run type-check
 
 **Seams under test (TDD):** the planning stage reuses 12e's gate mechanism rather than a second copy of it (asserted by construction, not by comment); the approved phase file carries the stamp `timone-plan` writes; the terminal park names what it waits for.
 
+> ✏ **Refined 2026-08-05 — 12g found a false gate, and the cause is the conflict 12e flagged.** The live planning session wrote **no phase file at all**, and the daemon posted an approval request anyway, linking a directory that did not contain a plan. Two separate defects, one fixed and one escalated:
+>
+> - **Fixed (daemon):** a gate was opened on the strength of the session's exit code, never on the existence of what it was gating. A gate over nothing is the one failure a gate must not have — a reply of `approve` would have advanced the pipeline past a step nobody did. The spawner now compares the work branch's tip across the session and, when nothing was committed, fails the run and says so instead of asking for a signature on a blank. Also fixed: the approval-recording session ran with no guardrail baseline, silently disarming the checks on a session that commits and pushes.
+> - **Escalated (process):** `timone-plan` says outright *"the human approves the breakdown **before** any file is written… do not write the file to 'show' the plan"*, and *"never `Awaiting approval` — approval precedes the write"*. `timone-prd` carries the identical rule. The planning session obeyed its skill; the requirements session, one cycle earlier, obeyed this phase's prompt instead and wrote the files. **The same conflict produced opposite behaviour in two consecutive sessions** — which is worse than either outcome, because it means neither is reliable. This is the conflict recorded at 12e as a disagreement between `process.md` stage 3 and PRD-02.R4; it is now proven to break the pipeline rather than merely to differ. **Needs fvermaut's decision and a grill session** — it changes two skills, so it is not a defect execution may quietly correct. 12g cannot complete until it is settled.
+
 > Sub-phase 12e must be complete before starting this sub-phase.
 
 #### Agent Validation Steps
