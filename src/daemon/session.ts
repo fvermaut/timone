@@ -148,12 +148,6 @@ export interface AgentSessionSpawnerOptions {
     branch: string,
   ) => Promise<string | undefined>;
   /**
-   * Guardrail bracket (R15): `beforeSession` records the state of the world
-   * before the session touches it, `afterSession` judges what changed.
-   */
-  beforeSession?: (run: Run, project: TicketingProject) => Promise<void>;
-  afterSession?: (run: Run, project: TicketingProject) => Promise<void>;
-  /**
    * Milliseconds between progress lines while a session works. Defaults to
    * {@link DEFAULT_PROGRESS_INTERVAL_SECONDS}.
    */
@@ -460,8 +454,6 @@ export class AgentSessionSpawner implements SessionSpawner {
       branch: store.get(run.id)?.branch,
     });
 
-    await this.snapshot(run, project);
-
     const branch = store.get(run.id)?.branch;
     const headBefore = await this.branchHead(project, branch);
 
@@ -482,15 +474,13 @@ export class AgentSessionSpawner implements SessionSpawner {
 
     if (!outcome.ok) {
       const reason = outcome.error ?? "the session ended without a result";
-      const failed = store.fail(run.id, reason);
+      store.fail(run.id, reason);
       await adapter.postComment(project, run.ticket, failedComment(reason));
-      await this.guardrails(failed, project);
       return { ok: false };
     }
 
     const headAfter = await this.branchHead(project, branch);
 
-    await this.guardrails(active, project);
     const after = await adapter.getTicket(project, run.ticket);
     return {
       ok: true,
@@ -807,11 +797,6 @@ export class AgentSessionSpawner implements SessionSpawner {
       { project, ticket, branch: store.get(run.id)?.branch },
     );
 
-    // This session commits and pushes like any other, so it gets the same
-    // guardrail bracket. Without a baseline the checks cannot judge it, and
-    // an unpushed approval stamp is exactly the failure they exist to catch.
-    await this.snapshot(run, project);
-
     // Its own declared model, never the runtime's default: this is the second
     // `runtime.start` site and not a `PipelineStage`, so nothing in the graph
     // speaks for it. Haiku carries no effort at all.
@@ -826,13 +811,11 @@ export class AgentSessionSpawner implements SessionSpawner {
     const outcome = await this.watch(run.id, `${run.id} (approval record)`, started);
     if (!outcome.ok) {
       const reason = `could not record the approval: ${outcome.error ?? "the session ended without a result"}`;
-      const failed = store.fail(run.id, reason);
+      store.fail(run.id, reason);
       await adapter.postComment(project, run.ticket, failedComment(reason));
-      await this.guardrails(failed, project);
       return false;
     }
 
-    await this.guardrails(active, project);
     return true;
   }
 
@@ -882,10 +865,9 @@ export class AgentSessionSpawner implements SessionSpawner {
     // and stop, rather than asking for a signature on a blank.
     if (!producedWork) {
       const reason = `the ${stage} stage finished without committing anything to gate`;
-      const failed = store.fail(run.id, reason);
+      store.fail(run.id, reason);
       await adapter.postComment(project, run.ticket, producedNothingComment(stage));
       this.log(`failed ${run.id} — ${reason}`);
-      await this.guardrails(failed, project);
       return;
     }
 
@@ -944,13 +926,9 @@ export class AgentSessionSpawner implements SessionSpawner {
   ): Promise<void> {
     const { adapter } = this.options;
 
-    const parked = this.stop(run, {
-      waitingOn: "the next stage to be built",
-      stage,
-    });
+    this.stop(run, { waitingOn: "the next stage to be built", stage });
     await adapter.postComment(project, run.ticket, parkedComment(stage));
     this.log(`parked ${run.id} at ${stage} — not built yet`);
-    await this.guardrails(parked, project);
   }
 
   /**
@@ -1005,32 +983,6 @@ export class AgentSessionSpawner implements SessionSpawner {
     }
   }
 
-  /**
-   * Record the state of the world before a session touches it. Every session
-   * that can commit gets one — a missing baseline silently disarms the checks
-   * on exactly the session that needed watching.
-   */
-  private async snapshot(run: Run, project: TicketingProject): Promise<void> {
-    if (this.options.beforeSession === undefined) return;
-    try {
-      await this.options.beforeSession(run, project);
-    } catch (error) {
-      this.log(`pre-session snapshot failed for ${run.id}: ${oneLine(error)}`);
-    }
-  }
-
-  /**
-   * Guardrails report; they never decide whether the run succeeded, and a
-   * broken check must not take the daemon down with it.
-   */
-  private async guardrails(run: Run, project: TicketingProject): Promise<void> {
-    if (this.options.afterSession === undefined) return;
-    try {
-      await this.options.afterSession(run, project);
-    } catch (error) {
-      this.log(`post-session checks failed for ${run.id}: ${oneLine(error)}`);
-    }
-  }
 }
 
 /**
@@ -1039,7 +991,9 @@ export class AgentSessionSpawner implements SessionSpawner {
  * Permissions are bypassed because there is no human at the keyboard to
  * answer a prompt — a daemon session that asks would hang forever. That is
  * the accepted risk PRD-02 records for sandboxing; the path-containment
- * guardrail (R15) is what catches a session that strays.
+ * guardrail (R15) is what catches a session that strays. That check no longer
+ * lives here — since ADR-0018 it is a `Stop` hook in `.claude/settings.json`,
+ * which is what makes it cover interactive sessions too.
  */
 export const agentSdkRuntime: SessionRuntime = {
   async start(request: SessionRequest): Promise<StartedSession> {

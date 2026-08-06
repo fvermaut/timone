@@ -729,67 +729,6 @@ describe("run lifecycle", () => {
     expect(() => store.park(run.id, { waitingOn: "again" })).toThrow(/parked/);
   });
 
-  it("runs the post-session checks after the session, not before", async () => {
-    const store = newStore();
-    const { adapter } = fakeAdapter();
-    const { runtime } = classifyingRuntime("feature", adapter);
-    const order: string[] = [];
-    const run = pickedUpRun(store);
-
-    await new AgentSessionSpawner({
-      manifest,
-      store,
-      adapter,
-      runtime,
-      root: "/root",
-      afterSession: async (finishedRun) => {
-        order.push(`checked:${finishedRun.id}`);
-      },
-    }).spawn(run, project);
-
-    expect(order).toEqual(["checked:scratch-app#7"]);
-  });
-
-  it("checks after every session, not only the last one", async () => {
-    const store = newStore();
-    const { adapter } = fakeAdapter();
-    const { runtime } = classifyingRuntime("bug", adapter);
-    const checks: string[] = [];
-
-    await new AgentSessionSpawner({
-      manifest,
-      store,
-      adapter,
-      runtime,
-      root: "/root",
-      afterSession: async (run) => {
-        checks.push(run.status);
-      },
-    }).spawn(pickedUpRun(store), project);
-
-    // Once after triage's session, once when the run parks unbuilt.
-    expect(checks).toEqual(["active", "parked"]);
-  });
-
-  it("does not let a failing post-session check crash the spawn", async () => {
-    const store = newStore();
-    const { adapter } = fakeAdapter();
-    const { runtime } = classifyingRuntime("feature", adapter);
-    const run = pickedUpRun(store);
-
-    await new AgentSessionSpawner({
-      manifest,
-      store,
-      adapter,
-      runtime,
-      root: "/root",
-      afterSession: async () => {
-        throw new Error("git blew up");
-      },
-    }).spawn(run, project);
-
-    expect(store.get(run.id)?.status).toBe("parked");
-  });
 });
 
 describe("the requirements gate", () => {
@@ -1352,51 +1291,6 @@ describe("a gate is never opened over nothing", () => {
     const body = comments.at(-1)!.body;
     expect(body).toMatch(/still stands/i);
     expect(body.trimEnd().split("\n").at(-1)).toMatch(/What I need from you:/);
-  });
-});
-
-describe("every committing session is watched", () => {
-  const settled: TicketThread = {
-    ...thread,
-    labels: ["timone", "triage:feature"],
-    comments: [],
-  };
-
-  it("takes a baseline before the approval-recording session, not only after", async () => {
-    // Without one the checks are silently disarmed on a session that commits
-    // and pushes — which is exactly the session they exist to watch.
-    const store = newStore();
-    const { adapter } = fakeAdapter(settled);
-    const { runtime } = fakeRuntime();
-    const run = pickedUpRun(store);
-    store.activate(run.id, "s");
-    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
-    store.park(run.id, {
-      waitingOn: "your answer",
-      kind: "gate",
-      stage: "planning",
-      waitCursor: "2026-08-03T09:00:00Z",
-    });
-    const order: string[] = [];
-
-    await new AgentSessionSpawner({
-      manifest,
-      store,
-      adapter,
-      runtime,
-      root: "/root",
-      beforeSession: async () => {
-        order.push("baseline");
-      },
-      afterSession: async () => {
-        order.push("checked");
-      },
-    }).spawn(store.get(run.id)!, project, {
-      stage: "execution",
-      approval: { stage: "planning", by: "fvermaut", at: "2026-08-04T22:39:09Z" },
-    });
-
-    expect(order.slice(0, 2)).toEqual(["baseline", "checked"]);
   });
 });
 

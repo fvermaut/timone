@@ -8,7 +8,6 @@ import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { AgentSessionSpawner, agentSdkRuntime } from "../daemon/session.js";
-import { GuardrailObserver } from "../daemon/hooks.js";
 
 /** Options accepted by `timone daemon`, as commander parses them. */
 interface DaemonOptions {
@@ -117,20 +116,15 @@ export function registerDaemonCommand(program: Command): void {
 
       const adapter = new GitHubTicketingAdapter();
       const log = (message: string): void => console.log(message);
-      const guardrails = new GuardrailObserver({
-        root: process.cwd(),
-        store,
-        adapter,
-        log,
-      });
+      // No guardrail bracket here any more (ADR-0018): the checks live in
+      // `.claude/settings.json`'s SessionStart/Stop hooks, which every session
+      // at the timone root passes through — including the ones a human starts.
       const spawner = new AgentSessionSpawner({
         manifest,
         store,
         adapter,
         runtime: agentSdkRuntime,
         root: process.cwd(),
-        beforeSession: (run, target) => guardrails.before(run, target),
-        afterSession: (run, target) => guardrails.after(run, target),
         progressIntervalMs: progressInterval * 1000,
         log,
       });

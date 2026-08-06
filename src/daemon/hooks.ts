@@ -1,10 +1,17 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import type { TicketingAdapter, TicketingProject } from "../adapters/ticketing.js";
-import type { Run, RunStore } from "./runs.js";
+import type { RunStore } from "./runs.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,12 +49,23 @@ export interface RepoEvidence {
  * be shown failing on a fabricated violation.
  */
 export interface SessionEvidence {
-  /** The project the session was supposed to be working on. */
-  target: string;
-  /** The timone repo, where the session ran. */
+  /**
+   * The project the session was supposed to be working on, when one is known.
+   *
+   * A daemon session always has one — it belongs to a run, and the run names
+   * its project. An interactive session belongs to no run and names nothing,
+   * and that absence is meaningful rather than missing information: with no
+   * declared target there is no "should have stayed inside" to judge, and a
+   * session working on Timone itself touches nothing under `projects/` at all.
+   */
+  target?: string;
+  /** The timone repo, where every session runs (ADR-0007). */
   workspace: RepoEvidence;
-  /** The managed project's checkout. */
-  project: RepoEvidence;
+  /**
+   * The managed projects' checkouts. One for a daemon session; every declared
+   * project for an interactive one, because nobody said which it would touch.
+   */
+  projects: RepoEvidence[];
 }
 
 export type GuardrailRule =
@@ -79,7 +97,7 @@ const HARNESS_PATHS = [
  */
 export function checkUnpushed(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
-  for (const repo of [evidence.project, evidence.workspace]) {
+  for (const repo of [...evidence.projects, evidence.workspace]) {
     for (const branch of repo.branches) {
       if (branch.unpushed.length === 0) continue;
       violations.push({
@@ -104,7 +122,7 @@ export function checkUnpushed(evidence: SessionEvidence): Violation[] {
  */
 export function checkStatusPlacement(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
-  for (const repo of [evidence.project, evidence.workspace]) {
+  for (const repo of [...evidence.projects, evidence.workspace]) {
     for (const commit of repo.commits) {
       if (commit.branch === repo.defaultBranch) continue;
       if (!commit.files.some((file) => file.endsWith("STATUS.md"))) continue;
@@ -127,53 +145,64 @@ function isHarnessPath(path: string): boolean {
 }
 
 /**
- * **Path containment.** A session works one project. In the workspace repo
- * that means it should have touched nothing outside `projects/<target>/`
- * (and that directory is not the workspace repo's content anyway); in the
- * project repo it means no harness file rides along — process artifacts
- * under `doc/` and `CONTEXT.md` are exactly what a client repo does receive
- * (R2).
+ * **Path containment.** Two halves, and they have different preconditions.
+ *
+ * In the workspace repo: a session sent to work one project should have
+ * touched nothing outside `projects/<target>/`. This half asks a question
+ * that only exists when somebody named a target — a session working on
+ * Timone itself was *sent* to change `src/` and `doc/`, and judging it
+ * against a target it never had would flag every honest edit. So it runs for
+ * a daemon session and is silent for an interactive one.
+ *
+ * In a project repo: no harness file may ride along, whoever was driving.
+ * Process artifacts under `doc/` and `CONTEXT.md` are exactly what a client
+ * repo does receive (R2); `.claude/`, `.timone/` and the rest are not. This
+ * half needs no target and runs for both kinds.
  */
 export function checkPathContainment(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
-  const allowedPrefix = `projects/${evidence.target}/`;
 
-  const strayed = [
-    ...evidence.workspace.commits.flatMap((commit) =>
-      commit.files.map((file) => ({ file, where: `commit ${commit.sha}` })),
-    ),
-    ...evidence.workspace.workingTree.map((file) => ({
-      file,
-      where: "uncommitted change",
-    })),
-  ].filter(({ file }) => !file.startsWith(allowedPrefix));
+  if (evidence.target !== undefined) {
+    const allowedPrefix = `projects/${evidence.target}/`;
+    const strayed = [
+      ...evidence.workspace.commits.flatMap((commit) =>
+        commit.files.map((file) => ({ file, where: `commit ${commit.sha}` })),
+      ),
+      ...evidence.workspace.workingTree.map((file) => ({
+        file,
+        where: "uncommitted change",
+      })),
+    ].filter(({ file }) => !file.startsWith(allowedPrefix));
 
-  if (strayed.length > 0) {
-    violations.push({
-      rule: "path-containment",
-      summary: `the session changed ${strayed.length} file(s) outside \`${allowedPrefix}\``,
-      detail: [
-        `This run was working on **${evidence.target}**, so everything it touches belongs under \`${allowedPrefix}\`.`,
-        ...strayed.map(({ file, where }) => `- ${file} (${where})`),
-      ],
-    });
+    if (strayed.length > 0) {
+      violations.push({
+        rule: "path-containment",
+        summary: `the session changed ${strayed.length} file(s) outside \`${allowedPrefix}\``,
+        detail: [
+          `This run was working on **${evidence.target}**, so everything it touches belongs under \`${allowedPrefix}\`.`,
+          ...strayed.map(({ file, where }) => `- ${file} (${where})`),
+        ],
+      });
+    }
   }
 
-  const harness = evidence.project.commits.flatMap((commit) =>
-    commit.files
-      .filter(isHarnessPath)
-      .map((file) => `- ${file} (commit ${commit.sha})`),
-  );
+  for (const project of evidence.projects) {
+    const harness = project.commits.flatMap((commit) =>
+      commit.files
+        .filter(isHarnessPath)
+        .map((file) => `- ${file} (commit ${commit.sha})`),
+    );
 
-  if (harness.length > 0) {
-    violations.push({
-      rule: "path-containment",
-      summary: `${harness.length} harness file(s) were committed into ${evidence.project.repo}`,
-      detail: [
-        "A client repository receives process artifacts only — documents under `doc/` and `CONTEXT.md`. These are not that:",
-        ...harness,
-      ],
-    });
+    if (harness.length > 0) {
+      violations.push({
+        rule: "path-containment",
+        summary: `${harness.length} harness file(s) were committed into ${project.repo}`,
+        detail: [
+          "A client repository receives process artifacts only — documents under `doc/` and `CONTEXT.md`. These are not that:",
+          ...harness,
+        ],
+      });
+    }
   }
 
   return violations;
@@ -188,12 +217,36 @@ export function checkAll(evidence: SessionEvidence): Violation[] {
   ];
 }
 
+/**
+ * Where a report goes, which is decided by whether a run owns the session.
+ *
+ * Resolved rather than configured: the check looks the session id up in the
+ * ledger, and runs already store it. A run found means the daemon drove this
+ * session and its ticket is the right place; no run means a human did, and
+ * there is no ticket to write on. One implementation, two audiences.
+ */
+export type ReportTarget =
+  | { kind: "run"; project: TicketingProject; runId: string; ticket: number }
+  | { kind: "interactive"; sessionId: string };
+
 export interface GuardrailReportDeps {
   store: RunStore;
   adapter: TicketingAdapter;
-  project: TicketingProject;
-  runId: string;
-  ticket: number;
+  target: ReportTarget;
+  /** Where an interactive report is written. Defaults to stdout. */
+  print?: (message: string) => void;
+  /** Appends one line to `.timone/sessions.jsonl`. Defaults to doing nothing. */
+  journal?: (line: string) => void;
+  /**
+   * Violation summaries already reported for this session, which are found
+   * again but not repeated. `Stop` fires at the end of every assistant turn
+   * rather than once per session, so without this an interactive session
+   * would be told the same thing after every reply until it was fixed.
+   *
+   * It lives here rather than in the rules on purpose: the rules stay pure
+   * functions over git evidence and know nothing about turns.
+   */
+  suppress?: ReadonlySet<string>;
 }
 
 /** The loud comment for one violation. Ends, like every message, with a CTA. */
@@ -203,30 +256,63 @@ export function violationComment(violation: Violation): string {
     "",
     ...violation.detail,
     "",
-    "This is a mechanical check, not a judgement about the work itself. It runs after every automatic session because these are mistakes that otherwise pass unnoticed.",
+    "This is a mechanical check, not a judgement about the work itself. It runs after every session at the timone root because these are mistakes that otherwise pass unnoticed.",
     "",
     "**What I need from you:** nothing yet — but treat anything below this comment as unfinished until it is sorted out.",
   ].join("\n");
 }
 
+/** The same violation, for someone reading a terminal rather than a ticket. */
+export function violationReport(violation: Violation): string {
+  return [
+    `⚠️  Automatic check failed — ${violation.summary}`,
+    ...violation.detail.map((line) => `    ${line}`),
+  ].join("\n");
+}
+
 /**
- * Run every check and report what failed: one loud ticket comment per
- * violation, and the run flagged so `timone status` shows it. A clean
- * session produces nothing — silence is the signal that all three passed.
+ * Run every check and report what failed.
+ *
+ * A session the daemon drove gets one loud ticket comment per violation and
+ * its run flagged, so `timone status` shows it — unchanged from phase 11,
+ * because that path already worked and this slice's risk is breaking it.
+ *
+ * A session a human drove gets the same words on stdout and one line in the
+ * journal, and posts nothing anywhere: there is no ticket, and inventing one
+ * would put a machine's bookkeeping on somebody's unrelated work.
+ *
+ * A clean session of either kind produces nothing. Silence is the signal.
  */
 export async function reportGuardrails(
   evidence: SessionEvidence,
   deps: GuardrailReportDeps,
 ): Promise<Violation[]> {
-  const violations = checkAll(evidence);
+  const suppress = deps.suppress ?? new Set<string>();
+  const violations = checkAll(evidence).filter(
+    (violation) => !suppress.has(violation.summary),
+  );
+  const print = deps.print ?? ((message: string) => console.log(message));
+  const journal = deps.journal ?? (() => {});
 
   for (const violation of violations) {
-    await deps.adapter.postComment(
-      deps.project,
-      deps.ticket,
-      violationComment(violation),
+    if (deps.target.kind === "run") {
+      await deps.adapter.postComment(
+        deps.target.project,
+        deps.target.ticket,
+        violationComment(violation),
+      );
+      deps.store.flag(deps.target.runId, violation.summary);
+      continue;
+    }
+
+    print(violationReport(violation));
+    journal(
+      JSON.stringify({
+        session: deps.target.sessionId,
+        rule: violation.rule,
+        summary: violation.summary,
+      }),
     );
-    deps.store.flag(deps.runId, violation.summary);
   }
 
   return violations;
@@ -294,20 +380,29 @@ export type RepoBaseline = Map<string, string>;
 /** What the guardrails need to know about the world before a session. */
 export interface SessionBaseline {
   workspace: RepoBaseline;
-  project: RepoBaseline;
+  /** Project name → its checkout's branch tips, for every declared project. */
+  projects: Map<string, RepoBaseline>;
 }
 
-/** Record both repos' branch tips. Called immediately before a session. */
+/**
+ * Record every repo's branch tips. Called from the `SessionStart` hook, which
+ * cannot know which project the session will touch — so it baselines them
+ * all. A checkout that does not exist yet contributes an empty map rather
+ * than an error: not having cloned a project is not a violation.
+ */
 export async function captureBaseline(
   root: string,
-  projectDir: string,
+  projects: readonly string[],
 ): Promise<SessionBaseline> {
-  return {
-    workspace: await branchTips(root),
-    project: existsSync(projectDir)
-      ? await branchTips(projectDir)
-      : new Map<string, string>(),
-  };
+  const byProject = new Map<string, RepoBaseline>();
+  for (const name of projects) {
+    const dir = join(root, "projects", name);
+    byProject.set(
+      name,
+      existsSync(dir) ? await branchTips(dir) : new Map<string, string>(),
+    );
+  }
+  return { workspace: await branchTips(root), projects: byProject };
 }
 
 /**
@@ -386,76 +481,149 @@ async function collectRepo(
   };
 }
 
-/** Gather the evidence for one finished session. */
+/**
+ * Gather the evidence for one finished session.
+ *
+ * `target` is passed only when a run owns the session. Every project the
+ * baseline covered is collected either way — a stray commit in a checkout
+ * nobody named is exactly the accident this widening exists to catch.
+ */
 export async function collectEvidence(
   root: string,
-  target: string,
   baseline: SessionBaseline,
+  target?: string,
 ): Promise<SessionEvidence> {
-  const projectDir = join(root, "projects", target);
+  const projects: RepoEvidence[] = [];
+  for (const [name, tips] of baseline.projects) {
+    projects.push(
+      await collectRepo(join(root, "projects", name), name, tips),
+    );
+  }
   return {
-    target,
+    ...(target === undefined ? {} : { target }),
     workspace: await collectRepo(root, "timone", baseline.workspace),
-    project: await collectRepo(projectDir, target, baseline.project),
+    projects,
   };
 }
 
-export interface GuardrailObserverOptions {
-  root: string;
-  store: RunStore;
-  adapter: TicketingAdapter;
-  log?: (message: string) => void;
+// ---------------------------------------------------------------------------
+// Parking a baseline between two processes.
+//
+// `SessionStart` and `Stop` are separate invocations of the CLI, so the
+// baseline cannot live in memory the way it did when one spawner held both
+// ends. It is keyed by session id rather than run id because an interactive
+// session has no run — and the session id is the only identifier both hooks
+// are given.
+// ---------------------------------------------------------------------------
+
+/** What is parked on disk between the two hooks. */
+interface StoredBaseline {
+  workspace: Record<string, string>;
+  projects: Record<string, Record<string, string>>;
+  /**
+   * Violation summaries already reported for this session. `Stop` fires at
+   * the end of every assistant turn, not once per session, so without this
+   * an interactive session would repeat the same complaint after every reply.
+   */
+  reported: string[];
+  /** When the baseline was taken, so old ones can be swept. */
+  takenAt: string;
+}
+
+/** A session id reduced to something safe to use as a filename. */
+function safeName(sessionId: string): string {
+  return sessionId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 128) || "unknown";
+}
+
+/** Where a session's baseline is parked. Under `.timone/`, so gitignored. */
+export function baselinePath(root: string, sessionId: string): string {
+  return join(root, ".timone", "baselines", `${safeName(sessionId)}.json`);
+}
+
+/** The journal an interactive session's findings are appended to. */
+export function journalPath(root: string): string {
+  return join(root, ".timone", "sessions.jsonl");
+}
+
+/** Park a baseline for the `Stop` hook to find. */
+export function saveBaseline(
+  path: string,
+  baseline: SessionBaseline,
+  takenAt: string,
+): void {
+  const stored: StoredBaseline = {
+    workspace: Object.fromEntries(baseline.workspace),
+    projects: Object.fromEntries(
+      [...baseline.projects].map(([name, tips]) => [
+        name,
+        Object.fromEntries(tips),
+      ]),
+    ),
+    reported: [],
+    takenAt,
+  };
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(stored)}\n`, "utf8");
 }
 
 /**
- * Brackets a session: records the baseline before it starts, then judges
- * what changed once it ends. Held per run, because a run's baseline is only
- * meaningful against that run's session.
+ * Read a parked baseline, or undefined when there is none — which is a
+ * finding rather than a silence: without a baseline the checks cannot judge
+ * anything, and passing quietly would disarm them on exactly the session that
+ * needed watching.
  */
-export class GuardrailObserver {
-  private readonly baselines = new Map<string, SessionBaseline>();
-  private readonly log: (message: string) => void;
-
-  constructor(private readonly options: GuardrailObserverOptions) {
-    this.log = options.log ?? (() => {});
+export function loadBaseline(
+  path: string,
+): { baseline: SessionBaseline; reported: string[] } | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    const stored = JSON.parse(readFileSync(path, "utf8")) as StoredBaseline;
+    return {
+      baseline: {
+        workspace: new Map(Object.entries(stored.workspace ?? {})),
+        projects: new Map(
+          Object.entries(stored.projects ?? {}).map(([name, tips]) => [
+            name,
+            new Map(Object.entries(tips)),
+          ]),
+        ),
+      },
+      reported: stored.reported ?? [],
+    };
+  } catch {
+    return undefined;
   }
+}
 
-  async before(run: Run, project: TicketingProject): Promise<void> {
-    this.baselines.set(
-      run.id,
-      await captureBaseline(
-        this.options.root,
-        join(this.options.root, "projects", project.name),
-      ),
-    );
+/** Remember what has already been said, so `Stop` does not say it each turn. */
+export function markReported(path: string, summaries: string[]): void {
+  if (!existsSync(path) || summaries.length === 0) return;
+  try {
+    const stored = JSON.parse(readFileSync(path, "utf8")) as StoredBaseline;
+    stored.reported = [...new Set([...(stored.reported ?? []), ...summaries])];
+    writeFileSync(path, `${JSON.stringify(stored)}\n`, "utf8");
+  } catch {
+    // A journal that cannot be updated is not worth failing a session over.
   }
+}
 
-  async after(run: Run, project: TicketingProject): Promise<void> {
-    const baseline = this.baselines.get(run.id);
-    if (baseline === undefined) {
-      this.log(
-        `guardrails skipped for ${run.id}: no baseline was taken before the session`,
-      );
-      return;
+/**
+ * Delete baselines older than a day. Called on `SessionStart`, because that
+ * is the moment a new one is written and the only moment anything is
+ * guaranteed to run: a session killed mid-flight never reaches `Stop`, and
+ * its baseline would otherwise sit there forever.
+ */
+export function sweepBaselines(root: string, now: Date, maxAgeMs: number): void {
+  const dir = dirname(baselinePath(root, "x"));
+  if (!existsSync(dir)) return;
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    try {
+      const stored = JSON.parse(readFileSync(path, "utf8")) as StoredBaseline;
+      const age = now.getTime() - Date.parse(stored.takenAt);
+      if (Number.isFinite(age) && age > maxAgeMs) rmSync(path, { force: true });
+    } catch {
+      rmSync(path, { force: true });
     }
-    this.baselines.delete(run.id);
-
-    const evidence = await collectEvidence(
-      this.options.root,
-      project.name,
-      baseline,
-    );
-    const violations = await reportGuardrails(evidence, {
-      store: this.options.store,
-      adapter: this.options.adapter,
-      project,
-      runId: run.id,
-      ticket: run.ticket,
-    });
-    this.log(
-      violations.length === 0
-        ? `guardrails clean for ${run.id}`
-        : `guardrails flagged ${violations.length} violation(s) for ${run.id}`,
-    );
   }
 }

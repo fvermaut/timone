@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { Command } from "commander";
 
 import { registerDaemonCommand } from "./commands/daemon.js";
+import { registerGuardrailsCommand } from "./commands/guardrails.js";
 import { registerProjectsCommand } from "./commands/projects.js";
 import { registerRetryCommand } from "./commands/retry.js";
 import { registerStatusCommand } from "./commands/status.js";
@@ -39,6 +40,7 @@ export function buildProgram(): Command {
   registerProjectsCommand(program);
   registerWorkspaceCommand(program);
   registerDaemonCommand(program);
+  registerGuardrailsCommand(program);
   registerStatusCommand(program);
   registerTakeoverCommand(program);
   registerRetryCommand(program);

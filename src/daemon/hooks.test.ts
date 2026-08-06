@@ -60,22 +60,33 @@ function cleanEvidence(): SessionEvidence {
   return {
     target: "scratch-app",
     workspace: quietRepo("timone"),
-    project: {
-      repo: "scratch-app",
-      defaultBranch: "main",
-      branches: [{ name: "phase/01", unpushed: [], hasUpstream: true }],
-      commits: [
-        { sha: "aaa1111", branch: "phase/01", files: ["src/features/todos/x.ts"] },
-      ],
-      workingTree: [],
-    },
+    projects: [
+      {
+        repo: "scratch-app",
+        defaultBranch: "main",
+        branches: [{ name: "phase/01", unpushed: [], hasUpstream: true }],
+        commits: [
+          {
+            sha: "aaa1111",
+            branch: "phase/01",
+            files: ["src/features/todos/x.ts"],
+          },
+        ],
+        workingTree: [],
+      },
+    ],
   };
+}
+
+/** The one project checkout in the fixture above. */
+function projectRepo(evidence: SessionEvidence): RepoEvidence {
+  return evidence.projects[0];
 }
 
 describe("checkUnpushed", () => {
   it("flags a branch carrying commits the remote never saw", () => {
     const evidence = cleanEvidence();
-    evidence.project.branches = [
+    projectRepo(evidence).branches = [
       { name: "phase/01", unpushed: ["aaa1111", "bbb2222"], hasUpstream: true },
     ];
 
@@ -89,7 +100,7 @@ describe("checkUnpushed", () => {
 
   it("flags a branch that was never pushed at all", () => {
     const evidence = cleanEvidence();
-    evidence.project.branches = [
+    projectRepo(evidence).branches = [
       { name: "phase/01", unpushed: ["aaa1111"], hasUpstream: false },
     ];
 
@@ -107,7 +118,7 @@ describe("checkUnpushed", () => {
 describe("checkStatusPlacement", () => {
   it("flags STATUS.md committed off the default branch", () => {
     const evidence = cleanEvidence();
-    evidence.project.commits = [
+    projectRepo(evidence).commits = [
       { sha: "ccc3333", branch: "phase/01", files: ["STATUS.md", "src/x.ts"] },
     ];
 
@@ -130,7 +141,7 @@ describe("checkStatusPlacement", () => {
 
   it("stays silent when STATUS.md is committed on the default branch", () => {
     const evidence = cleanEvidence();
-    evidence.project.commits = [
+    projectRepo(evidence).commits = [
       { sha: "ccc3333", branch: "main", files: ["STATUS.md"] },
     ];
 
@@ -165,7 +176,7 @@ describe("checkPathContainment", () => {
 
   it("flags harness files committed into the client repo", () => {
     const evidence = cleanEvidence();
-    evidence.project.commits = [
+    projectRepo(evidence).commits = [
       {
         sha: "fff6666",
         branch: "phase/01",
@@ -181,7 +192,7 @@ describe("checkPathContainment", () => {
 
   it("allows process artifacts in the client repo", () => {
     const evidence = cleanEvidence();
-    evidence.project.commits = [
+    projectRepo(evidence).commits = [
       {
         sha: "fff6666",
         branch: "phase/01",
@@ -260,19 +271,17 @@ describe("reportGuardrails", () => {
     const { adapter, comments } = fakeAdapter();
 
     const evidence = cleanEvidence();
-    evidence.project.branches = [
+    projectRepo(evidence).branches = [
       { name: "phase/01", unpushed: ["aaa1111"], hasUpstream: true },
     ];
-    evidence.project.commits = [
+    projectRepo(evidence).commits = [
       { sha: "ccc3333", branch: "phase/01", files: ["STATUS.md"] },
     ];
 
     const violations = await reportGuardrails(evidence, {
       store,
       adapter,
-      project,
-      runId: run.id,
-      ticket: 7,
+      target: { kind: "run", project, runId: run.id, ticket: 7 },
     });
 
     expect(violations).toHaveLength(2);
@@ -293,9 +302,7 @@ describe("reportGuardrails", () => {
     const violations = await reportGuardrails(cleanEvidence(), {
       store,
       adapter,
-      project,
-      runId: run.id,
-      ticket: 7,
+      target: { kind: "run", project, runId: run.id, ticket: 7 },
     });
 
     expect(violations).toEqual([]);
