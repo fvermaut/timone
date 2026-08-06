@@ -169,6 +169,8 @@ npm run type-check
 
 **Seams under test (TDD):** merged/closed/comment/silence over fabricated PR threads, each to its transition; a machine comment on the PR never wakes the run (the marker earning its keep on a second surface); the remediation prompt distinguishes act from ask; the cycle's exit state is parked-on-review with the cursor advanced; re-delivery targets the same PR number.
 
+> ✏ **Refined 2026-08-06 — requested and approved by fvermaut at the 13h gate.** A ticket whose run ends stayed open on GitHub, though its closing comment says "this ticket's journey ends here" — the machine saying one thing and doing another, and an open finished ticket re-enters the marked listing on every poll forever. The seam gained an eighth capability, `closeTicket(project, number, reason)`: a merged PR closes the ticket as `completed`, a declined one as `not-planned` (its comment now says "reopen and re-mark"), and the answered-question route closes as `completed` — matching the words each path already posts. Scope grown at the gate with the human's explicit request standing as the re-approval this amendment needs.
+
 > Sub-phases 13a–13e must be complete before starting this sub-phase.
 
 #### Agent Validation Steps

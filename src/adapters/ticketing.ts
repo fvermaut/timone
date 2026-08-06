@@ -208,4 +208,17 @@ export interface TicketingAdapter {
     body: string,
     replyTo?: string,
   ): Promise<void>;
+
+  /**
+   * Close a ticket whose journey has ended — `completed` when the work
+   * merged or a question was answered, `not-planned` when the work was
+   * declined. A ticket left open after the machine told it "this ticket's
+   * journey ends here" is the machine saying one thing and doing another
+   * (asked for by fvermaut at phase 13's live gate).
+   */
+  closeTicket(
+    project: TicketingProject,
+    number: number,
+    reason: "completed" | "not-planned",
+  ): Promise<void>;
 }

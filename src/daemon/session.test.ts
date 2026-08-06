@@ -108,6 +108,7 @@ const noPullRequests = {
     throw new Error("no pull request exists in this test");
   },
   async postPullRequestComment(): Promise<void> {},
+  async closeTicket(): Promise<void> {},
 };
 
 function fakeAdapter(initial: TicketThread = thread): {

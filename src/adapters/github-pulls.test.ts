@@ -296,3 +296,31 @@ describe("postPullRequestComment", () => {
     expect(body.match(new RegExp("🤖", "g"))).toHaveLength(1);
   });
 });
+
+describe("closeTicket", () => {
+  it("closes a completed ticket with the completed reason", async () => {
+    const { run, calls } = fakeRunner("");
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    await adapter.closeTicket(alpha, 6, "completed");
+
+    expect(calls[0].args).toEqual([
+      "issue",
+      "close",
+      "6",
+      "--repo",
+      "fvermaut/scratch-app",
+      "--reason",
+      "completed",
+    ]);
+  });
+
+  it("closes declined work as not planned", async () => {
+    const { run, calls } = fakeRunner("");
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    await adapter.closeTicket(alpha, 6, "not-planned");
+
+    expect(calls[0].args).toContain("not planned");
+  });
+});

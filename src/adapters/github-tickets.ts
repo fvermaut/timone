@@ -335,6 +335,22 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     ]);
   }
 
+  async closeTicket(
+    project: TicketingProject,
+    number: number,
+    reason: "completed" | "not-planned",
+  ): Promise<void> {
+    await this.run("gh", [
+      "issue",
+      "close",
+      String(number),
+      "--repo",
+      repoSlug(project.repoUrl),
+      "--reason",
+      reason === "completed" ? "completed" : "not planned",
+    ]);
+  }
+
   async findPullRequest(
     project: TicketingProject,
     branch: string,

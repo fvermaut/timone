@@ -697,6 +697,9 @@ export class AgentSessionSpawner implements SessionSpawner {
     if (transition.kind === "finish") {
       store.complete(run.id);
       await adapter.postComment(project, run.ticket, answeredComment());
+      // The comment says "I'm closing my side of it" — so close it, rather
+      // than saying one thing and doing another.
+      await adapter.closeTicket(project, run.ticket, "completed");
       this.log(`done   ${run.id} — ${transition.reason}`);
       return undefined;
     }

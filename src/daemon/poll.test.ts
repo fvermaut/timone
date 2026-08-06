@@ -89,6 +89,7 @@ const noPullRequests = {
     throw new Error("no pull request exists in this test");
   },
   async postPullRequestComment(): Promise<void> {},
+  async closeTicket(): Promise<void> {},
 };
 
 function fakeAdapter(
@@ -808,8 +809,9 @@ describe("pollOnce — a run parked on a pull-request review", () => {
   function reviewAdapter(
     state: "open" | "merged" | "closed",
     comments: PullRequestThread["comments"],
-  ): { adapter: TicketingAdapter; posted: PostedComment[] } {
+  ): { adapter: TicketingAdapter; posted: PostedComment[]; closed: string[] } {
     const posted: PostedComment[] = [];
+    const closed: string[] = [];
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
       async listMarkedTickets(): Promise<Ticket[]> {
@@ -840,8 +842,11 @@ describe("pollOnce — a run parked on a pull-request review", () => {
         };
       },
       async postPullRequestComment(): Promise<void> {},
+      async closeTicket(_project, number, reason): Promise<void> {
+        closed.push(`${number}:${reason}`);
+      },
     };
-    return { adapter, posted };
+    return { adapter, posted, closed };
   }
 
   it("completes the run and promotes the queue when the PR merged", async () => {
@@ -849,13 +854,15 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     parkedOnReview(store);
     const { run: queued } = store.register("scratch-app", 8);
     expect(queued.status).toBe("queued");
-    const { adapter, posted } = reviewAdapter("merged", []);
+    const { adapter, posted, closed } = reviewAdapter("merged", []);
     const { spawner, spawned } = fakeSpawner();
 
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
     expect(store.get("scratch-app#6")?.status).toBe("done");
     expect(posted.some((comment) => /merged/i.test(comment.body))).toBe(true);
+    // A ticket whose journey ended is closed, not left open forever.
+    expect(closed).toEqual(["6:completed"]);
     // R10's live half in miniature: the terminal state is what starts the
     // next ticket.
     expect(store.get("scratch-app#8")?.status).not.toBe("queued");
@@ -865,13 +872,14 @@ describe("pollOnce — a run parked on a pull-request review", () => {
   it("completes the run as declined when the PR was closed unmerged", async () => {
     const store = newStore();
     parkedOnReview(store);
-    const { adapter, posted } = reviewAdapter("closed", []);
+    const { adapter, posted, closed } = reviewAdapter("closed", []);
     const { spawner } = fakeSpawner();
 
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
     expect(store.get("scratch-app#6")?.status).toBe("done");
     expect(posted.some((comment) => /without merging/i.test(comment.body))).toBe(true);
+    expect(closed).toEqual(["6:not-planned"]);
   });
 
   it("spawns a remediation carrying the human's words on a new review comment", async () => {

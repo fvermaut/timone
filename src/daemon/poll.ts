@@ -83,10 +83,10 @@ export function closedUnmergedComment(pr: number): string {
     "**The pull request was closed without merging.**",
     "",
     `Pull request #${pr} for this ticket was closed rather than merged, so I'm`,
-    "treating this work as declined and stepping away from it. The branch and",
-    "everything on it stay where they are.",
+    "treating this work as declined and closing this ticket with it. The",
+    "branch and everything on it stay where they are.",
     "",
-    "**What I need from you:** nothing — re-mark this ticket if you want the work picked back up.",
+    "**What I need from you:** nothing — reopen and re-mark this ticket if you want the work picked back up.",
   ].join("\n");
 }
 
@@ -309,6 +309,11 @@ async function concludeReview(
     project,
     run.ticket,
     pr.state === "merged" ? mergedComment(pr.number) : closedUnmergedComment(pr.number),
+  );
+  await adapter.closeTicket(
+    project,
+    run.ticket,
+    pr.state === "merged" ? "completed" : "not-planned",
   );
   result.completed.push(run.id);
   log(`done   ${run.id} — PR #${pr.number} ${pr.state}`);
