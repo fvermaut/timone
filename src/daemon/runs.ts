@@ -241,6 +241,7 @@ export class RunStore {
    * re-polling the same marked ticket never doubles it.
    */
   register(project: string, ticket: number): { run: Run; created: boolean } {
+    this.refresh();
     const id = runId(project, ticket);
     const existing = this.get(id);
     if (existing !== undefined) return { run: existing, created: false };
@@ -364,6 +365,7 @@ export class RunStore {
    * a queued run behind a park that no longer blocks anything.
    */
   promoteQueue(project: string): Run | undefined {
+    this.refresh();
     this.promoteHead(project);
     this.persist();
     return this.runningRun(project);
@@ -433,8 +435,27 @@ export class RunStore {
     return { ...run };
   }
 
+  /**
+   * Re-read the state file before writing to it.
+   *
+   * The daemon is no longer the only writer. Since ADR-0018 the guardrail
+   * checks run as hooks in their own process, and one of the things they do is
+   * flag a run — so a long-lived daemon store holding an in-memory copy from
+   * before the hook ran would write that flag straight back out of existence.
+   * It was silently losing exactly the record the checks exist to leave.
+   *
+   * Re-reading here makes last-write-wins per *mutation* rather than per
+   * process, which is what makes two writers of different fields safe. It does
+   * not make two daemons safe — two writers of the *same* field still race,
+   * and that hazard is named and still open.
+   */
+  private refresh(): void {
+    this.state = readState(this.path);
+  }
+
   /** The run record, by id, for in-place mutation. Throws when unknown. */
   private mutable(id: string): Run {
+    this.refresh();
     const run = this.state.runs.find((candidate) => candidate.id === id);
     if (run === undefined) throw new Error(`No such run: ${id}`);
     return run;

@@ -687,3 +687,51 @@ describe("the heartbeat, and the runs that have stopped making one", () => {
     expect(store.staleRuns(FOUR_INTERVALS)).toEqual([]);
   });
 });
+
+describe("two processes writing the one ledger", () => {
+  it("does not let a long-lived store write another process's flag out of existence", () => {
+    // Since ADR-0018 the guardrail checks run as hooks in their own process,
+    // and flagging a run is one of the things they do. A daemon holding an
+    // in-memory copy from before the hook ran used to write that flag straight
+    // back out — silently losing exactly the record the checks exist to leave.
+    const path = statePath();
+    const daemon = newStore(path);
+    const { run } = daemon.register("scratch-app", 7);
+    daemon.activate(run.id, "session-abc");
+
+    const hook = newStore(path);
+    hook.flag(run.id, "scratch-app: 1 commit(s) never reached the remote");
+
+    daemon.setStage(run.id, "planning");
+
+    expect(RunStore.open(path).get(run.id)?.flags).toEqual([
+      "scratch-app: 1 commit(s) never reached the remote",
+    ]);
+  });
+
+  it("still applies its own change on top of what the other process wrote", () => {
+    const path = statePath();
+    const daemon = newStore(path);
+    const { run } = daemon.register("scratch-app", 7);
+    daemon.activate(run.id, "session-abc");
+
+    newStore(path).flag(run.id, "a violation");
+    daemon.setStage(run.id, "planning");
+
+    const final = RunStore.open(path).get(run.id);
+    expect(final?.stage).toBe("planning");
+    expect(final?.flags).toEqual(["a violation"]);
+  });
+
+  it("sees a run another process registered, rather than refusing it exists", () => {
+    const path = statePath();
+    const daemon = newStore(path);
+    daemon.register("scratch-app", 7);
+
+    newStore(path).register("scratch-app", 8);
+
+    // Registering the same ticket again from the first store must find the
+    // existing run, not create a second one on top of it.
+    expect(daemon.register("scratch-app", 8).created).toBe(false);
+  });
+});
