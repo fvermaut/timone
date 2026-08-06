@@ -81,6 +81,11 @@ function fakeAdapter(): {
   };
 }
 
+/** A commit message carrying the provenance trailer every session owes. */
+function trailed(subject: string): string {
+  return `${subject}\n\nTimone-Stage: interactive\nTimone-Session: test`;
+}
+
 function git(dir: string, ...args: string[]): string {
   return execFileSync("git", args, { cwd: dir, encoding: "utf8" });
 }
@@ -218,7 +223,7 @@ describe("a session the daemon drove", () => {
       () => {
         writeFileSync(join(projectDir, "feature.txt"), "work\n");
         git(projectDir, "add", "-A");
-        git(projectDir, "commit", "-q", "-m", "never pushed");
+        git(projectDir, "commit", "-q", "-m", trailed("never pushed"));
       },
     );
 
@@ -246,7 +251,7 @@ describe("a session the daemon drove", () => {
       () => {
         writeFileSync(join(projectDir, "feature.txt"), "work\n");
         git(projectDir, "add", "-A");
-        git(projectDir, "commit", "-q", "-m", "pushed");
+        git(projectDir, "commit", "-q", "-m", trailed("pushed"));
         git(projectDir, "push", "-q", "origin", "HEAD:main");
       },
     );
@@ -274,7 +279,7 @@ describe("a session a human drove", () => {
       () => {
         writeFileSync(join(projectDir, "stray.txt"), "left behind\n");
         git(projectDir, "add", "-A");
-        git(projectDir, "commit", "-q", "-m", "stray");
+        git(projectDir, "commit", "-q", "-m", trailed("stray"));
       },
     );
 
@@ -344,7 +349,7 @@ describe("a session a human drove", () => {
 
     writeFileSync(join(projectDir, "stray.txt"), "left behind\n");
     git(projectDir, "add", "-A");
-    git(projectDir, "commit", "-q", "-m", "stray");
+    git(projectDir, "commit", "-q", "-m", trailed("stray"));
 
     const printed: string[] = [];
     const deps = {
@@ -402,5 +407,80 @@ describe("the journal", () => {
       .filter((line) => line !== "");
     expect(lines).toHaveLength(2);
     expect(JSON.parse(lines[1])).toMatchObject({ session: "b" });
+  });
+});
+
+describe("the provenance trailer, read back off real commits", () => {
+  it("accepts a trailed commit and flags an untrailed one", async () => {
+    // The parsing is the part that can silently break: the message is
+    // multi-line and the file list follows it in the same `git log` output.
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const { adapter } = fakeAdapter();
+
+    const { printed } = await bracket(
+      root,
+      "session-trailers",
+      store,
+      adapter,
+      () => {
+        writeFileSync(join(projectDir, "good.txt"), "a\n");
+        git(projectDir, "add", "-A");
+        git(
+          projectDir,
+          "commit",
+          "-q",
+          "-m",
+          "feat: something\n\nA body that wraps\nover several lines.\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nTimone-Stage: execution\nTimone-Run: scratch-app#7",
+        );
+        git(projectDir, "push", "-q", "origin", "HEAD:main");
+      },
+    );
+
+    expect(printed.join("\n")).not.toContain("where they came from");
+  });
+
+  it("flags a commit that carries no trailer at all", async () => {
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const { adapter } = fakeAdapter();
+
+    const { printed } = await bracket(
+      root,
+      "session-untrailed",
+      store,
+      adapter,
+      () => {
+        writeFileSync(join(projectDir, "bare.txt"), "a\n");
+        git(projectDir, "add", "-A");
+        git(projectDir, "commit", "-q", "-m", "just a subject");
+        git(projectDir, "push", "-q", "origin", "HEAD:main");
+      },
+    );
+
+    expect(printed.join("\n")).toContain("where they came from");
+    expect(printed.join("\n")).toContain("Timone-Stage: interactive");
+  });
+
+  it("tells the session its own id and what it owes, at SessionStart", async () => {
+    // The hook is the only place that knows the session id — the prompt is
+    // built before the SDK has issued one — and the one place both kinds of
+    // session pass through.
+    const { root } = workspace();
+
+    const reply = JSON.parse(
+      await runBaseline({
+        root,
+        manifest,
+        sessionId: "session-xyz",
+        now: new Date("2026-08-06T10:00:00Z"),
+      }),
+    ) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+
+    expect(reply.hookSpecificOutput.hookEventName).toBe("SessionStart");
+    expect(reply.hookSpecificOutput.additionalContext).toContain(
+      "Timone-Session: session-xyz",
+    );
+    expect(reply.hookSpecificOutput.additionalContext).toContain("Timone-Stage:");
   });
 });

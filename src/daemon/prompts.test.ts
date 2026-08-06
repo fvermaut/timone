@@ -10,6 +10,7 @@ import {
 } from "../adapters/ticketing.js";
 import {
   PROMPTED_STAGES,
+  approvalRecordPrompt,
   conversationSubject,
   stagePrompt,
   takeoverPrompt,
@@ -315,5 +316,46 @@ describe("every unattended work prompt", () => {
     });
     expect(prompt).toMatch(/unattended/i);
     expect(prompt).toMatch(/before you finish|within this session/i);
+  });
+});
+
+describe("the provenance trailer every committing session owes", () => {
+  it("carries the obligation on every prompted stage, without exception", () => {
+    for (const stage of PROMPTED_STAGES) {
+      const prompt = stagePrompt(stage, context);
+      expect(prompt, `${stage} does not instruct the trailer`).toContain(
+        "Timone-Stage:",
+      );
+    }
+  });
+
+  it("names the stage and the run, which only the prompt knows", () => {
+    const prompt = stagePrompt("execution", context);
+
+    expect(prompt).toContain("Timone-Stage: execution");
+    expect(prompt).toContain("Timone-Run: scratch-app#6");
+  });
+
+  it("leaves the session id to the hook, which is the only thing that has it", () => {
+    // The prompt is built before the SDK has issued a session id, so the
+    // prompt cannot carry one. The `SessionStart` hook tells the session.
+    const prompt = stagePrompt("execution", context);
+
+    expect(prompt).toContain("Timone-Session:");
+    expect(prompt).toContain("the id you were given at the start");
+  });
+
+  it("adds the trailer rather than replacing what git already puts there", () => {
+    expect(stagePrompt("execution", context)).toContain("Co-Authored-By:");
+  });
+
+  it("instructs the approval-recording session too, short as it is", () => {
+    const prompt = approvalRecordPrompt(
+      { stage: "planning", by: "fvermaut", at: "2026-08-06T12:00:00Z" },
+      context,
+    );
+
+    expect(prompt).toContain("Timone-Stage: planning (recording the approval)");
+    expect(prompt).toContain("Timone-Run: scratch-app#6");
   });
 });

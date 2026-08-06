@@ -70,7 +70,7 @@ export interface BaselineDeps {
  * said which one this session will touch — and an interactive session may
  * never say.
  */
-export async function runBaseline(deps: BaselineDeps): Promise<void> {
+export async function runBaseline(deps: BaselineDeps): Promise<string> {
   sweepBaselines(deps.root, deps.now, BASELINE_MAX_AGE_MS);
   const baseline = await captureBaseline(
     deps.root,
@@ -81,6 +81,40 @@ export async function runBaseline(deps: BaselineDeps): Promise<void> {
     baseline,
     deps.now.toISOString(),
   );
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext: trailerInstruction(deps.sessionId),
+    },
+  });
+}
+
+/**
+ * What every session is told about the trailer it owes (ADR-0019).
+ *
+ * It arrives from the `SessionStart` hook rather than from a prompt or a
+ * skill, and that is the whole point: the hook is the one place *both* kinds
+ * of session pass through, so an interactive session — which follows no skill
+ * and reads no stage prompt — is told the same thing as a daemon one. It is
+ * also the only place the session id is known: the prompt is built before the
+ * SDK has issued one.
+ */
+export function trailerInstruction(sessionId: string): string {
+  return [
+    "**Every git commit you make in this session must end with these trailers:**",
+    "",
+    "```",
+    "Timone-Stage: <the process stage you are running, or `interactive` if none>",
+    `Timone-Session: ${sessionId}`,
+    "```",
+    "",
+    "Add `Timone-Run: <project>#<ticket>` as a third line when a run drove this",
+    "session — the stage's own instructions say so and name the run when they do.",
+    "",
+    "These go below any `Co-Authored-By:` line and replace nothing. They are what",
+    "makes machine-authored work identifiable from git history alone, and an",
+    "automatic check at the end of this session reports any commit that lacks them.",
+  ].join("\n");
 }
 
 export interface CheckDeps {
@@ -194,12 +228,16 @@ export function registerGuardrailsCommand(program: Command): void {
     try {
       const payload = await readHookPayload(process.stdin);
       if (payload === undefined) return;
-      await runBaseline({
-        root: process.cwd(),
-        manifest: loadManifest(options.manifest),
-        sessionId: payload.session_id,
-        now: new Date(),
-      });
+      // The only thing this command writes to stdout: the hook's JSON reply,
+      // which is how the session is told its own id and what it owes.
+      console.log(
+        await runBaseline({
+          root: process.cwd(),
+          manifest: loadManifest(options.manifest),
+          sessionId: payload.session_id,
+          now: new Date(),
+        }),
+      );
     } catch (error) {
       console.error(
         `guardrails baseline: ${error instanceof Error ? error.message : String(error)}`,

@@ -278,6 +278,23 @@ Before finishing, update the target project's `STATUS.md` — on the **default b
 9. Update `STATUS.md`.
 10. Report per Closing below.
 
+
+## Commit provenance
+
+Every commit you cause to be made in a managed project carries the trailer
+([ADR-0019](../../../doc/adr/0019-timone-authored-commits-carry-a-provenance-trailer.md)),
+below any `Co-Authored-By:` line:
+
+```
+Timone-Stage: <this stage>
+Timone-Run: <project>#<ticket>     # only when a ticket drove this session
+Timone-Session: <the id you were given at the start of this session>
+```
+
+It is what makes machine-authored work identifiable from git history alone. An
+automatic check at the end of every session reports any commit that omits it,
+so leaving it off costs a correction rather than passing quietly.
+
 ## Closing
 
 **A pass has three endings, not two.** Report the one you reached.

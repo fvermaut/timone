@@ -14,6 +14,7 @@ import type {
 import { RunStore } from "./runs.js";
 import {
   checkPathContainment,
+  checkProvenance,
   checkStatusPlacement,
   checkUnpushed,
   reportGuardrails,
@@ -70,6 +71,7 @@ function cleanEvidence(): SessionEvidence {
             sha: "aaa1111",
             branch: "phase/01",
             files: ["src/features/todos/x.ts"],
+        trailers: ["Timone-Stage: execution"],
           },
         ],
         workingTree: [],
@@ -119,7 +121,7 @@ describe("checkStatusPlacement", () => {
   it("flags STATUS.md committed off the default branch", () => {
     const evidence = cleanEvidence();
     projectRepo(evidence).commits = [
-      { sha: "ccc3333", branch: "phase/01", files: ["STATUS.md", "src/x.ts"] },
+      { sha: "ccc3333", branch: "phase/01", files: ["STATUS.md", "src/x.ts"], trailers: ["Timone-Stage: execution"] },
     ];
 
     const violations = checkStatusPlacement(evidence);
@@ -133,7 +135,7 @@ describe("checkStatusPlacement", () => {
   it("flags it in the workspace repo too", () => {
     const evidence = cleanEvidence();
     evidence.workspace.commits = [
-      { sha: "ddd4444", branch: "some-branch", files: ["STATUS.md"] },
+      { sha: "ddd4444", branch: "some-branch", files: ["STATUS.md"], trailers: ["Timone-Stage: execution"] },
     ];
 
     expect(checkStatusPlacement(evidence)).toHaveLength(1);
@@ -142,7 +144,7 @@ describe("checkStatusPlacement", () => {
   it("stays silent when STATUS.md is committed on the default branch", () => {
     const evidence = cleanEvidence();
     projectRepo(evidence).commits = [
-      { sha: "ccc3333", branch: "main", files: ["STATUS.md"] },
+      { sha: "ccc3333", branch: "main", files: ["STATUS.md"], trailers: ["Timone-Stage: execution"] },
     ];
 
     expect(checkStatusPlacement(evidence)).toEqual([]);
@@ -157,7 +159,7 @@ describe("checkPathContainment", () => {
   it("flags a commit in the timone workspace itself", () => {
     const evidence = cleanEvidence();
     evidence.workspace.commits = [
-      { sha: "eee5555", branch: "main", files: ["src/daemon/poll.ts"] },
+      { sha: "eee5555", branch: "main", files: ["src/daemon/poll.ts"], trailers: ["Timone-Stage: execution"] },
     ];
 
     const violations = checkPathContainment(evidence);
@@ -181,6 +183,7 @@ describe("checkPathContainment", () => {
         sha: "fff6666",
         branch: "phase/01",
         files: [".claude/skills/timone-plan/SKILL.md", "src/x.ts"],
+        trailers: ["Timone-Stage: execution"],
       },
     ];
 
@@ -197,6 +200,7 @@ describe("checkPathContainment", () => {
         sha: "fff6666",
         branch: "phase/01",
         files: ["doc/plans/phases/phase-01.md", "CONTEXT.md"],
+        trailers: ["Timone-Stage: execution"],
       },
     ];
 
@@ -275,7 +279,7 @@ describe("reportGuardrails", () => {
       { name: "phase/01", unpushed: ["aaa1111"], hasUpstream: true },
     ];
     projectRepo(evidence).commits = [
-      { sha: "ccc3333", branch: "phase/01", files: ["STATUS.md"] },
+      { sha: "ccc3333", branch: "phase/01", files: ["STATUS.md"], trailers: ["Timone-Stage: execution"] },
     ];
 
     const violations = await reportGuardrails(evidence, {
@@ -308,5 +312,97 @@ describe("reportGuardrails", () => {
     expect(violations).toEqual([]);
     expect(comments).toEqual([]);
     expect(store.get(run.id)?.flags).toEqual([]);
+  });
+});
+
+describe("checkProvenance", () => {
+  it("flags a commit that says nothing about where it came from", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      { sha: "aaa1111", branch: "phase/01", files: ["src/x.ts"], trailers: [] },
+    ];
+
+    const [violation] = checkProvenance(evidence);
+
+    expect(violation.rule).toBe("provenance");
+    expect(violation.summary).toContain("say nothing about where they came from");
+    expect(violation.detail.join("\n")).toContain("aaa1111");
+  });
+
+  it("accepts a run-driven commit carrying all three lines", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "aaa1111",
+        branch: "phase/01",
+        files: ["src/x.ts"],
+        trailers: [
+          "Timone-Stage: execution",
+          "Timone-Run: scratch-app#7",
+          "Timone-Session: abc-123",
+        ],
+      },
+    ];
+
+    expect(checkProvenance(evidence)).toEqual([]);
+  });
+
+  it("accepts an interactive commit, which carries no run", () => {
+    // `Timone-Stage: interactive` is what makes absence unambiguous: a commit
+    // with no run is different from a commit that forgot to say.
+    const evidence = cleanEvidence();
+    evidence.target = undefined;
+    projectRepo(evidence).commits = [];
+    evidence.workspace.commits = [
+      {
+        sha: "bbb2222",
+        branch: "main",
+        files: ["src/daemon/hooks.ts"],
+        trailers: ["Timone-Stage: interactive", "Timone-Session: abc-123"],
+      },
+    ];
+
+    expect(checkProvenance(evidence)).toEqual([]);
+  });
+
+  it("judges only what this session committed, never what was there before", () => {
+    // The evidence is already scoped to the session by the baseline, and this
+    // rule adds no reach of its own: every commit made before the convention
+    // landed is unmarked, and nothing is rewritten.
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [];
+    evidence.workspace.commits = [];
+
+    expect(checkProvenance(evidence)).toEqual([]);
+  });
+
+  it("leaves Co-Authored-By alone — it adds a trailer, it does not replace one", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "aaa1111",
+        branch: "phase/01",
+        files: ["src/x.ts"],
+        trailers: [
+          "Co-Authored-By: Claude <noreply@anthropic.com>",
+          "Timone-Stage: execution",
+        ],
+      },
+    ];
+
+    expect(checkProvenance(evidence)).toEqual([]);
+  });
+
+  it("counts every untrailed commit, in both repos", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      { sha: "aaa1111", branch: "phase/01", files: ["a"], trailers: [] },
+    ];
+    evidence.workspace.commits = [
+      { sha: "bbb2222", branch: "main", files: ["b"], trailers: [] },
+    ];
+
+    const [violation] = checkProvenance(evidence);
+    expect(violation.summary).toContain("2 commit(s)");
   });
 });

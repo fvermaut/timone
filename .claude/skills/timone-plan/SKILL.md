@@ -192,6 +192,23 @@ Per the spec's amendment rule (stage 5), plans are amended in place, never silen
 
 Sub-phases added mid-phase keep the next free letter and carry the same marker inline. Scope that grows beyond an amendment is a new phase, not a bigger one; post-delivery plan changes belong to `timone-improve` (stage 9), not here.
 
+
+## Commit provenance
+
+Every commit you cause to be made in a managed project carries the trailer
+([ADR-0019](../../../doc/adr/0019-timone-authored-commits-carry-a-provenance-trailer.md)),
+below any `Co-Authored-By:` line:
+
+```
+Timone-Stage: <this stage>
+Timone-Run: <project>#<ticket>     # only when a ticket drove this session
+Timone-Session: <the id you were given at the start of this session>
+```
+
+It is what makes machine-authored work identifiable from git history alone. An
+automatic check at the end of every session reports any commit that omits it,
+so leaving it off costs a correction rather than passing quietly.
+
 ## Closing
 
 Report to the user, in this order:

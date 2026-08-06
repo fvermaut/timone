@@ -30,6 +30,8 @@ export interface CommitEvidence {
   branch: string;
   /** Repo-relative paths the commit touched. */
   files: string[];
+  /** The commit message's trailer lines, verbatim (ADR-0019). */
+  trailers: string[];
 }
 
 /** What one repository did during a session. */
@@ -71,7 +73,11 @@ export interface SessionEvidence {
 export type GuardrailRule =
   | "unpushed"
   | "status-placement"
-  | "path-containment";
+  | "path-containment"
+  | "provenance";
+
+/** The trailer every Timone-authored commit carries (ADR-0019). */
+export const STAGE_TRAILER = "Timone-Stage";
 
 export interface Violation {
   rule: GuardrailRule;
@@ -208,12 +214,57 @@ export function checkPathContainment(evidence: SessionEvidence): Violation[] {
   return violations;
 }
 
+/**
+ * **Provenance.** Every commit a Timone session makes says which stage made
+ * it (ADR-0019), so "where did this come from?" is answered from git history
+ * alone rather than reconstructed from memory.
+ *
+ * This is what makes the convention binding rather than aspirational. A
+ * trailer emitted only by the stage skills would bind only the sessions that
+ * follow a skill — and an interactive session follows none, which is exactly
+ * the gap phase 14 exists to close. So the rule is checked here, on evidence,
+ * for both kinds.
+ *
+ * Only commits made *during* the session are judged, which is what the
+ * baseline already scopes the evidence to. Every commit made before this
+ * convention landed is unmarked, and nothing is rewritten: absence proves
+ * nothing about existing history, and this rule never claims otherwise.
+ */
+export function checkProvenance(evidence: SessionEvidence): Violation[] {
+  const untrailed = [...evidence.projects, evidence.workspace].flatMap((repo) =>
+    repo.commits
+      .filter(
+        (commit) =>
+          !commit.trailers.some((line) =>
+            line.startsWith(`${STAGE_TRAILER}:`),
+          ),
+      )
+      .map((commit) => `- ${repo.repo} ${commit.sha} on \`${commit.branch}\``),
+  );
+
+  if (untrailed.length === 0) return [];
+
+  return [
+    {
+      rule: "provenance",
+      summary: `${untrailed.length} commit(s) made in this session say nothing about where they came from`,
+      detail: [
+        `Every commit a Timone session makes carries a \`${STAGE_TRAILER}:\` trailer naming the step that made it. These do not:`,
+        ...untrailed,
+        "",
+        `Amend them with the trailer — \`${STAGE_TRAILER}: interactive\` when no process stage was running.`,
+      ],
+    },
+  ];
+}
+
 /** Every check, in the order their comments should read. */
 export function checkAll(evidence: SessionEvidence): Violation[] {
   return [
     ...checkPathContainment(evidence),
     ...checkUnpushed(evidence),
     ...checkStatusPlacement(evidence),
+    ...checkProvenance(evidence),
   ];
 }
 
@@ -374,6 +425,20 @@ async function workingTreePaths(dir: string): Promise<string[]> {
     .map((path) => path.replace(/^"|"$/g, ""));
 }
 
+/**
+ * The trailer lines of a commit message: the `Key: value` lines of its final
+ * paragraph. Read here rather than via `git log --format=%(trailers)` so the
+ * message is parsed once, alongside the file list, from a single log call.
+ */
+function trailersOf(message: string): string[] {
+  const paragraphs = message.trimEnd().split(/\n\s*\n/);
+  const last = paragraphs.at(-1) ?? "";
+  const lines = last.split("\n").map((line) => line.trim());
+  return lines.every((line) => /^[A-Za-z][A-Za-z0-9-]*:\s*\S/.test(line))
+    ? lines
+    : [];
+}
+
 /** One repository's tip shas, taken before the session runs. */
 export type RepoBaseline = Map<string, string>;
 
@@ -452,22 +517,27 @@ async function collectRepo(
     });
 
     // Commits reachable from this branch but from none of the tips that
-    // existed before the session — that is what the session added.
+    // existed before the session — that is what the session added. The
+    // \x00 / \x01 / \x02 delimiters exist because the message is multi-line
+    // and the file list follows it: without them the two cannot be told apart.
     const log = await git(dir, [
       "log",
-      "--pretty=format:%x00%H",
+      "--pretty=format:%x00%H%x01%B%x02",
       "--name-only",
       name,
       "--not",
       ...baselineShas,
     ]);
     for (const block of log.split("\0")) {
-      const lines = block.split("\n").filter((line) => line.trim() !== "");
-      if (lines.length === 0) continue;
+      if (block.trim() === "") continue;
+      const [header, afterBody = ""] = block.split("\x02");
+      const [sha, body = ""] = header.split("\x01");
+      if (sha.trim() === "") continue;
       commits.push({
-        sha: lines[0].slice(0, 7),
+        sha: sha.trim().slice(0, 7),
         branch: name,
-        files: lines.slice(1),
+        files: afterBody.split("\n").filter((line) => line.trim() !== ""),
+        trailers: trailersOf(body),
       });
     }
   }

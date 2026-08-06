@@ -104,6 +104,33 @@ function writingBlock(): string {
   ].join("\n");
 }
 
+/**
+ * What every commit this session makes must say about where it came from
+ * (ADR-0019).
+ *
+ * The prompt carries the stage and the run because it is the only place that
+ * knows them; the session id arrives separately, from the `SessionStart`
+ * hook, because the prompt is built before the SDK has issued one. The two
+ * halves meet in the commit message.
+ */
+function provenanceBlock(stage: string, context: PromptContext): string {
+  const { project, ticket } = context;
+
+  return [
+    "**Every commit you make in this session must end with these trailers**,",
+    "below any `Co-Authored-By:` line:",
+    "",
+    "```",
+    `Timone-Stage: ${stage}`,
+    `Timone-Run: ${project.name}#${ticket.number}`,
+    "Timone-Session: <the id you were given at the start of this session>",
+    "```",
+    "",
+    "This is what makes the work you do identifiable from git history alone.",
+    "An automatic check reports any commit that leaves them off.",
+  ].join("\n");
+}
+
 /** The human's words, when a gate sent this stage back to do it again. */
 function feedbackBlock(feedback: string | undefined): string {
   if (feedback === undefined || feedback.trim() === "") return "";
@@ -133,6 +160,19 @@ function feedbackBlock(feedback: string | undefined): string {
  * human unable to tell who is talking.
  */
 export function stagePrompt(
+  stage: (typeof PROMPTED_STAGES)[number],
+  context: PromptContext,
+): string {
+  // Appended here rather than woven into each stage's text: the obligation is
+  // the same for all of them, and a per-stage copy is a per-stage chance to
+  // forget it. Stages that commit nothing carry it harmlessly.
+  return [stageBody(stage, context), "", provenanceBlock(stage, context)].join(
+    "\n",
+  );
+}
+
+/** One stage's own instruction, before the shared obligations are appended. */
+function stageBody(
   stage: (typeof PROMPTED_STAGES)[number],
   context: PromptContext,
 ): string {
@@ -437,6 +477,8 @@ export function approvalRecordPrompt(
   const spec = APPROVAL_RECORD[approval.stage];
 
   return [
+    provenanceBlock(`${approval.stage} (recording the approval)`, context),
+    "",
     `**${approval.by} approved this on ${approval.at}.** Record that, and nothing else.`,
     "",
     ticketBlock(context),
