@@ -6,13 +6,18 @@ import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
 import type { TicketingAdapter } from "../adapters/ticketing.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
-import { AgentSessionSpawner, agentSdkRuntime } from "../daemon/session.js";
+import {
+  AgentSessionSpawner,
+  DEFAULT_PROGRESS_INTERVAL_SECONDS,
+  agentSdkRuntime,
+} from "../daemon/session.js";
 import { GuardrailObserver } from "../daemon/hooks.js";
 
 /** Options accepted by `timone daemon`, as commander parses them. */
 interface DaemonOptions {
   manifest: string;
   interval: string;
+  progressInterval: string;
   once?: boolean;
   state?: string;
 }
@@ -64,6 +69,11 @@ export function registerDaemonCommand(program: Command): void {
       "timone.yaml",
     )
     .option("--interval <seconds>", "seconds between poll cycles", "60")
+    .option(
+      "--progress-interval <seconds>",
+      "seconds between progress lines while a session works",
+      String(DEFAULT_PROGRESS_INTERVAL_SECONDS),
+    )
     .option("--once", "run a single poll cycle and exit")
     .option("--state <path>", "path to the daemon state file")
     .action(async (options: DaemonOptions) => {
@@ -79,6 +89,13 @@ export function registerDaemonCommand(program: Command): void {
       const interval = Number(options.interval);
       if (!Number.isFinite(interval) || interval <= 0) {
         console.error(`--interval must be a positive number of seconds`);
+        process.exitCode = 1;
+        return;
+      }
+
+      const progressInterval = Number(options.progressInterval);
+      if (!Number.isFinite(progressInterval) || progressInterval <= 0) {
+        console.error(`--progress-interval must be a positive number of seconds`);
         process.exitCode = 1;
         return;
       }
@@ -113,6 +130,7 @@ export function registerDaemonCommand(program: Command): void {
         root: process.cwd(),
         beforeSession: (run, target) => guardrails.before(run, target),
         afterSession: (run, target) => guardrails.after(run, target),
+        progressIntervalMs: progressInterval * 1000,
         log,
       });
 

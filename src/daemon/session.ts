@@ -41,6 +41,13 @@ import {
   stagePrompt,
   workBranch,
 } from "./prompts.js";
+import {
+  SessionProgress,
+  closingLine,
+  tickLine,
+  type ProgressSnapshot,
+  type SessionSummary,
+} from "./progress.js";
 import type { ParkOptions, Run, RunStore } from "./runs.js";
 
 /** What the spawner asks a runtime to run. */
@@ -70,10 +77,36 @@ export interface SessionOutcome {
   error?: string;
 }
 
+/** What the spawner needs to say how a running session is doing. */
+export interface ProgressReader {
+  snapshot(): ProgressSnapshot;
+  summary(): SessionSummary | undefined;
+}
+
 /** A session that has started and will finish. */
 export interface StartedSession {
   sessionId: string;
   completed: Promise<SessionOutcome>;
+  /**
+   * How the session is doing, for the spawner's ticker. Optional because a
+   * runtime that cannot see inside a session — a test fake, mostly — should
+   * not have to invent numbers to satisfy the interface.
+   */
+  progress?: ProgressReader;
+}
+
+/** A running ticker, stoppable. */
+export interface Ticker {
+  stop(): void;
+}
+
+/** Seconds between progress lines when nobody says otherwise. */
+export const DEFAULT_PROGRESS_INTERVAL_SECONDS = 30;
+
+/** The real ticker. Behind a seam so tests need no clock. */
+function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
+  const handle = setInterval(onTick, intervalMs);
+  return { stop: () => clearInterval(handle) };
 }
 
 /**
@@ -122,6 +155,13 @@ export interface AgentSessionSpawnerOptions {
    */
   beforeSession?: (run: Run, project: TicketingProject) => Promise<void>;
   afterSession?: (run: Run, project: TicketingProject) => Promise<void>;
+  /**
+   * Milliseconds between progress lines while a session works. Defaults to
+   * {@link DEFAULT_PROGRESS_INTERVAL_SECONDS}.
+   */
+  progressIntervalMs?: number;
+  /** Starts a ticker. Behind a seam so tests need no real timer. */
+  ticker?: (onTick: () => void, intervalMs: number) => Ticker;
   log?: (message: string) => void;
 }
 
@@ -312,10 +352,13 @@ function isPrompted(
 export class AgentSessionSpawner implements SessionSpawner {
   private readonly log: (message: string) => void;
   private readonly channel: ConversationChannel;
+  private readonly progressIntervalMs: number;
 
   constructor(private readonly options: AgentSessionSpawnerOptions) {
     this.log = options.log ?? (() => {});
     this.channel = options.channel ?? new TerminalChannel();
+    this.progressIntervalMs =
+      options.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000;
   }
 
   async spawn(
@@ -437,7 +480,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const active = store.activate(run.id, started.sessionId);
     this.log(`session ${started.sessionId} started for ${run.id} (${stage}, ${model})`);
 
-    const outcome = await started.completed;
+    const outcome = await this.watch(`${run.id} (${stage})`, started);
 
     if (!outcome.ok) {
       const reason = outcome.error ?? "the session ended without a result";
@@ -782,7 +825,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const active = store.activate(run.id, started.sessionId);
     this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
 
-    const outcome = await started.completed;
+    const outcome = await this.watch(`${run.id} (approval record)`, started);
     if (!outcome.ok) {
       const reason = `could not record the approval: ${outcome.error ?? "the session ended without a result"}`;
       const failed = store.fail(run.id, reason);
@@ -926,6 +969,39 @@ export class AgentSessionSpawner implements SessionSpawner {
   }
 
   /**
+   * Await a session, saying what it is doing while it works and what it cost
+   * when it stops.
+   *
+   * The ticker is cleared in a `finally`, so a session that fails or throws
+   * leaves no timer behind, and the closing line is printed there too — the
+   * money was spent whether or not the session succeeded, and a cost report
+   * that only appears on success is a success report wearing its clothes.
+   */
+  private async watch(
+    label: string,
+    started: StartedSession,
+  ): Promise<SessionOutcome> {
+    const { progress } = started;
+    const start = this.options.ticker ?? intervalTicker;
+    const ticker =
+      progress === undefined
+        ? undefined
+        : start(() => {
+            this.log(`work   ${label} — ${tickLine(progress.snapshot())}`);
+          }, this.progressIntervalMs);
+
+    try {
+      return await started.completed;
+    } finally {
+      ticker?.stop();
+      const summary = progress?.summary();
+      if (summary !== undefined) {
+        this.log(`cost   ${label} — ${closingLine(summary)}`);
+      }
+    }
+  }
+
+  /**
    * Record the state of the world before a session touches it. Every session
    * that can commit gets one — a missing baseline silently disarms the checks
    * on exactly the session that needed watching.
@@ -982,10 +1058,16 @@ export const agentSdkRuntime: SessionRuntime = {
       resolveId = resolve;
     });
 
+    // Fed as the stream is consumed rather than reconstructed afterwards:
+    // everything the tick reports has to be known *while* the session runs,
+    // and the stream is the only place it exists.
+    const progress = new SessionProgress();
+
     const completed = (async (): Promise<SessionOutcome> => {
       let id = "unknown";
       try {
         for await (const message of session) {
+          progress.observe(message);
           if ("session_id" in message && typeof message.session_id === "string") {
             id = message.session_id;
             resolveId(id);
@@ -1005,6 +1087,6 @@ export const agentSdkRuntime: SessionRuntime = {
       }
     })();
 
-    return { sessionId: await sessionId, completed };
+    return { sessionId: await sessionId, completed, progress };
   },
 };

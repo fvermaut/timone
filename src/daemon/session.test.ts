@@ -26,10 +26,14 @@ import {
   type PipelineStage,
 } from "./pipeline.js";
 import { RunStore, type Run } from "./runs.js";
+import type { ProgressSnapshot, SessionSummary } from "./progress.js";
 import {
   AgentSessionSpawner,
+  DEFAULT_PROGRESS_INTERVAL_SECONDS,
+  type ProgressReader,
   type SessionRequest,
   type SessionRuntime,
+  type Ticker,
 } from "./session.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
@@ -2018,5 +2022,236 @@ describe("the model each session runs on", () => {
 
     expect(requests).toHaveLength(0);
     expect(store.get("scratch-app#7")?.waitingKind).toBe("conversation");
+  });
+});
+
+describe("saying what a session is doing while it does it", () => {
+  /** A progress reader the test drives by hand. */
+  function fakeProgress(): {
+    reader: ProgressReader;
+    setSnapshot: (snapshot: ProgressSnapshot) => void;
+    setSummary: (summary: SessionSummary) => void;
+  } {
+    let snapshot: ProgressSnapshot = {
+      elapsedMs: 0,
+      turns: 0,
+      outputTokens: 0,
+      subAgents: 0,
+    };
+    let summary: SessionSummary | undefined;
+    return {
+      reader: {
+        snapshot: () => snapshot,
+        summary: () => summary,
+      },
+      setSnapshot: (next) => {
+        snapshot = next;
+      },
+      setSummary: (next) => {
+        summary = next;
+      },
+    };
+  }
+
+  /**
+   * A ticker under the test's control, recording the interval it was asked
+   * for and every time it was stopped. `ticks` says how many intervals have
+   * elapsed by the time the session starts — deterministic, where firing by
+   * hand mid-session would race the runtime's own promise.
+   */
+  function handTicker(options: { ticks?: number } = {}): {
+    ticker: (onTick: () => void, intervalMs: number) => Ticker;
+    stops: number;
+    intervals: number[];
+  } {
+    const state = { stops: 0, intervals: [] as number[] };
+    return {
+      ticker: (fn, intervalMs) => {
+        state.intervals.push(intervalMs);
+        for (let i = 0; i < (options.ticks ?? 0); i += 1) fn();
+        return {
+          stop: () => {
+            state.stops += 1;
+          },
+        };
+      },
+      get stops() {
+        return state.stops;
+      },
+      get intervals() {
+        return state.intervals;
+      },
+    };
+  }
+
+  /** A runtime whose session reports progress the test controls. */
+  function watchedRuntime(
+    progress: ProgressReader,
+    options: { ok?: boolean; error?: string; work?: () => Promise<void> } = {},
+  ): SessionRuntime {
+    return {
+      async start() {
+        return {
+          sessionId: "session-abc",
+          progress,
+          completed: (async () => {
+            await options.work?.();
+            return {
+              sessionId: "session-abc",
+              ok: options.ok ?? true,
+              error: options.error,
+            };
+          })(),
+        };
+      },
+    };
+  }
+
+  it("prints elapsed time, turns, tokens and the fleet on every tick", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const progress = fakeProgress();
+    const clock = handTicker({ ticks: 1 });
+    const lines: string[] = [];
+
+    progress.setSnapshot({
+      elapsedMs: 252_000,
+      turns: 18,
+      outputTokens: 42_100,
+      subAgents: 3,
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: watchedRuntime(progress.reader, {
+        work: async () => {
+          await adapter.applyLabel(project, 7, "triage:question");
+          await adapter.postComment(project, 7, "a question.");
+        },
+      }),
+      root: "/root",
+      ticker: clock.ticker,
+      log: (message) => lines.push(message),
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(lines).toContainEqual(
+      expect.stringContaining("4m12s · 18 turns · 42.1k out · 3 sub-agents"),
+    );
+  });
+
+  it("closes with the cost, and stops the ticker, even when the session failed", async () => {
+    // The failure path is where a leaked timer would live, because it is the
+    // path nobody watches — and the cost was spent either way.
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const progress = fakeProgress();
+    const clock = handTicker();
+    const lines: string[] = [];
+
+    progress.setSummary({
+      durationMs: 5_000,
+      turns: 2,
+      costUsd: 0.12,
+      models: [{ model: "claude-sonnet-5", outputTokens: 900 }],
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: watchedRuntime(progress.reader, {
+        ok: false,
+        error: "model unavailable",
+      }),
+      root: "/root",
+      ticker: clock.ticker,
+      log: (message) => lines.push(message),
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(store.get("scratch-app#7")?.status).toBe("failed");
+    expect(lines).toContainEqual(expect.stringContaining("$0.12"));
+    expect(clock.stops).toBe(1);
+  });
+
+  it("prints no tick at all for a session shorter than one interval", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const progress = fakeProgress();
+    const clock = handTicker();
+    const lines: string[] = [];
+
+    progress.setSummary({
+      durationMs: 4_000,
+      turns: 1,
+      costUsd: 0.02,
+      models: [],
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: watchedRuntime(progress.reader, {
+        work: async () => {
+          // The ticker is never fired: the session ended before one interval.
+          await adapter.applyLabel(project, 7, "triage:question");
+          await adapter.postComment(project, 7, "a question.");
+        },
+      }),
+      root: "/root",
+      ticker: clock.ticker,
+      log: (message) => lines.push(message),
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(lines.filter((line) => line.startsWith("work"))).toHaveLength(0);
+    expect(lines).toContainEqual(expect.stringContaining("$0.02"));
+  });
+
+  it("ticks at the interval it was given, in milliseconds", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const progress = fakeProgress();
+    const clock = handTicker();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: watchedRuntime(progress.reader, {
+        work: async () => {
+          await adapter.applyLabel(project, 7, "triage:question");
+          await adapter.postComment(project, 7, "a question.");
+        },
+      }),
+      root: "/root",
+      progressIntervalMs: 45_000,
+      ticker: clock.ticker,
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(clock.intervals).toEqual([45_000]);
+  });
+
+  it("starts no ticker for a runtime that cannot say how it is doing", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const clock = handTicker();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: classifyingRuntime("question", adapter).runtime,
+      root: "/root",
+      ticker: clock.ticker,
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(clock.intervals).toEqual([]);
+    expect(clock.stops).toBe(0);
+  });
+
+  it("defaults to thirty seconds", () => {
+    expect(DEFAULT_PROGRESS_INTERVAL_SECONDS).toBe(30);
   });
 });
