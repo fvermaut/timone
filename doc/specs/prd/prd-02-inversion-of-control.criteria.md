@@ -198,17 +198,100 @@
 
 ## R15 — Post-session guardrail hooks
 
+> ✏ Revised 2026-08-06: [ADR-0018](../../adr/0018-the-session-bracket-belongs-to-the-hooks.md) moved the bracket out of the daemon's spawner and into `SessionStart`/`Stop` hooks, so the checks now cover **every session at the timone root** — the daemon's and fvermaut's own — rather than daemon-spawned sessions only. The criterion's opening clause widens accordingly, and a fourth rule joins the three: a commit made during the session without a `Timone-Stage` trailer ([ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md)). The trigger was a live consequence, not tidiness: the stray `email-alerts` commit that blocked a build on 2026-08-06 came from an interactive session, and would have been caught at once had the existing rules been looking at it.
+
 - **Priority:** SHOULD
-- **Status:** verified
+- **Status:** draft
+    - ✏ 2026-08-06 **dropped from `verified` by the revision above, deliberately.** What was verified was the narrower requirement; widening the scope changes what the requirement claims, so the old evidence no longer settles it. The three original rules are unchanged in substance and their machinery is untouched — what must be re-observed is that the bracket still fires for a daemon session now that the spawner no longer calls it, and that it fires at all for an interactive one. Re-verification needs both session kinds in one pass.
     - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. Both clauses observed against `scratch-app`: a scripted session that committed and never pushed produced **one** loud ticket comment naming the branch and the commit, and the run was flagged in `timone status` (`⚠ 1 automatic check(s) failed`); the clean re-run immediately after, on the same ticket, posted **nothing** — silence asserted, not assumed. Hook failures flag a run but never crash the daemon, and the checks are pure functions over injected git evidence, so each rule can be shown red.
     - ✏ 2026-08-03 **known limit of the evidence.** Only the **unpushed** rule fired live. `STATUS.md` placement and path containment were shown capable of failing only in the test suite — by neutering each check in turn and confirming its violating fixtures went red (9 tests fell over). No live session has yet committed a file at all, so neither rule has met real evidence; phase 13's execution path is what will supply it.
     - ✏ 2026-08-06 **both remaining rules have now met real evidence**, at [phase 13](../../plans/phases/phase-13.md)'s 13h gate: sessions committed real files, `STATUS.md` landed only on the pilot's default branch (first-parent ancestry checked at the gate), and every touched path stayed inside the target project — the placement and containment checks passed against substance rather than absence. Neither has yet *fired* live, because no violation has occurred; their red sides still rest on the test suite, which is the acceptable remainder.
 - **Verify-via:** api
 - **Criteria:**
-    - GIVEN a daemon-spawned stage session completes
+    - GIVEN any agent session at the timone root completes, whether the daemon spawned it or a human started it
       WHEN the guardrail hooks run
-      THEN violations of the deterministic rules — commits left unpushed, `STATUS.md` written anywhere but the default branch, files touched outside `projects/<target>/` (process artifacts excepted per R2) — are posted loudly on the ticket and the run is flagged in `timone status`
-    - GIVEN a clean session
+      THEN violations of the deterministic rules — commits left unpushed, `STATUS.md` written anywhere but the default branch, files touched outside `projects/<target>/` (process artifacts excepted per R2), and commits made without a `Timone-Stage` trailer — are reported loudly
+    - GIVEN the completed session maps to a run in the ledger
+      WHEN a violation is reported
+      THEN it is posted on that run's ticket and the run is flagged in `timone status`
+    - GIVEN the completed session maps to no run
+      WHEN a violation is reported
+      THEN it is printed plainly and appended to `.timone/sessions.jsonl`, since there is no ticket to carry it
+    - GIVEN a clean session of either kind
       WHEN the hooks run
       THEN they stay silent
-- **Verification hint:** force each violation in a scripted session against the pilot repo; confirm one loud ticket comment per violation and a flagged status; confirm a clean run posts nothing.
+- **Verification hint:** force each violation twice — once in a scripted daemon session against the pilot repo, once in an interactive session at the timone root — confirming a loud ticket comment plus flagged status for the first and a printed violation plus a journal line for the second; confirm a clean run of each kind reports nothing.
+
+## R16 — Each stage runs on a model and effort suited to its work
+
+- **Priority:** SHOULD
+- **Status:** draft
+    - ✏ 2026-08-06 raised by fvermaut and settled at the grill of the same day. Daemon sessions ran on the runtime's default model with no effort set, so a triage read and a whole phase build were served identically. The mapping lives in the stage graph as data (`StageSpec`), not in `timone.yaml`: the graph already holds what a stage waits for and what follows it, and per-stage configuration in a per-project manifest is the wrong shape. **Explicitly no ADR** — it fails the significance gate's first part, being a one-line edit to reverse.
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a daemon-spawned session for a stage
+      WHEN the session is started
+      THEN the runtime is given that stage's declared model, and its declared reasoning effort when the model accepts one
+    - GIVEN a stage whose declared model does not support the effort parameter
+      WHEN the session is started
+      THEN no effort is sent, rather than a value the API would reject
+    - GIVEN the approval-recording session, which is not a pipeline stage
+      WHEN it is started
+      THEN it too carries a declared model rather than the runtime default
+- **Verification hint:** assert the request the runtime seam receives for each stage against the declared table; confirm the Haiku-tier row sends no `effort` field at all; observe a live run's stages landing on the intended models.
+
+## R17 — The daemon shows progress while a session runs
+
+- **Priority:** SHOULD
+- **Status:** draft
+    - ✏ 2026-08-06 raised by fvermaut and settled at the grill of the same day. Today there is total silence between `session started` and the next stage line, which for an execution session is many minutes in which a hung run and a working one are indistinguishable. Output is append-only rather than a repainting status line, because `log()` already fires mid-session (guardrail reports) and would shred a repainting line — and because append-only behaves identically in a terminal, a pipe and a log file.
+    - ✏ 2026-08-06 **an accuracy constraint, recorded so it is not "fixed" into a wrong number later:** the live counter is cumulative **output** tokens. Summing per-turn `usage.input_tokens` would report input roughly N× the real prompt for an N-turn session, because every turn resends the whole conversation. Authoritative totals exist only on the final `result` message (`total_cost_usd`, `modelUsage`) and belong on the closing line.
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a daemon-spawned session that runs longer than the progress interval
+      WHEN the interval elapses
+      THEN a line is printed naming the run, the stage, elapsed time, turns taken, cumulative output tokens and the number of live sub-agents
+    - GIVEN the session ends
+      WHEN its result is read
+      THEN one closing line reports the authoritative duration, turns, token usage and cost taken from the result message
+    - GIVEN output is redirected to a file or a pipe
+      WHEN progress is printed
+      THEN it is the same append-only lines, with no cursor control and no interleaving damage to other log lines
+- **Verification hint:** run a long stage with a short `--progress-interval` and confirm the tick; compare the closing line's cost against the same session's `total_cost_usd`; redirect to a file and confirm the content is identical to the terminal's.
+
+## R18 — A run orphaned by a crashed daemon is reclaimed
+
+- **Priority:** MUST
+- **Status:** draft
+    - ✏ 2026-08-06 carried out of [phase 13](../../plans/phases/phase-13.md) as an open question — *"a crashed daemon has no recovery path"* — and settled at the grill of 2026-08-06 by [ADR-0017](../../adr/0017-a-runs-liveness-is-its-heartbeat.md). A process killed mid-session left its run `active` forever, holding its project against every other ticket, with `timone retry` refusing it by design. Detection is the R17 heartbeat rather than a startup sweep, so it stays correct when two daemons run; reclaim fails the run rather than resuming it, because a crash mid-stage can leave partial commits.
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a run whose daemon was killed mid-session
+      WHEN a daemon polls and finds the run `active` or `picked-up` with a heartbeat older than the staleness threshold
+      THEN the run is failed with a plain reason, the failure is posted on its ticket, its project is released and any queued run for that project is promoted
+    - GIVEN a run whose session is alive and still stamping its heartbeat
+      WHEN another daemon polls
+      THEN the run is left untouched, however long the session has been running
+    - GIVEN a run reclaimed this way
+      WHEN `timone retry` is invoked for it
+      THEN it is re-armed at the stage it was reclaimed from, exactly as any other failed run
+- **Verification hint:** kill a daemon mid-execution and confirm the next daemon reclaims the run, comments, and frees the project; run a long stage to completion and confirm no reclaim fires; confirm `timone retry` then re-arms the reclaimed run.
+
+## R19 — Machine-authored commits are identifiable from git history
+
+- **Priority:** SHOULD
+- **Status:** draft
+    - ✏ 2026-08-06 settled at the grill of 2026-08-06 by [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md), extending the `MACHINE_MARKER` convention from ticket comments to commits. The trigger was a live consequence: a stray commit that blocked a build could only be attributed by reconstructing a session from memory. The existing `Co-Authored-By` line does not serve — it names the model, appears identically on machine- and human-driven work, and every Claude Code session anywhere emits it.
+    - ✏ 2026-08-06 **enforcement is R15's, not this requirement's.** A convention binds only the sessions that follow it, and a human-driven session follows no skill; the `Timone-Stage` rule added to R15's hook is what makes it a fact rather than a hope.
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a commit made by any Timone session, in the timone repository or a managed project
+      WHEN the commit message is read
+      THEN it carries `Timone-Stage` and `Timone-Session` trailers, plus `Timone-Run` when a run drove it
+    - GIVEN a session with no run in the ledger
+      WHEN it commits
+      THEN the trailer records the stage as `interactive` and carries no `Timone-Run` line, so the absence is a statement rather than an ambiguity
+    - GIVEN a managed project's repository
+      WHEN `git log --grep=Timone-Stage` is run from any clone
+      THEN every machine-authored commit since the convention landed is listed, and no harness *file* has been added to the repository (R2 stands, narrowed to files)
+- **Verification hint:** inspect the trailers on a daemon-driven phase's commits and on a deliberate interactive commit; confirm the R15 hook flags a commit made without one; confirm `git log --stat` still matches no harness path.
