@@ -86,6 +86,17 @@ const runSchema = z.strictObject({
   pr: z.number().int().positive().optional(),
   /** Agent SDK session identifier, once one has been spawned. */
   sessionId: z.string().optional(),
+  /**
+   * When the run last proved it was alive (ADR-0017). Stamped by the same
+   * tick that prints the progress line, so liveness and visibility are one
+   * mechanism rather than two that can disagree.
+   *
+   * Optional, and its absence is a legitimate state rather than a gap: a run
+   * written by a daemon older than this field has none, and a run that has
+   * not ticked yet has none either. {@link RunStore.staleRuns} falls back to
+   * `updatedAt` for both, which is when the run last actually moved.
+   */
+  heartbeatAt: z.string().optional(),
   /** Why a failed run failed. */
   failure: z.string().optional(),
   /** Guardrail-hook violations recorded against this run (R15). */
@@ -376,6 +387,41 @@ export class RunStore {
       rearmed.failure = undefined;
       rearmed.sessionId = undefined;
     });
+  }
+
+  /**
+   * Stamp a run as still alive (ADR-0017).
+   *
+   * `updatedAt` is deliberately left alone: a heartbeat is not the run
+   * moving, and overwriting it would erase when the run actually started —
+   * which is what `timone status` reports as how long it has been running.
+   */
+  heartbeat(id: string): Run {
+    const run = this.mutable(id);
+    run.heartbeatAt = this.now();
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Runs whose daemon appears to have died: running, and silent for longer
+   * than `thresholdMs`.
+   *
+   * Only `active` and `picked-up` runs qualify. A parked run is waiting on a
+   * human by design and may wait for weeks; a terminal one is finished.
+   *
+   * Staleness is judged against the heartbeat, or against `updatedAt` when
+   * there is none — which covers both a run picked up moments ago and one
+   * left `active` by a daemon that predates the field. Judging "no heartbeat"
+   * as stale on its own would reclaim every run the instant it was picked up;
+   * treating it as fresh would leave the old ones immortal.
+   */
+  staleRuns(thresholdMs: number, now?: string): Run[] {
+    const cutoff = Date.parse(now ?? this.now()) - thresholdMs;
+    return this.state.runs
+      .filter((run) => RUNNING.includes(run.status))
+      .filter((run) => Date.parse(run.heartbeatAt ?? run.updatedAt) < cutoff)
+      .map((run) => ({ ...run }));
   }
 
   /** Record a guardrail violation against a run (R15). */

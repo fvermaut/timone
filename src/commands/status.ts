@@ -105,9 +105,16 @@ export function renderStatus(
     (name) => `${name.padEnd(width)}  ${describeProject(name, runs)}`,
   );
 
+  // Every failure names the way back, in the same breath as the bad news.
+  // A run reclaimed from a dead daemon arrives here like any other failure,
+  // which is the point: the reader does not need to know it was reclaimed,
+  // only what happened and what to type.
   const failures = runs
     .filter((run) => run.status === "failed" && run.failure !== undefined)
-    .map((run) => `${run.project} #${run.ticket} stopped early: ${run.failure}`);
+    .flatMap((run) => [
+      `${run.project} #${run.ticket} stopped early: ${run.failure}`,
+      `  to pick it up from where it stopped: timone retry ${run.id}`,
+    ]);
 
   const waiting = runs.filter((run) => run.status === "parked");
 

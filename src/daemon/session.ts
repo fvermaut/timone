@@ -42,6 +42,7 @@ import {
   workBranch,
 } from "./prompts.js";
 import {
+  DEFAULT_PROGRESS_INTERVAL_SECONDS,
   SessionProgress,
   closingLine,
   tickLine,
@@ -99,9 +100,6 @@ export interface StartedSession {
 export interface Ticker {
   stop(): void;
 }
-
-/** Seconds between progress lines when nobody says otherwise. */
-export const DEFAULT_PROGRESS_INTERVAL_SECONDS = 30;
 
 /** The real ticker. Behind a seam so tests need no clock. */
 function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
@@ -480,7 +478,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const active = store.activate(run.id, started.sessionId);
     this.log(`session ${started.sessionId} started for ${run.id} (${stage}, ${model})`);
 
-    const outcome = await this.watch(`${run.id} (${stage})`, started);
+    const outcome = await this.watch(run.id, `${run.id} (${stage})`, started);
 
     if (!outcome.ok) {
       const reason = outcome.error ?? "the session ended without a result";
@@ -825,7 +823,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const active = store.activate(run.id, started.sessionId);
     this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
 
-    const outcome = await this.watch(`${run.id} (approval record)`, started);
+    const outcome = await this.watch(run.id, `${run.id} (approval record)`, started);
     if (!outcome.ok) {
       const reason = `could not record the approval: ${outcome.error ?? "the session ended without a result"}`;
       const failed = store.fail(run.id, reason);
@@ -978,22 +976,28 @@ export class AgentSessionSpawner implements SessionSpawner {
    * that only appears on success is a success report wearing its clothes.
    */
   private async watch(
+    runId: string,
     label: string,
     started: StartedSession,
   ): Promise<SessionOutcome> {
     const { progress } = started;
     const start = this.options.ticker ?? intervalTicker;
-    const ticker =
-      progress === undefined
-        ? undefined
-        : start(() => {
-            this.log(`work   ${label} — ${tickLine(progress.snapshot())}`);
-          }, this.progressIntervalMs);
+
+    // One tick, two jobs (ADR-0017). The heartbeat is stamped unconditionally
+    // — including for a runtime that can say nothing about its progress —
+    // because it is what proves the run alive, and a tick made conditional on
+    // having something to print would silently move recovery with it.
+    const ticker = start(() => {
+      this.options.store.heartbeat(runId);
+      if (progress !== undefined) {
+        this.log(`work   ${label} — ${tickLine(progress.snapshot())}`);
+      }
+    }, this.progressIntervalMs);
 
     try {
       return await started.completed;
     } finally {
-      ticker?.stop();
+      ticker.stop();
       const summary = progress?.summary();
       if (summary !== undefined) {
         this.log(`cost   ${label} — ${closingLine(summary)}`);

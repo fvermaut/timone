@@ -10,7 +10,11 @@ import {
   stageAfter,
   type PipelineStage,
 } from "./pipeline.js";
+import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 import type { Run, RunStore } from "./runs.js";
+// The same comment the spawner posts when a session ends badly, because this
+// is the same kind of ending: work stopped, nothing was decided, try again.
+import { failedComment } from "./session.js";
 
 /** What a spawn is resuming, when it is resuming something. */
 export interface SpawnContext {
@@ -46,11 +50,19 @@ export interface PollDeps {
   store: RunStore;
   adapter: TicketingAdapter;
   spawner: SessionSpawner;
+  /**
+   * How long a run may go without a heartbeat before it is treated as
+   * orphaned by a dead daemon (ADR-0017). Four progress intervals by default,
+   * which is four chances for a healthy session to have said something.
+   */
+  staleAfterMs?: number;
   /** Progress sink; defaults to silence (the command wires stdout). */
   log?: (message: string) => void;
 }
 
 export interface PollResult {
+  /** Run ids reclaimed from a dead daemon this cycle. */
+  reclaimed: string[];
   /** Run ids newly picked up this cycle. */
   pickedUp: string[];
   /** Run ids newly queued behind an occupying run this cycle. */
@@ -127,6 +139,18 @@ export function queuedComment(
   ].join("\n");
 }
 
+/**
+ * Why a reclaimed run failed, in words that assume nothing about daemons.
+ *
+ * It says what happened and stops. Reclaim is deliberately not recovery
+ * (ADR-0017): a crash mid-stage can leave partial commits on the branch, and
+ * a reproducible crash re-armed automatically would loop forever. The way
+ * back is `timone retry`, and {@link failedComment} already asks for it.
+ */
+export function reclaimedReason(): string {
+  return "the machine running it stopped before the work was finished";
+}
+
 /** Reduce an error to one readable line. */
 function oneLine(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -148,6 +172,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   const { manifest } = deps;
   const log = deps.log ?? (() => {});
   const result: PollResult = {
+    reclaimed: [],
     pickedUp: [],
     queued: [],
     spawned: [],
@@ -159,6 +184,10 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   for (const [name, config] of Object.entries(manifest.projects)) {
     const project: TicketingProject = { name, repoUrl: config.repo_url };
     try {
+      // Before anything is picked up: a run left `active` by a daemon that
+      // died is holding its project, and every ticket behind it is waiting on
+      // a session that no longer exists.
+      await reclaimStale(project, deps, result, log);
       await pollProject(project, deps, result, log);
     } catch (error) {
       const line = `${name}: ${oneLine(error)}`;
@@ -168,6 +197,35 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   }
 
   return result;
+}
+
+/**
+ * Fail every run of `project` whose heartbeat has gone quiet, tell its ticket,
+ * and let the ledger free the project and promote whatever was queued behind
+ * it — `store.fail` does both, because ending a run is what releases it.
+ *
+ * Idempotent across cycles for free: a failed run is no longer running, so
+ * the next call finds nothing and the ticket is told exactly once.
+ */
+async function reclaimStale(
+  project: TicketingProject,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
+  const threshold =
+    deps.staleAfterMs ?? 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000;
+
+  for (const run of store.staleRuns(threshold)) {
+    if (run.project !== project.name) continue;
+
+    const reason = reclaimedReason();
+    store.fail(run.id, reason);
+    log(`reclaim ${run.id} — ${reason}`);
+    result.reclaimed.push(run.id);
+    await adapter.postComment(project, run.ticket, failedComment(reason));
+  }
 }
 
 /** One project's share of a cycle. Throws only on tracker-level failures. */

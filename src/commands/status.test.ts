@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
+import { reclaimedReason } from "../daemon/poll.js";
 import type { Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
 
@@ -245,5 +246,65 @@ describe("renderStatus — the back half of the pipeline", () => {
     const line = lineFor(output, "scratch-app");
     expect(line).toMatch(/waiting on you/i);
     expect(line).toMatch(/pull request #9/);
+  });
+});
+
+describe("renderStatus — a run whose daemon died under it", () => {
+  it("says what happened and what to type, without naming a daemon or a run", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "failed",
+          stage: "execution",
+          failure: reclaimedReason(),
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    expect(output).toContain(
+      "scratch-app #7 stopped early: the machine running it stopped before the work was finished",
+    );
+    expect(output).toContain("timone retry scratch-app#7");
+    // 12c's discipline: nothing here should require knowing what a stage,
+    // a heartbeat, a poll cycle or a marker is.
+    expect(output).not.toMatch(/heartbeat|stale|reclaim|poll|session id/i);
+  });
+
+  it("frees the project, so the line reads idle rather than busy", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "failed",
+          failure: reclaimedReason(),
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    expect(lineFor(output, "scratch-app")).toContain("idle");
+  });
+
+  it("names the way back for every failure, not only the reclaimed ones", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "failed",
+          failure: "the model was unavailable",
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    expect(output).toContain("timone retry scratch-app#7");
   });
 });

@@ -515,3 +515,175 @@ describe("retry", () => {
     expect(store.get(run.id)?.status).toBe("failed");
   });
 });
+
+describe("the heartbeat, and the runs that have stopped making one", () => {
+  /** A store whose clock the test sets by hand, instant by instant. */
+  function clockedStore(path = statePath()): {
+    store: RunStore;
+    set: (iso: string) => void;
+  } {
+    let instant = "2026-08-06T10:00:00Z";
+    return {
+      store: RunStore.open(path, { now: () => instant }),
+      set: (iso) => {
+        instant = iso;
+      },
+    };
+  }
+
+  const FOUR_INTERVALS = 4 * 30 * 1000;
+
+  it("stamps the heartbeat without pretending the run moved", () => {
+    // `updatedAt` is what `timone status` reads as when the run started
+    // working. A heartbeat that overwrote it would make every long session
+    // look as though it had just begun.
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-abc");
+    const activatedAt = store.get(run.id)!.updatedAt;
+
+    set("2026-08-06T10:04:00Z");
+    store.heartbeat(run.id);
+
+    expect(store.get(run.id)?.heartbeatAt).toBe("2026-08-06T10:04:00Z");
+    expect(store.get(run.id)?.updatedAt).toBe(activatedAt);
+  });
+
+  it("never calls a run stale while its heartbeat is fresh, however long it has run", () => {
+    // The false positive that would be worst, and the property the rejected
+    // startup-sweep alternative could not have had: a healthy four-hour
+    // execution session must survive every cycle of every daemon.
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-abc");
+
+    set("2026-08-06T14:00:00Z");
+    store.heartbeat(run.id);
+    set("2026-08-06T14:00:20Z");
+
+    expect(store.staleRuns(FOUR_INTERVALS)).toEqual([]);
+  });
+
+  it("calls a run stale once its heartbeat is older than the threshold", () => {
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-abc");
+    store.heartbeat(run.id);
+
+    set("2026-08-06T10:03:00Z");
+
+    expect(store.staleRuns(FOUR_INTERVALS).map((stale) => stale.id)).toEqual([
+      "scratch-app#7",
+    ]);
+  });
+
+  it("judges a run that has never ticked by when it last moved", () => {
+    // Both the run picked up two seconds ago and the one an older daemon left
+    // `active` for a week look identical — neither has a heartbeat — and the
+    // difference between them is entirely in `updatedAt`.
+    const { store, set } = clockedStore();
+    store.register("scratch-app", 7);
+
+    set("2026-08-06T10:00:30Z");
+    expect(store.staleRuns(FOUR_INTERVALS)).toEqual([]);
+
+    set("2026-08-06T10:09:00Z");
+    expect(store.staleRuns(FOUR_INTERVALS)).toHaveLength(1);
+  });
+
+  it("reclaims a run written before this field existed rather than leaving it immortal", () => {
+    const path = statePath();
+    const { store: seed } = clockedStore(path);
+    const { run } = seed.register("scratch-app", 7);
+    seed.activate(run.id, "session-abc");
+
+    // Strip the field the way an older state file would have it: absent.
+    const state = JSON.parse(readFileSync(path, "utf8")) as {
+      runs: Record<string, unknown>[];
+    };
+    expect(state.runs[0]).not.toHaveProperty("heartbeatAt");
+
+    const reopened = RunStore.open(path, {
+      now: () => "2026-08-06T11:00:00Z",
+    });
+    expect(reopened.staleRuns(FOUR_INTERVALS).map((r) => r.id)).toEqual([
+      "scratch-app#7",
+    ]);
+  });
+
+  it("leaves a parked run alone however long it waits", () => {
+    // A park is a human wait, and humans take weeks. Reclaiming one would
+    // fail a run because nobody had answered yet.
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-abc");
+    store.park(run.id, { waitingOn: "your answer on the ticket", kind: "gate" });
+
+    set("2026-08-20T10:00:00Z");
+
+    expect(store.staleRuns(FOUR_INTERVALS)).toEqual([]);
+  });
+
+  it("leaves finished runs alone, however old", () => {
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s");
+    store.complete(run.id);
+
+    const second = store.register("scratch-app", 8).run;
+    store.activate(second.id, "s2");
+    store.fail(second.id, "something broke");
+
+    set("2026-09-01T10:00:00Z");
+
+    expect(store.staleRuns(FOUR_INTERVALS)).toEqual([]);
+  });
+
+  it("lets a reclaimed run be failed and then retried, with no new transition", () => {
+    // Reclaim is not recovery: the way back is `timone retry`, and it needs
+    // no change to handle a run that stopped this way rather than any other.
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-abc");
+    store.claimBranch(run.id, "timone/7-slow");
+
+    set("2026-08-06T10:09:00Z");
+    const [stale] = store.staleRuns(FOUR_INTERVALS);
+    store.fail(stale.id, "the daemon running it stopped");
+
+    const rearmed = store.retry(stale.id);
+    expect(rearmed.status).toBe("picked-up");
+    expect(rearmed.branch).toBe("timone/7-slow");
+    expect(rearmed.failure).toBeUndefined();
+  });
+
+  it("frees the project the moment a stale run is failed", () => {
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-abc");
+    store.claimBranch(run.id, "timone/7-slow");
+    const queued = store.register("scratch-app", 8).run;
+    expect(queued.status).toBe("queued");
+
+    set("2026-08-06T10:09:00Z");
+    store.fail(store.staleRuns(FOUR_INTERVALS)[0].id, "the daemon stopped");
+
+    expect(store.get("scratch-app#8")?.status).toBe("picked-up");
+    expect(store.occupyingRun("scratch-app")?.id).toBe("scratch-app#8");
+  });
+
+  it("has nothing more to reclaim once it has reclaimed", () => {
+    // Idempotence across cycles: the second cycle must find nothing, or the
+    // daemon would comment on the same ticket every minute forever.
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-abc");
+
+    set("2026-08-06T10:09:00Z");
+    const first = store.staleRuns(FOUR_INTERVALS);
+    expect(first).toHaveLength(1);
+    store.fail(first[0].id, "the daemon stopped");
+
+    expect(store.staleRuns(FOUR_INTERVALS)).toEqual([]);
+  });
+});

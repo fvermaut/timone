@@ -941,3 +941,181 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     expect(store.get("scratch-app#6")?.status).toBe("parked");
   });
 });
+
+describe("reclaiming a run its daemon left behind", () => {
+  /** A store whose clock the test sets by hand. */
+  function clockedStore(): { store: RunStore; set: (iso: string) => void } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-reclaim-"));
+    tempDirs.push(dir);
+    let instant = "2026-08-06T10:00:00Z";
+    return {
+      store: RunStore.open(join(dir, ".timone", "state.json"), {
+        now: () => instant,
+      }),
+      set: (iso) => {
+        instant = iso;
+      },
+    };
+  }
+
+  const FOUR_INTERVALS = 4 * 30 * 1000;
+
+  it("fails the run, tells the ticket and frees the project, in one cycle", async () => {
+    const { store, set } = clockedStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-gone");
+    store.claimBranch(run.id, "timone/7-slow");
+
+    set("2026-08-06T10:09:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(result.reclaimed).toEqual(["scratch-app#7"]);
+    expect(store.get("scratch-app#7")?.status).toBe("failed");
+    expect(store.occupyingRun("scratch-app")).toBeUndefined();
+    expect(comments.some((c) => c.body.includes("stopped before the work"))).toBe(
+      true,
+    );
+  });
+
+  it("promotes the run that was queued behind it in the same cycle", async () => {
+    const { store, set } = clockedStore();
+    const { adapter } = fakeAdapter({
+      "scratch-app": [ticket(7), ticket(8)],
+    });
+    const { spawner, spawned } = fakeSpawner();
+
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-gone");
+    store.claimBranch(run.id, "timone/7-slow");
+    store.register("scratch-app", 8);
+    expect(store.get("scratch-app#8")?.status).toBe("queued");
+
+    set("2026-08-06T10:09:00Z");
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(spawned.map((r) => r.id)).toEqual(["scratch-app#8"]);
+  });
+
+  it("never reclaims a long session that is still saying it is alive", async () => {
+    // The false positive that matters most. A four-hour execution session is
+    // a normal thing, and reclaiming one would kill work in progress.
+    const { store, set } = clockedStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-alive");
+    store.claimBranch(run.id, "timone/7-slow");
+
+    set("2026-08-06T14:00:00Z");
+    store.heartbeat(run.id);
+    set("2026-08-06T14:00:20Z");
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get("scratch-app#7")?.status).toBe("active");
+    expect(comments).toEqual([]);
+  });
+
+  it("says so once, not every cycle", async () => {
+    const { store, set } = clockedStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-gone");
+    store.claimBranch(run.id, "timone/7-slow");
+
+    set("2026-08-06T10:09:00Z");
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    };
+    await pollOnce(deps);
+    set("2026-08-06T10:12:00Z");
+    const second = await pollOnce(deps);
+
+    expect(second.reclaimed).toEqual([]);
+    expect(
+      comments.filter((c) => c.body.includes("stopped before the work")),
+    ).toHaveLength(1);
+  });
+
+  it("leaves a run parked on a human alone, however long it has waited", async () => {
+    const { store, set } = clockedStore();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s");
+    store.claimBranch(run.id, "timone/7-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "requirements",
+      waitCursor: "2026-08-06T10:00:00Z",
+    });
+
+    set("2026-08-25T10:00:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get("scratch-app#7")?.status).toBe("parked");
+  });
+
+  it("leaves a reclaimed run ready for `timone retry`, with its branch intact", async () => {
+    const { store, set } = clockedStore();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-gone");
+    store.claimBranch(run.id, "timone/7-slow");
+    store.setStage(run.id, "execution");
+
+    set("2026-08-06T10:09:00Z");
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    const rearmed = store.retry("scratch-app#7");
+    expect(rearmed.status).toBe("picked-up");
+    expect(rearmed.stage).toBe("execution");
+    expect(rearmed.branch).toBe("timone/7-slow");
+  });
+});

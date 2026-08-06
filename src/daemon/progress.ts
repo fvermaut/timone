@@ -197,3 +197,14 @@ function count(value: number, noun: string): string {
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
+
+/**
+ * Seconds between progress ticks when nobody says otherwise.
+ *
+ * It sets two things at once, and that is deliberate (ADR-0017): how often
+ * the daemon says what a session is doing, and how often the session proves
+ * it is alive. Recovery is derived from it — a run silent for four of these
+ * is reclaimed — so nobody may later make the tick conditional without
+ * moving recovery too.
+ */
+export const DEFAULT_PROGRESS_INTERVAL_SECONDS = 30;

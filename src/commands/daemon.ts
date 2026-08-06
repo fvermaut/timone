@@ -6,11 +6,8 @@ import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
 import type { TicketingAdapter } from "../adapters/ticketing.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
-import {
-  AgentSessionSpawner,
-  DEFAULT_PROGRESS_INTERVAL_SECONDS,
-  agentSdkRuntime,
-} from "../daemon/session.js";
+import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
+import { AgentSessionSpawner, agentSdkRuntime } from "../daemon/session.js";
 import { GuardrailObserver } from "../daemon/hooks.js";
 
 /** Options accepted by `timone daemon`, as commander parses them. */
@@ -26,6 +23,8 @@ export interface RunDaemonOptions {
   manifest: Manifest;
   store: RunStore;
   intervalMs: number;
+  /** How long a run may go silent before it is treated as orphaned. */
+  staleAfterMs?: number;
   once: boolean;
   adapter: TicketingAdapter;
   spawner: SessionSpawner;
@@ -47,6 +46,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<number> {
       store: options.store,
       adapter: options.adapter,
       spawner: options.spawner,
+      staleAfterMs: options.staleAfterMs,
       log,
     });
     failures = result.errors.length;
@@ -71,7 +71,8 @@ export function registerDaemonCommand(program: Command): void {
     .option("--interval <seconds>", "seconds between poll cycles", "60")
     .option(
       "--progress-interval <seconds>",
-      "seconds between progress lines while a session works",
+      "seconds between progress lines — and, four of them without one, " +
+        "when a run is treated as orphaned by a stopped daemon",
       String(DEFAULT_PROGRESS_INTERVAL_SECONDS),
     )
     .option("--once", "run a single poll cycle and exit")
@@ -138,6 +139,10 @@ export function registerDaemonCommand(program: Command): void {
         manifest,
         store,
         intervalMs: interval * 1000,
+        // ADR-0017: the tick that prints is the tick that proves the run
+        // alive, so this one flag sets both cadences. Four intervals gives a
+        // healthy session four chances to have said something.
+        staleAfterMs: 4 * progressInterval * 1000,
         once: options.once === true,
         adapter,
         spawner,

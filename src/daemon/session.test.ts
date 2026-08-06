@@ -26,10 +26,13 @@ import {
   type PipelineStage,
 } from "./pipeline.js";
 import { RunStore, type Run } from "./runs.js";
-import type { ProgressSnapshot, SessionSummary } from "./progress.js";
+import {
+  DEFAULT_PROGRESS_INTERVAL_SECONDS,
+  type ProgressSnapshot,
+  type SessionSummary,
+} from "./progress.js";
 import {
   AgentSessionSpawner,
-  DEFAULT_PROGRESS_INTERVAL_SECONDS,
   type ProgressReader,
   type SessionRequest,
   type SessionRuntime,
@@ -2233,10 +2236,14 @@ describe("saying what a session is doing while it does it", () => {
     expect(clock.intervals).toEqual([45_000]);
   });
 
-  it("starts no ticker for a runtime that cannot say how it is doing", async () => {
+  it("ticks even when it has nothing to print, because the tick is also the heartbeat", async () => {
+    // ADR-0017: one tick, two jobs. A tick made conditional on having
+    // something to say would move recovery with it — the run would go quiet
+    // and be reclaimed for having no progress reader.
     const store = newStore();
     const { adapter } = fakeAdapter();
-    const clock = handTicker();
+    const clock = handTicker({ ticks: 1 });
+    const lines: string[] = [];
 
     await new AgentSessionSpawner({
       manifest,
@@ -2245,10 +2252,37 @@ describe("saying what a session is doing while it does it", () => {
       runtime: classifyingRuntime("question", adapter).runtime,
       root: "/root",
       ticker: clock.ticker,
+      log: (message) => lines.push(message),
     }).spawn(pickedUpRun(store), project, { stage: "triage" });
 
-    expect(clock.intervals).toEqual([]);
-    expect(clock.stops).toBe(0);
+    expect(clock.intervals).toEqual([30_000]);
+    expect(clock.stops).toBe(1);
+    // Nothing printed — there was nothing to say — but the run was stamped.
+    expect(lines.filter((line) => line.startsWith("work"))).toHaveLength(0);
+    expect(store.get("scratch-app#7")?.heartbeatAt).toEqual(expect.any(String));
+  });
+
+  it("stamps the heartbeat on every tick of a session that does report", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const progress = fakeProgress();
+    const clock = handTicker({ ticks: 2 });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: watchedRuntime(progress.reader, {
+        work: async () => {
+          await adapter.applyLabel(project, 7, "triage:question");
+          await adapter.postComment(project, 7, "a question.");
+        },
+      }),
+      root: "/root",
+      ticker: clock.ticker,
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(store.get("scratch-app#7")?.heartbeatAt).toEqual(expect.any(String));
   });
 
   it("defaults to thirty seconds", () => {
