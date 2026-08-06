@@ -308,3 +308,85 @@ describe("renderStatus — a run whose daemon died under it", () => {
     expect(output).toContain("timone retry scratch-app#7");
   });
 });
+
+describe("renderStatus — what a run is costing right now", () => {
+  it("names the model and how long it has been at it", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "active",
+          stage: "execution",
+          updatedAt: "2026-08-06T10:00:00Z",
+        }),
+      ],
+      { stateExists: true, now: new Date("2026-08-06T10:12:04Z") },
+    );
+
+    // The same phrasing the daemon's own progress line uses, so the two agree
+    // rather than being two dialects for one fact.
+    expect(lineFor(output, "scratch-app")).toContain("claude-opus-5");
+    expect(lineFor(output, "scratch-app")).toContain("for 12m04s");
+  });
+
+  it("still speaks plainly — no stage numbers, no jargon", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "active",
+          stage: "execution",
+          updatedAt: "2026-08-06T10:00:00Z",
+        }),
+      ],
+      { stateExists: true, now: new Date("2026-08-06T10:00:30Z") },
+    );
+
+    expect(lineFor(output, "scratch-app")).toContain("building");
+    expect(lineFor(output, "scratch-app")).not.toMatch(
+      /stage 6|heartbeat|marker|session id/i,
+    );
+  });
+
+  it("says nothing about a model for a run that is waiting, not working", () => {
+    // "What is this costing me" is not a question about a parked run.
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "parked",
+          stage: "planning",
+          waitingOn: "your answer on the ticket",
+          waitingKind: "gate",
+        }),
+      ],
+      { stateExists: true, now: new Date("2026-08-06T10:00:30Z") },
+    );
+
+    expect(lineFor(output, "scratch-app")).not.toContain("claude-");
+  });
+
+  it("omits the elapsed time rather than guessing when nobody said what now is", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "active",
+          stage: "execution",
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    expect(lineFor(output, "scratch-app")).toContain("claude-opus-5");
+    expect(lineFor(output, "scratch-app")).not.toContain(" for ");
+  });
+});

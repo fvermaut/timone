@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
-import type { PipelineStage } from "../daemon/pipeline.js";
+import { modelFor, type PipelineStage } from "../daemon/pipeline.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 
 /** Statuses that mean a session is running, or about to. */
@@ -25,6 +25,37 @@ const STAGE_LABELS: Partial<Record<PipelineStage, string>> = {
 export interface RenderStatusOptions {
   /** False when the daemon has never written a state file. */
   stateExists: boolean;
+  /** Now, for saying how long a running session has been going. */
+  now?: Date;
+}
+
+/**
+ * How long a run has been working, in the words the daemon's own progress
+ * line uses — so the thing printed while a session runs and the thing
+ * `timone status` reports agree rather than being two dialects.
+ *
+ * Measured from `updatedAt`, which for an active run is when it activated.
+ * The heartbeat deliberately does not touch that field, for this reason.
+ */
+function howLong(run: Run, now: Date | undefined): string {
+  if (now === undefined) return "";
+  const started = Date.parse(run.updatedAt);
+  if (!Number.isFinite(started)) return "";
+  const elapsed = now.getTime() - started;
+  return elapsed < 0 ? "" : ` for ${humanDuration(elapsed)}`;
+}
+
+/** `9s`, `4m12s`, `1h04m` — the same shape the progress line prints. */
+function humanDuration(ms: number): string {
+  const total = Math.round(ms / 1000);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (value: number): string => String(value).padStart(2, "0");
+
+  if (hours > 0) return `${hours}h${pad(minutes)}m`;
+  if (minutes > 0) return `${minutes}m${pad(seconds)}s`;
+  return `${seconds}s`;
 }
 
 /** What a parked run is waiting for. A review wait names its pull request
@@ -38,14 +69,21 @@ function describeWait(run: Run): string {
 }
 
 /** One run's phrase: the ticket, how far it got, and what it is doing. */
-function describeRun(run: Run): string {
+function describeRun(run: Run, now: Date | undefined): string {
   const stage =
     run.stage === undefined ? "" : ` (${STAGE_LABELS[run.stage] ?? run.stage})`;
+  // The model is named for a working run only: it answers "what is this
+  // costing me right now", which is not a question about a parked one.
+  const model =
+    run.status === "active" && run.stage !== undefined
+      ? (modelFor(run.stage) ?? "")
+      : "";
+  const on = model === "" ? "" : ` on ${model}`;
   const what =
     run.status === "parked"
       ? describeWait(run)
       : run.status === "active"
-        ? "working on it now"
+        ? `working on it now${on}${howLong(run, now)}`
         : "picked up, about to start";
 
   const flags =
@@ -65,13 +103,13 @@ function describeRun(run: Run): string {
  * them would hide most of what is being asked of them, which is the one thing
  * this command exists to prevent.
  */
-function describeProject(project: string, runs: Run[]): string {
+function describeProject(project: string, runs: Run[], now: Date | undefined): string {
   const mine = runs.filter((run) => run.project === project);
   const running = mine.filter((run) => RUNNING.includes(run.status));
   const parked = mine.filter((run) => run.status === "parked");
   const queued = mine.filter((run) => run.status === "queued");
 
-  const parts = [...running, ...parked].map(describeRun);
+  const parts = [...running, ...parked].map((run) => describeRun(run, now));
   if (parts.length === 0) parts.push("idle");
 
   if (queued.length > 0) {
@@ -102,7 +140,7 @@ export function renderStatus(
 
   const width = Math.max(...names.map((name) => name.length), 0);
   const lines = names.map(
-    (name) => `${name.padEnd(width)}  ${describeProject(name, runs)}`,
+    (name) => `${name.padEnd(width)}  ${describeProject(name, runs, options.now)}`,
   );
 
   // Every failure names the way back, in the same breath as the bad news.
@@ -172,6 +210,6 @@ export function registerStatusCommand(program: Command): void {
         return;
       }
 
-      console.log(renderStatus(manifest, runs, { stateExists }));
+      console.log(renderStatus(manifest, runs, { stateExists, now: new Date() }));
     });
 }
