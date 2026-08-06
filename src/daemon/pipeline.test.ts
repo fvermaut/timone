@@ -3,11 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { TicketComment } from "../adapters/ticketing.js";
 import type { GateDecision } from "./gates.js";
 import {
+  APPROVAL_RECORD_MODEL,
   CLASSIFICATIONS,
   PIPELINE_STAGES,
   classificationFromLabels,
   concludeConversation,
+  effortFor,
   isBuilt,
+  modelFor,
   ownsBranch,
   processStage,
   readGate,
@@ -176,6 +179,66 @@ describe("the stage graph", () => {
       expect(typeof waitFor(stage)).toBe("string");
       expect(typeof ownsBranch(stage)).toBe("boolean");
     }
+  });
+});
+
+describe("the model and effort each stage runs on", () => {
+  it("declares the table settled at the grill, stage by stage", () => {
+    // Written out rather than looped, because the point of the table is the
+    // specific choice per stage — a loop would pass against any table at all.
+    expect(modelFor("triage")).toBe("claude-sonnet-5");
+    expect(effortFor("triage")).toBe("medium");
+
+    expect(modelFor("requirements")).toBe("claude-opus-5");
+    expect(effortFor("requirements")).toBe("high");
+
+    expect(modelFor("planning")).toBe("claude-opus-5");
+    expect(effortFor("planning")).toBe("high");
+
+    expect(modelFor("execution")).toBe("claude-opus-5");
+    expect(effortFor("execution")).toBe("xhigh");
+
+    expect(modelFor("verification")).toBe("claude-opus-5");
+    expect(effortFor("verification")).toBe("xhigh");
+
+    expect(modelFor("delivery")).toBe("claude-opus-5");
+    expect(effortFor("delivery")).toBe("high");
+
+    expect(modelFor("remediation")).toBe("claude-opus-5");
+    expect(effortFor("remediation")).toBe("high");
+  });
+
+  it("keeps triage off the cheapest model, because it routes silently", () => {
+    // A `triage:chore` label goes straight to planning while `triage:feature`
+    // opens a human interview first — so a misclassification skips a gate
+    // nobody notices was skipped. The genuinely mechanical session is the
+    // approval record, and that is the one Haiku row.
+    expect(modelFor("triage")).not.toBe(APPROVAL_RECORD_MODEL);
+  });
+
+  it("gives every stage the daemon spawns a session for a declared model", () => {
+    for (const stage of PIPELINE_STAGES) {
+      if (!isBuilt(stage) || !runsUnattended(stage)) continue;
+      expect(modelFor(stage), `${stage} declares no model`).toEqual(
+        expect.any(String),
+      );
+    }
+  });
+
+  it("declares nothing for a stage no session is ever started for", () => {
+    // `spawn()` short-circuits to `openConversation` before it reaches
+    // `runStage`, so clarification never calls `runtime.start`. A model on it
+    // would be config nothing reads — the kind that later looks like a bug.
+    expect(modelFor("clarification")).toBeUndefined();
+    expect(effortFor("clarification")).toBeUndefined();
+    expect(modelFor("feedback")).toBeUndefined();
+    expect(effortFor("feedback")).toBeUndefined();
+  });
+
+  it("runs the approval record on Haiku, and sends it no effort at all", () => {
+    // Haiku 4.5 does not support the parameter and rejects it, so there is no
+    // effort to declare — not a default one, and not an undefined one.
+    expect(APPROVAL_RECORD_MODEL).toBe("claude-haiku-4-5");
   });
 });
 

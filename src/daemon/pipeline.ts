@@ -1,3 +1,5 @@
+import type { EffortLevel } from "@anthropic-ai/claude-agent-sdk";
+
 import type { GateDecision } from "./gates.js";
 
 /**
@@ -35,7 +37,7 @@ export type PipelineStage = (typeof PIPELINE_STAGES)[number];
  */
 export type WaitKind = "gate" | "conversation" | "review" | "none";
 
-interface StageSpec {
+interface StageFacts {
   /** The stage of `process.md` this is, for anyone comparing the two. */
   processStage: number;
   /** What the run waits on when the stage's session finishes. */
@@ -53,10 +55,62 @@ interface StageSpec {
 }
 
 /**
+ * A stage the daemon starts a session for, which must therefore say what that
+ * session runs on. Declaring the model is not optional here on purpose: a
+ * spawned stage without one silently takes the runtime's default, which is
+ * precisely the defect this requirement closes — and it would hide in
+ * whichever stage nobody thought to check.
+ */
+interface SpawnedStage {
+  built: true;
+  /** Never a conversation — see {@link UnspawnedStage}. */
+  waits: Exclude<WaitKind, "conversation">;
+  model: string;
+  /**
+   * Omitted for models that reject the parameter — Haiku 4.5 does. Optional
+   * rather than defaulted, so the type carries the constraint instead of a
+   * runtime check having to.
+   */
+  effort?: EffortLevel;
+}
+
+/**
+ * A stage no session is ever started for, and which therefore declares
+ * neither. Two ways to be one: the machinery does not exist yet, or the stage
+ * waits on a conversation — `spawn()` short-circuits to `openConversation`
+ * before it ever reaches `runStage`, so `runtime.start` is never called. A
+ * model on either would be configuration nothing reads.
+ */
+type UnspawnedStage = { model?: never; effort?: never } & (
+  | { built: false }
+  | { built: true; waits: "conversation" }
+);
+
+type StageSpec = StageFacts & (SpawnedStage | UnspawnedStage);
+
+/**
+ * The model the approval-recording session runs on. Not a stage — it has no
+ * row in the graph because it is not one of `process.md`'s steps — but it is
+ * the second place `runtime.start` is called, and the one that would
+ * otherwise keep the runtime default while every real stage moved off it.
+ *
+ * Haiku because the work genuinely is mechanical: stamp a name and a date
+ * into an artifact that already exists, commit, push. No effort goes with it.
+ */
+export const APPROVAL_RECORD_MODEL = "claude-haiku-4-5";
+
+/**
  * The stage graph. It is data rather than control flow on purpose: the daemon
  * orchestrates stage skills and never reimplements them, so what it holds
- * about a stage is which skill runs, what the run then waits for, and what
- * comes next — and those are facts, not code paths.
+ * about a stage is which skill runs, what the run then waits for, what comes
+ * next, and what it runs on — and those are facts, not code paths.
+ *
+ * The model and effort columns were settled once, at the grill of
+ * 2026-08-06, and carry their reasons here so no slice re-argues them. They
+ * live in the graph rather than in `timone.yaml` because the manifest is
+ * strictly per-*project* and this is per-*stage*; moving them later would be
+ * a refactor, and changing one is a one-line edit — which is why the choice
+ * is recorded in phase 14's plan rather than in an ADR.
  */
 const STAGES: Record<PipelineStage, StageSpec> = {
   triage: {
@@ -64,6 +118,12 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     waits: "none",
     ownsBranch: false,
     built: true,
+    // Not the cheap model, though the work looks small: triage routes
+    // silently. A `triage:chore` label goes straight to planning while
+    // `triage:feature` opens a human interview first, so a misclassification
+    // skips a gate and nobody is told a gate was skipped.
+    model: "claude-sonnet-5",
+    effort: "medium",
     // What follows depends on the classification: see `routeAfterTriage`.
   },
   clarification: {
@@ -78,6 +138,9 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     waits: "gate",
     ownsBranch: true,
     built: true,
+    // The PRD everything downstream is built and verified against.
+    model: "claude-opus-5",
+    effort: "high",
     next: "planning",
   },
   planning: {
@@ -85,6 +148,9 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     waits: "gate",
     ownsBranch: true,
     built: true,
+    // Human-gated, but a bad cut costs a whole phase before anyone sees it.
+    model: "claude-opus-5",
+    effort: "high",
     next: "execution",
   },
   execution: {
@@ -92,6 +158,10 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     waits: "none",
     ownsBranch: true,
     built: true,
+    // A fleet: `timone-execute` spawns one sub-agent per sub-phase, and they
+    // inherit this row.
+    model: "claude-opus-5",
+    effort: "xhigh",
     next: "verification",
   },
   verification: {
@@ -99,6 +169,9 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     waits: "none",
     ownsBranch: true,
     built: true,
+    // The check nobody else performs — correctness over cost.
+    model: "claude-opus-5",
+    effort: "xhigh",
     next: "delivery",
   },
   delivery: {
@@ -106,6 +179,9 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     waits: "review",
     ownsBranch: true,
     built: true,
+    // Also a fleet: two review axes as parallel fresh contexts.
+    model: "claude-opus-5",
+    effort: "high",
     // Nothing follows in the graph: the run ends at the pull request, whose
     // merge or close is a terminal event on the run, not a stage.
   },
@@ -117,6 +193,9 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     waits: "none",
     ownsBranch: true,
     built: true,
+    // Coding, on a live pull request.
+    model: "claude-opus-5",
+    effort: "high",
     next: "verification",
   },
   feedback: {
@@ -197,6 +276,25 @@ export function ownsBranch(stage: PipelineStage): boolean {
 /** Whether the machinery for `stage` exists yet. */
 export function isBuilt(stage: PipelineStage): boolean {
   return STAGES[stage].built;
+}
+
+/**
+ * The model a stage's session runs on, or undefined for a stage no session is
+ * ever started for. The undefined is a real answer rather than a gap: see
+ * {@link UnspawnedStage}.
+ */
+export function modelFor(stage: PipelineStage): string | undefined {
+  return STAGES[stage].model;
+}
+
+/**
+ * The reasoning effort a stage's session runs at, or undefined when there is
+ * none to send — either because the stage spawns nothing, or because its
+ * model rejects the parameter. Callers must omit the field entirely on
+ * undefined rather than sending it unset.
+ */
+export function effortFor(stage: PipelineStage): EffortLevel | undefined {
+  return STAGES[stage].effort;
 }
 
 /**

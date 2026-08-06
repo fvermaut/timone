@@ -19,6 +19,12 @@ import {
   type TicketThread,
 } from "../adapters/ticketing.js";
 import { gateCommentFor } from "./gate-comment.js";
+import {
+  APPROVAL_RECORD_MODEL,
+  effortFor,
+  modelFor,
+  type PipelineStage,
+} from "./pipeline.js";
 import { RunStore, type Run } from "./runs.js";
 import {
   AgentSessionSpawner,
@@ -1882,5 +1888,135 @@ describe("the remediation stage", () => {
 
     expect(store.get("scratch-app#7")?.status).toBe("failed");
     expect(comments.at(-1)?.body).toContain("moves a requirement");
+  });
+});
+
+describe("the model each session runs on", () => {
+  /** A run parked at a gate, ready to be resumed into `stage`. */
+  function parkedAt(store: RunStore, stage: PipelineStage): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "the next stage",
+      stage,
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  it("gives a triage session the model and effort the graph declares", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = classifyingRuntime("question", adapter);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(requests[0].model).toBe(modelFor("triage"));
+    expect(requests[0].effort).toBe(effortFor("triage"));
+  });
+
+  it("gives an execution session its own row, not triage's", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${STAGE_DONE_MARKER}\n\nBuilt.`);
+      },
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      planStatusProbe: async () => "Complete — see reports/phase-04-complete.md",
+      verificationReportProbe: async () =>
+        "doc/plans/phases/reports/phase-04-verification.md",
+    }).spawn(parkedAt(store, "planning"), project, { stage: "execution" });
+
+    expect(requests[0].model).toBe(modelFor("execution"));
+    expect(requests[0].effort).toBe("xhigh");
+  });
+
+  it("runs the approval record on its own declared model, never the default", async () => {
+    // The second `runtime.start` site, and the one that would otherwise have
+    // quietly kept whatever the runtime defaults to while every stage moved.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:feature"],
+      comments: [],
+    });
+    const { runtime, requests } = fakeRuntime();
+
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "planning",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(store.get(run.id)!, project, {
+      stage: "execution",
+      approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    expect(requests[0].model).toBe(APPROVAL_RECORD_MODEL);
+    // Not undefined — absent. Haiku 4.5 rejects the parameter, so the request
+    // must not carry the key at all for the runtime to have anything to omit.
+    expect("effort" in requests[0]).toBe(false);
+  });
+
+  it("starts no session at all for clarification, so its missing model is read by nobody", async () => {
+    // This is why clarification declares neither model nor effort. `spawn()`
+    // short-circuits to `openConversation` before `runStage`, so the request
+    // that would have needed a model is never built.
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = fakeRuntime();
+
+    // Reached the way the pipeline reaches it: triage has already run, so the
+    // run is active when clarification comes round.
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-triage");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      channel: {
+        name: "fake",
+        async open() {
+          return { comment: "come and talk to me", waitingOn: "a chat" };
+        },
+        async conclude() {
+          return "done";
+        },
+      },
+    }).spawn(store.get(run.id)!, project, { stage: "clarification" });
+
+    expect(requests).toHaveLength(0);
+    expect(store.get("scratch-app#7")?.waitingKind).toBe("conversation");
   });
 });

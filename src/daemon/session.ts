@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 
 const execFileAsync = promisify(execFile);
 
@@ -20,8 +20,11 @@ import { gateCommentFor } from "./gate-comment.js";
 import { waitCursorFrom } from "./gates.js";
 import { outcomeCursorFrom, readStageOutcome, type StageOutcome } from "./outcomes.js";
 import {
+  APPROVAL_RECORD_MODEL,
   classificationFromLabels,
+  effortFor,
   isBuilt,
+  modelFor,
   ownsBranch,
   processStage,
   routeAfterTriage,
@@ -45,6 +48,19 @@ export interface SessionRequest {
   /** Always the timone root — sessions never run inside a managed project. */
   cwd: string;
   prompt: string;
+  /**
+   * The model this session runs on, declared per stage in the graph. Required
+   * rather than optional: a request that could omit it is a request that can
+   * silently take whatever the runtime defaults to, which is the failure this
+   * field exists to make impossible.
+   */
+  model: string;
+  /**
+   * The reasoning effort, when the stage declares one. Absent — not
+   * undefined — for models that reject the parameter, so the runtime has
+   * something unambiguous to omit.
+   */
+  effort?: EffortLevel;
 }
 
 /** How a session ended. */
@@ -376,10 +392,19 @@ export class AgentSessionSpawner implements SessionSpawner {
   > {
     const { store, adapter, runtime, root } = this.options;
 
-    if (!isPrompted(stage)) {
+    const model = modelFor(stage);
+    if (!isPrompted(stage) || model === undefined) {
       // A stage the graph calls built and the prompts module cannot instruct
       // is a wiring mistake, and failing loudly beats running a blank session.
-      const reason = `no prompt exists for the ${stage} stage`;
+      // The missing model is the same mistake wearing different clothes — and
+      // is unreachable while the graph type-checks, since a stage the daemon
+      // spawns cannot be declared without one. It is here so that a stage
+      // reaching this line by some path the types cannot see stops, rather
+      // than running on whatever the runtime happens to default to.
+      const reason =
+        isPrompted(stage) && model === undefined
+          ? `no model is declared for the ${stage} stage`
+          : `no prompt exists for the ${stage} stage`;
       store.fail(run.id, reason);
       await adapter.postComment(project, run.ticket, failedComment(reason));
       return { ok: false };
@@ -399,9 +424,18 @@ export class AgentSessionSpawner implements SessionSpawner {
     const branch = store.get(run.id)?.branch;
     const headBefore = await this.branchHead(project, branch);
 
-    const started = await runtime.start({ cwd: root, prompt });
+    const effort = effortFor(stage);
+    const started = await runtime.start({
+      cwd: root,
+      prompt,
+      model,
+      // Spread rather than assigned, so a stage with no effort produces a
+      // request with no `effort` key — not one set to undefined, which the
+      // runtime would have to tell apart from an intended value.
+      ...(effort === undefined ? {} : { effort }),
+    });
     const active = store.activate(run.id, started.sessionId);
-    this.log(`session ${started.sessionId} started for ${run.id} (${stage})`);
+    this.log(`session ${started.sessionId} started for ${run.id} (${stage}, ${model})`);
 
     const outcome = await started.completed;
 
@@ -737,7 +771,14 @@ export class AgentSessionSpawner implements SessionSpawner {
     // an unpushed approval stamp is exactly the failure they exist to catch.
     await this.snapshot(run, project);
 
-    const started = await runtime.start({ cwd: root, prompt });
+    // Its own declared model, never the runtime's default: this is the second
+    // `runtime.start` site and not a `PipelineStage`, so nothing in the graph
+    // speaks for it. Haiku carries no effort at all.
+    const started = await runtime.start({
+      cwd: root,
+      prompt,
+      model: APPROVAL_RECORD_MODEL,
+    });
     const active = store.activate(run.id, started.sessionId);
     this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
 
@@ -928,6 +969,11 @@ export const agentSdkRuntime: SessionRuntime = {
         cwd: request.cwd,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
+        model: request.model,
+        // Omitted entirely when the stage declares none — Haiku 4.5 rejects
+        // the parameter, and sending it as undefined is not the same as not
+        // sending it.
+        ...(request.effort === undefined ? {} : { effort: request.effort }),
       },
     });
 
