@@ -44,7 +44,12 @@ node dist/cli.js daemon --once          # a single cycle — every transition in
 node dist/cli.js daemon --interval 30   # seconds between cycles
 node dist/cli.js status                 # what each project is working, and what waits on you
 node dist/cli.js takeover <project>#<n> # pick up a ticket that wants to talk something through
+node dist/cli.js retry <project>#<n>    # re-arm a failed run at the stage where it stopped
 ```
+
+A ticket now goes the whole way: after you approve the plan, the daemon builds it slice by slice, has a fresh session that never watched the build check the result, and opens a pull request carrying the scope, the verification outcome and two independent reviews. The ticket links the PR and the PR references the ticket. **Merging stays yours** — a merge completes the ticket (and closes it), and whatever was queued behind it starts.
+
+**Review comments on an open Timone PR are acted on** ([ADR-0016](doc/adr/0016-review-remediation-rides-the-verify-fix-shape.md)): name a concrete change and the next cycle makes it — one `fix: review — …` commit, a full re-check, the same PR refreshed, and a reply saying what was done. A vague comment gets you a clarifying question and no commit; a comment that would change what was agreed gets told so plainly and taken through the front door. `timone retry` is the way back when a run fails: it re-arms at the stage that stopped, keeping the branch and everything on it.
 
 **The `timone` label is a permission boundary, not an instruction.** Putting it on an open issue says the daemon may act on that issue; it says nothing about what the issue *is* — classifying that is stage 1's job, run by an agent that has read the raw text. An unlabelled issue is never touched. Write tickets in plain language: naming a stage, a skill or a process concept is never required of you ([PRD-02.R13](doc/specs/prd/prd-02-inversion-of-control.criteria.md)).
 

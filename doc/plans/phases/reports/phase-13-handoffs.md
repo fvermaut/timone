@@ -209,3 +209,11 @@ $ node dist/cli.js retry --help     → usage printed
 Checklist: only a failed run re-arms ✓; a re-armed run keeps branch, stage and ticket history ✓; nothing in 13h requires hand-editing the ledger ✓ (the kill-and-retry step uses this command).
 
 **What the next sub-phase must know.** 13h is the live proof — no code. The daemon binary needs `planStatusProbe`/`verificationReportProbe` left as their real git implementations (the daemon command passes no probes, so the defaults apply — verify `src/commands/daemon.ts` wires nothing that would override them).
+
+## 13h — live proof on the pilot
+
+**No code.** The observable end state is the seam, and it was reached: `scratch-app` #6 went from parked-at-execution to a merged, closed ticket through five built slices, a clean fresh-context verification, [PR #9](https://github.com/fvermaut/scratch-app/pull/9), one remediated review comment (fixed, re-verified, same PR), one clarified vague comment (no commit), and a live queue promotion (#10) at the merge. Three real failures were recovered with `timone retry` and zero ledger hand-edits. Two defects were found and fixed mid-step (unattended sessions ending on background work; tickets never closing — the latter raised by fvermaut at the gate), each a dated ✏ amendment on the plan. Full accounting in [phase-13-complete.md](phase-13-complete.md).
+
+## 13i — documentation and close
+
+**No behaviour-carrying code.** Register: R6 and R7 → `verified` with evidence and written limits; R11 stays `draft` with a three-of-four-clauses marker; R2, R10, R15 evidence-limit notes closed where 13h supplied the live halves. `README.md` gained the retry command and the review-loop contract. `STATUS.md` names phase 14 (previews) as next. Completion report committed; this file closed.

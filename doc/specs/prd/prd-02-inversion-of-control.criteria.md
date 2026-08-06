@@ -27,6 +27,7 @@
 - **Status:** verified
     - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. Clause by clause: **runs from the timone root** — the spawner's cwd is the root by construction and refuses to be anything else; live session `f8982c83` ran there; **stage skills available** — that session invoked stage 1 and produced a classification, which it could not have done otherwise; **target carried and validated** — the event context names the project and the spawner refuses one absent from `timone.yaml` (unit-proven on an undeclared target, live-resolved on `scratch-app`); **no harness files in the client repo** — `git log --stat` over `scratch-app`'s entire history matches no `.claude/` or `timone.yaml` path.
     - ✏ 2026-08-03 **known limit of the evidence.** The "every file the session touches lies under `projects/X/…`" clause was satisfied by a session that **wrote no files at all** — triage records itself as an issue comment, so containment held vacuously rather than being tested. The guardrail hook that would catch a straying session ran and reported clean, but on the same empty evidence. A session that actually writes into a project — phase 13's execution path — is what makes this clause discriminating.
+    - ✏ 2026-08-06 **the vacuous clause is vacuous no longer.** [Phase 13](../../plans/phases/phase-13.md)'s execution, verification, delivery and remediation sessions wrote and committed real files across five slices, three reports and a review fix; every path lay under `projects/scratch-app/…`, the guardrails ran against actual evidence and stayed silent, and `git log --stat --all` on the pilot still matches no harness path. The limit above no longer applies.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a pipeline stage starts for project X
@@ -83,7 +84,9 @@
 ## R6 — Autonomous execution with verification
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
+    - ✏ 2026-08-06 verified by fvermaut at [phase 13](../../plans/phases/phase-13.md)'s 13h gate, on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6). **Unattended execution with sub-phase validation** — the daemon resumed the parked run and one session built the approved five-slice `phase-04.md` on `timone/6-typing-in-the-box-is-fiddly-on-my-phone`: one commit per sub-phase after its own validation passed (`d424c6a`, `13c0836`, `53c2de8`, `7a909ae`, `6c712c7`), handoffs, the completion report, and the `Status:` flip the daemon reads as its artifact witness. **Fresh-context verification** — a separate session whose prompt deliberately carries neither the ticket's text nor its thread ran stage 7 and committed the report (`6e02f3b`); the pass was clean first time, 0 of 2 fix loops consumed, and the later review remediation triggered a second full pass (`18ea12f`), also clean. **Failures reported as ticket comments** — three stops landed as plain-language reports rather than silence: two pre-flight refusals over a stray commit another session had left on the branch, and a delivery that produced nothing; each was recovered with `timone retry`, and `.timone/state.json` was never edited by hand.
+    - ✏ 2026-08-06 **known limit of the evidence.** The bounded verify-fix loop never fired — both live passes were clean on the first attempt — so "at most two verify-fix iterations" rests on the verify skill's own rule (exercised hand-run in phases 8–10) rather than a daemon-path observation. The failure-report clause was observed for refusals and a produced-nothing stage, not for loop exhaustion.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN an approved phase plan
@@ -94,7 +97,8 @@
 ## R7 — Pull request delivery
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
+    - ✏ 2026-08-06 verified by fvermaut at [phase 13](../../plans/phases/phase-13.md)'s 13h gate. [PR #9](https://github.com/fvermaut/scratch-app/pull/9) was opened by the delivery session **from the work branch**, referencing #6; its body carries the plain-language scope summary, the full verdict table with the one advisory HUMAN-CHECK as an unticked checklist item, and both review axes under separate headings (Spec quoting requirement IDs); the delivery report was committed on the branch (`14d5e24`) **before** the PR opened, and the ticket links the PR in plain words — cross-links both ways, as the criterion asks. The review remediation refreshed the *same* PR as iteration 2 (`a2419f1`) rather than forking a second one. fvermaut merged it, the run completed, and the ticket closed as completed.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN execution and verification completed
@@ -130,6 +134,7 @@
 - **Status:** verified
     - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. [#6](https://github.com/fvermaut/scratch-app/issues/6) was filed while `#4`'s run was active; the next cycle registered it as `queued`, posted an acknowledgement that names what it waits behind ("I'm already working on #4 … It's next in line"), and `timone status` showed both. No session was spawned for it. One active run per project is an invariant the run store enforces rather than a convention callers follow: activating a second run on a busy project throws.
     - ✏ 2026-08-03 **known limit of the evidence.** The "started only when the active run reaches a terminal state" half was **not** observed live — `#4` parks awaiting the stage phase 12 builds and has never reached a terminal state, so promotion never fired in the pilot. It is proven only by unit test (`src/daemon/runs.test.ts`: promotion on `done`, on `failed`, in pickup order, and not at all when the queue is empty). Live evidence arrives with phase 12, when runs can finish.
+    - ✏ 2026-08-06 **the promotion half is now observed live**, at [phase 13](../../plans/phases/phase-13.md)'s 13h gate: ticket [#10](https://github.com/fvermaut/scratch-app/issues/10), filed as a labelled fixture and visibly queued behind #6's open pull request, started in the very cycle that saw the PR merge and completed the run — the first terminal state a live run has ever reached. The unit-only limit above no longer applies.
 - **Verify-via:** api
 - **Criteria:** while a project has an active pipeline run, additional marked tickets are visibly queued and started only when the active run reaches a terminal state.
 
@@ -137,6 +142,8 @@
 
 - **Priority:** MUST
 - **Status:** draft
+    - ✏ 2026-08-06 **three clauses of four observed at [phase 13](../../plans/phases/phase-13.md)'s 13h gate; `draft` stands only because the preview clause cannot yet be checked.** A concrete review comment ("derive the skeleton row height from the real row's classes instead of hard-coding 62px") was picked up on the next cycle and remediated per [ADR-0016](../../adr/0016-review-remediation-rides-the-verify-fix-shape.md): one commit `fix: review — derive-skeleton-row-height-from-row-classes` (`69760d9`) on the PR branch, a **full re-verification** (`18ea12f`), the same PR refreshed as iteration 2, and a plain-words reply on the PR naming the commit. A deliberately vague comment ("not sure about the spacing") produced a clarifying question naming the four concrete things "spacing" could mean — flagging that two of them are written agreements whose change would take the full path — and **no commit**, with the run re-parked directly. "The preview reflects the update" awaits R8's machinery (phase 14) and is the only unverified clause.
+    - ✏ 2026-08-06 **a wording note, not a divergence:** the criterion's "(the improve skill)" parenthetical predates [ADR-0016](../../adr/0016-review-remediation-rides-the-verify-fix-shape.md), which routes concrete review comments past that skill's proposal table; the observed behaviour is the ADR's. Reconciling the parenthetical is a stage-9 record item when this requirement is next revised.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN an open Timone PR receives a human review comment requesting a change
@@ -195,6 +202,7 @@
 - **Status:** verified
     - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. Both clauses observed against `scratch-app`: a scripted session that committed and never pushed produced **one** loud ticket comment naming the branch and the commit, and the run was flagged in `timone status` (`⚠ 1 automatic check(s) failed`); the clean re-run immediately after, on the same ticket, posted **nothing** — silence asserted, not assumed. Hook failures flag a run but never crash the daemon, and the checks are pure functions over injected git evidence, so each rule can be shown red.
     - ✏ 2026-08-03 **known limit of the evidence.** Only the **unpushed** rule fired live. `STATUS.md` placement and path containment were shown capable of failing only in the test suite — by neutering each check in turn and confirming its violating fixtures went red (9 tests fell over). No live session has yet committed a file at all, so neither rule has met real evidence; phase 13's execution path is what will supply it.
+    - ✏ 2026-08-06 **both remaining rules have now met real evidence**, at [phase 13](../../plans/phases/phase-13.md)'s 13h gate: sessions committed real files, `STATUS.md` landed only on the pilot's default branch (first-parent ancestry checked at the gate), and every touched path stayed inside the target project — the placement and containment checks passed against substance rather than absence. Neither has yet *fired* live, because no violation has occurred; their red sides still rest on the test suite, which is the acceptable remainder.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a daemon-spawned stage session completes
