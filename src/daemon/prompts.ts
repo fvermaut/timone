@@ -318,6 +318,14 @@ function verificationPrompt(context: PromptContext): string {
  */
 function outcomeBlock(done: string, handed: string): string {
   return [
+    "**You are running unattended, and nothing survives the end of your turn.**",
+    "Nobody continues this conversation after your last message, and no",
+    "notification will ever reach you — so anything you delegate must run to",
+    "completion **before you finish**, and ending while \"waiting to be",
+    "notified\" of background work is ending with the work undone. This is how",
+    "a live delivery once produced nothing: it launched its reviews in the",
+    "background and finished, and the reviews died with it.",
+    "",
     "Then close with **exactly one comment on the ticket**, and make its first",
     "content line one of these two, exactly as written:",
     "",

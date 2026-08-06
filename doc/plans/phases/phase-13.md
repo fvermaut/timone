@@ -144,6 +144,8 @@ npm run type-check
 
 **Seams under test (TDD):** the delivery prompt carries branch, ticket reference and the both-ways-linking obligation; no-PR fails loudly with the run failed; the park records PR number, wait kind and cursor; takeover on a review park refuses with the PR named.
 
+> ✏ **Refined 2026-08-06 — a defect 13h found live, fixed here.** The first live delivery session launched its two review axes as *background* sub-agents and ended its turn "waiting to be notified" — but a daemon session ends when its turn does, so the reviews died with it and the stage produced nothing (the daemon's two-witness check failed the run correctly rather than parking on a review of nothing). Every unattended work prompt (execution, verification, delivery, remediation) now states outright that nothing survives the end of the turn and delegation must complete before the session finishes, with a prompt test pinning all four. Scope-reducing correction of a defect execution found; the approval stamp stands.
+
 > Sub-phases 13a, 13b and 13d must be complete before starting this sub-phase.
 
 #### Agent Validation Steps

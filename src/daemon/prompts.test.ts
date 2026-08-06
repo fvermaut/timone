@@ -300,3 +300,20 @@ describe("the remediation prompt", () => {
     expect(prompt).toMatch(/pull request/i);
   });
 });
+
+describe("every unattended work prompt", () => {
+  // The stages that do real work with nobody at the keyboard. A session that
+  // ends its turn "waiting to be notified" of background work simply ends —
+  // the delivery session did exactly that in 13h, launching its review axes
+  // in the background and finishing with nothing to show.
+  const WORK_STAGES = ["execution", "verification", "delivery", "remediation"] as const;
+
+  it.each(WORK_STAGES)("%s says that nothing survives the end of the turn", (stage) => {
+    const prompt = stagePrompt(stage, {
+      ...context,
+      branch: "timone/6-typing-in-the-box",
+    });
+    expect(prompt).toMatch(/unattended/i);
+    expect(prompt).toMatch(/before you finish|within this session/i);
+  });
+});
