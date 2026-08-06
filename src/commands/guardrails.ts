@@ -207,33 +207,38 @@ export function registerGuardrailsCommand(program: Command): void {
       "The automatic checks that bracket every session at the timone root",
     );
 
-  const manifestOption = (
-    command: Command,
-  ): Command =>
+  // `--root` rather than trusting the cwd: a hook is invoked by the harness,
+  // not by a shell someone stood in, and every path here — the manifest, the
+  // ledger, the checkouts — is relative to the timone root. The settings file
+  // passes `$CLAUDE_PROJECT_DIR`, which is the harness's own answer to
+  // "where is this project", so the two can never disagree.
+  const commonOptions = (command: Command): Command =>
     command
+      .option("--root <path>", "the timone root", process.cwd())
       .option(
         "--manifest <path>",
-        "path to the timone manifest file",
+        "path to the timone manifest file, relative to the root",
         "timone.yaml",
       )
       .option("--state <path>", "path to the daemon state file");
 
-  manifestOption(
+  commonOptions(
     guardrails
       .command("baseline")
       .description("Record the state of the world before a session (SessionStart hook)"),
-  ).action(async (options: { manifest: string }) => {
+  ).action(async (options: { root: string; manifest: string }) => {
     // Nothing here may fail a session. A hook that throws turns a guardrail
     // into an outage, which is a worse failure than the ones it catches.
     try {
       const payload = await readHookPayload(process.stdin);
       if (payload === undefined) return;
+      const root = resolve(options.root);
       // The only thing this command writes to stdout: the hook's JSON reply,
       // which is how the session is told its own id and what it owes.
       console.log(
         await runBaseline({
-          root: process.cwd(),
-          manifest: loadManifest(options.manifest),
+          root,
+          manifest: loadManifest(resolve(root, options.manifest)),
           sessionId: payload.session_id,
           now: new Date(),
         }),
@@ -245,16 +250,16 @@ export function registerGuardrailsCommand(program: Command): void {
     }
   });
 
-  manifestOption(
+  commonOptions(
     guardrails
       .command("check")
       .description("Judge what a session changed and report it (Stop hook)"),
-  ).action(async (options: { manifest: string; state?: string }) => {
+  ).action(async (options: { root: string; manifest: string; state?: string }) => {
     try {
       const payload = await readHookPayload(process.stdin);
       if (payload === undefined) return;
 
-      const root = process.cwd();
+      const root = resolve(options.root);
       // No ledger at all is a legitimate state — the daemon may never have
       // run here — and `RunStore.open` starts empty rather than failing.
       const statePath =
@@ -264,7 +269,7 @@ export function registerGuardrailsCommand(program: Command): void {
 
       const account = await runCheck({
         root,
-        manifest: loadManifest(options.manifest),
+        manifest: loadManifest(resolve(root, options.manifest)),
         store: RunStore.open(statePath),
         adapter: new GitHubTicketingAdapter(),
         sessionId: payload.session_id,

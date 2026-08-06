@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node dist/cli.js guardrails baseline"
+            "command": "node \"$CLAUDE_PROJECT_DIR/dist/cli.js\" guardrails baseline --root \"$CLAUDE_PROJECT_DIR\""
           }
         ]
       }
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node dist/cli.js guardrails check"
+            "command": "node \"$CLAUDE_PROJECT_DIR/dist/cli.js\" guardrails check --root \"$CLAUDE_PROJECT_DIR\""
           }
         ]
       }
