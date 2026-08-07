@@ -15,6 +15,13 @@ doc/todo.md
 # daemon (ADR-0003): this is local state, never a process artifact.
 .timone/
 
+# The daemon's own output, when it is redirected. The README tells the reader
+# to run `node dist/cli.js daemon > daemon.log`, and an untracked file at the
+# root is a file outside the target project — which the path-containment
+# guardrail then reports, correctly and uselessly, on whatever run was in
+# flight. Seen live on 2026-08-07.
+daemon.log
+
 # Node
 node_modules/
 dist/
