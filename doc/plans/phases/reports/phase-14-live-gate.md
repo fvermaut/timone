@@ -91,9 +91,31 @@ All three are this report's own commits, made by interactive session `dd86be88` 
 
 **Both session kinds, violation and silence, are now observed in one pass — which is what R15's widened criterion asks for.** Whether it may return to `verified` is a separate question, and the attribution defect is the reason to say no.
 
-### Steps 5 and 6 — **not started**
+### Step 5 — R19, the provenance trailer: **complete, and clean**
 
-Trailer inspection across the phase's commits, and taking #11 the whole way to a merged PR.
+Every commit the pipeline made on `scratch-app` for #11 carries the full trailer, and **`git log --grep=Timone-Stage` lists exactly the machine-authored work and nothing else**. Thirteen commits, spanning five stages and five distinct sessions:
+
+| stage | commits | session |
+| --- | --- | --- |
+| `planning` | 1 | `3f87741a` |
+| `planning (recording the approval)` | 1 | `4d19fd8b` |
+| `execution` | 7 | `82e4d50a` |
+| `verification` | 2 | `a0a8dcf5` |
+| `delivery` | 2 | `8ad402af` |
+
+All thirteen carry `Timone-Run: scratch-app#11`. **The count is the point: the phase-05 range holds thirteen commits and thirteen trailers** — no machine-authored commit escaped without one, so the grep is a complete index rather than a partial one. The session ids also match the daemon's own log line for each stage, which is what makes the trailer usable for attribution rather than merely decorative.
+
+The five session ids being distinct is itself worth recording: the approval-recording session (`4d19fd8b`) is separable from the planning session that preceded it (`3f87741a`), which is the granularity R16's per-stage model claim needs to be checkable after the fact.
+
+**No harness path in any diffstat, across all history.** `git log --stat --all | grep -cE "\.claude/|timone\.yaml"` returns **0** as the validation step asks. A broader probe (`\.timone/|process\.md|standards/`) returns 3, and all three are **commit-message prose** written by execution when it amended its own plan — "process.md stage 5's re-approval rule", "standards/testing.md" — not files. The rule is about files and the files are clean; the widened grep just cannot tell a path from a sentence.
+
+**The interactive side, both directions.** Timone's own last fifteen commits each carry `Timone-Stage: interactive` with the session that made them, correctly splitting across three sessions. And fvermaut's deliberate `142edde "stray"` carries **no trailer at all** — which is the reason the provenance rule fired on it in step 4. R19's enforcement and R19's data are the same mechanism seen from two sides.
+
+**One caveat for 14h, and it is small.** The local `projects/scratch-app` clone was inspected as it stands and has not been fetched since PR #12 merged, so the merge commit GitHub created is not in the set. Nothing in the step turns on it — the merge commit is GitHub's, not the pipeline's, and every commit the pipeline authored is present and trailed.
+
+### Step 6 — **complete**
+
+See *Still owed* below and the closing section: the ticket went the whole way to a merged PR.
 
 ## Defects the gate found
 
@@ -223,8 +245,11 @@ Execution produced seven commits and closed its phase with a clean tree, **amend
 
 1. Step 1's remaining rows — triage on Sonnet, requirements and planning on Opus, observed rather than inferred.
 2. Step 2's `> daemon.log` identity check.
-3. Step 5 — the trailer inspection, in full.
-4. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded.
+3. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded.
+
+**The two remaining steps are one run apart.** Both 1 and 2 want a fresh ticket taken from filing to the plan gate: step 1 needs triage and requirements and planning observed on their declared models, and step 2 needs that same run redirected with `> daemon.log` so the file can be diffed against what the terminal showed. Neither needs execution, so neither needs the $14 stage — a ticket stopped at the plan gate buys both. `scratch-app` is free (#11 released it), and #4 is already parked at triage if a fresh ticket is not wanted.
+
+**Step 5 is complete** — thirteen commits, thirteen trailers, no harness file anywhere in history.
 
 **Step 4 is complete** — both session kinds, violation and silence, in one pass. Its silence half is now observed on **three** daemon sessions (verification twice, delivery once), each of which required staying out of the timone repo for its duration. **Step 3's false-positive check is complete** at 59m35s, with the sleep hazard recorded separately as a path it does not cover.
 
@@ -236,7 +261,11 @@ Nothing in phase 14 changed the pipeline's behaviour, which is what the step set
 
 ## Register guidance for 14h
 
-Nothing in this report justifies flipping **R15** or **R17** to `verified`; both carry open defects found by this gate. **R18** should wait on the sleep question. **R16** is proven at two rows of its table and unobserved at the rest. **R19** is untested (step 5) but has been incidentally exercised throughout — every commit in this gate carries its trailer, and the attribution finding turns on trailers being both present and unread.
+Nothing in this report justifies flipping **R15** or **R17** to `verified`; both carry open defects found by this gate. **R18** should wait on the sleep question. **R16** is proven at two rows of its table and unobserved at the rest.
+
+**R19 is the one requirement this gate can flip to `verified`.** Step 5 tested it directly and it passed on every clause: thirteen machine-authored commits and thirteen complete trailers, `--grep` returning a complete index, zero harness files in history, and the interactive side correct in both directions — trailed where it should be, bare on the commit that was meant to be bare. It was also exercised incidentally throughout the gate rather than only under test.
+
+The attribution defect is **not** a reason to hold R19 down, and 14h should resist the reflex to bundle them. R19 asks that the trailer be *written*; it was, on everything, without exception. The defect is that a different rule does not *read* it — which lands on R15, and which the trailer's own completeness is what makes fixable at all. Holding R19 down for it would penalise the one mechanism that worked.
 
 ## Sequencing note
 
