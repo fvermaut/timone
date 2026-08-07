@@ -143,7 +143,7 @@ describe("what the accumulator counts", () => {
     feed(progress, assistantTurn(10, { parent: "toolu_1" }));
     feed(progress, assistantTurn(10));
 
-    expect(progress.snapshot().turns).toBe(2);
+    expect(progress.snapshot().replies).toBe(2);
   });
 
   it("raises the sub-agent count as the fleet fans out and drops it as it lands", () => {
@@ -247,39 +247,39 @@ describe("what the lines look like", () => {
   it("says elapsed time, turns, output tokens and sub-agents", () => {
     const line = tickLine({
       elapsedMs: 252_000,
-      turns: 18,
+      replies: 18,
       outputTokens: 42_100,
       subAgents: 3,
     });
 
-    expect(line).toBe("4m12s · 18 turns · 42.1k out · 3 sub-agents");
+    expect(line).toBe("4m12s · 18 replies · 42.1k out · 3 sub-agents");
   });
 
-  it("says one sub-agent rather than 1 sub-agents", () => {
+  it("says one reply and one sub-agent, not 1 replys and 1 sub-agents", () => {
     const line = tickLine({
       elapsedMs: 61_000,
-      turns: 1,
+      replies: 1,
       outputTokens: 900,
       subAgents: 1,
     });
 
-    expect(line).toBe("1m01s · 1 turn · 900 out · 1 sub-agent");
+    expect(line).toBe("1m01s · 1 reply · 900 out · 1 sub-agent");
   });
 
   it("leaves the fleet out of the line entirely when there is none", () => {
     const line = tickLine({
       elapsedMs: 9_000,
-      turns: 2,
+      replies: 2,
       outputTokens: 1_500,
       subAgents: 0,
     });
 
-    expect(line).toBe("9s · 2 turns · 1.5k out");
+    expect(line).toBe("9s · 2 replies · 1.5k out");
   });
 
   it("reaches into hours without losing the minutes", () => {
     expect(
-      tickLine({ elapsedMs: 3_864_000, turns: 1, outputTokens: 0, subAgents: 0 }),
+      tickLine({ elapsedMs: 3_864_000, replies: 1, outputTokens: 0, subAgents: 0 }),
     ).toContain("1h04m");
   });
 
@@ -311,7 +311,7 @@ describe("what the lines look like", () => {
     // would shred a repainting line. It also has to survive `> daemon.log`,
     // a systemd journal and a pipe identically.
     const lines = [
-      tickLine({ elapsedMs: 1_000, turns: 1, outputTokens: 1, subAgents: 1 }),
+      tickLine({ elapsedMs: 1_000, replies: 1, outputTokens: 1, subAgents: 1 }),
       closingLine({ durationMs: 1_000, turns: 1, costUsd: 1, models: [] }),
     ];
 
@@ -378,7 +378,7 @@ describe("where the running token total comes from", () => {
     progress.observe(stream({ type: "message_delta", usage: { output_tokens: 900 } }, "toolu_1"));
 
     expect(progress.snapshot().outputTokens).toBe(1_200);
-    expect(progress.snapshot().turns).toBe(1);
+    expect(progress.snapshot().replies).toBe(1);
   });
 
   it("counts a message that produced nothing as nothing, not as missing", () => {
@@ -395,6 +395,6 @@ describe("where the running token total comes from", () => {
     progress.observe(stream({ type: "message_start" }));
 
     expect(progress.snapshot().outputTokens).toBe(0);
-    expect(progress.snapshot().turns).toBe(1);
+    expect(progress.snapshot().replies).toBe(1);
   });
 });

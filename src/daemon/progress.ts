@@ -15,8 +15,15 @@ const MAIN_THREAD = "main";
 export interface ProgressSnapshot {
   /** Milliseconds since the session started. */
   elapsedMs: number;
-  /** Turns the main thread has taken; the fleet's turns are not counted. */
-  turns: number;
+  /**
+   * Replies the main thread has made so far — messages, counted live. This
+   * is deliberately *not* called turns: the SDK's own `num_turns`, which the
+   * closing line reports, counts round trips and comes out higher. Two
+   * honest counts of different things had the same name and disagreed on
+   * screen (31 against 44, live on 2026-08-07), which reads as one of them
+   * being wrong.
+   */
+  replies: number;
   /** Cumulative output tokens, sub-agents included — that output is real. */
   outputTokens: number;
   /** Sub-agents working right now, not sub-agents ever started. */
@@ -154,7 +161,7 @@ export class SessionProgress {
     }
     return {
       elapsedMs: this.now() - this.startedAt,
-      turns: this.turns,
+      replies: this.turns,
       outputTokens,
       subAgents: this.liveSubAgents.size,
     };
@@ -197,7 +204,7 @@ function toolResultIds(content: unknown): string[] {
 export function tickLine(snapshot: ProgressSnapshot): string {
   const parts = [
     duration(snapshot.elapsedMs),
-    count(snapshot.turns, "turn"),
+    count(snapshot.replies, "reply", "replies"),
     `${tokens(snapshot.outputTokens)} out`,
   ];
   if (snapshot.subAgents > 0) {
@@ -251,8 +258,9 @@ function money(usd: number): string {
   return `$${usd.toFixed(2)}`;
 }
 
-function count(value: number, noun: string): string {
-  return `${value} ${noun}${value === 1 ? "" : "s"}`;
+function count(value: number, noun: string, plural?: string): string {
+  if (value === 1) return `${value} ${noun}`;
+  return `${value} ${plural ?? `${noun}s`}`;
 }
 
 function pad(value: number): string {

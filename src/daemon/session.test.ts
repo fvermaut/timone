@@ -1932,7 +1932,7 @@ describe("saying what a session is doing while it does it", () => {
   } {
     let snapshot: ProgressSnapshot = {
       elapsedMs: 0,
-      turns: 0,
+      replies: 0,
       outputTokens: 0,
       subAgents: 0,
     };
@@ -2014,7 +2014,7 @@ describe("saying what a session is doing while it does it", () => {
 
     progress.setSnapshot({
       elapsedMs: 252_000,
-      turns: 18,
+      replies: 18,
       outputTokens: 42_100,
       subAgents: 3,
     });
@@ -2035,7 +2035,7 @@ describe("saying what a session is doing while it does it", () => {
     }).spawn(pickedUpRun(store), project, { stage: "triage" });
 
     expect(lines).toContainEqual(
-      expect.stringContaining("4m12s · 18 turns · 42.1k out · 3 sub-agents"),
+      expect.stringContaining("4m12s · 18 replies · 42.1k out · 3 sub-agents"),
     );
   });
 
