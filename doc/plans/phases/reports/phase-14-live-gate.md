@@ -62,7 +62,17 @@ The two rules that fired are the target-free pair. Containment stayed quiet beca
 
 **This closes the handover's open question about per-turn `Stop` firing.** The offending session took several turns and the provenance finding was journalled **once**. The parked baseline's suppression works.
 
-**Still owed: the daemon-side violation** — forcing one in a daemon session and confirming the loud ticket comment and flagged run.
+**Daemon violation — caught, but incidentally rather than forced.** The pre-crash execution session on #11 tripped path containment on its own, and produced both halves the step asks to confirm. The ticket comment:
+
+> ⚠️ **Automatic check failed — the session changed 1 file(s) outside `projects/scratch-app/`**
+> This run was working on **scratch-app**, so everything it touches belongs under `projects/scratch-app/`.
+> - daemon.log (uncommitted change)
+
+and the matching ledger flag on the run, `the session changed 1 file(s) outside projects/scratch-app/`. Loud comment and flagged run, on the daemon path, unchanged from phase 11's behaviour.
+
+**Two caveats 14h must weigh.** It was not *forced*, and the plan's wording asks for a forced one — though the observed behaviour is identical, and the same argument that made the real crash better evidence than a staged `SIGKILL` applies here. And its cause is now fixed (`8f96919` gitignored `daemon.log`), so this exact violation cannot recur; reproducing one deliberately needs a different mechanism.
+
+**Still owed on the daemon side: a clean daemon session confirming silence.** Note that #11's run carries the stale flag through `timone retry` (see below), so its next clean session must be read with that in mind.
 
 ### Steps 5 and 6 — **not started**
 
@@ -119,6 +129,10 @@ The crash log shows ticks at `2m21s` then `8m54s` — a 6½-minute gap where thi
 
 1. Step 1's remaining rows — triage on Sonnet, requirements and planning on Opus, observed rather than inferred.
 2. Step 2's `> daemon.log` identity check.
-3. Step 4's daemon-side violation, plus a clean daemon session confirming silence. **R15 needs both kinds in one pass**; the interactive half alone does not earn it back.
+3. A **clean daemon session confirming silence** — the last piece of step 4. The daemon violation is observed but incidental; 14h decides whether a forced one is still required. **R15 needs both kinds in one pass**, and the interactive half alone does not earn it back.
 4. Steps 5 and 6 in full.
-5. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build.
+5. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **The stale-tick defect above bears directly on the first half of that gate** and should be put in front of him rather than asked around.
+
+## Sequencing note
+
+Anything needing a fresh daemon session on `scratch-app` — a forced violation, a clean-silence pass — **must wait for #11 to release the project**. One session per project runs at a time, so there is no way to run one alongside without killing a healthy build that is itself serving as step 3's false-positive evidence and step 6's whole-loop proof. The order that costs nothing: let #11 run through verification and delivery, then use the released project for whatever step 4 still needs.
