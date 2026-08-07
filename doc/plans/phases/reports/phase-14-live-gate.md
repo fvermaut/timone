@@ -33,7 +33,21 @@ parked scratch-app#13 at clarification, waiting on a conversation
 
 **Why a feature ticket, deliberately.** #11 was a **chore**, and `routeAfterTriage` sends a chore straight to planning — which is why requirements was never observed on it and could not have been. Only `triage:feature` routes through requirements, so closing this row at all required a ticket that would classify as a feature. #13 did, and triage's own reasoning for the classification is on the ticket.
 
-**Rows still owed: requirements and planning, both on Opus.** #13 is parked at `clarification`, which spawns no session and waits on a human conversation (`timone takeover scratch-app#13`). Requirements cannot start until that conversation happens, and planning follows requirements' gate. Both rows arrive on the same ticket once it moves; **the model table's remaining rows are one human conversation away, not one run away.**
+**Requirements observed on Opus, same ticket, after the takeover conversation:**
+
+```
+branch scratch-app#13 → timone/13-i-can-t-tell-at-a-glance-how-much-is-lef
+session 89015a2e-cc9a-464a-9b44-86476789570b started for scratch-app#13 (requirements, claude-opus-5)
+work   scratch-app#13 (requirements) — 31s · 5 replies · 1.7k out
+…
+cost   scratch-app#13 (requirements) — 7m02s · 38 turns · $3.07 · claude-opus-5 27.7k out
+```
+
+Declared and billed both read `claude-opus-5`. The stage did its job as well as naming its model: PRD-03 committed to the work branch (`48ece63`), the glossary updated (`3a6ceb3`), and the gate comment posted asking for `approve`.
+
+**Only planning is left, and it is behind fvermaut's approval of PRD-03** — the plan gate's own session is the last row of the table. **Four of the five rows are now observed** (triage/Sonnet, requirements/Opus, execution/Opus, approval-record/Haiku); the declared table has not been contradicted anywhere.
+
+*A note on line order, not a defect.* `resume scratch-app#13 → requirements` prints **after** the whole session it started has ended, because the line is logged when `spawn()` returns. `spawn` behaved identically on the triage cycle. So a terminal shows a session's entire life before the line announcing it began — pre-existing, unchanged from phase 11, and worth a glance at the human gate rather than a fix.
 
 ### Step 2 — R17, the progress heartbeat: **observed, one clause outstanding**
 
@@ -59,7 +73,16 @@ The sub-agent count moved as `timone-execute` fanned out, and a closing `cost` l
 
 **The single byte of difference is the terminal's carriage return** — the pty's line discipline turning `\n` into `\r\n`. Strip it and `diff` reports the two **identical**. The child genuinely saw a terminal in the first case (`process.stdout.isTTY === true`) and genuinely did not in the second (`undefined`), so the comparison is between the two channels the clause names, not between two copies of one.
 
-**What is still owed on this clause: the same comparison on a tick-bearing cycle.** The lines compared above are error output; the tick and `cost` lines have so far been captured to a file only (the triage cycle above). They travel the identical `console.log` path, so the expectation is the same result — but the clause asks for the observation, and a tick-bearing pty capture is one session away. #13's requirements cycle will be run under the pty harness and settles it.
+**Now done on tick-bearing output, and the clause closes.** #13's requirements cycle — nineteen lines including fifteen `work` ticks, a `cost` line, `branch`, `session`, `parked` and `resume` — was captured through the pty harness; the triage cycle was captured to a file. Counted at the byte level:
+
+| capture | bytes | lines | CR | ESC | other control bytes |
+| --- | --- | --- | --- | --- | --- |
+| pty (requirements, tick-bearing) | 1414 | 19 | 19 | 0 | none |
+| `> file` (triage, tick-bearing) | 400 | 7 | 0 | 0 | none |
+
+**The carriage-return count equals the line count exactly, and there is nothing else.** No escape byte, no control character of any kind, in either channel. The terminal's entire contribution is one `\r` per line — the line discipline, not the program — so a redirected file carries every byte the screen showed. The `work`/`cost` grammar is identical across the two captures.
+
+**A file is therefore not a degraded copy of the terminal; it is the same bytes plus nothing.** The README's claim that the output "consults no terminal, so `> daemon.log` and a systemd journal show exactly what the screen showed" is now measured rather than asserted. **Step 2's outstanding clause is closed.**
 
 **An instrument warning worth more than the result, so nobody repeats it.** The first attempt used `script(1)`, and it **silently dropped captured output** in this sandbox — non-deterministically, for short-lived children, regardless of exit code. It briefly produced what looked like a real defect: the redirected file carrying an 80-byte error the terminal capture had "lost". That reading was wrong, and `/bin/sh` printing one line and exiting reproduced the same "loss", which is what exposed the instrument rather than the subject. The comparison above uses a direct `pty.openpty()` harness (`ptyrun.py`, kept in the session scratchpad) that was validated on known-good input first. **A measurement instrument gets verified before its output is believed** — this one would otherwise have put a fabricated defect into the record.
 
@@ -238,6 +261,8 @@ See *Still owed* below and the closing section: the ticket went the whole way to
 
   A stage that spawns no sub-agents is very nearly accurate; the two fleet stages are out by multiples. Nothing is wrong with the main-thread accounting — only the fleet's work is invisible, exactly as the code reading predicted.
 
+**A fourth measurement, taken 2026-08-08 on #13's requirements session, holds the prediction:** last tick **26.6k**, authoritative **27.7k** — **1.04×**, on a stage that spawns no sub-agents. It lands on the same row as verification's 1.04× and nowhere near the fleet stages' 2.2× and 3.2×. The rule now has two independent confirmations at each end, which is what turns the diagnosis from a plausible code reading into a measured one: **the error is a function of fan-out, not of stage, model or duration.**
+
   14b took real trouble to avoid printing a confidently *wrong* number — it rejected `usage.output_tokens` for under-reporting ~30× — and shipped something that under-reports ~3× on any run using the fleet, which is every execution run. The direction of the error was fixed; its existence was not.
 
   **No fix proposed here, deliberately.** The obvious fallback — `usage.output_tokens` on the sub-agent's `assistant` message — is precisely the source `progress.ts:78-81` rejects as under-reporting by roughly thirty times. Whether sub-agent deltas can be obtained honestly is an investigation, not a one-liner, and 14h should route it as one. Note the interaction with ADR-0017: the tick is also the heartbeat, and the heartbeat kept stamping correctly throughout — **liveness was never affected**, only the display.
@@ -271,6 +296,19 @@ See *Still owed* below and the closing section: the ticket went the whole way to
 
   **The consequence is R18's, not R17's, and it is the serious half.** ADR-0017 makes the tick the heartbeat: `heartbeatAt` is stamped only when the tick fires. A 15-minute sleep therefore leaves a perfectly healthy run looking stale against a 2-minute threshold, and the next poll cycle after wake is entitled to reclaim it. **Nothing was reclaimed on this run**, but the margin appears to be a race between the ticker and the poll loop on wake rather than anything designed — and step 3's false-positive check does not cover it, because that check was "let a healthy session run untouched", not "let the laptop sleep".
 
+  **A fourth session, 2026-08-08, is the first where the two clocks agree — and it is the control the earlier three lacked.** #13's requirements session ticked to **7m01s** and closed at **7m02s**: one second apart, against divergences of 8m38s, 14m37s and ~60m on the others.
+
+  | session | ticks reached | SDK `duration_ms` | unaccounted |
+  | --- | --- | --- | --- |
+  | verification (first) | 1h05m | 5m05s | ~60m |
+  | verification (retry) | 23m46s | 15m08s | 8m38s |
+  | delivery | 24m48s | 10m11s | 14m37s |
+  | **requirements (#13)** | **7m01s** | **7m02s** | **none** |
+
+  Its ticks are also perfectly regular — fifteen of them at exactly 30-second spacing, no gap anywhere. **The machine stayed awake for this one, and the divergence vanished.** That is the prediction the sleep hypothesis makes, tested on a session that was watched start to finish rather than reconstructed, and it is much stronger evidence than three more divergent sessions would have been: the hypothesis now has a case where it says *nothing should happen*, and nothing did.
+
+  It does not prove the mechanism — that still needs the `duration_ms` question answered — but it removes the competing explanation that the tick's arithmetic is simply wrong, since on an uninterrupted run it is exactly right. **The remaining question is narrowed to what happens across a suspend**, not whether the clock can be trusted at all.
+
   Not investigated further and no fix proposed: whether the SDK's `duration_ms` excludes suspended time, and whether a monotonic clock or a wake-aware staleness rule is the right answer, are questions for 14h to route. **R18 should not close until this is understood** — a laptop that sleeps is the normal operating environment here.
 
 - **`timone retry` carries a dead attempt's flags into the fresh one.** It clears `failure` and `sessionId` but not `flags`, so #11 resumed carrying `the session changed 1 file(s) outside projects/scratch-app/` from its crashed attempt — a flag whose cause (`daemon.log`) had already been fixed by `8f96919`. `timone status` therefore shows `⚠ 1 automatic check(s) failed` about a file that no longer exists.
@@ -297,13 +335,12 @@ Execution produced seven commits and closed its phase with a clean tree, **amend
 
 ## Still owed before 14g can close
 
-1. Step 1's remaining rows — **requirements and planning on Opus** (triage on Sonnet is now observed, 2026-08-08).
-2. Step 2's `> daemon.log` identity check on a **tick-bearing** cycle (the clause is otherwise settled — see above).
-3. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded. **The unrunnable CTA belongs in front of him too** — it is fixed, but it is the one defect that was aimed at him personally, and the gate is about him.
+1. Step 1's **last row — planning on Opus**, which runs once fvermaut approves PRD-03 on #13. Triage/Sonnet and requirements/Opus were observed on 2026-08-08; four of five rows are done.
+2. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded. **The unrunnable CTA belongs in front of him too** — it is fixed, but it is the one defect that was aimed at him personally, and the gate is about him.
 
-**Both remaining items now sit on one ticket, and behind one human conversation.** `scratch-app` #13 is filed, triaged as a feature, and parked at `clarification` waiting on `timone takeover scratch-app#13`. Once that conversation happens, requirements runs on Opus and — after its gate — planning does too, closing step 1; running those cycles under the pty harness closes step 2's remaining clause in the same pass, at no extra cost. **Neither item needs execution**, so the $14 stage is never paid.
+**Step 2 is complete** — the redirection clause is measured at the byte level on tick-bearing output, and the terminal adds one carriage return per line and nothing else.
 
-Until the conversation happens there is nothing further to observe: `clarification` spawns no session, so no amount of polling advances it.
+**One machine-observable thing remains in the whole gate: planning on Opus.** #13 is parked at the PRD-03 gate waiting on the word `approve`. One cycle after that reply closes step 1 and, with it, everything that does not require fvermaut's own judgement. **Execution is never reached**, so the $14 stage is never paid: #13 has cost **$3.39** so far ($0.32 triage + $3.07 requirements, the takeover conversation aside).
 
 **Step 5 is complete** — thirteen commits, thirteen trailers, no harness file anywhere in history.
 
