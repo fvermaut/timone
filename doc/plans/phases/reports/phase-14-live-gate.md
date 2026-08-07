@@ -18,6 +18,23 @@ session 82e4d50a-8f9c-4a69-aa0d-1c7fd5c6762c started for scratch-app#11 (executi
 
 The approval-recording session ran on Haiku and execution on Opus, each as declared. **Triage on Sonnet and requirements/planning on Opus were not observed** — they ran before the 2026-08-07 crash and the log covering them was truncated when the daemon was restarted. The declared table is proven at two of its rows on this pass, not all of them.
 
+**Resumed 2026-08-08 on a fresh ticket, and triage is now observed.** `scratch-app` #13 ("I can't tell at a glance how much is left") was filed and marked, and one `--once` cycle produced:
+
+```
+pickup scratch-app#13
+session 019225ec-058e-451b-bd5b-edcaaaf62159 started for scratch-app#13 (triage, claude-sonnet-5)
+work   scratch-app#13 (triage) — 31s · 8 replies · 1.2k out
+cost   scratch-app#13 (triage) — 39s · 10 turns · $0.32 · claude-sonnet-5 1.9k out
+stage  scratch-app#13 → clarification
+parked scratch-app#13 at clarification, waiting on a conversation
+```
+
+**Triage on `claude-sonnet-5` is the daemon's own statement, twice** — on the opening `session` line and again on the closing `cost` line, which is the stronger of the two because it reports what the finished session actually billed rather than what it was asked for.
+
+**Why a feature ticket, deliberately.** #11 was a **chore**, and `routeAfterTriage` sends a chore straight to planning — which is why requirements was never observed on it and could not have been. Only `triage:feature` routes through requirements, so closing this row at all required a ticket that would classify as a feature. #13 did, and triage's own reasoning for the classification is on the ticket.
+
+**Rows still owed: requirements and planning, both on Opus.** #13 is parked at `clarification`, which spawns no session and waits on a human conversation (`timone takeover scratch-app#13`). Requirements cannot start until that conversation happens, and planning follows requirements' gate. Both rows arrive on the same ticket once it moves; **the model table's remaining rows are one human conversation away, not one run away.**
+
 ### Step 2 — R17, the progress heartbeat: **observed, one clause outstanding**
 
 Ticks every thirty seconds naming elapsed time, replies, output tokens and a sub-agent count, e.g.
@@ -28,6 +45,25 @@ work   scratch-app#11 (execution) — 17m01s · 14 replies · 19.5k out · 1 sub
 ```
 
 The sub-agent count moved as `timone-execute` fanned out, and a closing `cost` line carried the authoritative total for the session that ended. **The "re-run with `> daemon.log` and confirm the file matches the terminal" clause has not been done** — the run in flight is redirected to the file, so the comparison is still owed.
+
+#### The `> daemon.log` identity clause — mostly settled, 2026-08-08
+
+**By construction there is nothing to diverge.** Every daemon line goes through one `console.log` (`daemon.ts`, `runDaemon`'s `log` default and the command's own binding). A search of `src/` for `isTTY`, `clearLine`, `cursorTo`, ANSI escapes or any colour library returns **nothing outside tests** — the tick is a whole line printed once, not a line rewritten in place. A `\r`-redrawn progress display is the failure this clause exists to catch, and the code has no mechanism for one.
+
+**Measured, not only argued.** A cycle forced to produce output was run with stdout on a **real pty** and, separately, redirected to a file, three times each and deterministically:
+
+| channel | bytes | exit |
+| --- | --- | --- |
+| pty (terminal) | 81 | 1 |
+| `> file` | 80 | 1 |
+
+**The single byte of difference is the terminal's carriage return** — the pty's line discipline turning `\n` into `\r\n`. Strip it and `diff` reports the two **identical**. The child genuinely saw a terminal in the first case (`process.stdout.isTTY === true`) and genuinely did not in the second (`undefined`), so the comparison is between the two channels the clause names, not between two copies of one.
+
+**What is still owed on this clause: the same comparison on a tick-bearing cycle.** The lines compared above are error output; the tick and `cost` lines have so far been captured to a file only (the triage cycle above). They travel the identical `console.log` path, so the expectation is the same result — but the clause asks for the observation, and a tick-bearing pty capture is one session away. #13's requirements cycle will be run under the pty harness and settles it.
+
+**An instrument warning worth more than the result, so nobody repeats it.** The first attempt used `script(1)`, and it **silently dropped captured output** in this sandbox — non-deterministically, for short-lived children, regardless of exit code. It briefly produced what looked like a real defect: the redirected file carrying an 80-byte error the terminal capture had "lost". That reading was wrong, and `/bin/sh` printing one line and exiting reproduced the same "loss", which is what exposed the instrument rather than the subject. The comparison above uses a direct `pty.openpty()` harness (`ptyrun.py`, kept in the session scratchpad) that was validated on known-good input first. **A measurement instrument gets verified before its output is believed** — this one would otherwise have put a fabricated defect into the record.
+
+One loose end, recorded rather than chased: during the flaky-instrument window three consecutive no-op cycles exited `1` while three file-redirected ones exited `0`, with no output either way. It does not reproduce under the verified harness, every `errors.push` in `poll.ts` is paired with a `log`, and there is no evidence left to work from. **Named as unexplained, not as a defect** — an exit code seen through a broken instrument is not an observation.
 
 **A defect sits under this step** — the tick freezes for the whole length of a sub-agent's work. See *the tick goes stale while the fleet works*, below. R17 should not be flipped to `verified` on this evidence.
 
@@ -243,11 +279,13 @@ Execution produced seven commits and closed its phase with a clean tree, **amend
 
 ## Still owed before 14g can close
 
-1. Step 1's remaining rows — triage on Sonnet, requirements and planning on Opus, observed rather than inferred.
-2. Step 2's `> daemon.log` identity check.
+1. Step 1's remaining rows — **requirements and planning on Opus** (triage on Sonnet is now observed, 2026-08-08).
+2. Step 2's `> daemon.log` identity check on a **tick-bearing** cycle (the clause is otherwise settled — see above).
 3. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded.
 
-**The two remaining steps are one run apart.** Both 1 and 2 want a fresh ticket taken from filing to the plan gate: step 1 needs triage and requirements and planning observed on their declared models, and step 2 needs that same run redirected with `> daemon.log` so the file can be diffed against what the terminal showed. Neither needs execution, so neither needs the $14 stage — a ticket stopped at the plan gate buys both. `scratch-app` is free (#11 released it), and #4 is already parked at triage if a fresh ticket is not wanted.
+**Both remaining items now sit on one ticket, and behind one human conversation.** `scratch-app` #13 is filed, triaged as a feature, and parked at `clarification` waiting on `timone takeover scratch-app#13`. Once that conversation happens, requirements runs on Opus and — after its gate — planning does too, closing step 1; running those cycles under the pty harness closes step 2's remaining clause in the same pass, at no extra cost. **Neither item needs execution**, so the $14 stage is never paid.
+
+Until the conversation happens there is nothing further to observe: `clarification` spawns no session, so no amount of polling advances it.
 
 **Step 5 is complete** — thirteen commits, thirteen trailers, no harness file anywhere in history.
 
