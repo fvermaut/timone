@@ -152,6 +152,16 @@ Trailer inspection across the phase's commits, and taking #11 the whole way to a
 
   The live counter's last reading was **53.8k**; the authoritative `modelUsage` total was **170.3k**. The tick under-reported the session's output by **3.2×**, the missing ~116k being the fleet's work. The freeze/unfreeze boundary was also watched directly, confirming the mechanism: `14 replies · 19.5k out` held for 25 consecutive ticks while a sub-agent worked, then jumped to `22 replies · 31.5k out` the moment it returned.
 
+  **The error scales with fan-out, which confirms the diagnosis better than any single number.** Measured across all four stages of the run:
+
+  | stage | last tick | authoritative | under-report | fleet? |
+  | --- | --- | --- | --- | --- |
+  | execution | 53.8k | 170.3k | **3.2×** | yes, one sub-agent per sub-phase |
+  | delivery | 23.8k | 52.3k | **2.2×** | yes, two review axes |
+  | verification (retry) | 48.5k | 50.3k | 1.04× | no |
+
+  A stage that spawns no sub-agents is very nearly accurate; the two fleet stages are out by multiples. Nothing is wrong with the main-thread accounting — only the fleet's work is invisible, exactly as the code reading predicted.
+
   14b took real trouble to avoid printing a confidently *wrong* number — it rejected `usage.output_tokens` for under-reporting ~30× — and shipped something that under-reports ~3× on any run using the fleet, which is every execution run. The direction of the error was fixed; its existence was not.
 
   **No fix proposed here, deliberately.** The obvious fallback — `usage.output_tokens` on the sub-agent's `assistant` message — is precisely the source `progress.ts:78-81` rejects as under-reporting by roughly thirty times. Whether sub-agent deltas can be obtained honestly is an investigation, not a one-liner, and 14h should route it as one. Note the interaction with ADR-0017: the tick is also the heartbeat, and the heartbeat kept stamping correctly throughout — **liveness was never affected**, only the display.
@@ -171,6 +181,16 @@ Trailer inspection across the phase's commits, and taking #11 the whole way to a
 
   The ticks reach **1h05m**; the SDK's own `duration_ms` says **5m05s**. Both are labelled as how long this session has been going, and `timone status` renders the tick's number as "working on it now … for Xm". This is precisely the two-dialects problem `e856ebb` set out to kill, reappearing on a different pair of numbers.
 
+  **Reproduced three times, on three healthy sessions, always in the same direction:**
+
+  | session | ticks reached | SDK `duration_ms` | unaccounted |
+  | --- | --- | --- | --- |
+  | verification (first) | 1h05m | 5m05s | ~60m |
+  | verification (retry) | 23m46s | 15m08s | 8m38s |
+  | delivery | 24m48s | 10m11s | 14m37s |
+
+  The first could be blamed on the API error that ended it; the second and third cannot — both completed normally and handed on. Three occurrences settle that this is a property of the tick rather than an artifact of any one failure.
+
   **The tick spacing is the clue and it is highly regular:** pairs of ticks 30 s apart, separated by gaps of ~15m15s, ~15m33s, ~15m28s, ~15m. The awake stretches sum to roughly the 5m05s the SDK reports. **The most plausible explanation is the machine sleeping** — a `setInterval` does not fire while a laptop sleeps, but wall-clock elapsed advances across it. That would also retire the earlier "watch item": the 6½-minute gap in the crash log, provisionally blamed on the signal storm, is far better explained as sleep, and it appeared in the same log for the same reason.
 
   **The consequence is R18's, not R17's, and it is the serious half.** ADR-0017 makes the tick the heartbeat: `heartbeatAt` is stamped only when the tick fires. A 15-minute sleep therefore leaves a perfectly healthy run looking stale against a 2-minute threshold, and the next poll cycle after wake is entitled to reclaim it. **Nothing was reclaimed on this run**, but the margin appears to be a race between the ticker and the poll loop on wake rather than anything designed — and step 3's false-positive check does not cover it, because that check was "let a healthy session run untouched", not "let the laptop sleep".
@@ -189,7 +209,11 @@ The crash log's 6½-minute tick gap (`2m21s` → `8m54s`), provisionally blamed 
 | --- | --- | --- | --- | --- |
 | approval record | 44s | 14 | $0.14 | `claude-haiku-4-5` |
 | execution | 59m35s | 52 | $14.44 | `claude-opus-5` (`xhigh`) |
-| verification | 5m05s | 32 | $1.88 | `claude-opus-5` |
+| verification (died on API error) | 5m05s | 32 | $1.88 | `claude-opus-5` |
+| verification (retry) | 15m08s | 72 | $5.61 | `claude-opus-5` |
+| delivery | 10m11s | 35 | $4.99 | `claude-opus-5` |
+
+**Total for one ticket, plan gate to open pull request: $27.06.** Worth having on the record — it is the first end-to-end cost measurement the project has, and the fleet stages dominate it.
 
 Execution produced seven commits and closed its phase with a clean tree, **amending its own plan twice** when it found defects in it (`0dd2b97`, `8d95c65`) rather than building to a spec it had discovered was wrong. It then advanced to verification by itself, with `timone status` reading `(checking the result)` — the `ca3bc09` fix holding across a second stage transition.
 
@@ -199,10 +223,13 @@ Execution produced seven commits and closed its phase with a clean tree, **amend
 
 1. Step 1's remaining rows — triage on Sonnet, requirements and planning on Opus, observed rather than inferred.
 2. Step 2's `> daemon.log` identity check.
-3. Steps 5 and 6 in full. Step 6 needs #11 retried past verification to a merged PR.
-4. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded.
+3. Step 5 — the trailer inspection, in full.
+4. Step 6's last act: **the merge**, which is fvermaut's and nobody else's.
+5. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded.
 
-**Step 4 is complete** — both session kinds, violation and silence, in one pass. **Step 3's false-positive check is complete** at 59m35s, with the sleep hazard recorded separately as a path it does not cover.
+**Step 4 is complete** — both session kinds, violation and silence, in one pass. Its silence half is now observed on **three** daemon sessions (verification twice, delivery once), each of which required staying out of the timone repo for its duration. **Step 3's false-positive check is complete** at 59m35s, with the sleep hazard recorded separately as a path it does not cover.
+
+**Step 6 is complete but for the merge.** The loop ran ticket → triage → plan → human approval → execution → verification → delivery → **pull request**, and survived a hard crash and an upstream API failure on the way without human repair beyond two `timone retry` calls. [`scratch-app` #12](https://github.com/fvermaut/scratch-app/pull/12) is open: 14 files, +1535 / −24. Nothing in phase 14 changed the pipeline's behaviour, which is what the step set out to show.
 
 ## Register guidance for 14h
 
