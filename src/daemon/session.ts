@@ -449,6 +449,14 @@ export class AgentSessionSpawner implements SessionSpawner {
         return;
       }
 
+      // Recorded before the stage runs, not after it finishes. `timone status`
+      // reads this to say what a run is doing, and since 14f to say which
+      // model it is doing it on — so a stage written only on completion has
+      // both describing the *previous* stage for as long as the current one
+      // takes, which for a build is hours. Seen live on 2026-08-07: a run
+      // three minutes into building still read "planning".
+      this.options.store.setStage(run.id, stage);
+
       await this.claimBranch(run, project, stage);
 
       const outcome = await this.runStage(run, project, stage, feedback);

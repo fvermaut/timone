@@ -784,6 +784,32 @@ describe("the requirements gate", () => {
     expect(claimed).toEqual(["timone/7-the-page-feels-slow"]);
   });
 
+  it("records the stage before the session starts, not after it ends", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const seen: (string | undefined)[] = [];
+    const { runtime } = fakeRuntime({
+      work: () => {
+        seen.push(store.get("scratch-app#7")?.stage);
+      },
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    // Written only on completion, the ledger names the *previous* stage for as
+    // long as the current one takes — hours, for a build — and `timone status`
+    // reads it to say both what a run is doing and which model it is doing it
+    // on. Seen live on 2026-08-07: a run minutes into building read "planning".
+    expect(seen).toEqual(["requirements"]);
+  });
+
   it("holds the project from the moment it owns a branch", async () => {
     const store = newStore();
     const { adapter } = fakeAdapter(settled);
