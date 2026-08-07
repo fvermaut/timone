@@ -19,19 +19,44 @@ import {
 function assistantTurn(
   outputTokens: number,
   options: { parent?: string | null; inputTokens?: number } = {},
-): SDKMessage {
-  return {
-    type: "assistant",
-    parent_tool_use_id: options.parent ?? null,
-    message: {
-      usage: {
-        input_tokens: options.inputTokens ?? 25_000,
-        output_tokens: outputTokens,
+): SDKMessage[] {
+  const parent = options.parent ?? null;
+  const stream = (event: unknown): SDKMessage =>
+    ({
+      type: "stream_event",
+      event,
+      parent_tool_use_id: parent,
+      uuid: "stream-uuid",
+      session_id: "session-abc",
+    }) as unknown as SDKMessage;
+
+  return [
+    stream({ type: "message_start" }),
+    // A `message_delta` carries the *cumulative* output of the message being
+    // written, so a message that ends at N tokens reports N — twice, on its
+    // way there, and the later value replaces rather than adds to the earlier.
+    stream({ type: "message_delta", usage: { output_tokens: Math.floor(outputTokens / 2) } }),
+    stream({ type: "message_delta", usage: { output_tokens: outputTokens } }),
+    {
+      type: "assistant",
+      parent_tool_use_id: parent,
+      message: {
+        usage: {
+          input_tokens: options.inputTokens ?? 25_000,
+          // Deliberately wrong-looking: this is what the SDK actually puts
+          // here, a partial snapshot, and nothing may count it.
+          output_tokens: 4,
+        },
       },
-    },
-    uuid: "assistant-uuid",
-    session_id: "session-abc",
-  } as unknown as SDKMessage;
+      uuid: "assistant-uuid",
+      session_id: "session-abc",
+    } as unknown as SDKMessage,
+  ];
+}
+
+/** Feed a whole turn's worth of messages to the accumulator. */
+function feed(progress: SessionProgress, messages: SDKMessage[]): void {
+  for (const message of messages) progress.observe(message);
 }
 
 /** A tool result returning to the main thread, ending sub-agent `id`. */
@@ -84,9 +109,9 @@ describe("what the accumulator counts", () => {
   it("adds up output tokens across every turn, sub-agents included", () => {
     const progress = new SessionProgress();
 
-    progress.observe(assistantTurn(1_000));
-    progress.observe(assistantTurn(2_500, { parent: "toolu_1" }));
-    progress.observe(assistantTurn(500));
+    feed(progress, assistantTurn(1_000));
+    feed(progress, assistantTurn(2_500, { parent: "toolu_1" }));
+    feed(progress, assistantTurn(500));
 
     expect(progress.snapshot().outputTokens).toBe(4_000);
   });
@@ -98,9 +123,9 @@ describe("what the accumulator counts", () => {
     // which is worse than no number. Asserted rather than reviewed for.
     const progress = new SessionProgress();
 
-    progress.observe(assistantTurn(100, { inputTokens: 50_000 }));
-    progress.observe(assistantTurn(100, { inputTokens: 51_000 }));
-    progress.observe(assistantTurn(100, { inputTokens: 52_000 }));
+    feed(progress, assistantTurn(100, { inputTokens: 50_000 }));
+    feed(progress, assistantTurn(100, { inputTokens: 51_000 }));
+    feed(progress, assistantTurn(100, { inputTokens: 52_000 }));
 
     const snapshot = progress.snapshot();
     expect(snapshot.outputTokens).toBe(300);
@@ -113,10 +138,10 @@ describe("what the accumulator counts", () => {
   it("counts main-thread turns, not the fleet's", () => {
     const progress = new SessionProgress();
 
-    progress.observe(assistantTurn(10));
-    progress.observe(assistantTurn(10, { parent: "toolu_1" }));
-    progress.observe(assistantTurn(10, { parent: "toolu_1" }));
-    progress.observe(assistantTurn(10));
+    feed(progress, assistantTurn(10));
+    feed(progress, assistantTurn(10, { parent: "toolu_1" }));
+    feed(progress, assistantTurn(10, { parent: "toolu_1" }));
+    feed(progress, assistantTurn(10));
 
     expect(progress.snapshot().turns).toBe(2);
   });
@@ -125,12 +150,12 @@ describe("what the accumulator counts", () => {
     const progress = new SessionProgress();
     expect(progress.snapshot().subAgents).toBe(0);
 
-    progress.observe(assistantTurn(10, { parent: "toolu_1" }));
-    progress.observe(assistantTurn(10, { parent: "toolu_2" }));
+    feed(progress, assistantTurn(10, { parent: "toolu_1" }));
+    feed(progress, assistantTurn(10, { parent: "toolu_2" }));
     expect(progress.snapshot().subAgents).toBe(2);
 
     // A second message from a sub-agent already counted is not a second agent.
-    progress.observe(assistantTurn(10, { parent: "toolu_1" }));
+    feed(progress, assistantTurn(10, { parent: "toolu_1" }));
     expect(progress.snapshot().subAgents).toBe(2);
 
     progress.observe(toolResult("toolu_1"));
@@ -154,8 +179,8 @@ describe("the closing summary", () => {
   it("takes its cost from the result message, never from a running total", () => {
     const progress = new SessionProgress();
 
-    progress.observe(assistantTurn(1_000));
-    progress.observe(assistantTurn(2_000));
+    feed(progress, assistantTurn(1_000));
+    feed(progress, assistantTurn(2_000));
     progress.observe(resultMessage({ total_cost_usd: 1.83 }));
 
     expect(progress.summary()?.costUsd).toBe(1.83);
@@ -165,7 +190,7 @@ describe("the closing summary", () => {
     const clock = fakeClock();
     const progress = new SessionProgress({ now: clock.now });
 
-    progress.observe(assistantTurn(10));
+    feed(progress, assistantTurn(10));
     clock.advance(1_000);
     progress.observe(resultMessage({ num_turns: 47, duration_ms: 724_000 }));
 
@@ -179,7 +204,7 @@ describe("the closing summary", () => {
 
   it("has nothing to report before the session ends", () => {
     const progress = new SessionProgress();
-    progress.observe(assistantTurn(1_000));
+    feed(progress, assistantTurn(1_000));
 
     expect(progress.summary()).toBeUndefined();
   });
@@ -293,5 +318,83 @@ describe("what the lines look like", () => {
     for (const line of lines) {
       expect(line).not.toMatch(/[\r]/);
     }
+  });
+});
+
+describe("where the running token total comes from", () => {
+  it("counts the cumulative delta, not the assistant message's own usage", () => {
+    // Found live on 2026-08-07: `usage.output_tokens` on the assistant message
+    // is a partial snapshot taken before the message is written. Summed, it
+    // reported 129 tokens for a session that had actually produced 26,800.
+    // The regression this pins is a confidently wrong number, which is the
+    // one failure this whole line was designed to avoid.
+    const progress = new SessionProgress();
+
+    feed(progress, assistantTurn(20_000));
+
+    expect(progress.snapshot().outputTokens).toBe(20_000);
+    // The wrong answer, for contrast: four, from the assistant message.
+    expect(progress.snapshot().outputTokens).not.toBe(4);
+  });
+
+  it("replaces the in-flight message's count rather than adding to it", () => {
+    // A `message_delta` is cumulative for its own message. Adding successive
+    // deltas would over-report by roughly the triangular number of the turn.
+    const progress = new SessionProgress();
+    const stream = (event: unknown): SDKMessage =>
+      ({
+        type: "stream_event",
+        event,
+        parent_tool_use_id: null,
+        uuid: "u",
+        session_id: "s",
+      }) as unknown as SDKMessage;
+
+    progress.observe(stream({ type: "message_start" }));
+    progress.observe(stream({ type: "message_delta", usage: { output_tokens: 100 } }));
+    progress.observe(stream({ type: "message_delta", usage: { output_tokens: 250 } }));
+    progress.observe(stream({ type: "message_delta", usage: { output_tokens: 400 } }));
+
+    expect(progress.snapshot().outputTokens).toBe(400);
+  });
+
+  it("keeps each sub-agent's stream on its own tally", () => {
+    // Sub-agent streams interleave with the main one. A single "current
+    // message" would have them overwriting each other's cumulative counts.
+    const progress = new SessionProgress();
+    const stream = (event: unknown, parent: string | null): SDKMessage =>
+      ({
+        type: "stream_event",
+        event,
+        parent_tool_use_id: parent,
+        uuid: "u",
+        session_id: "s",
+      }) as unknown as SDKMessage;
+
+    progress.observe(stream({ type: "message_start" }, null));
+    progress.observe(stream({ type: "message_start" }, "toolu_1"));
+    progress.observe(stream({ type: "message_delta", usage: { output_tokens: 500 } }, "toolu_1"));
+    progress.observe(stream({ type: "message_delta", usage: { output_tokens: 300 } }, null));
+    progress.observe(stream({ type: "message_delta", usage: { output_tokens: 900 } }, "toolu_1"));
+
+    expect(progress.snapshot().outputTokens).toBe(1_200);
+    expect(progress.snapshot().turns).toBe(1);
+  });
+
+  it("counts a message that produced nothing as nothing, not as missing", () => {
+    const progress = new SessionProgress();
+    const stream = (event: unknown): SDKMessage =>
+      ({
+        type: "stream_event",
+        event,
+        parent_tool_use_id: null,
+        uuid: "u",
+        session_id: "s",
+      }) as unknown as SDKMessage;
+
+    progress.observe(stream({ type: "message_start" }));
+
+    expect(progress.snapshot().outputTokens).toBe(0);
+    expect(progress.snapshot().turns).toBe(1);
   });
 });

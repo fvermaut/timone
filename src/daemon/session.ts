@@ -1004,6 +1004,11 @@ export const agentSdkRuntime: SessionRuntime = {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         model: request.model,
+        // The only honest live source of output tokens is the cumulative
+        // `usage` on a `message_delta`, and that arrives only as a partial
+        // message. Without this the progress line reports about a thirtieth
+        // of the truth (see `SessionProgress.observeStreamEvent`).
+        includePartialMessages: true,
         // Omitted entirely when the stage declares none — Haiku 4.5 rejects
         // the parameter, and sending it as undefined is not the same as not
         // sending it.

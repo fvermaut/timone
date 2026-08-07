@@ -1,5 +1,8 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
+/** Tally key for the session's own stream, as opposed to a sub-agent's. */
+const MAIN_THREAD = "main";
+
 /**
  * What a session looks like from outside, while it is still working.
  *
@@ -41,7 +44,13 @@ export class SessionProgress {
   private readonly now: () => number;
   private readonly startedAt: number;
   private turns = 0;
-  private outputTokens = 0;
+  /**
+   * Per-stream output tallies, keyed by sub-agent tool-use id (or
+   * {@link MAIN_THREAD}). `committed` is every finished message; `current` is
+   * the one being written, whose delta is cumulative and so replaces rather
+   * than adds.
+   */
+  private readonly streams = new Map<string, { committed: number; current: number }>();
   /** Tool-use ids of sub-agents that have spoken but not yet returned. */
   private readonly liveSubAgents = new Set<string>();
   private ended: SessionSummary | undefined;
@@ -53,16 +62,18 @@ export class SessionProgress {
 
   /** Read one message off the stream. Anything unrecognised is ignored. */
   observe(message: SDKMessage): void {
+    if (message.type === "stream_event") {
+      this.observeStreamEvent(message.event, message.parent_tool_use_id);
+      return;
+    }
+
     if (message.type === "assistant") {
+      // Read for the fleet only. Its `usage.output_tokens` is *not* the
+      // finished message's output — measured live it under-reports by roughly
+      // thirty times — so nothing is counted from here. See
+      // {@link observeStreamEvent} for where the tokens actually come from.
       const parent = message.parent_tool_use_id;
-      if (parent === null) {
-        this.turns += 1;
-      } else {
-        // A sub-agent announces itself by speaking. There is no separate
-        // "started" event, so its first message is the only signal there is.
-        this.liveSubAgents.add(parent);
-      }
-      this.outputTokens += message.message.usage?.output_tokens ?? 0;
+      if (parent !== null) this.liveSubAgents.add(parent);
       return;
     }
 
@@ -89,12 +100,62 @@ export class SessionProgress {
     }
   }
 
+  /**
+   * The one place a running total of output tokens can honestly come from.
+   *
+   * A `message_delta` event carries the *cumulative* output of the message
+   * being written, so the running total is every finished message's final
+   * delta plus the one in flight. Proven exact against the SDK's own
+   * accounting rather than assumed: summed deltas and `modelUsage` agree to
+   * the token.
+   *
+   * The obvious-looking source — `usage.output_tokens` on the assistant
+   * message — is a partial snapshot taken before the message is written, and
+   * summing it reports roughly a thirtieth of the truth. This phase set out
+   * to avoid printing a confidently wrong number in one direction and found
+   * the same trap waiting in the other.
+   */
+  private observeStreamEvent(
+    event: { type?: string; usage?: { output_tokens?: number } },
+    parent: string | null,
+  ): void {
+    // Sub-agent streams interleave with the main one, so each is tallied
+    // under its own key; a shared "current message" would have them
+    // overwriting each other's counts.
+    const key = parent ?? MAIN_THREAD;
+
+    if (event.type === "message_start") {
+      const stream = this.streamFor(key);
+      stream.committed += stream.current;
+      stream.current = 0;
+      if (parent === null) this.turns += 1;
+      else this.liveSubAgents.add(parent);
+      return;
+    }
+
+    if (event.type === "message_delta" && event.usage?.output_tokens !== undefined) {
+      this.streamFor(key).current = event.usage.output_tokens;
+    }
+  }
+
+  private streamFor(key: string): { committed: number; current: number } {
+    const existing = this.streams.get(key);
+    if (existing !== undefined) return existing;
+    const fresh = { committed: 0, current: 0 };
+    this.streams.set(key, fresh);
+    return fresh;
+  }
+
   /** How the session is doing right now. */
   snapshot(): ProgressSnapshot {
+    let outputTokens = 0;
+    for (const stream of this.streams.values()) {
+      outputTokens += stream.committed + stream.current;
+    }
     return {
       elapsedMs: this.now() - this.startedAt,
       turns: this.turns,
-      outputTokens: this.outputTokens,
+      outputTokens,
       subAgents: this.liveSubAgents.size,
     };
   }
