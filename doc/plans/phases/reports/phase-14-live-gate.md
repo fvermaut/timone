@@ -224,12 +224,15 @@ Execution produced seven commits and closed its phase with a clean tree, **amend
 1. Step 1's remaining rows — triage on Sonnet, requirements and planning on Opus, observed rather than inferred.
 2. Step 2's `> daemon.log` identity check.
 3. Step 5 — the trailer inspection, in full.
-4. Step 6's last act: **the merge**, which is fvermaut's and nobody else's.
-5. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded.
+4. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded.
 
 **Step 4 is complete** — both session kinds, violation and silence, in one pass. Its silence half is now observed on **three** daemon sessions (verification twice, delivery once), each of which required staying out of the timone repo for its duration. **Step 3's false-positive check is complete** at 59m35s, with the sleep hazard recorded separately as a path it does not cover.
 
-**Step 6 is complete but for the merge.** The loop ran ticket → triage → plan → human approval → execution → verification → delivery → **pull request**, and survived a hard crash and an upstream API failure on the way without human repair beyond two `timone retry` calls. [`scratch-app` #12](https://github.com/fvermaut/scratch-app/pull/12) is open: 14 files, +1535 / −24. Nothing in phase 14 changed the pipeline's behaviour, which is what the step set out to show.
+**Step 6 is complete.** The loop ran ticket → triage → plan → human approval → execution → verification → delivery → pull request → **merge**, and survived a hard crash and an upstream API failure on the way without human repair beyond two `timone retry` calls.
+
+[`scratch-app` #12](https://github.com/fvermaut/scratch-app/pull/12) — 14 files, +1535 / −24 — was merged by fvermaut at `21:08:53Z`. The daemon detected the terminal event and **closed ticket #11 at `21:09:18Z`, twenty-five seconds later**, marking the run `done` and releasing the project. Queue promotion had nothing to promote: #4 holds no project and #10 is failed.
+
+Nothing in phase 14 changed the pipeline's behaviour, which is what the step set out to show.
 
 ## Register guidance for 14h
 
