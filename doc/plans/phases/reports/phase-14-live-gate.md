@@ -29,6 +29,8 @@ work   scratch-app#11 (execution) — 17m01s · 14 replies · 19.5k out · 1 sub
 
 The sub-agent count moved as `timone-execute` fanned out, and a closing `cost` line carried the authoritative total for the session that ended. **The "re-run with `> daemon.log` and confirm the file matches the terminal" clause has not been done** — the run in flight is redirected to the file, so the comparison is still owed.
 
+**A defect sits under this step** — the tick freezes for the whole length of a sub-agent's work. See *the tick goes stale while the fleet works*, below. R17 should not be flipped to `verified` on this evidence.
+
 ### Step 3 — R18, the heartbeat is the run's liveness: **observed, and better than staged**
 
 The kill was **not** a deliberate `SIGKILL`: on 2026-08-07 a stray process signalled every terminal and killed the daemon mid-execution, ~14 minutes into building #11. That is a real crash rather than a simulated one, which is stronger evidence than the plan asked for.
@@ -94,6 +96,18 @@ Trailer inspection across the phase's commits, and taking #11 the whole way to a
   The sting: the trailer exists precisely to say which session made a commit, and the rule that *enforces* the trailer does not read it.
 
   **Proposed fix, if 14h routes it:** keep the baseline diff for finding candidate commits, but exclude any commit whose trailer names a different session. That removes the daemon-attribution line and the inflated count. The duplicate provenance line survives by necessity — an untrailed commit is genuinely unattributable — and over-reporting a real violation is the safe direction. That limit belongs in the record rather than engineered around.
+
+- **The tick goes stale while the fleet works — every number but elapsed time freezes.** Observed on #11's execution: `14 replies · 19.5k out · 1 sub-agent`, unchanged across **25 consecutive ticks** (12½ minutes), while the sub-agent was demonstrably working the whole time.
+
+  The run was proven alive by three independent means, none of them the progress line: `6a5694b feat: 05a — the production build no longer reads the database` was committed at 19:44 with a full trailer; `Dockerfile` (5,946 bytes), `.dockerignore` and `next.config.ts` carried mtimes inside the frozen window, the last of them seconds before the check; and the SDK process was alive and consuming CPU throughout.
+
+  **The replies half is correct by design** — `progress.ts:87` counts main-thread messages only, and the main thread genuinely is idle while a sub-agent works. **The token half is the defect.** `progress.ts:129-132` deliberately tallies each sub-agent's stream under its own key, with a comment explaining that a shared key would have them overwrite each other — the per-key design is right and is simply never fed. The `1 sub-agent` display is the tell: that count comes from `assistant` messages carrying a non-null `parent_tool_use_id` (line 83), so sub-agent *messages* arrive; output tokens come only from `message_delta` **stream events** (line 143), and those evidently do not arrive for sub-agents.
+
+  **Why this is load-bearing rather than cosmetic.** The phase's stated goal is that a run stops being a black box. `timone-execute` spawns one sub-agent per sub-phase, so the fleet's work *is* the run — and across exactly that stretch the display is frozen. A frozen tick is also indistinguishable from a hung session: fvermaut asked "is it me or the daemon does nothing?" and the only way to answer was `ps` and file mtimes, which is the question the feature exists to make unnecessary.
+
+  14b took real trouble to avoid printing a confidently *wrong* number and landed on a confidently *stale* one.
+
+  **No fix proposed here, deliberately.** The obvious fallback — `usage.output_tokens` on the sub-agent's `assistant` message — is precisely the source `progress.ts:78-81` rejects as under-reporting by roughly thirty times. Whether sub-agent deltas can be obtained honestly is an investigation, not a one-liner, and 14h should route it as one. Note the interaction with ADR-0017: the tick is also the heartbeat, and the heartbeat kept stamping correctly throughout — **liveness was never affected**, only the display.
 
 - **`timone retry` carries a dead attempt's flags into the fresh one.** It clears `failure` and `sessionId` but not `flags`, so #11 resumed carrying `the session changed 1 file(s) outside projects/scratch-app/` from its crashed attempt — a flag whose cause (`daemon.log`) had already been fixed by `8f96919`. `timone status` therefore shows `⚠ 1 automatic check(s) failed` about a file that no longer exists.
 
