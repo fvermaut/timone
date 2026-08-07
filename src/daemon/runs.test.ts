@@ -735,3 +735,66 @@ describe("two processes writing the one ledger", () => {
     expect(daemon.register("scratch-app", 8).created).toBe(false);
   });
 });
+
+describe("a heartbeat belongs to the session that wrote it", () => {
+  function clockedStore(path = statePath()): {
+    store: RunStore;
+    set: (iso: string) => void;
+  } {
+    let instant = "2026-08-07T10:00:00Z";
+    return {
+      store: RunStore.open(path, { now: () => instant }),
+      set: (iso) => {
+        instant = iso;
+      },
+    };
+  }
+
+  const FOUR_INTERVALS = 4 * 30 * 1000;
+
+  it("does not reclaim a run that was just re-armed under an old heartbeat", () => {
+    // Fired live on 2026-08-07. A run retried hours after its session died
+    // still carried that session's last tick, and the very next cycle
+    // reclaimed it before it had a chance to start — so `timone retry`, the
+    // one road back from failure, undid itself.
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-one");
+    store.heartbeat(run.id);
+
+    // Hours pass; the session dies and the run is reclaimed and retried.
+    set("2026-08-07T14:00:00Z");
+    store.fail(run.id, "the machine running it stopped");
+    store.retry(run.id);
+
+    expect(store.staleRuns(FOUR_INTERVALS)).toEqual([]);
+  });
+
+  it("still reclaims a run whose newer heartbeat has gone quiet", () => {
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-one");
+
+    set("2026-08-07T14:00:00Z");
+    store.heartbeat(run.id);
+    set("2026-08-07T14:09:00Z");
+
+    expect(store.staleRuns(FOUR_INTERVALS).map((r) => r.id)).toEqual([
+      "scratch-app#7",
+    ]);
+  });
+
+  it("takes the later of the two signals, whichever it happens to be", () => {
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-one");
+    store.heartbeat(run.id);
+
+    // The run moves on later than it last ticked — a stage transition.
+    set("2026-08-07T10:05:00Z");
+    store.setStage(run.id, "planning");
+    set("2026-08-07T10:06:00Z");
+
+    expect(store.staleRuns(FOUR_INTERVALS)).toEqual([]);
+  });
+});

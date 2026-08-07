@@ -412,17 +412,22 @@ export class RunStore {
    * Only `active` and `picked-up` runs qualify. A parked run is waiting on a
    * human by design and may wait for weeks; a terminal one is finished.
    *
-   * Staleness is judged against the heartbeat, or against `updatedAt` when
-   * there is none — which covers both a run picked up moments ago and one
-   * left `active` by a daemon that predates the field. Judging "no heartbeat"
-   * as stale on its own would reclaim every run the instant it was picked up;
-   * treating it as fresh would leave the old ones immortal.
+   * Staleness is judged against the run's last sign of life, which is the
+   * **later** of its heartbeat and `updatedAt` — not the heartbeat alone.
+   *
+   * Both halves are load-bearing. Without `updatedAt` a run picked up moments
+   * ago, which has never ticked, would be reclaimed instantly, and a run left
+   * `active` by a daemon predating the field would be immortal. Without
+   * taking the later of the two, a heartbeat from a *previous* session
+   * outlives the session that wrote it: a run re-armed by `timone retry`
+   * carries the old tick, and the next cycle reclaims it before it has had a
+   * chance to start. That happened live on 2026-08-07.
    */
   staleRuns(thresholdMs: number, now?: string): Run[] {
     const cutoff = Date.parse(now ?? this.now()) - thresholdMs;
     return this.state.runs
       .filter((run) => RUNNING.includes(run.status))
-      .filter((run) => Date.parse(run.heartbeatAt ?? run.updatedAt) < cutoff)
+      .filter((run) => lastSignOfLife(run) < cutoff)
       .map((run) => ({ ...run }));
   }
 
@@ -547,6 +552,18 @@ function applyPark(run: Run, options: ParkOptions): void {
   run.waitingKind = options.kind;
   run.waitCursor = options.waitCursor;
   if (options.stage !== undefined) run.stage = options.stage;
+}
+
+/**
+ * The last moment a run showed it was alive: the later of its heartbeat and
+ * the last time it moved. A heartbeat belongs to the session that wrote it
+ * and says nothing about a later one, so it can only ever be evidence *for*
+ * liveness — never against it.
+ */
+function lastSignOfLife(run: Run): number {
+  const moved = Date.parse(run.updatedAt);
+  const ticked = run.heartbeatAt === undefined ? Number.NaN : Date.parse(run.heartbeatAt);
+  return Number.isNaN(ticked) ? moved : Math.max(moved, ticked);
 }
 
 /**
