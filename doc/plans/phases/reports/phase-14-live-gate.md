@@ -43,7 +43,9 @@ reclaim scratch-app#11 — the machine running it stopped before the work was fi
 
 The run flipped to `failed` with a plain reason; the project was freed; the ticket got its comment ("Nothing was decided about this ticket, so nothing here is final") ending in a CTA; `timone status` named `timone retry scratch-app#11`. After `timone retry`, the next cycle picked it up and execution restarted.
 
-**The false-positive half is observed:** staleness is four intervals (2 minutes at the 30 s default) and the restarted execution session ran past **17 minutes** untouched with nothing reclaiming it.
+**The false-positive half is conclusively observed:** staleness is four intervals (2 minutes at the 30 s default), and the restarted execution session ran **59m35s** — roughly thirty times the threshold — with the daemon polling throughout and nothing reclaiming it.
+
+**But a false-positive path the check does not cover was found anyway — see *the tick's clock is not the session's clock*, below.** The heartbeat only stamps when the tick fires, and the tick did not fire for stretches of ~15 minutes. That the run survived appears to be timing rather than design, and R18 should not close until it is understood.
 
 `ce6ebdb` was seen load-bearing in the wild: the re-armed run still carried a two-hour-old `heartbeatAt`, and only the `updatedAt` fallback stopped the very next cycle reclaiming it again.
 
@@ -72,7 +74,22 @@ and the matching ledger flag on the run, `the session changed 1 file(s) outside 
 
 **Two caveats 14h must weigh.** It was not *forced*, and the plan's wording asks for a forced one — though the observed behaviour is identical, and the same argument that made the real crash better evidence than a staged `SIGKILL` applies here. And its cause is now fixed (`8f96919` gitignored `daemon.log`), so this exact violation cannot recur; reproducing one deliberately needs a different mechanism.
 
-**Still owed on the daemon side: a clean daemon session confirming silence.** Note that #11's run carries the stale flag through `timone retry` (see below), so its next clean session must be read with that in mind.
+**Daemon violation, forced version — arrived by itself, and it is the serious one.** The execution session `82e4d50a` was flagged for three files it never touched:
+
+> ⚠️ **Automatic check failed — the session changed 3 file(s) outside `projects/scratch-app/`**
+> - doc/plans/phases/reports/phase-14-live-gate.md (commit bcb6929)
+> - doc/plans/phases/reports/phase-14-live-gate.md (commit c8a8920)
+> - doc/plans/phases/reports/phase-14-live-gate.md (commit 21a1ae4)
+
+All three are this report's own commits, made by interactive session `dd86be88` while the daemon happened to be building. See *findings are attributed to the wrong session* below — this is the same defect, in its damaging direction.
+
+**Clean daemon session — silent. This completes step 4.** The verification session `6f0d5ff4` recorded `"reported":[]` and added no flag to the run. Three things make that silence trustworthy rather than merely absent:
+
+- The mechanism demonstrably writes when it fires — execution's baseline for the same run carries `"reported":["the session changed 3 file(s) outside …"]`.
+- `Stop` fires per assistant turn and the session took **32 turns**, so the check ran many times over, well before the session's end.
+- Its baseline names `bcb6929` as the workspace head, and **nothing was committed to the timone repo for the whole life of that session** — deliberately held back for exactly this reason. A clean daemon session was only obtainable by staying out of the repo while it ran, which is itself a consequence of the attribution defect.
+
+**Both session kinds, violation and silence, are now observed in one pass — which is what R15's widened criterion asks for.** Whether it may return to `verified` is a separate question, and the attribution defect is the reason to say no.
 
 ### Steps 5 and 6 — **not started**
 
@@ -105,7 +122,18 @@ Trailer inspection across the phase's commits, and taking #11 the whole way to a
 
   The sting: the trailer exists precisely to say which session made a commit, and the rule that *enforces* the trailer does not read it.
 
-  **Proposed fix, if 14h routes it:** keep the baseline diff for finding candidate commits, but exclude any commit whose trailer names a different session. That removes the daemon-attribution line and the inflated count. The duplicate provenance line survives by necessity — an untrailed commit is genuinely unattributable — and over-reporting a real violation is the safe direction. That limit belongs in the record rather than engineered around.
+  **Then it fired in the damaging direction, and this is the severity escalation.** The execution session `82e4d50a` was flagged, and a false accusation was posted **publicly on `scratch-app` #11**, under fvermaut's GitHub identity, naming three files it never touched — all three being this report's own commits (`21a1ae4`, `c8a8920`, `bcb6929`), made by interactive session `dd86be88`.
+
+  What separates this from the interactive symptom:
+
+  - It writes into a **client repo's ticket**, through the loud channel, rather than dirtying a local journal.
+  - It flags the run and instructs the reader to "treat anything below this comment as unfinished" — on a false premise. The loud channel firing at innocent work is the failure mode guardrails must not have.
+  - **Every one of the three commits carries `Timone-Session: dd86be88-…`.** The information needed to attribute them correctly was present, in the trailer R19 exists to provide, and the rule did not read it.
+  - It is now proven in **both** directions. This is not an edge case: it fires whenever anyone works at the timone root while the daemon runs, which is how this project is developed. It also made a clean daemon session obtainable only by deliberately not touching the repo for an hour.
+
+  **Proposed fix, if 14h routes it:** keep the baseline diff for finding candidate commits, but exclude any commit whose trailer names a different session. That removes the daemon-attribution line and the inflated count — and, note, **all three** lines of the client-ticket accusation, since every one is trailed. For that case it is a complete fix rather than a partial one. The duplicate provenance line from an untrailed commit survives by necessity — such a commit is genuinely unattributable — and over-reporting a real violation is the safe direction. That limit belongs in the record rather than engineered around.
+
+  **This should block R15 from returning to `verified`,** notwithstanding that both session kinds were observed in one pass. The rule is not merely noisy: it reports the wrong actor to the wrong audience through the loud channel.
 
 - **The tick goes stale while the fleet works — every number but elapsed time freezes.** Observed on #11's execution: `14 replies · 19.5k out · 1 sub-agent`, unchanged across **25 consecutive ticks** (12½ minutes), while the sub-agent was demonstrably working the whole time.
 
@@ -115,23 +143,70 @@ Trailer inspection across the phase's commits, and taking #11 the whole way to a
 
   **Why this is load-bearing rather than cosmetic.** The phase's stated goal is that a run stops being a black box. `timone-execute` spawns one sub-agent per sub-phase, so the fleet's work *is* the run — and across exactly that stretch the display is frozen. A frozen tick is also indistinguishable from a hung session: fvermaut asked "is it me or the daemon does nothing?" and the only way to answer was `ps` and file mtimes, which is the question the feature exists to make unnecessary.
 
-  14b took real trouble to avoid printing a confidently *wrong* number and landed on a confidently *stale* one.
+  **Now quantified, at the session's close:**
+
+  ```
+  work   scratch-app#11 (execution) — 59m31s · 44 replies · 53.8k out
+  cost   scratch-app#11 (execution) — 59m35s · 52 turns · $14.44 · claude-opus-5 170.3k out
+  ```
+
+  The live counter's last reading was **53.8k**; the authoritative `modelUsage` total was **170.3k**. The tick under-reported the session's output by **3.2×**, the missing ~116k being the fleet's work. The freeze/unfreeze boundary was also watched directly, confirming the mechanism: `14 replies · 19.5k out` held for 25 consecutive ticks while a sub-agent worked, then jumped to `22 replies · 31.5k out` the moment it returned.
+
+  14b took real trouble to avoid printing a confidently *wrong* number — it rejected `usage.output_tokens` for under-reporting ~30× — and shipped something that under-reports ~3× on any run using the fleet, which is every execution run. The direction of the error was fixed; its existence was not.
 
   **No fix proposed here, deliberately.** The obvious fallback — `usage.output_tokens` on the sub-agent's `assistant` message — is precisely the source `progress.ts:78-81` rejects as under-reporting by roughly thirty times. Whether sub-agent deltas can be obtained honestly is an investigation, not a one-liner, and 14h should route it as one. Note the interaction with ADR-0017: the tick is also the heartbeat, and the heartbeat kept stamping correctly throughout — **liveness was never affected**, only the display.
 
+- **The tick's clock is not the session's clock — they disagree by 13×, and the heartbeat rides on the wrong one.** The verification session's ticks and its own closing line describe the same session:
+
+  ```
+  work   scratch-app#11 (verification) — 31s   · 5 replies · 1.4k out
+  work   scratch-app#11 (verification) — 2m31s · 10 replies · 9.5k out
+  work   scratch-app#11 (verification) — 17m46s · 11 replies · 9.5k out
+  work   scratch-app#11 (verification) — 18m16s · 12 replies · 10.8k out
+  work   scratch-app#11 (verification) — 33m49s · 14 replies · 11.9k out
+  …
+  work   scratch-app#11 (verification) — 1h05m · 21 replies · 15.7k out
+  cost   scratch-app#11 (verification) — 5m05s · 32 turns · $1.88 · claude-opus-5 15.7k out
+  ```
+
+  The ticks reach **1h05m**; the SDK's own `duration_ms` says **5m05s**. Both are labelled as how long this session has been going, and `timone status` renders the tick's number as "working on it now … for Xm". This is precisely the two-dialects problem `e856ebb` set out to kill, reappearing on a different pair of numbers.
+
+  **The tick spacing is the clue and it is highly regular:** pairs of ticks 30 s apart, separated by gaps of ~15m15s, ~15m33s, ~15m28s, ~15m. The awake stretches sum to roughly the 5m05s the SDK reports. **The most plausible explanation is the machine sleeping** — a `setInterval` does not fire while a laptop sleeps, but wall-clock elapsed advances across it. That would also retire the earlier "watch item": the 6½-minute gap in the crash log, provisionally blamed on the signal storm, is far better explained as sleep, and it appeared in the same log for the same reason.
+
+  **The consequence is R18's, not R17's, and it is the serious half.** ADR-0017 makes the tick the heartbeat: `heartbeatAt` is stamped only when the tick fires. A 15-minute sleep therefore leaves a perfectly healthy run looking stale against a 2-minute threshold, and the next poll cycle after wake is entitled to reclaim it. **Nothing was reclaimed on this run**, but the margin appears to be a race between the ticker and the poll loop on wake rather than anything designed — and step 3's false-positive check does not cover it, because that check was "let a healthy session run untouched", not "let the laptop sleep".
+
+  Not investigated further and no fix proposed: whether the SDK's `duration_ms` excludes suspended time, and whether a monotonic clock or a wake-aware staleness rule is the right answer, are questions for 14h to route. **R18 should not close until this is understood** — a laptop that sleeps is the normal operating environment here.
+
 - **`timone retry` carries a dead attempt's flags into the fresh one.** It clears `failure` and `sessionId` but not `flags`, so #11 resumed carrying `the session changed 1 file(s) outside projects/scratch-app/` from its crashed attempt — a flag whose cause (`daemon.log`) had already been fixed by `8f96919`. `timone status` therefore shows `⚠ 1 automatic check(s) failed` about a file that no longer exists.
 
-## Watch item, not yet a defect
+## Resolved watch item
 
-The crash log shows ticks at `2m21s` then `8m54s` — a 6½-minute gap where thirteen were owed. A gap that long on a *healthy* session is exactly the false positive step 3 exists to rule out. **It has not reproduced**: the restarted session ticked unbroken every 30 s across the whole observed window. The benign explanation — the signal storm starving the whole process, poll loop included, so nothing was awake to reclaim anything — is the better-supported one, but this is worth one more look before 14h closes R18.
+The crash log's 6½-minute tick gap (`2m21s` → `8m54s`), provisionally blamed on the signal storm, is **superseded**. The same shape recurred on a healthy verification session in far more regular form, and sleep explains both. Folded into *the tick's clock is not the session's clock*, above; no longer tracked separately.
+
+## What the run cost, and how it ended
+
+| stage | wall | turns | cost | model |
+| --- | --- | --- | --- | --- |
+| approval record | 44s | 14 | $0.14 | `claude-haiku-4-5` |
+| execution | 59m35s | 52 | $14.44 | `claude-opus-5` (`xhigh`) |
+| verification | 5m05s | 32 | $1.88 | `claude-opus-5` |
+
+Execution produced seven commits and closed its phase with a clean tree, **amending its own plan twice** when it found defects in it (`0dd2b97`, `8d95c65`) rather than building to a spec it had discovered was wrong. It then advanced to verification by itself, with `timone status` reading `(checking the result)` — the `ca3bc09` fix holding across a second stage transition.
+
+**Verification then died: `the session stopped on an API error (server_error)`.** An upstream infrastructure event, not a Timone defect — the same instability was hitting this session's own tooling at the same moment. **The daemon handled it exactly as designed:** failed the run with a plain reason, left `timone retry scratch-app#11` as the way back. Worth recording as an unplanned second proof of the failure path, on a different cause than the crash.
 
 ## Still owed before 14g can close
 
 1. Step 1's remaining rows — triage on Sonnet, requirements and planning on Opus, observed rather than inferred.
 2. Step 2's `> daemon.log` identity check.
-3. A **clean daemon session confirming silence** — the last piece of step 4. The daemon violation is observed but incidental; 14h decides whether a forced one is still required. **R15 needs both kinds in one pass**, and the interactive half alone does not earn it back.
-4. Steps 5 and 6 in full.
-5. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **The stale-tick defect above bears directly on the first half of that gate** and should be put in front of him rather than asked around.
+3. Steps 5 and 6 in full. Step 6 needs #11 retried past verification to a merged PR.
+4. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded.
+
+**Step 4 is complete** — both session kinds, violation and silence, in one pass. **Step 3's false-positive check is complete** at 59m35s, with the sleep hazard recorded separately as a path it does not cover.
+
+## Register guidance for 14h
+
+Nothing in this report justifies flipping **R15** or **R17** to `verified`; both carry open defects found by this gate. **R18** should wait on the sleep question. **R16** is proven at two rows of its table and unobserved at the rest. **R19** is untested (step 5) but has been incidentally exercised throughout — every commit in this gate carries its trailer, and the attribution finding turns on trailers being both present and unread.
 
 ## Sequencing note
 
