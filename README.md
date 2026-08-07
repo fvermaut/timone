@@ -83,6 +83,7 @@ One session per project runs at a time, always. A parked ticket only blocks the 
 ```bash
 npm install
 npm run build
+npm link          # required — see below
 
 # describe your projects (see timone.example.yaml)
 cp timone.example.yaml timone.yaml
@@ -94,6 +95,8 @@ node dist/cli.js projects add <name> --repo <url> --path projects/<name> \
 node dist/cli.js projects update <name> [--repo <url>] [--path <path>] \
   [--stack <comma,list>] [--ticketing github] [--preview docker]   # correct an existing entry (ADR-0008: never hand-edit)
 ```
+
+**`npm link` is not optional, and it is not a convenience.** Timone writes calls to action for you — on client tickets, and in `timone status` — and every one of them names the `timone` command: `timone takeover <project>#<ticket>` to open a conversation, `timone retry <project>#<n>` to re-arm a failed run, `timone daemon` to start the watcher. Without the link that command does not exist, and **every instruction the machine gives you is one you cannot follow**. It went unnoticed until 2026-08-08, when `scratch-app` #13 became the first ticket to park on a wait only a human could clear and the copy-pasteable command in its comment turned out not to run ([the 14g gate report](doc/plans/phases/reports/phase-14-live-gate.md)). The `node dist/cli.js …` form used elsewhere in this README works either way; the CTAs are written the short way on purpose, because a comment on a client's ticket should not carry this repository's build layout.
 
 `npm test` runs the suite (manifest validation + workspace-sync integration tests on local fixtures).
 

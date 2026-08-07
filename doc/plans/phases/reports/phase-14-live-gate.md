@@ -163,6 +163,24 @@ See *Still owed* below and the closing section: the ticket went the whole way to
 
 - **`8f96919` (earlier session) — `daemon.log` at the timone root** was reported by path containment against whatever run was in flight. Correct check, file that should never have been tracked.
 
+- **Every call to action names a command the human cannot run.** Found by fvermaut on 2026-08-08, in the only way it could be: he tried to do what the ticket told him to do, and it failed.
+
+  `scratch-app` #13's clarification comment ends with `timone takeover scratch-app#13`. There is no `timone` on his PATH. `package.json` declares `bin: { "timone": "dist/cli.js" }`, but the package has never been linked or installed, so the name exists in the manifest and nowhere else. The working form is `node dist/cli.js takeover scratch-app#13`, from the timone root.
+
+  **It is systemic, not one string.** Three separate emitters name the missing binary, and they are the loud channels rather than incidental prose: `channels/terminal.ts:16` builds the takeover CTA that goes onto the **client's ticket**; `commands/status.ts:154` prints `timone retry <id>` as the way out of a failed run; `commands/retry.ts:75` tells the reader to start `timone daemon`. `status.ts:169` does the same for a cold start.
+
+  **Why this is the sharpest finding of the gate, despite being the smallest.** The project's stated principle is that the harness routes and the human never does, and that every message to the human ends with an actionable CTA. A CTA that does not run is the exact failure of that principle — and unlike the other defects here, it does not need two sessions overlapping or a laptop sleeping to appear. **It fires every single time**, and it had been firing unnoticed because until now the human's next step was always something the machine did for him. #13 is the first ticket that parked on a wait only a human could clear, so it is the first time anyone tried to obey the instruction.
+
+  It also lands on the **human gate** rather than on a requirement: the gate asks whether the daemon's output tells fvermaut what he wants, and on this evidence the answer includes "it told him to run a command that does not exist".
+
+  **Two routes, and they differ in kind.** Either make the name true — `npm link`, after which every existing CTA is correct as written and the docs stop lying — or change the strings to `node dist/cli.js …`, which is correct but ugly and hard-codes a build layout into a client-facing ticket comment. **The first is better**: the CTA text is right and the environment is what is missing. That makes this a setup gap the record never captured, not a wording bug — and onboarding a second machine would hit it again.
+
+  **Resolved the same day, and it is the one defect of the five that is closed.** fvermaut ran `npm link`; `timone` now resolves to the linked `dist/cli.js` and every CTA runs as written — `timone takeover <project>#<ticket>`, `timone retry <project>#<n>`, `timone daemon`, `timone status`, each verified after the link rather than assumed. **No code changed**, which is the point: the strings were right and the environment was incomplete.
+
+  **The fix is the documentation, so record it as one.** `npm link` is now a step in the README's "Getting started" alongside `npm install` and `npm run build`, with the reason attached — that without it every instruction the machine gives is one the human cannot follow. A missing setup step that nothing records is indistinguishable from a bug for whoever hits it next, and this one had been latent since the CLI was written. **A `setup` skill is deliberately deferred**, and recorded here because this report is tracked and fvermaut's todo list is not: it would cover install, build, `npm link`, the manifest from `timone.example.yaml`, and the GitHub credential. It is worth building when Timone is **redistributed** rather than run from this checkout — the README is enough while there is one machine. Noted so the decision reads as deferred rather than missed.
+
+  For 14h: this one needs no routing decision, only the note that **the gate found it and the gate closed it**. Its lasting value is the class — the pipeline is exercised by the machine, so the paths only a human walks are the ones nothing tests. #13 is the first ticket that made a human walk one.
+
 ### Found and deliberately **not** fixed — for 14h to route
 
 - **Guardrail findings are attributed to the wrong session when sessions overlap.** The rules scope "this session's commits" by diffing against the session's `SessionStart` baseline, and **never read the `Timone-Session:` trailer**. With two sessions open at the timone root, the one whose baseline is older is blamed for the other's commits.
@@ -255,18 +273,6 @@ See *Still owed* below and the closing section: the ticket went the whole way to
 
   Not investigated further and no fix proposed: whether the SDK's `duration_ms` excludes suspended time, and whether a monotonic clock or a wake-aware staleness rule is the right answer, are questions for 14h to route. **R18 should not close until this is understood** — a laptop that sleeps is the normal operating environment here.
 
-- **Every call to action names a command the human cannot run.** Found by fvermaut on 2026-08-08, in the only way it could be: he tried to do what the ticket told him to do, and it failed.
-
-  `scratch-app` #13's clarification comment ends with `timone takeover scratch-app#13`. There is no `timone` on his PATH. `package.json` declares `bin: { "timone": "dist/cli.js" }`, but the package has never been linked or installed, so the name exists in the manifest and nowhere else. The working form is `node dist/cli.js takeover scratch-app#13`, from the timone root.
-
-  **It is systemic, not one string.** Three separate emitters name the missing binary, and they are the loud channels rather than incidental prose: `channels/terminal.ts:16` builds the takeover CTA that goes onto the **client's ticket**; `commands/status.ts:154` prints `timone retry <id>` as the way out of a failed run; `commands/retry.ts:75` tells the reader to start `timone daemon`. `status.ts:169` does the same for a cold start.
-
-  **Why this is the sharpest finding of the gate, despite being the smallest.** The project's stated principle is that the harness routes and the human never does, and that every message to the human ends with an actionable CTA. A CTA that does not run is the exact failure of that principle — and unlike the other defects here, it does not need two sessions overlapping or a laptop sleeping to appear. **It fires every single time**, and it had been firing unnoticed because until now the human's next step was always something the machine did for him. #13 is the first ticket that parked on a wait only a human could clear, so it is the first time anyone tried to obey the instruction.
-
-  It also lands on the **human gate** rather than on a requirement: the gate asks whether the daemon's output tells fvermaut what he wants, and on this evidence the answer includes "it told him to run a command that does not exist".
-
-  **Two routes, and they differ in kind.** Either make the name true — `npm link`, after which every existing CTA is correct as written and the docs stop lying — or change the strings to `node dist/cli.js …`, which is correct but ugly and hard-codes a build layout into a client-facing ticket comment. **The first is better**: the CTA text is right and the environment is what is missing. That makes this a setup gap the record never captured, not a wording bug — and onboarding a second machine would hit it again.
-
 - **`timone retry` carries a dead attempt's flags into the fresh one.** It clears `failure` and `sessionId` but not `flags`, so #11 resumed carrying `the session changed 1 file(s) outside projects/scratch-app/` from its crashed attempt — a flag whose cause (`daemon.log`) had already been fixed by `8f96919`. `timone status` therefore shows `⚠ 1 automatic check(s) failed` about a file that no longer exists.
 
 ## Resolved watch item
@@ -293,8 +299,7 @@ Execution produced seven commits and closed its phase with a clean tree, **amend
 
 1. Step 1's remaining rows — **requirements and planning on Opus** (triage on Sonnet is now observed, 2026-08-08).
 2. Step 2's `> daemon.log` identity check on a **tick-bearing** cycle (the clause is otherwise settled — see above).
-3. A decision on the **unrunnable CTA** (below): `npm link` so the name is true, or reword three emitters. It blocks nothing technically — the `node dist/cli.js` form works — but it is in the way of the human gate, since the gate is about whether the output tells fvermaut what he wants.
-4. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded.
+3. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded. **The unrunnable CTA belongs in front of him too** — it is fixed, but it is the one defect that was aimed at him personally, and the gate is about him.
 
 **Both remaining items now sit on one ticket, and behind one human conversation.** `scratch-app` #13 is filed, triaged as a feature, and parked at `clarification` waiting on `timone takeover scratch-app#13`. Once that conversation happens, requirements runs on Opus and — after its gate — planning does too, closing step 1; running those cycles under the pty harness closes step 2's remaining clause in the same pass, at no extra cost. **Neither item needs execution**, so the $14 stage is never paid.
 
