@@ -101,6 +101,48 @@ export interface Ticker {
   stop(): void;
 }
 
+/**
+ * How a session really ended, given the result the SDK reported and the last
+ * thing the model was seen to say.
+ *
+ * A `success` subtype is not on its own proof that the work happened. On
+ * 2026-08-07 a planning session died on `API Error: Connection closed
+ * mid-response` — the transcript ends on a synthetic message carrying
+ * `error: "server_error"` — and the SDK still reported success. The daemon
+ * believed it, opened a gate over a branch with nothing on it, and asked a
+ * human to approve a document that was never written.
+ *
+ * So three things are read, not one: the subtype, the result's own
+ * `is_error`, and whether the model's *last* word was an API error. The last
+ * of those is deliberately last-wins — an error the CLI retried and recovered
+ * from is followed by a real message, which clears it, and only an error
+ * nothing came back from survives to be reported.
+ */
+export function sessionOutcomeFrom(
+  sessionId: string,
+  result: { subtype: string; is_error?: boolean },
+  lastApiError: string | undefined,
+): SessionOutcome {
+  if (lastApiError !== undefined) {
+    return {
+      sessionId,
+      ok: false,
+      error: `the session stopped on an API error (${lastApiError})`,
+    };
+  }
+  if (result.subtype !== "success") {
+    return { sessionId, ok: false, error: result.subtype };
+  }
+  if (result.is_error === true) {
+    return {
+      sessionId,
+      ok: false,
+      error: "the session reported success but flagged itself as an error",
+    };
+  }
+  return { sessionId, ok: true };
+}
+
 /** The real ticker. Behind a seam so tests need no clock. */
 function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
   const handle = setInterval(onTick, intervalMs);
@@ -129,6 +171,13 @@ export interface AgentSessionSpawnerOptions {
    * did-this-stage-produce-anything check is testable without a real repo.
    */
   repoProbe?: (repoDir: string, branch: string) => Promise<string | undefined>;
+  /**
+   * Reads the checkout's current `HEAD`. It is the baseline for a stage that
+   * has no work branch yet: the commit a new branch would be cut from, and
+   * therefore the thing a branch must have moved *past* to have produced
+   * anything.
+   */
+  headProbe?: (repoDir: string) => Promise<string | undefined>;
   /**
    * Reads the `Status:` line of the newest phase file on a branch. The
    * artifact half of execution's outcome check — the stage's own closing act
@@ -314,6 +363,21 @@ async function gitBranchHead(
   }
 }
 
+/**
+ * The checkout's current HEAD sha. Undefined is a legitimate answer — an
+ * unborn branch in a fresh clone has no HEAD commit.
+ */
+async function gitCurrentHead(repoDir: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: repoDir,
+    });
+    return stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Reduce an error to one readable line. */
 function oneLine(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -455,7 +519,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     });
 
     const branch = store.get(run.id)?.branch;
-    const headBefore = await this.branchHead(project, branch);
+    // A branch the stage has not cut yet has no tip, and "no tip" must not
+    // read as "different from whatever tip appears" — cutting a branch is not
+    // doing work. The checkout's current HEAD is what the stage would cut
+    // from, so it is the honest baseline.
+    const headBefore =
+      (await this.branchHead(project, branch)) ?? (await this.currentHead(project));
 
     const effort = effortFor(stage);
     const started = await runtime.start({
@@ -672,6 +741,18 @@ export class AgentSessionSpawner implements SessionSpawner {
         join(this.options.root, "projects", project.name),
         branch,
       );
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The checkout's current HEAD, or undefined when it cannot be read. */
+  private async currentHead(
+    project: TicketingProject,
+  ): Promise<string | undefined> {
+    const probe = this.options.headProbe ?? gitCurrentHead;
+    try {
+      return await probe(join(this.options.root, "projects", project.name));
     } catch {
       return undefined;
     }
@@ -1028,6 +1109,10 @@ export const agentSdkRuntime: SessionRuntime = {
 
     const completed = (async (): Promise<SessionOutcome> => {
       let id = "unknown";
+      // The last thing the main thread said, when that was an API error.
+      // Assignment is unconditional so a later real message clears it: an
+      // error the CLI recovered from is not how the session ended.
+      let lastApiError: string | undefined;
       try {
         for await (const message of session) {
           progress.observe(message);
@@ -1035,11 +1120,12 @@ export const agentSdkRuntime: SessionRuntime = {
             id = message.session_id;
             resolveId(id);
           }
+          if (message.type === "assistant" && message.parent_tool_use_id === null) {
+            lastApiError = message.error;
+          }
           if (message.type === "result") {
             resolveId(id);
-            return message.subtype === "success"
-              ? { sessionId: id, ok: true }
-              : { sessionId: id, ok: false, error: message.subtype };
+            return sessionOutcomeFrom(id, message, lastApiError);
           }
         }
         resolveId(id);

@@ -33,6 +33,7 @@ import {
 } from "./progress.js";
 import {
   AgentSessionSpawner,
+  sessionOutcomeFrom,
   type ProgressReader,
   type SessionRequest,
   type SessionRuntime,
@@ -2181,5 +2182,138 @@ describe("saying what a session is doing while it does it", () => {
 
   it("defaults to thirty seconds", () => {
     expect(DEFAULT_PROGRESS_INTERVAL_SECONDS).toBe(30);
+  });
+});
+
+describe("how a session's ending is judged", () => {
+  it("believes a plain success", () => {
+    expect(sessionOutcomeFrom("s1", { subtype: "success" }, undefined)).toEqual({
+      sessionId: "s1",
+      ok: true,
+    });
+  });
+
+  it("fails a session whose last word was an API error, however it was reported", () => {
+    // Found live on 2026-08-07. A planning session died on "API Error:
+    // Connection closed mid-response" — the transcript ends on a synthetic
+    // message carrying `error: "server_error"` — and the SDK still reported
+    // `subtype: "success"`. The daemon believed it, opened a gate over a
+    // branch with nothing on it, and asked a human to approve a document
+    // that was never written.
+    const outcome = sessionOutcomeFrom("s1", { subtype: "success" }, "server_error");
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toContain("server_error");
+  });
+
+  it("fails a success that flags itself as an error", () => {
+    const outcome = sessionOutcomeFrom("s1", { subtype: "success", is_error: true }, undefined);
+
+    expect(outcome.ok).toBe(false);
+  });
+
+  it("still reports a non-success subtype as before", () => {
+    expect(
+      sessionOutcomeFrom("s1", { subtype: "error_max_turns" }, undefined),
+    ).toMatchObject({ ok: false, error: "error_max_turns" });
+  });
+
+  it("does not fail a session that recovered from a transient error", () => {
+    // The caller clears the error whenever the model speaks again, so an
+    // error the CLI retried past never reaches here. Recording the rule where
+    // it is relied upon, so the clearing is not later "tidied" into a latch.
+    expect(sessionOutcomeFrom("s1", { subtype: "success" }, undefined).ok).toBe(true);
+  });
+});
+
+describe("a gate is never opened over a branch that was merely created", () => {
+  /** A run parked at the plan gate, ready to be resumed into planning. */
+  function readyToPlan(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    return store.get(run.id)!;
+  }
+
+  it("refuses to gate when the stage cut a branch and committed nothing", async () => {
+    // Found live on 2026-08-07: `headBefore` was undefined because the branch
+    // did not exist, so an empty branch cut from main compared unequal and
+    // read as work. The gate-over-nothing guard had a hole exactly where it
+    // was most needed — the first stage to own a branch.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:chore"],
+      comments: [],
+    });
+    const { runtime } = fakeRuntime();
+    let calls = 0;
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      // The branch does not exist before the session — the stage cuts it —
+      // and afterwards it sits on exactly the commit it was cut from.
+      repoProbe: async () => (calls++ === 0 ? undefined : "sha-base"),
+      headProbe: async () => "sha-base",
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    expect(store.get("scratch-app#7")?.status).toBe("failed");
+    expect(store.get("scratch-app#7")?.failure).toMatch(/without committing anything/);
+    expect(comments.at(-1)?.body).toContain("nothing for you to approve");
+  });
+
+  it("gates normally when the new branch actually carries a commit", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:chore"],
+      comments: [],
+    });
+    const { runtime } = fakeRuntime();
+    let calls = 0;
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: async () => (calls++ === 0 ? undefined : "sha-after"),
+      headProbe: async () => "sha-base",
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    expect(store.get("scratch-app#7")?.status).toBe("parked");
+    expect(comments.at(-1)?.body).toContain("approve");
+  });
+
+  it("still judges an existing branch by whether its tip moved", async () => {
+    // The path that already worked, unchanged: a stage resuming on a branch
+    // it already owns is measured against that branch, not against HEAD.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:chore"],
+      comments: [],
+    });
+    const { runtime } = fakeRuntime();
+    const run = readyToPlan(store);
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      // Deliberately equal to the "after" tip: if HEAD were consulted for a
+      // branch that already exists, this would wrongly read as no work.
+      headProbe: async () => "sha-after",
+    }).spawn(store.get(run.id)!, project, { stage: "planning" });
+
+    expect(store.get("scratch-app#7")?.status).toBe("parked");
   });
 });
