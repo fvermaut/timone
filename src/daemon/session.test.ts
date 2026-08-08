@@ -122,6 +122,7 @@ const noPullRequests = {
     throw new Error("no pull request exists in this test");
   },
   async postPullRequestComment(): Promise<void> {},
+  async upsertPullRequestComment(): Promise<void> {},
   async closeTicket(): Promise<void> {},
 };
 
@@ -1581,6 +1582,7 @@ describe("the delivery stage", () => {
     title: "Fix the box",
     url: "https://github.com/fvermaut/scratch-app/pull/9",
     state: "open" as const,
+    headSha: "aaaaaaa",
   };
 
   /** The fake adapter with a pull-request surface that has a PR to find. */
@@ -1712,6 +1714,7 @@ describe("the remediation stage", () => {
     title: "Fix the box",
     url: "https://github.com/fvermaut/scratch-app/pull/9",
     state: "open" as const,
+    headSha: "aaaaaaa",
   };
 
   function adapterWithPrThread() {

@@ -829,3 +829,105 @@ describe("a heartbeat belongs to the session that wrote it", () => {
     expect(store.staleRuns(FOUR_INTERVALS)).toEqual([]);
   });
 });
+
+describe("previews", () => {
+  it("records a preview against the commit it was reconciled for", () => {
+    const store = newStore();
+
+    const previous = store.recordPreview(
+      "scratch-app",
+      9,
+      { state: "ready", url: "http://localhost:54321/" },
+      "abc1234",
+    );
+
+    expect(previous).toBeUndefined();
+    expect(store.previewRecord("scratch-app", 9)).toEqual({
+      project: "scratch-app",
+      pr: 9,
+      headSha: "abc1234",
+      state: "ready",
+      url: "http://localhost:54321/",
+      reason: undefined,
+      updatedAt: "2026-08-02T10:00:00Z",
+    });
+  });
+
+  it("hands back what it replaced, so a caller can tell whether anything moved", () => {
+    const store = newStore();
+    store.recordPreview(
+      "scratch-app",
+      9,
+      { state: "ready", url: "http://localhost:54321/" },
+      "abc1234",
+    );
+
+    const previous = store.recordPreview(
+      "scratch-app",
+      9,
+      { state: "ready", url: "http://localhost:49713/" },
+      "def5678",
+    );
+
+    expect(previous).toMatchObject({
+      headSha: "abc1234",
+      url: "http://localhost:54321/",
+    });
+  });
+
+  it("keeps previews of one project out of another's", () => {
+    const store = newStore();
+    store.recordPreview("scratch-app", 9, { state: "ready" }, "abc1234");
+    store.recordPreview("other-app", 9, { state: "failed" }, "def5678");
+
+    expect(store.previewsFor("scratch-app")).toHaveLength(1);
+    expect(store.previewsFor("scratch-app")[0].pr).toBe(9);
+    expect(store.previewsFor("other-app")[0].state).toBe("failed");
+  });
+
+  it("forgets a preview, and forgetting one that is already gone is a no-op", () => {
+    const store = newStore();
+    store.recordPreview("scratch-app", 9, { state: "ready" }, "abc1234");
+
+    store.forgetPreview("scratch-app", 9);
+    store.forgetPreview("scratch-app", 9);
+
+    expect(store.previewRecord("scratch-app", 9)).toBeUndefined();
+    expect(store.previewsFor("scratch-app")).toEqual([]);
+  });
+
+  it("survives a preview record outliving the run that opened it", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.recordPreview("scratch-app", 9, { state: "ready" }, "abc1234");
+    store.activate(run.id, "session-1");
+    store.complete(run.id);
+
+    // The pull request keeps living after its run reaches a terminal state,
+    // which is why the record is top-level rather than a field on the run.
+    expect(store.previewRecord("scratch-app", 9)?.state).toBe("ready");
+  });
+
+  it("loads a state file written before previews existed, at version 1", () => {
+    const path = statePath();
+    const store = newStore(path);
+    store.register("scratch-app", 7);
+
+    const written = JSON.parse(readFileSync(path, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(written.version).toBe(1);
+    expect(written).not.toHaveProperty("previews");
+
+    // Re-open it, exactly as a daemon started later would.
+    const reopened = newStore(path);
+    expect(reopened.all()).toHaveLength(1);
+    expect(reopened.previewsFor("scratch-app")).toEqual([]);
+
+    reopened.recordPreview("scratch-app", 9, { state: "ready" }, "abc1234");
+    expect(
+      (JSON.parse(readFileSync(path, "utf8")) as { version: number }).version,
+    ).toBe(1);
+  });
+});

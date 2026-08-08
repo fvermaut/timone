@@ -1,5 +1,15 @@
-import type { Manifest } from "../manifest.js";
-import type { TicketingAdapter, TicketingProject } from "../adapters/ticketing.js";
+import type { Manifest, ProjectConfig } from "../manifest.js";
+import {
+  PREVIEW_MARKER,
+  type PullRequest,
+  type TicketingAdapter,
+  type TicketingProject,
+} from "../adapters/ticketing.js";
+import type {
+  Preview,
+  PreviewAdapter,
+  PreviewProject,
+} from "../adapters/preview.js";
 import { instant as instantOf, readConversationRecord, readGateDecision } from "./gates.js";
 import {
   classificationFromLabels,
@@ -56,6 +66,12 @@ export interface PollDeps {
    * which is four chances for a healthy session to have said something.
    */
   staleAfterMs?: number;
+  /**
+   * How previews are served, when any are. Absent means the daemon was built
+   * without one, and no project gets previews however it is bound — the
+   * binding says *which* adapter, never *whether* to have one at all.
+   */
+  previews?: PreviewAdapter;
   /** Progress sink; defaults to silence (the command wires stdout). */
   log?: (message: string) => void;
 }
@@ -151,6 +167,63 @@ export function reclaimedReason(): string {
   return "the machine running it stopped before the work was finished";
 }
 
+/**
+ * What a pull request says about its preview, in words that assume nothing.
+ *
+ * Two things are said outright rather than left to be discovered: it is
+ * reachable only from the machine Timone runs on, and its data is fake. Both
+ * are limits [ADR-0021](../../doc/adr/0021-previews-are-reconciled-behind-an-adapter-seam.md)
+ * accepted deliberately, and a reviewer who has to work either of them out
+ * for themselves has been misled by omission.
+ */
+export function previewComment(preview: Preview, headSha: string): string {
+  const commit = headSha.slice(0, 7);
+
+  if (preview.state === "ready" && preview.url !== undefined) {
+    return [
+      PREVIEW_MARKER,
+      "",
+      `**Open it: ${preview.url}**`,
+      "",
+      `That's this pull request's code actually running, built from commit \`${commit}\`.`,
+      "It gets rebuilt shortly after every push to this branch, and this comment is",
+      "rewritten rather than repeated — so there is only ever one of it, and the",
+      "address in it may change. It disappears when this pull request does.",
+      "",
+      "**Two things it is not.** It runs on the same machine Timone runs on, so it is",
+      "reachable from there and nowhere else — not from your phone. And whatever data",
+      "it holds comes from this project's own committed sample data, never from a copy",
+      "of anything real.",
+      "",
+      "**What I need from you:** nothing — open it if it helps you review.",
+    ].join("\n");
+  }
+
+  if (preview.state === "building") {
+    return [
+      PREVIEW_MARKER,
+      "",
+      `**Still starting up**, on commit \`${commit}\`. I'll put the address here when it answers.`,
+      "",
+      "**What I need from you:** nothing — this comment updates itself.",
+    ].join("\n");
+  }
+
+  return [
+    PREVIEW_MARKER,
+    "",
+    `**I could not get this branch running**, at commit \`${commit}\`:`,
+    "",
+    `> ${preview.reason ?? "no reason was reported"}`,
+    "",
+    "**Nothing is blocked by this.** The pull request itself is unaffected and still",
+    "yours to read, comment on and merge — a preview is a convenience for reviewing,",
+    "not part of the work. I'll try again on the next commit pushed here.",
+    "",
+    "**What I need from you:** nothing — though if the same failure keeps appearing, it is worth telling me.",
+  ].join("\n");
+}
+
 /** Reduce an error to one readable line. */
 function oneLine(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -189,6 +262,10 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
       // a session that no longer exists.
       await reclaimStale(project, deps, result, log);
       await pollProject(project, deps, result, log);
+      // Last, so a run whose pull request merged during `pollProject` has
+      // already been completed when its preview is released — R12's "within
+      // one poll cycle" is the same cycle, not the next one.
+      await reconcilePreviews(project, config, deps, result, log);
     } catch (error) {
       const line = `${name}: ${oneLine(error)}`;
       result.errors.push(line);
@@ -226,6 +303,131 @@ async function reclaimStale(
     result.reclaimed.push(run.id);
     await adapter.postComment(project, run.ticket, failedComment(reason));
   }
+}
+
+/**
+ * Bring every open Timone pull request on `project` into line with the commit
+ * under review, and let the pull request itself say where to look.
+ *
+ * **Reconciliation, not a stage** ([ADR-0021](../../doc/adr/0021-previews-are-reconciled-behind-an-adapter-seam.md)):
+ * `PIPELINE_STAGES` gains no member and no run enters a preview state, because
+ * a preview outlives the run that opened it and belongs to the pull request
+ * rather than to the pipeline.
+ *
+ * **A project with no preview binding is not reconciled at all** — not asked
+ * about, not looked up, and certainly not built. Previews are opt-in per
+ * project, and the way to be sure of that is for this function to return
+ * before it has done anything.
+ *
+ * Nothing here can stop the pipeline: a preview that fails is a value posted
+ * on the pull request, and an adapter that throws is caught per pull request
+ * so the rest of the cycle — and the rest of the project's pull requests —
+ * carry on.
+ */
+async function reconcilePreviews(
+  project: TicketingProject,
+  config: ProjectConfig,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { previews, store, adapter } = deps;
+  if (previews === undefined) return;
+  if (config.bindings.preview === undefined) return;
+
+  const target: PreviewProject = { name: project.name, path: config.path };
+
+  for (const run of store.runsFor(project.name)) {
+    if (run.pr === undefined || run.branch === undefined) continue;
+
+    try {
+      const pull = await adapter.findPullRequest(project, run.branch);
+      if (pull === undefined) continue;
+
+      if (pull.state === "open") {
+        await ensurePreview(target, project, pull, deps, log);
+      } else {
+        await releasePreview(target, project, pull.number, deps, log);
+      }
+    } catch (error) {
+      const line = `${project.name}: preview for #${run.ticket}: ${oneLine(error)}`;
+      result.errors.push(line);
+      log(`error  ${line}`);
+    }
+  }
+}
+
+/**
+ * Make an open pull request's preview true, and revise what the pull request
+ * says about it — but only when a reviewer would notice the difference.
+ *
+ * That last condition is the whole reason the record exists. Reconciliation
+ * runs every cycle; a comment posted every cycle would bury a client's pull
+ * request under near-identical machine chatter within an hour.
+ */
+async function ensurePreview(
+  target: PreviewProject,
+  project: TicketingProject,
+  pull: PullRequest,
+  deps: PollDeps,
+  log: (message: string) => void,
+): Promise<void> {
+  const { previews, store, adapter } = deps;
+  if (previews === undefined) return;
+
+  const preview = await previews.ensure(target, pull.number, pull.headSha);
+  const before = store.recordPreview(
+    project.name,
+    pull.number,
+    preview,
+    pull.headSha,
+  );
+  if (
+    before !== undefined &&
+    before.headSha === pull.headSha &&
+    before.state === preview.state &&
+    before.url === preview.url &&
+    before.reason === preview.reason
+  ) {
+    return;
+  }
+
+  await adapter.upsertPullRequestComment(
+    project,
+    pull.number,
+    PREVIEW_MARKER,
+    previewComment(preview, pull.headSha),
+  );
+  log(
+    `preview ${project.name}!${pull.number} ${preview.state}` +
+      (preview.url === undefined ? "" : ` — ${preview.url}`),
+  );
+}
+
+/**
+ * Give up the preview of a pull request that has ended, once.
+ *
+ * The record is what makes it once rather than every cycle thereafter: a
+ * merged pull request stays merged forever, so a release keyed on the pull
+ * request's state alone would generate work for the rest of the daemon's
+ * life. Dropping the record is also what lets a *reopened* pull request get a
+ * preview again with no code of its own — the next cycle simply finds it open
+ * and unrecorded, which is the state a new pull request is in.
+ */
+async function releasePreview(
+  target: PreviewProject,
+  project: TicketingProject,
+  pr: number,
+  deps: PollDeps,
+  log: (message: string) => void,
+): Promise<void> {
+  const { previews, store } = deps;
+  if (previews === undefined) return;
+  if (store.previewRecord(project.name, pr) === undefined) return;
+
+  await previews.release(target, pr);
+  store.forgetPreview(project.name, pr);
+  log(`preview ${project.name}!${pr} released`);
 }
 
 /** One project's share of a cycle. Throws only on tracker-level failures. */

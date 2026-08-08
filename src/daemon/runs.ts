@@ -105,12 +105,46 @@ const runSchema = z.strictObject({
   updatedAt: z.string(),
 });
 
+/**
+ * What the daemon last knew about one pull request's preview.
+ *
+ * It is the record, not the preview: the containers are the adapter's, and
+ * this exists so a cycle can tell "nothing has changed, say nothing" from
+ * "this moved, revise what the pull request says". That is why the URL and
+ * the reason are here alongside the commit — a preview whose URL changed
+ * without its commit changing is still news to a reviewer.
+ */
+const previewRecordSchema = z.strictObject({
+  project: z.string(),
+  pr: z.number().int().positive(),
+  /** The commit this preview was last reconciled against. */
+  headSha: z.string(),
+  state: z.enum(["ready", "building", "failed"]),
+  url: z.string().optional(),
+  reason: z.string().optional(),
+  updatedAt: z.string(),
+});
+
 const stateSchema = z.strictObject({
   version: z.literal(1),
   runs: z.array(runSchema),
+  /**
+   * Previews, keyed `<project>#<pr>`.
+   *
+   * **Top-level rather than a field on a run, because a preview outlives the
+   * run that opened it**: a delivered run parks on `review` and its pull
+   * request keeps living — through remediation, through a second reviewer,
+   * possibly after the run reaches a terminal state.
+   *
+   * **Optional so `version` stays `1`.** Every state file written before this
+   * field existed loads unchanged; nothing migrates, and a daemon rolled back
+   * simply stops recording previews.
+   */
+  previews: z.record(z.string(), previewRecordSchema).optional(),
 });
 
 export type Run = z.infer<typeof runSchema>;
+export type PreviewRecord = z.infer<typeof previewRecordSchema>;
 type State = z.infer<typeof stateSchema>;
 
 export interface RunStoreOptions {
@@ -439,6 +473,60 @@ export class RunStore {
       .map((run) => ({ ...run }));
   }
 
+  /** What the daemon last knew about a pull request's preview, if anything. */
+  previewRecord(project: string, pr: number): PreviewRecord | undefined {
+    const record = this.state.previews?.[previewKey(project, pr)];
+    return record === undefined ? undefined : { ...record };
+  }
+
+  /** Every preview the daemon is currently tracking for `project`. */
+  previewsFor(project: string): PreviewRecord[] {
+    return Object.values(this.state.previews ?? {})
+      .filter((record) => record.project === project)
+      .map((record) => ({ ...record }));
+  }
+
+  /**
+   * Write down what a pull request's preview now is. Returns the previous
+   * record, so a caller can tell whether anything a reviewer would care
+   * about actually changed — which is what keeps a per-cycle reconciler from
+   * saying the same thing every minute.
+   */
+  recordPreview(
+    project: string,
+    pr: number,
+    preview: { state: PreviewRecord["state"]; url?: string; reason?: string },
+    headSha: string,
+  ): PreviewRecord | undefined {
+    this.refresh();
+    const key = previewKey(project, pr);
+    const previous = this.state.previews?.[key];
+    this.state.previews = {
+      ...this.state.previews,
+      [key]: {
+        project,
+        pr,
+        headSha,
+        state: preview.state,
+        url: preview.url,
+        reason: preview.reason,
+        updatedAt: this.now(),
+      },
+    };
+    this.persist();
+    return previous === undefined ? undefined : { ...previous };
+  }
+
+  /** Drop a preview's record. Idempotent: an absent one is already dropped. */
+  forgetPreview(project: string, pr: number): void {
+    this.refresh();
+    const key = previewKey(project, pr);
+    if (this.state.previews?.[key] === undefined) return;
+    const { [key]: _dropped, ...rest } = this.state.previews;
+    this.state.previews = rest;
+    this.persist();
+  }
+
   /** Record a guardrail violation against a run (R15). */
   flag(id: string, violation: string): Run {
     const run = this.mutable(id);
@@ -552,6 +640,11 @@ export class RunStore {
 /** One run per ticket — the id is what makes re-pickup a no-op. */
 export function runId(project: string, ticket: number): string {
   return `${project}#${ticket}`;
+}
+
+/** One preview per pull request, keyed the same way runs are keyed. */
+export function previewKey(project: string, pr: number): string {
+  return `${project}#${pr}`;
 }
 
 /** Write a wait onto a run. Shared by {@link RunStore.park} and `repark`. */

@@ -1,5 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { z } from "zod";
 
 import {
@@ -15,44 +13,17 @@ import {
   type TicketThread,
 } from "./ticketing.js";
 
-const execFileAsync = promisify(execFile);
-
-/**
- * How the adapter reaches the outside world. Injected so tests can drive
- * the whole implementation without a network or a `gh` binary: every
- * subprocess this file runs goes through here.
- */
-export type CommandRunner = (
-  command: string,
-  args: string[],
-) => Promise<string>;
-
-/** Error shape thrown by promisified execFile for a failing process. */
-interface ExecFileError extends Error {
-  stderr?: string;
-}
-
-/**
- * The default runner: `gh` with arguments passed verbatim (never through a
- * shell). Throws an Error carrying gh's stderr when the command fails.
- */
-export const execCommandRunner: CommandRunner = async (command, args) => {
-  try {
-    const { stdout } = await execFileAsync(command, args, {
-      maxBuffer: 32 * 1024 * 1024,
-    });
-    return stdout;
-  } catch (error) {
-    const stderr = (error as ExecFileError).stderr?.trim();
-    const reason =
-      stderr !== undefined && stderr !== ""
-        ? stderr
-        : error instanceof Error
-          ? error.message
-          : String(error);
-    throw new Error(`${command} ${args.join(" ")} failed: ${reason}`);
-  }
-};
+// The runner moved to its own module when the preview adapter became its
+// second user: a Docker adapter importing its subprocess seam from the GitHub
+// adapter would be a dependency between two implementations that share
+// nothing. Re-exported here so every existing importer is unaffected.
+export {
+  execCommandRunner,
+  type CommandOptions,
+  type CommandRunner,
+} from "./command-runner.js";
+import type { CommandRunner } from "./command-runner.js";
+import { execCommandRunner } from "./command-runner.js";
 
 /**
  * Reduce a clone URL to GitHub's `owner/repo`. Handles the three forms a
@@ -100,6 +71,13 @@ const ghCommentSchema = z.looseObject({
   author: ghAuthorSchema,
   body: z.string(),
   createdAt: z.string(),
+  /**
+   * The comment's permalink, e.g. `…/pull/9#issuecomment-1234567`. The only
+   * place `gh pr view --json comments` surfaces the numeric id that the REST
+   * endpoint for editing a comment addresses — the `id` field it returns is
+   * GraphQL's opaque node id, which that endpoint does not accept.
+   */
+  url: z.string().optional(),
 });
 
 const ghIssueWithCommentsSchema = ghIssueSchema.extend({
@@ -128,6 +106,8 @@ const ghPullSchema = z.looseObject({
   title: z.string(),
   url: z.string(),
   state: ghPullStateSchema,
+  /** GitHub's name for the commit at the head of the PR's branch. */
+  headRefOid: z.string(),
 });
 
 /** A PR review summary as `gh pr view --json reviews` returns it. */
@@ -152,7 +132,7 @@ const ghInlineCommentSchema = z.looseObject({
 });
 
 /** The JSON fields requested for pull requests. */
-const PR_FIELDS = "number,title,url,state";
+const PR_FIELDS = "number,title,url,state,headRefOid";
 const PR_VIEW_FIELDS = `${PR_FIELDS},comments,reviews`;
 
 function toPullRequest(pull: z.infer<typeof ghPullSchema>): PullRequest {
@@ -161,7 +141,24 @@ function toPullRequest(pull: z.infer<typeof ghPullSchema>): PullRequest {
     title: pull.title,
     url: pull.url,
     state: GH_PR_STATES[pull.state],
+    headSha: pull.headRefOid,
   };
+}
+
+/**
+ * The numeric id the REST comment-editing endpoint addresses, out of a
+ * comment's permalink (`…#issuecomment-1234567`).
+ *
+ * Throws rather than falling back to posting a fresh comment: the whole point
+ * of editing is that a client's pull request does not accumulate near-copies
+ * of the same statement, and a silent fallback would produce exactly that.
+ */
+export function commentDatabaseId(url: string): string {
+  const match = /#issuecomment-(\d+)$/.exec(url.trim());
+  if (match === null) {
+    throw new Error(`Cannot derive a comment id from "${url}"`);
+  }
+  return match[1];
 }
 
 /**
@@ -491,6 +488,54 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
       `repos/${slug}/pulls/${number}/comments/${replyTo}/replies`,
       "-f",
       `body=${stamped}`,
+    ]);
+  }
+
+  async upsertPullRequestComment(
+    project: TicketingProject,
+    number: number,
+    marker: string,
+    body: string,
+  ): Promise<void> {
+    const slug = repoSlug(project.repoUrl);
+
+    const raw = await this.run("gh", [
+      "pr",
+      "view",
+      String(number),
+      "--repo",
+      slug,
+      "--json",
+      "comments",
+    ]);
+    const { comments } = parseGhJson(
+      z.looseObject({ comments: z.array(ghCommentSchema) }),
+      raw,
+      `reading comments on ${slug}!${number}`,
+    );
+
+    // Ours *and* carrying the marker. Matching the marker alone would let a
+    // human quoting the preview comment back at the machine capture the edit.
+    const existing = comments.find(
+      (comment) => isMachineComment(comment.body) && comment.body.includes(marker),
+    );
+    if (existing === undefined) {
+      await this.postPullRequestComment(project, number, body);
+      return;
+    }
+    if (existing.url === undefined) {
+      throw new Error(
+        `gh returned a comment on ${slug}!${number} with no url, so it cannot be edited`,
+      );
+    }
+
+    await this.run("gh", [
+      "api",
+      "--method",
+      "PATCH",
+      `repos/${slug}/issues/comments/${commentDatabaseId(existing.url)}`,
+      "-f",
+      `body=${stampMachineComment(body)}`,
     ]);
   }
 }

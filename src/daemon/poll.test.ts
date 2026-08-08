@@ -4,9 +4,11 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
+import type { Preview, PreviewAdapter } from "../adapters/preview.js";
 import {
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
+  PREVIEW_MARKER,
   type PullRequest,
   type PullRequestThread,
   type Ticket,
@@ -89,6 +91,7 @@ const noPullRequests = {
     throw new Error("no pull request exists in this test");
   },
   async postPullRequestComment(): Promise<void> {},
+  async upsertPullRequestComment(): Promise<void> {},
   async closeTicket(): Promise<void> {},
 };
 
@@ -830,6 +833,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
           title: "Fix the box",
           url: "https://github.com/fvermaut/scratch-app/pull/9",
           state,
+          headSha: "aaaaaaa",
         };
       },
       async getPullRequestThread() {
@@ -838,10 +842,12 @@ describe("pollOnce — a run parked on a pull-request review", () => {
           title: "Fix the box",
           url: "https://github.com/fvermaut/scratch-app/pull/9",
           state,
+          headSha: "aaaaaaa",
           comments,
         };
       },
       async postPullRequestComment(): Promise<void> {},
+  async upsertPullRequestComment(): Promise<void> {},
       async closeTicket(_project, number, reason): Promise<void> {
         closed.push(`${number}:${reason}`);
       },
@@ -1117,5 +1123,410 @@ describe("reclaiming a run its daemon left behind", () => {
     expect(rearmed.status).toBe("picked-up");
     expect(rearmed.stage).toBe("execution");
     expect(rearmed.branch).toBe("timone/7-slow");
+  });
+});
+
+// ─── Previews (phase 16) ────────────────────────────────────────────────────
+
+/** A manifest whose named projects are all bound to Docker previews. */
+function manifestWithPreviews(...names: string[]): Manifest {
+  const manifest = manifestWith(...names);
+  for (const name of names) {
+    manifest.projects[name].bindings = {
+      ticketing: "github" as const,
+      preview: "docker" as const,
+    };
+  }
+  return manifest;
+}
+
+/** A run of `project` that owns a branch and has a pull request open on it. */
+function runWithPullRequest(
+  store: RunStore,
+  project: string,
+  ticketNumber: number,
+  pr: number,
+): void {
+  const { run } = store.register(project, ticketNumber);
+  store.claimBranch(run.id, `timone/${ticketNumber}-work`);
+  store.recordPullRequest(run.id, pr);
+}
+
+interface Upsert {
+  project: string;
+  number: number;
+  marker: string;
+  body: string;
+}
+
+/**
+ * A ticketing fake whose pull-request surface answers with `pulls`, keyed by
+ * branch, and records every in-place comment revision.
+ */
+function previewTicketing(pulls: Record<string, PullRequest>): {
+  adapter: TicketingAdapter;
+  upserts: Upsert[];
+} {
+  const upserts: Upsert[] = [];
+  const adapter: TicketingAdapter = {
+    async listMarkedTickets(): Promise<Ticket[]> {
+      return [];
+    },
+    async getTicket(): Promise<TicketThread> {
+      throw new Error("no ticket is read in this test");
+    },
+    async postComment(): Promise<void> {},
+    async applyLabel(): Promise<void> {},
+    async findPullRequest(_project, branch): Promise<PullRequest | undefined> {
+      return pulls[branch];
+    },
+    async getPullRequestThread(): Promise<PullRequestThread> {
+      throw new Error("no pull-request thread is read in this test");
+    },
+    async postPullRequestComment(): Promise<void> {},
+    async upsertPullRequestComment(project, number, marker, body): Promise<void> {
+      upserts.push({ project: project.name, number, marker, body });
+    },
+    async closeTicket(): Promise<void> {},
+  };
+  return { adapter, upserts };
+}
+
+/** A pull request as the tracker reports it. */
+function pull(
+  number: number,
+  headSha: string,
+  state: PullRequest["state"] = "open",
+): PullRequest {
+  return {
+    number,
+    title: `pull request ${number}`,
+    url: `https://github.com/fvermaut/scratch-app/pull/${number}`,
+    state,
+    headSha,
+  };
+}
+
+/**
+ * A preview adapter that answers with whatever `reply` returns for the commit
+ * it is asked about, and records everything it was asked to do.
+ */
+function fakePreviews(
+  reply: (headSha: string) => Preview | Error = () => ({
+    state: "ready" as const,
+    url: "http://localhost:54321/",
+  }),
+): {
+  previews: PreviewAdapter;
+  ensured: Array<{ project: string; pr: number; headSha: string }>;
+  released: Array<{ project: string; pr: number }>;
+} {
+  const ensured: Array<{ project: string; pr: number; headSha: string }> = [];
+  const released: Array<{ project: string; pr: number }> = [];
+  return {
+    previews: {
+      async ensure(project, pr, headSha): Promise<Preview> {
+        ensured.push({ project: project.name, pr, headSha });
+        const answer = reply(headSha);
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+      async release(project, pr): Promise<void> {
+        released.push({ project: project.name, pr });
+      },
+    },
+    ensured,
+    released,
+  };
+}
+
+describe("pollOnce — previews are opt-in", () => {
+  it("does not reconcile a project with no preview binding at all", async () => {
+    const store = newStore();
+    runWithPullRequest(store, "scratch-app", 7, 9);
+    const { adapter, upserts } = previewTicketing({
+      "timone/7-work": pull(9, "abc1234"),
+    });
+    const { previews, ensured } = fakePreviews();
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      previews,
+    });
+
+    // Not "built and discarded" — never asked. A binding says which adapter,
+    // never whether to have one, so an unbound project must cost nothing.
+    expect(ensured).toEqual([]);
+    expect(upserts).toEqual([]);
+    expect(store.previewsFor("scratch-app")).toEqual([]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("does nothing for a bound project when the daemon has no preview adapter", async () => {
+    const store = newStore();
+    runWithPullRequest(store, "scratch-app", 7, 9);
+    const { adapter, upserts } = previewTicketing({
+      "timone/7-work": pull(9, "abc1234"),
+    });
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWithPreviews("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(upserts).toEqual([]);
+    expect(store.previewsFor("scratch-app")).toEqual([]);
+  });
+});
+
+describe("pollOnce — previews reconcile and land on the pull request", () => {
+  it("says it once and revises it in place, never once per cycle", async () => {
+    const store = newStore();
+    runWithPullRequest(store, "scratch-app", 7, 9);
+    const pulls = { "timone/7-work": pull(9, "abc1234") };
+    const { adapter, upserts } = previewTicketing(pulls);
+    let port = 54321;
+    const { previews } = fakePreviews(() => ({
+      state: "ready",
+      url: `http://localhost:${port}/`,
+    }));
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWithPreviews("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      previews,
+    };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    // Three cycles, one statement. This is the failure mode a per-cycle
+    // reconciler creates and the one that would spam a client's pull request.
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0].marker).toBe(PREVIEW_MARKER);
+    expect(upserts[0].body).toContain("http://localhost:54321/");
+
+    // A rebuild moved the port, which is the one thing a reviewer must be
+    // told again — and it is a revision, not a second comment.
+    port = 49713;
+    pulls["timone/7-work"] = pull(9, "def5678");
+    await pollOnce(deps);
+
+    expect(upserts).toHaveLength(2);
+    expect(upserts[1].body).toContain("http://localhost:49713/");
+    expect(upserts[1].body).toContain("def5678");
+  });
+
+  it("records the preview against the commit it was reconciled for", async () => {
+    const store = newStore();
+    runWithPullRequest(store, "scratch-app", 7, 9);
+    const { adapter } = previewTicketing({ "timone/7-work": pull(9, "abc1234") });
+    const { previews, ensured } = fakePreviews();
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWithPreviews("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      previews,
+    });
+
+    expect(ensured).toEqual([
+      { project: "scratch-app", pr: 9, headSha: "abc1234" },
+    ]);
+    expect(store.previewRecord("scratch-app", 9)).toMatchObject({
+      project: "scratch-app",
+      pr: 9,
+      headSha: "abc1234",
+      state: "ready",
+      url: "http://localhost:54321/",
+    });
+  });
+
+  it("posts a failed preview's reason and lets the rest of the cycle happen", async () => {
+    const store = newStore();
+    runWithPullRequest(store, "scratch-app", 7, 9);
+    runWithPullRequest(store, "other-app", 3, 4);
+    const { adapter, upserts } = previewTicketing({
+      "timone/7-work": pull(9, "abc1234"),
+      "timone/3-work": pull(4, "beef999"),
+    });
+    const { previews, ensured } = fakePreviews((headSha) =>
+      headSha === "abc1234"
+        ? { state: "failed", reason: "the app container never became healthy" }
+        : { state: "ready", url: "http://localhost:54321/" },
+    );
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWithPreviews("scratch-app", "other-app"),
+      store,
+      adapter,
+      spawner,
+      previews,
+    });
+
+    // A failure is a value, so it is not an error and it blocks nothing.
+    expect(result.errors).toEqual([]);
+    expect(upserts[0].body).toContain("never became healthy");
+    expect(upserts[0].body).toContain("Nothing is blocked by this");
+    expect(ensured.map((call) => call.project)).toEqual([
+      "scratch-app",
+      "other-app",
+    ]);
+  });
+
+  it("catches an adapter that throws into errors, leaving the rest of the cycle intact", async () => {
+    const store = newStore();
+    runWithPullRequest(store, "scratch-app", 7, 9);
+    runWithPullRequest(store, "other-app", 3, 4);
+    const { adapter, upserts } = previewTicketing({
+      "timone/7-work": pull(9, "abc1234"),
+      "timone/3-work": pull(4, "beef999"),
+    });
+    const { previews } = fakePreviews((headSha) =>
+      headSha === "abc1234" ? new Error("docker daemon is not running") : {
+        state: "ready",
+        url: "http://localhost:54321/",
+      },
+    );
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWithPreviews("scratch-app", "other-app"),
+      store,
+      adapter,
+      spawner,
+      previews,
+    });
+
+    expect(result.errors).toEqual([
+      "scratch-app: preview for #7: docker daemon is not running",
+    ]);
+    expect(upserts.map((upsert) => upsert.number)).toEqual([4]);
+  });
+});
+
+describe("pollOnce — previews end when their pull request does", () => {
+  /** A store and fakes with one preview already recorded and running. */
+  async function withLivePreview(state: PullRequest["state"]): Promise<{
+    store: RunStore;
+    deps: Parameters<typeof pollOnce>[0];
+    released: Array<{ project: string; pr: number }>;
+    upserts: Upsert[];
+    pulls: Record<string, PullRequest>;
+  }> {
+    const store = newStore();
+    runWithPullRequest(store, "scratch-app", 7, 9);
+    const pulls: Record<string, PullRequest> = {
+      "timone/7-work": pull(9, "abc1234"),
+    };
+    const { adapter, upserts } = previewTicketing(pulls);
+    const { previews, released } = fakePreviews();
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWithPreviews("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      previews,
+    };
+
+    await pollOnce(deps);
+    pulls["timone/7-work"] = pull(9, "abc1234", state);
+    return { store, deps, released, upserts, pulls };
+  }
+
+  it("releases a merged pull request's preview and drops its record", async () => {
+    const { store, deps, released } = await withLivePreview("merged");
+
+    await pollOnce(deps);
+
+    expect(released).toEqual([{ project: "scratch-app", pr: 9 }]);
+    expect(store.previewRecord("scratch-app", 9)).toBeUndefined();
+  });
+
+  it("releases a pull request closed without merging, just the same", async () => {
+    const { store, deps, released } = await withLivePreview("closed");
+
+    await pollOnce(deps);
+
+    expect(released).toEqual([{ project: "scratch-app", pr: 9 }]);
+    expect(store.previewRecord("scratch-app", 9)).toBeUndefined();
+  });
+
+  it("releases once per ending, not once per cycle thereafter", async () => {
+    const { deps, released } = await withLivePreview("merged");
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    // A merged pull request stays merged forever; a release keyed on its
+    // state alone would make work for the rest of the daemon's life.
+    expect(released).toHaveLength(1);
+  });
+
+  it("gives a reopened pull request a preview again, with no code of its own", async () => {
+    const { store, deps, pulls, upserts } = await withLivePreview("closed");
+    await pollOnce(deps);
+    expect(store.previewRecord("scratch-app", 9)).toBeUndefined();
+
+    // Reopening is not a case anything handles — it is simply an open pull
+    // request with no preview recorded, which is what a new one is.
+    pulls["timone/7-work"] = pull(9, "abc1234", "open");
+    await pollOnce(deps);
+
+    expect(store.previewRecord("scratch-app", 9)).toMatchObject({
+      state: "ready",
+    });
+    expect(upserts).toHaveLength(2);
+  });
+
+  it("reports a release that fails and does not wedge the cycle", async () => {
+    const store = newStore();
+    runWithPullRequest(store, "scratch-app", 7, 9);
+    const pulls: Record<string, PullRequest> = {
+      "timone/7-work": pull(9, "abc1234"),
+    };
+    const { adapter } = previewTicketing(pulls);
+    const { spawner } = fakeSpawner();
+    const previews: PreviewAdapter = {
+      async ensure(): Promise<Preview> {
+        return { state: "ready", url: "http://localhost:54321/" };
+      },
+      async release(): Promise<void> {
+        throw new Error("docker compose down exploded");
+      },
+    };
+    const deps = {
+      manifest: manifestWithPreviews("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      previews,
+    };
+
+    await pollOnce(deps);
+    pulls["timone/7-work"] = pull(9, "abc1234", "merged");
+    const result = await pollOnce(deps);
+
+    expect(result.errors).toEqual([
+      "scratch-app: preview for #7: docker compose down exploded",
+    ]);
+    // The record survives, so a later cycle tries again rather than leaving
+    // containers on the host with nothing left that remembers them.
+    expect(store.previewRecord("scratch-app", 9)).toBeDefined();
   });
 });

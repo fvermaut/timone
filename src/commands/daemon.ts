@@ -3,6 +3,8 @@ import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
 import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
+import { DockerPreviewAdapter } from "../adapters/docker-preview.js";
+import type { PreviewAdapter } from "../adapters/preview.js";
 import type { TicketingAdapter } from "../adapters/ticketing.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
@@ -27,6 +29,8 @@ export interface RunDaemonOptions {
   once: boolean;
   adapter: TicketingAdapter;
   spawner: SessionSpawner;
+  /** How previews are served. Absent means no project gets one. */
+  previews?: PreviewAdapter;
   log?: (message: string) => void;
 }
 
@@ -46,6 +50,7 @@ export async function runDaemon(options: RunDaemonOptions): Promise<number> {
       adapter: options.adapter,
       spawner: options.spawner,
       staleAfterMs: options.staleAfterMs,
+      previews: options.previews,
       log,
     });
     failures = result.errors.length;
@@ -132,6 +137,9 @@ export function registerDaemonCommand(program: Command): void {
       process.exitCode = await runDaemon({
         manifest,
         store,
+        // One adapter for every bound project: which projects get previews is
+        // the manifest's answer, not this command's (ADR-0021).
+        previews: new DockerPreviewAdapter({ root: process.cwd() }),
         intervalMs: interval * 1000,
         // ADR-0017: the tick that prints is the tick that proves the run
         // alive, so this one flag sets both cadences. Four intervals gives a

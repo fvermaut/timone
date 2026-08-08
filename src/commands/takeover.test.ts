@@ -98,6 +98,7 @@ const noPullRequests = {
     throw new Error("no pull request exists in this test");
   },
   async postPullRequestComment(): Promise<void> {},
+  async upsertPullRequestComment(): Promise<void> {},
   async closeTicket(): Promise<void> {},
 };
 

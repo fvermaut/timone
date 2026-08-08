@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { MACHINE_MARKER, type TicketingProject } from "./ticketing.js";
+import {
+  MACHINE_MARKER,
+  PREVIEW_MARKER,
+  type TicketingProject,
+} from "./ticketing.js";
 import { GitHubTicketingAdapter, type CommandRunner } from "./github-tickets.js";
 
 const alpha: TicketingProject = {
@@ -45,6 +49,7 @@ function ghPull(overrides: Record<string, unknown> = {}): unknown {
     title: "Typing in the box is fiddly on my phone",
     url: "https://github.com/fvermaut/scratch-app/pull/9",
     state: "OPEN",
+    headRefOid: "9f1c0d3ab2e4f5061728394a5b6c7d8e9f0a1b2c",
     createdAt: "2026-08-06T10:00:00Z",
     ...overrides,
   };
@@ -58,6 +63,7 @@ describe("findPullRequest", () => {
     const pr = await adapter.findPullRequest(alpha, "timone/6-fiddly-box");
 
     expect(pr).toEqual({
+      headSha: "9f1c0d3ab2e4f5061728394a5b6c7d8e9f0a1b2c",
       number: 9,
       title: "Typing in the box is fiddly on my phone",
       url: "https://github.com/fvermaut/scratch-app/pull/9",
@@ -138,6 +144,7 @@ function prViewPayload(overrides: Record<string, unknown> = {}): string {
     title: "Typing in the box is fiddly on my phone",
     url: "https://github.com/fvermaut/scratch-app/pull/9",
     state: "OPEN",
+    headRefOid: "9f1c0d3ab2e4f5061728394a5b6c7d8e9f0a1b2c",
     comments: [
       {
         id: "C1",
@@ -322,5 +329,94 @@ describe("closeTicket", () => {
     await adapter.closeTicket(alpha, 6, "not-planned");
 
     expect(calls[0].args).toContain("not planned");
+  });
+});
+
+describe("upsertPullRequestComment", () => {
+  const preview = `${PREVIEW_MARKER}\n\nOpen it: http://localhost:54321/`;
+
+  /** A comment as `gh pr view --json comments` returns it. */
+  function ghComment(body: string, id = 777): unknown {
+    return {
+      author: { login: "fvermaut" },
+      body,
+      createdAt: "2026-08-08T10:00:00Z",
+      url: `https://github.com/fvermaut/scratch-app/pull/9#issuecomment-${id}`,
+    };
+  }
+
+  it("edits what it said last time rather than saying it again", async () => {
+    const { run, calls } = fakeRunner(
+      JSON.stringify({
+        comments: [
+          ghComment("just a human talking"),
+          ghComment(`${MACHINE_MARKER}\n\n---\n\n${PREVIEW_MARKER}\n\nstale`, 42),
+        ],
+      }),
+      "",
+    );
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    await adapter.upsertPullRequestComment(alpha, 9, PREVIEW_MARKER, preview);
+
+    expect(calls[1]).toEqual({
+      command: "gh",
+      args: [
+        "api",
+        "--method",
+        "PATCH",
+        "repos/fvermaut/scratch-app/issues/comments/42",
+        "-f",
+        `body=${MACHINE_MARKER}\n\n---\n\n${preview}`,
+      ],
+    });
+  });
+
+  it("posts a first one when it has never said it before", async () => {
+    const { run, calls } = fakeRunner(
+      JSON.stringify({ comments: [ghComment("just a human talking")] }),
+      "",
+    );
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    await adapter.upsertPullRequestComment(alpha, 9, PREVIEW_MARKER, preview);
+
+    expect(calls[1].args.slice(0, 2)).toEqual(["pr", "comment"]);
+    expect(calls[1].args.at(-1)).toBe(`${MACHINE_MARKER}\n\n---\n\n${preview}`);
+  });
+
+  it("will not let a human quoting the marker capture the edit", async () => {
+    const { run, calls } = fakeRunner(
+      // A person pasting the preview comment back into the thread — no
+      // machine header, so it is not ours and must not be overwritten.
+      JSON.stringify({ comments: [ghComment(`${PREVIEW_MARKER}\n\nis this right?`)] }),
+      "",
+    );
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    await adapter.upsertPullRequestComment(alpha, 9, PREVIEW_MARKER, preview);
+
+    expect(calls[1].args.slice(0, 2)).toEqual(["pr", "comment"]);
+  });
+
+  it("refuses to guess when the comment it must edit has no address", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify({
+        comments: [
+          {
+            author: { login: "fvermaut" },
+            body: `${MACHINE_MARKER}\n\n---\n\n${PREVIEW_MARKER}\n\nstale`,
+            createdAt: "2026-08-08T10:00:00Z",
+          },
+        ],
+      }),
+    );
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    // Posting instead would put a near-copy on a client's pull request, which
+    // is the one outcome this call exists to prevent.
+    await expect(
+      adapter.upsertPullRequestComment(alpha, 9, PREVIEW_MARKER, preview),
+    ).rejects.toThrow(/no url/);
   });
 });

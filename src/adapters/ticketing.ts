@@ -52,6 +52,21 @@ export const STAGE_DONE_MARKER =
 export const STAGE_HANDED_MARKER =
   "🙋 **Needs a person** · written by the machine when a stage stopped and is asking for help";
 
+/**
+ * The line the preview comment carries, so a pull request ends up with one of
+ * them rather than one per poll cycle.
+ *
+ * Unlike its siblings this marker is not just provenance — it is an
+ * *identity*. Previews are reconciled every cycle
+ * ([ADR-0021](../../doc/adr/0021-previews-are-reconciled-behind-an-adapter-seam.md)),
+ * and a preview's URL changes whenever its stack is rebuilt, so the same
+ * statement has to be *revised* on a client's pull request rather than
+ * repeated. This is what {@link TicketingAdapter.upsertPullRequestComment}
+ * matches on to find what it said last time.
+ */
+export const PREVIEW_MARKER =
+  "🔍 **Preview** · a running copy of this pull request, kept up to date by the machine";
+
 /** Put the machine header on a comment body, unless it already carries one. */
 export function stampMachineComment(body: string): string {
   return body.startsWith(MACHINE_MARKER)
@@ -110,6 +125,15 @@ export const pullRequestSchema = z.strictObject({
   title: z.string(),
   url: z.string(),
   state: z.enum(PR_STATES),
+  /**
+   * The commit at the head of the PR's branch, as the *tracker* sees it.
+   *
+   * Deliberately read from the tracker rather than from a local clone: a
+   * preview is reconciled against the commit under review, and a clone that
+   * has not fetched recently would have the reconciler chasing a commit
+   * nobody is looking at.
+   */
+  headSha: z.string(),
 });
 
 /**
@@ -150,11 +174,12 @@ export interface TicketingProject {
 /**
  * The seam between the process and whatever tracks tickets. Real interface
  * from day one per ADR-0004: GitHub is the first implementation, not the
- * shape. Seven capabilities, and no more — anything a stage needs beyond
- * these is a deliberate widening of the seam, not an incidental one. The
- * last three are phase 13's widening: delivery and the review loop live on
+ * shape. Nine capabilities, and no more — anything a stage needs beyond
+ * these is a deliberate widening of the seam, not an incidental one. Three
+ * of them are phase 13's widening: delivery and the review loop live on
  * pull requests, and the PR is stage 8's artifact (ADR-0004), so reading
  * and answering it is the ticketing seam's business, not a second adapter's.
+ * The last is phase 16's, and its reasoning is on the call itself.
  */
 export interface TicketingAdapter {
   /** Open tickets carrying the mark label, oldest first. */
@@ -207,6 +232,29 @@ export interface TicketingAdapter {
     number: number,
     body: string,
     replyTo?: string,
+  ): Promise<void>;
+
+  /**
+   * Say something on a pull request **in place of** whatever was last said
+   * under `marker`, editing that comment rather than adding another.
+   *
+   * Phase 16's widening of this seam, and deliberate rather than incidental.
+   * Everything else the process says on a pull request is an *event* — this
+   * happened, then that did — and appending is the honest record of an event.
+   * A preview is not an event but a **standing fact** whose truth changes:
+   * "this pull request is running here". Reconciled every cycle, appended, it
+   * would be a client's PR filling with near-identical comments. Editing is
+   * what makes per-cycle reconciliation compatible with a surface a human
+   * reads.
+   *
+   * Implementations match on `marker` appearing in a comment they themselves
+   * wrote, and post a new one when they find none.
+   */
+  upsertPullRequestComment(
+    project: TicketingProject,
+    number: number,
+    marker: string,
+    body: string,
   ): Promise<void>;
 
   /**

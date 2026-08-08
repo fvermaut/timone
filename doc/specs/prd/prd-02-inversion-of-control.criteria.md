@@ -110,15 +110,16 @@
 
 - **Priority:** MUST
 - **Status:** draft
+    - ✏ 2026-08-08 **both criteria revised at [phase 16](../../plans/phases/phase-16.md)'s 16a, and the requirement stays `draft`.** This is a **specification correction, not an intent change**: R8 has always asked for a running, reachable preview per pull request. What failed was the wording's ability to go red. The old first clause read *"WHEN the **preview stage** runs"* and the old second *"WHEN the **preview refresh** runs"* — both presuppose a mechanism, and under [ADR-0021](../../adr/0021-previews-are-reconciled-behind-an-adapter-seam.md) the first of them **will not exist**: previews are reconciled by the poll loop, `PIPELINE_STAGES` gains no member, and no run enters a preview state. A criterion whose precondition never becomes true cannot fail, so the requirement read as satisfiable by something nobody built. **The replacements name a state the world reaches** — what a reviewer finds on the pull request — and no mechanism at all: not a stage, not a cycle, not Docker. Both **go red against today's code**, where no preview exists anywhere. This is the same fault, found the same way, that [15d](../../plans/phases/phase-15.md) fixed in R18; correcting the second clause as well as the first was 16a's own call, because leaving one mechanism-shaped precondition beside a corrected one would have re-created the fault at the next reading.
 - **Verify-via:** api
 - **Criteria:**
-    - GIVEN a Timone PR on a project with the Docker preview binding
-      WHEN the preview stage runs
-      THEN a container stack for the PR branch runs on the host, reachable at a per-PR URL posted as a PR comment
-    - GIVEN a new commit on the PR branch
-      WHEN the preview refresh runs
-      THEN the preview serves the updated build
-- **Verification hint:** `docker ps` filtered by PR identifier; `curl` the posted URL before and after pushing a visible change.
+    - GIVEN an open Timone pull request on a project bound to previews
+      WHEN a reviewer opens that pull request
+      THEN it carries a URL, and that URL serves a running instance of the pull request's current commit
+    - GIVEN a pull request whose branch has moved to a new commit since its preview URL was published
+      WHEN the reviewer opens that URL again
+      THEN what it serves is the new commit's build, and the pull request still carries exactly one preview URL
+- **Verification hint:** open the URL the pull request carries and confirm what it serves matches the branch's head commit; push a visible change, re-open it, and confirm both that the change is there and that no second preview comment has appeared. `docker ps` and `docker compose port` are instruments for the first adapter, not part of the criterion.
 
 ## R9 — Status visibility
 
