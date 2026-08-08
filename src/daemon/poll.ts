@@ -292,7 +292,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
     staleAfterMs,
   });
   if (!witness.mayJudge) {
-    log(`witness not judging — ${whyNotJudging(witness)}`);
+    log(`witness not judging — ${whyNotJudging(witness, staleAfterMs)}`);
   }
 
   for (const [name, config] of Object.entries(manifest.projects)) {
@@ -318,20 +318,29 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
 }
 
 /**
- * Why the daemon is declining to judge, in the terms an operator can act on:
- * how long it was away, or that it has only just started watching.
+ * Why the daemon is declining to judge, in the terms an operator can act on.
  *
- * Both halves matter at a live gate. "The daemon was away for 17m" is a
- * machine that slept; "it has been watching for 40s" is one that just started.
- * A line saying only that judgement was withheld is a line nobody can use.
+ * **Three refusals, not one**, and saying which is which is the whole value of
+ * the line. A daemon that was away for 17m is a machine that slept; one that
+ * has watched unbroken for 40s of a 2m window is a machine that just started
+ * and is about to be fine. Collapsing them printed "nothing was watching for
+ * 0s" on two cycles a tenth of a second apart — a statement an operator knows
+ * to be false, which is how a log stops being read. Found by running the built
+ * binary, not by a test.
  */
-function whyNotJudging(witness: Witness): string {
+function whyNotJudging(witness: Witness, staleAfterMs: number): string {
   if (witness.gapMs === undefined) {
     return "no daemon has observed this state file before, so every run gets one fresh window";
   }
+  if (witness.unwitnessedGap) {
+    return (
+      `nothing was watching for ${humanMs(witness.gapMs)}, ` +
+      `so no run's silence over it is evidence of anything`
+    );
+  }
   return (
-    `nothing was watching for ${humanMs(witness.gapMs)}, ` +
-    `so no run's silence over it is evidence of anything`
+    `watching for ${humanMs(witness.watchedMs)} of the ` +
+    `${humanMs(staleAfterMs)} it would have to vouch for`
   );
 }
 

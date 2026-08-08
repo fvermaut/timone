@@ -188,6 +188,18 @@ export interface Witness {
    * can act on and one they learn to ignore.
    */
   gapMs?: number;
+  /** How long the current unbroken watch has run, at this cycle's instant. */
+  watchedMs: number;
+  /**
+   * Whether the gap since the previous cycle was too large to have been
+   * watched — that is, whether this cycle *reset* the watch.
+   *
+   * Distinct from `mayJudge` being false, and the two were briefly conflated:
+   * a daemon that has watched unbroken for one second may not judge either,
+   * and reporting that as "nothing was watching" is simply untrue. A witness
+   * that cannot tell its own two refusals apart cannot explain either.
+   */
+  unwitnessedGap: boolean;
 }
 
 /** What the store needs to know to judge a cycle's witness. */
@@ -581,10 +593,13 @@ export class RunStore {
     this.state.observingSince = observingSince;
     this.persist();
 
+    const watchedMs = nowMs - Date.parse(observingSince);
     return {
       observingSince,
-      mayJudge: nowMs - Date.parse(observingSince) >= options.staleAfterMs,
+      mayJudge: watchedMs >= options.staleAfterMs,
       gapMs,
+      watchedMs,
+      unwitnessedGap: !continuous,
     };
   }
 

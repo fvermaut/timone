@@ -1222,6 +1222,40 @@ describe("reclaiming a run its daemon left behind", () => {
     expect(lines.some((line) => /not judging.*17m/.test(line))).toBe(true);
   });
 
+  it("tells a young watch apart from an absence, in the words it logs", async () => {
+    // Found by running the real binary rather than by a test: two cycles a
+    // tenth of a second apart logged "nothing was watching for 0s", which is
+    // false — the daemon had been watching the whole time and was merely too
+    // young to judge. An operator who reads a line they know to be nonsense
+    // stops reading the lines, and this is the line the gate turns on.
+    const { store, set } = clockedStore();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    const lines: string[] = [];
+    quietRun(store);
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      pollIntervalMs: POLL_INTERVAL,
+      log: (line: string) => lines.push(line),
+    };
+
+    // A gap: nobody was watching.
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:02:00Z");
+    set("2026-08-06T10:18:00Z");
+    await pollOnce(deps);
+    // No gap at all — an unbroken watch that is simply not old enough yet.
+    set("2026-08-06T10:19:00Z");
+    await pollOnce(deps);
+
+    expect(lines[0]).toMatch(/nothing was watching for 17m/);
+    expect(lines[1]).toMatch(/watching for 1m of the 2m/);
+    expect(lines[1]).not.toMatch(/nothing was watching/);
+  });
+
   it("is delayed, not disabled: the same run is reclaimed a window later", async () => {
     const { store, set } = clockedStore();
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
