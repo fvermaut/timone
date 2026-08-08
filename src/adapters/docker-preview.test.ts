@@ -367,9 +367,13 @@ describe("ensure — failure is a value", () => {
 });
 
 describe("release", () => {
-  it("tears the stack down with its volumes and removes the worktree", async () => {
+  it("tears the stack down with its volumes and images, and removes the worktree", async () => {
     const runner = fakeRunner();
     runner.on((call) => call.args.includes("list"), worktreeList(WORKTREE));
+    runner.on(
+      (call) => call.command === "docker" && call.args.includes("ls"),
+      "sha256:aaa\nsha256:bbb\nsha256:aaa\n",
+    );
 
     await adapterWith(runner.run).release(scratchApp, 12);
 
@@ -383,6 +387,22 @@ describe("release", () => {
       "--volumes",
       "--remove-orphans",
     ]);
+    // Measured at 16e's gate: without this, teardown left 1.5 GB of built
+    // images per pull request on the host, forever.
+    expect(runner.vector("docker", "ls")).toEqual([
+      "image",
+      "ls",
+      "--filter",
+      "reference=scratch-app-pr-12-*",
+      "--quiet",
+    ]);
+    expect(runner.vector("docker", "rm")).toEqual([
+      "image",
+      "rm",
+      "--force",
+      "sha256:aaa",
+      "sha256:bbb",
+    ]);
     expect(runner.vector("git", "remove")).toEqual([
       "-C",
       REPO,
@@ -391,6 +411,20 @@ describe("release", () => {
       "--force",
       WORKTREE,
     ]);
+  });
+
+  it("asks Docker to remove nothing when the build left no image", async () => {
+    const runner = fakeRunner();
+    runner.on((call) => call.args.includes("list"), worktreeList(WORKTREE));
+    runner.on(
+      (call) => call.command === "docker" && call.args.includes("ls"),
+      "\n",
+    );
+
+    await adapterWith(runner.run).release(scratchApp, 12);
+
+    // `docker image rm` with no arguments is an error, not a no-op.
+    expect(runner.calls.filter((call) => call.args.includes("rm"))).toEqual([]);
   });
 
   it("is a no-op against a preview that is already gone", async () => {

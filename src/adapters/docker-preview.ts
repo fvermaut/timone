@@ -144,6 +144,7 @@ export class DockerPreviewAdapter implements PreviewAdapter {
       "--volumes",
       "--remove-orphans",
     ]);
+    await this.removeBuiltImages(project, pr);
     await this.run("git", [
       "-C",
       this.repoPath(project),
@@ -152,6 +153,43 @@ export class DockerPreviewAdapter implements PreviewAdapter {
       "--force",
       worktree,
     ]);
+  }
+
+  /**
+   * Delete the images this preview's own build produced.
+   *
+   * **Measured at 16e's gate: without this, teardown left 1.5 GB per pull
+   * request on the host forever** — containers and volumes are the small half
+   * of the accumulation nobody notices until the disk fills.
+   *
+   * **Not `docker compose down --rmi local`**, which was tried first and does
+   * nothing here: compose fills in a default `image` name for a build-only
+   * service during config normalisation, and then skips it as "custom
+   * tagged". It reports no error and no image, so the flag reads as working.
+   * The matter was settled by looking at `docker images` after a real
+   * teardown, not by reading the flag's documentation.
+   *
+   * The filter is the compose project prefix, which is unique to this pull
+   * request — so this cannot reach a pinned image like `postgres:17.5`, which
+   * other previews and the human's own stack share, or another preview's.
+   */
+  private async removeBuiltImages(
+    project: PreviewProject,
+    pr: number,
+  ): Promise<void> {
+    const listed = await this.run("docker", [
+      "image",
+      "ls",
+      "--filter",
+      `reference=${composeProject(project.name, pr)}-*`,
+      "--quiet",
+    ]);
+    const ids = [
+      ...new Set(listed.split("\n").map((id) => id.trim()).filter((id) => id !== "")),
+    ];
+    if (ids.length === 0) return;
+
+    await this.run("docker", ["image", "rm", "--force", ...ids]);
   }
 
   /** Make the preview true, and return where it is. Throws on any failure. */

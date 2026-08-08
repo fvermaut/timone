@@ -98,7 +98,7 @@ and then, checked rather than assumed:
 - **volumes** — `scratch-app-pr-16_pgdata` gone
 - **worktree** — `.timone/previews/scratch-app/pr-16` gone from disk *and* deregistered from `git worktree list`
 
-**Volumes and worktrees, not just containers** — the accumulation nobody notices until the disk fills.
+**Volumes and worktrees, not just containers** — the accumulation nobody notices until the disk fills. **And a fourth thing the plan never named, found by checking the host after the sign-off rather than before it — see defect 3 below.**
 
 Reopening the pull request brought the preview back one cycle later, on `http://localhost:55010/`, serving `Todos — gate D, recovered`. **No code handles reopening**: a reopened pull request is an open one with no preview recorded, which is what a new one is. Asserted in `poll.test.ts` and now watched.
 
@@ -127,7 +127,7 @@ Carrying a review comment through remediation with the preview refreshing needs 
 
 ## What the gate found that nothing else could
 
-**Phase 14 found six defects this way against 532 green tests. Phase 15 found an instrument that lied in the reassuring direction. This gate found two, against 581.**
+**Phase 14 found six defects this way against 532 green tests. Phase 15 found an instrument that lied in the reassuring direction. This gate found three, against 581 — and the third only because the host was inspected *after* the sign-off rather than treating the sign-off as the end.**
 
 ### 1. A failed preview told a reviewer nothing
 
@@ -147,7 +147,22 @@ Previews check a client's commit out at `.timone/previews/…`, which is a **sec
 
 **This would have broken every future run of Timone's own tests**, and no test could have caught it: the fault is in the thing that decides which tests exist.
 
-A third, smaller one was caught earlier the same way, before the daemon ever ran: an `ensure` against an unresolvable commit returned a reason carrying the whole argument vector — **absolute paths from this laptop, bound for a client's public pull request** (`9b808f6`).
+### 3. Teardown left 1.5 GB per pull request on the host, forever
+
+Found during the post-gate clean-up, by looking at `docker images` after everything else had been confirmed gone:
+
+```
+scratch-app-pr-16-app       315MB
+scratch-app-pr-16-migrate  1.19GB
+```
+
+Containers, volumes and worktrees were all removed — and **built images were not**, once per pull request, permanently. R12's own criterion says "stopped and removed", and 16d's checklist named volumes and worktrees because those were the ones anybody had thought of.
+
+**The fix's first attempt did not work, and that is the more useful half.** `docker compose down --rmi local` is the documented way to do this, and it does nothing here: compose fills in a default `image` name for a build-only service during config normalisation and then skips it as "custom tagged". It reports **no error and no image**, so the flag reads as having worked. The images are now removed explicitly, filtered on the compose project prefix so nothing can reach a pinned image like `postgres:17.5` or another preview's, and **the fix was confirmed by looking at `docker images` after a real teardown** — the same discipline that found the defect. Confirmed clean: `scratch-app-pr-996-app` and `-migrate` present before, absent after, `postgres:17.5` untouched.
+
+### And one caught before the daemon ever ran
+
+An `ensure` against an unresolvable commit returned a reason carrying the whole argument vector — **absolute paths from this laptop, bound for a client's public pull request** (`9b808f6`). Caught by driving the adapter against real Docker out of band, which is the cheapest version of the same lesson.
 
 ## Instruments, verified before their output was believed
 
