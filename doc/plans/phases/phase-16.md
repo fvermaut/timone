@@ -1,6 +1,6 @@
 # Phase 16: a pull request you can click
 
-> **Status:** **Awaiting approval.** Hand-planned 2026-08-08, as all Timone-self phases are (`/timone-plan` targets managed projects only); the plan skill's shape rules — thin vertical slices, declared seams, per-slice validation — are followed, not the instrument. Approval is gated on this file per [ADR-0014](../../adr/0014-artifact-first-gates.md).
+> **Status:** **Approved for execution by fvermaut 2026-08-08.** Hand-planned 2026-08-08, as all Timone-self phases are (`/timone-plan` targets managed projects only); the plan skill's shape rules — thin vertical slices, declared seams, per-slice validation — are followed, not the instrument. Approval was gated on this file per [ADR-0014](../../adr/0014-artifact-first-gates.md).
 
 > **Sixth phase of [PRD-02](../../specs/prd/prd-02-inversion-of-control.md).** Governing decision: **[ADR-0021](../../adr/0021-previews-are-reconciled-behind-an-adapter-seam.md)** (previews are reconciled behind an adapter seam), extending [ADR-0005](../../adr/0005-docker-previews-on-own-host.md). Standing: [ADR-0007](../../adr/0007-sessions-at-timone-root.md), [ADR-0014](../../adr/0014-artifact-first-gates.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md).
 
