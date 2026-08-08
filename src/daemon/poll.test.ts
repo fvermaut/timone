@@ -1219,7 +1219,7 @@ describe("reclaiming a run its daemon left behind", () => {
     );
     // The gate has to be able to read this off the log and know why — both
     // that judgement was withheld and how long the daemon was away.
-    expect(lines.some((line) => /not judging.*17m/.test(line))).toBe(true);
+    expect(lines.some((line) => /not judging.*17m00s/.test(line))).toBe(true);
   });
 
   it("tells a young watch apart from an absence, in the words it logs", async () => {
@@ -1251,8 +1251,8 @@ describe("reclaiming a run its daemon left behind", () => {
     set("2026-08-06T10:19:00Z");
     await pollOnce(deps);
 
-    expect(lines[0]).toMatch(/nothing was watching for 17m/);
-    expect(lines[1]).toMatch(/watching for 1m of the 2m/);
+    expect(lines[0]).toMatch(/nothing was watching for 17m00s/);
+    expect(lines[1]).toMatch(/watching for 1m00s of the 2m00s/);
     expect(lines[1]).not.toMatch(/nothing was watching/);
   });
 

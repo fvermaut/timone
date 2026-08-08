@@ -344,13 +344,21 @@ function whyNotJudging(witness: Witness, staleAfterMs: number): string {
   );
 }
 
-/** `40s`, `17m`, `4h13m` — enough to tell jitter from a night's sleep. */
+/**
+ * `40s`, `1m03s`, `4h13m` — enough to tell jitter from a night's sleep, and
+ * shaped like the progress line's own durations so the two read as one system.
+ *
+ * The seconds are load-bearing below a minute's resolution: dropping them
+ * printed "watching for 1m of the 2m" on two consecutive cycles at the live
+ * gate, which reads as a daemon stuck rather than one counting up.
+ */
 function humanMs(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
   if (hours > 0) return `${hours}h${String(minutes).padStart(2, "0")}m`;
-  if (minutes > 0) return `${minutes}m`;
+  if (minutes > 0) return `${minutes}m${String(seconds).padStart(2, "0")}s`;
   return `${total}s`;
 }
 
