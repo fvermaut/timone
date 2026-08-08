@@ -270,10 +270,16 @@ function pad(value: number): string {
 /**
  * Seconds between progress ticks when nobody says otherwise.
  *
- * It sets two things at once, and that is deliberate (ADR-0017): how often
- * the daemon says what a session is doing, and how often the session proves
- * it is alive. Recovery is derived from it — a run silent for four of these
- * is reclaimed — so nobody may later make the tick conditional without
- * moving recovery too.
+ * It sets two things at once, and that is deliberate (ADR-0020, keeping
+ * ADR-0017's mechanism intact): how often the daemon says what a session is
+ * doing, and how often the session proves it is alive. Recovery is derived
+ * from it — a run silent for four of these is reclaimed — so nobody may later
+ * make the tick conditional without moving recovery too.
+ *
+ * **What ADR-0020 narrowed is the reading, not this cadence.** Four intervals
+ * of silence is grounds for reclaiming only where the daemon can vouch for
+ * having been present across them; a tick that never fired because the machine
+ * was suspended is silence nobody was listening for, and the poll loop's
+ * witness — not this constant — is what tells the two apart.
  */
 export const DEFAULT_PROGRESS_INTERVAL_SECONDS = 30;

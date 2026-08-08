@@ -1050,7 +1050,8 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { progress } = started;
     const start = this.options.ticker ?? intervalTicker;
 
-    // One tick, two jobs (ADR-0017). The heartbeat is stamped unconditionally
+    // One tick, two jobs (ADR-0020, which narrowed the heartbeat's meaning and
+    // left ADR-0017's mechanism alone). The heartbeat is stamped unconditionally
     // — including for a runtime that can say nothing about its progress —
     // because it is what proves the run alive, and a tick made conditional on
     // having something to print would silently move recovery with it.

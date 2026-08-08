@@ -965,6 +965,27 @@ describe("reclaiming a run its daemon left behind", () => {
   }
 
   const FOUR_INTERVALS = 4 * 30 * 1000;
+  const POLL_INTERVAL = 60 * 1000;
+
+  /**
+   * Leave the store's witness where a daemon polling every interval from
+   * `from` until `to` would have left it (ADR-0020).
+   *
+   * Every reclaim test needs this, and that is the point: a daemon that was
+   * not watching may not judge, so a test that reclaims without having watched
+   * would be testing a daemon that cannot exist. It also keeps the tests below
+   * honest — each one still fails for the reason it names, not because
+   * judgement was withheld.
+   */
+  function watchingSince(store: RunStore, from: string, to: string): void {
+    for (let at = Date.parse(from); at < Date.parse(to); at += POLL_INTERVAL) {
+      store.witness({
+        unwitnessedAfterMs: 2 * POLL_INTERVAL,
+        staleAfterMs: FOUR_INTERVALS,
+        now: new Date(at).toISOString(),
+      });
+    }
+  }
 
   it("fails the run, tells the ticket and frees the project, in one cycle", async () => {
     const { store, set } = clockedStore();
@@ -975,6 +996,7 @@ describe("reclaiming a run its daemon left behind", () => {
     store.activate(run.id, "session-gone");
     store.claimBranch(run.id, "timone/7-slow");
 
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
     set("2026-08-06T10:09:00Z");
     const result = await pollOnce({
       manifest: manifestWith("scratch-app"),
@@ -1005,6 +1027,7 @@ describe("reclaiming a run its daemon left behind", () => {
     store.register("scratch-app", 8);
     expect(store.get("scratch-app#8")?.status).toBe("queued");
 
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
     set("2026-08-06T10:09:00Z");
     await pollOnce({
       manifest: manifestWith("scratch-app"),
@@ -1030,6 +1053,9 @@ describe("reclaiming a run its daemon left behind", () => {
 
     set("2026-08-06T14:00:00Z");
     store.heartbeat(run.id);
+    // The daemon has been watching throughout, so this run is spared for the
+    // reason the test names — its heartbeat — and not for want of a witness.
+    watchingSince(store, "2026-08-06T13:57:00Z", "2026-08-06T14:00:20Z");
     set("2026-08-06T14:00:20Z");
 
     const result = await pollOnce({
@@ -1054,6 +1080,7 @@ describe("reclaiming a run its daemon left behind", () => {
     store.activate(run.id, "session-gone");
     store.claimBranch(run.id, "timone/7-slow");
 
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
     set("2026-08-06T10:09:00Z");
     const deps = {
       manifest: manifestWith("scratch-app"),
@@ -1063,7 +1090,9 @@ describe("reclaiming a run its daemon left behind", () => {
       staleAfterMs: FOUR_INTERVALS,
     };
     await pollOnce(deps);
-    set("2026-08-06T10:12:00Z");
+    // One poll interval later, so the daemon is still entitled to judge and
+    // the silence below is the ledger's doing rather than the witness's.
+    set("2026-08-06T10:10:00Z");
     const second = await pollOnce(deps);
 
     expect(second.reclaimed).toEqual([]);
@@ -1087,6 +1116,7 @@ describe("reclaiming a run its daemon left behind", () => {
       waitCursor: "2026-08-06T10:00:00Z",
     });
 
+    watchingSince(store, "2026-08-25T09:57:00Z", "2026-08-25T10:00:00Z");
     set("2026-08-25T10:00:00Z");
     const result = await pollOnce({
       manifest: manifestWith("scratch-app"),
@@ -1110,6 +1140,7 @@ describe("reclaiming a run its daemon left behind", () => {
     store.claimBranch(run.id, "timone/7-slow");
     store.setStage(run.id, "execution");
 
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
     set("2026-08-06T10:09:00Z");
     await pollOnce({
       manifest: manifestWith("scratch-app"),
@@ -1123,6 +1154,177 @@ describe("reclaiming a run its daemon left behind", () => {
     expect(rearmed.status).toBe("picked-up");
     expect(rearmed.stage).toBe("execution");
     expect(rearmed.branch).toBe("timone/7-slow");
+  });
+
+  // ─── The witness (phase 17, ADR-0020) ────────────────────────────────────
+
+  /** A stale run of `scratch-app`, quiet since ten o'clock. */
+  function quietRun(store: RunStore): void {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-gone");
+    store.claimBranch(run.id, "timone/7-slow");
+  }
+
+  it("still reclaims a run it watched go quiet, gap or no gap", async () => {
+    // Asserted before any test of the skip, and the order is the point: a
+    // change that merely stopped reclaiming would satisfy every test below
+    // and destroy the requirement this phase exists to close.
+    const { store, set } = clockedStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    quietRun(store);
+
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
+    set("2026-08-06T10:09:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      pollIntervalMs: POLL_INTERVAL,
+    });
+
+    expect(result.reclaimed).toEqual(["scratch-app#7"]);
+    expect(comments.some((c) => c.body.includes("stopped before the work"))).toBe(
+      true,
+    );
+  });
+
+  it("reclaims nothing on the cycle that discovers a gap, and says why", async () => {
+    // 15a's night: 146 suspensions, 113 of them past the threshold. Under a
+    // continuously running daemon each one of those was a healthy run killed.
+    const { store, set } = clockedStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    const lines: string[] = [];
+    quietRun(store);
+
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:02:00Z");
+    set("2026-08-06T10:18:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      pollIntervalMs: POLL_INTERVAL,
+      log: (line) => lines.push(line),
+    });
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get("scratch-app#7")?.status).toBe("active");
+    expect(comments.some((c) => c.body.includes("stopped before the work"))).toBe(
+      false,
+    );
+    // The gate has to be able to read this off the log and know why — both
+    // that judgement was withheld and how long the daemon was away.
+    expect(lines.some((line) => /not judging.*17m/.test(line))).toBe(true);
+  });
+
+  it("is delayed, not disabled: the same run is reclaimed a window later", async () => {
+    const { store, set } = clockedStore();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    quietRun(store);
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      pollIntervalMs: POLL_INTERVAL,
+    };
+
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:02:00Z");
+    set("2026-08-06T10:18:00Z");
+    expect((await pollOnce(deps)).reclaimed).toEqual([]);
+
+    set("2026-08-06T10:19:00Z");
+    expect((await pollOnce(deps)).reclaimed).toEqual([]);
+    set("2026-08-06T10:20:00Z");
+
+    expect((await pollOnce(deps)).reclaimed).toEqual(["scratch-app#7"]);
+  });
+
+  it("grants the window on a state file no daemon has ever observed", async () => {
+    const { store, set } = clockedStore();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    quietRun(store);
+
+    set("2026-08-06T10:09:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      pollIntervalMs: POLL_INTERVAL,
+    });
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get("scratch-app#7")?.status).toBe("active");
+  });
+
+  it("takes one witness for the whole cycle, not one per project", async () => {
+    // A witness taken per project would have project one's fresh stamp answer
+    // for project two, which is the same masking hazard two daemons have.
+    const { store, set } = clockedStore();
+    const { adapter } = fakeAdapter({
+      "scratch-app": [ticket(7)],
+      "other-app": [ticket(8)],
+    });
+    const { spawner } = fakeSpawner();
+    const lines: string[] = [];
+
+    for (const [project, number] of [
+      ["scratch-app", 7],
+      ["other-app", 8],
+    ] as const) {
+      const { run } = store.register(project, number);
+      store.activate(run.id, `session-gone-${number}`);
+      store.claimBranch(run.id, `timone/${number}-slow`);
+    }
+
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:02:00Z");
+    set("2026-08-06T10:18:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app", "other-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      pollIntervalMs: POLL_INTERVAL,
+      log: (line) => lines.push(line),
+    });
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get("other-app#8")?.status).toBe("active");
+    expect(lines.filter((line) => /not judging/.test(line))).toHaveLength(1);
+  });
+
+  it("derives the unwitnessed gap from the poll interval it was given", async () => {
+    // Four minutes is an absence at a one-minute interval and jitter at a
+    // five-minute one. The threshold is not a constant, it is twice the
+    // cadence the daemon was actually told to poll at.
+    const { store, set } = clockedStore();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    quietRun(store);
+
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:02:00Z");
+    set("2026-08-06T10:06:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      pollIntervalMs: 5 * 60 * 1000,
+    });
+
+    expect(result.reclaimed).toEqual(["scratch-app#7"]);
   });
 });
 

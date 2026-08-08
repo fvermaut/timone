@@ -7,7 +7,11 @@ import { DockerPreviewAdapter } from "../adapters/docker-preview.js";
 import type { PreviewAdapter } from "../adapters/preview.js";
 import type { TicketingAdapter } from "../adapters/ticketing.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
-import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
+import {
+  DEFAULT_POLL_INTERVAL_SECONDS,
+  pollOnce,
+  type SessionSpawner,
+} from "../daemon/poll.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { AgentSessionSpawner, agentSdkRuntime } from "../daemon/session.js";
 
@@ -50,6 +54,10 @@ export async function runDaemon(options: RunDaemonOptions): Promise<number> {
       adapter: options.adapter,
       spawner: options.spawner,
       staleAfterMs: options.staleAfterMs,
+      // The cadence this loop actually keeps, so the unwitnessed-gap threshold
+      // is derived from it rather than assumed (ADR-0020). A daemon told to
+      // poll every five minutes must not read a four-minute gap as an absence.
+      pollIntervalMs: options.intervalMs,
       previews: options.previews,
       log,
     });
@@ -72,7 +80,12 @@ export function registerDaemonCommand(program: Command): void {
       "path to the timone manifest file",
       "timone.yaml",
     )
-    .option("--interval <seconds>", "seconds between poll cycles", "60")
+    .option(
+      "--interval <seconds>",
+      "seconds between poll cycles — and, twice one of them without a cycle, " +
+        "how long a gap the daemon treats as time it did not witness",
+      String(DEFAULT_POLL_INTERVAL_SECONDS),
+    )
     .option(
       "--progress-interval <seconds>",
       "seconds between progress lines — and, four of them without one, " +
@@ -141,9 +154,11 @@ export function registerDaemonCommand(program: Command): void {
         // the manifest's answer, not this command's (ADR-0021).
         previews: new DockerPreviewAdapter({ root: process.cwd() }),
         intervalMs: interval * 1000,
-        // ADR-0017: the tick that prints is the tick that proves the run
-        // alive, so this one flag sets both cadences. Four intervals gives a
-        // healthy session four chances to have said something.
+        // ADR-0020, keeping ADR-0017's mechanism: the tick that prints is the
+        // tick that proves the run alive, so this one flag sets both cadences.
+        // Four intervals gives a healthy session four chances to have said
+        // something — and silence across them is only evidence of death if the
+        // daemon was present throughout, which `--interval` above decides.
         staleAfterMs: 4 * progressInterval * 1000,
         once: options.once === true,
         adapter,

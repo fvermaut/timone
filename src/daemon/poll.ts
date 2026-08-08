@@ -21,7 +21,7 @@ import {
   type PipelineStage,
 } from "./pipeline.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
-import type { Run, RunStore } from "./runs.js";
+import type { Run, RunStore, Witness } from "./runs.js";
 // The same comment the spawner posts when a session ends badly, because this
 // is the same kind of ending: work stopped, nothing was decided, try again.
 import { failedComment } from "./session.js";
@@ -62,10 +62,20 @@ export interface PollDeps {
   spawner: SessionSpawner;
   /**
    * How long a run may go without a heartbeat before it is treated as
-   * orphaned by a dead daemon (ADR-0017). Four progress intervals by default,
+   * orphaned by a dead daemon (ADR-0020). Four progress intervals by default,
    * which is four chances for a healthy session to have said something.
+   *
+   * Silence past this is *not* on its own grounds for reclaiming: the daemon
+   * must also have been present to hear it — see {@link pollIntervalMs}.
    */
   staleAfterMs?: number;
+  /**
+   * How often the daemon polls, which is what the unwitnessed-gap threshold
+   * derives from (ADR-0020): a gap longer than
+   * {@link UNWITNESSED_POLL_INTERVALS} of these means no daemon was watching
+   * across it. Defaults to the command's own default cadence.
+   */
+  pollIntervalMs?: number;
   /**
    * How previews are served, when any are. Absent means the daemon was built
    * without one, and no project gets previews however it is bound — the
@@ -92,6 +102,21 @@ export interface PollResult {
   /** One readable line per project that failed; the cycle continued. */
   errors: string[];
 }
+
+/**
+ * Seconds between poll cycles when nobody says otherwise. It is also what the
+ * unwitnessed-gap threshold is measured in, which is why it is a constant here
+ * rather than a string default on the command's option.
+ */
+export const DEFAULT_POLL_INTERVAL_SECONDS = 60;
+
+/**
+ * How many poll intervals of silence make a gap unwitnessed (ADR-0020).
+ *
+ * One missed cycle is scheduler jitter; two is evidence the process was not
+ * running.
+ */
+export const UNWITNESSED_POLL_INTERVALS = 2;
 
 /** The comment posted on the ticket when its pull request was merged. */
 export function mergedComment(pr: number): string {
@@ -159,7 +184,8 @@ export function queuedComment(
  * Why a reclaimed run failed, in words that assume nothing about daemons.
  *
  * It says what happened and stops. Reclaim is deliberately not recovery
- * (ADR-0017): a crash mid-stage can leave partial commits on the branch, and
+ * (ADR-0020, keeping ADR-0017's conservatism intact): a crash mid-stage can
+ * leave partial commits on the branch, and
  * a reproducible crash re-armed automatically would loop forever. The way
  * back is `timone retry`, and {@link failedComment} already asks for it.
  */
@@ -254,13 +280,28 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
     errors: [],
   };
 
+  // Once for the whole cycle, and before any project is looked at (ADR-0020).
+  // Per-project would let the first project's fresh stamp answer for the
+  // second, which is exactly the masking that makes two daemons unsafe.
+  const staleAfterMs =
+    deps.staleAfterMs ?? 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000;
+  const pollIntervalMs =
+    deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_SECONDS * 1000;
+  const witness = deps.store.witness({
+    unwitnessedAfterMs: UNWITNESSED_POLL_INTERVALS * pollIntervalMs,
+    staleAfterMs,
+  });
+  if (!witness.mayJudge) {
+    log(`witness not judging — ${whyNotJudging(witness)}`);
+  }
+
   for (const [name, config] of Object.entries(manifest.projects)) {
     const project: TicketingProject = { name, repoUrl: config.repo_url };
     try {
       // Before anything is picked up: a run left `active` by a daemon that
       // died is holding its project, and every ticket behind it is waiting on
       // a session that no longer exists.
-      await reclaimStale(project, deps, result, log);
+      await reclaimStale(project, deps, result, log, witness, staleAfterMs);
       await pollProject(project, deps, result, log);
       // Last, so a run whose pull request merged during `pollProject` has
       // already been completed when its preview is released — R12's "within
@@ -277,9 +318,46 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
 }
 
 /**
- * Fail every run of `project` whose heartbeat has gone quiet, tell its ticket,
- * and let the ledger free the project and promote whatever was queued behind
- * it — `store.fail` does both, because ending a run is what releases it.
+ * Why the daemon is declining to judge, in the terms an operator can act on:
+ * how long it was away, or that it has only just started watching.
+ *
+ * Both halves matter at a live gate. "The daemon was away for 17m" is a
+ * machine that slept; "it has been watching for 40s" is one that just started.
+ * A line saying only that judgement was withheld is a line nobody can use.
+ */
+function whyNotJudging(witness: Witness): string {
+  if (witness.gapMs === undefined) {
+    return "no daemon has observed this state file before, so every run gets one fresh window";
+  }
+  return (
+    `nothing was watching for ${humanMs(witness.gapMs)}, ` +
+    `so no run's silence over it is evidence of anything`
+  );
+}
+
+/** `40s`, `17m`, `4h13m` — enough to tell jitter from a night's sleep. */
+function humanMs(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0) return `${hours}h${String(minutes).padStart(2, "0")}m`;
+  if (minutes > 0) return `${minutes}m`;
+  return `${total}s`;
+}
+
+/**
+ * Fail every run of `project` whose heartbeat has gone quiet *while a daemon
+ * was listening*, tell its ticket, and let the ledger free the project and
+ * promote whatever was queued behind it — `store.fail` does both, because
+ * ending a run is what releases it.
+ *
+ * **The witness comes first and can stop this outright** (ADR-0020). A
+ * `setInterval` cannot fire while its process is not scheduled, so a suspended
+ * laptop silences a healthy session and the daemon watching it in the same
+ * breath; 15a measured 146 such suspensions in one night, 113 of them past the
+ * staleness threshold. Reclaiming on that evidence would have killed a live
+ * run seventeen times over. So a cycle that cannot vouch for having watched
+ * the window it is judging reclaims nothing and waits for one that can.
  *
  * Idempotent across cycles for free: a failed run is no longer running, so
  * the next call finds nothing and the ticket is told exactly once.
@@ -289,10 +367,11 @@ async function reclaimStale(
   deps: PollDeps,
   result: PollResult,
   log: (message: string) => void,
+  witness: Witness,
+  threshold: number,
 ): Promise<void> {
   const { store, adapter } = deps;
-  const threshold =
-    deps.staleAfterMs ?? 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000;
+  if (!witness.mayJudge) return;
 
   for (const run of store.staleRuns(threshold)) {
     if (run.project !== project.name) continue;

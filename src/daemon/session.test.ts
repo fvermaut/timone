@@ -2161,7 +2161,8 @@ describe("saying what a session is doing while it does it", () => {
   });
 
   it("ticks even when it has nothing to print, because the tick is also the heartbeat", async () => {
-    // ADR-0017: one tick, two jobs. A tick made conditional on having
+    // ADR-0020, carrying ADR-0017's mechanism: one tick, two jobs. A tick
+    // made conditional on having
     // something to say would move recovery with it — the run would go quiet
     // and be reclaimed for having no progress reader.
     const store = newStore();

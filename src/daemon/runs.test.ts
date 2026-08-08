@@ -931,3 +931,174 @@ describe("previews", () => {
     ).toBe(1);
   });
 });
+
+describe("the witness — the time a daemon can vouch for having watched", () => {
+  /** A store whose clock the test sets by hand, instant by instant. */
+  function clockedStore(path = statePath()): {
+    store: RunStore;
+    set: (iso: string) => void;
+  } {
+    let instant = "2026-08-06T10:00:00Z";
+    return {
+      store: RunStore.open(path, { now: () => instant }),
+      set: (iso) => {
+        instant = iso;
+      },
+    };
+  }
+
+  /** The daemon's default cadences, in the units the store takes them in. */
+  const POLL_INTERVAL = 60 * 1000;
+  const UNWITNESSED_AFTER = 2 * POLL_INTERVAL;
+  const FOUR_INTERVALS = 4 * 30 * 1000;
+
+  /** One poll cycle's worth of witnessing, at the default cadences. */
+  function observe(store: RunStore): ReturnType<RunStore["witness"]> {
+    return store.witness({
+      unwitnessedAfterMs: UNWITNESSED_AFTER,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+  }
+
+  it("lets the daemon judge once it has watched a full staleness window", () => {
+    // Asserted first, and deliberately: a fix that simply stopped reclaiming
+    // would pass every test below it and destroy R18 outright. The daemon
+    // present throughout must end up entitled to judge.
+    const { store, set } = clockedStore();
+
+    observe(store);
+    set("2026-08-06T10:01:00Z");
+    observe(store);
+    set("2026-08-06T10:02:00Z");
+
+    expect(observe(store).mayJudge).toBe(true);
+  });
+
+  it("refuses judgement on the first cycle a daemon has ever run", () => {
+    // No `observedAt` is not "nothing happened" — it is "nobody was
+    // listening", which is exactly the case for granting the window.
+    const { store } = clockedStore();
+
+    expect(observe(store).mayJudge).toBe(false);
+  });
+
+  it("refuses judgement after a gap longer than twice the poll interval", () => {
+    const { store, set } = clockedStore();
+    observe(store);
+    set("2026-08-06T10:01:00Z");
+    observe(store);
+    set("2026-08-06T10:02:00Z");
+    expect(observe(store).mayJudge).toBe(true);
+
+    // The laptop sleeps for sixteen minutes — 15a's median, near enough.
+    set("2026-08-06T10:18:00Z");
+    const woken = observe(store);
+
+    expect(woken.mayJudge).toBe(false);
+    expect(woken.observingSince).toBe("2026-08-06T10:18:00Z");
+    expect(woken.gapMs).toBe(16 * 60 * 1000);
+  });
+
+  it("is delayed, not disabled: judgement returns a window after the gap", () => {
+    const { store, set } = clockedStore();
+    observe(store);
+    set("2026-08-06T10:18:00Z");
+    expect(observe(store).mayJudge).toBe(false);
+
+    set("2026-08-06T10:19:00Z");
+    expect(observe(store).mayJudge).toBe(false);
+    set("2026-08-06T10:20:00Z");
+
+    expect(observe(store).mayJudge).toBe(true);
+  });
+
+  it("carries the watch forward across normal cycles rather than restarting it", () => {
+    const { store, set } = clockedStore();
+
+    observe(store);
+    set("2026-08-06T10:01:00Z");
+    const second = observe(store);
+    set("2026-08-06T10:02:00Z");
+    const third = observe(store);
+
+    expect(second.observingSince).toBe("2026-08-06T10:00:00Z");
+    expect(third.observingSince).toBe("2026-08-06T10:00:00Z");
+  });
+
+  it("treats one missed cycle as jitter and two as an absence", () => {
+    const { store, set } = clockedStore();
+    observe(store);
+
+    // Twice the interval exactly is still within the watch: the boundary
+    // belongs to jitter, because the cost of getting it wrong the other way
+    // is a live agent's work.
+    set("2026-08-06T10:02:00Z");
+    expect(observe(store).observingSince).toBe("2026-08-06T10:00:00Z");
+
+    set("2026-08-06T10:04:01Z");
+    expect(observe(store).observingSince).toBe("2026-08-06T10:04:01Z");
+  });
+
+  it("stamps a run's heartbeat nowhere: the window is granted, not forged", () => {
+    // `heartbeatAt` is evidence, and rewriting it on wake would record a
+    // heartbeat that never happened. The whole ADR turns on the distinction.
+    const { store, set } = clockedStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-abc");
+    store.heartbeat(run.id);
+
+    set("2026-08-06T10:18:00Z");
+    observe(store);
+
+    expect(store.get(run.id)?.heartbeatAt).toBe("2026-08-06T10:00:00Z");
+    expect(store.staleRuns(FOUR_INTERVALS).map((r) => r.id)).toEqual([
+      "scratch-app#7",
+    ]);
+  });
+
+  it("persists the witness, because every cycle is its own process under --once", () => {
+    const path = statePath();
+    const { store, set } = clockedStore(path);
+    observe(store);
+    set("2026-08-06T10:01:00Z");
+    observe(store);
+
+    const written = JSON.parse(readFileSync(path, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(written.observedAt).toBe("2026-08-06T10:01:00Z");
+    expect(written.observingSince).toBe("2026-08-06T10:00:00Z");
+    expect(written.version).toBe(1);
+
+    // A second process one cycle later inherits the watch rather than
+    // starting a new one — which is the whole reason this is on disk.
+    const next = RunStore.open(path, { now: () => "2026-08-06T10:02:00Z" });
+    expect(
+      next.witness({
+        unwitnessedAfterMs: UNWITNESSED_AFTER,
+        staleAfterMs: FOUR_INTERVALS,
+      }).mayJudge,
+    ).toBe(true);
+  });
+
+  it("loads a state file written before the witness existed, at version 1", () => {
+    const path = statePath();
+    const seed = newStore(path);
+    seed.register("scratch-app", 7);
+
+    const written = JSON.parse(readFileSync(path, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(written).not.toHaveProperty("observedAt");
+    expect(written).not.toHaveProperty("observingSince");
+
+    const reopened = RunStore.open(path, { now: () => "2026-08-06T10:00:00Z" });
+    expect(reopened.all()).toHaveLength(1);
+    expect(observe(reopened).mayJudge).toBe(false);
+    expect(
+      (JSON.parse(readFileSync(path, "utf8")) as { version: number }).version,
+    ).toBe(1);
+  });
+});

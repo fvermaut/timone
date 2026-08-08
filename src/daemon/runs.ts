@@ -87,9 +87,15 @@ const runSchema = z.strictObject({
   /** Agent SDK session identifier, once one has been spawned. */
   sessionId: z.string().optional(),
   /**
-   * When the run last proved it was alive (ADR-0017). Stamped by the same
-   * tick that prints the progress line, so liveness and visibility are one
-   * mechanism rather than two that can disagree.
+   * When the run last proved it was alive (ADR-0020, superseding ADR-0017).
+   * Stamped by the same tick that prints the progress line, so liveness and
+   * visibility are one mechanism rather than two that can disagree.
+   *
+   * **It is evidence, and only ever evidence *for* liveness.** A stale one
+   * means the run went quiet, which means it died *only if somebody was
+   * listening throughout* — see {@link RunStore.witness}. Nothing may write
+   * this field to grant a run more time: that would record a heartbeat that
+   * never happened.
    *
    * Optional, and its absence is a legitimate state rather than a gap: a run
    * written by a daemon older than this field has none, and a run that has
@@ -141,11 +147,61 @@ const stateSchema = z.strictObject({
    * simply stops recording previews.
    */
   previews: z.record(z.string(), previewRecordSchema).optional(),
+  /**
+   * When a poll cycle last observed the world (ADR-0020).
+   *
+   * **Top-level, because it describes the daemon's attention** rather than
+   * anything about a run. Optional for the same reason `previews` is: every
+   * state file written before it existed loads unchanged and `version` stays
+   * `1`. Its absence means nobody was listening, which is not the same as
+   * nothing having happened — see {@link RunStore.witness}.
+   */
+  observedAt: z.string().optional(),
+  /**
+   * When the daemon's current unbroken watch began (ADR-0020).
+   *
+   * A cycle finding a normal gap since {@link observedAt} carries this
+   * forward; a cycle finding a large one resets it to now, because whatever
+   * happened across that gap happened unobserved.
+   */
+  observingSince: z.string().optional(),
 });
 
 export type Run = z.infer<typeof runSchema>;
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
 type State = z.infer<typeof stateSchema>;
+
+/** What a cycle's {@link RunStore.witness} call establishes about the daemon. */
+export interface Witness {
+  /** When the current unbroken watch began. */
+  observingSince: string;
+  /**
+   * Whether the daemon has now been continuously present for at least as long
+   * as the staleness window it is about to judge. False means it has not, and
+   * nothing may be reclaimed on this cycle.
+   */
+  mayJudge: boolean;
+  /**
+   * Milliseconds since the previous cycle, or undefined when there was none.
+   * Carried so the log can say *how long* the daemon was away rather than
+   * merely that it was — which is the difference between a line an operator
+   * can act on and one they learn to ignore.
+   */
+  gapMs?: number;
+}
+
+/** What the store needs to know to judge a cycle's witness. */
+export interface WitnessOptions {
+  /**
+   * A gap longer than this is unwitnessed. One missed cycle is scheduler
+   * jitter; two is evidence the process was not running.
+   */
+  unwitnessedAfterMs: number;
+  /** The staleness window this cycle would judge runs against. */
+  staleAfterMs: number;
+  /** Override the clock, as {@link RunStore.staleRuns} allows. */
+  now?: string;
+}
 
 export interface RunStoreOptions {
   /** Injected clock, so tests get deterministic timestamps. */
@@ -434,7 +490,7 @@ export class RunStore {
   }
 
   /**
-   * Stamp a run as still alive (ADR-0017).
+   * Stamp a run as still alive (ADR-0020, superseding ADR-0017).
    *
    * `updatedAt` is deliberately left alone: a heartbeat is not the run
    * moving, and overwriting it would erase when the run actually started —
@@ -448,8 +504,14 @@ export class RunStore {
   }
 
   /**
-   * Runs whose daemon appears to have died: running, and silent for longer
+   * Runs that have gone quiet: running, and with no sign of life for longer
    * than `thresholdMs`.
+   *
+   * **It answers "which runs are quiet", not "which runs are dead"** — a
+   * distinction ADR-0020 made load-bearing. Silence is evidence of death only
+   * when a daemon was present to miss it, and that question is
+   * {@link witness}'s, not this one's. Nothing changed here; what changed is
+   * that the caller must ask both.
    *
    * Only `active` and `picked-up` runs qualify. A parked run is waiting on a
    * human by design and may wait for weeks; a terminal one is finished.
@@ -471,6 +533,59 @@ export class RunStore {
       .filter((run) => RUNNING.includes(run.status))
       .filter((run) => lastSignOfLife(run) < cutoff)
       .map((run) => ({ ...run }));
+  }
+
+  /**
+   * Record that a poll cycle is happening now, and answer whether the daemon
+   * has watched long enough to be entitled to call anything dead (ADR-0020).
+   *
+   * A `setInterval` cannot fire while its process is not scheduled, so on a
+   * laptop that suspends the daemon goes silent for exactly as long as the
+   * session it is watching does — and a run's silence looks identical to a
+   * corpse's. The daemon can prove that about *itself*: the gap between two of
+   * its own cycles is measurable from inside, without asking the operating
+   * system anything.
+   *
+   * So each cycle stamps `observedAt`, and carries `observingSince` forward
+   * only when the gap since the last cycle is small enough to have been
+   * jitter. Judgement is granted once the unbroken watch is at least as long
+   * as the window being judged: **the daemon may only call a run quiet for two
+   * minutes dead if it was present for those two minutes.**
+   *
+   * An absent `observedAt` — a first-ever cycle, or a state file from a daemon
+   * predating this field — counts as unwitnessed, so it grants the window
+   * rather than reclaiming. Conservative in the only safe direction: a late
+   * reclaim costs a project two minutes, an early one costs an agent's work.
+   *
+   * **No run is touched.** Granting the window by rewriting each run's
+   * `heartbeatAt` would record a heartbeat that never happened, and the
+   * heartbeat is evidence rather than bookkeeping.
+   */
+  witness(options: WitnessOptions): Witness {
+    this.refresh();
+    const at = options.now ?? this.now();
+    const nowMs = Date.parse(at);
+
+    const previous = this.state.observedAt;
+    const gapMs =
+      previous === undefined ? undefined : nowMs - Date.parse(previous);
+    const continuous =
+      gapMs !== undefined &&
+      gapMs <= options.unwitnessedAfterMs &&
+      this.state.observingSince !== undefined;
+
+    const observingSince = continuous
+      ? (this.state.observingSince as string)
+      : at;
+    this.state.observedAt = at;
+    this.state.observingSince = observingSince;
+    this.persist();
+
+    return {
+      observingSince,
+      mayJudge: nowMs - Date.parse(observingSince) >= options.staleAfterMs,
+      gapMs,
+    };
   }
 
   /** What the daemon last knew about a pull request's preview, if anything. */
