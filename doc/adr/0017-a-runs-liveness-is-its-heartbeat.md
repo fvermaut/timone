@@ -1,6 +1,6 @@
 # ADR-0017: A run's liveness is its heartbeat
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0020](0020-liveness-is-judged-only-over-witnessed-time.md)
 - **Date:** 2026-08-06
 - **Source:** grill session of 2026-08-06, on the open question carried out of [phase 13](../plans/phases/phase-13.md): "a crashed daemon has no recovery path"
 
