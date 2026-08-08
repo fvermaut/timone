@@ -1,8 +1,8 @@
 # Phase 14 — 14g live gate: observations
 
-> Evidence log for [sub-phase 14g](../phase-14.md#sub-phase-14g-live-proof-on-the-pilot), written as the gate runs rather than reconstructed after it. 14h folds this into `phase-14-complete.md` and decides the register flips. **The gate is not finished** — what is owed is listed at the bottom.
+> Evidence log for [sub-phase 14g](../phase-14.md#sub-phase-14g-live-proof-on-the-pilot), written as the gate ran rather than reconstructed after it. **The gate is complete**: all six steps observed and the human gate answered on 2026-08-08. [`phase-14-complete.md`](phase-14-complete.md) folds this into the phase's close and carries the register decisions.
 >
-> Ticket under test: `scratch-app` #11 ("I can't run this anywhere but my own laptop"), branch `timone/11-i-can-t-run-this-anywhere-but-my-own-lap`.
+> Tickets under test: `scratch-app` [#11](https://github.com/fvermaut/scratch-app/issues/11) ("I can't run this anywhere but my own laptop"), which ran the whole loop to a merged PR, and [#13](https://github.com/fvermaut/scratch-app/issues/13) ("I can't tell at a glance how much is left"), filed to reach the stages #11 could not.
 
 ## What has been observed
 
@@ -393,15 +393,22 @@ Execution produced seven commits and closed its phase with a clean tree, **amend
 
 **It happened a second time on 2026-08-08**, to #13's planning session, with the identical outcome: run `failed`, plain reason on the ticket ("Nothing was decided about this ticket, so nothing here is final"), `timone retry scratch-app#13` named by `timone status`. **Two independent occurrences on two different stages of two different tickets** — the failure path is now the best-exercised branch in the daemon, having been reached by a hard crash and by an upstream error twice, and it has never needed human repair beyond the retry it asks for.
 
-## Still owed before 14g can close
+## The human gate — answered 2026-08-08, and 14g closes
 
-1. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded. **The unrunnable CTA belongs in front of him too** — it is fixed, but it is the one defect that was aimed at him personally, and the gate is about him.
+**fvermaut answered yes to both halves**, with the gate's findings put in front of him rather than asked around. He was told, before answering, that the display had shown him the wrong stage (fixed), the wrong token count (twice, one of them unexplained), the wrong elapsed time (13× out) and one command he could not run (fixed).
+
+- *Does the daemon's output tell him what he wants while a run works?* **Yes.**
+- *Would the interactive check have caught the commit that blocked his build?* **Yes.**
+
+**Recorded with its limit, because the gate is only as good as what it saw.** The first answer is a judgement about the feature's shape — a run stops being a black box — given in full knowledge of the defects in its numbers. It is **not** a statement that the numbers are right, and 14h must not read it as one: R17 and R18 stay down on the evidence above regardless of this answer. What the gate settles is that the *design* is what fvermaut wanted; what the defects settle is that this *implementation* does not yet deliver it.
+
+**All six steps are now complete and 14g is closed.**
 
 **Step 2 is complete** — the redirection clause is measured at the byte level on tick-bearing output, and the terminal adds one carriage return per line and nothing else.
 
 **Step 1 is complete** — all five rows of the model table observed from the daemon's own output, across #11 and #13.
 
-**Every machine-observable step of the gate is now done. Only the human gate remains**, and it is fvermaut's judgement rather than an observation anyone can take for him.
+**Every machine-observable step of the gate is done**, and the human gate above answers the rest.
 
 #13 cost **$7.19** in total ($0.32 triage + $3.07 requirements + $0.13 approval record + $3.67 planning), and **execution was never reached** as intended. It sits `failed` on an upstream API error with `timone retry scratch-app#13` as the way back; **retrying it is not needed for the gate** — step 1 closed on the session that died — so whether #13 is carried to a real plan is fvermaut's call about `scratch-app`, not about phase 14.
 
