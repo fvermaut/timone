@@ -377,6 +377,13 @@ export class RunStore {
    * The transition guards still apply: a project that has moved on to
    * another run refuses, because re-arming would put two sets of work on
    * one repository.
+   *
+   * What it does *not* keep is everything belonging to the attempt that
+   * died: its failure, its session, and its guardrail flags. The flags were
+   * missed until 14g, where a re-armed run carried a warning about a file
+   * whose cause had already been fixed — so `timone status` complained about
+   * something that no longer existed. They are cleared here rather than in
+   * `runRetry` so there is one answer to what re-arming resets.
    */
   retry(id: string): Run {
     const run = this.mutable(id);
@@ -388,6 +395,7 @@ export class RunStore {
     return this.transition(id, "picked-up", (rearmed) => {
       rearmed.failure = undefined;
       rearmed.sessionId = undefined;
+      rearmed.flags = [];
     });
   }
 

@@ -494,6 +494,37 @@ describe("retry", () => {
     expect(rearmed.failure).toBeUndefined();
   });
 
+  it("leaves the dead attempt's flags behind", () => {
+    // 14g: #11 resumed still carrying `the session changed 1 file(s) outside
+    // projects/scratch-app/` from its crashed attempt — a flag whose cause
+    // had already been fixed — so `timone status` warned about a file that
+    // no longer existed. `flags` is the third field belonging to the dead
+    // attempt, beside `failure` and `sessionId`, and was simply missed.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 11);
+    store.activate(run.id, "s1");
+    store.flag(run.id, "the session changed 1 file(s) outside `projects/scratch-app/`");
+    store.fail(run.id, "died mid-slice");
+
+    expect(store.retry(run.id).flags).toEqual([]);
+  });
+
+  it("keeps the flags the fresh attempt earns for itself", () => {
+    // The property that separates "clear the dead attempt's" from "clear
+    // all": re-arming forgets the old attempt's findings, not every finding
+    // the run will ever collect.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 11);
+    store.activate(run.id, "s1");
+    store.flag(run.id, "from the attempt that died");
+    store.fail(run.id, "died mid-slice");
+    store.retry(run.id);
+
+    store.flag(run.id, "from the attempt that followed");
+
+    expect(store.get(run.id)?.flags).toEqual(["from the attempt that followed"]);
+  });
+
   it("refuses to retry anything that is not failed", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);
