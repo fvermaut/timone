@@ -45,9 +45,34 @@ cost   scratch-app#13 (requirements) — 7m02s · 38 turns · $3.07 · claude-op
 
 Declared and billed both read `claude-opus-5`. The stage did its job as well as naming its model: PRD-03 committed to the work branch (`48ece63`), the glossary updated (`3a6ceb3`), and the gate comment posted asking for `approve`.
 
-**Only planning is left, and it is behind fvermaut's approval of PRD-03** — the plan gate's own session is the last row of the table. **Four of the five rows are now observed** (triage/Sonnet, requirements/Opus, execution/Opus, approval-record/Haiku); the declared table has not been contradicted anywhere.
+**Planning observed on Opus, and step 1 closes.** After fvermaut replied `approve`, one cycle produced the approval record on Haiku and then planning on Opus:
+
+```
+record scratch-app#13 — fvermaut approved requirements
+cost   scratch-app#13 (approval record) — 50s · 19 turns · $0.13 · claude-haiku-4-5 2.7k out
+session bcfcd3b7-82c5-4b75-8c7f-0697a2f07979 started for scratch-app#13 (planning, claude-opus-5)
+cost   scratch-app#13 (planning) — 19m30s · 17 turns · $3.67 · claude-opus-5 27.2k out
+```
+
+**Every row of the declared table is now observed from the daemon's own output**, each on both the `session` line and the closing `cost` line:
+
+| stage | declared | observed | ticket |
+| --- | --- | --- | --- |
+| triage | `claude-sonnet-5` | `claude-sonnet-5` | #13 |
+| requirements | `claude-opus-5` | `claude-opus-5` | #13 |
+| planning | `claude-opus-5` | `claude-opus-5` | #13 |
+| approval record | `claude-haiku-4-5` | `claude-haiku-4-5` | #11, #13 |
+| execution | `claude-opus-5` | `claude-opus-5` | #11 |
+
+**Nothing contradicted the table anywhere, on either ticket. Step 1 is complete.**
+
+**One caveat, and it does not touch the row.** Planning **died on an upstream API error** before committing its plan, so #13 is `failed` and holds no phase file. The model observation is unaffected — the session declared and billed `claude-opus-5`, which is the whole of what step 1 asks — but R16 is proven for planning's *model*, not for planning's *output*, on this ticket. #11 supplies the latter.
 
 *A note on line order, not a defect.* `resume scratch-app#13 → requirements` prints **after** the whole session it started has ended, because the line is logged when `spawn()` returns. `spawn` behaved identically on the triage cycle. So a terminal shows a session's entire life before the line announcing it began — pre-existing, unchanged from phase 11, and worth a glance at the human gate rather than a fix.
+
+*A note on line order, not a defect.* `resume scratch-app#13 → requirements` prints **after** the whole session it started has ended, because the line is logged when `spawn()` returns. `spawn` behaved identically on the triage cycle. So a terminal shows a session's entire life before the line announcing it began — pre-existing, unchanged from phase 11, and worth a glance at the human gate rather than a fix.
+
+**The planning session also produced the gate's most important measurement, and it is not about R16 at all** — see *the tick's clock is not the session's clock*, below. It ran overnight across a sleeping laptop, and what the tick did during that is the evidence R18 was missing.
 
 ### Step 2 — R17, the progress heartbeat: **observed, one clause outstanding**
 
@@ -263,6 +288,18 @@ See *Still owed* below and the closing section: the ticket went the whole way to
 
 **A fourth measurement, taken 2026-08-08 on #13's requirements session, holds the prediction:** last tick **26.6k**, authoritative **27.7k** — **1.04×**, on a stage that spawns no sub-agents. It lands on the same row as verification's 1.04× and nowhere near the fleet stages' 2.2× and 3.2×. The rule now has two independent confirmations at each end, which is what turns the diagnosis from a plausible code reading into a measured one: **the error is a function of fan-out, not of stage, model or duration.**
 
+**A fifth measurement then broke the rule, and 14h should treat this as a separate finding.** #13's planning session under-reported by **5.8×** — last tick **4.7k**, authoritative **27.2k** — which is worse than either fleet stage. The fan-out explanation does not cover it:
+
+- A sub-agent was displayed only between **1m31s and 4m31s**. From `5m01s` onward the line showed **no sub-agent at all**.
+- Across that same stretch the **replies counter kept moving** — `8 → 22` — so main-thread assistant messages were arriving continuously.
+- And yet **output tokens stayed frozen at exactly `4.7k` for the remaining four hours**, never advancing once.
+
+Under the recorded diagnosis this cannot happen. The replies half counts main-thread messages and the token half counts `message_delta` stream events on the same thread; if replies advance, deltas should advance with them. **Fourteen main-thread replies arrived carrying no measurable output.**
+
+**The obvious confound is sleep, and it should be tested before anything is concluded.** This is the same session whose clock diverged 13×, so the frozen counter may be a suspend artifact — deltas dropped across the pause while assistant messages survived — rather than a second independent defect. That would make the two tick defects one mechanism seen twice, which is a materially different fix from patching them separately.
+
+**What is certain is that the earlier table is incomplete.** "Nearly accurate without fan-out, out by multiples with it" held for four sessions and failed on the fifth, in the direction that matters: **the worst under-report yet came from a stage that was not fanning out.** 14h should route this as one question with the clock, not as a refinement of the fleet story.
+
   14b took real trouble to avoid printing a confidently *wrong* number — it rejected `usage.output_tokens` for under-reporting ~30× — and shipped something that under-reports ~3× on any run using the fleet, which is every execution run. The direction of the error was fixed; its existence was not.
 
   **No fix proposed here, deliberately.** The obvious fallback — `usage.output_tokens` on the sub-agent's `assistant` message — is precisely the source `progress.ts:78-81` rejects as under-reporting by roughly thirty times. Whether sub-agent deltas can be obtained honestly is an investigation, not a one-liner, and 14h should route it as one. Note the interaction with ADR-0017: the tick is also the heartbeat, and the heartbeat kept stamping correctly throughout — **liveness was never affected**, only the display.
@@ -309,7 +346,28 @@ See *Still owed* below and the closing section: the ticket went the whole way to
 
   It does not prove the mechanism — that still needs the `duration_ms` question answered — but it removes the competing explanation that the tick's arithmetic is simply wrong, since on an uninterrupted run it is exactly right. **The remaining question is narrowed to what happens across a suspend**, not whether the clock can be trusted at all.
 
-  Not investigated further and no fix proposed: whether the SDK's `duration_ms` excludes suspended time, and whether a monotonic clock or a wake-aware staleness rule is the right answer, are questions for 14h to route. **R18 should not close until this is understood** — a laptop that sleeps is the normal operating environment here.
+  **Then #13's planning session ran overnight, and turned the hazard from an argument into a measurement.** It is the fifth reproduction, the largest by far, and the first where the consequence can be counted rather than reasoned about.
+
+  | | |
+  | --- | --- |
+  | ticks reached | **4h13m** |
+  | SDK `duration_ms` | **19m30s** |
+  | divergence | **13.0×** |
+  | unaccounted | **3h54m** |
+  | work ticks emitted | 46 |
+  | **gaps exceeding the 2-minute staleness threshold** | **17 of 45** |
+  | largest gap | **16m00s — 8× the threshold** |
+  | total time inside those gaps | **3h56m** |
+
+  The shape is unmistakable and matches the earlier sessions exactly: **pairs of ticks 30 seconds apart, separated by gaps of ~15–16 minutes.** Between 7m01s and 4h13m the counter advanced by four hours of wall clock on about twelve minutes of work. A laptop asleep on a 15-minute cycle produces precisely this and nothing else does.
+
+  **This is the R18 evidence the gate was missing, and it is decisive.** ADR-0017 makes `heartbeatAt` stamp only when the tick fires, and staleness is four intervals — 120 seconds. This session went silent for longer than that **seventeen separate times**, once for sixteen minutes. **A continuously running daemon would have declared this healthy session dead and reclaimed it, seventeen times over.** It survived for one reason only, and it is an artifact of how the gate was run: `--once` cycles were used throughout, so no poll loop existed alongside it to do the reclaiming. Under `timone daemon` — the normal way to run this, and the way the README documents — the run would have been killed, its ticket commented, its project freed, and the work thrown away.
+
+  Step 3's false-positive check said "let a healthy session run untouched and confirm nothing reclaims it", and it passed at 59m35s. **It passed because the machine stayed awake.** The check and this session together say the threshold is safe against long work and unsafe against suspension, which are different things.
+
+  **R18 cannot close on this evidence.** The earlier wording — "should not close until this is understood" — was too soft: this is no longer an unresolved question about whether a hazard exists, it is a measured false-positive path with a count attached. What remains open is only the fix.
+
+  Not investigated further and no fix proposed: whether the SDK's `duration_ms` excludes suspended time, and whether a monotonic clock or a wake-aware staleness rule is the right answer, are questions for 14h to route. **A laptop that sleeps is the normal operating environment here**, and an overnight run is exactly the case the daemon exists to serve.
 
 - **`timone retry` carries a dead attempt's flags into the fresh one.** It clears `failure` and `sessionId` but not `flags`, so #11 resumed carrying `the session changed 1 file(s) outside projects/scratch-app/` from its crashed attempt — a flag whose cause (`daemon.log`) had already been fixed by `8f96919`. `timone status` therefore shows `⚠ 1 automatic check(s) failed` about a file that no longer exists.
 
@@ -333,14 +391,19 @@ Execution produced seven commits and closed its phase with a clean tree, **amend
 
 **Verification then died: `the session stopped on an API error (server_error)`.** An upstream infrastructure event, not a Timone defect — the same instability was hitting this session's own tooling at the same moment. **The daemon handled it exactly as designed:** failed the run with a plain reason, left `timone retry scratch-app#11` as the way back. Worth recording as an unplanned second proof of the failure path, on a different cause than the crash.
 
+**It happened a second time on 2026-08-08**, to #13's planning session, with the identical outcome: run `failed`, plain reason on the ticket ("Nothing was decided about this ticket, so nothing here is final"), `timone retry scratch-app#13` named by `timone status`. **Two independent occurrences on two different stages of two different tickets** — the failure path is now the best-exercised branch in the daemon, having been reached by a hard crash and by an upstream error twice, and it has never needed human repair beyond the retry it asks for.
+
 ## Still owed before 14g can close
 
-1. Step 1's **last row — planning on Opus**, which runs once fvermaut approves PRD-03 on #13. Triage/Sonnet and requirements/Opus were observed on 2026-08-08; four of five rows are done.
-2. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded. **The unrunnable CTA belongs in front of him too** — it is fixed, but it is the one defect that was aimed at him personally, and the gate is about him.
+1. The human gate: fvermaut confirms the daemon's output tells him what he wants while a run works, and that the interactive check would have caught the commit that blocked his build. **Both tick defects above bear directly on the first half of that gate** and should be put in front of him rather than asked around — on this evidence the honest answer is that the display told him the wrong stage, the wrong token count and the wrong elapsed time, and each was found and fixed or recorded. **The unrunnable CTA belongs in front of him too** — it is fixed, but it is the one defect that was aimed at him personally, and the gate is about him.
 
 **Step 2 is complete** — the redirection clause is measured at the byte level on tick-bearing output, and the terminal adds one carriage return per line and nothing else.
 
-**One machine-observable thing remains in the whole gate: planning on Opus.** #13 is parked at the PRD-03 gate waiting on the word `approve`. One cycle after that reply closes step 1 and, with it, everything that does not require fvermaut's own judgement. **Execution is never reached**, so the $14 stage is never paid: #13 has cost **$3.39** so far ($0.32 triage + $3.07 requirements, the takeover conversation aside).
+**Step 1 is complete** — all five rows of the model table observed from the daemon's own output, across #11 and #13.
+
+**Every machine-observable step of the gate is now done. Only the human gate remains**, and it is fvermaut's judgement rather than an observation anyone can take for him.
+
+#13 cost **$7.19** in total ($0.32 triage + $3.07 requirements + $0.13 approval record + $3.67 planning), and **execution was never reached** as intended. It sits `failed` on an upstream API error with `timone retry scratch-app#13` as the way back; **retrying it is not needed for the gate** — step 1 closed on the session that died — so whether #13 is carried to a real plan is fvermaut's call about `scratch-app`, not about phase 14.
 
 **Step 5 is complete** — thirteen commits, thirteen trailers, no harness file anywhere in history.
 
@@ -354,7 +417,13 @@ Nothing in phase 14 changed the pipeline's behaviour, which is what the step set
 
 ## Register guidance for 14h
 
-Nothing in this report justifies flipping **R15** or **R17** to `verified`; both carry open defects found by this gate. **R18** should wait on the sleep question. **R16** is proven at two rows of its table and unobserved at the rest.
+Nothing in this report justifies flipping **R15** or **R17** to `verified`; both carry open defects found by this gate.
+
+**R16 is the second requirement this gate can flip to `verified`.** All five rows of the declared model table are now observed from the daemon's own output, each on both the opening `session` line and the closing `cost` line, across #11 and #13 — and nothing contradicted the table anywhere. The one caveat is narrow and belongs in the record rather than in the verdict: planning's row was observed on a session that then died on an upstream API error, so planning's *model* is proven on #13 and planning's *output* on #11.
+
+**R18 must stay `draft`, and the reason has hardened from a question into a measurement.** The earlier reading — wait on the sleep question — is superseded by #13's planning session: 17 of its 45 tick gaps exceeded the 2-minute staleness threshold, the largest by 8×, and only the gate's use of `--once` cycles kept a poll loop from reclaiming a perfectly healthy run. This is a demonstrated false-positive path, not an open worry.
+
+**R17 gains a second reason to stay down**, distinct from the fleet defect: on #13's planning session the token counter froze at 4.7k for four hours *while the replies counter kept advancing*, under-reporting by 5.8× with no sub-agent displayed. That breaks the fan-out explanation and may share a mechanism with the clock divergence. 14h should route the two tick defects as one investigation rather than two fixes.
 
 **R19 is the one requirement this gate can flip to `verified`.** Step 5 tested it directly and it passed on every clause: thirteen machine-authored commits and thirteen complete trailers, `--grep` returning a complete index, zero harness files in history, and the interactive side correct in both directions — trailed where it should be, bare on the commit that was meant to be bare. It was also exercised incidentally throughout the gate rather than only under test.
 
