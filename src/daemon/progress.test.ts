@@ -75,6 +75,7 @@ function toolResult(id: string): SDKMessage {
 function resultMessage(
   overrides: Partial<{
     duration_ms: number;
+    duration_api_ms: number;
     num_turns: number;
     total_cost_usd: number;
     modelUsage: Record<string, { inputTokens: number; outputTokens: number }>;
@@ -84,6 +85,7 @@ function resultMessage(
     type: "result",
     subtype: "success",
     duration_ms: overrides.duration_ms ?? 724_000,
+    duration_api_ms: overrides.duration_api_ms ?? 700_000,
     num_turns: overrides.num_turns ?? 47,
     total_cost_usd: overrides.total_cost_usd ?? 1.83,
     modelUsage: overrides.modelUsage ?? {
@@ -225,6 +227,20 @@ describe("the closing summary", () => {
     expect(progress.summary()?.costUsd).toBe(0.12);
   });
 
+  it("reads `duration_ms` and never `duration_api_ms`, whichever is larger", () => {
+    // Proven unread rather than assumed unread. `duration_api_ms` is a
+    // distinct field and *not* a nested total: on a control run it exceeded
+    // `duration_ms`, so nothing may treat either as bounding the other. The
+    // fixture is deliberately the surprising way round.
+    const progress = new SessionProgress();
+    progress.observe(
+      resultMessage({ duration_ms: 1_170_000, duration_api_ms: 9_900_000 }),
+    );
+
+    expect(progress.summary()?.durationMs).toBe(1_170_000);
+    expect(closingLine(progress.summary()!)).toContain("19m30s working");
+  });
+
   it("names every model the session used", () => {
     const progress = new SessionProgress();
     progress.observe(
@@ -252,7 +268,7 @@ describe("what the lines look like", () => {
       subAgents: 3,
     });
 
-    expect(line).toBe("4m12s · 18 replies · 42.1k out · 3 sub-agents");
+    expect(line).toBe("4m12s elapsed · 18 replies · 42.1k out · 3 sub-agents");
   });
 
   it("says one reply and one sub-agent, not 1 replys and 1 sub-agents", () => {
@@ -263,7 +279,7 @@ describe("what the lines look like", () => {
       subAgents: 1,
     });
 
-    expect(line).toBe("1m01s · 1 reply · 900 out · 1 sub-agent");
+    expect(line).toBe("1m01s elapsed · 1 reply · 900 out · 1 sub-agent");
   });
 
   it("leaves the fleet out of the line entirely when there is none", () => {
@@ -274,7 +290,7 @@ describe("what the lines look like", () => {
       subAgents: 0,
     });
 
-    expect(line).toBe("9s · 2 replies · 1.5k out");
+    expect(line).toBe("9s elapsed · 2 replies · 1.5k out");
   });
 
   it("reaches into hours without losing the minutes", () => {
@@ -295,7 +311,7 @@ describe("what the lines look like", () => {
     };
 
     expect(closingLine(summary)).toBe(
-      "12m04s · 47 turns · $1.83 · claude-opus-5 84.2k out, claude-haiku-4-5 1.1k out",
+      "12m04s working · 47 turns · $1.83 · claude-opus-5 84.2k out, claude-haiku-4-5 1.1k out",
     );
   });
 
@@ -303,6 +319,48 @@ describe("what the lines look like", () => {
     expect(
       closingLine({ durationMs: 1_000, turns: 1, costUsd: 0.0004, models: [] }),
     ).toContain("$0.0004");
+  });
+
+  it("labels the two clocks so neither can be read as the other", () => {
+    // 15a's measurement, rendered. That session's tick had run for 4h13m of
+    // wall clock while the SDK reported 19m30s of `duration_ms` — a 13×
+    // divergence in which *both numbers were correct*. They were wall time
+    // and awake time, printed under one name, and the fix is the name.
+    const tick = tickLine({
+      elapsedMs: 15_180_000,
+      replies: 22,
+      outputTokens: 4_700,
+      subAgents: 0,
+    });
+    const closing = closingLine({
+      durationMs: 1_170_000,
+      turns: 31,
+      costUsd: 4.12,
+      models: [],
+    });
+
+    expect(tick).toContain("4h13m elapsed");
+    expect(closing).toContain("19m30s working");
+    expect(tick).not.toContain("working");
+    expect(closing).not.toContain("elapsed");
+  });
+
+  it("leaves the duration arithmetic exactly where it was", () => {
+    // The diff this sub-phase makes is words. A slice that found itself
+    // computing a duration differently would have left its scope, so the
+    // three shapes are pinned against the labels rather than through them.
+    expect(
+      tickLine({ elapsedMs: 9_000, replies: 1, outputTokens: 0, subAgents: 0 }),
+    ).toMatch(/^9s elapsed · /);
+    expect(
+      tickLine({ elapsedMs: 252_000, replies: 1, outputTokens: 0, subAgents: 0 }),
+    ).toMatch(/^4m12s elapsed · /);
+    expect(
+      tickLine({ elapsedMs: 3_864_000, replies: 1, outputTokens: 0, subAgents: 0 }),
+    ).toMatch(/^1h04m elapsed · /);
+    expect(
+      closingLine({ durationMs: 3_864_000, turns: 1, costUsd: 1, models: [] }),
+    ).toMatch(/^1h04m working · /);
   });
 
   it("uses no cursor control anywhere, so a pipe reads what a terminal shows", () => {

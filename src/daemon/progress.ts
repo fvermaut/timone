@@ -13,7 +13,17 @@ const MAIN_THREAD = "main";
  * on the `result` message, and belong on the closing line.
  */
 export interface ProgressSnapshot {
-  /** Milliseconds since the session started. */
+  /**
+   * **Wall clock** since the session started — `Date.now()` differenced, so it
+   * advances while the machine is suspended.
+   *
+   * Deliberately not the same quantity as {@link SessionSummary.durationMs},
+   * and the two are labelled rather than reconciled (ADR-0020). 15a measured
+   * them diverging by 13× on one overnight session — 4h13m here against
+   * 19m30s there — with **neither number wrong**: at ~45s awake per ~15m49s
+   * sleep cycle, 4h13m of wall clock really is about 19 minutes of work. On an
+   * overnight run this is the number the human actually wants.
+   */
   elapsedMs: number;
   /**
    * Replies the main thread has made so far — messages, counted live. This
@@ -32,6 +42,15 @@ export interface ProgressSnapshot {
 
 /** What the session cost, once it has ended and can say so authoritatively. */
 export interface SessionSummary {
+  /**
+   * **Awake time**: the SDK's own `duration_ms`, which excludes time the
+   * machine spent suspended. See {@link ProgressSnapshot.elapsedMs} for the
+   * other clock and why both are kept.
+   *
+   * `duration_api_ms` is **not** read and is not a nested total — on a control
+   * run it *exceeded* `duration_ms` — so nothing here may treat one as
+   * bounding the other.
+   */
   durationMs: number;
   turns: number;
   costUsd: number;
@@ -203,7 +222,10 @@ function toolResultIds(content: unknown): string[] {
  */
 export function tickLine(snapshot: ProgressSnapshot): string {
   const parts = [
-    duration(snapshot.elapsedMs),
+    // Which clock this is, said outright (ADR-0020). The tick's number and the
+    // closing line's are both correct and measure different quantities; what
+    // made them look like a contradiction was sharing a name.
+    `${duration(snapshot.elapsedMs)} elapsed`,
     count(snapshot.replies, "reply", "replies"),
     `${tokens(snapshot.outputTokens)} out`,
   ];
@@ -216,7 +238,9 @@ export function tickLine(snapshot: ProgressSnapshot): string {
 /** The one line printed when a session ends, carrying what it actually cost. */
 export function closingLine(summary: SessionSummary): string {
   const parts = [
-    duration(summary.durationMs),
+    // The other clock, and the other word. This one excludes time the machine
+    // spent suspended, which on an overnight run is most of it.
+    `${duration(summary.durationMs)} working`,
     count(summary.turns, "turn"),
     money(summary.costUsd),
   ];

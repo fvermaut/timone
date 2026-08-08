@@ -2064,7 +2064,9 @@ describe("saying what a session is doing while it does it", () => {
     }).spawn(pickedUpRun(store), project, { stage: "triage" });
 
     expect(lines).toContainEqual(
-      expect.stringContaining("4m12s · 18 replies · 42.1k out · 3 sub-agents"),
+      expect.stringContaining(
+        "4m12s elapsed · 18 replies · 42.1k out · 3 sub-agents",
+      ),
     );
   });
 
