@@ -123,7 +123,7 @@ export class DockerPreviewAdapter implements PreviewAdapter {
       // Never an exception: the pull request is the deliverable and the
       // preview is an aid to reviewing it, so a stack that will not come up
       // is a thing to be told about rather than a reason to withhold work.
-      preview = { state: "failed", reason: oneLine(error) };
+      preview = { state: "failed", reason: previewFailureReason(error) };
     }
 
     this.ensured.set(key, { headSha, preview });
@@ -329,8 +329,19 @@ export function readPublishedPort(published: string): string {
   return port;
 }
 
-/** Reduce an error to the one line that will go onto a pull request. */
-function oneLine(error: unknown): string {
+/**
+ * Reduce an error to the one line that will go onto a pull request.
+ *
+ * The command echo is dropped, not just shortened. {@link execCommandRunner}
+ * prefixes its errors with the whole argument vector, which here is full of
+ * absolute paths on the machine the daemon runs on — and this string is
+ * posted on a *client's* public pull request. What a reviewer needs is what
+ * went wrong; where this laptop keeps its files is neither useful to them nor
+ * ours to publish.
+ */
+export function previewFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message.split("\n")[0].trim();
+  const first = message.split("\n")[0].trim();
+  const echoed = / failed: /.exec(first);
+  return echoed === null ? first : first.slice(echoed.index + echoed[0].length);
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CommandOptions, CommandRunner } from "./command-runner.js";
-import { DockerPreviewAdapter } from "./docker-preview.js";
+import { DockerPreviewAdapter, previewFailureReason } from "./docker-preview.js";
 import type { PreviewProject } from "./preview.js";
 
 const ROOT = "/timone";
@@ -445,5 +445,34 @@ describe("what the adapter never does", () => {
         expect(arg.startsWith(`${ROOT}/.timone/previews/`)).toBe(true);
       }
     }
+  });
+});
+
+describe("what a failure is allowed to say", () => {
+  it("reports what went wrong without republishing this machine's paths", () => {
+    const reason = previewFailureReason(
+      new Error(
+        "git -C /Users/someone/dev/timone/projects/scratch-app worktree add " +
+          "--detach /Users/someone/dev/timone/.timone/previews/scratch-app/pr-12 " +
+          "deadbee failed: fatal: invalid reference: deadbee",
+      ),
+    );
+
+    // This string goes on a *client's* public pull request. Where the daemon's
+    // laptop keeps its files is not useful to a reviewer and not ours to post.
+    expect(reason).toBe("fatal: invalid reference: deadbee");
+    expect(reason).not.toContain("/Users/");
+  });
+
+  it("leaves an error that carries no command echo alone", () => {
+    expect(previewFailureReason(new Error("docker daemon is not running"))).toBe(
+      "docker daemon is not running",
+    );
+  });
+
+  it("keeps the message to one line", () => {
+    expect(
+      previewFailureReason(new Error("container is unhealthy\nsee logs\nand more")),
+    ).toBe("container is unhealthy");
   });
 });
