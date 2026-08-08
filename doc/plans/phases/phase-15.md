@@ -1,6 +1,6 @@
 # Phase 15: the defects running it found — false accusations, two clocks, and a stale flag
 
-> **Status:** **Awaiting approval by fvermaut.** Hand-planned 2026-08-08, as all Timone-self phases are (`/timone-plan` targets managed projects only); the plan skill's shape rules — thin vertical slices, declared seams, per-slice validation — are followed, not the instrument.
+> **Status:** **Approved for execution by fvermaut 2026-08-08.** Hand-planned 2026-08-08, as all Timone-self phases are (`/timone-plan` targets managed projects only); the plan skill's shape rules — thin vertical slices, declared seams, per-slice validation — are followed, not the instrument.
 
 > **Fifth phase of [PRD-02](../../specs/prd/prd-02-inversion-of-control.md).** Governing decisions: [ADR-0017](../../adr/0017-a-runs-liveness-is-its-heartbeat.md) (a run's liveness is its heartbeat), [ADR-0018](../../adr/0018-the-session-bracket-belongs-to-the-hooks.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md). Standing: [ADR-0007](../../adr/0007-sessions-at-timone-root.md).
 

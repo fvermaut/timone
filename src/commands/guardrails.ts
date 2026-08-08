@@ -161,11 +161,10 @@ export async function runCheck(deps: CheckDeps): Promise<string> {
           repoUrl: deps.manifest.projects[run.project]?.repo_url ?? "",
         };
 
-  const evidence = await collectEvidence(
-    deps.root,
-    parked.baseline,
-    run === undefined ? undefined : run.project,
-  );
+  const evidence = await collectEvidence(deps.root, parked.baseline, {
+    sessionId: deps.sessionId,
+    ...(run === undefined ? {} : { target: run.project }),
+  });
 
   const target: ReportTarget =
     run === undefined || project === undefined

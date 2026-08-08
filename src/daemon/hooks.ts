@@ -79,6 +79,16 @@ export type GuardrailRule =
 /** The trailer every Timone-authored commit carries (ADR-0019). */
 export const STAGE_TRAILER = "Timone-Stage";
 
+/**
+ * The trailer naming which session made a commit (ADR-0019).
+ *
+ * It exists so "who did this?" is answered from git history alone — and for
+ * one phase the rules that *enforce* it did not *read* it, which is how a
+ * clean session came to be accused publicly on a client's ticket of touching
+ * three files another session had committed.
+ */
+export const SESSION_TRAILER = "Timone-Session";
+
 export interface Violation {
   rule: GuardrailRule;
   /** One line, in the human's terms. */
@@ -478,6 +488,7 @@ async function collectRepo(
   dir: string,
   label: string,
   baseline: RepoBaseline,
+  sessionId: string,
 ): Promise<RepoEvidence> {
   if (!existsSync(dir)) {
     return {
@@ -499,12 +510,15 @@ async function collectRepo(
   const commits: CommitEvidence[] = [];
 
   for (const [name] of touched) {
+    // Unpushed commits are a question about the *repository* — `--not
+    // --remotes=origin` has no session scoping in it whatsoever — so they
+    // need the trailer filter by their own route rather than inheriting it
+    // from the baseline diff below. This is the half that fired in the
+    // common case: any interactive session opened while the daemon builds
+    // saw the daemon's in-flight commits as its own.
     const unpushed = (
-      await git(dir, ["rev-list", name, "--not", "--remotes=origin"])
-    )
-      .split("\n")
-      .map((sha) => sha.trim())
-      .filter((sha) => sha !== "");
+      await commitsOn(dir, name, [name, "--not", "--remotes=origin"])
+    ).filter((commit) => !madeElsewhere(commit, sessionId));
 
     const upstream = (
       await git(dir, ["rev-parse", "--verify", `refs/remotes/origin/${name}`])
@@ -512,33 +526,20 @@ async function collectRepo(
 
     branches.push({
       name,
-      unpushed: unpushed.map((sha) => sha.slice(0, 7)),
+      unpushed: unpushed.map((commit) => commit.sha),
       hasUpstream: upstream !== "",
     });
 
     // Commits reachable from this branch but from none of the tips that
-    // existed before the session — that is what the session added. The
-    // \x00 / \x01 / \x02 delimiters exist because the message is multi-line
-    // and the file list follows it: without them the two cannot be told apart.
-    const log = await git(dir, [
-      "log",
-      "--pretty=format:%x00%H%x01%B%x02",
-      "--name-only",
+    // existed before the session — that is what the session added, minus
+    // whatever another session added alongside it.
+    for (const commit of await commitsOn(dir, name, [
       name,
       "--not",
       ...baselineShas,
-    ]);
-    for (const block of log.split("\0")) {
-      if (block.trim() === "") continue;
-      const [header, afterBody = ""] = block.split("\x02");
-      const [sha, body = ""] = header.split("\x01");
-      if (sha.trim() === "") continue;
-      commits.push({
-        sha: sha.trim().slice(0, 7),
-        branch: name,
-        files: afterBody.split("\n").filter((line) => line.trim() !== ""),
-        trailers: trailersOf(body),
-      });
+    ])) {
+      if (madeElsewhere(commit, sessionId)) continue;
+      commits.push(commit);
     }
   }
 
@@ -552,26 +553,88 @@ async function collectRepo(
 }
 
 /**
+ * The commits `revArgs` selects, each with the trailers that say who made it.
+ *
+ * The \x00 / \x01 / \x02 delimiters exist because the message is multi-line
+ * and the file list follows it in the same output: without them the two
+ * cannot be told apart.
+ */
+async function commitsOn(
+  dir: string,
+  branch: string,
+  revArgs: string[],
+): Promise<CommitEvidence[]> {
+  const log = await git(dir, [
+    "log",
+    "--pretty=format:%x00%H%x01%B%x02",
+    "--name-only",
+    ...revArgs,
+  ]);
+
+  const commits: CommitEvidence[] = [];
+  for (const block of log.split("\0")) {
+    if (block.trim() === "") continue;
+    const [header, afterBody = ""] = block.split("\x02");
+    const [sha, body = ""] = header.split("\x01");
+    if (sha.trim() === "") continue;
+    commits.push({
+      sha: sha.trim().slice(0, 7),
+      branch,
+      files: afterBody.split("\n").filter((line) => line.trim() !== ""),
+      trailers: trailersOf(body),
+    });
+  }
+  return commits;
+}
+
+/**
+ * True when this commit says, in its own message, that a **different**
+ * session made it.
+ *
+ * The predicate excludes; it never includes. A commit carrying no session
+ * trailer is kept and judged, because such a commit is genuinely
+ * unattributable and over-reporting a real violation is the safe direction —
+ * so the duplicate provenance line from an untrailed commit survives by
+ * necessity. That is the known limit of this fix, and it is a test rather
+ * than a comment: removing it turns a guardrail into a blind spot.
+ */
+function madeElsewhere(commit: CommitEvidence, sessionId: string): boolean {
+  const prefix = `${SESSION_TRAILER}:`;
+  for (const line of commit.trailers) {
+    if (!line.startsWith(prefix)) continue;
+    return line.slice(prefix.length).trim() !== sessionId;
+  }
+  return false;
+}
+
+/**
  * Gather the evidence for one finished session.
  *
  * `target` is passed only when a run owns the session. Every project the
  * baseline covered is collected either way — a stray commit in a checkout
  * nobody named is exactly the accident this widening exists to catch.
+ *
+ * `sessionId` is required rather than optional, and arrives as an argument
+ * rather than off the environment: it is what scopes the evidence to the
+ * session being judged, and every rule downstream depends on that scoping
+ * being right. A baseline diff alone cannot do it — two sessions open at the
+ * timone root share the repository, and the one with the older baseline sees
+ * the other's commits as its own.
  */
 export async function collectEvidence(
   root: string,
   baseline: SessionBaseline,
-  target?: string,
+  session: { sessionId: string; target?: string },
 ): Promise<SessionEvidence> {
   const projects: RepoEvidence[] = [];
   for (const [name, tips] of baseline.projects) {
     projects.push(
-      await collectRepo(join(root, "projects", name), name, tips),
+      await collectRepo(join(root, "projects", name), name, tips, session.sessionId),
     );
   }
   return {
-    ...(target === undefined ? {} : { target }),
-    workspace: await collectRepo(root, "timone", baseline.workspace),
+    ...(session.target === undefined ? {} : { target: session.target }),
+    workspace: await collectRepo(root, "timone", baseline.workspace, session.sessionId),
     projects,
   };
 }

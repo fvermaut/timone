@@ -82,8 +82,8 @@ function fakeAdapter(): {
 }
 
 /** A commit message carrying the provenance trailer every session owes. */
-function trailed(subject: string): string {
-  return `${subject}\n\nTimone-Stage: interactive\nTimone-Session: test`;
+function trailed(subject: string, sessionId: string): string {
+  return `${subject}\n\nTimone-Stage: interactive\nTimone-Session: ${sessionId}`;
 }
 
 function git(dir: string, ...args: string[]): string {
@@ -115,6 +115,14 @@ function workspace(): { root: string; projectDir: string } {
   writeFileSync(join(root, ".gitignore"), "projects/\n.timone/\n");
   git(root, "add", "-A");
   git(root, "commit", "-q", "-m", "first");
+  // The root has a remote too, and pushing its first commit matters: without
+  // one, `--not --remotes=origin` calls every commit in the fixture unpushed,
+  // and a test asserting silence would be arguing with the fixture rather
+  // than with the rule.
+  const workspaceRemote = join(dir, "timone.git");
+  git(dir, "init", "-q", "--bare", workspaceRemote);
+  git(root, "remote", "add", "origin", workspaceRemote);
+  git(root, "push", "-q", "origin", "main");
 
   // A bare remote, then a clone of it, so "unpushed" is a real question.
   const remote = join(dir, "scratch-app.git");
@@ -223,7 +231,7 @@ describe("a session the daemon drove", () => {
       () => {
         writeFileSync(join(projectDir, "feature.txt"), "work\n");
         git(projectDir, "add", "-A");
-        git(projectDir, "commit", "-q", "-m", trailed("never pushed"));
+        git(projectDir, "commit", "-q", "-m", trailed("never pushed", "session-daemon"));
       },
     );
 
@@ -251,7 +259,7 @@ describe("a session the daemon drove", () => {
       () => {
         writeFileSync(join(projectDir, "feature.txt"), "work\n");
         git(projectDir, "add", "-A");
-        git(projectDir, "commit", "-q", "-m", trailed("pushed"));
+        git(projectDir, "commit", "-q", "-m", trailed("pushed", "session-daemon"));
         git(projectDir, "push", "-q", "origin", "HEAD:main");
       },
     );
@@ -279,7 +287,7 @@ describe("a session a human drove", () => {
       () => {
         writeFileSync(join(projectDir, "stray.txt"), "left behind\n");
         git(projectDir, "add", "-A");
-        git(projectDir, "commit", "-q", "-m", trailed("stray"));
+        git(projectDir, "commit", "-q", "-m", trailed("stray", "session-interactive"));
       },
     );
 
@@ -349,7 +357,7 @@ describe("a session a human drove", () => {
 
     writeFileSync(join(projectDir, "stray.txt"), "left behind\n");
     git(projectDir, "add", "-A");
-    git(projectDir, "commit", "-q", "-m", trailed("stray"));
+    git(projectDir, "commit", "-q", "-m", trailed("stray", "session-chatty"));
 
     const printed: string[] = [];
     const deps = {
@@ -482,5 +490,141 @@ describe("the provenance trailer, read back off real commits", () => {
       "Timone-Session: session-xyz",
     );
     expect(reply.hookSpecificOutput.additionalContext).toContain("Timone-Stage:");
+  });
+});
+
+/**
+ * The 14g attribution defect, per rule.
+ *
+ * Two sessions are open at the timone root — which is how this project is
+ * developed, and the daemon builds while fvermaut works. The rules scoped
+ * "this session's commits" by diffing against the session's `SessionStart`
+ * baseline alone, so the session whose baseline was older was blamed for the
+ * other's work. At 14g that posted a false accusation on a client's ticket
+ * naming three files the accused session never touched — all three carrying
+ * the trailer that would have exonerated it.
+ *
+ * Every rule is asserted separately rather than once. One filter at the
+ * evidence boundary corrects all four, and that is the design — but a test
+ * naming only one rule would not notice a rule reading commits by some other
+ * route, which is exactly how the unpushed half came to need its own fix.
+ */
+describe("commits another session made", () => {
+  it("are invisible to the unpushed rule, and do not inflate its count", async () => {
+    // The common case rather than the edge one: `rev-list --not
+    // --remotes=origin` is a repository-state question with no session
+    // scoping in it at all, so *any* interactive session opened while the
+    // daemon holds in-flight commits reported them as its own.
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const { adapter } = fakeAdapter();
+
+    const { printed } = await bracket(root, "mine", store, adapter, () => {
+      writeFileSync(join(projectDir, "theirs.txt"), "the daemon's work\n");
+      git(projectDir, "add", "-A");
+      git(projectDir, "commit", "-q", "-m", trailed("theirs", "session-daemon"));
+      writeFileSync(join(projectDir, "mine.txt"), "my work\n");
+      git(projectDir, "add", "-A");
+      git(projectDir, "commit", "-q", "-m", trailed("mine", "mine"));
+    });
+
+    const report = printed.join("\n");
+    expect(report).toContain("1 commit(s)");
+    expect(report).toContain(git(projectDir, "rev-parse", "--short", "HEAD").trim());
+    expect(report).not.toContain(
+      git(projectDir, "rev-parse", "--short", "HEAD~1").trim(),
+    );
+  });
+
+  it("are invisible to the STATUS.md placement rule", async () => {
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const { adapter } = fakeAdapter();
+
+    const { printed } = await bracket(root, "mine", store, adapter, () => {
+      git(projectDir, "checkout", "-q", "-b", "feature");
+      writeFileSync(join(projectDir, "STATUS.md"), "# status\n");
+      git(projectDir, "add", "-A");
+      git(projectDir, "commit", "-q", "-m", trailed("status", "session-daemon"));
+      git(projectDir, "push", "-q", "origin", "HEAD:feature");
+    });
+
+    expect(printed.join("\n")).not.toContain("STATUS.md was written on");
+  });
+
+  it("are invisible to the path-containment rule — the 14g accusation itself", async () => {
+    // The one that reached a client's ticket. A daemon session working
+    // `scratch-app` is judged against `projects/scratch-app/`, and the files
+    // an interactive session committed to Timone's own tree were counted
+    // against it.
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const { adapter, comments } = fakeAdapter();
+    const { run } = store.register("scratch-app", 11);
+    store.activate(run.id, "session-daemon");
+
+    const { printed } = await bracket(
+      root,
+      "session-daemon",
+      store,
+      adapter,
+      () => {
+        // The daemon's own work, where it belongs.
+        writeFileSync(join(projectDir, "feature.txt"), "work\n");
+        git(projectDir, "add", "-A");
+        git(projectDir, "commit", "-q", "-m", trailed("feature", "session-daemon"));
+        git(projectDir, "push", "-q", "origin", "HEAD:main");
+        // Meanwhile, a human writing this very report in the workspace.
+        writeFileSync(join(root, "report.md"), "# gate\n");
+        git(root, "add", "-A");
+        git(root, "commit", "-q", "-m", trailed("the report", "dd86be88"));
+      },
+    );
+
+    expect(comments).toEqual([]);
+    expect(printed).toEqual([]);
+    expect(store.get("scratch-app#11")?.flags).toEqual([]);
+  });
+
+  it("are invisible to the provenance rule", async () => {
+    // A commit naming its session but not its stage: trailed enough to be
+    // attributable, untrailed enough for the provenance rule to fire on it.
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const { adapter } = fakeAdapter();
+
+    const { printed } = await bracket(root, "mine", store, adapter, () => {
+      writeFileSync(join(projectDir, "theirs.txt"), "a\n");
+      git(projectDir, "add", "-A");
+      git(
+        projectDir,
+        "commit",
+        "-q",
+        "-m",
+        "feat: theirs\n\nTimone-Session: session-daemon",
+      );
+      git(projectDir, "push", "-q", "origin", "HEAD:main");
+    });
+
+    expect(printed.join("\n")).not.toContain("where they came from");
+  });
+
+  it("are still judged when they name no session at all — the fix's known limit", async () => {
+    // Deliberate, and asserted so a later tidy-up cannot remove it without
+    // a test going red. A commit carrying no session trailer is genuinely
+    // unattributable, and over-reporting a real violation is the safe
+    // direction. The duplicate provenance line survives by necessity.
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const { adapter } = fakeAdapter();
+
+    const { printed } = await bracket(root, "mine", store, adapter, () => {
+      writeFileSync(join(projectDir, "orphan.txt"), "a\n");
+      git(projectDir, "add", "-A");
+      git(projectDir, "commit", "-q", "-m", "just a subject");
+      git(projectDir, "push", "-q", "origin", "HEAD:main");
+    });
+
+    expect(printed.join("\n")).toContain("where they came from");
   });
 });
