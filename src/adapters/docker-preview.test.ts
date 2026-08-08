@@ -321,7 +321,7 @@ describe("ensure — failure is a value", () => {
     runner.on(
       (call) => call.args.includes("up"),
       new Error(
-        'container scratch-app-pr-12-app-1 is unhealthy\nsee logs for details',
+        "dependency failed to start\ncontainer scratch-app-pr-12-app-1 is unhealthy",
       ),
     );
 
@@ -470,9 +470,40 @@ describe("what a failure is allowed to say", () => {
     );
   });
 
+  it("takes the summary Docker puts last, not the file reference it puts first", () => {
+    // Verbatim from 16e's live gate, where the first line — `Dockerfile:74` —
+    // was what a reviewer got, and it told them nothing.
+    const reason = previewFailureReason(
+      new Error(
+        [
+          "docker compose -p scratch-app-pr-16 up --build failed: #29 2.415   \u001b[90m18 |\u001b[0m       <AddTodoForm />",
+          "#29 ERROR: process \"/bin/sh -c npm run build\" did not complete successfully: exit code: 1",
+          "------",
+          "Dockerfile:74",
+          "--------------------",
+          "  74 | >>> RUN npm run build",
+          "--------------------",
+          'target app: failed to solve: process "/bin/sh -c npm run build" did not complete successfully: exit code: 1',
+        ].join("\n"),
+      ),
+    );
+
+    expect(reason).toBe(
+      'target app: failed to solve: process "/bin/sh -c npm run build" did not complete successfully: exit code: 1',
+    );
+    expect(reason).not.toContain("Dockerfile:74");
+  });
+
   it("keeps the message to one line", () => {
     expect(
-      previewFailureReason(new Error("container is unhealthy\nsee logs\nand more")),
-    ).toBe("container is unhealthy");
+      previewFailureReason(new Error("container is unhealthy\nsee logs")),
+    ).toBe("see logs");
+  });
+
+  it("truncates a reason too long to belong in a comment", () => {
+    const reason = previewFailureReason(new Error("x".repeat(500)));
+
+    expect(reason).toHaveLength(300);
+    expect(reason.endsWith("\u2026")).toBe(true);
   });
 });

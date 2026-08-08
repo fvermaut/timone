@@ -329,19 +329,43 @@ export function readPublishedPort(published: string): string {
   return port;
 }
 
+/** How much of a failure a pull-request comment will carry. */
+const REASON_LIMIT = 300;
+
+/** Buildkit's rules and separators, which carry no information on their own. */
+const SEPARATOR = /^[-=\s>|]*$/;
+
 /**
  * Reduce an error to the one line that will go onto a pull request.
  *
- * The command echo is dropped, not just shortened. {@link execCommandRunner}
+ * **The last meaningful line, not the first**, and that was learnt at 16e's
+ * live gate rather than reasoned out: a deliberately broken build reported
+ * `Dockerfile:74`, which is true, fits on one line, and tells a reviewer
+ * nothing. Docker and git both put their *summary* last — `target app: failed
+ * to solve: process "/bin/sh -c npm run build" did not complete successfully`
+ * — and lead with progress and source excerpts.
+ *
+ * **The command echo is dropped, not just shortened.** {@link execCommandRunner}
  * prefixes its errors with the whole argument vector, which here is full of
- * absolute paths on the machine the daemon runs on — and this string is
- * posted on a *client's* public pull request. What a reviewer needs is what
- * went wrong; where this laptop keeps its files is neither useful to them nor
- * ours to publish.
+ * absolute paths on the machine the daemon runs on — and this string is posted
+ * on a *client's* public pull request. What a reviewer needs is what went
+ * wrong; where this laptop keeps its files is neither useful to them nor ours
+ * to publish.
  */
 export function previewFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  const first = message.split("\n")[0].trim();
-  const echoed = / failed: /.exec(first);
-  return echoed === null ? first : first.slice(echoed.index + echoed[0].length);
+  const lines = message
+    // Docker colours its output, and a PR comment is not a terminal.
+    .replace(/\[[0-9;]*m/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !SEPARATOR.test(line));
+  const last = lines.at(-1) ?? "";
+
+  const echoed = / failed: /.exec(last);
+  const reason =
+    echoed === null ? last : last.slice(echoed.index + echoed[0].length);
+  return reason.length <= REASON_LIMIT
+    ? reason
+    : `${reason.slice(0, REASON_LIMIT - 1)}…`;
 }
