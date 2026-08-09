@@ -66,7 +66,63 @@ Each ticket is a child of the map, body = the question it resolves, sized to one
 | `prototype` | HITL | `timone-prototype` ([ADR-0011](../../../doc/adr/0011-prototype-convention.md)): a cheap, throwaway artifact to react to when "how should it look/behave" is the key question — a `prototype/NN-<slug>` branch served at a preview URL, never merged, deleted once the reaction is recorded; the human's reaction *is* the resolution |
 | `task` | HITL or AFK | manual work that unblocks a decision (signing up for a service, provisioning access, moving data so its shape can be seen) — done by the agent where possible, else handed to the human as a precise checklist; the resolution records what was done and the resulting facts later tickets depend on |
 
-A HITL ticket resolves only through live exchange with the human — never answer the human's side yourself.
+A HITL ticket resolves only through exchange with the human — never answer the human's side yourself.
+
+### Every ticket carries its own CTA
+
+A ticket body is the question **plus what the human is being asked to do about it** ([ADR-0022](../../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md)). A question with no instruction is a defect: the human is assumed to know nothing about this process, and a wall of well-phrased questions they cannot act on is worse than no ticket. Close every body with the block for its type, verbatim in shape, substituting the real project and number:
+
+**`grilling` and `task` — both paths:**
+
+````markdown
+---
+
+**Two ways to answer this — take whichever suits you.**
+
+- **Write your answer here.** A comment on this ticket is enough; you don't need to answer every part, and "I don't know, what do you suggest?" is a real answer. I'll pick it up and carry on. If what you write leaves something open, I'll ask once more here — and if it's still not settled, I'll say so rather than keep typing at you.
+- **Talk it through instead.** If it's easier said than written, run this and I'll pick up exactly where this ticket left off:
+
+  ```
+  timone takeover <project>#<n>
+  ```
+
+  You don't need to tell it anything else — it works out what this ticket is waiting for.
+
+**What I need from you:** answer here, or run the command — whichever you prefer.
+````
+
+**`prototype` — the takeover alone**, because there is nothing to react to until it is built:
+
+````markdown
+---
+
+**This one needs something to look at first.** Run this and I'll build it and walk you through it:
+
+```
+timone takeover <project>#<n>
+```
+
+**What I need from you:** run the command when you have a few minutes.
+````
+
+**`research` — nobody is waiting on the human:**
+
+```markdown
+---
+
+**What I need from you:** nothing — I'm resolving this one myself and will post what I find here.
+```
+
+**The takeover line is a promise the CLI has to keep.** `timone takeover` resolves a ticket from the daemon's run ledger, and a wayfinder ticket created by an interactive session has no run in it. Before writing that line onto a ticket, satisfy yourself the resolution path exists for this project; if it does not, write the ticket with the written-answer path only and say plainly that the talk-it-through option is not wired up yet. An instruction the human cannot follow is the same defect as no instruction at all.
+
+### Reading a written answer
+
+A comment on a claimed ticket, authored by the human and posted after the question, **is** the answer to it — no keyword, nothing for them to remember. When a session picks one up:
+
+1. **Take it at its word and check it against the map.** A written answer is thinner than an interview by nature; it carries no hesitation you can read. Restate what you understood in the resolution comment so a misreading surfaces where the human is already looking.
+2. **If it settles the question**, resolve the ticket exactly as an interview would have: resolution comment, close, gist onto the map, ADR at decision time if it passes stage 4's test.
+3. **If it is partial or ambiguous**, post **only what is still open** — never the whole question again — and wait. Answer from the codebase anything the codebase can answer rather than asking it a second time.
+4. **One clarifying round, then stop asking in writing.** If the next answer still does not settle it, say so and hand back the takeover command. The bound is the whole reason the written path is allowed; a thread that keeps going is the ping-pong [ADR-0012](../../../doc/adr/0012-conversation-channels.md) struck out.
 
 **Claiming:** assign the ticket to yourself **before any work** — the assignee *is* the claim; open + unassigned = unclaimed. **Blocking:** use GitHub's native sub-issue and dependency relationships where `gh`/GraphQL supports them (verify once per repo); where unavailable, fall back loudly to a body line `Blocked by: #N, #M`. The **frontier** is the open, unblocked, unclaimed children. Expect other sessions to be editing the tracker concurrently.
 
@@ -101,7 +157,7 @@ Invoked with a map (URL, number, or fallback path); a ticket is optional — wit
 
 1. **Load the map** — the low-res view, not every ticket body.
 2. **Choose the ticket**: the user's if named, else the first frontier ticket. **Claim it before any work.**
-3. **Resolve it** per its type (table above), zooming as needed — fetch the full body of any related closed ticket on demand; consult the skills the map's Notes name.
+3. **Read the thread before asking anything.** A human may already have answered in writing — that is one of the two paths every HITL ticket offers, and re-asking a question they have answered is the failure the path exists to avoid. Then **resolve it** per its type (table above), zooming as needed — fetch the full body of any related closed ticket on demand; consult the skills the map's Notes name.
 4. **Record the resolution**: post the answer as a resolution comment, **close** the ticket, append the one-line gist to the map's Decisions so far. If the decision was ADR-significant, the ADR was already written at decision time (see above).
 5. **Tend the map**: create-then-wire newly surfaced tickets; graduate sharpened fog; rule mis-scoped tickets out of scope; update or delete tickets the answer invalidated.
 6. **One ticket per session** — `research` tickets excepted. Update `STATUS.md`, then stop.

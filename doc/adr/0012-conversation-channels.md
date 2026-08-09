@@ -1,6 +1,6 @@
 # ADR-0012: Gates on tickets, conversations on channels
 
-- **Status:** accepted
+- **Status:** accepted — **amended 2026-08-09 by [ADR-0022](0022-a-conversation-ticket-can-be-answered-in-writing.md)** on the conversation bullet alone: a ticket waiting on a conversation now also names a written-answer path beside the takeover. The split below stands; the body is untouched.
 - **Date:** 2026-08-02
 - **Source:** grill session of 2026-08-02 (conversation-medium design for PRD-02)
 

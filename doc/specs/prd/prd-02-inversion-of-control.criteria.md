@@ -37,10 +37,13 @@
 
 ## R3 — Async clarification via a conversation
 
+> ✏ Revised 2026-08-09: the grill session of 2026-08-09 ([ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md)) gave the waiting ticket a **second answer path beside the takeover** — the human may write the answer as a comment, the daemon picks it up, and one clarifying round is allowed before the session escalates to the terminal. The takeover clause below is unchanged; a clause is added, and the requirement re-enters verification on the new wording.
+
 > ✏ Revised 2026-08-02: the grill session on the conversation medium ([ADR-0012](../../adr/0012-conversation-channels.md)) moved conversations off ticket-comment ping-pong — clarification is a conversation on the project's conversation channel, not a comment thread; the ticket records the CTA and the outcome.
 
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** revised
+    - ✏ 2026-08-09 **set `revised` by the amendment above, not by any observed failure.** The evidence below stands for the clauses it was gathered against; it says nothing about the written path, which no pass has seen. A requirement's status is the weakest of its clauses' outcomes, so it leaves the regression set until stage 7 re-verifies it whole.
     - ✏ 2026-08-05 verified by fvermaut at [phase 12](../../plans/phases/phase-12.md)'s 12g gate, on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6). Clause by clause: **conversation opened** — the pipeline reached the clarification stage on its own and posted a CTA carrying a copy-pasteable `timone takeover scratch-app#6`, naming no stage and no skill; `timone status` showed it waiting, and a second poll cycle changed nothing, so the wait holds rather than re-firing. **Concluded and resumed** — fvermaut ran the command, held the interview to acceptance, and the accepted summary landed on the ticket carrying `CONVERSATION_RECORD_MARKER`; the next cycle read that record and advanced the run to the requirements stage. The summary the interview produced was substantive rather than a transcript: it split the request into two changes and said which one was not being built.
 - **Verify-via:** api
 - **Criteria:**
@@ -50,7 +53,10 @@
     - GIVEN the conversation concludes with the human accepting the summary
       WHEN the session closes
       THEN the accepted outcome summary is posted on the ticket and the pipeline resumes incorporating it
-- **Verification hint:** file a deliberately vague ticket; take over via the posted CTA; run the interview to acceptance; watch the summary land on the ticket and status transition waiting → running.
+    - GIVEN a ticket waiting on a conversation
+      WHEN the human writes their answer as a ticket comment instead of taking over
+      THEN the daemon picks that comment up, spawns the session for what the ticket was waiting on, and the session resolves it from the written answer without re-asking what was answered — and where the answer leaves something open, it posts only the remainder, once, before handing back the takeover
+- **Verification hint:** file a deliberately vague ticket; take over via the posted CTA; run the interview to acceptance; watch the summary land on the ticket and status transition waiting → running. Then, on a second ticket, answer in writing instead: watch the daemon pick the comment up unprompted, and answer that one partially to see the single clarifying round and the escalation that follows it.
 
 ## R4 — PRD gate on the ticket
 
@@ -319,3 +325,22 @@
       WHEN `git log --grep=Timone-Stage` is run from any clone
       THEN every machine-authored commit since the convention landed is listed, and no harness *file* has been added to the repository (R2 stands, narrowed to files)
 - **Verification hint:** inspect the trailers on a daemon-driven phase's commits and on a deliberate interactive commit; confirm the R15 hook flags a commit made without one; confirm `git log --stat` still matches no harness path.
+
+## R20 — Wayfinder decision tickets participate in the loop
+
+> Added 2026-08-09 by [ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md). A wayfinder map's decision tickets ([ADR-0010](../../adr/0010-wayfinder-discovery-maps.md)) are created by an interactive stage-2 session straight through `gh`, so they have never had a run in the ledger and the daemon has never known they exist. That was not a design choice — it is why `ivtrends` #5–#13 stood open on 2026-08-09 as questions with no instruction, and why `timone takeover ivtrends#5` refused. This requirement is what makes them first-class.
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a wayfinder decision ticket a human is expected to act on
+      WHEN its body is read
+      THEN it carries a CTA worded for its type — both answer paths for `grilling` and `task`, the takeover alone for `prototype`, an explicit "nothing needed" for `research`
+    - GIVEN a wayfinder ticket with no run in the ledger
+      WHEN `timone takeover <project>#<n>` is run against it
+      THEN it resolves what that ticket is waiting on from the tracker, spawns the stage-2 session for it, and the session re-enters from the map, the ticket and the repository alone ([ADR-0013](../../adr/0013-stateless-session-reentry.md))
+    - GIVEN an open, claimed wayfinder ticket the human has answered in writing
+      WHEN the daemon next polls the project
+      THEN it picks the answer up and spawns the session that resolves the ticket, without the human running anything
+- **Verification hint:** read a freshly charted map's tickets for their CTAs; run takeover against one with no ledger run and confirm it opens the right conversation; answer another in writing and confirm the daemon acts on the comment unprompted.

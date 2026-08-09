@@ -1,6 +1,6 @@
 # Timone — Status
 
-**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-08-08** (phase 17 closed — **the sleeping-laptop fault is fixed, and you can leave the machine running overnight**. It was proven by freezing a healthy job until it looked dead and watching the service refuse to kill it. The blanket overnight warning is gone; a narrower note replaces it near the bottom, including the one thing still untested and the one call I made without you).
+**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-08-09** (**the questions on the trading app were unanswerable, and that is now fixed in writing and planned in code**. Six tickets asked you things and none of them told you how to reply. The rule changed: any ticket waiting on you offers two ways to answer — write it there, or talk it through — and there is a plan waiting for your approval that makes the machine actually do it).
 
 > **This file is about Timone itself** — the tool. Each managed project has its own `STATUS.md` file; the to-do app's is at `projects/scratch-app/STATUS.md`. **Every file path in this file lives in the Timone repository unless it says otherwise.** When something here is about a project, it names the project and says so.
 
@@ -23,7 +23,24 @@ Timone's own requirements are written down as a numbered list in `doc/specs/prd/
 - **Ten stage skills exist and have each been exercised against throwaway projects:** onboarding a new repository, sorting an incoming request, interviewing you for requirements, writing requirements down, recording architecture decisions, planning work into steps, building the code, checking the result, opening the pull request, and — new on 2026-08-02 — **acting on your feedback**.
 - **A standards library** — twelve written entries. Ten cover the preferred technology choices; two apply to every project with no exceptions (accessibility, which is a legal requirement in the EU, and visual/interaction design). The twelfth is new today, below.
 
-## Just finished — you can leave it running overnight
+## Just finished — a ticket you can just answer
+
+**This one started with you noticing something was wrong, and you were right.** The trading app (`ivtrends`, a separate repository) has a map of open questions on GitHub — nine of them, six needing you. Every one was a clear, well-argued question. **Not one of them said what to do about it.** No reply instructions, no command, nothing. And the command you *would* have needed refused to run on them, because that side of the machine had never been told these questions exist.
+
+**What changed, as a rule.** Any ticket that is waiting on you now offers **two ways to answer, and you pick without explaining why**:
+
+- **Write the answer there.** A comment is enough. You don't have to answer every part, and "I don't know, what do you suggest?" is a real answer.
+- **Or talk it through**, by running one line the ticket hands you — for when it's easier said than written.
+
+**Both end up in the same place.** The same session picks it up either way, and the same record gets written.
+
+**The catch that had to be designed around.** Answering in comments was deliberately ruled out back on 2026-08-02, and for a good reason: an interview is fifteen questions, and fifteen questions in a comment thread is miserable. That still holds. What was missed is that these map questions are **one sharp question each** — which is a different thing, and typing six words into a terminal to answer one of them is silly. So the written path comes with a limit: **if what you write leaves something open, you get asked once more, and if that still doesn't settle it the machine stops typing at you and hands back the conversation.** Without that limit it would have quietly become the thing that was ruled out.
+
+**What is done and what is not.** The rules are written down and committed — the process definition, the skill that makes those maps, the requirements list and the decision record. **The machine does not do it yet.** That is `doc/plans/phases/phase-18.md`, and it needs your approval before it is built. Until it is, the maps will offer the write-it-down path only and say plainly that the talk-it-through option isn't wired up — **an instruction you can't follow is the same bug in a nicer suit**, and shipping one to replace the other would be no fix at all.
+
+**The six live questions on the trading app are still bare.** They get their instructions as the first step of that build, not before — for the same reason.
+
+## Before that — you can leave it running overnight
 
 **Phase 17 is complete, built and proven on 2026-08-08.** This is the fault you called *"more a bug I can live with"* when you split it off from previews — and it is now dead.
 
@@ -199,6 +216,8 @@ The proof run also showed the safety machinery earning its keep, which matters m
 - **Two defects were found live and fixed on the spot:** a session that ended while "waiting to be notified" of background work (its work died with it), and finished tickets being left open — the second one caught by you at the gate.
 
 ## Waiting on you
+
+**What I need from you now: approve `doc/plans/phases/phase-18.md`** — the plan that makes "just answer the ticket" actually work. It is in the Timone repository. Reading it is not required; saying yes is. Until you do, the questions on the trading app stay as they are.
 
 **One decision on Timone itself.** ~~Approve the phase 14 plan.~~ **Approved 2026-08-06**, signed off 2026-08-08. ~~Do the three recorded faults get fixed before the click-a-preview work, or after it?~~ **You chose "before", on 2026-08-08** — phase 15 fixed two of them and explained the third, and previews move back one place to phase 16.
 
