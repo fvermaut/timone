@@ -1,4 +1,5 @@
 import {
+  CLARIFICATION_MARKER,
   CONVERSATION_RECORD_MARKER,
   type TicketComment,
   type TicketThread,
@@ -91,6 +92,29 @@ export function readConversationRecord(
       instant(comment.createdAt) > after &&
       comment.body.includes(CONVERSATION_RECORD_MARKER),
   );
+}
+
+/**
+ * How many clarifying rounds the written path has already spent on this
+ * ticket: the machine's own comments carrying {@link CLARIFICATION_MARKER}.
+ *
+ * ADR-0022 bounds the written path at one — ask what is still open once, and
+ * if the next answer still does not settle it, hand back the takeover rather
+ * than typing at them a third time. The bound is counted here, on the thread,
+ * because the thread is where the asking happened; nothing in the ledger
+ * records it, and nothing should.
+ *
+ * Deliberately not cursor-relative, unlike everything else in this module.
+ * The others answer "has this wait been answered", which is a question about
+ * one wait; this answers "have I already asked again about this ticket",
+ * which is a question about the whole conversation — and a fresh cursor is
+ * written on every re-park, so scoping it to one would reset the bound on the
+ * very move that spends it.
+ */
+export function clarifyingRounds(thread: TicketThread): number {
+  return thread.comments.filter(
+    (comment) => comment.fromTimone && comment.body.includes(CLARIFICATION_MARKER),
+  ).length;
 }
 
 /**

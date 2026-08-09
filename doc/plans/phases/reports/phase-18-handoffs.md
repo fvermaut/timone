@@ -267,3 +267,174 @@ Assertion 2 — *no existing triage test changes behaviour*: **met.** `git diff 
 - **`entryContext` only fires for a run with no recorded stage.** A run already parked at wayfinding resumes from the ledger, not the label, so 18c's written-answer pickup must go through `resolveWait`'s `waitingKind === "conversation"` branch, not through entry routing.
 - **`timone status` renders a wayfinding run as `(wayfinding)`** — `STAGE_LABELS` has no entry and falls back to the raw stage name, same as triage and clarification. Not broken, but if the back half's stages earned a phrase, this one probably should too.
 - **The fence-indentation drift 18a recorded is untouched.** I edited `SKILL.md` only where 18b required it and left both CTA template blocks byte-identical. Still 18d's to reconcile.
+
+## 18c — a written answer moves the ticket
+
+**Built.** A ticket parked on a conversation is now genuinely answerable in writing. A human comment posted after the park is picked up by the daemon, carried to the conversation's **own** stage as the human's words, and the daemon **starts a session for that stage** — which it could not do at all before this slice. That session is told, truthfully, that nobody is reading along; it is handed what they wrote as an *answer* rather than as a gate's change request; and it is bounded at **one clarifying round**, after which it hands back the takeover instead of typing at them a third time. Three endings are judged from the ticket: settled advances (or **completes** the run, at a stage nothing follows), unsettled re-parks on a conversation with a **fresh cursor** — which is what makes the resume once-only — and a handback is the same ledger state with different words on the ticket. The machine's own follow-up question can never be read as the answer, and a quiet park stays exactly where it is, cycle after cycle.
+
+**The escalation that produced this slice, and the amendment it earned.** This slice stopped once before it was built, and was right to. A previous context proved end-to-end — real `AgentSessionSpawner`, real ledger, fake tracker, a human comment sitting past the park cursor — that `session.ts:447` short-circuited *unconditionally* (`if (!runsUnattended(stage)) { await this.openConversation(...); return; }`), so a run resumed with an answer in hand did not ingest it: it **re-posted the whole "Two ways to answer this" invitation and re-parked**, the precise failure ADR-0022's written path exists to prevent. The graph blocked it a second way — `UnspawnedStage` *forbade* a conversation-waiting stage from declaring a model, and `runStage` fails a run loudly without one. Four production files were needed that the plan had not granted, so the slice reported instead of quietly patching, the phase's stamp reverted to `Awaiting approval` a second time, and fvermaut re-approved an amendment that named the files **and settled four design questions** so this slice did not have to. Its uncommitted output — `poll.ts`'s `writtenAnswer`, four seam tests and one deliberately-red wall test (`starts a session carrying the answer, rather than asking again`) — was inherited and continued, not restarted. That red test is the executable statement of the wall, and turning it green is the centre of what follows.
+
+**Files touched.**
+
+- `src/daemon/pipeline.ts` (+33/−13) — `UnspawnedStage` loses its `{ built: true; waits: "conversation" }` arm and is now just `{ built: false }`; `SpawnedStage.waits` drops its `Exclude<WaitKind, "conversation">`. `clarification` and `wayfinding` each declare `claude-opus-5` / `high`. `runsUnattended` keeps its behaviour exactly and gains a docblock saying what it now answers: *does the daemon start this stage **of its own accord***.
+- `src/daemon/session.ts` (+77/−3) — the three changes the amendment named. `spawn`'s short-circuit becomes `if (!runsUnattended(stage) && feedback === undefined)`. `afterStage` gains a conversation branch **before** the triage-classification fall-through, delegating to a new `afterConversation`. `runStage` now returns the `cursor` it started from, so the record and the outcome markers are read from one instant.
+- `src/adapters/ticketing.ts` (+14/−0) — `CLARIFICATION_MARKER`, beside its five siblings.
+- `src/daemon/gates.ts` (+24/−0) — `clarifyingRounds(thread)`, beside `readConversationRecord`.
+- `src/daemon/prompts.ts` (+136/−16) — new module-private `conversationOpening(context)` and `writtenAnswerBlock(context)`; both conversation prompts rebuilt on them; `wayfindingPrompt` now instructs `CONVERSATION_RECORD_MARKER`. `PromptContext.feedback`'s docblock widened.
+- `src/daemon/poll.ts` (+113/−7) — `writtenAnswer` reconciled to the amendment (joins, no longer newest-wins); new `concludeLastConversation` beside `concludeReview`.
+- Tests: `poll.test.ts` (+250/−0, additions only), `session.test.ts` (+170/−0, additions only), `gates.test.ts` (+29/−1), `prompts.test.ts` (+106/−4), `pipeline.test.ts` (+27/−5). `src/adapters/github-tickets.test.ts` was granted and **not touched**: the marker needs no adapter change, since a comment carrying it starts with `MACHINE_MARKER` like every other machine comment and `isMachineComment` already answers for it.
+
+**Decisions taken inside the slice.**
+
+- **The written answer travels in `SpawnContext.feedback`, not a new field.** It is one fact — the human's words, handed to the stage that must act on them — and the two readings are told apart by *which stage* is being prompted, not by which field carried them. A gate stage frames it through `feedbackBlock` ("they asked for a change"); a conversation stage frames it through the new `writtenAnswerBlock` ("they answered"). A second field would have made the spawner's fall-through condition and the prompt's framing two facts free to disagree.
+- **`writtenAnswerBlock` is a separate block from `feedbackBlock`, not a parameter on it.** A gate's feedback is a rejection of something the session produced; a written answer is a reply to a question the session asked. Rendering the second as the first would have the session apologise for a document nobody complained about, and the *bound* has no meaning at a gate.
+- **The bound lives in the prompt, and that is the whole of what is guaranteed.** No code decides "settled" — the phase forbids it and ADR-0022 says the judgement is the session's. What is executable is the shape of the instruction: with no round spent, the prompt authorises exactly one marked question; with one spent, that authorisation is *gone* and the takeover command is in its place. `clarifyingRounds` reads the round off the thread, so the count and the comments a human is looking at cannot disagree.
+- **`clarifyingRounds` is deliberately not cursor-relative**, unlike everything else in `gates.ts`. The others answer "has *this wait* been answered"; this answers "have I already asked again about this ticket". A fresh cursor is written on every re-park, so scoping the count to one would reset the bound on the very move that spends it.
+- **"Not settled" and "handed back" are one ledger state and two comments.** Both re-park on a conversation; the difference is what the human reads. Distinguishing them in the ledger would require the daemon to decide which one happened, which is deciding "settled" — exactly what no slice may do.
+- **The fresh cursor is written by the spawner, never by `poll.ts`.** Whoever ran the session owns the fact of when it finished; the poll loop cannot write it for a session it did not run without holding a second copy of it.
+- **`concludeLastConversation` mirrors `concludeReview` rather than widening `resolveWait`.** Ending a run is not "what should this run do next", and `resumeAnswered` already carries one such pre-step for exactly this reason. It costs one extra `getTicket` per conversation-parked run per cycle — precisely the shape, and the cost, that `concludeReview` already has.
+- **The takeover's opening was kept, not deleted.** `PromptContext.interactive` already existed and was already set by `takeoverPrompt`; it had simply never been read. The "at the keyboard" framing is true for a session a human opened and is preserved verbatim for that case.
+
+**Two tests re-pointed, none deleted.**
+
+- `pipeline.test.ts` → `declares nothing for a stage no session is ever started for` asserted `modelFor("clarification")` is undefined, on the reasoning that `spawn()` short-circuits before `runStage`. The amendment overturns that reasoning by name. Re-pointed onto `research` and `feedback`, where the property still holds, and the reason for the move recorded in the test.
+- `prompts.test.ts` → `tells the session someone is present and waiting` (both conversation prompts) asserted `/at the keyboard/i` unconditionally. Re-pointed onto `{ ...context, interactive: true }`, which is when it is true. Both remain guards on real properties.
+
+**Validation evidence.**
+
+*Baseline.* 636 green across 20 files at `eaf20f5`, plus the inherited uncommitted work: 639 green + **1 red** (the wall test), type-check clean. Confirmed before touching anything:
+
+```
+$ npx vitest run src/daemon
+ × pollOnce — a written answer reaches a session that ingests it > starts a session carrying the answer, rather than asking again
+   → expected [] to have a length of 1 but got +0
+      Tests  1 failed | 458 passed (459)
+```
+
+*Case 1 — every comment after the park joins to make the answer.* The amendment's fourth settled question, overriding the "newest comment" wording the inherited `writtenAnswer` was built to. Test written first, red:
+
+```
+$ npx vitest run src/daemon/poll.test.ts -t "joins every comment"
+AssertionError: expected 'and only ever on the long ones' to contain 'it\'s the draft they lose'
+      Tests  1 failed (61)
+```
+
+Green by replacing `.at(-1)` with the review park's own join (`\n\n---\n\n`) — 60 passed, the wall test still the only red.
+
+*Case 2 — a conversation stage declares a model.* Red:
+
+```
+$ npx vitest run src/daemon/pipeline.test.ts -t "same pair as planning"
+AssertionError: expected undefined to be 'claude-opus-5'
+```
+
+Green with the two rows and the `UnspawnedStage` change. This is where the old guard failed (`expected 'claude-opus-5' to be undefined`) and was re-pointed; 48 passed, `tsc --noEmit` clean — `pipeline.ts` expresses a finished thought again.
+
+*Case 3 — the spawner runs the stage instead of re-inviting.* Red:
+
+```
+$ npx vitest run src/daemon/session.test.ts -t "ingesting a written answer"
+× runs the conversation stage instead of re-inviting, when the answer is in hand
+  → expected [] to have a length of 1 but got +0
+```
+
+The conditional at `:447` moved it on to a *different* red — the session now started, but an invitation was still posted, because `afterStage` fell through to the triage-classification read. That is the trap 18b predicted, arriving exactly where it said it would.
+
+*Case 4 — `afterStage`'s conversation branch.* Three cases written, all red, and the third is the amendment's prediction verbatim:
+
+```
+× runs the conversation stage instead of re-inviting  → expected '**I need to ask you a few things…' not to match /two ways to answer/i
+× advances a clarification the session recorded as agreed  → expected 'clarification' to be 'requirements'
+× completes a wayfinding run once its one decision is recorded  → expected 'failed' to be 'done'
+```
+
+That `'failed'` is `triage recorded no classification` — a wayfinder ticket carries no `triage:` label, so the fall-through killed the run. Green with `afterConversation`: 85 passed, type-check clean.
+
+*Case 4b — the fresh cursor.* `re-parks on the conversation, with a fresh cursor` **passed before the implementation**, via the wrong path: the classification read routed back to clarification and `openConversation` re-parked with a cursor that happened to match. Proved non-vacuous by mutation — `waitCursorFrom(ticket)` replaced by the session's own start cursor:
+
+```
+× re-parks on the conversation, with a fresh cursor, when nothing was settled
+  → expected '2026-08-01T09:00:00Z' to be '2026-08-02T11:00:00Z'
+```
+
+Mutation reverted. Its sibling (`not.toMatch(/two ways to answer/i)`) is what pins that the re-park is not a re-invitation.
+
+*Case 5 — the clarifying round, counted on the ticket.* Three assertions, red:
+
+```
+$ npx vitest run src/daemon/gates.test.ts
+TypeError: (0 , clarifyingRounds) is not a function   [×3]
+```
+
+Green with `CLARIFICATION_MARKER` and `clarifyingRounds` — 37 passed.
+
+*Case 6 — the prompts.* Eleven red at once (both conversation stages × five rules, plus the wayfinding record marker):
+
+```
+× the wayfinding prompt > marks the resolution so the machinery knows the run is over
+  → expected '…' to contain '✅ **Agreed** · the record of a conver…'
+× clarification/wayfinding does not claim anyone is at the keyboard when nobody is
+  → expected '…' not to match /at the keyboard/i
+× clarification/wayfinding carries what they wrote, as an answer
+  → expected '…' not to match /asked for a change/i
+× clarification/wayfinding forbids re-asking what the answer already settles
+  → expected '…' to match /do not ask .*again|already answered/i
+× clarification/wayfinding allows exactly one more question, marked so it can be counted
+  → expected '…' to contain '❓ **Still open** · written by the mac…'
+× clarification/wayfinding hands back the takeover instead of asking a third time
+  → expected '…' to match /not ask (them )?again|no more questions|third/i
+```
+
+**Two assertions I had written were wrong, and were corrected rather than coded around** — both were mine, authored this turn and never green:
+
+1. `toMatch(/nobody is at the keyboard|…/)` sat one line under `not.toMatch(/at the keyboard/i)` and could never both hold. Replaced with `/in writing/i` + `/comment/i`.
+2. `not.toContain(CLARIFICATION_MARKER)` on the second-round prompt is unsatisfiable *and wrong*: the marker is in the prompt because the prompt renders the thread, which is how the round was counted in the first place. What must be gone is the **authorisation** to spend another, so it became `not.toMatch(/you may ask/i)`, with the reason on the test.
+
+Green after `conversationOpening` + `writtenAnswerBlock` + the wayfinding record instruction — 124 passed. The bound's branch proved non-vacuous by mutation (`spent === 0` → `true`):
+
+```
+× clarification/wayfinding hands back the takeover instead of asking a third time
+  → expected '…' to contain 'timone takeover scratch-app#6'
+```
+
+Reverted.
+
+*Case 7 — a resolved wayfinding run ends.* The takeover's half of settled question 3. Red, and it is 18b's "parks forever" symptom exactly:
+
+```
+$ npx vitest run src/daemon/poll.test.ts -t "last thing it had to decide"
+AssertionError: expected 'parked' to be 'done'
+```
+
+Green with `concludeLastConversation` — 481 passed in `src/daemon`.
+
+*The plan's validation block, run at the end:*
+
+```
+$ npx vitest run src/daemon
+ Test Files  9 passed (9)
+      Tests  481 passed (481)
+
+$ npm test
+ Test Files  20 passed (20)
+      Tests  662 passed (662)
+
+$ npm run type-check
+> tsc --noEmit
+(no output, exit 0)
+```
+
+Assertion 1 — *the full suite is green*: **met.** 662 passed across 20 files, from a 636 baseline (+26), with the inherited red now green. Run twice end-to-end, 662/662 both times; 18b's unidentified intermittent did not reappear, which is evidence of nothing either way and is recorded as such.
+
+Assertion 2 — *the parked-and-quiet case is asserted across two consecutive cycles, not one*: **met.** `leaves a quiet conversation park where it is across two consecutive cycles` (inherited, kept) calls `pollOnce` twice over the same deps and asserts on both results: `first.resumed` and `second.resumed` both empty, nothing spawned, **nothing posted**, the run still `parked`, and the cursor still the invitation's. The no-posting assertion is the one that would catch a re-invitation loop.
+
+Beyond the block, `npm run build && node dist/cli.js takeover --help` was run against a freshly built `dist/` (exit 0), because both conversation prompts changed and `timone takeover` is the path that renders them for a human.
+
+**What 18d must know.**
+
+- **The fence-indentation drift is still untouched, and is still yours.** Nothing in `.claude/skills/` or `src/channels/terminal.ts` was edited by this slice. Note that `prompts.ts` now emits its *own* fenced takeover command in the second-round handback block — that is prompt text instructing a session, not channel copy, and it is deliberately at column 0. Do not sweep it into the template reconciliation without deciding it belongs there.
+- **`CLARIFICATION_MARKER` is a sixth marker on the ticket surface** and a human will see it. Its wording (`❓ **Still open** · …`) got no more scrutiny than its siblings' did; if 18d is reviewing what a human actually reads, it is in scope.
+- **`afterStage` now takes seven positional parameters, and that is one too many.** Refactoring was deferred per the stage's rules. The right move is to pass `runStage`'s result object through rather than spreading it — `(run, project, stage, result)` — which also stops the next slice from having to thread an eighth.
+- **Two `getTicket` calls per conversation-parked run per cycle**, since `concludeLastConversation` and `resolveWait` each fetch. This exactly mirrors `concludeReview`/`resolveWait`'s existing double-fetch, so the fix is one refactor covering both, not a patch on the new one.
+- **`waitingOn` still says "a conversation in your terminal"** on a re-park, carried forward from the original park. 18a flagged the same string as marginally narrower than the behaviour now that a park can be resolved in writing. This slice did not widen it — changing it was no more in scope here than there — but two slices have now noticed it, which is usually the point at which it should be decided rather than noticed a third time.
+- **Nothing was added to the run state.** Phase 17's witness fields are untouched, and the clarifying round is counted on the thread, not in the ledger.

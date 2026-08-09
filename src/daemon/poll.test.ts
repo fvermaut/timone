@@ -465,6 +465,165 @@ describe("pollOnce — resuming a run whose human answered", () => {
     expect(spawned).toEqual([]);
   });
 
+  it("ends a run whose conversation resolved the last thing it had to decide", async () => {
+    // ✏ The amendment's third settled question, on the takeover's side of it.
+    // Nothing follows wayfinding, so an accepted record is a `finish` — and a
+    // run that finishes must end. Left as it was, the ledger accumulated a
+    // parked run for every decision ticket already resolved and closed.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "wayfinding",
+      waitCursor: invitation.createdAt,
+    });
+    const { adapter } = threadedAdapter([
+      invitation,
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\n---\n\n${CONVERSATION_RECORD_MARKER}\n\nIV Rank, over a 252-day lookback`,
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: true,
+      },
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(store.get("scratch-app#6")?.status).toBe("done");
+    expect(result.completed).toEqual(["scratch-app#6"]);
+    // And nothing was started: there is no stage after this one to run.
+    expect(spawned).toEqual([]);
+  });
+
+  it("picks up a written answer and carries it to the conversation's own stage", async () => {
+    // ADR-0022's written path: a plain comment after the machine's question is
+    // the answer, with no keyword, read exactly as a gate reply is. It resumes
+    // the stage the run is parked at — the conversation is what ingests it.
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter } = threadedAdapter([
+      invitation,
+      {
+        author: "fvermaut",
+        body: "it's the draft they lose, not the phone layout",
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: false,
+      },
+    ]);
+    const contexts: unknown[] = [];
+    const recording: SessionSpawner = {
+      async spawn(_run, _project, context) {
+        contexts.push(context);
+      },
+    };
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: recording,
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(contexts).toEqual([
+      {
+        stage: "clarification",
+        feedback: "it's the draft they lose, not the phone layout",
+      },
+    ]);
+  });
+
+  it("joins every comment they wrote after the park, not only the last one", async () => {
+    // ✏ The amendment's fourth settled question: a written answer is read
+    // generously, exactly as the review park reads a review. Someone who
+    // answers and then adds a second thought has said one thing in two
+    // comments, and dropping the first would lose it silently.
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter } = threadedAdapter([
+      invitation,
+      {
+        author: "fvermaut",
+        body: "it's the draft they lose, not the phone layout",
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: false,
+      },
+      {
+        author: "fvermaut",
+        body: "and only ever on the long ones",
+        createdAt: "2026-08-03T11:05:00Z",
+        fromTimone: false,
+      },
+    ]);
+    const contexts: { feedback?: string }[] = [];
+    const recording: SessionSpawner = {
+      async spawn(_run, _project, context) {
+        contexts.push(context ?? {});
+      },
+    };
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: recording,
+    });
+
+    expect(contexts[0]?.feedback).toContain("it's the draft they lose");
+    expect(contexts[0]?.feedback).toContain("only ever on the long ones");
+  });
+
+  it("does not read the machine's own follow-up question as the answer", async () => {
+    // The machine asks the remaining question on the same thread it is
+    // watching. A loop that answered itself would ask forever.
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter } = threadedAdapter([
+      invitation,
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\nand which of the two do they hit first?`,
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: true,
+      },
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#6")?.status).toBe("parked");
+  });
+
+  it("leaves a quiet conversation park where it is across two consecutive cycles", async () => {
+    // The idempotency R1 already demands, stated over more than one cycle:
+    // nothing new was said, so nothing may fire — not on this cycle and not on
+    // the next one either.
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter, posted } = threadedAdapter([invitation]);
+    const { spawner, spawned } = fakeSpawner();
+    const deps = { manifest: manifestWith("scratch-app"), store, adapter, spawner };
+
+    const first = await pollOnce(deps);
+    const second = await pollOnce(deps);
+
+    expect(first.resumed).toEqual([]);
+    expect(second.resumed).toEqual([]);
+    expect(spawned).toEqual([]);
+    expect(posted).toEqual([]);
+    expect(store.get("scratch-app#6")?.status).toBe("parked");
+    expect(store.get("scratch-app#6")?.waitCursor).toBe(invitation.createdAt);
+  });
+
   it("advances a gate the human approved", async () => {
     const store = newStore();
     parkedOnGate(store);
@@ -1928,5 +2087,96 @@ describe("pollOnce — a wayfinder decision ticket", () => {
     const park = comments.at(-1)?.body ?? "";
     expect(park).toMatch(/two ways to answer/i);
     expect(park).toContain("timone takeover scratch-app#5");
+  });
+});
+
+describe("pollOnce — a written answer reaches a session that ingests it", () => {
+  /**
+   * The real spawner again, and for the same reason: "the answer is picked up
+   * and the session spawned" (ADR-0022) is a claim about the poll loop, the
+   * stage graph and the spawner together. A fake spawner can only restate the
+   * half of it that lives in `poll.ts`.
+   *
+   * The runtime records rather than throws, because here a session *is* what
+   * should start — the written path exists so that writing causes something
+   * to happen.
+   */
+  function realSpawner(
+    store: RunStore,
+    adapter: TicketingAdapter,
+    prompts: string[],
+  ): SessionSpawner {
+    return new AgentSessionSpawner({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      runtime: {
+        async start(request) {
+          prompts.push(request.prompt);
+          return {
+            sessionId: "session-2",
+            completed: Promise.resolve({ sessionId: "session-2", ok: true }),
+          };
+        },
+      },
+      root: "/nowhere",
+    });
+  }
+
+  it("starts a session carrying the answer, rather than asking again", async () => {
+    const store = newStore();
+    const invitation = {
+      author: "fvermaut",
+      body: `${MACHINE_MARKER}\n\ntwo ways to answer this`,
+      createdAt: "2026-08-03T10:00:00Z",
+      fromTimone: true,
+    };
+    const answer = {
+      author: "fvermaut",
+      body: "it's the draft they lose, not the phone layout",
+      createdAt: "2026-08-03T11:00:00Z",
+      fromTimone: false,
+    };
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const posted: PostedComment[] = [];
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [invitation, answer] };
+      },
+      async postComment(project, number, body): Promise<void> {
+        posted.push({ project: project.name, number, body });
+      },
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+    };
+
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: invitation.createdAt,
+    });
+
+    const prompts: string[] = [];
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: realSpawner(store, adapter, prompts),
+    });
+
+    // One session, instructed with what they actually wrote.
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("it's the draft they lose");
+    // And no second invitation: re-posting the question they just answered is
+    // the exact failure the written path exists to prevent.
+    expect(posted.map((comment) => comment.body).join("\n")).not.toMatch(
+      /two ways to answer/i,
+    );
   });
 });

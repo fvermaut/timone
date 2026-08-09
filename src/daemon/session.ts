@@ -17,11 +17,12 @@ import {
 } from "../channels/conversation.js";
 import { TerminalChannel } from "../channels/terminal.js";
 import { gateCommentFor } from "./gate-comment.js";
-import { waitCursorFrom } from "./gates.js";
+import { readConversationRecord, waitCursorFrom } from "./gates.js";
 import { outcomeCursorFrom, readStageOutcome, type StageOutcome } from "./outcomes.js";
 import {
   APPROVAL_RECORD_MODEL,
   classificationFromLabels,
+  concludeConversation,
   effortFor,
   isBuilt,
   modelFor,
@@ -444,7 +445,13 @@ export class AgentSessionSpawner implements SessionSpawner {
         return;
       }
 
-      if (!runsUnattended(stage)) {
+      // A conversation stage still never starts of the daemon's own accord —
+      // but ADR-0022 gave the human a second way to start it, and an answer
+      // in hand *is* them having started it. Arriving here with nothing is
+      // still a stop; arriving with their words falls through to the session
+      // that ingests them, because re-posting the invitation they have just
+      // answered is the precise failure the written path exists to prevent.
+      if (!runsUnattended(stage) && feedback === undefined) {
         await this.openConversation(run, project, stage);
         return;
       }
@@ -470,6 +477,7 @@ export class AgentSessionSpawner implements SessionSpawner {
         outcome.ticket,
         outcome.producedWork,
         outcome.outcome,
+        outcome.cursor,
       );
       if (next === undefined) return;
       stage = next;
@@ -482,6 +490,13 @@ export class AgentSessionSpawner implements SessionSpawner {
    * Run one stage's session. Returns the ticket as it stood afterwards, and
    * whether the session actually moved the work branch on — which is the only
    * evidence the daemon has that a stage owing an artifact produced one.
+   *
+   * `cursor` is the instant the session started from: everything the session
+   * itself said is strictly after it. Returned rather than kept private
+   * because judging the stage means reading what *this* session posted, and
+   * the outcome markers and a conversation's record must be read from the
+   * same instant or the two judgements can disagree about whose words they
+   * are looking at.
    */
   private async runStage(
     run: Run,
@@ -494,6 +509,7 @@ export class AgentSessionSpawner implements SessionSpawner {
         ticket: TicketThread;
         producedWork: boolean;
         outcome: StageOutcome | undefined;
+        cursor: string;
       }
     | { ok: false }
   > {
@@ -558,12 +574,14 @@ export class AgentSessionSpawner implements SessionSpawner {
 
     const headAfter = await this.branchHead(project, branch);
 
+    const cursor = outcomeCursorFrom(before);
     const after = await adapter.getTicket(project, run.ticket);
     return {
       ok: true,
       ticket: after,
       producedWork: headAfter !== undefined && headAfter !== headBefore,
-      outcome: readStageOutcome(after, outcomeCursorFrom(before)),
+      outcome: readStageOutcome(after, cursor),
+      cursor,
     };
   }
 
@@ -791,12 +809,17 @@ export class AgentSessionSpawner implements SessionSpawner {
     ticket: TicketThread,
     producedWork: boolean,
     outcome: StageOutcome | undefined,
+    cursor: string,
   ): Promise<PipelineStage | undefined> {
     const { store, adapter } = this.options;
 
     if (waitFor(stage) === "gate") {
       await this.openGate(run, project, stage, producedWork);
       return undefined;
+    }
+
+    if (waitFor(stage) === "conversation") {
+      return this.afterConversation(run, project, stage, ticket, cursor);
     }
 
     if (stage === "execution") {
@@ -860,6 +883,57 @@ export class AgentSessionSpawner implements SessionSpawner {
     if (transition.kind !== "advance") return undefined;
 
     return transition.stage;
+  }
+
+  /**
+   * Judge a session that ingested a written answer (ADR-0022).
+   *
+   * Three endings, and the ticket is where all three are read from — the
+   * daemon never saw the exchange, so what the session *posted* is the whole
+   * of what it knows. **Settled** is a record carrying the conversation
+   * marker {@link readConversationRecord} looks for, and it ends the
+   * conversation exactly as a takeover's would: on to the next stage, or done
+   * when nothing follows (wayfinding, whose one decision is the whole run).
+   *
+   * **Not settled** and **handed back** are one ledger state and two
+   * comments, deliberately. Whether the session asked the one remaining thing
+   * or gave up and named the takeover, the ticket is waiting on a human
+   * again; the difference is what they read, not what the run is doing.
+   * Trying to tell them apart mechanically would be this slice deciding
+   * "settled", which is the session's judgement and no code's.
+   *
+   * The **fresh cursor** is what makes the resume once-only: the answer that
+   * started this session now sits before the cursor and cannot start another.
+   * It is written here, by whoever ran the session, because the poll loop
+   * cannot write it for a session it did not run without owning the same fact
+   * twice.
+   */
+  private async afterConversation(
+    run: Run,
+    project: TicketingProject,
+    stage: PipelineStage,
+    ticket: TicketThread,
+    cursor: string,
+  ): Promise<PipelineStage | undefined> {
+    const { store } = this.options;
+
+    if (readConversationRecord(ticket, cursor) === undefined) {
+      this.stop(run, {
+        waitingOn: run.waitingOn ?? "a conversation in your terminal",
+        kind: "conversation",
+        stage,
+        waitCursor: waitCursorFrom(ticket),
+      });
+      this.log(`parked ${run.id} at ${stage}, still waiting on a conversation`);
+      return undefined;
+    }
+
+    const transition = concludeConversation(stage, { accepted: true });
+    if (transition.kind === "advance") return transition.stage;
+
+    store.complete(run.id);
+    this.log(`done   ${run.id} — ${stage} resolved it`);
+    return undefined;
   }
 
   /**

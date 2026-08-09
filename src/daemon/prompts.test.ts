@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CLARIFICATION_MARKER,
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
   STAGE_DONE_MARKER,
@@ -132,8 +133,14 @@ describe("the triage prompt", () => {
 describe("the clarification prompt", () => {
   const prompt = stagePrompt("clarification", context);
 
-  it("tells the session someone is present and waiting", () => {
-    expect(prompt).toMatch(/at the keyboard/i);
+  it("tells the session someone is present and waiting, when one is", () => {
+    // ✏ Re-pointed at the session a human actually opened. The prompt used to
+    // claim this unconditionally, which was false the moment ADR-0022 let the
+    // daemon start this stage to ingest an answer written on the ticket — and
+    // it is the sentence most likely to make such a session behave wrongly.
+    expect(stagePrompt("clarification", { ...context, interactive: true })).toMatch(
+      /at the keyboard/i,
+    );
   });
 
   it("carries what triage decided, so the interview does not start from nothing", () => {
@@ -172,8 +179,18 @@ describe("the wayfinding prompt", () => {
     expect(PROMPTED_STAGES).toContain("wayfinding");
   });
 
-  it("tells the session someone is present and waiting", () => {
-    expect(prompt).toMatch(/at the keyboard/i);
+  it("tells the session someone is present and waiting, when one is", () => {
+    expect(stagePrompt("wayfinding", { ...context, interactive: true })).toMatch(
+      /at the keyboard/i,
+    );
+  });
+
+  it("marks the resolution so the machinery knows the run is over", () => {
+    // ✏ The amendment's third settled question. Nothing follows wayfinding,
+    // so the record marker is what turns a resolved decision ticket into a
+    // finished run instead of one parked forever on a question already
+    // answered.
+    expect(prompt).toContain(CONVERSATION_RECORD_MARKER);
   });
 
   it("sends the session to this one ticket on its map", () => {
@@ -191,6 +208,91 @@ describe("the wayfinding prompt", () => {
   it("supposes no answer to the question the ticket exists to ask", () => {
     expect(prompt).not.toMatch(/the problem is|they want|you should build/i);
   });
+});
+
+describe("a conversation prompt built for a written answer", () => {
+  const CONVERSATION_STAGES = ["clarification", "wayfinding"] as const;
+  const answer = "it's the draft they lose, not the phone layout";
+
+  /** The thread as it stands once the machine has already asked once more. */
+  function afterOneRound(): TicketThread {
+    return {
+      ...ticket,
+      comments: [
+        ...ticket.comments,
+        {
+          author: "fvermaut",
+          body: `${MACHINE_MARKER}\n\n${CLARIFICATION_MARKER}\n\nwhich of the two first?`,
+          createdAt: "2026-08-03T10:00:00Z",
+          fromTimone: true,
+        },
+      ],
+    };
+  }
+
+  it.each(CONVERSATION_STAGES)(
+    "%s does not claim anyone is at the keyboard when nobody is",
+    (stage) => {
+      // The daemon started this session because they wrote on the ticket. A
+      // session told a human is waiting in front of it will behave as though
+      // its reply is being read in the moment — and nothing it says reaches
+      // them except as a comment.
+      const prompt = stagePrompt(stage, { ...context, feedback: answer });
+
+      expect(prompt).not.toMatch(/at the keyboard/i);
+      expect(prompt).toMatch(/in writing/i);
+      expect(prompt).toMatch(/comment/i);
+    },
+  );
+
+  it.each(CONVERSATION_STAGES)("%s carries what they wrote, as an answer", (stage) => {
+    const prompt = stagePrompt(stage, { ...context, feedback: answer });
+
+    expect(prompt).toContain(answer);
+    // Not as a gate's change request: they answered a question, they did not
+    // reject a document.
+    expect(prompt).not.toMatch(/asked for a change/i);
+  });
+
+  it.each(CONVERSATION_STAGES)(
+    "%s forbids re-asking what the answer already settles",
+    (stage) => {
+      expect(stagePrompt(stage, { ...context, feedback: answer })).toMatch(
+        /do not ask .*again|already answered/i,
+      );
+    },
+  );
+
+  it.each(CONVERSATION_STAGES)(
+    "%s allows exactly one more question, marked so it can be counted",
+    (stage) => {
+      const prompt = stagePrompt(stage, { ...context, feedback: answer });
+
+      expect(prompt).toContain(CLARIFICATION_MARKER);
+      expect(prompt).toMatch(/once/i);
+    },
+  );
+
+  it.each(CONVERSATION_STAGES)(
+    "%s hands back the takeover instead of asking a third time",
+    (stage) => {
+      // ADR-0022's bound, and the one thing this slice guarantees: escalation
+      // is the session's judgement, but a second unsettled answer must
+      // produce the takeover rather than another question.
+      const prompt = stagePrompt(stage, {
+        ...context,
+        ticket: afterOneRound(),
+        feedback: "still not sure really",
+      });
+
+      expect(prompt).toContain("timone takeover scratch-app#6");
+      expect(prompt).toMatch(/not ask (them )?again|no more questions|third/i);
+      // The marker itself is still in the prompt — it is in the thread the
+      // prompt renders, which is exactly how the round was counted. What must
+      // be gone is the *authorisation* to spend another one.
+      expect(prompt).not.toMatch(/you may ask/i);
+    },
+  );
 });
 
 describe("conversationSubject", () => {

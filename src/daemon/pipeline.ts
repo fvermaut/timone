@@ -78,8 +78,7 @@ interface StageFacts {
  */
 interface SpawnedStage {
   built: true;
-  /** Never a conversation — see {@link UnspawnedStage}. */
-  waits: Exclude<WaitKind, "conversation">;
+  waits: WaitKind;
   model: string;
   /**
    * Omitted for models that reject the parameter — Haiku 4.5 does. Optional
@@ -91,15 +90,17 @@ interface SpawnedStage {
 
 /**
  * A stage no session is ever started for, and which therefore declares
- * neither. Two ways to be one: the machinery does not exist yet, or the stage
- * waits on a conversation — `spawn()` short-circuits to `openConversation`
- * before it ever reaches `runStage`, so `runtime.start` is never called. A
- * model on either would be configuration nothing reads.
+ * neither. One way to be one, since ADR-0022: the machinery does not exist
+ * yet. A model on it would be configuration nothing reads.
+ *
+ * It used to be two. A stage waiting on a conversation was unspawnable
+ * because `spawn()` short-circuited to `openConversation` before it ever
+ * reached `runStage` — but a conversation can now be **answered in writing**,
+ * and the session that ingests that answer is a session the daemon starts. So
+ * a conversation stage declares a model like any other spawned stage; what it
+ * still never does is start *of its own accord* (see {@link runsUnattended}).
  */
-type UnspawnedStage = { model?: never; effort?: never } & (
-  | { built: false }
-  | { built: true; waits: "conversation" }
-);
+type UnspawnedStage = { model?: never; effort?: never } & { built: false };
 
 type StageSpec = StageFacts & (SpawnedStage | UnspawnedStage);
 
@@ -146,6 +147,14 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     waits: "conversation",
     ownsBranch: false,
     built: true,
+    // Read only when the *daemon* spawns the session that ingests a written
+    // answer (ADR-0022) — a human's `timone takeover` runs in their own CLI
+    // and never consults this. That session judges whether what they wrote
+    // settles the question, resolves or asks the one remaining thing on that
+    // judgement, and may write an ADR: the same class of work as requirements
+    // and planning, which carry the same pair.
+    model: "claude-opus-5",
+    effort: "high",
     next: "requirements",
   },
   wayfinding: {
@@ -157,6 +166,10 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     waits: "conversation",
     ownsBranch: false,
     built: true,
+    // The same pair as `clarification`, for the same reason and read on the
+    // same occasion: the daemon-spawned session that ingests a written answer.
+    model: "claude-opus-5",
+    effort: "high",
     // **Nothing follows, on purpose.** A decision ticket's answer resolves
     // that ticket and ends its run. The destination artifact is the whole
     // map's to hand to stage 3 once the effort closes, and advancing one
@@ -373,12 +386,19 @@ export function effortFor(stage: PipelineStage): EffortLevel | undefined {
 }
 
 /**
- * Whether the daemon starts this stage itself.
+ * Whether the daemon starts this stage **of its own accord**.
  *
  * Derived rather than declared, because it *is* the same fact: a stage whose
  * wait is a conversation has no unattended work to do — the conversation is
- * the work, and it needs someone at the keyboard. Recording it twice would
- * let the two drift.
+ * the work, and it needs a human to have said something. Recording it twice
+ * would let the two drift.
+ *
+ * ADR-0022 narrowed what this answers without changing the answer. A written
+ * answer on the ticket *does* start a conversation stage's session — but the
+ * human is what started it, and this function is still false for that stage,
+ * because the daemon reaching the stage with nothing in hand must still stop
+ * and invite rather than run. The written path is a branch in the spawner on
+ * the answer's presence, not a redefinition of this.
  */
 export function runsUnattended(stage: PipelineStage): boolean {
   return waitFor(stage) !== "conversation";

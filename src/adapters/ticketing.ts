@@ -34,6 +34,20 @@ export const CONVERSATION_RECORD_MARKER =
   "✅ **Agreed** · the record of a conversation, accepted by the human";
 
 /**
+ * The line the machine's one clarifying question carries, when a written
+ * answer left something unsettled ([ADR-0022](../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md)).
+ *
+ * The written path is bounded at **one clarifying round**, and this marker is
+ * where that round is counted. It is counted on the *ticket* rather than in
+ * the ledger deliberately: the thread already holds the fact — the machine
+ * either asked again or it did not — and a counter beside it would be a
+ * second copy of one truth, free to disagree with the comments a human is
+ * looking at. Read by {@link clarifyingRounds}.
+ */
+export const CLARIFICATION_MARKER =
+  "❓ **Still open** · written by the machine when a written answer left something unsettled";
+
+/**
  * The line a stage's closing comment carries when its work is done and the
  * pipeline may move on. Phase 13's back half runs stages whose sessions do
  * real, fallible work; the daemon judges them by the artifact they owe *and*

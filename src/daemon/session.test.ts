@@ -645,6 +645,176 @@ describe("the conversation invitation", () => {
   });
 });
 
+describe("ingesting a written answer", () => {
+  /** A run parked on a conversation at `stage`, its cursor at `cursor`. */
+  function parkedOnConversation(
+    store: RunStore,
+    stage: PipelineStage,
+    cursor = "2026-08-02T10:00:00Z",
+  ): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage,
+      waitCursor: cursor,
+    });
+    return store.get(run.id)!;
+  }
+
+  it("runs the conversation stage instead of re-inviting, when the answer is in hand", async () => {
+    // ADR-0022's written path, at the spawner. The stage still never starts
+    // of the daemon's own accord — but an answer in hand is the human having
+    // started it, and re-posting the invitation they just answered is the
+    // exact failure the path exists to prevent.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:feature"],
+    });
+    const { runtime, requests } = fakeRuntime();
+    const run = parkedOnConversation(store, "clarification");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(run, project, {
+      stage: "clarification",
+      feedback: "it's the draft they lose, not the phone layout",
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].model).toBe(modelFor("clarification"));
+    expect(requests[0].prompt).toContain("it's the draft they lose");
+    expect(comments.map((comment) => comment.body).join("\n")).not.toMatch(
+      /two ways to answer/i,
+    );
+  });
+
+  it("still invites, and starts nothing, when the daemon arrives with nothing in hand", async () => {
+    // The other half of the same branch, and the reason `runsUnattended` kept
+    // its meaning: reaching a conversation stage with no answer is still a
+    // stop, not a session.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:feature"],
+    });
+    const { runtime, requests } = fakeRuntime();
+    const run = parkedOnConversation(store, "clarification");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(run, project, { stage: "clarification" });
+
+    expect(requests).toEqual([]);
+    expect(store.get(run.id)?.waitingKind).toBe("conversation");
+  });
+
+  it("re-parks on the conversation, with a fresh cursor, when nothing was settled", async () => {
+    // The session read the answer and posted what is still open. Nothing is
+    // agreed, so the run waits again — and the fresh cursor is what makes the
+    // resume once-only: without it the same answer would resume it forever.
+    const store = newStore();
+    const { adapter, ticket } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:feature"],
+    });
+    const { runtime } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, "and which of the two do they hit first?");
+      },
+    });
+    const run = parkedOnConversation(store, "clarification");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(run, project, { stage: "clarification", feedback: "the draft" });
+
+    const parked = store.get(run.id);
+    expect(parked?.status).toBe("parked");
+    expect(parked?.waitingKind).toBe("conversation");
+    expect(parked?.stage).toBe("clarification");
+    expect(parked?.waitCursor).toBe(ticket.comments.at(-1)?.createdAt);
+    expect(parked?.waitCursor).not.toBe("2026-08-02T10:00:00Z");
+  });
+
+  it("advances a clarification the session recorded as agreed", async () => {
+    // Settled is settled, whichever way the answer arrived: the record marker
+    // ends the conversation exactly as it does after a takeover.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:feature"],
+    });
+    const { runtime, requests } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(
+          project,
+          7,
+          `${CONVERSATION_RECORD_MARKER}\n\nwe agreed it is the draft`,
+        );
+      },
+    });
+    const run = parkedOnConversation(store, "clarification");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(run, project, { stage: "clarification", feedback: "the draft" });
+
+    expect(store.get(run.id)?.stage).toBe("requirements");
+    expect(requests[1]?.prompt).toMatch(/Write down what ticket #7/);
+  });
+
+  it("completes a wayfinding run once its one decision is recorded", async () => {
+    // ✏ The amendment's third settled question, closing what 18b deferred.
+    // Nothing follows wayfinding, so the transition is `finish` — and a run
+    // that finishes must end, not sit parked on a ticket already resolved.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "wayfinder:grilling"],
+    });
+    const { runtime } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(
+          project,
+          7,
+          `${CONVERSATION_RECORD_MARKER}\n\nIV Rank, over a 252-day lookback`,
+        );
+      },
+    });
+    const run = parkedOnConversation(store, "wayfinding");
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(run, project, { stage: "wayfinding", feedback: "IV Rank" });
+
+    expect(store.get(run.id)?.status).toBe("done");
+  });
+});
+
 describe("run lifecycle", () => {
   it("activates on start and parks once on a clean exit", async () => {
     const store = newStore();

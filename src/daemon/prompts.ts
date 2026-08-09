@@ -1,4 +1,5 @@
 import {
+  CLARIFICATION_MARKER,
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
   STAGE_DONE_MARKER,
@@ -7,6 +8,7 @@ import {
   type TicketThread,
 } from "../adapters/ticketing.js";
 import { takeoverCommand } from "../channels/terminal.js";
+import { clarifyingRounds } from "./gates.js";
 import type { Classification } from "./pipeline.js";
 
 /** The stages that have a prompt. Extended as stages are built. */
@@ -27,7 +29,13 @@ export interface PromptContext {
   ticket: TicketThread;
   /** What triage decided, once it has. */
   classification?: Classification;
-  /** The human's words, when a gate sent this stage back to redo its work. */
+  /**
+   * The human's words, when they are what resumed this stage: a gate's change
+   * request at a gated stage, or the answer they wrote on the ticket at a
+   * conversation stage (ADR-0022). One field, because it is one fact — what
+   * they said, to the stage that has to act on it — and each prompt frames it
+   * for what its own stage was waiting on.
+   */
   feedback?: string;
   /** The work branch this run owns, at the stages that own one. */
   branch?: string;
@@ -129,6 +137,111 @@ function provenanceBlock(stage: string, context: PromptContext): string {
     "",
     "This is what makes the work you do identifiable from git history alone.",
     "An automatic check reports any commit that leaves them off.",
+  ].join("\n");
+}
+
+/**
+ * How this conversation session came to exist, said truthfully.
+ *
+ * Both openings used to be the first: *"A human has just opened this session
+ * by running `timone takeover…`. They are at the keyboard now, waiting for
+ * you."* ADR-0022 made that flatly false for a session the **daemon** starts
+ * to ingest an answer written on the ticket — and it is the sentence most
+ * likely to make such a session behave wrongly, since a session that believes
+ * someone is reading along will ask a question and wait for a reply that
+ * cannot arrive. Which side started the session changes who is waiting and
+ * where the words have to land; it does not change what the stage is.
+ */
+function conversationOpening(context: PromptContext): string[] {
+  const { project, ticket } = context;
+  const opening = `You are resuming work on the managed project **${project.name}**.`;
+
+  if (context.interactive === true) {
+    return [
+      opening,
+      "A human has just opened this session by running",
+      `\`${takeoverCommand(project.name, ticket.number)}\`.`,
+      "**They are at the keyboard now, waiting for you.** This is a conversation, not a batch job.",
+    ];
+  }
+
+  return [
+    opening,
+    "**Nobody is reading along as you work.** You were started by the",
+    "machinery because they answered this ticket in writing, and everything",
+    "you want to say to them has to be posted as a comment on the ticket —",
+    "there is no other way for it to reach them, and nothing you leave",
+    "unsaid here survives the end of your turn.",
+  ];
+}
+
+/**
+ * The human's written answer to the question this ticket was waiting on, and
+ * the bound on what the session may do about it (ADR-0022).
+ *
+ * Deliberately not {@link feedbackBlock}, though both carry the human's words
+ * back into a stage. A gate's feedback is a rejection — "you did this, do it
+ * again differently" — and reading a written answer that way would have the
+ * session apologise for a document nobody complained about. This is the
+ * opposite: they answered a question, and the session's job is to see whether
+ * the answer settles it.
+ *
+ * **The bound is expressed here because here is where it can be.** Whether an
+ * answer "settles" the question is the session's judgement and no code's, so
+ * nothing downstream can decide it — what is guaranteed instead is that a
+ * second unsettled answer produces the takeover rather than a third question,
+ * and this block is what guarantees it: the round already spent is read off
+ * the thread, and the instruction changes accordingly.
+ */
+function writtenAnswerBlock(context: PromptContext): string {
+  const answer = context.feedback;
+  if (answer === undefined || answer.trim() === "") return "";
+
+  const spent = clarifyingRounds(context.ticket);
+  const { project, ticket } = context;
+
+  return [
+    "",
+    "**They have answered this ticket in writing.** This is what they wrote,",
+    "in their words — read it as the answer to what this ticket was waiting",
+    "on, exactly as you would read a reply given out loud:",
+    "",
+    "--- what they wrote ---",
+    answer,
+    "--- end of what they wrote ---",
+    "",
+    "**Do not ask them again anything it already answers**, and do not make",
+    "them repeat themselves. Answer from the codebase whatever the codebase",
+    "can answer. If it settles the question, resolve this ticket now.",
+    "",
+    ...(spent === 0
+      ? [
+          "If something real is genuinely still open, you may ask **once**, and",
+          "only about what is still open — post exactly one comment whose first",
+          "content line is this line, exactly as written:",
+          "",
+          CLARIFICATION_MARKER,
+          "",
+          "That line is how the machinery knows the one question has been spent.",
+          "Then stop and change nothing else. Asking about something they have",
+          "already settled, or asking several things at once, wastes the one",
+          "question on nothing.",
+        ]
+      : [
+          "**You have already asked once, and this is their answer to that.**",
+          "You may not ask a third time. If it still does not settle the",
+          "question, say so plainly on the ticket and hand it back — tell them",
+          "the rest is quicker talked through, and give them this to run:",
+          "",
+          "```",
+          takeoverCommand(project.name, ticket.number),
+          "```",
+          "",
+          "Then change nothing else. Do not ask them another question in",
+          "writing: this ticket has had its written round, and typing at them",
+          "again is the failure that bound exists to prevent.",
+        ]),
+    "",
   ].join("\n");
 }
 
@@ -595,20 +708,19 @@ function triagePrompt(context: PromptContext): string {
 /**
  * Stage 2: the interview.
  *
- * Always an interactive session — the daemon never runs this one, because
- * the work *is* the conversation and a conversation needs someone present.
+ * Usually an interactive session, because the work *is* the conversation. The
+ * daemon runs it in exactly one case (ADR-0022): the human answered on the
+ * ticket in writing, and this session exists to ingest what they wrote. See
+ * {@link conversationOpening} for why the difference has to be said out loud.
  */
 function clarificationPrompt(context: PromptContext): string {
-  const { ticket, classification } = context;
+  const { classification } = context;
 
   return [
-    `You are resuming work on the managed project **${context.project.name}**.`,
-    "A human has just opened this session by running",
-    `\`${takeoverCommand(context.project.name, ticket.number)}\`.`,
-    "**They are at the keyboard now, waiting for you.** This is a conversation, not a batch job.",
+    ...conversationOpening(context),
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
+    writtenAnswerBlock(context),
     "",
     reentryBlock(),
     "",
@@ -661,16 +773,11 @@ function clarificationPrompt(context: PromptContext): string {
  * that writing requirements is not what this is.
  */
 function wayfindingPrompt(context: PromptContext): string {
-  const { ticket } = context;
-
   return [
-    `You are resuming work on the managed project **${context.project.name}**.`,
-    "A human has just opened this session by running",
-    `\`${takeoverCommand(context.project.name, ticket.number)}\`.`,
-    "**They are at the keyboard now, waiting for you.** This is a conversation, not a batch job.",
+    ...conversationOpening(context),
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
+    writtenAnswerBlock(context),
     "",
     reentryBlock(),
     "",
@@ -690,6 +797,19 @@ function wayfindingPrompt(context: PromptContext): string {
     "map's decisions. If the answer is a decision that is hard to reverse or",
     "carries a real trade-off, record it as an ADR at decision time, exactly as",
     "that stage requires — a decision that lives only on a ticket is lost.",
+    "",
+    "Start the resolution comment with the machine line below, then a blank",
+    "line, then this exact line:",
+    "",
+    CONVERSATION_RECORD_MARKER,
+    "",
+    "That line is how the machinery knows this decision is settled and the",
+    "ticket's journey is over. Without it the question stays open as far as",
+    "anything downstream can tell, however plainly you wrote the answer.",
+    "",
+    "**If nothing was settled, post nothing carrying that line.** Say what is",
+    "still open and change nothing else — an unresolved decision is not a",
+    "decision, and marking one would close a question nobody answered.",
     "",
     "**Do not write the destination artifact.** No requirements, no PRD, no",
     "phase file, and no application code: the map produces decisions, and what",

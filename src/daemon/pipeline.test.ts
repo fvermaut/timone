@@ -271,6 +271,21 @@ describe("the model and effort each stage runs on", () => {
     expect(effortFor("remediation")).toBe("high");
   });
 
+  it("runs a conversation the daemon ingests an answer into on the same pair as planning", () => {
+    // ✏ The amendment's first settled question. A conversation stage is
+    // spawned after all — not of the daemon's own accord, but to ingest a
+    // written answer (ADR-0022) — and a stage the runtime starts without a
+    // declared model silently takes whatever the runtime defaults to. The
+    // session judges whether an answer settles a decision, re-asks or
+    // resolves on that judgement, and may write an ADR: requirements' and
+    // planning's class of work, so requirements' and planning's pair.
+    expect(modelFor("clarification")).toBe("claude-opus-5");
+    expect(effortFor("clarification")).toBe("high");
+
+    expect(modelFor("wayfinding")).toBe("claude-opus-5");
+    expect(effortFor("wayfinding")).toBe("high");
+  });
+
   it("keeps triage off the cheapest model, because it routes silently", () => {
     // A `triage:chore` label goes straight to planning while `triage:feature`
     // opens a human interview first — so a misclassification skips a gate
@@ -289,11 +304,18 @@ describe("the model and effort each stage runs on", () => {
   });
 
   it("declares nothing for a stage no session is ever started for", () => {
-    // `spawn()` short-circuits to `openConversation` before it reaches
-    // `runStage`, so clarification never calls `runtime.start`. A model on it
-    // would be config nothing reads — the kind that later looks like a bug.
-    expect(modelFor("clarification")).toBeUndefined();
-    expect(effortFor("clarification")).toBeUndefined();
+    // A stage whose machinery does not exist calls `runtime.start` by no
+    // path at all, so a model on it would be config nothing reads — the kind
+    // that later looks like a bug.
+    //
+    // ✏ This guard used to point at `clarification`, on the reasoning that
+    // `spawn()` short-circuited to `openConversation` before ever reaching
+    // `runStage`. ADR-0022 made that false: a written answer is ingested by a
+    // session the daemon starts at that very stage. Re-pointed rather than
+    // deleted — the property is real, and the unbuilt stages are where it
+    // still holds.
+    expect(modelFor("research")).toBeUndefined();
+    expect(effortFor("research")).toBeUndefined();
     expect(modelFor("feedback")).toBeUndefined();
     expect(effortFor("feedback")).toBeUndefined();
   });

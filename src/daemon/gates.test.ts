@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CLARIFICATION_MARKER,
   MACHINE_MARKER,
   stampMachineComment,
   type TicketComment,
   type TicketThread,
 } from "../adapters/ticketing.js";
 import { APPROVAL_WORD, gateComment } from "./gate-comment.js";
-import { APPROVAL_TOKENS, readGateDecision } from "./gates.js";
+import { APPROVAL_TOKENS, clarifyingRounds, readGateDecision } from "./gates.js";
 
 /** The instant the gate comment was posted; the cursor stored on the run. */
 const GATE_POSTED_AT = "2026-08-03T10:00:00Z";
@@ -193,6 +194,33 @@ describe("readGateDecision", () => {
     const decision = readGateDecision(thread(quoted), GATE_POSTED_AT);
 
     expect(decision?.kind).toBe("change-request");
+  });
+});
+
+describe("clarifyingRounds", () => {
+  it("counts nothing on a thread where the machine has only ever invited", () => {
+    // The bound is spent by *asking again*, not by having opened the
+    // conversation in the first place.
+    const invited = machine("come and talk to me");
+    const answered = human("it's the draft they lose");
+
+    expect(clarifyingRounds(thread(invited, answered))).toBe(0);
+  });
+
+  it("counts the machine's clarifying question, once it has asked one", () => {
+    const asked = machine(`${CLARIFICATION_MARKER}\n\nwhich of the two first?`);
+
+    expect(clarifyingRounds(thread(machine("come and talk"), asked))).toBe(1);
+  });
+
+  it("never counts a human quoting the marker back", () => {
+    // The count is what bounds the machine, so only the machine's own
+    // comments may spend it. `fromTimone` is the adapter's marker-derived
+    // judgement and this function's only input on the question — Timone posts
+    // through the human's account, so the author says nothing.
+    const quoted = human(`> ${CLARIFICATION_MARKER}\n\nwhy does it say that?`);
+
+    expect(clarifyingRounds(thread(quoted))).toBe(0);
   });
 });
 

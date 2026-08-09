@@ -5,6 +5,7 @@ import {
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
+  type TicketThread,
 } from "../adapters/ticketing.js";
 import type {
   Preview,
@@ -32,7 +33,13 @@ import { failedComment } from "./session.js";
 export interface SpawnContext {
   /** Start at this stage rather than the run's recorded one. */
   stage?: PipelineStage;
-  /** The human's words, when a gate sent the stage back to do it again. */
+  /**
+   * The human's words, when they are what resumed the run: a gate's change
+   * request, or the answer they wrote on a ticket waiting on a conversation
+   * (ADR-0022). Its presence at a conversation stage is also what tells the
+   * spawner to *run* that stage rather than invite again — a stage reached
+   * with nothing in hand still stops.
+   */
   feedback?: string;
   /**
    * The approval that resumed this run. Its stage's artifact has to record
@@ -611,8 +618,9 @@ function entryContext(
  * Resume every parked run whose human has answered.
  *
  * The ticket is the one surface this reads (ADR-0012): a gate's answer is the
- * human's reply, and a conversation's is the record the session posted when
- * it concluded. Both are found relative to the cursor stored when the run
+ * human's reply, and a conversation's is either the record the session posted
+ * when it concluded or — since ADR-0022 — the answer they simply wrote in the
+ * thread. All of them are found relative to the cursor stored when the run
  * parked, so nothing said before the question can answer it.
  *
  * Only one run resumes per cycle per project, because sessions serialize. The
@@ -642,6 +650,20 @@ async function resumeAnswered(
         if (ended) return;
       } catch (error) {
         const line = `${project.name}: could not read PR for #${run.ticket}: ${oneLine(error)}`;
+        result.errors.push(line);
+        log(`error  ${line}`);
+        continue;
+      }
+    }
+
+    // A conversation park is the other one, for a different reason: at a
+    // stage nothing follows, the answer *is* the whole of the run.
+    if (run.waitingKind === "conversation") {
+      try {
+        const ended = await concludeLastConversation(run, project, deps, result, log);
+        if (ended) return;
+      } catch (error) {
+        const line = `${project.name}: could not read #${run.ticket}: ${oneLine(error)}`;
         result.errors.push(line);
         log(`error  ${line}`);
         continue;
@@ -703,6 +725,47 @@ async function concludeReview(
   );
   result.completed.push(run.id);
   log(`done   ${run.id} — PR #${pr.number} ${pr.state}`);
+  return true;
+}
+
+/**
+ * End a conversation-parked run whose stage has nothing after it, once the
+ * conversation has been recorded as agreed. Returns true when the run ended,
+ * false when it is still waiting or has somewhere left to go.
+ *
+ * Only `wayfinding` is such a stage today, and deliberately so (ADR-0010): a
+ * decision ticket's answer resolves that ticket and the map owns what comes
+ * next, so there is no next stage to advance into. Without this the run sat
+ * `parked` for the rest of the ledger's life — harmless, since a closed
+ * ticket leaves `listMarkedTickets` and nothing re-registers it, but it left
+ * `timone status` claiming to be waiting on a human for a question they had
+ * already answered.
+ *
+ * The session started by a *written* answer ends its own run, in the spawner:
+ * it is still `active` when it finds the record, so it is not this loop's to
+ * see. This is the takeover's half of the same ending — a session the daemon
+ * never ran, whose only trace is what it posted.
+ */
+async function concludeLastConversation(
+  run: Run,
+  project: TicketingProject,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<boolean> {
+  const { store, adapter } = deps;
+  const { stage, waitCursor } = run;
+  if (stage === undefined || waitCursor === undefined) return false;
+
+  const thread = await adapter.getTicket(project, run.ticket);
+  if (readConversationRecord(thread, waitCursor) === undefined) return false;
+
+  const transition = concludeConversation(stage, { accepted: true });
+  if (transition.kind !== "finish") return false;
+
+  store.complete(run.id);
+  result.completed.push(run.id);
+  log(`done   ${run.id} — ${transition.reason}`);
   return true;
 }
 
@@ -769,11 +832,20 @@ async function resolveWait(
   if (run.waitingKind === "conversation") {
     const thread = await adapter.getTicket(project, run.ticket);
     const record = readConversationRecord(thread, cursor);
-    const transition = concludeConversation(stage, {
-      accepted: record !== undefined,
-    });
+    if (record !== undefined) {
+      const transition = concludeConversation(stage, { accepted: true });
+      return transition.kind === "advance"
+        ? { stage: transition.stage }
+        : undefined;
+    }
 
-    return transition.kind === "advance" ? { stage: transition.stage } : undefined;
+    // ADR-0022's second path. The conversation may also be answered in
+    // writing, and what resumes is the *same* stage carrying the words — the
+    // conversation is what ingests an answer to its own question, and
+    // advancing on it would skip the stage that has to judge whether the
+    // answer settles anything.
+    const answer = writtenAnswer(thread, cursor);
+    return answer === undefined ? undefined : { stage, feedback: answer };
   }
 
   if (run.waitingKind === "review") {
@@ -796,6 +868,40 @@ async function resolveWait(
   }
 
   return undefined;
+}
+
+/**
+ * The human's written answer to an open conversation, or undefined while they
+ * have not written one.
+ *
+ * **No keyword, and Timone's own comments can never be it** — the machine asks
+ * its remaining question on the same thread it is watching, and a loop that
+ * read its own question as the answer would ask forever. `fromTimone` is the
+ * adapter's marker-derived judgement, never the author, because Timone posts
+ * through the human's account.
+ *
+ * **Everything they wrote after the park is the answer, joined** — the same
+ * rule the review park reads a review by, and settled deliberately against
+ * preferring the newest. A written answer is meant to be read generously, and
+ * someone who answers and then adds a second thought has said one thing in two
+ * comments: dropping the first would lose it, silently and without telling
+ * them.
+ */
+function writtenAnswer(
+  thread: TicketThread,
+  cursor: string,
+): string | undefined {
+  const after = instantOf(cursor);
+
+  const words = thread.comments
+    .filter(
+      (comment) =>
+        !comment.fromTimone && instantOf(comment.createdAt) > after,
+    )
+    .map((comment) => comment.body.trim())
+    .filter((body) => body !== "");
+
+  return words.length === 0 ? undefined : words.join("\n\n---\n\n");
 }
 
 /**
