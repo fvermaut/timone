@@ -438,3 +438,68 @@ Beyond the block, `npm run build && node dist/cli.js takeover --help` was run ag
 - **Two `getTicket` calls per conversation-parked run per cycle**, since `concludeLastConversation` and `resolveWait` each fetch. This exactly mirrors `concludeReview`/`resolveWait`'s existing double-fetch, so the fix is one refactor covering both, not a patch on the new one.
 - **`waitingOn` still says "a conversation in your terminal"** on a re-park, carried forward from the original park. 18a flagged the same string as marginally narrower than the behaviour now that a park can be resolved in writing. This slice did not widen it — changing it was no more in scope here than there — but two slices have now noticed it, which is usually the point at which it should be decided rather than noticed a third time.
 - **Nothing was added to the run state.** Phase 17's witness fields are untouched, and the clarifying round is counted on the thread, not in the ledger.
+
+## 18d — the words the human reads
+
+**Built.** The two documents a human actually reads now say what 18a–18c made true. `README.md`'s back-and-forth section states that a ticket waiting on you offers **two ways to answer and prefers neither**, that both reach the same session and produce the same record, that a written answer is read exactly as a gate reply is (any comment of yours after the question, no keyword) and need not be complete — and it carries the bound *with its reason*, which is the sentence ADR-0022 exists to justify: comment ping-pong was ruled out because the failure is gradual, so the written path degrades toward the terminal rather than growing a thread. A new paragraph says a map's decision tickets carry the same `timone` mark as everything else, are recognised as questions asked *of* the human rather than fresh requests, and park waiting — which is what makes `timone takeover <project>#<n>` work on them where it refused before — with the map itself never marked, and the `prototype` / `research` types named honestly as the two narrower cases. `STATUS.md` gets a new top entry saying the machine now does what this morning's instructions promised, what it has not yet proven, and one live consequence nobody had written down: **the nine `ivtrends` tickets this phase exists for do not carry the mark, so nothing picks their answers up yet.**
+
+**Files touched.**
+
+- `README.md` — the `### The two ways you get asked something` lead and its second bullet rewritten; two paragraphs added (the bound, and the map). No other section touched; the `Status` narrative was deliberately left alone, since this slice's grant is the back-and-forth section.
+- `STATUS.md` — header `Last updated` parenthetical rewritten; new `## Just finished — you can answer by just writing back`; the previous top entry demoted to `## Before that — a ticket you can just answer` per the file's own convention; the phase-18 approval line under *Waiting on you* struck through and closed; a second ask added under the three trading-app questions.
+- `doc/plans/phases/reports/phase-18-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **The CTA-drift assertion is met, and the difference is recorded rather than glossed** (evidence below). Neither `SKILL.md` nor `terminal.ts` was edited, which is also what the grant allowed.
+- **The README states the bound's *reason*, not just the bound.** ADR-0022's whole argument is that one clarifying round is what keeps the written path from becoming the thread ADR-0012 struck out. A README that says "you get asked once more" without saying why reads as an arbitrary limit and invites the next reader to relax it.
+- **`prototype` and `research` are named in the README rather than swept under "watched like any other".** "Every conversation ticket offers both paths" is false for `prototype` by ADR-0022's own wording, and `research` asks the human for nothing. Two clauses cost less than a sentence a reader could catch out.
+- **`STATUS.md` says the phase is built and *not* verified or signed off.** The file's convention distinguishes these consistently (phases 14–17 each name what was held back), and the phase has had no stage-7 pass. It also says the 662 checks are fixture-level and that no real question has been answered this way yet.
+- **The unmarked `ivtrends` tickets are reported, not fixed.** Checked directly: `gh issue list` on `projects/ivtrends` returns nine open `wayfinder:*` tickets and the map, and **not one carries `timone`**. So 18b's routing never fires on them and 18c's written pickup never sees their comments — the machinery is live but inert on the exact tickets ADR-0022 was written about. Labelling them is outside this slice's grant and is a *permission* the human gives (README: "the `timone` label is a permission boundary"), so `STATUS.md` asks for the word rather than taking it. It also notes that the hand-written blocks in those bodies still say the takeover is unavailable, which is now false.
+- **No stage numbers, skill names or process nouns entered either file.** ADR links stay, because both files already cite ADRs throughout and they are the reader's route to the reasoning.
+
+**Validation evidence.**
+
+**No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.** The plan's block, run as written:
+
+```
+$ grep -n "answer" README.md | head          # lines cut at 120 chars here; five matches, not truncated by head
+74:- **A single decision — answered on the ticket.** When Timone wants approval, it posts what it wrote, links the artif
+75:- **A back-and-forth — answered whichever way suits you.** When a step needs an interview rather than a single answer
+77:**The written path is bounded at one more question, and the bound is the whole reason it is allowed.** Comment ping-p
+79:**An idea too big for one sitting is charted as a map of questions — and those tickets are watched like any other.**
+81:One session per project runs at a time, always. A parked ticket only blocks the others once it owns a work branch — s
+
+$ npm test
+ Test Files  20 passed (20)
+      Tests  662 passed (662)
+   Duration  33.07s
+```
+
+Type-check also run (not in the block, cheap): `npm run type-check` → no output, exit 0. Both match the stated baseline exactly — 662 across 20 files at `62f69ea` — so nothing outside these files broke, and 18b's unidentified intermittent did not reappear (evidence of nothing either way, recorded as such).
+
+**The assertion — *the skill's CTA template and `TerminalChannel.open`'s comment say the same thing in the same words*: MET.** Judged mechanically rather than by eye: `SKILL.md`'s `grilling`/`task` template (lines 86–97) was extracted and compared line-by-line against the array `invitationToAnswer` returns, with `<project>#<n>` as the command.
+
+```
+skill lines: 12   channel lines: 12
+~ line 5: INDENT ONLY  skill="  ```"
+~ line 6: INDENT ONLY  skill="  timone takeover <project>#<n>"
+~ line 7: INDENT ONLY  skill="  ```"
+~ line 9: INDENT ONLY  skill="  You don't need to tell it anything else — it works out what this ticket is waiting for."
+
+indent-only differences: 4
+word differences: 0
+```
+
+Twelve lines each, in the same order. **Every difference is a leading two-space indent and nothing else**; strip it and the two are byte-identical, promise for promise — same "two ways", same "you don't need to answer every part", same *"I don't know, what do you suggest?"*, same one-more-round bound, same closing CTA. 18a's record is accurate and slightly understated: the nesting covers four lines, not just the fence — the fence, its content, its closing, and the follow-up sentence, all of which belong to the same nesting decision.
+
+What each renders as: in the **skill's** form the code block and the "you don't need to tell it anything else" line are indented into the *Talk it through instead* bullet, so they render as that bullet's continuation — one two-item list with the command inside item two. In the **channel's** form the list ends at item two's colon and the fence and sentence are top-level blocks after it — the same two bullets, then a standalone code block. On GitHub both render a real fenced block with a copy button; the command is copy-pasteable in both, which is the property the pre-existing test guards. The difference is association and left margin, not words.
+
+Therefore, per the slice's own instruction: **not a defect in 18a, and neither side was edited.** For whoever reconciles it later, the cheap options are unchanged — indent the channel's fence and relax `terminal.test.ts`'s `/```\ntimone takeover scratch-app#6\n```/` to tolerate leading spaces, or drop the skill's two spaces. Both are cosmetic; nothing downstream reads the indentation.
+
+**What delivery must know.**
+
+- **The docs describe built-but-unverified behaviour.** `STATUS.md` says so in as many words. If stage 7 finds the written path behaves otherwise, that entry is the thing to correct, not the README bullet.
+- **The `ivtrends` mark gap is the phase's live loose end.** Nine open `wayfinder:*` tickets, none marked `timone` — so the very tickets ADR-0022 cites are still unreachable by the machinery this phase built. `STATUS.md` asks the human for the word; nothing else in the repo tracks it, and a delivery PR is a reasonable second place to say it. Marking them will also *add* a real invitation comment to each ticket while the hand-written block in each body still says the takeover is unavailable — the two would contradict for as long as the bodies are left alone, which is why the ask is phrased as "mark them **and** replace their blocks", one action.
+- **The fence-indentation drift is judged and closed** (above). It is a formatting choice, recorded with what each renders as; it is not an open defect and needs no fix to ship.
+- **Three items earlier slices flagged remain open and are not this slice's:** `waitingOn` still reads "a conversation in your terminal" for a park that can be answered in writing (flagged by 18a and 18c — noticed twice, so worth deciding rather than noticing a third time); `afterStage` takes seven positional parameters; `CLARIFICATION_MARKER`'s wording (`❓ **Still open** · …`) is a sixth marker a human will read and got no more scrutiny than its siblings. This slice read all three and touched none — every one lives in `src/`, which was not granted.

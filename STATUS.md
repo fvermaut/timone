@@ -1,6 +1,6 @@
 # Timone — Status
 
-**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-08-09** (**the questions on the trading app were unanswerable; they are answerable now**. Nine tickets asked you things and none told you how to reply. The rule changed — any ticket waiting on you offers two ways to answer, write it there or talk it through — all nine now carry instructions, and the build that makes the machine do it by itself is approved and handed to another session. **Three questions are ready for you**, at the bottom of this file).
+**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-08-09** (**the machine now does what those instructions promise**. This morning any ticket waiting on you *said* you could just write your answer back; nothing was listening. That is built as of this afternoon: a written answer is picked up and acted on, and the questions on a map are watched like every other ticket. **Not yet checked by an independent pass, and not yet signed off by you.** **Three questions are ready for you**, at the bottom of this file — and connecting them to this costs one label each, which is your call).
 
 > **This file is about Timone itself** — the tool. Each managed project has its own `STATUS.md` file; the to-do app's is at `projects/scratch-app/STATUS.md`. **Every file path in this file lives in the Timone repository unless it says otherwise.** When something here is about a project, it names the project and says so.
 
@@ -23,7 +23,23 @@ Timone's own requirements are written down as a numbered list in `doc/specs/prd/
 - **Ten stage skills exist and have each been exercised against throwaway projects:** onboarding a new repository, sorting an incoming request, interviewing you for requirements, writing requirements down, recording architecture decisions, planning work into steps, building the code, checking the result, opening the pull request, and — new on 2026-08-02 — **acting on your feedback**.
 - **A standards library** — twelve written entries. Ten cover the preferred technology choices; two apply to every project with no exceptions (accessibility, which is a legal requirement in the EU, and visual/interaction design). The twelfth is new today, below.
 
-## Just finished — a ticket you can just answer
+## Just finished — you can answer by just writing back
+
+**Built 2026-08-09, the same day the rule was written.** The entry below changed the rule: any ticket waiting on you offers two ways to answer, write it there or talk it through. Until this afternoon only the *words* existed. The machine wrote them onto tickets and then acted on neither path — so "write your answer here" was a sentence, not a thing that happened. Now it is a thing that happens.
+
+**Three pieces, and they only matter together.**
+
+- **Any ticket waiting on you now offers both ways, and picks neither for you.** Write the answer in the thread, or run the one line the ticket hands you. Same session either way, same record written back onto the ticket.
+- **The questions on a map are watched like any other ticket.** The machine now recognises a map question as something being asked *of you*, rather than a fresh request somebody just filed — so it stops trying to sort it, and instead parks it waiting on your answer. That is also what makes the run-this-line instruction work at all: until today the command **refused** those tickets outright, because that half of the machine had never been told they exist.
+- **Writing the answer moves the ticket.** A comment of yours on a waiting ticket gets picked up within a minute and the session carries on from there — no keyword, nothing to remember, the same way your approvals already work. It reads everything you wrote after the question, not just your last comment, so a second thought typed a minute later is not thrown away.
+
+**The limit is built in rather than promised.** If what you write leaves something open, you get asked once more — **only the part still open**, never the whole question again. If that answer still doesn't settle it, the machine stops typing at you and hands the conversation back. That bound is the entire reason writing was allowed back in, and it is now something the machine does rather than something the rulebook says.
+
+**What this does not have yet, said plainly.** Nobody independent has checked it and you have not signed it off — those are the next two steps. And it has only ever run against throwaway fixtures: 662 automatic checks pass, but **no real question has yet been answered this way**. The first one you answer is its proof.
+
+**The nine questions on the trading app are not connected to it yet, and that is one label each.** They carry the label that says what kind of question they are, but not the `timone` mark — and the mark is what permits the machine to look at a ticket at all. Until it is on them, an answer you write there still sits unread, which is the state this work exists to end. Their hand-written instructions also still say the talk-it-through option isn't available; that sentence is now out of date. **I did not label them unasked**, because putting that mark on a ticket is what sets the machine going on it, and that has always been your decision rather than mine.
+
+## Before that — a ticket you can just answer
 
 **This one started with you noticing something was wrong, and you were right.** The trading app (`ivtrends`, a separate repository) has a map of open questions on GitHub — **nine of them needing you**, not the six first reported here; that was a miscount, corrected the same day. Every one was a clear, well-argued question. **Not one of them said what to do about it.** No reply instructions, no command, nothing. And the command you *would* have needed refused to run on them, because that side of the machine had never been told these questions exist.
 
@@ -221,7 +237,7 @@ The proof run also showed the safety machinery earning its keep, which matters m
 
 ## Waiting on you
 
-~~**What I need from you now: approve `doc/plans/phases/phase-18.md`**~~ — **approved 2026-08-09**, and handed to another session to build.
+~~**What I need from you now: approve `doc/plans/phases/phase-18.md`**~~ — **approved 2026-08-09, and built the same day.** See the top of this file for what it does and what it has not yet proven.
 
 **What I need from you now: answer three questions on the trading app, whenever you have a moment.** They are on GitHub, in the `ivtrends` repository, and they are the three that are ready — everything else on that map is waiting behind them:
 
@@ -229,7 +245,9 @@ The proof run also showed the safety machinery earning its keep, which matters m
 - **[IV granularity: per underlying, or per contract?](https://github.com/fvermaut/ivtrends/issues/6)**
 - **[Quality and risk filters: which, and how strict?](https://github.com/fvermaut/ivtrends/issues/9)**
 
-Write your answer as a comment on the ticket. You don't have to answer every part, and *"I don't know, what do you suggest?"* is a real answer — you get a recommendation back rather than the same question again. **Nothing picks those comments up automatically yet** — that is what the approved build adds — so tell me you've answered, or answer them in a session, and they get acted on.
+Write your answer as a comment on the ticket. You don't have to answer every part, and *"I don't know, what do you suggest?"* is a real answer — you get a recommendation back rather than the same question again.
+
+**Second thing, and it takes one word from you: shall I connect those nine tickets to the machine?** ~~Nothing picks those comments up automatically yet — that is what the approved build adds~~ — **the build landed on 2026-08-09**, but it only looks at tickets carrying the `timone` mark, and those nine do not have it. So today an answer written there still waits for me to notice it. **Say the word and I'll mark all nine and replace their hand-written instructions with the real ones** — after that, answering a question is answering it, and something acts within the minute. I have deliberately not done it unasked: that mark is a permission, and it is yours to give. Until then, tell me you've answered, or answer them in a session, and they get acted on the old way.
 
 **One decision on Timone itself.** ~~Approve the phase 14 plan.~~ **Approved 2026-08-06**, signed off 2026-08-08. ~~Do the three recorded faults get fixed before the click-a-preview work, or after it?~~ **You chose "before", on 2026-08-08** — phase 15 fixed two of them and explained the third, and previews move back one place to phase 16.
 
