@@ -1,6 +1,10 @@
 # Phase 18: a ticket you can just answer
 
-> **Status:** **Awaiting approval.** Written 2026-08-09 immediately after the grill that produced [ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md), so the decision does not evaporate between the conversation and the plan. Hand-planned, as all Timone-self phases are. Approval is gated on this file per [ADR-0014](../../adr/0014-artifact-first-gates.md).
+> **Status:** **Approved for execution by fvermaut 2026-08-09**, minutes after it was written, in the same session — he approved on the shape of the fix rather than on a reading of the slices, and said so. Written 2026-08-09 immediately after the grill that produced [ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md), so the decision does not evaporate between the conversation and the plan. Hand-planned, as all Timone-self phases are. Approval was gated on this file per [ADR-0014](../../adr/0014-artifact-first-gates.md).
+
+> **Executed by a different session.** fvermaut approved this and handed the build on; see [doc/handover/2026-08-09-phase-18-answerable-tickets.md](../../handover/2026-08-09-phase-18-answerable-tickets.md) for the state at handover.
+
+> **18e's step 1 is already done and is not the build's to repeat.** The nine open `ivtrends` tickets were given their CTAs by hand on 2026-08-09, in the **written-path-only** form, because takeover does not resolve them until 18b lands. The gate step becomes: *replace* those hand-written blocks with the real per-type templates once 18b exists, and confirm the takeover line then works. See "The live tickets, as they stand" below.
 
 > **Eighth phase of [PRD-02](../../specs/prd/prd-02-inversion-of-control.md).** Governing decision: **[ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md)**, which amends [ADR-0012](../../adr/0012-conversation-channels.md). Standing: [ADR-0007](../../adr/0007-sessions-at-timone-root.md), [ADR-0010](../../adr/0010-wayfinder-discovery-maps.md), [ADR-0013](../../adr/0013-stateless-session-reentry.md), [ADR-0014](../../adr/0014-artifact-first-gates.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md).
 
@@ -28,7 +32,7 @@ The doc half of the fix landed with the grill on 2026-08-09: `process.md`, `timo
 
 **R3's re-entry is not a formality.** It was `verified` on evidence gathered at [phase 12](phase-12.md)'s gate against the takeover path only. The written path has never been observed, and a requirement's status is the weakest of its clauses' outcomes, so the pass re-checks the two old clauses as well as the new one.
 
-Deliberately **not** this phase: the Slack channel behind the same seam; a written-answer path for **gates** (they already have one — a gate reply *is* writing on the ticket, and nothing about that changes); retrofitting CTAs onto the six live `ivtrends` tickets, which is a one-command chore once 18b exists and is not worth a slice; the frozen output-token counter, still R17's remainder and still unexplained.
+Deliberately **not** this phase: the Slack channel behind the same seam; a written-answer path for **gates** (they already have one — a gate reply *is* writing on the ticket, and nothing about that changes); the frozen output-token counter, still R17's remainder and still unexplained.
 
 ## Goal Description
 
@@ -140,11 +144,31 @@ npm test
 
 Assertions: the skill's CTA template and `TerminalChannel.open`'s comment say the same thing in the same words; any drift found here is a defect in 18a, not a wording preference.
 
+## The live tickets, as they stand
+
+Done by hand on 2026-08-09, before the build, because leaving nine unanswerable tickets open across a session boundary was the whole complaint. **Read this before 18e; it changes what the gate has to do.**
+
+`ivtrends` holds **eight `wayfinder:grilling` tickets, one `wayfinder:prototype`, one `wayfinder:map`** — not the six first reported here, which was a miscount corrected the same day. All nine non-map tickets now carry a CTA. **None is the real template**: takeover does not resolve them until 18b lands, so every block is written in the **written-path-only** form and says in as many words that the terminal option is not available yet.
+
+The blocks are not uniform, because the tickets aren't:
+
+| Tickets | State | What their CTA says |
+|---|---|---|
+| #5, #6, #9 | **frontier** — every blocker closed | Answer here; this one is ready. Names the one-clarifying-round bound. |
+| #7, #8, #10, #12, #13 | blocked by an open ticket | Nothing needed yet, names its blockers **by title**, points at the three ready ones. |
+| #11 | blocked, and a prototype | Nothing needed; explains it is something to look at, not to answer, and that a link arrives when there is something behind it. |
+
+**A stale fact was corrected while doing it.** #5, #6 and #9 each still carried a `**Blocked by** the AlphaVantage capability research` line naming #2/#3/#4 — all three closed. Left alone, those lines would have sat directly above a CTA saying "nothing is blocking it". They are struck through with the resolution and what it constrains, not deleted.
+
+**What 18e must therefore do:** *replace* these hand-written blocks with the per-type templates from `timone-wayfind` once 18b makes the takeover line true, and confirm it resolves. Not append — replace, or a ticket ends with two CTAs disagreeing about whether the terminal option exists.
+
+**Noticed, not acted on** (recorded here so it is not lost, and not fixed because nobody asked): the ticket bodies refer to each other by bare number — `#8`, `#5`, `#2` — which `timone-wayfind`'s "refer by name" rule forbids in everything the human reads. It is pre-existing, it is not this phase's subject, and it is a one-pass fix whenever someone wants it.
+
 ### 18e: the live gate
 
-Not a code slice. Run against `ivtrends`, whose six open grilling tickets are the real thing this phase was written for.
+Not a code slice. Run against `ivtrends`, whose open decision tickets are the real thing this phase was written for.
 
-1. Retrofit the CTA onto the six open tickets (one command, using 18b's labelling).
+1. **Replace** the hand-written CTA blocks (above) with the real per-type templates, now that the takeover line is true.
 2. Answer one **in writing**, completely. Expect: the daemon picks it up unprompted, the session resolves the ticket, closes it, and the gist lands on the map — with no terminal involved at any point.
 3. Answer another **partially**. Expect: exactly one follow-up comment carrying only what is still open. Answer that unsatisfyingly too. Expect: a takeover CTA and no third question.
 4. Run `timone takeover ivtrends#<n>` on a third. Expect: it resolves and opens the interview — the command that refused on 2026-08-09.
@@ -156,6 +180,6 @@ Not a code slice. Run against `ivtrends`, whose six open grilling tickets are th
 
 - [ ] R20's three clauses observed live on `ivtrends`, not only in tests
 - [ ] R3 re-verified whole — the two phase-12 clauses as well as the written one
-- [ ] The six live `ivtrends` tickets carry their CTAs
+- [ ] The nine live `ivtrends` tickets carry the **real** per-type CTAs, the hand-written blocks replaced rather than joined
 - [ ] `npm test` and `npm run type-check` clean; no existing triage or gate behaviour changed
 - [ ] `STATUS.md` says, in plain language, that a ticket can now just be answered

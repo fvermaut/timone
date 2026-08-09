@@ -1,6 +1,6 @@
 # Timone — Status
 
-**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-08-09** (**the questions on the trading app were unanswerable, and that is now fixed in writing and planned in code**. Six tickets asked you things and none of them told you how to reply. The rule changed: any ticket waiting on you offers two ways to answer — write it there, or talk it through — and there is a plan waiting for your approval that makes the machine actually do it).
+**For fvermaut. Plain language, no process knowledge assumed.** This file is a status report, not agent context — agents update it, they never treat it as a source of truth. Last updated **2026-08-09** (**the questions on the trading app were unanswerable; they are answerable now**. Nine tickets asked you things and none told you how to reply. The rule changed — any ticket waiting on you offers two ways to answer, write it there or talk it through — all nine now carry instructions, and the build that makes the machine do it by itself is approved and handed to another session. **Three questions are ready for you**, at the bottom of this file).
 
 > **This file is about Timone itself** — the tool. Each managed project has its own `STATUS.md` file; the to-do app's is at `projects/scratch-app/STATUS.md`. **Every file path in this file lives in the Timone repository unless it says otherwise.** When something here is about a project, it names the project and says so.
 
@@ -25,7 +25,7 @@ Timone's own requirements are written down as a numbered list in `doc/specs/prd/
 
 ## Just finished — a ticket you can just answer
 
-**This one started with you noticing something was wrong, and you were right.** The trading app (`ivtrends`, a separate repository) has a map of open questions on GitHub — nine of them, six needing you. Every one was a clear, well-argued question. **Not one of them said what to do about it.** No reply instructions, no command, nothing. And the command you *would* have needed refused to run on them, because that side of the machine had never been told these questions exist.
+**This one started with you noticing something was wrong, and you were right.** The trading app (`ivtrends`, a separate repository) has a map of open questions on GitHub — **nine of them needing you**, not the six first reported here; that was a miscount, corrected the same day. Every one was a clear, well-argued question. **Not one of them said what to do about it.** No reply instructions, no command, nothing. And the command you *would* have needed refused to run on them, because that side of the machine had never been told these questions exist.
 
 **What changed, as a rule.** Any ticket that is waiting on you now offers **two ways to answer, and you pick without explaining why**:
 
@@ -36,9 +36,13 @@ Timone's own requirements are written down as a numbered list in `doc/specs/prd/
 
 **The catch that had to be designed around.** Answering in comments was deliberately ruled out back on 2026-08-02, and for a good reason: an interview is fifteen questions, and fifteen questions in a comment thread is miserable. That still holds. What was missed is that these map questions are **one sharp question each** — which is a different thing, and typing six words into a terminal to answer one of them is silly. So the written path comes with a limit: **if what you write leaves something open, you get asked once more, and if that still doesn't settle it the machine stops typing at you and hands back the conversation.** Without that limit it would have quietly become the thing that was ruled out.
 
-**What is done and what is not.** The rules are written down and committed — the process definition, the skill that makes those maps, the requirements list and the decision record. **The machine does not do it yet.** That is `doc/plans/phases/phase-18.md`, and it needs your approval before it is built. Until it is, the maps will offer the write-it-down path only and say plainly that the talk-it-through option isn't wired up — **an instruction you can't follow is the same bug in a nicer suit**, and shipping one to replace the other would be no fix at all.
+**What is done and what is not.** The rules are written down and committed — the process definition, the skill that makes those maps, the requirements list and the decision record. **The machine does not do it yet.** That is `doc/plans/phases/phase-18.md`, **which you approved on 2026-08-09** and handed to another session to build.
 
-**The six live questions on the trading app are still bare.** They get their instructions as the first step of that build, not before — for the same reason.
+**The nine live questions are no longer bare — I wrote their instructions by hand.** Every one now says what to do about it. They carry the **write-it-here** path only, and say in as many words that the talk-it-through option isn't available yet, because **an instruction you can't follow is the same bug in a nicer suit** and shipping one to replace the other would be no fix at all. When the build lands, those hand-written blocks get *replaced* by the real ones — not added to, or a ticket would end up with two sets of instructions disagreeing about what exists.
+
+**They don't all say the same thing, because they aren't all in the same state.** Three are ready to answer now. Five are waiting on one of those three, and say so by name rather than making you work it out. The ninth isn't a question at all — it's a screen you'll be shown and asked to react to, once the ones it depends on are settled.
+
+**And a stale line got fixed on the way.** Three of the ready ones still said they were blocked by research that finished days ago. Left alone, each would have sat directly above a new line saying nothing was blocking it. They now say what that research concluded and how it narrows the answer — struck through, not deleted.
 
 ## Before that — you can leave it running overnight
 
@@ -217,7 +221,15 @@ The proof run also showed the safety machinery earning its keep, which matters m
 
 ## Waiting on you
 
-**What I need from you now: approve `doc/plans/phases/phase-18.md`** — the plan that makes "just answer the ticket" actually work. It is in the Timone repository. Reading it is not required; saying yes is. Until you do, the questions on the trading app stay as they are.
+~~**What I need from you now: approve `doc/plans/phases/phase-18.md`**~~ — **approved 2026-08-09**, and handed to another session to build.
+
+**What I need from you now: answer three questions on the trading app, whenever you have a moment.** They are on GitHub, in the `ivtrends` repository, and they are the three that are ready — everything else on that map is waiting behind them:
+
+- **[What does "high IV" mean, and what does "evolving" mean?](https://github.com/fvermaut/ivtrends/issues/5)** — the big one. Five other questions unlock behind it.
+- **[IV granularity: per underlying, or per contract?](https://github.com/fvermaut/ivtrends/issues/6)**
+- **[Quality and risk filters: which, and how strict?](https://github.com/fvermaut/ivtrends/issues/9)**
+
+Write your answer as a comment on the ticket. You don't have to answer every part, and *"I don't know, what do you suggest?"* is a real answer — you get a recommendation back rather than the same question again. **Nothing picks those comments up automatically yet** — that is what the approved build adds — so tell me you've answered, or answer them in a session, and they get acted on.
 
 **One decision on Timone itself.** ~~Approve the phase 14 plan.~~ **Approved 2026-08-06**, signed off 2026-08-08. ~~Do the three recorded faults get fixed before the click-a-preview work, or after it?~~ **You chose "before", on 2026-08-08** — phase 15 fixed two of them and explained the third, and previews move back one place to phase 16.
 
