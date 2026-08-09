@@ -38,6 +38,13 @@ describe("TerminalChannel.open", () => {
     expect(comment).toMatch(/```\ntimone takeover scratch-app#6\n```/);
   });
 
+  it("invites a written answer on the ticket, beside the command", async () => {
+    const { comment } = await new TerminalChannel().open(context);
+
+    expect(comment).toMatch(/two ways to answer/i);
+    expect(comment).toMatch(/a comment on this ticket is enough/i);
+  });
+
   it("says what the conversation is about, in the words the stage wrote", async () => {
     const { comment } = await new TerminalChannel().open(context);
     expect(comment).toContain(context.subject);
@@ -52,17 +59,24 @@ describe("TerminalChannel.open", () => {
     }
   });
 
-  it("ends with a CTA naming the command to run", async () => {
+  it("ends with a CTA naming both paths and preferring neither", async () => {
     const { comment } = await new TerminalChannel().open(context);
     const closing = comment.trimEnd().split("\n").at(-1) ?? "";
 
     expect(closing).toMatch(/What I need from you:/);
-    expect(closing).toContain("timone takeover scratch-app#6");
+    expect(closing).toMatch(/answer here/i);
+    expect(closing).toMatch(/run the command/i);
+    expect(closing).toMatch(/whichever you prefer/i);
   });
 
   it("tells the ledger what the run is waiting for", async () => {
     const { waitingOn } = await new TerminalChannel().open(context);
     expect(waitingOn).toMatch(/terminal/i);
+  });
+
+  it("still says the run waits on a conversation, whichever way it is answered", async () => {
+    const { waitingOn } = await new TerminalChannel().open(context);
+    expect(waitingOn).toMatch(/conversation/i);
   });
 
   it("leaves the machine marker to the adapter", async () => {
@@ -89,6 +103,17 @@ describe("TerminalChannel.conclude", () => {
     });
 
     expect(comment).toMatch(/didn't finish/i);
+    expect(comment).toContain("timone takeover scratch-app#6");
+  });
+
+  it("offers both paths again when the conversation was left unfinished", async () => {
+    const comment = await new TerminalChannel().conclude(context, {
+      accepted: false,
+      summary: "",
+    });
+
+    expect(comment).toMatch(/two ways to answer/i);
+    expect(comment).toMatch(/a comment on this ticket is enough/i);
     expect(comment).toContain("timone takeover scratch-app#6");
   });
 
