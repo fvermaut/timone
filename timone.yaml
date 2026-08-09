@@ -10,3 +10,17 @@ projects:
     bindings:
       ticketing: github
       preview: docker
+  ivtrends:
+    repo_url: https://github.com/fvermaut/ivtrends.git
+    path: projects/ivtrends
+    stack:
+      - typescript
+      - nextjs
+      - prisma
+      - postgresql
+      - shadcn
+      - vercel
+      - supabase
+    bindings:
+      ticketing: github
+      preview: docker
