@@ -11,6 +11,19 @@ export const CLASSIFICATIONS = ["feature", "bug", "chore", "question"] as const;
 export type Classification = (typeof CLASSIFICATIONS)[number];
 
 /**
+ * The four kinds of decision ticket a wayfinder map holds (ADR-0010), read
+ * back off the `wayfinder:<type>` label the charting session applied.
+ *
+ * `map` is deliberately not among them. The map is an index of the effort
+ * rather than a question anybody can answer, so it never carries the mark
+ * label and never becomes a run — a run on the map would be a run nothing
+ * could resolve.
+ */
+const WAYFINDER_TYPES = ["research", "grilling", "prototype", "task"] as const;
+
+type WayfinderType = (typeof WAYFINDER_TYPES)[number];
+
+/**
  * The stages a run passes through. Named for what they do rather than by
  * `process.md`'s numbers, because these strings surface in `timone status`
  * and on tickets, where a number would mean nothing to the reader.
@@ -18,6 +31,8 @@ export type Classification = (typeof CLASSIFICATIONS)[number];
 export const PIPELINE_STAGES = [
   "triage",
   "clarification",
+  "wayfinding",
+  "research",
   "requirements",
   "planning",
   "execution",
@@ -133,6 +148,39 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     built: true,
     next: "requirements",
   },
+  wayfinding: {
+    // Stage 2's other mode: the same requirements discovery, at scale
+    // (ADR-0010). What is resolved here is one decision ticket off a map, and
+    // what it produces is a decision — never a slice of a build, which is why
+    // it owns no branch.
+    processStage: 2,
+    waits: "conversation",
+    ownsBranch: false,
+    built: true,
+    // **Nothing follows, on purpose.** A decision ticket's answer resolves
+    // that ticket and ends its run. The destination artifact is the whole
+    // map's to hand to stage 3 once the effort closes, and advancing one
+    // ticket into PRD-writing would write requirements off a single answer.
+  },
+  research: {
+    // The one wayfinder type nobody waits on: its own CTA says "nothing —
+    // I'm resolving this one myself and will post what I find here".
+    processStage: 2,
+    waits: "none",
+    ownsBranch: false,
+    // **Not built, and that is the honest word rather than a placeholder.**
+    // The daemon cannot yet judge an unattended stage-2 session's outcome:
+    // the spawner's post-stage judgement ends in a fall-through that assumes
+    // the only remaining wait-free stage is triage and reads a classification
+    // off the ticket's labels — which a wayfinder ticket does not carry, so a
+    // run reaching it would die on "triage recorded no classification".
+    //
+    // Declared here anyway, rather than left out, because that is what keeps
+    // a marked `wayfinder:research` ticket from being *triaged as a fresh
+    // request*: it enters at a stage of its own, parks, and says plainly that
+    // the machinery is not built. Wrong-but-loud beats routed-into-the-build.
+    built: false,
+  },
   requirements: {
     processStage: 3,
     waits: "gate",
@@ -225,6 +273,33 @@ export function classificationFromLabels(
     const kind = label.startsWith("triage:") ? label.slice("triage:".length) : "";
     if ((CLASSIFICATIONS as readonly string[]).includes(kind)) {
       return kind as Classification;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The stage that resolves a wayfinder decision ticket carrying `labels`, or
+ * undefined when the ticket is not one.
+ *
+ * **Derived from the labels every time, never stored on the run.** The
+ * tracker holds the ticket's type; a copy of it in the ledger is a copy that
+ * can disagree with a label a human has since changed.
+ *
+ * The split is the one ADR-0010's table draws: `research` resolves itself
+ * with nobody waiting, while `grilling`, `prototype` and `task` each resolve
+ * only through exchange with a human — which is a conversation, whatever
+ * medium it ends up running on.
+ */
+export function wayfinderStage(
+  labels: readonly string[],
+): PipelineStage | undefined {
+  for (const label of labels) {
+    const type = label.startsWith("wayfinder:")
+      ? label.slice("wayfinder:".length)
+      : "";
+    if ((WAYFINDER_TYPES as readonly string[]).includes(type)) {
+      return (type as WayfinderType) === "research" ? "research" : "wayfinding";
     }
   }
   return undefined;

@@ -162,6 +162,37 @@ describe("the clarification prompt", () => {
   });
 });
 
+describe("the wayfinding prompt", () => {
+  const prompt = stagePrompt("wayfinding", context);
+
+  it("is a stage a takeover can hold a conversation for", () => {
+    // `runTakeover` refuses any stage the prompts module cannot instruct, so
+    // this membership is what turns the CTA on a wayfinder ticket from an
+    // instruction the human cannot follow into one that works.
+    expect(PROMPTED_STAGES).toContain("wayfinding");
+  });
+
+  it("tells the session someone is present and waiting", () => {
+    expect(prompt).toMatch(/at the keyboard/i);
+  });
+
+  it("sends the session to this one ticket on its map", () => {
+    expect(prompt).toContain("timone-wayfind");
+    expect(prompt).toMatch(/one ticket per session/i);
+  });
+
+  it("resolves the ticket rather than writing the destination artifact", () => {
+    // ADR-0010: the map produces decisions, and the destination is the whole
+    // effort's to hand over once it closes. One answer is not a PRD.
+    expect(prompt).toMatch(/close/i);
+    expect(prompt).toMatch(/not.*(write|requirements)/i);
+  });
+
+  it("supposes no answer to the question the ticket exists to ask", () => {
+    expect(prompt).not.toMatch(/the problem is|they want|you should build/i);
+  });
+});
+
 describe("conversationSubject", () => {
   it("says what is about to be talked through, in the ticket's own terms", () => {
     const subject = conversationSubject(ticket);

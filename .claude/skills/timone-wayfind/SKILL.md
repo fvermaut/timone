@@ -57,7 +57,13 @@ A single issue on the project's tracker labelled `wayfinder:map` — the canonic
 
 ### Tickets
 
-Each ticket is a child of the map, body = the question it resolves, sized to one session, labelled `wayfinder:<type>`:
+Each ticket is a child of the map, body = the question it resolves, sized to one session, labelled `wayfinder:<type>` **and `timone`**:
+
+**Both labels, every decision ticket.** `wayfinder:<type>` says what kind of question it is; `timone` is the mark the daemon watches, and it is what gives the ticket a run — which is in turn what makes its `timone takeover` line work and what lets a written answer be picked up at all. A decision ticket created without the mark is the defect [ADR-0022](../../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md) was written about: a well-formed question nothing is listening to.
+
+**Never mark the map.** It carries `wayfinder:map` alone. The map is an index of the effort, not a question anybody can answer, so marking it would create a run for a ticket nothing can resolve.
+
+**`research` is the one type the daemon cannot yet resolve unattended.** It is resolved in-session by a sub-agent (Mode 1, step 5) and normally closed before the daemon would ever list it. A `research` ticket left open and marked parks with a comment saying that machinery is not built — honest, but not what its own CTA promises, so close them in the session that fired them.
 
 | Type | Mode | Resolved by |
 |---|---|---|
@@ -113,7 +119,7 @@ timone takeover <project>#<n>
 **What I need from you:** nothing — I'm resolving this one myself and will post what I find here.
 ```
 
-**The takeover line is a promise the CLI has to keep.** `timone takeover` resolves a ticket from the daemon's run ledger, and a wayfinder ticket created by an interactive session has no run in it. Before writing that line onto a ticket, satisfy yourself the resolution path exists for this project; if it does not, write the ticket with the written-answer path only and say plainly that the talk-it-through option is not wired up yet. An instruction the human cannot follow is the same defect as no instruction at all.
+**The takeover line is a promise the CLI keeps, so long as the ticket carries the mark.** `timone takeover` resolves a ticket from the daemon's run ledger; the `timone` label above is what puts it there. The daemon picks a marked decision ticket up, recognises its `wayfinder:<type>`, enters at this stage rather than triaging it as a fresh request, and parks it waiting on you — which is the state the takeover resolves. Write both templates as they stand; the only way to make either line a lie is to leave the mark off.
 
 ### Reading a written answer
 
@@ -147,7 +153,7 @@ Invoked with a loose idea. Charting is one session's work; it hand-resolves noth
 1. **Name the destination** — a short grill (one question at a time, recommended answers) pinning down what this map is finding its way to. The destination fixes the scope, so it comes first.
 2. **Map the frontier, breadth-first** — fan out across the whole space, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** — the journey fits one session — you don't need a map: stop and suggest plain `timone-grill` (or `timone-prd` directly).
 3. **Create the map** (`wayfinder:map`): Destination and Notes filled, Decisions-so-far empty, the fog sketched into Not yet specified.
-4. **Create the tickets you can specify now**, then wire blocking in a **second pass** (tickets need ids before they can reference each other).
+4. **Create the tickets you can specify now** — each labelled `wayfinder:<type>` **and `timone`**, each closing on the CTA block for its type — then wire blocking in a **second pass** (tickets need ids before they can reference each other).
 5. **Fire the research sub-agents** — each `research` ticket you just created gets a fresh-context sub-agent resolving it in parallel, posting findings as its resolution comment.
 6. Stop. Report the map by name with its link, the frontier, and the suggested first working session. Update `STATUS.md` per the process convention.
 

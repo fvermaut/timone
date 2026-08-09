@@ -13,6 +13,7 @@ import type { Classification } from "./pipeline.js";
 export const PROMPTED_STAGES = [
   "triage",
   "clarification",
+  "wayfinding",
   "requirements",
   "planning",
   "execution",
@@ -181,6 +182,8 @@ function stageBody(
       return triagePrompt(context);
     case "clarification":
       return clarificationPrompt(context);
+    case "wayfinding":
+      return wayfindingPrompt(context);
     case "requirements":
       return requirementsPrompt(context);
     case "planning":
@@ -641,6 +644,66 @@ function clarificationPrompt(context: PromptContext): string {
     "The conversation itself is not a process artifact: nothing may cite it,",
     "and no transcript is kept. What survives is the summary on the ticket and",
     "whatever the glossary gained.",
+    "",
+    writingBlock(),
+  ].join("\n");
+}
+
+/**
+ * Stage 2 at scale: resolve one decision ticket off a wayfinder map
+ * (ADR-0010).
+ *
+ * The shape it has to resist is the interview's. A clarification session
+ * ranges over the whole request and hands what it settles to stage 3; this one
+ * answers **the single question its ticket holds** and stops, because the
+ * ticket is the unit and the destination artifact belongs to the whole map.
+ * So the prompt says which ticket, says one per session, and says plainly
+ * that writing requirements is not what this is.
+ */
+function wayfindingPrompt(context: PromptContext): string {
+  const { ticket } = context;
+
+  return [
+    `You are resuming work on the managed project **${context.project.name}**.`,
+    "A human has just opened this session by running",
+    `\`${takeoverCommand(context.project.name, ticket.number)}\`.`,
+    "**They are at the keyboard now, waiting for you.** This is a conversation, not a batch job.",
+    "",
+    ticketBlock(context),
+    feedbackBlock(context.feedback),
+    "",
+    reentryBlock(),
+    "",
+    `**This ticket is one decision on a shared map**, charted because the idea`,
+    "behind it was too big to settle in one sitting. Its body is the single",
+    "question it exists to resolve. Run the at-scale requirements-discovery",
+    "stage on it — `timone-wayfind`, working through the map — and follow that",
+    "skill's rules for the ticket's own type, which its labels give you.",
+    "",
+    "**Read the thread above before you ask anything.** They may already have",
+    "answered in writing — that is one of the two ways this ticket offered, and",
+    "re-asking what they have answered is the failure that path exists to",
+    "avoid. Answer from the codebase anything the codebase can answer.",
+    "",
+    "**One ticket per session.** Resolve this one: post the answer as its",
+    "resolution comment, **close** it, and append the one-line gist to the",
+    "map's decisions. If the answer is a decision that is hard to reverse or",
+    "carries a real trade-off, record it as an ADR at decision time, exactly as",
+    "that stage requires — a decision that lives only on a ticket is lost.",
+    "",
+    "**Do not write the destination artifact.** No requirements, no PRD, no",
+    "phase file, and no application code: the map produces decisions, and what",
+    "it is finding its way to gets written once the whole effort closes, not",
+    "off a single answer. Tend the map as the skill says — new tickets for fog",
+    "the answer sharpened — and stop there.",
+    "",
+    "The human knows nothing about this process.",
+    "**Never ask them to name a stage, a skill, or a process concept**, and never",
+    "make them repeat something the ticket already says.",
+    "",
+    "The conversation itself is not a process artifact: nothing may cite it,",
+    "and no transcript is kept. What survives is the resolution on the ticket,",
+    "the gist on the map, whatever the glossary gained, and any ADR you wrote.",
     "",
     writingBlock(),
   ].join("\n");

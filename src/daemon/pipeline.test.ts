@@ -18,6 +18,7 @@ import {
   runsUnattended,
   stageAfter,
   waitFor,
+  wayfinderStage,
   type PipelineStage,
 } from "./pipeline.js";
 
@@ -47,6 +48,37 @@ describe("classificationFromLabels", () => {
     // Better to look unclassified — and be re-triaged — than to route on a
     // word nobody defined.
     expect(classificationFromLabels(["triage:urgent"])).toBeUndefined();
+  });
+});
+
+describe("wayfinderStage", () => {
+  it.each(["grilling", "prototype", "task"])(
+    "sends a %s decision ticket to the wayfinding conversation",
+    (type) => {
+      // ADR-0010's table: these three resolve only through exchange with a
+      // human, which is a conversation whatever medium it runs on.
+      expect(wayfinderStage(["timone", `wayfinder:${type}`])).toBe("wayfinding");
+    },
+  );
+
+  it("sends a research ticket to the stage nobody waits on", () => {
+    // The one type whose own CTA asks the human for nothing.
+    expect(wayfinderStage(["timone", "wayfinder:research"])).toBe("research");
+  });
+
+  it("makes no work of the map, which is an index rather than a question", () => {
+    // Marking the map would create a run for a ticket nothing can resolve.
+    expect(wayfinderStage(["timone", "wayfinder:map"])).toBeUndefined();
+  });
+
+  it("yields nothing for a wayfinder type nobody defined", () => {
+    // The same conservatism as an unrecognised `triage:` kind: routing on a
+    // word the process does not have is worse than not routing at all.
+    expect(wayfinderStage(["timone", "wayfinder:vibes"])).toBeUndefined();
+  });
+
+  it("yields nothing for an ordinary ticket, which still goes through triage", () => {
+    expect(wayfinderStage(["timone", "triage:feature"])).toBeUndefined();
   });
 });
 
@@ -163,6 +195,37 @@ describe("the stage graph", () => {
     expect(runsUnattended("execution")).toBe(true);
     expect(runsUnattended("verification")).toBe(true);
     expect(runsUnattended("delivery")).toBe(true);
+  });
+
+  it("resolves a wayfinder decision ticket at process stage 2, on a conversation", () => {
+    // Stage 2 at scale (ADR-0010) — the same requirements discovery as the
+    // interview, so the same process stage and the same kind of wait. It
+    // holds no branch: a decision ticket produces a decision, not a commit.
+    expect(processStage("wayfinding")).toBe(2);
+    expect(waitFor("wayfinding")).toBe("conversation");
+    expect(ownsBranch("wayfinding")).toBe(false);
+    expect(isBuilt("wayfinding")).toBe(true);
+  });
+
+  it("leaves a research ticket unattended, and says plainly it is not built yet", () => {
+    // Nobody waits on a research ticket — its CTA promises the machine will
+    // resolve it. What is missing is the daemon's ability to judge such a
+    // session's outcome, so the stage exists and is honestly unbuilt: a
+    // marked research ticket parks and says so rather than being triaged.
+    expect(processStage("research")).toBe(2);
+    expect(waitFor("research")).toBe("none");
+    expect(runsUnattended("research")).toBe(true);
+    expect(ownsBranch("research")).toBe(false);
+    expect(isBuilt("research")).toBe(false);
+  });
+
+  it("ends a decision ticket's run where the ticket ends, rather than in a PRD", () => {
+    // The trap the clarification row sets: `stageAfter("clarification")` is
+    // requirements, so a decision ticket parked at a stage copied from it
+    // would advance into writing requirements off a single answer. The
+    // destination artifact is the whole map's to hand over, once it closes.
+    expect(stageAfter("wayfinding")).toBeUndefined();
+    expect(stageAfter("research")).toBeUndefined();
   });
 
   it("leaves the conversation stage to a human-opened session", () => {

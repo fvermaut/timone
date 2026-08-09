@@ -18,6 +18,8 @@ import {
 } from "../adapters/ticketing.js";
 import { RunStore, type Run } from "./runs.js";
 import { pollOnce, type SessionSpawner } from "./poll.js";
+import { processStage } from "./pipeline.js";
+import { AgentSessionSpawner } from "./session.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
 const tempDirs: string[] = [];
@@ -1764,5 +1766,167 @@ describe("pollOnce — previews end when their pull request does", () => {
     // The record survives, so a later cycle tries again rather than leaving
     // containers on the host with nothing left that remembers them.
     expect(store.previewRecord("scratch-app", 9)).toBeDefined();
+  });
+});
+
+describe("pollOnce — a wayfinder decision ticket", () => {
+  /**
+   * The real spawner over fakes for the two things outside the process: the
+   * tracker, and the agent runtime. Everything the assertions are about —
+   * the stage graph, the conversation channel, the ledger — is the real
+   * collaborator, because "it parks on a conversation" is a claim about how
+   * those three behave together and a fake spawner could only restate it.
+   *
+   * The runtime throws on purpose: a conversation stage must never reach
+   * `runtime.start`, and a test that let it silently would be asserting the
+   * opposite of what it claims.
+   */
+  function realSpawner(
+    store: RunStore,
+    adapter: TicketingAdapter,
+  ): SessionSpawner {
+    return new AgentSessionSpawner({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      runtime: {
+        async start() {
+          throw new Error("no unattended session may start for a conversation");
+        },
+      },
+      root: "/nowhere",
+    });
+  }
+
+  it("parks on a conversation at stage 2, without ever being triaged", async () => {
+    // The map that charted this ticket already decided what kind of question
+    // it is. Triaging it would classify a decision as a fresh request and
+    // route it into the build pipeline.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      "scratch-app": [ticket(5, { labels: ["timone", "wayfinder:grilling"] })],
+    });
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: realSpawner(store, adapter),
+    });
+
+    const run = store.get("scratch-app#5");
+    expect(run?.stage).toBe("wayfinding");
+    expect(processStage("wayfinding")).toBe(2);
+    expect(run?.status).toBe("parked");
+    expect(run?.waitingKind).toBe("conversation");
+    // A decision ticket produces a decision, so nothing was branched.
+    expect(run?.branch).toBeUndefined();
+  });
+
+  it("leaves an ordinary marked ticket to start where it always did", async () => {
+    // The negative half of the routing, and the one that protects every
+    // existing run: a ticket carrying no wayfinder label is handed to the
+    // spawner with no entry context at all — not one naming triage. Two
+    // answers to where a run starts would eventually disagree.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      "scratch-app": [ticket(5, { labels: ["timone"] })],
+    });
+    const contexts: unknown[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(contexts).toEqual([undefined]);
+  });
+
+  it("does not work a wayfinder ticket the tracker never handed it", async () => {
+    // R1's negative clause, unchanged by this phase. The mark label is the
+    // permission boundary and `listMarkedTickets` is where it is applied — so
+    // a wayfinder ticket without the mark is simply not in the cycle's
+    // listing, and carrying `wayfinder:grilling` buys it no exemption. The
+    // map itself is the ticket this protects: it is never marked, and a run
+    // on it would be a run nothing could resolve.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [] });
+    const spawned: Run[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(run) {
+          spawned.push(run);
+        },
+      },
+    });
+
+    expect(store.all()).toEqual([]);
+    expect(spawned).toEqual([]);
+    expect(comments).toEqual([]);
+  });
+
+  it("resumes an old triage park onto the map, not into the build pipeline", async () => {
+    // A park from before this stage existed: triage ran, classified the
+    // ticket, and the run stopped because what followed was not built. If a
+    // wayfinder label has landed on it since, the map is what the ticket
+    // became — and resuming on the stale `triage:feature` would send a
+    // decision question off to have its requirements written.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      "scratch-app": [
+        ticket(5, {
+          labels: ["timone", "triage:feature", "wayfinder:grilling"],
+        }),
+      ],
+    });
+    const contexts: unknown[] = [];
+
+    const { run } = store.register("scratch-app", 5);
+    store.activate(run.id, "session-1");
+    store.park(run.id, { waitingOn: "the next stage to be built", stage: "triage" });
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(contexts).toEqual([{ stage: "wayfinding" }]);
+  });
+
+  it("invites the human with the channel's own words, not a second copy of them", async () => {
+    // ADR-0022's invitation is one piece of copy. The daemon's park comment
+    // is `TerminalChannel.open`'s, so a wayfinder ticket and a clarification
+    // ticket say the same thing about how to answer.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter({
+      "scratch-app": [ticket(5, { labels: ["timone", "wayfinder:grilling"] })],
+    });
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: realSpawner(store, adapter),
+    });
+
+    const park = comments.at(-1)?.body ?? "";
+    expect(park).toMatch(/two ways to answer/i);
+    expect(park).toContain("timone takeover scratch-app#5");
   });
 });

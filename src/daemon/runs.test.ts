@@ -95,10 +95,18 @@ describe("the one-active-run invariant", () => {
   });
 
   it("refuses transitions the lifecycle does not allow", () => {
+    // Re-pointed when `picked-up → parked` became legal, so that a run
+    // entering at a conversation stage can wait on a human without first
+    // pretending a session is attached to it. The lifecycle must still refuse
+    // *something*, and this is the neighbour that stayed illegal: a run still
+    // queued behind another has not begun, so it cannot be waiting on anyone.
     const store = newStore();
-    const { run } = store.register("scratch-app", 7);
-    expect(() => store.park(run.id, { waitingOn: "the human" })).toThrow(
-      /picked-up/,
+    store.register("scratch-app", 7);
+    const queued = store.register("scratch-app", 8);
+
+    expect(queued.run.status).toBe("queued");
+    expect(() => store.park(queued.run.id, { waitingOn: "the human" })).toThrow(
+      /queued/,
     );
   });
 

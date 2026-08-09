@@ -2,6 +2,7 @@ import type { Manifest, ProjectConfig } from "../manifest.js";
 import {
   PREVIEW_MARKER,
   type PullRequest,
+  type Ticket,
   type TicketingAdapter,
   type TicketingProject,
 } from "../adapters/ticketing.js";
@@ -18,6 +19,7 @@ import {
   readGate,
   routeAfterTriage,
   stageAfter,
+  wayfinderStage,
   type PipelineStage,
 } from "./pipeline.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
@@ -566,7 +568,7 @@ async function pollProject(
   const occupier = store.occupyingRun(project.name);
   if (occupier !== undefined && occupier.status === "picked-up") {
     try {
-      await deps.spawner.spawn(occupier, project);
+      await deps.spawner.spawn(occupier, project, entryContext(occupier, tickets));
       result.spawned.push(occupier.id);
       log(`spawn  ${occupier.id}`);
     } catch (error) {
@@ -575,6 +577,34 @@ async function pollProject(
       log(`error  ${line}`);
     }
   }
+}
+
+/**
+ * Where a run that has never run anything starts, when its ticket's labels
+ * say somewhere other than the default.
+ *
+ * Only a wayfinder decision ticket does. It was charted by a discovery
+ * session that had already decided what kind of question it holds, so sending
+ * it through triage would classify a decision as a fresh request and route it
+ * into the build pipeline. Everything else gets `undefined` — the spawner's
+ * own default is triage, and naming it here as well would let the two
+ * disagree.
+ *
+ * The labels come from the listing this cycle already made, so recognising a
+ * wayfinder ticket costs the tracker nothing.
+ */
+function entryContext(
+  run: Run,
+  tickets: readonly Ticket[],
+): SpawnContext | undefined {
+  // A run that has already reached a stage is resuming rather than entering,
+  // and where it resumes is the ledger's answer, not the label's.
+  if (run.stage !== undefined) return undefined;
+
+  const labels =
+    tickets.find((candidate) => candidate.number === run.ticket)?.labels ?? [];
+  const stage = wayfinderStage(labels);
+  return stage === undefined ? undefined : { stage };
 }
 
 /**
@@ -778,6 +808,14 @@ function whatFollows(
   labels: readonly string[],
 ): PipelineStage | undefined {
   if (stage !== "triage") return stageAfter(stage);
+
+  // The map wins over the classification, and is read first for that reason.
+  // These two labels can genuinely coexist: a ticket triaged before anyone
+  // decided to chart it keeps its `triage:<kind>` label, and routing on that
+  // would send a decision question off to have its requirements written. What
+  // the ticket has *become* is a decision ticket on a map.
+  const charted = wayfinderStage(labels);
+  if (charted !== undefined) return charted;
 
   const kind = classificationFromLabels(labels);
   if (kind === undefined) return undefined;

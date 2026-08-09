@@ -36,10 +36,20 @@ const TERMINAL: readonly RunStatus[] = ["done", "failed"];
  * `active → active` is a real move, not a no-op: a run that clears one stage
  * and starts the next without a human in between re-activates under a new
  * session id, since each stage is its own session.
+ *
+ * `picked-up → parked` is the other one worth explaining. A run that enters
+ * the pipeline at a stage waiting on a conversation — a wayfinder decision
+ * ticket does, since it skips triage (ADR-0010, ADR-0022) — has never had a
+ * session attached to it, and `active` means precisely that one is: `activate`
+ * takes a session id. What such a run waits for is a *human*, and the session
+ * that will serve them does not exist yet and may never be started by the
+ * daemon at all. Routing it through `active` first would mint an id for a
+ * session nobody started, and `timone status` would call the run running for
+ * as long as the human took to answer.
  */
 const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   queued: ["picked-up"],
-  "picked-up": ["active", "failed"],
+  "picked-up": ["active", "parked", "failed"],
   active: ["active", "parked", "done", "failed"],
   parked: ["active", "done", "failed"],
   done: [],
