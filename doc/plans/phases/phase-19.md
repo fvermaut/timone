@@ -1,6 +1,8 @@
 # Phase 19: one answer, one session
 
-> **Status:** Awaiting approval.
+> **Status:** **Approved for execution by fvermaut 2026-08-11**, the same day the ruling behind it was made. Hand-planned, as all Timone-self phases are; approval was gated on this file per [ADR-0014](../../adr/0014-artifact-first-gates.md). fvermaut is not building it in the session that planned it.
+
+> **Re-checked against `main` at approval, as this plan required of itself.** `main` is at `5376b51`, clean. **Nothing under `src/` has changed since the trace this plan rests on** — the only commits since `8952478` are this plan, [ADR-0023](../../adr/0023-one-answer-one-session.md), and the fixture correction to 19e. Every file-and-line citation below is therefore as traced on 2026-08-11. **Nothing in this plan changes as a result** — it is confirmed, not amended.
 
 > **Eighth phase of [PRD-02](../../specs/prd/prd-02-inversion-of-control.md).** Governing decision: **[ADR-0023](../../adr/0023-one-answer-one-session.md)** (one answer, one session), made by fvermaut on 2026-08-11 from four options. Standing: [ADR-0007](../../adr/0007-sessions-at-timone-root.md), [ADR-0014](../../adr/0014-artifact-first-gates.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md), [ADR-0020](../../adr/0020-liveness-is-judged-only-over-witnessed-time.md), [ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md).
 
