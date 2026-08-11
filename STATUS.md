@@ -268,10 +268,12 @@ The proof run also showed the safety machinery earning its keep, which matters m
 
 ~~**What I need from you now: answer three questions on the trading app.**~~ **You answered all three, and two more besides** — `ivtrends` #5, #6, #7, #8 and #9 are settled and closed, each by talking it through in your terminal, each leaving a written record on its ticket. Two of them produced permanent decision records in the trading app's own repository (its ADR-0006 and ADR-0007).
 
-**What I need from you now: two rulings on Timone itself, before you answer anything else in writing.**
+~~**What I need from you now: two rulings on Timone itself, before you answer anything else in writing.**~~ **You made the first on 2026-08-11. The second is still open.**
 
-- **Problem one above — one answer sets two of the machine going.** It needs fixing before the written path is safe to use on a real question. Say the word and it goes into the next chunk of work.
-- **Problem two above — the requirement says one thing, the build does another.** Reword the requirement, or build the missing path? Your call.
+- ~~**Problem one above — one answer sets two of the machine going.**~~ **Ruled on 2026-08-11.** You were shown four options and chose all three fixes layered rather than the cheap one. The reasoning is written down as a permanent record (`doc/adr/0023-one-answer-one-session.md`) and the work is planned as `doc/plans/phases/phase-19.md`, **which is what I need you to approve.** What the trace found, in one line: the machine has nothing stopping two watchers running at once, it puts its name on a job only *after* starting the work, and the check that should catch that reads a stale copy. There is also a fourth fault needing no second watcher at all — a session that answers you without saying anything reads your comment again next time round.
+- **Problem two above — the requirement says one thing, the build does another.** Reword the requirement, or build the missing path? **Still yours, and untouched by phase 19** — that plan says so in as many words rather than quietly folding it in.
+
+**What I need from you now: approve `doc/plans/phases/phase-19.md`.** Reply `approve`, or tell me what to change.
 
 **Six new questions are open on the trading app** (`ivtrends` #10, #12, #13, #14, #15, and #11 which is a screen to look at rather than a question). They are connected to the machine and they are waiting on you. **Until problem one is fixed, talk them through rather than writing your answer on the ticket** — run the line each ticket gives you. Writing the answer works, but it will answer you twice.
 
