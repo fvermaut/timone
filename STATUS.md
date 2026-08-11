@@ -277,7 +277,7 @@ The proof run also showed the safety machinery earning its keep, which matters m
 
 **What I need from you now: nothing until the build asks for you.** The next session builds phase 19 and comes back with something to look at. **It will need you for one thing at the end** — answering a throwaway question on the to-do app in your own words, and saying whether the machine's reply was a fair reading of it. That is the one judgement no test can make, and it is what lifts the write-your-answer restriction on the trading app.
 
-**Six new questions are open on the trading app** (`ivtrends` #10, #12, #13, #14, #15, and #11 which is a screen to look at rather than a question). They are connected to the machine and they are waiting on you. **Until problem one is fixed, talk them through rather than writing your answer on the ticket** — run the line each ticket gives you. Writing the answer works, but it will answer you twice.
+~~**Six new questions are open on the trading app**~~ **Five, as of this evening** — you answered and closed #10 at 19:17 by talking it through, after this file last said six. Open now: `ivtrends` #12, #13, #14, #15, and #11, which is a screen to look at rather than a question. They are connected to the machine and they are waiting on you. **Until problem one is fixed, talk them through rather than writing your answer on the ticket** — run the line each ticket gives you. Writing the answer works, but it will answer you twice.
 
 **One of them is telling you something wrong right now.** `timone status` asks you to answer #11; #11's own text says nothing is needed yet, because it is waiting on #10. The status line does not understand "waiting on another question" — that is a known fault, recorded, not yet fixed.
 
