@@ -15,6 +15,10 @@ import type {
 import type { Manifest } from "../manifest.js";
 import { RunStore } from "../daemon/runs.js";
 import {
+  AgentSessionSpawner,
+  type SessionRuntime,
+} from "../daemon/session.js";
+import {
   appendJournal,
   readHookPayload,
   runBaseline,
@@ -203,6 +207,72 @@ describe("finding the run that drove a session", () => {
     store.activate(run.id, "session-abc");
 
     expect(runForSession(store, "session-abc")?.id).toBe("scratch-app#7");
+  });
+
+  it("finds the run of a session started under the claim-first ordering", async () => {
+    // The run is claimed before the runtime is asked for a session, so for a
+    // moment the ledger holds a run with no session id (ADR-0023). The id
+    // still has to land, or every daemon session's `Stop` report would be
+    // filed as `interactive` — on the terminal, to nobody, instead of on the
+    // ticket the run belongs to.
+    const dir = mkdtempSync(join(tmpdir(), "timone-guardrails-"));
+    tempDirs.push(dir);
+    const store = newStore(dir);
+    const project = {
+      name: "scratch-app",
+      repoUrl: "https://github.com/fvermaut/scratch-app.git",
+    };
+    const ticket: TicketThread = {
+      number: 7,
+      title: "the page feels slow",
+      body: "when I add many items the page feels slow",
+      labels: ["timone", "triage:feature"],
+      url: "https://github.com/fvermaut/scratch-app/issues/7",
+      author: "fvermaut",
+      createdAt: "2026-08-06T09:00:00Z",
+      comments: [],
+    };
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...ticket, labels: [...ticket.labels], comments: [] };
+      },
+      async postComment(): Promise<void> {},
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+    };
+    const runtime: SessionRuntime = {
+      async start() {
+        return {
+          sessionId: "session-resumed",
+          completed: Promise.resolve({ sessionId: "session-resumed", ok: true }),
+        };
+      },
+    };
+
+    const { run } = store.register("scratch-app", 7);
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-06T10:00:00Z",
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: dir,
+      headProbe: async () => undefined,
+    }).spawn(store.get(run.id)!, project, {
+      stage: "clarification",
+      feedback: "it's the draft they lose, not the phone layout",
+    });
+
+    expect(runForSession(store, "session-resumed")?.id).toBe("scratch-app#7");
   });
 
   it("finds nobody for a session no run ever claimed", () => {

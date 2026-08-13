@@ -305,32 +305,64 @@ export class RunStore {
    * about to, or one parked on a work branch it owns. Undefined when the
    * project is free — including when runs are parked awaiting answers at a
    * stage that touches no repository.
+   *
+   * Reads the file rather than this store's memory (ADR-0023). It is one of
+   * the three the poll loop guards on, and a guard that answers from memory
+   * cannot see the claim another process has just written — which is what let
+   * one answer buy two sessions.
    */
   occupyingRun(project: string): Run | undefined {
+    this.refresh();
+    return this.loadedOccupyingRun(project);
+  }
+
+  /**
+   * The run occupying `project`'s single session slot — running, or picked up
+   * and awaiting a spawn. Undefined when no session is in flight, however
+   * many runs are parked. Reads the file, as {@link occupyingRun} does and
+   * for the same reason.
+   */
+  runningRun(project: string): Run | undefined {
+    this.refresh();
+    return this.loadedRunningRun(project);
+  }
+
+  /**
+   * Every run of `project` parked on a human, in pickup order. Reads the
+   * file, as {@link occupyingRun} does and for the same reason — this is the
+   * list the poll loop walks when it looks for a run to resume.
+   */
+  parkedRuns(project: string): Run[] {
+    this.refresh();
+    return this.state.runs
+      .filter((run) => run.project === project && run.status === "parked")
+      .map((run) => ({ ...run }));
+  }
+
+  /**
+   * {@link occupyingRun} over the state already in hand.
+   *
+   * The split is not an optimisation. A mutation holds a live reference into
+   * `this.state` between {@link mutable} and {@link persist}, and a refresh in
+   * that window replaces the object the reference points into — so the change
+   * would be written to a state nobody persists. Every caller inside a
+   * mutation asks these; every caller outside one asks the public pair, which
+   * re-reads first.
+   */
+  private loadedOccupyingRun(project: string): Run | undefined {
     const run = this.state.runs.find(
       (candidate) => candidate.project === project && holdsProject(candidate),
     );
     return run === undefined ? undefined : { ...run };
   }
 
-  /**
-   * The run occupying `project`'s single session slot — running, or picked up
-   * and awaiting a spawn. Undefined when no session is in flight, however
-   * many runs are parked.
-   */
-  runningRun(project: string): Run | undefined {
+  /** {@link runningRun} over the state already in hand. */
+  private loadedRunningRun(project: string): Run | undefined {
     const run = this.state.runs.find(
       (candidate) =>
         candidate.project === project && RUNNING.includes(candidate.status),
     );
     return run === undefined ? undefined : { ...run };
-  }
-
-  /** Every run of `project` parked on a human, in pickup order. */
-  parkedRuns(project: string): Run[] {
-    return this.state.runs
-      .filter((run) => run.project === project && run.status === "parked")
-      .map((run) => ({ ...run }));
   }
 
   /** Runs waiting behind the occupying one, in pickup order. */
@@ -359,11 +391,12 @@ export class RunStore {
     if (existing !== undefined) return { run: existing, created: false };
 
     const timestamp = this.now();
+    const holder = this.loadedOccupyingRun(project);
     const run: Run = {
       id,
       project,
       ticket,
-      status: this.occupyingRun(project) === undefined ? "picked-up" : "queued",
+      status: holder === undefined ? "picked-up" : "queued",
       flags: [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -381,10 +414,28 @@ export class RunStore {
   activate(id: string, sessionId: string): Run {
     return this.transition(id, "active", (run) => {
       run.sessionId = sessionId;
-      run.waitingOn = undefined;
-      run.waitingKind = undefined;
-      run.waitCursor = undefined;
+      stopWaiting(run);
     });
+  }
+
+  /**
+   * Take the run out of the pool a second process could resume it from,
+   * before the session that will do the work exists (ADR-0023).
+   *
+   * Distinct from {@link activate} in the one way that matters: there is no
+   * session id yet, because the runtime has not been asked to start one.
+   * Minting a placeholder would be worse than the gap it closed — the ledger's
+   * session id is what a guardrail report is matched against, so a made-up one
+   * files a real session's report against the wrong run.
+   *
+   * **What it waits for is deliberately left on the run.** The claim exists to
+   * hold the slot for a session that may still fail to start, and a claim that
+   * erased the wait would leave a process that died mid-spawn with no record
+   * of what the run was waiting for. {@link activate} clears it a moment
+   * later, once there is really a session.
+   */
+  claim(id: string): Run {
+    return this.transition(id, "active", () => {});
   }
 
   /** Park a run against a human wait, naming what it waits for. */
@@ -423,7 +474,7 @@ export class RunStore {
    */
   claimBranch(id: string, branch: string): Run {
     const run = this.mutable(id);
-    const holder = this.occupyingRun(run.project);
+    const holder = this.loadedOccupyingRun(run.project);
     if (holder !== undefined && holder.id !== id) {
       throw new Error(
         `Run ${id} cannot claim a branch on ${run.project}: run ${holder.id} ` +
@@ -480,7 +531,7 @@ export class RunStore {
     this.refresh();
     this.promoteHead(project);
     this.persist();
-    return this.runningRun(project);
+    return this.loadedRunningRun(project);
   }
 
   /**
@@ -723,7 +774,7 @@ export class RunStore {
     }
 
     if (RUNNING.includes(next)) {
-      const running = this.runningRun(run.project);
+      const running = this.loadedRunningRun(run.project);
       if (running !== undefined && running.id !== id) {
         throw new Error(
           `Project ${run.project} already has a session for run ${running.id} ` +
@@ -731,7 +782,7 @@ export class RunStore {
         );
       }
 
-      const holder = this.occupyingRun(run.project);
+      const holder = this.loadedOccupyingRun(run.project);
       if (holder !== undefined && holder.id !== id) {
         throw new Error(
           `Project ${run.project} is held by run ${holder.id} ` +
@@ -758,8 +809,8 @@ export class RunStore {
    * parked on a branch.
    */
   private promoteHead(project: string): void {
-    if (this.runningRun(project) !== undefined) return;
-    if (this.occupyingRun(project) !== undefined) return;
+    if (this.loadedRunningRun(project) !== undefined) return;
+    if (this.loadedOccupyingRun(project) !== undefined) return;
     const head = this.state.runs.find(
       (run) => run.project === project && run.status === "queued",
     );
@@ -785,6 +836,13 @@ export function runId(project: string, ticket: number): string {
 /** One preview per pull request, keyed the same way runs are keyed. */
 export function previewKey(project: string, pr: number): string {
   return `${project}#${pr}`;
+}
+
+/** Clear the wait a run has finished waiting on. */
+function stopWaiting(run: Run): void {
+  run.waitingOn = undefined;
+  run.waitingKind = undefined;
+  run.waitCursor = undefined;
 }
 
 /** Write a wait onto a run. Shared by {@link RunStore.park} and `repark`. */

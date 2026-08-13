@@ -762,6 +762,80 @@ describe("two processes writing the one ledger", () => {
     expect(final?.flags).toEqual(["a violation"]);
   });
 
+  it("shows another process's claim to a guard that has itself written nothing", () => {
+    // The guards are the poll loop's only defence against resuming a run
+    // somebody else has already taken (ADR-0023, fault 3). Answering from
+    // memory made them blind to exactly the write they exist to notice — and
+    // a guard that has mutated nothing has nothing that would have refreshed
+    // its memory as a side effect.
+    const path = statePath();
+    const daemon = newStore(path);
+    const { run } = daemon.register("scratch-app", 7);
+    daemon.activate(run.id, "session-abc");
+    daemon.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "triage",
+    });
+
+    const rival = newStore(path);
+    expect(rival.parkedRuns("scratch-app").map((each) => each.id)).toEqual([
+      run.id,
+    ]);
+
+    daemon.claim(run.id);
+
+    expect(rival.runningRun("scratch-app")?.id).toBe(run.id);
+    expect(rival.occupyingRun("scratch-app")?.id).toBe(run.id);
+    expect(rival.parkedRuns("scratch-app")).toEqual([]);
+  });
+
+  /**
+   * The poll loop's guard sequence over one project, as `resumeAnswered`
+   * runs it: walk the parked runs, stop if a session is in flight, skip a run
+   * whose project somebody else holds, and resume the first that survives.
+   * Copied rather than imported because the loop is not this module's — what
+   * is being asserted is that these three answers are enough to serialize two
+   * processes, which is the promise `poll.ts` is entitled to rely on.
+   */
+  function resumeOneParkedRun(
+    store: RunStore,
+    project: string,
+    sessionId: string,
+  ): string | undefined {
+    for (const run of store.parkedRuns(project)) {
+      if (store.runningRun(project) !== undefined) return undefined;
+      const holder = store.occupyingRun(project);
+      if (holder !== undefined && holder.id !== run.id) continue;
+      store.activate(run.id, sessionId);
+      return run.id;
+    }
+    return undefined;
+  }
+
+  it("lets only one of two processes resume the same parked run", () => {
+    // One written answer, two daemons, two sessions, two full resolutions
+    // posted on one ticket — reproduced twice on scratch-app at phase 18's
+    // stage-7 pass. The second process must find the run already taken by
+    // asking, not by having happened to write something first.
+    const path = statePath();
+    const daemon = newStore(path);
+    const { run } = daemon.register("scratch-app", 7);
+    daemon.activate(run.id, "session-earlier");
+    daemon.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "triage",
+    });
+
+    const first = newStore(path);
+    const second = newStore(path);
+
+    expect(resumeOneParkedRun(first, "scratch-app", "session-a")).toBe(run.id);
+    expect(resumeOneParkedRun(second, "scratch-app", "session-b")).toBeUndefined();
+    expect(RunStore.open(path).get(run.id)?.sessionId).toBe("session-a");
+  });
+
   it("sees a run another process registered, rather than refusing it exists", () => {
     const path = statePath();
     const daemon = newStore(path);

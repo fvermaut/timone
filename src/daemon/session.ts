@@ -385,6 +385,24 @@ function oneLine(error: unknown): string {
   return message.split("\n")[0];
 }
 
+/**
+ * The wait a claimed run goes back to when its session never starts — its own
+ * wait, as the ledger recorded it, so a released run is indistinguishable from
+ * one that was never claimed.
+ *
+ * The fallback text is unreachable in practice: parking names what a run waits
+ * for, so a parked run has one. It is here so that releasing a claim can never
+ * be the thing that throws.
+ */
+function waitOf(run: Run): ParkOptions {
+  return {
+    waitingOn: run.waitingOn ?? "a human",
+    ...(run.waitingKind === undefined ? {} : { kind: run.waitingKind }),
+    ...(run.stage === undefined ? {} : { stage: run.stage }),
+    ...(run.waitCursor === undefined ? {} : { waitCursor: run.waitCursor }),
+  };
+}
+
 /** Whether `stage` is one the prompts module knows how to instruct. */
 function isPrompted(
   stage: PipelineStage,
@@ -513,7 +531,7 @@ export class AgentSessionSpawner implements SessionSpawner {
       }
     | { ok: false }
   > {
-    const { store, adapter, runtime, root } = this.options;
+    const { store, adapter, root } = this.options;
 
     const model = modelFor(stage);
     if (!isPrompted(stage) || model === undefined) {
@@ -551,7 +569,7 @@ export class AgentSessionSpawner implements SessionSpawner {
       (await this.branchHead(project, branch)) ?? (await this.currentHead(project));
 
     const effort = effortFor(stage);
-    const started = await runtime.start({
+    const started = await this.startClaimed(run, {
       cwd: root,
       prompt,
       model,
@@ -560,7 +578,6 @@ export class AgentSessionSpawner implements SessionSpawner {
       // runtime would have to tell apart from an intended value.
       ...(effort === undefined ? {} : { effort }),
     });
-    const active = store.activate(run.id, started.sessionId);
     this.log(`session ${started.sessionId} started for ${run.id} (${stage}, ${model})`);
 
     const outcome = await this.watch(run.id, `${run.id} (${stage})`, started);
@@ -583,6 +600,45 @@ export class AgentSessionSpawner implements SessionSpawner {
       outcome: readStageOutcome(after, cursor),
       cursor,
     };
+  }
+
+  /**
+   * Claim the run, then start its session — in that order (ADR-0023).
+   *
+   * The claim is what tells a second process the run is taken, so it has to
+   * be on disk *before* the work exists rather than after it returns.
+   * `runtime.start` awaits the session's first message, so the window between
+   * the two used to be as long as a session takes to answer, and for all of
+   * it the ledger still advertised the run as waiting on a human.
+   *
+   * Only a parked run is claimed here, because a `picked-up` run is already
+   * claimed: that status occupies the project's session slot and every guard
+   * already excludes it. What was missing was never a claim for the entry
+   * path — it was one for the resume path.
+   *
+   * If the spawn fails the run goes back to the wait it came from, and the
+   * error goes on to whoever asked for the session. **A claim that outlives
+   * its session is the stuck-run fault**, so releasing it is part of the same
+   * path rather than a later cycle's problem.
+   */
+  private async startClaimed(
+    run: Run,
+    request: SessionRequest,
+  ): Promise<StartedSession> {
+    const { store, runtime } = this.options;
+
+    const before = store.get(run.id);
+    const parked = before?.status === "parked" ? before : undefined;
+    if (parked !== undefined) store.claim(run.id);
+
+    try {
+      const started = await runtime.start(request);
+      store.activate(run.id, started.sessionId);
+      return started;
+    } catch (error) {
+      if (parked !== undefined) store.park(run.id, waitOf(parked));
+      throw error;
+    }
   }
 
   /**
@@ -951,7 +1007,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     project: TicketingProject,
     approval: NonNullable<SpawnContext["approval"]>,
   ): Promise<boolean> {
-    const { store, adapter, runtime, root } = this.options;
+    const { store, adapter, root } = this.options;
     if (!isPrompted(approval.stage)) return true;
 
     const ticket = await adapter.getTicket(project, run.ticket);
@@ -963,12 +1019,11 @@ export class AgentSessionSpawner implements SessionSpawner {
     // Its own declared model, never the runtime's default: this is the second
     // `runtime.start` site and not a `PipelineStage`, so nothing in the graph
     // speaks for it. Haiku carries no effort at all.
-    const started = await runtime.start({
+    const started = await this.startClaimed(run, {
       cwd: root,
       prompt,
       model: APPROVAL_RECORD_MODEL,
     });
-    const active = store.activate(run.id, started.sessionId);
     this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
 
     const outcome = await this.watch(run.id, `${run.id} (approval record)`, started);

@@ -50,12 +50,25 @@ afterEach(() => {
 });
 
 function newStore(): RunStore {
+  return newLedger().store;
+}
+
+/**
+ * A store and the file it writes, for a test that has to ask what *another*
+ * process would read — which is not the same question as what this store
+ * remembers.
+ */
+function newLedger(): { store: RunStore; path: string } {
   const dir = mkdtempSync(join(tmpdir(), "timone-session-"));
   tempDirs.push(dir);
+  const path = join(dir, ".timone", "state.json");
   let tick = 0;
-  return RunStore.open(join(dir, ".timone", "state.json"), {
-    now: () => `2026-08-02T10:${String(tick++).padStart(2, "0")}:00Z`,
-  });
+  return {
+    store: RunStore.open(path, {
+      now: () => `2026-08-02T10:${String(tick++).padStart(2, "0")}:00Z`,
+    }),
+    path,
+  };
 }
 
 const manifest: Manifest = {
@@ -568,6 +581,94 @@ describe("resuming a parked run", () => {
     });
 
     expect(requests[0].prompt).toContain("it's not a bug, the whole page is like that");
+  });
+});
+
+describe("claiming a run before its session exists", () => {
+  /** A run parked on a conversation, as the daemon finds it before resuming. */
+  function parkedOnAConversation(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-02T10:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  const answered = {
+    stage: "clarification",
+    feedback: "it's the draft they lose, not the phone layout",
+  } as const;
+
+  it("leaves the run parked, and still waiting, when the spawn throws", async () => {
+    // Asserted before anything about the claim itself: a claim that outlives
+    // the session it was taken for is the stuck-run fault phase 14 closed,
+    // and ADR-0023 names reintroducing it as the way this decision goes wrong.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:feature"],
+    });
+    const run = parkedOnAConversation(store);
+    const runtime: SessionRuntime = {
+      async start() {
+        throw new Error("the runtime is down");
+      },
+    };
+
+    await expect(
+      new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+      }).spawn(run, project, answered),
+    ).rejects.toThrow(/the runtime is down/);
+
+    const after = store.get(run.id)!;
+    expect(after.status).toBe("parked");
+    expect(after.waitingOn).toBe("a conversation in your terminal");
+    expect(after.waitingKind).toBe("conversation");
+    expect(after.waitCursor).toBe("2026-08-02T10:00:00Z");
+    // And the project is free for the next cycle, rather than held by a
+    // session that never started.
+    expect(store.runningRun("scratch-app")).toBeUndefined();
+  });
+
+  it("has written the claim to the ledger before the session is asked to start", async () => {
+    // Observed, not read off the diff: the runtime double opens the state
+    // file at the instant it is called, so what it reports is what a *second*
+    // process would find there — which is the whole point of claiming early.
+    const { store, path } = newLedger();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:feature"],
+    });
+    const run = parkedOnAConversation(store);
+    const onDiskWhenStarted: (string | undefined)[] = [];
+    const runtime: SessionRuntime = {
+      async start() {
+        onDiskWhenStarted.push(RunStore.open(path).get(run.id)?.status);
+        return {
+          sessionId: "session-resumed",
+          completed: Promise.resolve({ sessionId: "session-resumed", ok: true }),
+        };
+      },
+    };
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+    }).spawn(run, project, answered);
+
+    expect(onDiskWhenStarted).toEqual(["active"]);
   });
 });
 
