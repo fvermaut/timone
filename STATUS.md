@@ -37,7 +37,9 @@ And two faults already written down here turn out to be the same disease: the ma
 
 **Two consequences you weren't asked about, because they only became visible afterwards.** Once you say "go" on a question list, that list holds its whole project until the specification is written — no other ticket on that project moves meanwhile. And this **cannot be built before the duplicate-answer fix** that is already approved and waiting: the repair runs over exactly the machinery that answers you twice, so building it first would spread that fault from one ticket to every open one, every minute.
 
-**Written down and planned:** the reasoning is `doc/adr/0024-every-open-ticket-answers-for-itself.md`, the requirement is R21 in the trading list at `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, and the work is `doc/plans/phases/phase-20.md` — **eight steps, and it is what I need you to approve.** As with everything else, the live proof runs on the throwaway to-do app, not on the trading app.
+**Written down, planned, and approved the same day.** The reasoning is `doc/adr/0024-every-open-ticket-answers-for-itself.md`, the requirement is R21 in the list at `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, and the work is `doc/plans/phases/phase-20.md` — **eight steps, approved 2026-08-13, and you are running the build in another session.** As with everything else, the live proof runs on the throwaway to-do app, not on the trading app.
+
+**Two builds are now queued, and the order matters.** Phase 19 — the duplicate-answer fix, approved on 11 August — has to be built and proven **first**. Phase 20 waits behind it, and the plan tells any session that opens it to check and stop rather than take your word for it. **Until both are done, the instruction below still stands: talk the trading-app questions through rather than writing your answer on the ticket.**
 
 **One thing this does not fix, and it is worth knowing.** The trading app's specification can still be written today — by talking it through in a session, the way everything else has been. What does not exist until this is built is your ability to have said so **on the ticket**, which is what you actually did.
 
@@ -300,7 +302,7 @@ The proof run also showed the safety machinery earning its keep, which matters m
 
 ~~**What I need from you now: approve `doc/plans/phases/phase-19.md`.**~~ **Approved 2026-08-11**, and handed to another session to build. **You corrected one thing before approving, and it stuck:** the plan's proof run had you answering a real trading-app question in writing, on the reasoning that six of them already existed and were therefore free. You said use the throwaway app, that is what it is for. It now runs entirely on the throwaway app, and the rejected reasoning is written down rather than quietly swapped out — because *"it's free over there"* is the argument that will come back.
 
-✏ **Superseded 2026-08-13 — there is now one thing waiting on you: approve `doc/plans/phases/phase-20.md`** (the section at the top of this file explains what it is). Phase 19 is still unbuilt and still comes first — **phase 20 must not be started before it** — so approving phase 20 queues it rather than starting it.
+✏ **2026-08-13: phase 20 is approved**, and you said you would run the build in another session. **Phase 19 is still unbuilt and still comes first** — a session opening phase 20 is told to check that and stop if it hasn't happened.
 
 **What I need from you now: nothing until the build asks for you.** The next session builds phase 19 and comes back with something to look at. **It will need you for one thing at the end** — answering a throwaway question on the to-do app in your own words, and saying whether the machine's reply was a fair reading of it. That is the one judgement no test can make, and it is what lifts the write-your-answer restriction on the trading app.
 
