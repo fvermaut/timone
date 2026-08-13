@@ -17,7 +17,7 @@ import {
   type TicketThread,
 } from "../adapters/ticketing.js";
 import { RunStore, type Run } from "./runs.js";
-import { pollOnce, type SessionSpawner } from "./poll.js";
+import { pollOnce, type SessionSpawner, type SpawnContext } from "./poll.js";
 import { processStage } from "./pipeline.js";
 import { AgentSessionSpawner } from "./session.js";
 
@@ -2403,5 +2403,155 @@ describe("pollOnce — reading a written answer consumes it", () => {
     expect(thread.filter((comment) => comment.createdAt === before.createdAt)).toEqual([
       before,
     ]);
+  });
+});
+
+describe("pollOnce — one read of one thread per parked run", () => {
+  // Deciding whether a parked run's wait has ended, and deciding what to
+  // resume it with, are two questions asked of one thread. Asking the tracker
+  // twice doubles the latency of the decision and lets the two halves see
+  // different threads — which is the shape of fault ADR-0023 closes.
+  //
+  // Both halves of each case are load-bearing: the count says the thread is
+  // read once, and the decision says the cycle still reaches the answer it
+  // reached when it read twice. A count on its own would pass on a loop that
+  // decided nothing at all.
+
+  const invitation = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\ntwo ways to answer this`,
+    createdAt: "2026-08-03T10:00:00Z",
+    fromTimone: true,
+  };
+  const answer = {
+    author: "fvermaut",
+    body: "the phone layout, and only on the long ones",
+    createdAt: "2026-08-03T11:00:00Z",
+    fromTimone: false,
+  };
+
+  it("reads the ticket once to resume a conversation, and resumes on the same words", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: invitation.createdAt,
+    });
+
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    let fetches = 0;
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        fetches += 1;
+        return { ...base, comments: [invitation, answer] };
+      },
+      async postComment(): Promise<void> {},
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+    };
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(fetches).toBe(1);
+    // The same session, on the same words, at the same stage …
+    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(contexts).toEqual([
+      { stage: "clarification", feedback: answer.body },
+    ]);
+    // … and the same ledger write: the answer is still consumed (ADR-0023).
+    expect(store.get("scratch-app#6")?.waitCursor).toBe(answer.createdAt);
+  });
+
+  it("reads the pull request once to resume a review, and resumes on the same words", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    store.recordPullRequest(run.id, 9);
+    store.park(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "delivery",
+      waitCursor: "2026-08-06T10:00:00Z",
+    });
+
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    let fetches = 0;
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [] };
+      },
+      async postComment(): Promise<void> {},
+      async applyLabel(): Promise<void> {},
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return undefined;
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        fetches += 1;
+        return {
+          number: 9,
+          title: "Fix the box",
+          url: "https://github.com/fvermaut/scratch-app/pull/9",
+          state: "open",
+          headSha: "aaaaaaa",
+          comments: [
+            {
+              author: "fvermaut",
+              body: "Please rename this variable, it shadows the prop.",
+              createdAt: "2026-08-06T12:00:00Z",
+              fromTimone: false,
+              replyTo: "501",
+            },
+          ],
+        };
+      },
+      async postPullRequestComment(): Promise<void> {},
+      async upsertPullRequestComment(): Promise<void> {},
+      async closeTicket(): Promise<void> {},
+    };
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(fetches).toBe(1);
+    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(contexts).toEqual([
+      {
+        stage: "remediation",
+        feedback: "Please rename this variable, it shadows the prop.",
+      },
+    ]);
+    // A review park is not consumed, and the loop wrote nothing to the ledger.
+    const after = store.get("scratch-app#6");
+    expect(after?.status).toBe("parked");
+    expect(after?.waitCursor).toBe("2026-08-06T10:00:00Z");
   });
 });

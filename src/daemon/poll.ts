@@ -2,6 +2,7 @@ import type { Manifest, ProjectConfig } from "../manifest.js";
 import {
   PREVIEW_MARKER,
   type PullRequest,
+  type PullRequestThread,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
@@ -645,11 +646,20 @@ async function resumeAnswered(
     const holder = store.occupyingRun(project.name);
     if (holder !== undefined && holder.id !== run.id) continue;
 
+    // Every question asked about this run below is asked of the same thread,
+    // fetched once. Two questions are asked — has the wait ended, and what
+    // should the run resume with — and they used to be two fetches, so the
+    // second could see a thread the first never saw and the pair could decide
+    // against different comments. One read makes the decision atomic with
+    // respect to what the human wrote, which is what ADR-0023 is about, and
+    // halves the latency of reaching it.
+    const threads = threadsOf(run, project, adapter);
+
     // A review park is the one wait that can end the run outright — a PR
     // merged or closed is a terminal event, not a stage to spawn.
     if (run.waitingKind === "review") {
       try {
-        const ended = await concludeReview(run, project, deps, result, log);
+        const ended = await concludeReview(run, project, threads, deps, result, log);
         if (ended) return;
       } catch (error) {
         const line = `${project.name}: could not read PR for #${run.ticket}: ${oneLine(error)}`;
@@ -663,7 +673,7 @@ async function resumeAnswered(
     // stage nothing follows, the answer *is* the whole of the run.
     if (run.waitingKind === "conversation") {
       try {
-        const ended = await concludeLastConversation(run, project, deps, result, log);
+        const ended = await concludeLastConversation(run, threads, deps, result, log);
         if (ended) return;
       } catch (error) {
         const line = `${project.name}: could not read #${run.ticket}: ${oneLine(error)}`;
@@ -675,7 +685,7 @@ async function resumeAnswered(
 
     let resumption: Resumption | undefined;
     try {
-      resumption = await resolveWait(run, project, adapter);
+      resumption = await resolveWait(run, threads);
     } catch (error) {
       const line = `${project.name}: could not read #${run.ticket}: ${oneLine(error)}`;
       result.errors.push(line);
@@ -708,6 +718,51 @@ async function resumeAnswered(
 }
 
 /**
+ * The threads one parked run's decisions are taken from, each fetched at most
+ * once for the run's turn in a cycle.
+ *
+ * It exists so that "has this wait ended?" and "what should this run resume
+ * with?" are answered from the same words. They are two questions about one
+ * thread, asked a few hundred milliseconds apart, and asking the tracker twice
+ * both paid for the round trip twice and left the pair free to disagree about
+ * what the human had written — the answer read by one and not the other.
+ *
+ * Its lifetime is deliberately one run's turn and no longer. A reader shared
+ * across the cycle would answer a later run from a thread fetched before an
+ * earlier run's session posted to it, which is staleness bought with the same
+ * coin the fault was.
+ */
+interface RunThreads {
+  /** The run's ticket, with its comments. */
+  ticket(): Promise<TicketThread>;
+  /** The thread of `pr`, which for a run is the pull request it opened. */
+  pullRequest(pr: number): Promise<PullRequestThread>;
+}
+
+/** {@link RunThreads} over `adapter`, memoising each thread's first fetch. */
+function threadsOf(
+  run: Run,
+  project: TicketingProject,
+  adapter: TicketingAdapter,
+): RunThreads {
+  let ticket: Promise<TicketThread> | undefined;
+  let pull: { pr: number; thread: Promise<PullRequestThread> } | undefined;
+
+  return {
+    ticket: () => (ticket ??= adapter.getTicket(project, run.ticket)),
+    pullRequest: (pr) => {
+      // Keyed by number rather than assumed: a run has one pull request today,
+      // and a memo that answered for a different one would be a wrong thread
+      // rather than a slow one.
+      if (pull?.pr !== pr) {
+        pull = { pr, thread: adapter.getPullRequestThread(project, pr) };
+      }
+      return pull.thread;
+    },
+  };
+}
+
+/**
  * End a review-parked run if its pull request reached a terminal state.
  * Returns true when the run ended (the ticket has been told and the queue
  * promoted); false when the PR is still open and the wait continues.
@@ -715,6 +770,7 @@ async function resumeAnswered(
 async function concludeReview(
   run: Run,
   project: TicketingProject,
+  threads: RunThreads,
   deps: PollDeps,
   result: PollResult,
   log: (message: string) => void,
@@ -722,7 +778,7 @@ async function concludeReview(
   const { store, adapter } = deps;
   if (run.pr === undefined) return false;
 
-  const pr = await adapter.getPullRequestThread(project, run.pr);
+  const pr = await threads.pullRequest(run.pr);
   if (pr.state === "open") return false;
 
   store.complete(run.id);
@@ -761,16 +817,16 @@ async function concludeReview(
  */
 async function concludeLastConversation(
   run: Run,
-  project: TicketingProject,
+  threads: RunThreads,
   deps: PollDeps,
   result: PollResult,
   log: (message: string) => void,
 ): Promise<boolean> {
-  const { store, adapter } = deps;
+  const { store } = deps;
   const { stage, waitCursor } = run;
   if (stage === undefined || waitCursor === undefined) return false;
 
-  const thread = await adapter.getTicket(project, run.ticket);
+  const thread = await threads.ticket();
   if (readConversationRecord(thread, waitCursor) === undefined) return false;
 
   const transition = concludeConversation(stage, { accepted: true });
@@ -810,11 +866,14 @@ interface Resumption {
  * approval or an accepted conversation returns the next one. Nothing else
  * moves a run — an unanswered gate and an abandoned conversation both look
  * like silence, and silence is not an answer.
+ *
+ * It reads through {@link RunThreads} rather than the adapter, so the thread
+ * it judges is the one the caller's own conclusion check judged, and no branch
+ * here can quietly fetch a second copy of it.
  */
 async function resolveWait(
   run: Run,
-  project: TicketingProject,
-  adapter: TicketingAdapter,
+  threads: RunThreads,
 ): Promise<Resumption | undefined> {
   const stage = run.stage;
   if (stage === undefined) return undefined;
@@ -831,7 +890,7 @@ async function resolveWait(
     if (stage !== "triage") {
       return isBuilt(stage) ? { context: { stage } } : undefined;
     }
-    const thread = await adapter.getTicket(project, run.ticket);
+    const thread = await threads.ticket();
     const next = whatFollows(stage, thread.labels);
     return next !== undefined && isBuilt(next)
       ? { context: { stage: next } }
@@ -842,7 +901,7 @@ async function resolveWait(
   if (cursor === undefined) return undefined;
 
   if (run.waitingKind === "gate") {
-    const thread = await adapter.getTicket(project, run.ticket);
+    const thread = await threads.ticket();
     const decision = readGateDecision(thread, cursor);
     const transition = readGate(stage, decision);
 
@@ -870,7 +929,11 @@ async function resolveWait(
   }
 
   if (run.waitingKind === "conversation") {
-    const thread = await adapter.getTicket(project, run.ticket);
+    // One thread, and both halves of the decision taken from it: what the
+    // session is handed, and the instant consuming it advances the cursor to
+    // (ADR-0023). Splitting the pair across two reads would let the run resume
+    // on words it had already consumed, or consume words it never read.
+    const thread = await threads.ticket();
     const record = readConversationRecord(thread, cursor);
     if (record !== undefined) {
       const transition = concludeConversation(stage, { accepted: true });
@@ -897,7 +960,7 @@ async function resolveWait(
 
   if (run.waitingKind === "review") {
     if (run.pr === undefined) return undefined;
-    const pr = await adapter.getPullRequestThread(project, run.pr);
+    const pr = await threads.pullRequest(run.pr);
 
     // Only a human wakes a parked review. The machine's own bookkeeping —
     // outcome comments, threaded replies — lands on the same surface, and a
