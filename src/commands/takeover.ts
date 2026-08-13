@@ -8,6 +8,8 @@ import { loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, runId, type Run } from "../daemon/runs.js";
 import type { PipelineStage } from "../daemon/pipeline.js";
 import { PROMPTED_STAGES, takeoverPrompt } from "../daemon/prompts.js";
+import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
+import { withStateLock } from "../daemon/lock.js";
 
 /** A parsed `<project>#<ticket>` target. */
 export interface TakeoverTarget {
@@ -35,6 +37,16 @@ export interface ProcessLauncher {
 export interface TakeoverDeps {
   manifest: Manifest;
   store: RunStore;
+  /**
+   * Where the ledger lives, so a takeover is the only thing writing it
+   * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)). A takeover
+   * spawns a session like the daemon does, and was racing it by exactly the
+   * same faults.
+   *
+   * Absent means no lock is taken — the shape the resolution tests use, since
+   * working out what a ticket is waiting on writes nothing.
+   */
+  statePath?: string;
   adapter: TicketingAdapter;
   launcher: ProcessLauncher;
   /** The timone root: the conversation runs here, never in the project (ADR-0007). */
@@ -168,7 +180,32 @@ export async function runTakeover(
   deps: TakeoverDeps,
 ): Promise<number> {
   const log = deps.log ?? ((message: string) => console.log(message));
+  if (deps.statePath === undefined) return takeover(raw, deps, log);
 
+  const held = await withStateLock(
+    {
+      statePath: deps.statePath,
+      command: `timone takeover ${raw}`,
+      staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
+      // A takeover reclaims on the same evidence a daemon does — the holder's
+      // process being gone (ADR-0025). It is a question anybody can ask the
+      // OS, and withholding the answer here would leave a crashed daemon
+      // wedging the very command an operator reaches for to unwedge it.
+    },
+    () => takeover(raw, deps, log),
+  );
+
+  if (held.ok) return held.value;
+  log(held.error.message);
+  return 1;
+}
+
+/** The takeover itself, once this process is the ledger's only writer. */
+async function takeover(
+  raw: string,
+  deps: TakeoverDeps,
+  log: (message: string) => void,
+): Promise<number> {
   let target: TakeoverTarget;
   try {
     target = parseTarget(raw);
@@ -264,6 +301,7 @@ export function registerTakeoverCommand(program: Command): void {
         process.exitCode = await runTakeover(ticket, {
           manifest,
           store,
+          statePath,
           adapter: new GitHubTicketingAdapter(),
           launcher: inheritingLauncher,
           root: process.cwd(),

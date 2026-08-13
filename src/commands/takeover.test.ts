@@ -14,6 +14,7 @@ import type {
 import type { Manifest } from "../manifest.js";
 import { RunStore } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
+import { acquireStateLock } from "../daemon/lock.js";
 import {
   parseTarget,
   resolveTakeover,
@@ -371,6 +372,44 @@ describe("runTakeover", () => {
     });
 
     expect(asked).toEqual([]);
+  });
+});
+
+describe("takeover and the ledger's one writer", () => {
+  it("starts no session while a daemon holds the ledger, and says who has it", async () => {
+    // ADR-0023: takeover spawns a session too, and was racing the daemon by
+    // the same three faults — so it takes the same lock or it does not run.
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-lock-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-03T10:00:00Z" });
+    parkedOnConversation(store);
+    const daemon = acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    expect(daemon.ok).toBe(true);
+
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(1);
+    expect(calls).toEqual([]);
+    expect(said.join("\n")).toContain("timone daemon");
+    expect(said.join("\n")).toContain("4213");
   });
 });
 

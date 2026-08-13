@@ -3,11 +3,23 @@ import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, runId } from "../daemon/runs.js";
+import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
+import { acquireStateLock } from "../daemon/lock.js";
 import { parseTarget } from "./takeover.js";
 
 export interface RetryDeps {
   manifest: Manifest;
   store: RunStore;
+  /**
+   * Where the ledger lives, so a retry is the only thing writing it
+   * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)): re-arming a
+   * run is a ledger mutation, and the daemon may be mid-cycle over the same
+   * file.
+   *
+   * Absent means no lock is taken, which is what the refusal tests do — they
+   * never reach a write.
+   */
+  statePath?: string;
   log?: (message: string) => void;
 }
 
@@ -19,6 +31,35 @@ export interface RetryDeps {
  */
 export function runRetry(raw: string, deps: RetryDeps): number {
   const log = deps.log ?? ((message: string) => console.log(message));
+  if (deps.statePath === undefined) return retry(raw, deps, log);
+
+  const acquired = acquireStateLock({
+    statePath: deps.statePath,
+    command: `timone retry ${raw}`,
+    staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
+    // A retry reclaims on the same evidence a daemon does — the holder's
+    // process being gone (ADR-0025). `retry` is the route back from a session
+    // that died holding the ledger, so it above all must not be refused by
+    // the corpse of the daemon that died holding it.
+  });
+  if (!acquired.ok) {
+    log(acquired.error.message);
+    return 1;
+  }
+
+  try {
+    return retry(raw, deps, log);
+  } finally {
+    acquired.lock.release();
+  }
+}
+
+/** The retry itself, once this process is the ledger's only writer. */
+function retry(
+  raw: string,
+  deps: RetryDeps,
+  log: (message: string) => void,
+): number {
   const { manifest, store } = deps;
 
   let target: { project: string; ticket: number };
@@ -119,6 +160,6 @@ export function registerRetryCommand(program: Command): void {
         return;
       }
 
-      process.exitCode = runRetry(ticket, { manifest, store });
+      process.exitCode = runRetry(ticket, { manifest, store, statePath });
     });
 }

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,7 +11,8 @@ import type {
   TicketingAdapter,
 } from "../adapters/ticketing.js";
 import { RunStore } from "../daemon/runs.js";
-import type { SessionSpawner } from "../daemon/poll.js";
+import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
+import { stateLockPath } from "../daemon/lock.js";
 import { runDaemon } from "./daemon.js";
 
 const tempDirs: string[] = [];
@@ -23,17 +24,21 @@ afterEach(() => {
 });
 
 /** A store whose clock the test sets by hand, instant by instant. */
-function clockedStore(): { store: RunStore; set: (iso: string) => void } {
+function clockedStore(): {
+  store: RunStore;
+  set: (iso: string) => void;
+  statePath: string;
+} {
   const dir = mkdtempSync(join(tmpdir(), "timone-daemon-cmd-"));
   tempDirs.push(dir);
+  const statePath = join(dir, ".timone", "state.json");
   let instant = "2026-08-06T10:00:00Z";
   return {
-    store: RunStore.open(join(dir, ".timone", "state.json"), {
-      now: () => instant,
-    }),
+    store: RunStore.open(statePath, { now: () => instant }),
     set: (iso) => {
       instant = iso;
     },
+    statePath,
   };
 }
 
@@ -74,6 +79,89 @@ function quietAdapter(): TicketingAdapter {
 const idleSpawner: SessionSpawner = {
   async spawn(): Promise<void> {},
 };
+
+describe("runDaemon — one writer, and it says who holds it", () => {
+  it("refuses a second daemon while the first holds the ledger, naming the holder", async () => {
+    const { store, statePath } = clockedStore();
+    let releaseCycle = (): void => {};
+    const held = new Promise<void>((done) => {
+      releaseCycle = done;
+    });
+    // The first daemon is inside its cycle — the shape that produced two
+    // sessions from one answer: a second `--once` typed while the first is
+    // still blocked in a session.
+    const blocking: TicketingAdapter = {
+      ...quietAdapter(),
+      async listMarkedTickets(): Promise<Ticket[]> {
+        await held;
+        return [];
+      },
+    };
+    const first = runDaemon({
+      manifest,
+      store,
+      statePath,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter: blocking,
+      spawner: idleSpawner,
+      log: () => {},
+    });
+
+    const said: string[] = [];
+    const code = await runDaemon({
+      manifest,
+      store: RunStore.open(statePath),
+      statePath,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter: quietAdapter(),
+      spawner: idleSpawner,
+      log: (line) => said.push(line),
+    });
+
+    expect(code).toBe(1);
+    expect(said.join("\n")).toContain("timone daemon");
+    expect(said.join("\n")).toContain(String(process.pid));
+
+    releaseCycle();
+    expect(await first).toBe(0);
+  });
+
+  it("leaves pollOnce untaken — a cycle driven directly holds no lock", async () => {
+    // ADR-0023's consequence, guarded: the lock is on the process, not on the
+    // function, so every test that drives a cycle by hand keeps working and
+    // no unit had to learn about locking to keep passing.
+    const { store, statePath } = clockedStore();
+    const marked: TicketingAdapter = {
+      ...quietAdapter(),
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [
+          {
+            number: 7,
+            title: "typing in the box is fiddly on my phone",
+            body: "the message box is hard to use on mobile",
+            labels: ["timone"],
+            url: "https://github.com/fvermaut/scratch-app/issues/7",
+            author: "fvermaut",
+            createdAt: "2026-08-06T09:00:00Z",
+          },
+        ];
+      },
+    };
+
+    const result = await pollOnce({
+      manifest,
+      store,
+      adapter: marked,
+      spawner: idleSpawner,
+      log: () => {},
+    });
+
+    expect(result.pickedUp).toEqual(["scratch-app#7"]);
+    expect(existsSync(stateLockPath(statePath))).toBe(false);
+  });
+});
 
 describe("runDaemon — the cadence it keeps is the cadence it judges by", () => {
   const FOUR_INTERVALS = 4 * 30 * 1000;

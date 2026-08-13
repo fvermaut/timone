@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
 import { RunStore } from "../daemon/runs.js";
+import { acquireStateLock } from "../daemon/lock.js";
 import { runRetry } from "./retry.js";
 
 const tempDirs: string[] = [];
@@ -124,6 +125,30 @@ describe("timone retry", () => {
     expect(runRetry("nope#1", { manifest, store, log })).toBe(1);
     expect(lines.join("\n")).toMatch(/timone.*label|not working on/i);
     expect(lines.join("\n")).toContain("scratch-app");
+  });
+
+  it("re-arms nothing while a daemon holds the ledger, and says who has it", () => {
+    // ADR-0023: retry rewinds a run and hands it back to the loop, so it
+    // writes the ledger — and two writers of one field is the race.
+    const dir = mkdtempSync(join(tmpdir(), "timone-retry-lock-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-06T10:00:00Z" });
+    failedRun(store);
+    acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    const { log, lines } = collect();
+
+    const code = runRetry("scratch-app#6", { manifest, store, statePath, log });
+
+    expect(code).toBe(1);
+    expect(store.get("scratch-app#6")?.status).toBe("failed");
+    expect(lines.join("\n")).toContain("timone daemon");
+    expect(lines.join("\n")).toContain("4213");
   });
 
   it("refuses a malformed target with the shape it wanted", () => {

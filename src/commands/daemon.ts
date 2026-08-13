@@ -8,6 +8,11 @@ import type { PreviewAdapter } from "../adapters/preview.js";
 import type { TicketingAdapter } from "../adapters/ticketing.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import {
+  releaseHeldLocks,
+  withStateLock,
+  type StateLock,
+} from "../daemon/lock.js";
+import {
   DEFAULT_POLL_INTERVAL_SECONDS,
   pollOnce,
   type SessionSpawner,
@@ -27,6 +32,16 @@ interface DaemonOptions {
 export interface RunDaemonOptions {
   manifest: Manifest;
   store: RunStore;
+  /**
+   * Where the ledger lives, so this daemon can be the only thing writing it
+   * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)): the lock sits
+   * beside the state file and is held for as long as the loop runs.
+   *
+   * Absent means no lock is taken, which is what the tests of the cycle's own
+   * arithmetic do — the lock is on the process, not on the poll cycle, and
+   * `pollOnce` is reachable without one exactly as it always was.
+   */
+  statePath?: string;
   intervalMs: number;
   /** How long a run may go silent before it is treated as orphaned. */
   staleAfterMs?: number;
@@ -45,6 +60,48 @@ export interface RunDaemonOptions {
  */
 export async function runDaemon(options: RunDaemonOptions): Promise<number> {
   const log = options.log ?? ((message: string) => console.log(message));
+  if (options.statePath === undefined) return poll(options, log);
+
+  const staleAfterMs =
+    options.staleAfterMs ?? 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000;
+  const held = await withStateLock(
+    {
+      statePath: options.statePath,
+      command: "timone daemon",
+      staleAfterMs,
+      // Nothing else: the holder's process is the evidence, and the default
+      // probe asks the OS for it (ADR-0025). Acquisition reads the lock file
+      // and, at most, writes the lock file — the ledger it protects is not
+      // touched on any path through it, refusals included.
+    },
+    async (lock) => {
+      if (lock.reclaimed !== undefined) {
+        log(
+          `took the ledger back from ${lock.reclaimed.command} ` +
+            `(pid ${lock.reclaimed.pid}), silent since ${lock.reclaimed.observedAt}`,
+        );
+      }
+      return poll(options, log, lock);
+    },
+  );
+
+  if (held.ok) return held.value;
+  log(held.error.message);
+  return 1;
+}
+
+/**
+ * Poll until stopped, holding the lock throughout when there is one.
+ *
+ * The cycle itself is untouched by the lock: what holds it is the process,
+ * and `pollOnce` takes nothing — which is what keeps every test that drives a
+ * cycle directly working exactly as it did.
+ */
+async function poll(
+  options: RunDaemonOptions,
+  log: (message: string) => void,
+  lock?: StateLock,
+): Promise<number> {
   let failures = 0;
 
   for (;;) {
@@ -62,6 +119,11 @@ export async function runDaemon(options: RunDaemonOptions): Promise<number> {
       log,
     });
     failures = result.errors.length;
+    // Still here, once per cycle. This is what keeps a long-lived daemon out
+    // of the reclaim path's *first filter* — it is no longer what keeps its
+    // lock safe, since a quiet holder whose process is alive is refused
+    // anyway (ADR-0025). A cheap tick that saves a probe, not a defence.
+    lock?.touch();
 
     if (options.once) break;
     await new Promise((done) => setTimeout(done, options.intervalMs));
@@ -147,9 +209,21 @@ export function registerDaemonCommand(program: Command): void {
         log,
       });
 
+      // Ctrl-C is how every operator stops the daemon, and a lock left behind
+      // by that is a project wedged until the reclaim path's window passes.
+      // `withStateLock`'s `finally` never runs on a signal, so the exit path
+      // has to say it itself.
+      for (const signal of ["SIGINT", "SIGTERM"] as const) {
+        process.once(signal, () => {
+          releaseHeldLocks();
+          process.exit(signal === "SIGINT" ? 130 : 143);
+        });
+      }
+
       process.exitCode = await runDaemon({
         manifest,
         store,
+        statePath,
         // One adapter for every bound project: which projects get previews is
         // the manifest's answer, not this command's (ADR-0021).
         previews: new DockerPreviewAdapter({ root: process.cwd() }),
