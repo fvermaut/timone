@@ -9,6 +9,7 @@
 - **Priority:** MUST
 - **Status:** verified
     - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate, against `scratch-app`. Both clauses are discriminating and were observed in the same cycle: [#4](https://github.com/fvermaut/scratch-app/issues/4) carried the `timone` label and produced a run plus exactly one acknowledgement comment; [#5](https://github.com/fvermaut/scratch-app/issues/5), filed in the same session without the label, ended the cycle with **0 comments and 0 labels**. `timone status` listed the run. A third cycle over the same tickets posted nothing and created nothing — idempotency across cycles, which the criterion does not demand but a poll loop cannot be trusted without.
+    - ✏ 2026-08-13 **[ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md) changes what this looks like without changing what it requires, and the distinction is the whole of this marker.** The criterion forbids a **run** on an unmarked issue. It has never forbidden a *comment* — so an unmarked issue receiving exactly one introduction, and still no run, satisfies this requirement as written. **The requirement is not amended and its status does not move.** What the ADR invalidates is a clause of the *evidence* above: `#5` ending a cycle with **0 comments** will stop being reproducible, and [STATUS.md](../../../STATUS.md)'s sentence that an unlabelled ticket is *"left completely alone"* stops being true. **R1 is therefore re-verified at [R21](#r21--every-open-ticket-answers-for-itself)'s phase gate**, on the clause that still discriminates — no run — and this marker stands as the reason the old evidence reads oddly against the new behaviour. Nothing has been built yet; until it is, everything above holds exactly as recorded.
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN the daemon is running and a managed project has an open GitHub issue marked for Timone
@@ -336,6 +337,7 @@
 - **Status:** failed
     - ✏ 2026-08-11 **`failed` at [phase 18](../../plans/phases/phase-18.md)'s stage-7 pass** ([report](../../plans/phases/reports/phase-18-verification.md)), on the second criterion, which is the one this requirement's own preamble is written around. Probed at its literal precondition: `scratch-app` #20, open, `wayfinder:grilling`, deliberately unmarked, **zero runs in the ledger** — `node dist/cli.js takeover scratch-app#20` answered *"I'm not working on scratch-app #20. Add the `timone` label…"* and exited 1. The criterion asks it to resolve **from the tracker** and spawn the stage-2 session; it refuses, with the same sentence the requirement exists to abolish. **This is a deliberate divergence, not an oversight** — phase 18's load-bearing decisions rejected the tracker-resolution path by name and rely on the wayfind skill marking tickets at creation instead. Whether the criterion is mechanism-shaped and wants the correction [R8](#r8--docker-preview-per-pull-request) and [R18](#r18--a-run-orphaned-by-a-crashed-daemon-is-reclaimed) both received, or the path is genuinely owed, is a specification decision for stage 9 rather than something a fix context may guess at. **The gate's control for this step did not hold:** it cites `scratch-app#20` refusing, but on 2026-08-09 that issue did not exist — it tested a missing ticket, not an unmarked wayfinder one. The conclusion survives the correction; it simply had not been tested. The spawn-and-re-enter half has still never been observed end to end — the gate called `resolveTakeover` directly, and the five `ivtrends` takeovers that did complete all had ledger runs, so none meets this clause's GIVEN.
     - ✏ 2026-08-11 **the first criterion is observed for one of the four ticket types it names.** `grilling` carries both paths verbatim on six real `ivtrends` tickets and two fixtures. `research` and `task` have no post-phase instance on either project. `prototype` exists only as `ivtrends` #11, which is *blocked* and so carries "nothing right now" rather than the takeover — outside the clause's "a human is expected to act on", therefore not a failure and not evidence either. All three arrive free with the next map charted. **A live contradiction found in the surface this clause governs:** `timone status` asks the human to *"answer on … ivtrends #11"* while #11's body says nothing is needed — the operator-visible cost of the gate's finding 2, that the daemon has no notion of blocking.
+    - ✏ 2026-08-13 **the second criterion's open specification decision is made: the path is genuinely owed.** The 2026-08-11 marker below left it as *"a specification decision for stage 9 rather than something a fix context may guess at"* — whether this criterion is mechanism-shaped and wants rewording, or whether tracker resolution is really due. fvermaut ruled on 2026-08-13 ([ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md)): **`takeover` resolves any open ticket from the tracker, creating the run on demand, and the refusal at `src/commands/takeover.ts:90` is retired for open tickets.** Marking at creation is kept alongside it, because that is what daemon pickup is built on — so phase 18's design is extended rather than reversed. **The criterion stands unreworded** and this requirement stays `failed` until the path exists; it is built as part of [R21](#r21--every-open-ticket-answers-for-itself)'s phase, which is where both are gated together.
     - ✏ 2026-08-11 **the third criterion reaches its stated end state by a mechanism that is not sound.** The answer is picked up unprompted and the ticket resolved and closed with nothing run by hand — watched twice — but **two** sessions do it. See [R3](#r3--async-clarification-via-a-conversation)'s 2026-08-11 marker; it is the same defect and the same evidence.
 - **Verify-via:** api
 - **Criteria:**
@@ -349,3 +351,38 @@
       WHEN the daemon next polls the project
       THEN it picks the answer up and spawns the session that resolves the ticket, without the human running anything
 - **Verification hint:** read a freshly charted map's tickets for their CTAs; run takeover against one with no ledger run and confirm it opens the right conversation; answer another in writing and confirm the daemon acts on the comment unprompted.
+
+## R21 — Every open ticket answers for itself
+
+> Added 2026-08-13 by [ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md). On 2026-08-13 the `ivtrends` wayfinder map closed its last question, and fvermaut replied on it: *"ok go ahead and write the spec."* Nothing happened, and nothing was going to — the map is deliberately unmarked so the daemon never lists it, and `wayfinding` declares no `next`, so the stage-2 → stage-3 handover is the one handover in the loop with no ticket-borne entry point. Probing every open ticket on both managed projects the same day found **all four failing**, each differently. This requirement is the invariant that makes the ticket the interface rather than one of two interfaces.
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN any open ticket on a managed project
+      WHEN its body and thread are read
+      THEN it carries a line stating what happens next and who acts — naming the daemon or the exact `timone takeover <project>#<n>` command where either can move it, and where nothing can, saying so plainly and naming what would unblock it
+    - GIVEN an open ticket carrying no `timone` label, on a project with the introduction enabled
+      WHEN the daemon polls
+      THEN exactly one introduction comment is posted naming the label that hands the ticket over, **no pipeline run is created** ([R1](#r1--ticket-pickup) stands), and every later cycle posts nothing
+    - GIVEN a project onboarded with a backlog of open unmarked issues
+      WHEN the daemon polls it
+      THEN no introduction is posted on any of them, because the per-project switch defaults off for a backlog
+    - GIVEN a wayfinder map with at least one open decision ticket
+      WHEN its body is read
+      THEN its CTA says nothing is needed from the human, and no stage-3 run starts — a map does not advance on a single answer
+    - GIVEN a wayfinder map whose decision tickets are all closed
+      WHEN the daemon next polls
+      THEN the map's CTA invites the go-ahead for the destination artifact, and a human comment agreeing starts stage 3 **on the map's own run**, with nothing run by hand
+    - GIVEN any open ticket with no run in the ledger
+      WHEN `timone takeover <project>#<n>` is run against it
+      THEN the run is created from the tracker and the right session opens, and the refusal *"I'm not working on …"* is never the answer
+    - GIVEN an open ticket whose correct CTA has changed since the one last posted — its blocker closed, its run failed, its stage moved
+      WHEN the daemon next polls
+      THEN the updated CTA is posted exactly once, and a further cycle with nothing changed posts nothing
+    - GIVEN `timone status` and the body of any open ticket it names
+      WHEN both are read in the same cycle
+      THEN they agree about what that ticket needs from the human
+- **Depends on:** [R3](#r3--async-clarification-via-a-conversation) and [ADR-0023](../../adr/0023-one-answer-one-session.md). Self-healing CTAs write over the same resume path the double-answer defect lives on; building this first would multiply that defect from one answered ticket to every open one, on a timer. **Phase 19 is a hard prerequisite.**
+- **Verification hint:** read every open ticket on both projects and check each against clause 1; file an unmarked issue and confirm one comment and no run, then confirm a second cycle is silent; close a fixture map's last question and confirm the CTA flips, then answer it in writing and confirm stage 3 starts unprompted; run takeover against a ticket with no run; close a blocker and confirm the waiting ticket's CTA refreshes itself; diff `timone status` against the tickets it names.
