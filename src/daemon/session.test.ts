@@ -25,6 +25,7 @@ import {
   modelFor,
   type PipelineStage,
 } from "./pipeline.js";
+import { pollOnce } from "./poll.js";
 import { RunStore, type Run } from "./runs.js";
 import {
   DEFAULT_PROGRESS_INTERVAL_SECONDS,
@@ -913,6 +914,66 @@ describe("ingesting a written answer", () => {
     }).spawn(run, project, { stage: "wayfinding", feedback: "IV Rank" });
 
     expect(store.get(run.id)?.status).toBe("done");
+  });
+});
+
+describe("a written answer starts one session and no more", () => {
+  const invitation = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\ntwo ways to answer this`,
+    createdAt: "2026-08-02T10:00:00Z",
+    fromTimone: true,
+  };
+  const answer = {
+    author: "fvermaut",
+    body: "it's the draft they lose, not the phone layout",
+    createdAt: "2026-08-02T10:30:00Z",
+    fromTimone: false,
+  };
+
+  /** A run parked on the conversation `invitation` opened. */
+  function parkedOnConversation(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: invitation.createdAt,
+    });
+    return store.get(run.id)!;
+  }
+
+  it("does not read the same answer again when its session posted nothing", async () => {
+    // ADR-0023's fourth fault, and the one that needs no concurrency: a
+    // resumed session that says nothing used to be re-parked at the newest
+    // machine comment — the invitation the human had already answered — so
+    // one daemon, alone, picked the same answer up on its next cycle.
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:feature"],
+      comments: [invitation, answer],
+    });
+    const { runtime, requests } = fakeRuntime();
+    parkedOnConversation(store);
+    const deps = {
+      manifest,
+      store,
+      adapter,
+      spawner: new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+      }),
+    };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    expect(requests).toHaveLength(1);
   });
 });
 

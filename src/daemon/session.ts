@@ -17,7 +17,7 @@ import {
 } from "../channels/conversation.js";
 import { TerminalChannel } from "../channels/terminal.js";
 import { gateCommentFor } from "./gate-comment.js";
-import { readConversationRecord, waitCursorFrom } from "./gates.js";
+import { instant, readConversationRecord, waitCursorFrom } from "./gates.js";
 import { outcomeCursorFrom, readStageOutcome, type StageOutcome } from "./outcomes.js";
 import {
   APPROVAL_RECORD_MODEL,
@@ -390,17 +390,30 @@ function oneLine(error: unknown): string {
  * wait, as the ledger recorded it, so a released run is indistinguishable from
  * one that was never claimed.
  *
+ * Exported since ADR-0023's consume: the poll loop advances a wait's cursor
+ * and `timone retry` rewinds it, and both are "the wait it already had, with
+ * one field different". Three copies of that shape would be three places for
+ * the next field on a wait to be forgotten.
+ *
  * The fallback text is unreachable in practice: parking names what a run waits
  * for, so a parked run has one. It is here so that releasing a claim can never
  * be the thing that throws.
  */
-function waitOf(run: Run): ParkOptions {
+export function waitOf(run: Run): ParkOptions {
   return {
     waitingOn: run.waitingOn ?? "a human",
     ...(run.waitingKind === undefined ? {} : { kind: run.waitingKind }),
     ...(run.stage === undefined ? {} : { stage: run.stage }),
     ...(run.waitCursor === undefined ? {} : { waitCursor: run.waitCursor }),
   };
+}
+
+/**
+ * The later of two instants — the one a re-park may safely wait from, since a
+ * cursor is only ever a claim that everything up to it has been read.
+ */
+function laterOf(one: string, other: string): string {
+  return instant(one) >= instant(other) ? one : other;
 }
 
 /** Whether `stage` is one the prompts module knows how to instruct. */
@@ -978,7 +991,16 @@ export class AgentSessionSpawner implements SessionSpawner {
         waitingOn: run.waitingOn ?? "a conversation in your terminal",
         kind: "conversation",
         stage,
-        waitCursor: waitCursorFrom(ticket),
+        // Never before the answer this session was started on (ADR-0023).
+        // `waitCursorFrom` answers "when did the machine last speak", which is
+        // the right question when the session *spoke* — and the wrong one when
+        // it posted nothing, because then it resolves to the invitation the
+        // human already replied to and the next cycle reads their reply a
+        // second time. `cursor` is the newest comment on the thread as this
+        // session began, so it is never earlier than their answer; the later
+        // of the two is right in both cases and changes nothing on the path
+        // where the session did post.
+        waitCursor: laterOf(waitCursorFrom(ticket), cursor),
       });
       this.log(`parked ${run.id} at ${stage}, still waiting on a conversation`);
       return undefined;

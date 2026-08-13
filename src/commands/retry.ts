@@ -2,9 +2,10 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
-import { RunStore, defaultStatePath, runId } from "../daemon/runs.js";
+import { RunStore, defaultStatePath, runId, type Run } from "../daemon/runs.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
+import { waitOf } from "../daemon/session.js";
 import { parseTarget } from "./takeover.js";
 
 export interface RetryDeps {
@@ -97,11 +98,7 @@ function retry(
       log(`${name} is being worked on right now. There is nothing to retry.`);
       return 1;
     case "parked":
-      log(
-        `${name} didn't fail — it's waiting on you: ${run.waitingOn ?? "an answer"}. ` +
-          "Answer that and it carries on by itself.",
-      );
-      return 1;
+      return rewind(run, name, store, log);
     case "done":
       log(`${name} is finished. Retry can't reopen it — file a new ticket instead.`);
       return 1;
@@ -122,6 +119,59 @@ function retry(
     log(error instanceof Error ? error.message : String(error));
     return 1;
   }
+}
+
+/**
+ * Put a conversation's marker back to before the last answer read from it
+ * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)), so the watcher
+ * reads that answer again.
+ *
+ * This is the other half of consuming an answer. Reading one moves the marker
+ * past it, which leaves a window where the answer is read and nothing is
+ * acting on it — the deliberate trade of a silent double-answer for a visible
+ * stall. A stall a human can see and cannot leave is not a route back, so
+ * `retry` is the one, and it needs nothing of them but the ticket's name.
+ *
+ * **A millisecond is the whole rewind, and it is exact where it matters.** The
+ * marker sits *at* the instant of the last comment the answer was read from,
+ * and a comment counts as unread only when it is strictly later than the
+ * marker — so stepping back by the smallest instant the timestamp can express
+ * makes that comment readable again and nothing else. An answer written as
+ * several comments in one poll interval is rewound to its last one; the ledger
+ * keeps one instant per wait, and inventing a wider rewind would re-read
+ * comments that were never part of it.
+ *
+ * Only a conversation is rewound. A gate's answer is not consumed — it clears
+ * its wait by moving the run to another stage — so for every other wait this
+ * stays what it was: a refusal that says what the ticket is doing.
+ */
+function rewind(
+  run: Run,
+  name: string,
+  store: RunStore,
+  log: (message: string) => void,
+): number {
+  const cursor = run.waitCursor;
+  const at = cursor === undefined ? Number.NaN : Date.parse(cursor);
+  if (run.waitingKind !== "conversation" || Number.isNaN(at)) {
+    log(
+      `${name} didn't fail — it's waiting on you: ${run.waitingOn ?? "an answer"}. ` +
+        "Answer that and it carries on by itself.",
+    );
+    return 1;
+  }
+
+  store.repark(run.id, {
+    ...waitOf(run),
+    waitCursor: new Date(at - 1).toISOString(),
+  });
+  log(
+    `${name} is waiting on a conversation, and I've wound it back to before the ` +
+      "last answer written on the ticket, so I read that answer again instead of " +
+      "leaving it sitting there. The watcher picks it up on its next cycle — start " +
+      "`timone daemon` if it isn't running.",
+  );
+  return 0;
 }
 
 /** Register the `retry` command on the program. */

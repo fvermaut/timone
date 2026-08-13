@@ -2180,3 +2180,228 @@ describe("pollOnce — a written answer reaches a session that ingests it", () =
     );
   });
 });
+
+describe("pollOnce — reading a written answer consumes it", () => {
+  const invitation = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\ntwo ways to answer this`,
+    createdAt: "2026-08-03T10:00:00Z",
+    fromTimone: true,
+  };
+  const answer = {
+    author: "fvermaut",
+    body: "it's the draft they lose, not the phone layout",
+    createdAt: "2026-08-03T11:00:00Z",
+    fromTimone: false,
+  };
+
+  /** A conversation thread the test can add comments to as cycles pass. */
+  function conversationAdapter(comments: TicketThread["comments"]): {
+    adapter: TicketingAdapter;
+    thread: TicketThread["comments"];
+  } {
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const thread = [...comments];
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [...thread] };
+      },
+      async postComment(): Promise<void> {},
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+    };
+    return { adapter, thread };
+  }
+
+  /** A run parked on a conversation opened at `invitation`. */
+  function parkedOnConversation(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    return store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: invitation.createdAt,
+    });
+  }
+
+  it("reads one answer once, however many cycles pass over the same thread", async () => {
+    // ADR-0023's fourth mechanism. The comment stays on the ticket; what moves
+    // is the machine's marker, and it moves as part of deciding to resume — so
+    // the next read of the same thread finds nothing outstanding.
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter } = conversationAdapter([invitation, answer]);
+    const { spawner, spawned } = fakeSpawner();
+    const deps = { manifest: manifestWith("scratch-app"), store, adapter, spawner };
+
+    const first = await pollOnce(deps);
+    const second = await pollOnce(deps);
+
+    expect(first.resumed).toEqual(["scratch-app#6"]);
+    expect(second.resumed).toEqual([]);
+    expect(spawned).toHaveLength(1);
+  });
+
+  it("still hears the next thing they write, and hears only that", async () => {
+    // Consuming must move the marker, never deafen the path. A second answer
+    // is a second answer — and it arrives on its own, not with the first one
+    // silently restated alongside it.
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter, thread } = conversationAdapter([invitation, answer]);
+    const contexts: { feedback?: string }[] = [];
+    const recording: SessionSpawner = {
+      async spawn(_run, _project, context) {
+        contexts.push(context ?? {});
+      },
+    };
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: recording,
+    };
+
+    await pollOnce(deps);
+    thread.push({
+      author: "fvermaut",
+      body: "and only ever on the long ones",
+      createdAt: "2026-08-03T12:00:00Z",
+      fromTimone: false,
+    });
+    const second = await pollOnce(deps);
+
+    expect(second.resumed).toEqual(["scratch-app#6"]);
+    expect(contexts).toHaveLength(2);
+    expect(contexts[1]?.feedback).toBe("and only ever on the long ones");
+  });
+
+  /** Every call on the seam that changes something a human can see. */
+  const WRITES = [
+    "postComment",
+    "applyLabel",
+    "closeTicket",
+    "postPullRequestComment",
+    "upsertPullRequestComment",
+  ];
+
+  /**
+   * The seam with a recorder behind it: every call, with its arguments, in
+   * order. `postComment` really appends, so the machine's own words land on
+   * the thread and are recorded — which is what proves the instrument can see
+   * a write at all before it is used to say that none happened.
+   */
+  function recordingAdapter(comments: TicketThread["comments"]): {
+    adapter: TicketingAdapter;
+    calls: { call: string; args: unknown[] }[];
+    thread: TicketThread["comments"];
+  } {
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const thread = [...comments];
+    const calls: { call: string; args: unknown[] }[] = [];
+    let clock = 0;
+    const record = (call: string, ...args: unknown[]): void => {
+      calls.push({ call, args });
+    };
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        record("listMarkedTickets");
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        record("getTicket");
+        return { ...base, comments: [...thread] };
+      },
+      async postComment(_project, number, body): Promise<void> {
+        record("postComment", number, body);
+        thread.push({
+          author: "fvermaut",
+          body: `${MACHINE_MARKER}\n\n---\n\n${body}`,
+          createdAt: `2026-08-03T13:${String(clock++).padStart(2, "0")}:00Z`,
+          fromTimone: true,
+        });
+      },
+      async applyLabel(_project, number, label): Promise<void> {
+        record("applyLabel", number, label);
+      },
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return undefined;
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        throw new Error("no pull request exists in this test");
+      },
+      async postPullRequestComment(_project, number, body): Promise<void> {
+        record("postPullRequestComment", number, body);
+      },
+      async upsertPullRequestComment(
+        _project,
+        number,
+        marker,
+        body,
+      ): Promise<void> {
+        record("upsertPullRequestComment", number, marker, body);
+      },
+      async closeTicket(_project, number, reason): Promise<void> {
+        record("closeTicket", number, reason);
+      },
+    };
+    return { adapter, calls, thread };
+  }
+
+  it("never writes to what the human wrote, only alongside it", async () => {
+    // The answer is never destroyed — it is a comment on the ticket, permanent
+    // and public, and only the machine's marker moves (ADR-0023). Asserted
+    // against a recorder that demonstrably *does* see the machine's own post,
+    // so "nothing was written" is an observation and not an empty log.
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter, calls, thread } = recordingAdapter([invitation, answer]);
+    const before = { ...answer };
+    const spawner = new AgentSessionSpawner({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      runtime: {
+        async start() {
+          return {
+            sessionId: "session-2",
+            completed: (async () => {
+              await adapter.postComment(
+                { name: "scratch-app", repoUrl: "https://github.com/fvermaut/scratch-app.git" },
+                6,
+                "and which of the two do they hit first?",
+              );
+              return { sessionId: "session-2", ok: true };
+            })(),
+          };
+        },
+      },
+      root: "/nowhere",
+    });
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    const writes = calls.filter((entry) => WRITES.includes(entry.call));
+    // The instrument sees a write when there is one to see.
+    expect(JSON.stringify(writes)).toContain("which of the two");
+    // And not one of them carries the human's words anywhere.
+    expect(
+      writes.filter((entry) =>
+        JSON.stringify(entry.args).includes("the draft they lose"),
+      ),
+    ).toEqual([]);
+    // The comment is still on the thread, word for word, and still theirs.
+    expect(thread.filter((comment) => comment.createdAt === before.createdAt)).toEqual([
+      before,
+    ]);
+  });
+});

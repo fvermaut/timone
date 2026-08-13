@@ -4,8 +4,17 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
+import {
+  MACHINE_MARKER,
+  type PullRequest,
+  type PullRequestThread,
+  type Ticket,
+  type TicketingAdapter,
+  type TicketThread,
+} from "../adapters/ticketing.js";
 import { RunStore } from "../daemon/runs.js";
 import { acquireStateLock } from "../daemon/lock.js";
+import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { runRetry } from "./retry.js";
 
 const tempDirs: string[] = [];
@@ -158,5 +167,91 @@ describe("timone retry", () => {
 
     expect(code).toBe(1);
     expect(lines.join("\n")).toMatch(/<project>#<ticket>/);
+  });
+});
+
+describe("timone retry — the way back from a consumed answer", () => {
+  const invitation = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\ntwo ways to answer this`,
+    createdAt: "2026-08-06T09:00:00Z",
+    fromTimone: true,
+  };
+  const answer = {
+    author: "fvermaut",
+    body: "it's the draft they lose, not the phone layout",
+    createdAt: "2026-08-06T09:30:00Z",
+    fromTimone: false,
+  };
+
+  /** The ticket the conversation is happening on, and nothing else. */
+  function conversationAdapter(): TicketingAdapter {
+    const base: Ticket = {
+      number: 6,
+      title: "the page feels slow",
+      body: "when I add many items the page feels slow",
+      labels: ["timone", "triage:feature"],
+      url: "https://github.com/fvermaut/scratch-app/issues/6",
+      author: "fvermaut",
+      createdAt: "2026-08-06T08:00:00Z",
+    };
+    return {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [invitation, answer] };
+      },
+      async postComment(): Promise<void> {},
+      async applyLabel(): Promise<void> {},
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return undefined;
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        throw new Error("no pull request exists in this test");
+      },
+      async postPullRequestComment(): Promise<void> {},
+      async upsertPullRequestComment(): Promise<void> {},
+      async closeTicket(): Promise<void> {},
+    };
+  }
+
+  it("makes an answer the daemon consumed readable again", async () => {
+    // ADR-0023 trades a silent double-answer for a visible stall: the cursor
+    // moves as the answer is read, so a session that dies holding it leaves a
+    // ticket that looks answered with nothing working on it. This is the way
+    // out, and it is proven by running the loop rather than by writing the
+    // cursor the test wants to see.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: invitation.createdAt,
+    });
+
+    const contexts: { feedback?: string }[] = [];
+    const spawner: SessionSpawner = {
+      async spawn(_run, _project, context) {
+        contexts.push(context ?? {});
+      },
+    };
+    const deps = { manifest, store, adapter: conversationAdapter(), spawner };
+    const { log } = collect();
+
+    const read = await pollOnce(deps);
+    const stalled = await pollOnce(deps);
+    const code = runRetry("scratch-app#6", { manifest, store, log });
+    const again = await pollOnce(deps);
+
+    expect(read.resumed).toEqual(["scratch-app#6"]);
+    // Consumed: the same thread now holds nothing outstanding.
+    expect(stalled.resumed).toEqual([]);
+    // And the rewind hands it back, with the human's own words.
+    expect(code).toBe(0);
+    expect(again.resumed).toEqual(["scratch-app#6"]);
+    expect(contexts.at(-1)?.feedback).toBe(answer.body);
   });
 });

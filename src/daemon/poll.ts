@@ -27,7 +27,10 @@ import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 import type { Run, RunStore, Witness } from "./runs.js";
 // The same comment the spawner posts when a session ends badly, because this
 // is the same kind of ending: work stopped, nothing was decided, try again.
-import { failedComment } from "./session.js";
+// `waitOf` comes from there too, so a run put back onto its wait is described
+// by one function wherever it is put back — the spawner's release path and
+// this loop's consume must not drift on what a run was waiting for.
+import { failedComment, waitOf } from "./session.js";
 
 /** What a spawn is resuming, when it is resuming something. */
 export interface SpawnContext {
@@ -670,21 +673,31 @@ async function resumeAnswered(
       }
     }
 
-    let context: SpawnContext | undefined;
+    let resumption: Resumption | undefined;
     try {
-      context = await resolveWait(run, project, adapter);
+      resumption = await resolveWait(run, project, adapter);
     } catch (error) {
       const line = `${project.name}: could not read #${run.ticket}: ${oneLine(error)}`;
       result.errors.push(line);
       log(`error  ${line}`);
       continue;
     }
-    if (context === undefined) continue;
+    if (resumption === undefined) continue;
 
     try {
-      await deps.spawner.spawn(run, project, context);
+      // Reading the answer is what consumes it (ADR-0023), so the cursor moves
+      // before the session exists rather than after it returns: a second reader
+      // — another process, or this loop on its next cycle — then finds nothing
+      // outstanding. Before the spawn and not after it, deliberately: the
+      // spawner claims the run against the record it reads here and restores
+      // that record if the session never starts, so a cursor written now
+      // survives a failed spawn, while one written later would be overwritten.
+      if (resumption.consumed !== undefined) {
+        store.repark(run.id, { ...waitOf(run), waitCursor: resumption.consumed });
+      }
+      await deps.spawner.spawn(run, project, resumption.context);
       result.resumed.push(run.id);
-      log(`resume ${run.id} → ${context.stage ?? run.stage}`);
+      log(`resume ${run.id} → ${resumption.context.stage ?? run.stage}`);
     } catch (error) {
       const line = `${project.name}: could not resume #${run.ticket}: ${oneLine(error)}`;
       result.errors.push(line);
@@ -770,6 +783,27 @@ async function concludeLastConversation(
 }
 
 /**
+ * A parked run's decision to resume: what the session should do, and what
+ * reading the wait consumed in order to decide it.
+ *
+ * The two travel together because they are one decision. A cursor computed
+ * separately would mean reading the thread twice and judging it twice, and two
+ * readers of one thread are free to disagree about which comment the answer
+ * was.
+ */
+interface Resumption {
+  context: SpawnContext;
+  /**
+   * The instant the run's wait cursor must advance to before the session
+   * starts, when deciding to resume *was* reading the human's words
+   * (ADR-0023). Absent when nothing was consumed: an approval, an accepted
+   * conversation record and a park with no wait at all are all decided from
+   * something other than a comment the loop must not read twice.
+   */
+  consumed?: string;
+}
+
+/**
  * What a parked run should do now, or undefined while it is still waiting.
  *
  * A change request returns the *same* stage with the human's words; an
@@ -781,7 +815,7 @@ async function resolveWait(
   run: Run,
   project: TicketingProject,
   adapter: TicketingAdapter,
-): Promise<SpawnContext | undefined> {
+): Promise<Resumption | undefined> {
   const stage = run.stage;
   if (stage === undefined) return undefined;
 
@@ -795,11 +829,13 @@ async function resolveWait(
   // nobody wrote.
   if (run.waitingKind === undefined) {
     if (stage !== "triage") {
-      return isBuilt(stage) ? { stage } : undefined;
+      return isBuilt(stage) ? { context: { stage } } : undefined;
     }
     const thread = await adapter.getTicket(project, run.ticket);
     const next = whatFollows(stage, thread.labels);
-    return next !== undefined && isBuilt(next) ? { stage: next } : undefined;
+    return next !== undefined && isBuilt(next)
+      ? { context: { stage: next } }
+      : undefined;
   }
 
   const cursor = run.waitCursor;
@@ -812,19 +848,23 @@ async function resolveWait(
 
     if (transition.kind === "advance") {
       return {
-        stage: transition.stage,
-        approval:
-          decision?.kind === "approve"
-            ? {
-                stage,
-                by: decision.comment.author,
-                at: decision.comment.createdAt,
-              }
-            : undefined,
+        context: {
+          stage: transition.stage,
+          approval:
+            decision?.kind === "approve"
+              ? {
+                  stage,
+                  by: decision.comment.author,
+                  at: decision.comment.createdAt,
+                }
+              : undefined,
+        },
       };
     }
     if (transition.kind === "repeat") {
-      return { stage: transition.stage, feedback: transition.feedback };
+      return {
+        context: { stage: transition.stage, feedback: transition.feedback },
+      };
     }
     return undefined;
   }
@@ -835,7 +875,7 @@ async function resolveWait(
     if (record !== undefined) {
       const transition = concludeConversation(stage, { accepted: true });
       return transition.kind === "advance"
-        ? { stage: transition.stage }
+        ? { context: { stage: transition.stage } }
         : undefined;
     }
 
@@ -844,8 +884,15 @@ async function resolveWait(
     // conversation is what ingests an answer to its own question, and
     // advancing on it would skip the stage that has to judge whether the
     // answer settles anything.
+    //
+    // This is the one wait resolved by reading what a human wrote where the
+    // words themselves are the trigger, so it is the one that must be consumed
+    // (ADR-0023): a gate's answer clears its wait by advancing the run to
+    // another stage, and a conversation record is the machine's own.
     const answer = writtenAnswer(thread, cursor);
-    return answer === undefined ? undefined : { stage, feedback: answer };
+    return answer === undefined
+      ? undefined
+      : { context: { stage, feedback: answer.words }, consumed: answer.at };
   }
 
   if (run.waitingKind === "review") {
@@ -864,7 +911,9 @@ async function resolveWait(
       .filter((body) => body !== "");
     if (words.length === 0) return undefined;
 
-    return { stage: "remediation", feedback: words.join("\n\n---\n\n") };
+    return {
+      context: { stage: "remediation", feedback: words.join("\n\n---\n\n") },
+    };
   }
 
   return undefined;
@@ -872,7 +921,12 @@ async function resolveWait(
 
 /**
  * The human's written answer to an open conversation, or undefined while they
- * have not written one.
+ * have not written one — their words, and the instant of the last comment the
+ * answer was read from.
+ *
+ * That instant is what consuming moves the cursor to (ADR-0023), and it is the
+ * *newest* comment read rather than the oldest so that nothing already read is
+ * left outstanding, and nothing said later is swallowed with it.
  *
  * **No keyword, and Timone's own comments can never be it** — the machine asks
  * its remaining question on the same thread it is watching, and a loop that
@@ -890,18 +944,22 @@ async function resolveWait(
 function writtenAnswer(
   thread: TicketThread,
   cursor: string,
-): string | undefined {
+): { words: string; at: string } | undefined {
   const after = instantOf(cursor);
 
-  const words = thread.comments
-    .filter(
-      (comment) =>
-        !comment.fromTimone && instantOf(comment.createdAt) > after,
-    )
-    .map((comment) => comment.body.trim())
-    .filter((body) => body !== "");
+  const said = thread.comments.filter(
+    (comment) =>
+      !comment.fromTimone &&
+      instantOf(comment.createdAt) > after &&
+      comment.body.trim() !== "",
+  );
+  const newest = said.at(-1);
+  if (newest === undefined) return undefined;
 
-  return words.length === 0 ? undefined : words.join("\n\n---\n\n");
+  return {
+    words: said.map((comment) => comment.body.trim()).join("\n\n---\n\n"),
+    at: newest.createdAt,
+  };
 }
 
 /**
