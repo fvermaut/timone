@@ -155,6 +155,14 @@ Seven, and none of them is fixed here.
 
 9. **There is no way to end a run, and clearing residue therefore requires hand-editing the ledger.** `retry` re-arms, `takeover` enrols, nothing cancels. Both entries had to be removed from `.timone/state.json` by hand (backed up first) — which is precisely what [phase 13](phase-13.md)'s sign-off recorded as fixed: *"Three times a run stopped and `timone retry` restarted it exactly where it stood — the hand-editing of internal files that plagued the last sign-off is gone."* It is not gone; it is only unnecessary for runs that **should** continue. A run that should never have existed, or whose ticket has been closed underneath it, has no exit. Until findings 8 and 9 are closed together, every fixture run on a gate leaves this behind.
 
+10. **A map's frontier is asserted by a label, not derived from its questions — and the one real map in the workspace is wrong because of it.** `isFrontierEmpty` is `labels.includes(FRONTIER_EMPTY_LABEL)` (`src/daemon/pipeline.ts:58`). The label is written by the wayfinding session that closes the last question, so a map whose questions were closed **by hand, or before [20f](../phase-20.md) existed**, carries no label and reports itself as still working.
+
+    **Found on `ivtrends` #1 on 2026-08-14**, answering fvermaut's question of whether he could pick that map up and ask for the next step. Its state: `OPEN`, labelled `wayfinder:map`, **not** labelled `timone`, **not** labelled `wayfinder:frontier-empty` — and it is the **only open issue on the project**, so every decision ticket beneath it is closed and its frontier is genuinely empty. Marked as it stands, its call to action would read *"I'm working through this map's questions"* on a map with none left.
+
+    **This is the stale-line class [R21](../../specs/prd/prd-02-inversion-of-control.criteria.md#r21--every-open-ticket-answers-for-itself) exists to abolish**, reappearing one layer up: clause 7 keeps a CTA current against *the run's own state*, and nothing keeps that state honest against the tracker. It is the only finding of this gate sitting on a live project rather than the fixture, and it is the map that started phase 20.
+
+    **The manual route out**, for as long as the label is the mechanism: add `timone` and `wayfinder:frontier-empty` together. **The fix**, when someone takes it: derive emptiness from the map's open children rather than trusting a label a session may never have written — the same shape of correction [20a](../phase-20.md) made when it removed the second place deciding what a ticket needs.
+
 ## What this gate did not prove
 
 - **R21 clause 3 — the backlog default.** Unobservable on this machine while both projects have the switch on. Named in the register's marker as not obtained.
