@@ -72,10 +72,13 @@ const ghCommentSchema = z.looseObject({
   body: z.string(),
   createdAt: z.string(),
   /**
-   * The comment's permalink, e.g. `…/pull/9#issuecomment-1234567`. The only
-   * place `gh pr view --json comments` surfaces the numeric id that the REST
-   * endpoint for editing a comment addresses — the `id` field it returns is
-   * GraphQL's opaque node id, which that endpoint does not accept.
+   * The comment's permalink, e.g. `…/pull/9#issuecomment-1234567` or
+   * `…/issues/7#issuecomment-1234567`. The only place `gh pr view` and
+   * `gh issue view --json comments` surface the numeric id that the REST
+   * endpoint for editing a comment addresses — the `id` field they return is
+   * GraphQL's opaque node id, which that endpoint does not accept. One
+   * endpoint serves both: to GitHub a ticket comment and a pull request's
+   * conversation comment are the same resource.
    */
   url: z.string().optional(),
 });
@@ -316,6 +319,59 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     ]);
   }
 
+  async upsertComment(
+    project: TicketingProject,
+    number: number,
+    marker: string,
+    body: string,
+  ): Promise<void> {
+    const slug = repoSlug(project.repoUrl);
+
+    const raw = await this.run("gh", [
+      "issue",
+      "view",
+      String(number),
+      "--repo",
+      slug,
+      "--json",
+      "comments",
+    ]);
+    const { comments } = parseGhJson(
+      z.looseObject({ comments: z.array(ghCommentSchema) }),
+      raw,
+      `reading comments on ${slug}#${number}`,
+    );
+
+    // Ours *and* carrying the marker. Matching the marker alone would let a
+    // human quoting the CTA back at the machine capture the edit — and since
+    // Timone comments under the human's own account, the machine header is
+    // the only thing that tells the two apart.
+    const existing = comments.find(
+      (comment) =>
+        isMachineComment(comment.body) && comment.body.includes(marker),
+    );
+    if (existing === undefined) {
+      await this.postComment(project, number, body);
+      return;
+    }
+    if (existing.url === undefined) {
+      throw new Error(
+        `gh returned a comment on ${slug}#${number} with no url, so it cannot be edited`,
+      );
+    }
+
+    // A ticket comment and a pull request's conversation comment are one and
+    // the same resource to GitHub, so this is the endpoint its twin patches.
+    await this.run("gh", [
+      "api",
+      "--method",
+      "PATCH",
+      `repos/${slug}/issues/comments/${commentDatabaseId(existing.url)}`,
+      "-f",
+      `body=${stampMachineComment(body)}`,
+    ]);
+  }
+
   async applyLabel(
     project: TicketingProject,
     number: number,
@@ -500,7 +556,7 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     const slug = repoSlug(project.repoUrl);
 
     const raw = await this.run("gh", [
-      "pr",
+      "issue",
       "view",
       String(number),
       "--repo",

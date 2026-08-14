@@ -72,6 +72,7 @@ function quietAdapter(): TicketingAdapter {
     },
     async postPullRequestComment(): Promise<void> {},
     async upsertPullRequestComment(): Promise<void> {},
+    async upsertComment(): Promise<void> {},
     async closeTicket(): Promise<void> {},
   };
 }

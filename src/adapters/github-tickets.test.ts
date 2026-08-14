@@ -279,3 +279,135 @@ describe("applyLabel", () => {
     );
   });
 });
+
+describe("upsertComment", () => {
+  /**
+   * Stands in for whatever marker the caller passes — the marker is a
+   * parameter, so the adapter must work for any stable line, and pinning a
+   * particular one here would test a constant rather than the behaviour.
+   */
+  const marker = "📣 **What happens next** · kept up to date by the machine";
+  const body = `${marker}\n\n**What I need from you:** nothing right now.`;
+
+  /** A comment as `gh issue view --json comments` returns it. */
+  function ghComment(commentBody: string, id = 777): unknown {
+    return {
+      author: { login: "fvermaut" },
+      body: commentBody,
+      createdAt: "2026-08-08T10:00:00Z",
+      url: `https://github.com/fvermaut/scratch-app/issues/7#issuecomment-${id}`,
+    };
+  }
+
+  it("looks for what it said on the ticket, not on a pull request", async () => {
+    const { run, calls } = fakeRunner(JSON.stringify({ comments: [] }), "");
+
+    await new GitHubTicketingAdapter({ run }).upsertComment(
+      alpha,
+      7,
+      marker,
+      body,
+    );
+
+    expect(calls[0].args.slice(0, 3)).toEqual(["issue", "view", "7"]);
+    expect(calls[0].args[calls[0].args.indexOf("--repo") + 1]).toBe(
+      "fvermaut/scratch-app",
+    );
+    expect(calls[0].args[calls[0].args.indexOf("--json") + 1]).toBe("comments");
+  });
+
+  it("edits what it said last time rather than saying it again", async () => {
+    const { run, calls } = fakeRunner(
+      JSON.stringify({
+        comments: [
+          ghComment("it's worse on the archive page"),
+          ghComment(`${MACHINE_MARKER}\n\n---\n\n${marker}\n\nstale`, 42),
+        ],
+      }),
+      "",
+    );
+
+    await new GitHubTicketingAdapter({ run }).upsertComment(
+      alpha,
+      7,
+      marker,
+      body,
+    );
+
+    expect(calls[1]).toEqual({
+      command: "gh",
+      args: [
+        "api",
+        "--method",
+        "PATCH",
+        "repos/fvermaut/scratch-app/issues/comments/42",
+        "-f",
+        `body=${MACHINE_MARKER}\n\n---\n\n${body}`,
+      ],
+    });
+  });
+
+  it("posts a first one when it has never said it before", async () => {
+    const { run, calls } = fakeRunner(
+      JSON.stringify({
+        comments: [ghComment("it's worse on the archive page")],
+      }),
+      "",
+    );
+
+    await new GitHubTicketingAdapter({ run }).upsertComment(
+      alpha,
+      7,
+      marker,
+      body,
+    );
+
+    expect(calls[1].args.slice(0, 3)).toEqual(["issue", "comment", "7"]);
+    expect(calls[1].args.at(-1)).toBe(`${MACHINE_MARKER}\n\n---\n\n${body}`);
+  });
+
+  it("will not overwrite a human's own comment that quotes the marker", async () => {
+    const { run, calls } = fakeRunner(
+      // The human quoting the CTA back to ask about it. Same account the
+      // machine posts under, same marker text in the body — the machine
+      // header is the only thing it lacks, and that has to be enough.
+      JSON.stringify({
+        comments: [
+          ghComment(`${marker}\n\nis this still what you need from me?`, 42),
+        ],
+      }),
+      "",
+    );
+
+    await new GitHubTicketingAdapter({ run }).upsertComment(
+      alpha,
+      7,
+      marker,
+      body,
+    );
+
+    expect(calls[1].args.slice(0, 3)).toEqual(["issue", "comment", "7"]);
+    expect(calls).toHaveLength(2);
+    expect(calls.flatMap((call) => call.args)).not.toContain("PATCH");
+  });
+
+  it("refuses to guess when the comment it must edit has no address", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify({
+        comments: [
+          {
+            author: { login: "fvermaut" },
+            body: `${MACHINE_MARKER}\n\n---\n\n${marker}\n\nstale`,
+            createdAt: "2026-08-08T10:00:00Z",
+          },
+        ],
+      }),
+    );
+
+    // Posting instead would leave two calls to action on the ticket, one of
+    // them stale — the outcome editing exists to prevent.
+    await expect(
+      new GitHubTicketingAdapter({ run }).upsertComment(alpha, 7, marker, body),
+    ).rejects.toThrow(/no url/);
+  });
+});

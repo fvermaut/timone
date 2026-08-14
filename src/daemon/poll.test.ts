@@ -94,6 +94,7 @@ const noPullRequests = {
   },
   async postPullRequestComment(): Promise<void> {},
   async upsertPullRequestComment(): Promise<void> {},
+  async upsertComment(): Promise<void> {},
   async closeTicket(): Promise<void> {},
 };
 
@@ -1009,6 +1010,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
       },
       async postPullRequestComment(): Promise<void> {},
   async upsertPullRequestComment(): Promise<void> {},
+      async upsertComment(): Promise<void> {},
       async closeTicket(_project, number, reason): Promise<void> {
         closed.push(`${number}:${reason}`);
       },
@@ -1584,6 +1586,7 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
     async upsertPullRequestComment(project, number, marker, body): Promise<void> {
       upserts.push({ project: project.name, number, marker, body });
     },
+    async upsertComment(): Promise<void> {},
     async closeTicket(): Promise<void> {},
   };
   return { adapter, upserts };
@@ -2378,6 +2381,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
       ): Promise<void> {
         record("upsertPullRequestComment", number, marker, body);
       },
+      async upsertComment(): Promise<void> {},
       async closeTicket(_project, number, reason): Promise<void> {
         record("closeTicket", number, reason);
       },
@@ -2559,6 +2563,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       },
       async postPullRequestComment(): Promise<void> {},
       async upsertPullRequestComment(): Promise<void> {},
+      async upsertComment(): Promise<void> {},
       async closeTicket(): Promise<void> {},
     };
     const contexts: (SpawnContext | undefined)[] = [];

@@ -188,12 +188,13 @@ export interface TicketingProject {
 /**
  * The seam between the process and whatever tracks tickets. Real interface
  * from day one per ADR-0004: GitHub is the first implementation, not the
- * shape. Nine capabilities, and no more — anything a stage needs beyond
+ * shape. Ten capabilities, and no more — anything a stage needs beyond
  * these is a deliberate widening of the seam, not an incidental one. Three
  * of them are phase 13's widening: delivery and the review loop live on
  * pull requests, and the PR is stage 8's artifact (ADR-0004), so reading
  * and answering it is the ticketing seam's business, not a second adapter's.
- * The last is phase 16's, and its reasoning is on the call itself.
+ * The last two are phase 16's and phase 20's, and their reasoning is on the
+ * calls themselves.
  */
 export interface TicketingAdapter {
   /** Open tickets carrying the mark label, oldest first. */
@@ -209,6 +210,32 @@ export interface TicketingAdapter {
   postComment(
     project: TicketingProject,
     number: number,
+    body: string,
+  ): Promise<void>;
+
+  /**
+   * Say something on a ticket **in place of** whatever was last said under
+   * `marker`, editing that comment rather than adding another. The twin of
+   * {@link upsertPullRequestComment}, on the other surface.
+   *
+   * Phase 20's widening of this seam, and deliberate rather than incidental.
+   * A ticket's call to action is the same kind of statement that docblock
+   * argues about a preview — a standing fact whose truth changes, reconciled
+   * every cycle
+   * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)),
+   * so appending it would fill a client's ticket with near-identical
+   * comments. **That argument transfers here verbatim and is deliberately not
+   * restated**; read it there.
+   *
+   * Implementations match on `marker` appearing in a comment they themselves
+   * wrote — told by {@link isMachineComment}, never by the author, who is
+   * only the account the machine borrows — and post a new one when they find
+   * none. The body is stamped exactly as {@link postComment}'s is.
+   */
+  upsertComment(
+    project: TicketingProject,
+    number: number,
+    marker: string,
     body: string,
   ): Promise<void>;
 
