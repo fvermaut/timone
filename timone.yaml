@@ -7,6 +7,7 @@ projects:
       - nextjs
       - prisma
       - postgresql
+    introduce_unmarked: true
     bindings:
       ticketing: github
       preview: docker
@@ -21,6 +22,7 @@ projects:
       - shadcn
       - vercel
       - supabase
+    introduce_unmarked: true
     bindings:
       ticketing: github
       preview: docker
