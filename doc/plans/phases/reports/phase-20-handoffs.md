@@ -602,3 +602,52 @@ Commands, as given:
 **The second escalation is left open, deliberately and not by me.** An unmarked ticket that `takeover` has enrolled still receives **no standing call to action**, because `reconcileCtas` walks the marked listing only. **The orchestrator ruled on 2026-08-14 that this stays open**: it is the same tension 20d and 20e each flagged — R21's clause 1 promises every open ticket carries a line, while clause 3 blesses silence on a backlog project — and it is a question inside the register **fvermaut approved**, so settling it is his and neither a slice's nor the orchestrator's. **Widening `reconcileCtas` to the open listing would decide it quietly and would also undo 20e's restraint, which ADR-0024 calls the whole of it.** Nobody reading this later should take the gap for an oversight: it was seen, weighed, and left.
 
 The triage-entry consequence in *What 20h must know* stays a note for the same reason — an interactive session at an unattended stage has no way to tell the ledger it did the work, and fvermaut should meet that at the gate rather than in a diff.
+
+## Phase close — the register, the reports, and the documents that carry them
+
+> **Not a sub-phase.** [The plan](../phase-20.md) has none for this work — phase 19 had 19f, phase 20 stops at its live gate — so the register, `STATUS.md`, `README.md` and both reports were unassigned and were taken as phase-close work by the orchestrator. **The omission is recorded in [the completion report's Deviations](phase-20-complete.md#deviations-from-the-plan)** rather than smoothed over, because a phase that ends at a gate with its register unmarked depends on somebody noticing that the most consequential artifact — the record of what was and was not proven — is missing.
+
+**Built.** Nothing. This slice carries **no behaviour**, so **no seams were declared and there is no red→green trace**; validation is checklist-based, and every claim below is a document assertion checked by reading, not by a test.
+
+**Files touched.**
+
+- `doc/specs/prd/prd-02-inversion-of-control.criteria.md` — three dated markers, **no criterion edited and no status flipped**. R21 gains a marker naming the six clauses observed live, the two not obtained and why, the 4m19s idle observation, the clause-1/clause-3 contradiction, and the ledger-record-versus-comment-marker divergence. R1 gains a marker correcting its 2026-08-03 evidence in place. R20 gains a marker recording clause 2 as built and clause 1's `prototype`/`task` remainder.
+- `STATUS.md` — a new lead section, the header's last-updated clause, and eight superseded statements struck through rather than deleted (the takeover refusal, the stale-CTA gap, the "left completely alone" sentence, the `#11` contradiction, the two-builds-queued line, phase 20's approval line, the twenty-first requirement's "not started", and the run-this-line refusal). Three new entries under *Known problems*; two amended.
+- `README.md` — `README.md:81`'s *"the map … is never marked and nothing ever waits on it"* replaced with what ships, and one sentence added to the permission-boundary paragraph on the one-off introduction and its default-off switch.
+- `doc/plans/phases/reports/phase-20-live-gate.md` — created.
+- `doc/plans/phases/reports/phase-20-complete.md` — created.
+- `doc/plans/phases/reports/phase-20-handoffs.md` — this section only. **20a–20g's sections are untouched.**
+
+**Decisions taken inside the slice.**
+
+- **R21 is not marked verified, and that was the load-bearing call.** Two of eight clauses were not obtained and the idle observation stands at 4m19s of a required ten minutes. Timone's own rule is that a requirement is verified only when an agent that did not build it checks it and records evidence — stage 7's, not execution's. **A marker that claimed more than was seen would be worse than no marker**, because the next reader would take a clause nobody watched for a clause that passed.
+- **R1's criterion was not touched, and its old evidence was corrected rather than deleted**, exactly as [ADR-0024](../../../adr/0024-every-open-ticket-answers-for-itself.md)'s consequence requires. The criterion forbids a *run* on an unmarked issue and has never forbidden a comment, so the requirement stands as written; what died is the *"0 comments"* clause of its 2026-08-03 evidence and `STATUS.md`'s *"left completely alone"*.
+- **R20's status was left alone though clause 2 is built.** A requirement's status is the weakest of its clauses' outcomes, clause 1's remainder is unobserved, and clause 2's spawn half was not seen. Recording the build in a marker and leaving the flip to stage 7 is the same shape phase 19 used for clause 3.
+- **The register's internal contradiction is written into R21's marker as a blocker on verification**, not as a note. Clause 1 promises every open ticket carries a line; clause 3 blesses silence on a backlog project; an unmarked ticket with the switch off carries nothing. **Nothing can check clause 1 against a rule nobody has stated**, so it belongs where a verifier will read it before starting.
+- **`STATUS.md` leads with the 13 August gesture, not with the build.** The reader is the person who typed *"ok go ahead and write the spec"* onto a ticket and got nothing. What changed for him is that the same gesture now produces a specification he approved himself — everything else in the section is cost, restraint or remainder.
+- **`doc/plans/phases/phase-18.md` and phase 18's reports were left alone** although they repeat `README.md:81`'s superseded sentence. They are historical records of what was true then; [20f's escalation](#20f--the-map-becomes-first-class) said so explicitly and it is honoured.
+
+**Validation evidence.** Checklist-based, per the brief. **No behaviour, no seams, no red→green.** The four commands from the brief, and what each shows:
+
+- `grep -n -A3 "^## R21" …criteria.md` — three lines of context reach the blockquote preamble, not the status; **the status is on line 380 and reads `draft`**, followed by the 2026-08-14 marker. **Not verified.**
+- `grep -n -A3 "^## R1 " …criteria.md` — status `verified` (line 10), criterion unchanged, the 2026-08-03 and 2026-08-13 markers intact above the new correction.
+- `grep -n -A3 "^## R20" …criteria.md` — same preamble effect; **the status is on line 346 and reads `failed`**, with the clause-2-built marker first.
+- `grep -n "never marked" README.md` — **no match, exit 1.**
+
+Per checkbox:
+
+- **R21 is not marked verified; its marker names the six observed and the two not** — **PASS.**
+- **R1's criterion is unchanged; its stale evidence is corrected rather than deleted** — **PASS.**
+- **R20's clause 2 is recorded as built, with clause 1's remainder named** — **PASS.**
+- **`README.md` no longer says a map is never marked** — **PASS.**
+- **`STATUS.md` does not claim more than was observed** — **PASS.** It says the requirement is *"deliberately not marked as kept"*, gives the idle check as four minutes against ten owed, and names both unobtained clauses in the reader's own terms.
+
+**What stage 7 must know.**
+
+- **Start by clearing the ledger.** `scratch-app#29` is `active` at `planning` and `scratch-app#30` is `queued` while **both tickets are closed** — the outage stopped the daemon witnessing the endings. #29 holds the project until it is cleared, so nothing else on `scratch-app` will start.
+- **R21 cannot be verified until fvermaut settles clause 1 against clause 3.** Not a formality: clause 1 says *any* open ticket carries a line, clause 3 blesses silence on a backlog project, and an unmarked ticket with the switch off carries nothing at all. Checking clause 1 requires knowing whether those tickets are exempt.
+- **Clause 3 needs one manifest edit to become observable.** Set `introduce_unmarked` back to absent (or `false`) on a project with an open unmarked issue, rebuild, run one cycle, and assert **zero** `hello` lines, no `introductions` entry, and **no `gh issue list` without `--label`** in the tracker traffic. The unit evidence already exists and is genuinely discriminating; only the live half is missing.
+- **Clause 6's missing half needs an idle project.** Take over an open ticket with no run **while nothing else holds the project**, and watch the session actually open. At the gate #29 held `scratch-app`, so #30 queued.
+- **The ten-minute idle observation is owed and is cheap.** One daemon, no state changing, no comment typed; `grep -c '^cta ' <log>` must be 0 and the CTA comment's `updated_at` must not move over the window. **Check both**, as [20c's handoff](#20c--the-cta-is-reconciled-each-cycle) says: the log and the tracker disagreeing is the interesting outcome.
+- **R20 clause 1's `prototype` and `task` branches arrive free with the next map charted** by an interactive stage-2 session, and are not worth manufacturing.
+- **Do not read the seven live-gate findings as this phase's defects.** Two are other requirements' (R17's counter, ADR-0020's rest-state hole), one is a limit of phase 15's fix, one is a repeat of phase 19's, one is a decision nobody has taken, one is residue from a real outage, and one is per-ticket error containment working correctly under a fault nobody planned.
