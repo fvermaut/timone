@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
+import { ctaFor, type Cta } from "../daemon/cta.js";
 import { modelFor, type PipelineStage } from "../daemon/pipeline.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 
@@ -58,14 +59,21 @@ function humanDuration(ms: number): string {
   return `${seconds}s`;
 }
 
-/** What a parked run is waiting for. A review wait names its pull request
- * from the ledger, so the line points at the place the reader must go even
- * when the recorded `waitingOn` text is terser. */
+/**
+ * What one run's ticket is asking of the human.
+ *
+ * **The only place this file decides that**, and it decides it by asking
+ * (ADR-0024). What a ticket needs is computed once and rendered onto both the
+ * ticket and this command; a second opinion here is how `timone status` came
+ * to ask for an answer on a ticket whose own body said nothing was needed.
+ */
+function ctaOf(run: Run): Cta {
+  return ctaFor({ project: run.project, ticket: run.ticket, run });
+}
+
+/** What a parked run is waiting for, in the words the ticket itself carries. */
 function describeWait(run: Run): string {
-  if (run.waitingKind === "review" && run.pr !== undefined) {
-    return `waiting on you: your review of pull request #${run.pr}`;
-  }
-  return `waiting on you: ${run.waitingOn ?? "an answer"}`;
+  return `waiting on you: ${ctaOf(run).needFromYou}`;
 }
 
 /** One run's phrase: the ticket, how far it got, and what it is doing. */
@@ -149,12 +157,17 @@ export function renderStatus(
   // only what happened and what to type.
   const failures = runs
     .filter((run) => run.status === "failed" && run.failure !== undefined)
-    .flatMap((run) => [
-      `${run.project} #${run.ticket} stopped early: ${run.failure}`,
-      `  to pick it up from where it stopped: timone retry ${run.id}`,
-    ]);
+    .flatMap((run) => {
+      const { command } = ctaOf(run);
+      return [
+        `${run.project} #${run.ticket} stopped early: ${run.failure}`,
+        ...(command === undefined
+          ? []
+          : [`  to pick it up from where it stopped: ${command}`]),
+      ];
+    });
 
-  const waiting = runs.filter((run) => run.status === "parked");
+  const waiting = runs.filter((run) => ctaOf(run).waitingOnYou);
 
   const closing =
     waiting.length === 0

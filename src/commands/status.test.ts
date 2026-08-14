@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
+import { ctaComment, ctaFor } from "../daemon/cta.js";
 import { reclaimedReason } from "../daemon/poll.js";
 import type { Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
@@ -388,5 +389,67 @@ describe("renderStatus — what a run is costing right now", () => {
 
     expect(lineFor(output, "scratch-app")).toContain("claude-opus-5");
     expect(lineFor(output, "scratch-app")).not.toContain(" for ");
+  });
+});
+
+describe("renderStatus — one computation, two renderers", () => {
+  it("says the same thing on the ticket and on the status line, from one call", () => {
+    const parked = run({
+      project: "scratch-app",
+      ticket: 6,
+      status: "parked",
+      stage: "delivery",
+      waitingKind: "review",
+      waitingOn: "your review",
+      pr: 9,
+      branch: "timone/6-fiddly-box",
+    });
+
+    // **One call**, whose result is handed to both renderers. The expectations
+    // below are the computed CTA itself rather than two literals that happen to
+    // match, so a change to the computation has to move both outputs or this
+    // fails — which is the property R21's clause 8 closes by construction.
+    const cta = ctaFor({
+      project: parked.project,
+      ticket: parked.ticket,
+      run: parked,
+    });
+
+    expect(cta.needFromYou).not.toBe("");
+    expect(ctaComment(cta)).toContain(cta.needFromYou);
+    expect(
+      renderStatus(manifest, [parked], { stateExists: true }),
+    ).toContain(cta.needFromYou);
+  });
+
+  it("names in its closing line exactly the tickets the computation is waiting on", () => {
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "planning",
+        waitingKind: "gate",
+        waitingOn: "your answer on the ticket",
+      }),
+      run({ project: "scratch-app", ticket: 7, status: "active", stage: "execution" }),
+      run({
+        project: "other-app",
+        ticket: 2,
+        status: "failed",
+        stage: "planning",
+        failure: "the model was unavailable",
+      }),
+    ];
+
+    const lastLine =
+      renderStatus(manifest, runs, { stateExists: true }).trimEnd().split("\n").at(-1) ?? "";
+
+    // Hand-written from the line `timone status` prints today: the working
+    // ticket and the broken one are not waiting on an answer, and only the
+    // parked one is named.
+    expect(lastLine).toBe(
+      "**What I need from you:** answer on scratch-app #6 — each ticket says what it needs.",
+    );
   });
 });
