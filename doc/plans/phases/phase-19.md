@@ -1,6 +1,8 @@
 # Phase 19: one answer, one session
 
-> **Status:** **Approved for execution by fvermaut 2026-08-13**, re-approved against the amended file the same day the ruling behind the amendment was made. It was first **approved by fvermaut 2026-08-11**; ✏ **Refined 2026-08-13** grew 19a's declared seams, which reverted the stamp per the re-approval rule, and this is the fresh one. Hand-planned, as all Timone-self phases are; approval was gated on this file per [ADR-0014](../../adr/0014-artifact-first-gates.md).
+> **Status:** **Awaiting approval.** ✏ **Amended 2026-08-14** with a new sub-phase **19g**, after 19e's live gate failed its step 3 — a new sub-phase grows scope, which reverts the stamp per the re-approval rule. Previously **approved by fvermaut 2026-08-11**, re-approved **2026-08-13** against the ADR-0025 amendment; 19a–19d are built and committed under that stamp and are unaffected by this one. Hand-planned, as all Timone-self phases are; approval is gated on this file per [ADR-0014](../../adr/0014-artifact-first-gates.md).
+
+> ✏ **Amended 2026-08-14 — the live gate found what the tests could not.** 19e ran on `scratch-app` with fvermaut answering in his own words. **Steps 1, 2 and 4 passed**: one written answer bought exactly one session, one resolution and one close at $1.39 with no `could not resume`; a second `daemon --once` and a `takeover` were both refused naming the holder; a live holder was refused five times running, four of them past the staleness window; and a crashed holder's lock was reclaimed with attribution. **Step 3 failed.** `timone retry` does not give back an answer consumed by a session that died *after* being activated, because `activate` clears the very field the rewind needs — so the human is asked the same question again and their answer is never read. **[19g](#sub-phase-19g-the-consumed-answer-survives-the-session-that-read-it-r3) is added to close it, and 19e's step 3 is re-run against it.** Nothing else in this plan moves.
 
 > ✏ **Refined 2026-08-13 — the reclaim gate's evidence changes, on [ADR-0025](../../adr/0025-a-lock-holders-proof-of-life-is-its-process.md).** Executing 19a found that [ADR-0023](../../adr/0023-one-answer-one-session.md)'s reclaim clause **cannot be built as written**: `RunStore.witness` (`src/daemon/runs.ts:586`) ends in `persist()`, so consulting ADR-0020's witness *writes to the very file the lock protects*. Two faults followed, both reproduced at the real defaults — a refused process mutates the ledger it was refused, and three refused `daemon --once` starts a minute apart accumulate enough watch to **break a live daemon's lock**, which is this phase's own fault arriving as its fix, on the path [19e step 2](#sub-phase-19e-live-gate--a-written-answer-from-a-person) walks. fvermaut ruled on 2026-08-13 that **a lock holder's proof of life is its process, not its witnessed time**. 19a's reclaim seams and 19e's step 4 are rewritten below; **nothing else in this plan moves**, and 19a's other four seams, 19b, 19c, 19d and 19f are untouched.
 
@@ -159,13 +161,45 @@ npm test
 
 ---
 
+### Sub-phase 19g: the consumed answer survives the session that read it (R3)
+
+✏ **Added 2026-08-14**, after [19e](#sub-phase-19e-live-gate--a-written-answer-from-a-person) step 3 **failed on the live gate**. Steps 1, 2 and 4 passed; this slice exists because step 3 did not, and 19e is re-run once it lands.
+
+**What the gate found, so it is not re-derived.** On the resume path the consumed cursor is written by `repark`, then the run is spawned, and then `activate` **clears `waitCursor`**. A session that dies after being activated therefore leaves the run `failed` with **no cursor at all**. `timone retry` has nothing to rewind, falls through to the entry path, and reparks with `waitCursorFrom(ticket)` — which is *now*, after the human's answer. Observed on `scratch-app` #26 at 21:54:32Z against an answer written at 21:52:33Z: **the original invitation was re-posted verbatim and the answer was left permanently unread.**
+
+**Why it is not a documentation matter.** [ADR-0023](../../adr/0023-one-answer-one-session.md) justified consume-on-read by trading *"a silent double-answer for a visible stall"*, and undertook that **`timone retry` rewinds the marker**. What the build does instead is a **silent re-ask** — the human's words discarded and the same question posed again. That is not the trade that was accepted, and on a real decision it is worse than the double-answer it replaced.
+
+**[MODIFY]** `src/daemon/runs.ts`, `runs.test.ts` — the run records the instant of the answer it consumed, in a field that **survives `activate`**. `waitCursor` cannot carry it, which is the whole of the fault.
+**[MODIFY]** `src/daemon/poll.ts`, `poll.test.ts` — the consume writes that instant alongside the repark, from the same single read [19d](#sub-phase-19d-one-fetch-per-parked-run-per-cycle) established.
+**[MODIFY]** `src/commands/retry.ts`, `retry.test.ts` — `retry` rewinds to that instant **whichever state the run died in**, and clears it once used.
+
+**Seams under test (TDD):** a run that died **`active`** — the live case, which 19c's test never reached — is made readable again by `retry`, asserted end to end through the ledger and **before** any other case, because it is the one the gate caught; the consumed instant is proven to **survive `activate`**, by reading it back after the transition that clears `waitCursor`; `retry` on a **parked** run still rewinds as it did, asserted as a regression so 19c's case is not traded away for this one; a run that **resolved normally** leaves no stale consumed instant behind, so a later retry cannot resurrect a settled answer; and the re-ask itself is proven gone — after `retry`, the next cycle **resumes** rather than posting a fresh invitation, asserted by counting invitations on the thread.
+
+> Depends on 19c and 19d. It writes to the consume path 19c created and must take its instant from the single read 19d established.
+
+#### Agent Validation Steps
+
+```bash
+npx vitest run src/daemon/runs.test.ts src/daemon/poll.test.ts src/commands/retry.test.ts
+npm run type-check
+npm test
+```
+
+- [ ] A session that died **`active`** gives its answer back on `retry` — asserted first
+- [ ] The consumed instant survives `activate`, proven by reading it back
+- [ ] 19c's parked-run rewind still works — no regression
+- [ ] After `retry` the next cycle **resumes**; no second invitation is posted
+- [ ] A normally-resolved run leaves nothing a later `retry` could resurrect
+
+---
+
 ### Sub-phase 19e: live gate — a written answer, from a person
 
 **[NO CODE.]** A live run on the fixture, then the human gate on a real project.
 
 1. **A written answer is still picked up and resolved — once.** On `scratch-app`, mark a throwaway question, park it, write an ordinary answer, and run the daemon. Expect: one session, one resolution, one close, and **no** `could not resume` in the log. **A fix that merely stopped resuming would pass nothing else in this list**, which is why step 2 exists.
 2. **The refusal fires and is legible.** With the daemon inside a session, run a second `daemon --once` and a `takeover`. Both refused, both naming the holder. This is the step that would have caught the original fault, and it is run on purpose.
-3. **The way back works.** Kill a session holding a consumed answer; confirm the run is reported stopped rather than silently idle, and that `timone retry` makes the answer readable again and resolves it.
+3. **The way back works.** Kill a session holding a consumed answer; confirm the run is reported stopped rather than silently idle, and that `timone retry` makes the answer readable again and resolves it. ✏ **Ran 2026-08-13 and FAILED** — the run was reported stopped correctly, naming the signal and handing over the recovery command, but `retry` re-asked the question instead of giving the answer back. **Re-run against [19g](#sub-phase-19g-the-consumed-answer-survives-the-session-that-read-it-r3)**, and the re-run must kill the session **after** the run is `active`, since that is the state the first pass proved is the broken one — killing a merely parked run exercises the case 19c already had covered.
 4. ~~**The lock does not wedge anything.** Kill the daemon holding the lock with the machine awake throughout; confirm a fresh daemon reclaims and starts. Then confirm across a witness gap that it does **not** — the sleeping-laptop inversion, checked from the ledger's own timestamps as [17c](reports/phase-17-live-gate.md) did, at no cost.~~ ✏ **Refined 2026-08-13 on [ADR-0025](../../adr/0025-a-lock-holders-proof-of-life-is-its-process.md).** **The lock does not wedge anything, and does not break under a live holder.** Kill the daemon holding the lock; confirm a fresh `daemon --once` reclaims, starts, and **names whom it took the lock from**. Then the inverse, which is now checkable directly rather than by manufacturing a gap: with a daemon **alive and inside a session** — so its lock is quiet well past the window — run a second daemon repeatedly and confirm it is **refused every time**. That is the step the old wording could not have run, since driving the gate with `--once` was itself what accumulated the entitlement to break the lock.
 5. **The one judgement no pass has witnessed.** **fvermaut answers a `scratch-app` fixture question in writing, in his own words**, and judges two things a machine cannot: whether the resolution is a fair reading of what he wrote, and — on a deliberately partial second answer — whether the single clarifying question is reasonable and the hand-back timed right. Every written answer tested to date was typed by a machine in his voice; this is the gap [ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md), [phase 18](phase-18.md) and its verification all name, and **it closes because the person is real, not because the ticket is.** The fixture question must be one he can hold an opinion about and one a partial answer is natural on — a throwaway question about the to-do app, not a synthetic prompt, or he is judging a strawman.
 
@@ -218,9 +252,12 @@ grep -n "in writing" STATUS.md
 19b → 19a             the claim precedes the work
 19c → 19b             reading an answer consumes it
 19d → 19c             one fetch per parked run per cycle
-19e → 19a–19d         live gate: a written answer, from a person
+19g → 19c, 19d        the consumed answer survives the session that read it
+19e → 19a–19d, 19g    live gate: a written answer, from a person
 19f → all prior       docs, register, reports
 ```
+
+✏ **Amended 2026-08-14:** 19g is inserted between 19d and 19e. It keeps the next free letter per the amendment rule rather than renumbering, so the chain reads `a → b → c → d → g → e → f`. It extends rather than breaks the chain's logic: like every code slice before it, it writes to the ledger path the previous one reshaped.
 
 The code slices are a chain rather than a fan, because each writes to the ledger path the previous one reshaped. That is deliberate and it is the cost of layering three mechanisms at three depths.
 
