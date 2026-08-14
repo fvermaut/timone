@@ -322,3 +322,46 @@ Per checkbox:
 - **What the next cycle must do**, and how a pass is told from a coincidence: the log must say `resume scratch-app#N → wayfinding` and start a session, **not** `spawn`; the ticket must gain **no** second copy of the invitation ("Two ways to answer this"); and the session must open on your words. The strongest single check is the ticket itself — the invitation appears exactly once in the whole thread, and the failure comment sits between your answer and the resumed session's reply. A cycle that posts the invitation again is a fail even if the ledger looks right.
 - **`timone daemon` must be stopped before `timone retry`, and restarted after** — 19a's lock refuses the second writer and names the holder. That is unchanged by this slice; it is only worth repeating because the sequence now has a command in the middle of it.
 - **Deferred to the delivery review** (refactoring is not this stage's), in addition to 19a's, 19b's, 19c's and 19d's still-open items: `retry.ts` now spells "The watcher picks it up on its next cycle — start `timone daemon` if it isn't running." three times, and the two rewind sentences differ only in their first clause — the prose wants collecting, as 19a's refusal prose and 19c's `rewind` already asked. `reopenConsumed` and `rewind` are also two names for one act (wind the marker back and hand the run to the loop) that differ only in which transition they must go through to get there; if the lifecycle ever allowed `failed → parked`, they would be one function.
+
+## 19f — documentation, register, and the route out
+
+**Built.** Nothing executable. The phase's evidence is written down where each audience looks for it: the register, the plain-language status file, the operator's README, and the two reports.
+
+**PRD-02.R3 is `verified`, and it flips on [19e step 5](phase-19-live-gate.md#step-5--the-judgement-no-test-can-make) alone** — fvermaut's own written answers and his own judgement of what came back — with the live-gate report cited and two limits recorded beside it: the escalation was **not** re-observed on a human's answer (the machine resolved a contradictory second answer rather than handing back, and he ruled that a pass), and the fix is not live in a daemon that is already running. **PRD-02.R20 stays `failed`**, with clause 3 recorded as closed on the same evidence and clauses 1 and 2 named as the remainder. `STATUS.md`'s standing instruction — talk the trading-app questions through rather than writing on them — is **reversed**, in four places, against the gate's evidence and with the restart condition attached to every one of them.
+
+**Files touched.**
+
+- `doc/specs/prd/prd-02-inversion-of-control.criteria.md` — R3 `failed → verified` with three new markers (the verification and its evidence; the two limits; the failed-then-fixed way back) plus one recording that [ADR-0025](../../../adr/0025-a-lock-holders-proof-of-life-is-its-process.md) amends [ADR-0023](../../../adr/0023-one-answer-one-session.md) **for the ledger lock alone**, so a later reader does not read the register as having drifted from the ADRs and does not think [R18](../../../specs/prd/prd-02-inversion-of-control.criteria.md#r18--a-run-orphaned-by-a-crashed-daemon-is-reclaimed) moved with it. R20 gains one marker: clause 3 closed, requirement held down, both remainders named with their bite.
+- `STATUS.md` — a new lead section (*you get answered once, and you proved it yourself*), the counts corrected to twenty-one entries and seventeen verified, and six superseded statements struck through rather than deleted, per the file's own convention. Four new entries under *Known problems not yet fixed*: the stale running daemon, the `resume` line printing after the session ends, fixture decisions landing in a project's permanent record, the wrong-voice park comment (third observation), and the crashed-daemon wedge named as a deliberate trade. Two new asks at the top of *Waiting on you*: restart the watcher, and the open specification question about the hand-back.
+- `README.md` — one paragraph in the operator's terms, in the daemon section: a second watcher is refused by name, `takeover` and `retry` take the same lock, a crashed holder is reclaimed with attribution while a merely quiet one is not, the couple-of-minutes cost after a crash, and the restart-after-pulling habit.
+- `doc/plans/phases/reports/phase-19-live-gate.md` — **new.** House format per [phase-18](phase-18-live-gate.md) and [phase-17](phase-17-live-gate.md): step-by-step table, the traces with their timestamps, the six findings, the costs, and a *what this gate did not prove* section.
+- `doc/plans/phases/reports/phase-19-complete.md` — **new.** House format per [phase-18-complete](phase-18-complete.md): sub-phase table with commits, both amendments under *Deviations*, what the phase does not close, and the deferred-to-delivery list collected from every slice's handoff.
+- `doc/plans/phases/reports/phase-19-handoffs.md` — this section only. **19a–19g's sections are untouched.**
+
+**Decisions taken inside the slice.**
+
+- **R3 is verified on the gate, and the register says so in as many words.** The temptation is to let a green suite and a merged diff carry it. They cannot: 695 tests saw neither the step-3 failure nor any of the six findings, and the failing clause is about what a *person* gets back. The marker therefore leads with fvermaut's three judgements and quotes them.
+- **The bound's letter/purpose split is recorded as an open specification question, not resolved.** The machine resolved where the record says it hands back. Writing "verified" without that would make the register claim a mechanism nobody observed; rewording the criterion here would be stage 9's job done by a documentation slice. So it is named in R3, in the completion report, in the live-gate report and in `STATUS.md` as a decision fvermaut still owes — and the hand-back is explicitly listed as unwitnessed on a human's answer.
+- **R20's remainder is spelled out rather than cross-referenced.** Its clause 2 was *ruled* on 2026-08-13 and is **built by phase 20, not by this phase**; a reader meeting only "fvermaut's ruling is outstanding" (the phase-19 plan's wording, written before the ruling) would be misinformed in the other direction. The marker says both: ruled, not built here, and its bite unchanged meanwhile.
+- **`STATUS.md` carries finding 1 as a condition on the lifted instruction, not as a footnote.** The instruction is lifted in four places and the restart appears beside it in each, because a person who reads only the top paragraph and starts writing answers against a stale daemon gets the fault the phase just closed.
+- **Nothing was claimed as a pass that was not observed.** Step 3's first sitting is recorded as a failure in all four documents, including the register, rather than folded into the re-run's success.
+
+**Validation evidence.**
+
+**This slice carries no behaviour-carrying code, so no seams were declared and there is no red-green trace.** Validation is checklist-based, per the plan. The plan's three commands, run at the end:
+
+- `grep -n -A3 "^## R3 " …criteria.md` → the heading and its two `✏ Revised` preambles; the `- **Status:** verified` line sits below them and was read directly.
+- `grep -n -A3 "^## R20" …criteria.md` → the heading and its `Added 2026-08-09` preamble; `- **Status:** failed` likewise below, unchanged.
+- `grep -n "in writing" STATUS.md` → six hits, every standing prohibition either struck through or replaced by the lifted form with its condition.
+
+Per checkbox:
+
+- **R3 does not flip on a merged diff — only on step 5** — PASS. The marker's first sentence names 19e's gate and fvermaut's judgements as the evidence, and its second sentence says outright that the merged diff and the green suite could not have carried it.
+- **R20 is not quietly closed; its clause 2 remainder is named** — PASS. Status still `failed`; clause 3 recorded as closed; clause 2 named with its ruling, its owner (phase 20) and its unchanged bite; clause 1's three unobserved branches named; and the unobserved escalation added as a fourth caveat.
+- **STATUS.md's standing instruction to fvermaut is reversed against evidence or left standing** — PASS. Reversed, on the gate's evidence, with finding 1's restart condition attached at each of the four sites.
+
+**What delivery must know.**
+
+- **The phase's two reports are the record**; `phase-19-complete.md` carries the sub-phase table, both amendments and the collected deferred-refactoring list, and `phase-19-live-gate.md` carries the traces and the six findings. Neither is a review target — the reports are paperwork, not the change under review.
+- **`doc/plans/phases/phase-19.md`'s Status line was deliberately not touched** — the orchestrator flips it at phase close.
+- **Three things this slice deliberately left for other stages:** the hand-back specification question (stage 9), the six live-gate findings (none fixed here), and every refactoring item the slices deferred, which is collected in the completion report rather than scattered.
