@@ -13,6 +13,8 @@ import type {
 } from "../adapters/ticketing.js";
 import { RunStore } from "./runs.js";
 import {
+  checkAll,
+  checkBranchPlacement,
   checkPathContainment,
   checkProvenance,
   checkStatusPlacement,
@@ -152,6 +154,91 @@ describe("checkStatusPlacement", () => {
 
   it("stays silent when no commit touches STATUS.md", () => {
     expect(checkStatusPlacement(cleanEvidence())).toEqual([]);
+  });
+});
+
+/**
+ * Finding 11 of phase 20's live gate, as a rule.
+ *
+ * A run's work branch is named from its ticket alone (`workBranch`), so the
+ * name carries no repository and nothing downstream could tell that
+ * `timone/29-…` had been cut at the timone root rather than in the project's
+ * checkout. It sat there for three hours and collected seven artifacts.
+ */
+describe("checkBranchPlacement", () => {
+  it("flags a run's work branch cut in the harness repo", () => {
+    const evidence = cleanEvidence();
+    evidence.workspace.branches = [
+      {
+        name: "timone/29-fixture-map-notes-on-a-to-do",
+        unpushed: [],
+        hasUpstream: false,
+      },
+    ];
+
+    const violations = checkBranchPlacement(evidence);
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("branch-placement");
+    expect(violations[0].summary).toMatch(/timone\/29-fixture-map-notes/);
+    expect(violations[0].detail.join(" ")).toMatch(/projects\/scratch-app/);
+  });
+
+  it("counts the work stranded on it, which is what makes it urgent", () => {
+    const evidence = cleanEvidence();
+    evidence.workspace.branches = [
+      { name: "timone/29-fixture", unpushed: ["ddd4444"], hasUpstream: false },
+    ];
+    evidence.workspace.commits = [
+      {
+        sha: "ddd4444",
+        branch: "timone/29-fixture",
+        files: ["doc/adr/0026-a-ticket-is-a-conversation.md"],
+        trailers: ["Timone-Stage: interactive"],
+      },
+    ];
+
+    const violations = checkBranchPlacement(evidence);
+
+    expect(violations[0].detail.join(" ")).toMatch(/ddd4444/);
+  });
+
+  it("says nothing about the same branch in the project it belongs to", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).branches = [
+      { name: "timone/29-fixture", unpushed: [], hasUpstream: true },
+    ];
+
+    expect(checkBranchPlacement(evidence)).toEqual([]);
+  });
+
+  it("leaves Timone's own branches alone", () => {
+    // Timone is not a managed project and no run ever targets it, so only
+    // the `timone/` prefix is decidable — a phase branch is its own business.
+    const evidence = cleanEvidence();
+    evidence.workspace.branches = [
+      { name: "main", unpushed: [], hasUpstream: true },
+      { name: "phase-21-chunking", unpushed: [], hasUpstream: true },
+    ];
+
+    expect(checkBranchPlacement(evidence)).toEqual([]);
+  });
+
+  it("is silent on a session that did nothing to the workspace", () => {
+    expect(checkBranchPlacement(cleanEvidence())).toEqual([]);
+  });
+
+  it("is one of the checks that actually run", () => {
+    // The rule existing and the rule being wired in are different claims,
+    // and only the second one would have caught finding 11.
+    const evidence = cleanEvidence();
+    evidence.workspace.branches = [
+      { name: "timone/29-fixture", unpushed: [], hasUpstream: false },
+    ];
+
+    expect(checkAll(evidence).map((violation) => violation.rule)).toContain(
+      "branch-placement",
+    );
   });
 });
 

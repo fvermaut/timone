@@ -84,6 +84,37 @@ function ticketBlock(context: PromptContext): string {
   ].join("\n");
 }
 
+/**
+ * Which repository the session's git commands act on.
+ *
+ * Every session runs at the timone root ([ADR-0007](../../doc/adr/0007-sessions-at-timone-root.md)),
+ * and every stage that owns a branch is told to "work on the branch X" —
+ * naming the branch and never the repository. A bare `git checkout -b` at
+ * that cwd therefore cuts the project's branch in the *harness* repo, which
+ * is finding 11 of phase 20's live gate: `timone/29-…` was created here,
+ * left checked out, and collected seven of Timone's own artifacts before
+ * anyone noticed the handover claiming they were on `main`.
+ *
+ * The branch name cannot carry the answer — `workBranch` is computed from
+ * the ticket alone and a project's branch is legitimately named the same in
+ * both repos — so the instruction has to. It is appended in
+ * {@link stagePrompt} rather than written into each stage for the reason the
+ * provenance block is: a per-stage copy is a per-stage chance to forget it.
+ */
+function checkoutBlock(context: PromptContext): string {
+  const dir = `projects/${context.project.name}`;
+
+  return [
+    `**${context.project.name}'s git repository is \`${dir}/\`, and every git`,
+    `command you run belongs there** — \`git -C ${dir} …\`, or change into it`,
+    "first. You are running at the timone root, so a bare `git` command acts",
+    "on **Timone's own repository** instead: a branch cut there is one the",
+    "project never receives, and work committed there is invisible to",
+    "everyone who reads the project. Check which repository you are in before",
+    "the first branch or commit of this session, not after it.",
+  ].join("\n");
+}
+
 /** Where the session is running, and what it may assume it remembers. */
 function reentryBlock(): string {
   return [
@@ -277,12 +308,16 @@ export function stagePrompt(
   stage: (typeof PROMPTED_STAGES)[number],
   context: PromptContext,
 ): string {
-  // Appended here rather than woven into each stage's text: the obligation is
-  // the same for all of them, and a per-stage copy is a per-stage chance to
-  // forget it. Stages that commit nothing carry it harmlessly.
-  return [stageBody(stage, context), "", provenanceBlock(stage, context)].join(
-    "\n",
-  );
+  // Appended here rather than woven into each stage's text: the obligations
+  // are the same for all of them, and a per-stage copy is a per-stage chance
+  // to forget it. Stages that commit nothing carry them harmlessly.
+  return [
+    stageBody(stage, context),
+    "",
+    checkoutBlock(context),
+    "",
+    provenanceBlock(stage, context),
+  ].join("\n");
 }
 
 /** One stage's own instruction, before the shared obligations are appended. */
@@ -604,6 +639,11 @@ export function approvalRecordPrompt(
     `Work on the branch \`${context.branch ?? "the run's work branch"}\`. In`,
     `${spec?.artifact ?? "the artifact this stage produced"}: ${spec?.what ?? "record the approval"},`,
     `naming ${approval.by} and the date ${approval.at}. Commit and **push** it.`,
+    "",
+    // This prompt is the one that cut a project's branch in the harness repo
+    // (finding 11). It is built here rather than through `stagePrompt`, so
+    // the block it forgot has to be named here too.
+    checkoutBlock(context),
     "",
     "That is the whole task. Do not revise the artifact's content, do not start",
     "the next stage, and do not comment on the ticket — the approval was given,",

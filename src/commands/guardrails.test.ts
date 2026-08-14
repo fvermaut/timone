@@ -417,6 +417,39 @@ describe("a session a human drove", () => {
     expect(printed.join("\n")).not.toContain("outside");
   });
 
+  it("catches a project's work branch cut at the timone root — finding 11, on real git", async () => {
+    // 2026-08-14, 15:52: a session recording an approval, sitting at the
+    // timone root, created `timone/29-…` here instead of in the project's
+    // checkout and never switched back. Three hours later the next session
+    // committed seven of Timone's own artifacts onto it and reported them as
+    // being on `main`. Nothing in the rules named the branch itself.
+    const { root } = workspace();
+    const store = newStore(root);
+    const { adapter, comments } = fakeAdapter();
+
+    const { printed, journalled } = await bracket(
+      root,
+      "session-interactive",
+      store,
+      adapter,
+      () => {
+        git(root, "checkout", "-q", "-b", "timone/29-fixture-map-notes-on-a-to-do");
+        writeFileSync(join(root, "doc-artifact.md"), "an ADR that never lands\n");
+        git(root, "add", "-A");
+        git(root, "commit", "-q", "-m", trailed("stranded", "session-interactive"));
+      },
+    );
+
+    expect(printed.join("\n")).toContain(
+      "is a project's work branch, cut in Timone's own repository",
+    );
+    expect(
+      journalled.map((line) => JSON.parse(line).rule as string),
+    ).toContain("branch-placement");
+    // Interactive still means nothing lands on anybody's ticket.
+    expect(comments).toEqual([]);
+  });
+
   it("says the same thing once, however many turns the session takes", async () => {
     // `Stop` fires at the end of every assistant turn, not once per session.
     const { root, projectDir } = workspace();

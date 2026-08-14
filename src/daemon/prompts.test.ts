@@ -87,6 +87,17 @@ describe("every stage prompt", () => {
     expect(stagePrompt(stage, context)).toContain("projects/scratch-app/");
   });
 
+  it.each(PROMPTED_STAGES)("%s says which repository its git commands act on", (stage) => {
+    // Finding 11 of phase 20's gate: a session sits at the timone root
+    // (ADR-0007) and is told to "work on the branch X" with no repository
+    // named, so a bare `git checkout -b` cuts the branch in the harness repo.
+    // Naming the branch without naming the checkout is the whole defect.
+    const prompt = stagePrompt(stage, context);
+
+    expect(prompt).toContain("git -C projects/scratch-app");
+    expect(prompt).toMatch(/timone's own repository/i);
+  });
+
   it.each(PROMPTED_STAGES)("%s rebuilds from the artifacts and the thread alone", (stage) => {
     // ADR-0013: every human wait is a session boundary, so a resuming
     // session is handed a router and not a memory.
@@ -490,5 +501,40 @@ describe("the provenance trailer every committing session owes", () => {
 
     expect(prompt).toContain("Timone-Stage: planning (recording the approval)");
     expect(prompt).toContain("Timone-Run: scratch-app#6");
+  });
+});
+
+/**
+ * The prompt that made finding 11 happen.
+ *
+ * It is the shortest prompt in the file and the only one outside
+ * {@link stagePrompt}, so it inherits none of the shared blocks — which is
+ * exactly how it came to say "work on the branch X" to a session sitting in
+ * the wrong repository, twice, twenty minutes apart.
+ */
+describe("the approval-recording prompt", () => {
+  const approval = {
+    stage: "requirements" as const,
+    by: "fvermaut",
+    at: "2026-08-14T15:51:00Z",
+  };
+
+  it("names the checkout the branch lives in, not just the branch", () => {
+    const prompt = approvalRecordPrompt(approval, {
+      ...context,
+      branch: "timone/6-typing-in-the-box",
+    });
+
+    expect(prompt).toContain("timone/6-typing-in-the-box");
+    expect(prompt).toContain("git -C projects/scratch-app");
+    expect(prompt).toMatch(/timone's own repository/i);
+  });
+
+  it("says so even when no branch was resolved for the run", () => {
+    // The fallback wording — "the run's work branch" — is the case where the
+    // session has the least to go on and the most room to improvise.
+    const prompt = approvalRecordPrompt(approval, context);
+
+    expect(prompt).toContain("git -C projects/scratch-app");
   });
 });

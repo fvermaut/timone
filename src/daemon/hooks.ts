@@ -73,8 +73,18 @@ export interface SessionEvidence {
 export type GuardrailRule =
   | "unpushed"
   | "status-placement"
+  | "branch-placement"
   | "path-containment"
   | "provenance";
+
+/**
+ * The prefix every run's work branch carries (`workBranch` in `prompts.ts`).
+ *
+ * In a project's checkout it is correct and expected. In the workspace it
+ * cannot be anything but a mistake: Timone is not a managed project, so no
+ * run ever targets it and no work branch is ever named for it.
+ */
+const WORK_BRANCH_PREFIX = "timone/";
 
 /** The trailer every Timone-authored commit carries (ADR-0019). */
 export const STAGE_TRAILER = "Timone-Stage";
@@ -152,6 +162,53 @@ export function checkStatusPlacement(evidence: SessionEvidence): Violation[] {
       });
     }
   }
+  return violations;
+}
+
+/**
+ * **Branch placement.** A run's work branch belongs in its project's
+ * checkout. Cut in the workspace instead, it is a branch the project never
+ * receives — and because it stays checked out after the session that made it
+ * ends, the next session inherits it and commits Timone's own work onto it.
+ *
+ * This is finding 11 of phase 20's live gate, where that ran for three hours
+ * and stranded thirteen commits outside `origin/main`, including the
+ * handover that reported them as being on `main`.
+ *
+ * The rule is decidable on the name alone, which is the only reason it can
+ * exist: `timone/…` in a project is that project's work branch, and in the
+ * workspace it is always misplaced. It needs no target, because the mistake
+ * is the same whoever was driving — the session that made it was recording
+ * an approval, and the one that paid for it was interactive.
+ */
+export function checkBranchPlacement(evidence: SessionEvidence): Violation[] {
+  const violations: Violation[] = [];
+
+  for (const branch of evidence.workspace.branches) {
+    if (!branch.name.startsWith(WORK_BRANCH_PREFIX)) continue;
+
+    const stranded = evidence.workspace.commits
+      .filter((commit) => commit.branch === branch.name)
+      .map((commit) => `- ${commit.sha} (${commit.files.join(", ")})`);
+
+    violations.push({
+      rule: "branch-placement",
+      summary: `timone: \`${branch.name}\` is a project's work branch, cut in Timone's own repository`,
+      detail: [
+        // The branch name carries a ticket number and no project, so where it
+        // *should* have been cut is knowable only from the run's target. An
+        // interactive session has none, and gets the general form.
+        evidence.target === undefined
+          ? `A branch named \`${branch.name}\` belongs in a project's own checkout under \`projects/…\`, not here.`
+          : `A branch named \`${branch.name}\` belongs in \`projects/${evidence.target}/\`, not here.`,
+        "Nothing committed on it reaches the project, and it stays checked out for whatever session comes next.",
+        ...(stranded.length === 0
+          ? ["Nothing is committed on it yet, so deleting it costs nothing."]
+          : ["Already committed on it here:", ...stranded]),
+      ],
+    });
+  }
+
   return violations;
 }
 
@@ -272,6 +329,7 @@ export function checkProvenance(evidence: SessionEvidence): Violation[] {
 export function checkAll(evidence: SessionEvidence): Violation[] {
   return [
     ...checkPathContainment(evidence),
+    ...checkBranchPlacement(evidence),
     ...checkUnpushed(evidence),
     ...checkStatusPlacement(evidence),
     ...checkProvenance(evidence),
