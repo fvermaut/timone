@@ -81,6 +81,26 @@ export const STAGE_HANDED_MARKER =
 export const PREVIEW_MARKER =
   "🔍 **Preview** · a running copy of this pull request, kept up to date by the machine";
 
+/**
+ * The line a ticket's standing call to action carries, so a ticket ends up
+ * with one of them rather than one per poll cycle.
+ *
+ * {@link PREVIEW_MARKER}'s kind of marker rather than its siblings': an
+ * *identity*, not just provenance. What an open ticket is asking of the human
+ * is a standing fact whose truth changes — a blocker closes, a run fails, a
+ * stage moves — and [ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)
+ * has the daemon repair it every cycle rather than report it. This is what
+ * {@link TicketingAdapter.upsertComment} matches on to find what was said
+ * last time, and what the poll loop compares against to decide whether
+ * anything needs saying at all.
+ *
+ * It can never change once it has shipped: an edited marker orphans every
+ * comment posted under the old one, and the next cycle posts a second call to
+ * action beside the first.
+ */
+export const CTA_MARKER =
+  "📌 **Where this stands** · what this ticket needs right now, kept up to date by the machine";
+
 /** Put the machine header on a comment body, unless it already carries one. */
 export function stampMachineComment(body: string): string {
   return body.startsWith(MACHINE_MARKER)

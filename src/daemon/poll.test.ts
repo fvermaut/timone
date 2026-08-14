@@ -7,6 +7,7 @@ import type { Manifest } from "../manifest.js";
 import type { Preview, PreviewAdapter } from "../adapters/preview.js";
 import {
   CONVERSATION_RECORD_MARKER,
+  CTA_MARKER,
   MACHINE_MARKER,
   PREVIEW_MARKER,
   type PullRequest,
@@ -1414,9 +1415,13 @@ describe("reclaiming a run its daemon left behind", () => {
     set("2026-08-06T10:19:00Z");
     await pollOnce(deps);
 
-    expect(lines[0]).toMatch(/nothing was watching for 17m00s/);
-    expect(lines[1]).toMatch(/watching for 1m00s of the 2m00s/);
-    expect(lines[1]).not.toMatch(/nothing was watching/);
+    // The two refusals, in order, picked out of everything else the cycle
+    // says — a cycle logs whatever else it did, and this test is about the
+    // words of the refusal rather than about its place in the log.
+    const refusals = lines.filter((line) => line.includes("not judging"));
+    expect(refusals[0]).toMatch(/nothing was watching for 17m00s/);
+    expect(refusals[1]).toMatch(/watching for 1m00s of the 2m00s/);
+    expect(refusals[1]).not.toMatch(/nothing was watching/);
   });
 
   it("is delayed, not disabled: the same run is reclaimed a window later", async () => {
@@ -2323,6 +2328,11 @@ describe("pollOnce — reading a written answer consumes it", () => {
     "closeTicket",
     "postPullRequestComment",
     "upsertPullRequestComment",
+    // The call to action reconciled at the end of every cycle writes on the
+    // same thread the human's answer is on, so it is the write this test most
+    // needs to see. Left out, the assertions below would watch it happen and
+    // report nothing.
+    "upsertComment",
   ];
 
   /**
@@ -2381,7 +2391,9 @@ describe("pollOnce — reading a written answer consumes it", () => {
       ): Promise<void> {
         record("upsertPullRequestComment", number, marker, body);
       },
-      async upsertComment(): Promise<void> {},
+      async upsertComment(_project, number, marker, body): Promise<void> {
+        record("upsertComment", number, marker, body);
+      },
       async closeTicket(_project, number, reason): Promise<void> {
         record("closeTicket", number, reason);
       },
@@ -2430,6 +2442,10 @@ describe("pollOnce — reading a written answer consumes it", () => {
     const writes = calls.filter((entry) => WRITES.includes(entry.call));
     // The instrument sees a write when there is one to see.
     expect(JSON.stringify(writes)).toContain("which of the two");
+    // Including the newest one: the call to action this cycle reconciled onto
+    // the same thread. Asserted rather than assumed — a recorder blind to a
+    // write is a test that reports silence about it.
+    expect(writes.map((entry) => entry.call)).toContain("upsertComment");
     // And not one of them carries the human's words anywhere.
     expect(
       writes.filter((entry) =>
@@ -2591,5 +2607,397 @@ describe("pollOnce — one read of one thread per parked run", () => {
     const after = store.get("scratch-app#6");
     expect(after?.status).toBe("parked");
     expect(after?.waitCursor).toBe("2026-08-06T10:00:00Z");
+  });
+});
+
+describe("pollOnce — the call to action is reconciled each cycle", () => {
+  // Every open ticket says what happens next, and the daemon repairs that
+  // line rather than reporting it (ADR-0024). The whole risk of doing it
+  // every cycle is saying it again when nothing has changed: an upsert issued
+  // unconditionally is one comment edit per ticket per minute, which on a
+  // client's tracker is a notification storm and a thread nobody can read.
+  // So the guard is asserted first, and every case below counts calls on the
+  // seam rather than reading the loop's shape.
+
+  /** Every call on the seam whose effect a human can see. */
+  const WRITE_CALLS = [
+    "postComment",
+    "upsertComment",
+    "applyLabel",
+    "closeTicket",
+    "postPullRequestComment",
+    "upsertPullRequestComment",
+  ];
+
+  interface SeamCall {
+    call: string;
+    number: number;
+    body?: string;
+  }
+
+  const writesIn = (calls: readonly SeamCall[]): SeamCall[] =>
+    calls.filter((entry) => WRITE_CALLS.includes(entry.call));
+
+  /**
+   * A ticketing fake with the write path a reconciler actually meets: an
+   * upsert really replaces the machine's marked comment, or adds one where
+   * there is none, so a later cycle reads back what an earlier one wrote.
+   * A fake that dropped the write would let "a third cycle is silent again"
+   * pass for the wrong reason.
+   *
+   * `listed` is the array the test holds, so a ticket can leave the listing
+   * between cycles exactly as a closed one does.
+   */
+  function reconcilingAdapter(
+    listed: Ticket[],
+    seed: Record<number, TicketThread["comments"]> = {},
+  ): {
+    adapter: TicketingAdapter;
+    calls: SeamCall[];
+    unreadable: Set<number>;
+    threadOf: (number: number) => TicketThread["comments"];
+  } {
+    const calls: SeamCall[] = [];
+    const unreadable = new Set<number>();
+    const threads = new Map<number, TicketThread["comments"]>(
+      Object.entries(seed).map(([number, comments]) => [
+        Number(number),
+        [...comments],
+      ]),
+    );
+    let clock = 0;
+    const stamp = (body: string): string =>
+      `${MACHINE_MARKER}\n\n---\n\n${body}`;
+    const wrote = (body: string): TicketThread["comments"][number] => ({
+      author: "fvermaut",
+      body: stamp(body),
+      createdAt: `2026-08-03T13:${String(clock++).padStart(2, "0")}:00Z`,
+      fromTimone: true,
+    });
+    const thread = (number: number): TicketThread["comments"] => {
+      const found = threads.get(number);
+      if (found !== undefined) return found;
+      const fresh: TicketThread["comments"] = [];
+      threads.set(number, fresh);
+      return fresh;
+    };
+
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [...listed];
+      },
+      async getTicket(_project, number): Promise<TicketThread> {
+        calls.push({ call: "getTicket", number });
+        if (unreadable.has(number)) {
+          throw new Error(`gh could not read issue ${number}`);
+        }
+        const base = listed.find((candidate) => candidate.number === number);
+        return { ...(base ?? ticket(number)), comments: [...thread(number)] };
+      },
+      async postComment(_project, number, body): Promise<void> {
+        calls.push({ call: "postComment", number, body });
+        thread(number).push(wrote(body));
+      },
+      async upsertComment(_project, number, marker, body): Promise<void> {
+        calls.push({ call: "upsertComment", number, body });
+        const comments = thread(number);
+        // The adapter's own identity rule: ours, carrying the marker, the
+        // first such comment — and a fresh one when there is none.
+        const existing = comments.find(
+          (comment) => comment.fromTimone && comment.body.includes(marker),
+        );
+        if (existing === undefined) comments.push(wrote(body));
+        else existing.body = stamp(body);
+      },
+      async applyLabel(_project, number, label): Promise<void> {
+        calls.push({ call: "applyLabel", number, body: label });
+      },
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return undefined;
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        throw new Error("no pull request exists in this test");
+      },
+      async postPullRequestComment(_project, number, body): Promise<void> {
+        calls.push({ call: "postPullRequestComment", number, body });
+      },
+      async upsertPullRequestComment(
+        _project,
+        number,
+        _marker,
+        body,
+      ): Promise<void> {
+        calls.push({ call: "upsertPullRequestComment", number, body });
+      },
+      async closeTicket(_project, number, reason): Promise<void> {
+        calls.push({ call: "closeTicket", number, body: reason });
+      },
+    };
+    return { adapter, calls, unreadable, threadOf: thread };
+  }
+
+  /**
+   * What ADR-0024's `scratch-app` #13 is owed, written out by hand rather
+   * than computed — so a cycle that agrees with it agrees with something
+   * other than itself.
+   */
+  const FAILED_CTA = [
+    "**Something went wrong while I was working on this.**",
+    "",
+    "```",
+    "timone retry scratch-app#7",
+    "```",
+    "",
+    "**What I need from you:** run the command and I'll pick it up from where it stopped.",
+  ].join("\n");
+
+  /** A run of `scratch-app` #7 that stopped badly. */
+  function failedRun(store: RunStore): void {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.fail(run.id, "the machine running it stopped");
+  }
+
+  it("writes nothing at all when every ticket already says the right thing", async () => {
+    // The guard, asserted before anything is made to post: a cycle over a
+    // ticket whose call to action is already true touches nothing. The
+    // fixture is the comment the machine would have written, seeded by hand,
+    // so this holds without a happy path having run first.
+    const store = newStore();
+    failedRun(store);
+    const { adapter, calls } = reconcilingAdapter([ticket(7)], {
+      7: [
+        {
+          author: "fvermaut",
+          body: `${MACHINE_MARKER}\n\n---\n\n${CTA_MARKER}\n\n${FAILED_CTA}`,
+          createdAt: "2026-08-03T12:00:00Z",
+          fromTimone: true,
+        },
+      ],
+    });
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(writesIn(calls)).toEqual([]);
+  });
+  it("posts the call to action a ticket has never been given", async () => {
+    const store = newStore();
+    failedRun(store);
+    const { adapter, calls } = reconcilingAdapter([ticket(7)]);
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    const upserts = calls.filter((entry) => entry.call === "upsertComment");
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]?.number).toBe(7);
+    // The marker leads the body, because it is what the next cycle finds this
+    // comment by; the words under it are the fixed example above.
+    expect(upserts[0]?.body).toBe(`${CTA_MARKER}\n\n${FAILED_CTA}`);
+  });
+  it("edits once when the state changes, and says nothing on the cycle after", async () => {
+    const store = newStore();
+    const listed = [ticket(7)];
+    const { adapter, calls } = reconcilingAdapter(listed);
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    };
+
+    await pollOnce(deps);
+    store.activate("scratch-app#7", "session-1");
+    await pollOnce(deps);
+
+    // The state moves under it: the session running this ticket stopped badly.
+    store.fail("scratch-app#7", "the machine running it stopped");
+    const before = calls.length;
+    await pollOnce(deps);
+
+    const edits = writesIn(calls.slice(before));
+    expect(edits).toHaveLength(1);
+    expect(edits[0]?.call).toBe("upsertComment");
+    expect(edits[0]?.body).toBe(`${CTA_MARKER}\n\n${FAILED_CTA}`);
+
+    // And the cycle after it, with nothing changed, is silent again.
+    const settled = calls.length;
+    await pollOnce(deps);
+    expect(writesIn(calls.slice(settled))).toEqual([]);
+  });
+  it("refreshes a ticket whose blocker closed, with nothing run by hand", async () => {
+    // ADR-0024's rule replacing a session's good manners: the ticket waiting
+    // behind another is brought up to date because a cycle ran, not because
+    // whoever finished the first one remembered it.
+    const store = newStore();
+    const listed = [ticket(7), ticket(8)];
+    const { adapter, calls, threadOf } = reconcilingAdapter(listed);
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    };
+
+    await pollOnce(deps);
+    store.activate("scratch-app#7", "session-1");
+    await pollOnce(deps);
+    expect(
+      calls.find((entry) => entry.call === "upsertComment" && entry.number === 8)
+        ?.body,
+    ).toContain("**This one is in the queue.**");
+
+    // #7's work finished and its ticket closed, so it leaves the listing —
+    // and nothing else happens: no command is run, no session is started.
+    store.complete("scratch-app#7");
+    listed.splice(0, 1);
+    const before = calls.length;
+    await pollOnce(deps);
+
+    const edits = writesIn(calls.slice(before));
+    expect(edits).toHaveLength(1);
+    expect(edits[0]?.number).toBe(8);
+    expect(edits[0]?.body).toContain("**Picked this up.**");
+    // Revised where it stood, not repeated under itself.
+    expect(
+      threadOf(8).filter((comment) => comment.body.includes(CTA_MARKER)),
+    ).toHaveLength(1);
+  });
+
+  it("does not take a human's quotation of the marker for its own last word", async () => {
+    // Timone comments under the human's own account, so the marker alone
+    // cannot tell the two apart — `upsertComment` edits the first comment
+    // that is *ours* and carries it. A guard reading the thread by any other
+    // rule would compare against a comment the upsert would never touch and
+    // so find a difference on every cycle for ever, which is the storm the
+    // guard exists to prevent.
+    const store = newStore();
+    failedRun(store);
+    const { adapter, calls } = reconcilingAdapter([ticket(7)], {
+      7: [
+        {
+          author: "fvermaut",
+          body: `${CTA_MARKER}\n\n${FAILED_CTA}\n\nis this still what you need from me?`,
+          createdAt: "2026-08-03T11:00:00Z",
+          fromTimone: false,
+        },
+        {
+          author: "fvermaut",
+          body: `${MACHINE_MARKER}\n\n---\n\n${CTA_MARKER}\n\n${FAILED_CTA}`,
+          createdAt: "2026-08-03T12:00:00Z",
+          fromTimone: true,
+        },
+      ],
+    });
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(writesIn(calls)).toEqual([]);
+  });
+
+  it("does not repeat, under its marker, an acknowledgement it has just posted", async () => {
+    // `pickedUpComment` ends on the very line the call to action is made of,
+    // so posting the standing copy seconds later would be two near-identical
+    // comments in one cycle.
+    const store = newStore();
+    const { adapter, calls } = reconcilingAdapter([ticket(7)]);
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    };
+
+    await pollOnce(deps);
+
+    const acknowledgement = writesIn(calls);
+    expect(acknowledgement).toHaveLength(1);
+    expect(acknowledgement[0]?.call).toBe("postComment");
+
+    // The standing copy lands on the next cycle instead.
+    store.activate("scratch-app#7", "session-1");
+    const before = calls.length;
+    await pollOnce(deps);
+    const standing = writesIn(calls.slice(before));
+    expect(standing).toHaveLength(1);
+    expect(standing[0]?.call).toBe("upsertComment");
+  });
+
+  it("carries on to the next ticket when one ticket's thread cannot be read", async () => {
+    const store = newStore();
+    failedRun(store);
+    const second = store.register("scratch-app", 8).run;
+    store.activate(second.id, "session-2");
+    store.fail(second.id, "the machine running it stopped");
+    const { adapter, calls, unreadable } = reconcilingAdapter([
+      ticket(7),
+      ticket(8),
+    ]);
+    unreadable.add(7);
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/#7/);
+    expect(
+      calls
+        .filter((entry) => entry.call === "upsertComment")
+        .map((entry) => entry.number),
+    ).toEqual([8]);
+  });
+  it("is not fooled into writing by line endings it did not choose", async () => {
+    // The guard fails open — silently, and into the storm it exists to
+    // prevent — if the thread hands back the same words in a different shape.
+    // A tracker that stores CRLF, or a maintainer who edited the comment in a
+    // browser, must not make every cycle find a difference.
+    const store = newStore();
+    failedRun(store);
+    const posted = `${MACHINE_MARKER}\n\n---\n\n${CTA_MARKER}\n\n${FAILED_CTA}`;
+    const { adapter, calls } = reconcilingAdapter([ticket(7)], {
+      7: [
+        {
+          author: "fvermaut",
+          body: `${posted.replace(/\n/g, "\r\n")}\r\n`,
+          createdAt: "2026-08-03T12:00:00Z",
+          fromTimone: true,
+        },
+      ],
+    });
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(writesIn(calls)).toEqual([]);
   });
 });

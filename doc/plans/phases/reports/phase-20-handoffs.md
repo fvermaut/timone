@@ -140,3 +140,84 @@ The remedy was the mechanical one phase 16 used for the twin: `async upsertComme
 - **The failure modes to handle.** It throws on an unparseable or unexpected `gh` payload (message carries the raw text), and it throws `…with no url, so it cannot be edited` when the comment it must edit has no permalink. Both are per-ticket; a cycle reconciling many tickets must not let one ticket's throw abandon the rest.
 - **`recordingAdapter` in `poll.test.ts` cannot see you yet.** Its `upsertComment` is a conformance no-op and `WRITES` does not list it, so the "never writes to what the human wrote" test would watch you write and report nothing. Fix that in the same slice that first calls the method.
 - **20d's introduction is a different call.** It is posted exactly once and never revised, so it wants `postComment` with its own marker recorded, not `upsertComment` — reaching for the upsert would make it revisable, and an introduction that rewrites itself is not an introduction. Use `getTicket` and look for your marker to decide whether it has already happened.
+
+## 20c — the CTA is reconciled each cycle
+
+**Built.** Every ticket the poll loop sees now carries one standing statement of where it stands, and the daemon keeps it true instead of leaving it to whoever last touched the ticket. At the end of each project's turn in a cycle the loop asks `ctaFor` what each listed ticket needs, renders it with `ctaComment` under a new `CTA_MARKER`, and **calls `upsertComment` only where that body differs from the one already on the ticket**. A ticket whose blocker closed is brought up to date because a cycle ran — not because a session remembered it — and a cycle over tickets that have not moved touches nothing at all. The mark label still bounds what Timone *does*; this changes what it *says*.
+
+Nothing about the two answer paths, gate parsing or what a resolution looks like changed, `wayfinding` still has no `next`, and there is still exactly one place deciding what a ticket needs.
+
+**Files touched.**
+
+- `src/adapters/ticketing.ts` — `CTA_MARKER` added beside `PREVIEW_MARKER`, whose *kind* of marker it is: an identity to find the last statement by, not just provenance. Nothing else in the file.
+- `src/daemon/poll.ts` — `reconcileCtas` (the reconciliation and its guard), `ctaBody`, `standingCta`, `saysTheSame`; `threadReaders` hoists the per-run thread memo to one reader per ticket for the project's turn, so the reconciler reads what the resume path already read; `pollProject` collects the tickets it acknowledged this cycle and calls the reconciler last. `RunThreads`'s lifetime docblock amended to say what the sharing is now keyed by and why.
+- `src/daemon/poll.test.ts` — 8 tests added under *"pollOnce — the call to action is reconciled each cycle"*, the zero-writes guard first. `recordingAdapter` now records `upsertComment` and `WRITES` lists it (20b's flagged debt, paid). One pre-existing test — *"tells a young watch apart from an absence"* — read its two log lines by index and now filters for them by content; the assertions are unchanged.
+
+**Decisions taken inside the slice.**
+
+- **The rendered body is the comparison key, and the ticket is where it is kept.** `ctaComment(ctaFor(state))` is pure, so a body equal to the one on the ticket *is* the statement that nothing changed. No ledger record was added — `runs.ts` is outside this slice's grant, and keeping the key on the surface a human reads means the ledger and the ticket cannot disagree about what was last said.
+- **The guard reads by the same rule the upsert writes by**: ours (`fromTimone`), carrying the marker, **the first** such comment — `upsertComment`'s own `find`. A guard that judged differently would compare against one comment and edit another, finding a difference every cycle for ever. That is the storm wearing the costume of a fix, and it has a test with a mutation probe of its own.
+- **The comparison is by words, not bytes** (`saysTheSame` normalises CRLF and trims). The guard fails *open*: if the tracker hands a body back in a shape it was not sent in, every cycle finds a difference and rewrites the comment silently. This is the one door through which the exact fault ADR-0024 names could still arrive, and closing it costs two lines. **It cannot be fully closed by a unit test — see what 20h must know.**
+- **A ticket acknowledged this cycle does not also get its standing copy this cycle.** `pickedUpComment` and `queuedComment` end on the very line the CTA is made of, so posting it under a marker seconds later is two near-identical comments in one cycle — the thing the guard prevents everywhere else. The standing copy lands on the next cycle, by which time the run has usually moved on and it says something new.
+- **The reconciler runs last in the project's turn**, after resume and spawn, so a run that resumed, failed or finished *during* the cycle says so on the same cycle rather than a minute later. Its state comes from the ledger read at that point; only the thread comes from the memo.
+- **The per-ticket reader replaced the per-run one** rather than the reconciler fetching for itself. A second fetch would have undone 19d — proven, not assumed: swapping `threads(n).ticket()` for a direct `adapter.getTicket` fails *"reads the ticket once to resume a conversation"* with `expected 2 to be 1`. The memo is keyed by ticket, which is what keeps the staleness the old docblock warned about impossible: no run can be answered from another run's fetch.
+- **Errors are per ticket.** One unreadable thread is reported into `result.errors` and the rest of the listing is still reconciled; letting it throw abandons the project's whole reconciliation (probed).
+- **No `PollResult` field was added.** A CTA is not a run, and every field there is a run id. The daemon's log carries one `cta <project>#<n>` line per write, which is what 20h observes.
+
+**Validation evidence.**
+
+Red → green, one case at a time, with the guard first as the plan requires.
+
+1. **The zero-writes guard — *"writes nothing at all when every ticket already says the right thing"*.** Written first, over a fixture whose thread already carries the comment the machine would have written (the marker plus a **hand-written** body for ADR-0024's `scratch-app` #13 failed run), so it holds without a happy path having run first. **It was green on arrival**, as it must be — before any reconciliation exists a cycle naturally writes nothing. Said plainly rather than manufactured, and proven non-vacuous by the mutation the plan warns about: dropping the differs check (`if (standingCta(thread) === …) continue;` → `void thread;`) makes it fail with the write itself in the diff —
+
+   ````
+   × writes nothing at all when every ticket already says the right thing
+   AssertionError: expected [ { call: 'upsertComment', …(2) } ] to deeply equal []
+   +     "body": "📌 **Where this stands** · what this ticket needs right now, kept up to date by the machine
+   + **Something went wrong while I was working on this.**
+   + ```
+   + timone retry scratch-app#7
+   + ```
+   + **What I need from you:** run the command and I'll pick it up from where it stopped.",
+   +     "call": "upsertComment",
+   ````
+
+   The same mutation fails **three** tests (the guard, the state-change case and the human-quotation case) and no others. Reverted.
+2. **A ticket that has never been given one gets one.** Red: `expected [] to have a length of 1 but got +0`. Green: `reconcileCtas`. The body is asserted equal to `${CTA_MARKER}\n\n${FAILED_CTA}` — the marker leads, because that is what the next cycle finds it by.
+3. **A state change produces exactly one edit, and the cycle after is silent.** Arrived green (the reconciler existed); driven red by the mutations it exists to catch — the unconditional upsert (above), and a guard that treats any existing CTA as unchanged, which produces `expected [] to have a length of 1 but got +0`.
+4. **A ticket whose blocker closed is refreshed with nothing run by hand.** #8 queued behind #7, told *"This one is in the queue."*; #7 completes and leaves the listing; the next cycle produces **exactly one** write — #8's, now *"Picked this up."* — and #8's thread holds **one** comment carrying the marker, not two. Driven red by removing the reconciliation entirely (6 tests fail, this among them).
+5. **A human's quotation of the marker is not taken for the machine's last word.** The thread carries a human comment quoting the CTA *and*, after it, the machine's own. Silent, correctly. Driven red by dropping `fromTimone` from `standingCta`: `expected [ { call: 'upsertComment', …(2) } ] to deeply equal []` — one PATCH per cycle, for ever, which is the fault in miniature.
+6. **The acknowledgement is not repeated under the marker in the same cycle.** Cycle one writes exactly one `postComment`; cycle two writes exactly one `upsertComment`. Driven red by removing the skip: `expected [ { call: 'postComment', …(2) }, …(1) ] to have a length of 1 but got 2`.
+7. **One unreadable thread does not abandon the rest.** `result.errors` names #7 and #8 still gets its CTA. Driven red by re-throwing: the error escapes to the project handler, `expected 'scratch-app: gh could not read issue 7' to match /#7/`, and #8 is never reached.
+8. **Line endings it did not choose do not make it write.** Red before `saysTheSame` existed: `expected [ { call: 'upsertComment', …(2) } ] to deeply equal []` on a thread whose stored comment is the same words in CRLF. Green after.
+
+**The recording instrument sees `upsertComment` — proven, not assumed.** `recordingAdapter`'s no-op became `record("upsertComment", number, marker, body)`, `WRITES` gained the entry, and *"never writes to what the human wrote, only alongside it"* now asserts the CTA write is among what it recorded. Putting the no-op back fails it: `AssertionError: expected [ 'postComment' ] to include 'upsertComment'`. Before this, that test would have watched the new write happen and reported nothing.
+
+Commands, as given:
+
+- `npx vitest run src/daemon/poll.test.ts` → **76 passed** (68 before, 8 added).
+- `npm run type-check` → **clean**.
+- `npm test` → **735 passed, 22 files, 34s. Zero failures** — 727 baseline plus 8, and `guardrails.test.ts`'s known intermittent passed this run.
+
+Per checkbox:
+
+- **A cycle over unchanged tickets performs ZERO writes, asserted before any happy path, by counting adapter calls** — **PASS.** It is the first test in the block, it counts calls on the seam, and the mutation probe above is what makes the count mean something.
+- **A state change produces exactly one edit** — **PASS** (cases 3 and 4).
+- **A third cycle is silent again** — **PASS** (case 3's fourth cycle, case 4's, and the guard case).
+- **A ticket whose blocker closed has its CTA refreshed with nothing run by hand** — **PASS** (case 4): no command, no session, one cycle.
+- **The recording instrument sees `upsertComment` — proven, not assumed** — **PASS**, by reverting the recorder and watching the assertion fail.
+- **No second place decides what a ticket needs; `ctaFor` is the only source** — **PASS.** `reconcileCtas` contains no test of a run's status, stage or wait; its only decisions are *has this ticket just been acknowledged* and *does the body differ*. `ctaBody` is `CTA_MARKER` + `ctaComment(ctaFor(state))` and nothing else.
+
+**Refactoring noted, deferred to the delivery review** (nothing applied): `reconcileCtas` takes seven parameters, which is the file's existing convention (`reclaimStale` takes six) and no better for it — the cycle's `project, deps, result, log` quartet is a context object waiting to be extracted, and doing it once for every function in the file is a change of a size that belongs to a review, not to a slice. And `standingCta` + `saysTheSame` express the same identity rule `github-tickets.ts`'s two upserts already express twice; a single exported *"is this the machine's comment under this marker"* predicate would leave one copy of the decision that protects a human's comment from being overwritten.
+
+**A finding, not patched here.** A ticket whose run is `done` but which is still open and marked — a conversation concluded by `concludeLastConversation`, which completes the run without closing the ticket — now receives *"This one is finished. / nothing — file a new ticket for anything else."* That is honest and it is new; it is also the first time the loop says anything on such a ticket. If it should be closed rather than annotated, that is a change to the loop's ending, not to `ctaFor`.
+
+**What 20d and 20h must know.**
+
+- **Where to widen, 20d.** The reconciler walks the array `pollProject` got from `listMarkedTickets` and asks the ledger for each ticket's run. Widen that listing and every unmarked ticket gets its standing CTA for free — `ctaFor` already answers for a run-less ticket (*"I'm not working on this one. … add the `timone` label…"*), and `store.get` returning `undefined` is the normal case there, not an error. **Do not reconcile a ticket you have not listed**, and keep the acknowledged-skip: it is keyed on tickets `store.register` created this cycle.
+- **Your introduction is a different comment, 20d, and its marker must not collide.** `standingCta` matches `comment.body.includes(CTA_MARKER)`, and `upsertComment` matches the same way, so an introduction whose marker *contains* `CTA_MARKER` as a substring would be found and edited by the reconciler — the introduction rewriting itself every time the CTA changes. Pick a marker that is not a substring of `CTA_MARKER` and does not contain it.
+- **A ticket gets its acknowledgement on the cycle it is registered and its standing CTA on the next**, by the decision above. If 20d's introduction is posted on the first cycle an unmarked ticket is seen, decide deliberately whether the CTA joins it that same cycle or the next; the mechanism is the same `acknowledged` set.
+- **How 20h observes the write volume.** The daemon prints exactly one line per CTA write: `cta    <project>#<n>`. Over a ten-minute idle run — no state changing, no ticket marked, no session started — `grep -c '^cta ' <daemon log>` **must be 0** once each ticket has settled. Cross-check it on the tracker rather than only in the log: take the CTA comment's id (`gh api repos/<slug>/issues/<n>/comments --jq '.[] | select(.body | contains("Where this stands")) | .id, .updated_at'`) and read `updated_at` again ten minutes later — **it must not have moved**. The log and the tracker disagreeing is the interesting outcome; check both, as phase 18's verification had to.
+- **What makes it legitimately non-zero.** The **first** cycle after this ships: every open marked ticket has never carried a CTA under the marker, so each gets exactly one comment, once — that is the settling cycle, and the count must fall to zero on the next one. Then: a ticket marked during the run (acknowledgement on cycle N, CTA on N+1), a queue promotion, a run resuming, parking, failing or finishing, a session's stage moving. Each is **one** line for **one** ticket. Two lines for the same ticket on consecutive cycles with nothing else in the log between them is the fault, not jitter.
+- **The one thing no unit test can close, and it is 20h's to close.** The guard compares what the tracker hands back against what the loop would post. `saysTheSame` absorbs CRLF and surrounding whitespace; **any other transformation GitHub applies to a comment body would turn the guard off silently and produce exactly the storm ADR-0024 names.** So the live gate's decisive observation is not the first cycle — which writes by design — but the **second** cycle over a settled ticket. If the second cycle rewrites, read the two bodies byte for byte before touching anything else.
+- **The cost per cycle.** One `getTicket` per open listed ticket, plus `upsertComment`'s own read and write on the cycles it writes. A parked run still pays one read for its whole turn — the reconciler shares it — but the reconciler pays for every *other* listed ticket. On a project with a large open backlog that is the number 20d's widening multiplies, and it is worth measuring at the gate.

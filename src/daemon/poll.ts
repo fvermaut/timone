@@ -1,6 +1,8 @@
 import type { Manifest, ProjectConfig } from "../manifest.js";
 import {
+  CTA_MARKER,
   PREVIEW_MARKER,
+  stampMachineComment,
   type PullRequest,
   type PullRequestThread,
   type Ticket,
@@ -24,8 +26,9 @@ import {
   wayfinderStage,
   type PipelineStage,
 } from "./pipeline.js";
+import { ctaComment, ctaFor, type TicketState } from "./cta.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
-import type { Run, RunStore, Witness } from "./runs.js";
+import { runId, type Run, type RunStore, type Witness } from "./runs.js";
 // The same comment the spawner posts when a session ends badly, because this
 // is the same kind of ending: work stopped, nothing was decided, try again.
 // `waitOf` comes from there too, so a run put back onto its wait is described
@@ -548,11 +551,20 @@ async function pollProject(
 ): Promise<void> {
   const { store, adapter } = deps;
 
+  // One reader per ticket for this project's turn, so every question the
+  // cycle asks of a ticket's thread — has this wait ended, what should the
+  // run resume with, does its call to action still stand — is answered from
+  // one fetch of it.
+  const threads = threadReaders(project, adapter);
+
   const tickets = await adapter.listMarkedTickets(project);
+  // Tickets told where they stand a moment ago, by the acknowledgement below.
+  const acknowledged = new Set<number>();
   for (const ticket of tickets) {
     const occupier = store.occupyingRun(project.name);
     const { run, created } = store.register(project.name, ticket.number);
     if (!created) continue;
+    acknowledged.add(ticket.number);
 
     if (run.status === "queued") {
       result.queued.push(run.id);
@@ -569,7 +581,7 @@ async function pollProject(
     }
   }
 
-  await resumeAnswered(project, deps, result, log);
+  await resumeAnswered(project, deps, result, log, threads);
 
   // Hand off whatever now holds the project, if nothing is running it yet.
   // `promoteQueue` is what starts a run left queued behind a park that no
@@ -588,6 +600,123 @@ async function pollProject(
       log(`error  ${line}`);
     }
   }
+
+  // Last, and deliberately: a ticket's call to action is a statement about
+  // where its run stands *now*, and everything above is what moves it. A run
+  // that resumed, failed or finished during this cycle says so on the same
+  // cycle rather than a minute later.
+  await reconcileCtas(project, tickets, acknowledged, threads, deps, result, log);
+}
+
+/**
+ * Bring every listed ticket into line with what it is currently asking of the
+ * human, and say nothing wherever it already asks it
+ * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
+ *
+ * **The differs-from-last guard is the whole of the restraint here, and it is
+ * the way this goes wrong.** The loop runs every minute; an upsert issued
+ * unconditionally is one comment edit per ticket per minute, which on a
+ * client's tracker is a notification storm and a thread nobody can read. The
+ * rendered body is the comparison key and needs no record of its own:
+ * `ctaComment(ctaFor(state))` is a pure function of the state, so a body
+ * identical to the one already on the ticket *is* the statement that nothing
+ * has changed.
+ *
+ * **It compares by the same rule the upsert writes by** — ours, carrying the
+ * marker, the first such comment. A guard judging by a different rule than
+ * the write it guards would compare against one comment and edit another, and
+ * so write on every cycle for ever, which is the fault it exists to prevent
+ * wearing the costume of a fix.
+ *
+ * Nothing here decides what a ticket needs: {@link ctaFor} does, once, for
+ * this surface and for `timone status` both. One ticket's failure is one
+ * ticket's — a thread that cannot be read is reported and the rest of the
+ * listing is still reconciled.
+ */
+async function reconcileCtas(
+  project: TicketingProject,
+  tickets: readonly Ticket[],
+  acknowledged: ReadonlySet<number>,
+  threads: (ticket: number) => RunThreads,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
+
+  for (const ticket of tickets) {
+    // A ticket acknowledged moments ago has just been told this, in these
+    // words — `pickedUpComment` and `queuedComment` end on the very line the
+    // call to action is made of. Repeating it under a marker in the same
+    // cycle would be two near-identical comments seconds apart, which is what
+    // the guard below exists to prevent everywhere else. Its standing copy
+    // lands on the next cycle, by which time the run has usually moved.
+    if (acknowledged.has(ticket.number)) continue;
+
+    try {
+      const body = ctaBody({
+        project: project.name,
+        ticket: ticket.number,
+        run: store.get(runId(project.name, ticket.number)),
+        labels: ticket.labels,
+      });
+      const thread = await threads(ticket.number).ticket();
+      if (saysTheSame(standingCta(thread), stampMachineComment(body))) continue;
+
+      await adapter.upsertComment(project, ticket.number, CTA_MARKER, body);
+      log(`cta    ${project.name}#${ticket.number}`);
+    } catch (error) {
+      const line = `${project.name}: could not say where #${ticket.number} stands: ${oneLine(error)}`;
+      result.errors.push(line);
+      log(`error  ${line}`);
+    }
+  }
+}
+
+/**
+ * A ticket's standing statement of what it needs, under the marker that makes
+ * it revisable. A renderer over a renderer: every word comes from
+ * {@link ctaFor}, and the marker is prepended rather than baked into
+ * {@link ctaComment} because the terminal's rendering of the same value must
+ * not carry it.
+ */
+function ctaBody(state: TicketState): string {
+  return `${CTA_MARKER}\n\n${ctaComment(ctaFor(state))}`;
+}
+
+/**
+ * Whether what the ticket already says and what this cycle would say are the
+ * same statement — undefined on the left meaning it has never been said.
+ *
+ * **Compared by their words rather than byte for byte, because the guard
+ * fails open.** A tracker that hands a body back with the line endings it
+ * stores rather than the ones it was sent — or a maintainer who edited the
+ * comment in a browser — would otherwise make every cycle find a difference
+ * and rewrite the comment, silently, for ever. That is not a near-miss of the
+ * guard: it is precisely the storm the guard exists to prevent, arriving
+ * through the one door left open.
+ */
+function saysTheSame(said: string | undefined, saying: string): boolean {
+  const words = (body: string): string => body.replace(/\r\n/g, "\n").trim();
+  return said !== undefined && words(said) === words(saying);
+}
+
+/**
+ * What the machine last said under {@link CTA_MARKER} on `thread`, exactly as
+ * the ticket holds it — stamp and all — or undefined where it has never said
+ * it.
+ *
+ * The *first* such comment rather than the newest, matching
+ * {@link TicketingAdapter.upsertComment}'s own `find`: this must name the
+ * comment that call would edit. And ours rather than merely marked, for the
+ * reason that call gives — Timone comments under a person's account, so the
+ * machine header is the only thing telling the two apart, and a human
+ * quoting the marker back is not the machine's last word.
+ */
+function standingCta(thread: TicketThread): string | undefined {
+  return thread.comments.find(
+    (comment) => comment.fromTimone && comment.body.includes(CTA_MARKER),
+  )?.body;
 }
 
 /**
@@ -636,6 +765,7 @@ async function resumeAnswered(
   deps: PollDeps,
   result: PollResult,
   log: (message: string) => void,
+  threadsFor: (ticket: number) => RunThreads,
 ): Promise<void> {
   const { store, adapter } = deps;
 
@@ -653,7 +783,7 @@ async function resumeAnswered(
     // against different comments. One read makes the decision atomic with
     // respect to what the human wrote, which is what ADR-0023 is about, and
     // halves the latency of reaching it.
-    const threads = threadsOf(run, project, adapter);
+    const threads = threadsFor(run.ticket);
 
     // A review park is the one wait that can end the run outright — a PR
     // merged or closed is a terminal event, not a stage to spawn.
@@ -738,10 +868,16 @@ async function resumeAnswered(
  * both paid for the round trip twice and left the pair free to disagree about
  * what the human had written — the answer read by one and not the other.
  *
- * Its lifetime is deliberately one run's turn and no longer. A reader shared
- * across the cycle would answer a later run from a thread fetched before an
- * earlier run's session posted to it, which is staleness bought with the same
- * coin the fault was.
+ * **One reader per ticket, and its lifetime is one project's turn in one
+ * cycle.** The staleness this must not buy is one thread answering for
+ * another moment of itself, so the key is the ticket: a reader shared across
+ * *runs* would answer a later run from a thread fetched before an earlier
+ * run's session posted to it, and keying by ticket is what makes that
+ * impossible. Within one ticket the sharing is the point — the call to action
+ * reconciled at the end of the cycle is compared against the thread the
+ * resume decision already read, rather than fetching it a second time, which
+ * is what keeps "one read per parked run per cycle" true now that something
+ * else in the cycle needs the same thread.
  */
 interface RunThreads {
   /** The run's ticket, with its comments. */
@@ -750,9 +886,27 @@ interface RunThreads {
   pullRequest(pr: number): Promise<PullRequestThread>;
 }
 
+/**
+ * This project's readers for this cycle, one per ticket, each created the
+ * first time something asks for it.
+ */
+function threadReaders(
+  project: TicketingProject,
+  adapter: TicketingAdapter,
+): (ticket: number) => RunThreads {
+  const readers = new Map<number, RunThreads>();
+  return (ticket) => {
+    const existing = readers.get(ticket);
+    if (existing !== undefined) return existing;
+    const reader = threadsOf(ticket, project, adapter);
+    readers.set(ticket, reader);
+    return reader;
+  };
+}
+
 /** {@link RunThreads} over `adapter`, memoising each thread's first fetch. */
 function threadsOf(
-  run: Run,
+  number: number,
   project: TicketingProject,
   adapter: TicketingAdapter,
 ): RunThreads {
@@ -760,7 +914,7 @@ function threadsOf(
   let pull: { pr: number; thread: Promise<PullRequestThread> } | undefined;
 
   return {
-    ticket: () => (ticket ??= adapter.getTicket(project, run.ticket)),
+    ticket: () => (ticket ??= adapter.getTicket(project, number)),
     pullRequest: (pr) => {
       // Keyed by number rather than assumed: a run has one pull request today,
       // and a memo that answered for a different one would be a wrong thread
