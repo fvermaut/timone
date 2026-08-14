@@ -1,6 +1,6 @@
 # Phase 20: every open ticket answers for itself
 
-> **Status:** **Approved for execution by fvermaut 2026-08-13**, the same day the ruling behind it was made. Hand-planned, as all Timone-self phases are; approval was gated on this file per [ADR-0014](../../adr/0014-artifact-first-gates.md). fvermaut is not building it in the session that planned it.
+> **Status:** Complete — see [reports/phase-20-complete.md](reports/phase-20-complete.md).
 
 > **Re-checked against `main` at approval, as this plan required of itself.** `main` was at `1ce0900`, clean. **Nothing under `src/` or `.claude/` has changed since the trace this plan rests on** — the only commits since `990f969` are this plan and the STATUS.md update. Every file-and-line citation below is therefore as traced on 2026-08-13. **Nothing in this plan changes as a result** — it is confirmed, not amended.
 
