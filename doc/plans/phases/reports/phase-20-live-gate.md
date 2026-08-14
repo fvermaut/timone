@@ -137,7 +137,7 @@ The number is not nothing — 4m19s at a one-minute poll interval is four cycles
 
 ## Findings
 
-Seven, and none of them is fixed here.
+Eleven — the last four added after the gate closed, as its residue was cleared and then as that clearing was itself audited. None of them is fixed here.
 
 1. **A public false accusation, and it is [phase 15](../phase-15.md)'s fix meeting its known limit.** The path-containment guardrail posted on `scratch-app` #29: *"the session changed 1 file(s) outside `projects/scratch-app/` — timone.yaml (uncommitted change)"*. **The session had not. The orchestrator had** — running `projects update --introduce-unmarked` minutes earlier and leaving the change uncommitted in the working tree. Phase 15 stopped exactly this for **commits**, by reading the provenance trailer ([ADR-0019](../../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md)); an **uncommitted working-tree change carries no trailer**, so the check still cannot tell whose it is. This is [phase 14](phase-14-live-gate.md)'s 14g fault reappearing through the one gap its fix does not cover, and **it published on a ticket**, under fvermaut's GitHub account, accusing an innocent session in public. Ranked first because it is the only finding here that writes something false where somebody else can read it.
 2. **A ticket declaring itself a throwaway fixture is still recorded as real — second occurrence in two days.** The stage-3 session wrote the fixture's specification into `scratch-app`'s `STATUS.md` on `main` (`b2c9b07`), so the to-do app's own record announced a specification waiting on a decision nobody had asked for. Reverted at `af01893`; the branch and the PRD-04 draft were deleted. **[Phase 19's gate found the identical thing](phase-19-live-gate.md#findings) and it was reverted at `2d80e64`.** The banner in a ticket's body does not bind the record. **One occurrence is an accident; two is a mechanism**, and the mechanism is that nothing in a session's instructions treats "this is a fixture" as a constraint on what it may commit.
@@ -162,6 +162,29 @@ Seven, and none of them is fixed here.
     **This is the stale-line class [R21](../../specs/prd/prd-02-inversion-of-control.criteria.md#r21--every-open-ticket-answers-for-itself) exists to abolish**, reappearing one layer up: clause 7 keeps a CTA current against *the run's own state*, and nothing keeps that state honest against the tracker. It is the only finding of this gate sitting on a live project rather than the fixture, and it is the map that started phase 20.
 
     **The manual route out**, for as long as the label is the mechanism: add `timone` and `wayfinder:frontier-empty` together. **The fix**, when someone takes it: derive emptiness from the map's open children rather than trusting a label a session may never have written — the same shape of correction [20a](../phase-20.md) made when it removed the second place deciding what a ticket needs.
+
+11. **A managed project's work branch was created a second time inside the Timone repository, and every close-out artifact of phases 19 and 20 was then committed onto it.** `timone/29-fixture-map-notes-on-a-to-do-phase-20-ga` exists twice: **correctly in `projects/scratch-app`**, cut at 15:34 by the requirements run and deleted with the rest of the fixture at 16:02 — and **wrongly in `/Users/fvermaut/dev/timone`**, created between 15:52 and 15:54 by a session sitting at the Timone root. The two reflogs are the evidence, and they interleave:
+
+    ```
+    15:34  scratch-app   checkout: moving from main to timone/29-…      ← correct, the run's own branch
+    15:42  scratch-app   commit: PRD-04 draft
+    15:43  scratch-app   checkout: → main, commit: STATUS.md            ← finding 2's pollution
+    15:52  timone        checkout: moving from main to timone/29-…      ← the wrong repository
+    15:53  timone        checkout: moving from timone/29-… to main
+    15:54  timone        checkout: moving from main to timone/29-…      ← and left there
+    15:54  scratch-app   commit: fvermaut approves PRD-04
+    16:02  scratch-app   checkout: → main, commit: revert the fixture
+    ```
+
+    **The only session running in that window is the approval-record session**, whose scratch-app commit lands at 15:54. Its instruction is [`approvalRecordPrompt`](../../../../src/daemon/prompts.ts): *"Work on the branch `<name>`"* — **it names a branch and never names a repository**, and it runs with `cwd: root` (`src/daemon/session.ts:1054`) because [ADR-0007](../../../adr/0007-sessions-at-timone-root.md) puts every session at the Timone root. Unlike [`requirementsPrompt`](../../../../src/daemon/prompts.ts), it does not even say *cut from the project's default branch* — it assumes the branch is already there, which at the Timone root it is not. **`workBranch` is computed from the ticket alone** (`src/daemon/prompts.ts:621`), so the name carries no repository either, and nothing downstream can tell where it was meant to live. Whether the branch here was made deliberately or as a recovery from a failed checkout is not recoverable from the record; **that it was made, and left checked out, is.**
+
+    Note what this is **not**: the run's own flag — *"the session changed 1 file(s) outside `projects/scratch-app/`"* — belongs to finding 1's uncommitted `timone.yaml`, not to this. The run cut its branch in the right place. **The boundary was crossed by the machinery that came after it.**
+
+    **What it cost.** The checkout was never returned to `main`. Three hours later the session that closed phases 19 and 20 inherited it and committed **seven artifacts** there — [ADR-0026](../../../adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md), both phase-20 reports, the register markers, `STATUS.md`, finding 10, and [its own handover](../../../handover/2026-08-14-phases-19-20-closed.md), whose snapshot then asserted *"`main` is at `df453ef`, clean"*. **`main` was at `7693de8`, and `df453ef` was not on it.** With the six commits already unpushed beneath them, **13 commits stood outside `origin/main`** — every slice from 20c to 20g, plus the whole written record of two phases.
+
+    **The guardrail saw all of it and changed nothing.** `.timone/sessions.jsonl` carries six findings naming this branch from session `8708bfbf` — five on `timone`, `status-placement` and `unpushed` alternating with the count climbing 8 → 9 → 10 as the commits landed, and one on `scratch-app`, which is the *correct* branch being reported correctly. They go to a log nobody reads mid-session, so **a check that fires accurately six times and is never surfaced is indistinguishable from one that does not exist**. Compare finding 1, where the same guardrail family published something false where everyone could see it: **opposite in direction, identical in cause** — nothing decides where a finding of this class is meant to land.
+
+    **✏ Resolved 2026-08-14, on fvermaut's instruction.** `main` was a strict ancestor of the branch, so the repair was a fast-forward to `60cb4fc`, a branch delete, and one push of all 13 commits. **Nothing merged and nothing conflicted** — the branch held no fixture work at all, only Timone's own, which is why the damage was recoverable. **The defect is untouched:** the next managed-project run on this machine will cut its branch in the same place.
 
 ## What this gate did not prove
 
