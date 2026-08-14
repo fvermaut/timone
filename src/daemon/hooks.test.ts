@@ -19,9 +19,11 @@ import {
   checkProvenance,
   checkStatusPlacement,
   checkUnpushed,
+  disposeViolations,
   reportGuardrails,
   type RepoEvidence,
   type SessionEvidence,
+  type Violation,
 } from "./hooks.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
@@ -360,11 +362,98 @@ function fakeAdapter(): {
   return { adapter, comments };
 }
 
+/**
+ * ADR-0027's three states, as a pure function over what this session has
+ * already been told. `Stop` fires at the end of every assistant turn, so
+ * "first sighting" and "still standing" are distinguishable only against
+ * what was parked at the last one.
+ */
+describe("disposeViolations", () => {
+  const unpushed: Violation = {
+    rule: "unpushed",
+    summary: "scratch-app: 1 commit(s) never reached the remote",
+    detail: ["aaa1111"],
+  };
+  const stray: Violation = {
+    rule: "path-containment",
+    summary: "the session changed 1 file(s) outside `projects/scratch-app/`",
+    detail: ["timone.yaml"],
+  };
+
+  it("hands a first sighting back to the session and escalates nothing", () => {
+    const seen = disposeViolations([unpushed], { returned: [], escalated: [] });
+
+    expect(seen.returned).toEqual([unpushed]);
+    expect(seen.escalated).toEqual([]);
+  });
+
+  it("escalates what is still standing at the next stop", () => {
+    const seen = disposeViolations([unpushed], {
+      returned: [unpushed.summary],
+      escalated: [],
+    });
+
+    expect(seen.returned).toEqual([]);
+    expect(seen.escalated).toEqual([unpushed]);
+  });
+
+  it("falls silent once escalated, however many turns follow", () => {
+    const seen = disposeViolations([unpushed], {
+      returned: [unpushed.summary],
+      escalated: [unpushed.summary],
+    });
+
+    expect(seen.returned).toEqual([]);
+    expect(seen.escalated).toEqual([]);
+  });
+
+  it("tracks each violation separately, not the session as a whole", () => {
+    // One finding fixed and a new one made in the same turn is the ordinary
+    // case, and a per-session flag would either re-say the old or swallow
+    // the new.
+    const seen = disposeViolations([unpushed, stray], {
+      returned: [unpushed.summary],
+      escalated: [],
+    });
+
+    expect(seen.returned).toEqual([stray]);
+    expect(seen.escalated).toEqual([unpushed]);
+  });
+
+  it("says nothing about a session with nothing wrong with it", () => {
+    const seen = disposeViolations([], { returned: [], escalated: [] });
+
+    expect(seen).toEqual({ returned: [], escalated: [] });
+  });
+});
+
 describe("reportGuardrails", () => {
-  it("posts one loud comment per violation and flags the run", async () => {
+  it("hands a first sighting to the session, flagging nothing yet", async () => {
+    // ADR-0027: the session gets one chance before anything reaches a human.
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
-    const { adapter, comments } = fakeAdapter();
+
+    const evidence = cleanEvidence();
+    projectRepo(evidence).branches = [
+      { name: "phase/01", unpushed: ["aaa1111"], hasUpstream: true },
+    ];
+
+    const printed: string[] = [];
+    const seen = await reportGuardrails(evidence, {
+      store,
+      target: { kind: "run", runId: run.id },
+      print: (message) => printed.push(message),
+    });
+
+    expect(seen.returned).toHaveLength(1);
+    expect(seen.escalated).toEqual([]);
+    expect(store.get(run.id)?.flags).toEqual([]);
+    expect(printed).toEqual([]);
+  });
+
+  it("flags the run when a finding survives its chance, and posts nowhere", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
 
     const evidence = cleanEvidence();
     projectRepo(evidence).branches = [
@@ -373,36 +462,53 @@ describe("reportGuardrails", () => {
     projectRepo(evidence).commits = [
       { sha: "ccc3333", branch: "phase/01", files: ["STATUS.md"], trailers: ["Timone-Stage: execution"] },
     ];
+    const summaries = checkAll(evidence).map((violation) => violation.summary);
 
-    const violations = await reportGuardrails(evidence, {
+    const seen = await reportGuardrails(evidence, {
       store,
-      adapter,
-      target: { kind: "run", project, runId: run.id, ticket: 7 },
+      target: { kind: "run", runId: run.id },
+      seen: { returned: summaries, escalated: [] },
     });
 
-    expect(violations).toHaveLength(2);
-    expect(comments).toHaveLength(2);
+    expect(seen.escalated).toHaveLength(2);
     expect(store.get(run.id)?.flags).toHaveLength(2);
-    for (const comment of comments) {
-      expect(comment.number).toBe(7);
-      const lastLine = comment.body.trimEnd().split("\n").at(-1) ?? "";
-      expect(lastLine).toMatch(/\*\*What I need from you:\*\*/);
-    }
+  });
+
+  it("prints and journals an interactive escalation, as it always did", async () => {
+    const store = newStore();
+    const evidence = cleanEvidence();
+    projectRepo(evidence).branches = [
+      { name: "phase/01", unpushed: ["aaa1111"], hasUpstream: true },
+    ];
+    const summaries = checkAll(evidence).map((violation) => violation.summary);
+
+    const printed: string[] = [];
+    const journalled: string[] = [];
+    await reportGuardrails(evidence, {
+      store,
+      target: { kind: "interactive", sessionId: "session-interactive" },
+      print: (message) => printed.push(message),
+      journal: (line) => journalled.push(line),
+      seen: { returned: summaries, escalated: [] },
+    });
+
+    expect(printed.join("\n")).toContain("never reached the remote");
+    expect(JSON.parse(journalled[0])).toMatchObject({
+      session: "session-interactive",
+      rule: "unpushed",
+    });
   });
 
   it("says nothing at all about a clean session", async () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
-    const { adapter, comments } = fakeAdapter();
 
-    const violations = await reportGuardrails(cleanEvidence(), {
+    const seen = await reportGuardrails(cleanEvidence(), {
       store,
-      adapter,
-      target: { kind: "run", project, runId: run.id, ticket: 7 },
+      target: { kind: "run", runId: run.id },
     });
 
-    expect(violations).toEqual([]);
-    expect(comments).toEqual([]);
+    expect(seen).toEqual({ returned: [], escalated: [] });
     expect(store.get(run.id)?.flags).toEqual([]);
   });
 });

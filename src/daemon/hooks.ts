@@ -10,7 +10,6 @@ import {
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
-import type { TicketingAdapter, TicketingProject } from "../adapters/ticketing.js";
 import type { RunStore } from "./runs.js";
 
 const execFileAsync = promisify(execFile);
@@ -345,39 +344,96 @@ export function checkAll(evidence: SessionEvidence): Violation[] {
  * there is no ticket to write on. One implementation, two audiences.
  */
 export type ReportTarget =
-  | { kind: "run"; project: TicketingProject; runId: string; ticket: number }
+  | { kind: "run"; runId: string }
   | { kind: "interactive"; sessionId: string };
+
+/**
+ * What this session has already been told about, by state (ADR-0027).
+ *
+ * `Stop` fires at the end of every assistant turn rather than once per
+ * session, so a violation's *history* is the only thing that separates a
+ * first sighting from one that has had its chance. Kept per violation
+ * summary rather than per session: fixing one finding and making another in
+ * the same turn is ordinary, and a session-wide flag would either re-say the
+ * old one or swallow the new one.
+ *
+ * It lives here rather than in the rules on purpose: the rules stay pure
+ * functions over git evidence and know nothing about turns.
+ */
+export interface SeenViolations {
+  /** Handed back to the session already. It has had its one chance. */
+  returned: readonly string[];
+  /** Escalated already. Never said again, whatever happens next. */
+  escalated: readonly string[];
+}
+
+/** What is to be done with this stop's violations. */
+export interface GuardrailDisposition {
+  /** Handed to the session, which may not stop until it deals with them. */
+  returned: Violation[];
+  /** Survived their chance: flagged or printed, once each. */
+  escalated: Violation[];
+}
 
 export interface GuardrailReportDeps {
   store: RunStore;
-  adapter: TicketingAdapter;
   target: ReportTarget;
   /** Where an interactive report is written. Defaults to stdout. */
   print?: (message: string) => void;
   /** Appends one line to `.timone/sessions.jsonl`. Defaults to doing nothing. */
   journal?: (line: string) => void;
-  /**
-   * Violation summaries already reported for this session, which are found
-   * again but not repeated. `Stop` fires at the end of every assistant turn
-   * rather than once per session, so without this an interactive session
-   * would be told the same thing after every reply until it was fixed.
-   *
-   * It lives here rather than in the rules on purpose: the rules stay pure
-   * functions over git evidence and know nothing about turns.
-   */
-  suppress?: ReadonlySet<string>;
+  /** What this session has been told already. Defaults to nothing. */
+  seen?: SeenViolations;
 }
 
-/** The loud comment for one violation. Ends, like every message, with a CTA. */
-export function violationComment(violation: Violation): string {
+/**
+ * Sort this stop's violations into the three states of ADR-0027: unseen goes
+ * back to the session, seen-once escalates, escalated falls silent.
+ */
+export function disposeViolations(
+  violations: Violation[],
+  seen: SeenViolations,
+): GuardrailDisposition {
+  const returned = new Set(seen.returned);
+  const escalated = new Set(seen.escalated);
+
+  return {
+    returned: violations.filter(
+      (violation) =>
+        !returned.has(violation.summary) && !escalated.has(violation.summary),
+    ),
+    escalated: violations.filter(
+      (violation) =>
+        returned.has(violation.summary) && !escalated.has(violation.summary),
+    ),
+  };
+}
+
+/**
+ * The finding as the session that caused it is told (ADR-0027).
+ *
+ * Addressed to a machine rather than a person, and the only message in the
+ * system that invites disagreement: the rules read git, and whether the
+ * session actually did this is a question git cannot answer — which is
+ * precisely how a clean session came to be accused in public twice.
+ */
+export function violationFeedback(violations: Violation[]): string {
   return [
-    `⚠️ **Automatic check failed — ${violation.summary}**`,
+    `An automatic check found ${violations.length === 1 ? "something" : `${violations.length} things`} wrong with this session's work:`,
     "",
-    ...violation.detail,
+    ...violations.flatMap((violation) => [
+      `⚠️  ${violation.summary}`,
+      ...violation.detail.map((line) => `    ${line}`),
+      "",
+    ]),
+    "**Deal with this before you stop.** Either fix it — push the commits,",
+    "move the branch, amend the trailer, put the file where it is read — or",
+    "say plainly why the finding is wrong, which is a thing you can know and",
+    "the check cannot: it reads git, and git does not record whose working-tree",
+    "change is whose.",
     "",
-    "This is a mechanical check, not a judgement about the work itself. It runs after every session at the timone root because these are mistakes that otherwise pass unnoticed.",
-    "",
-    "**What I need from you:** nothing yet — but treat anything below this comment as unfinished until it is sorted out.",
+    "You get one round. Whatever is still standing when you stop again is",
+    "recorded against this session and shown to the human.",
   ].join("\n");
 }
 
@@ -390,36 +446,37 @@ export function violationReport(violation: Violation): string {
 }
 
 /**
- * Run every check and report what failed.
+ * Run every check and dispose of what failed (ADR-0027).
  *
- * A session the daemon drove gets one loud ticket comment per violation and
- * its run flagged, so `timone status` shows it — unchanged from phase 11,
- * because that path already worked and this slice's risk is breaking it.
+ * A first sighting goes back to the session that caused it and nowhere else
+ * — the caller hands `returned` to the session and refuses the stop. Nothing
+ * is flagged, printed or recorded on that pass: the session knows what it
+ * did, which is the one thing no rule reading git can know, and a finding it
+ * refutes should never have reached a human at all.
  *
- * A session a human drove gets the same words on stdout and one line in the
- * journal, and posts nothing anywhere: there is no ticket, and inventing one
- * would put a machine's bookkeeping on somebody's unrelated work.
+ * What survives that round escalates once. A run-driven session's escalation
+ * **flags the run**, which is what `timone status` reads, and posts on no
+ * ticket ever: a guardrail comment arrives on a client's thread under the
+ * human's own account, where a reader cannot tell a machine's housekeeping
+ * from that person's judgement of their work — and twice now it has been
+ * wrong there in public. An interactive session's prints and journals, since
+ * there is no run to carry it.
  *
  * A clean session of either kind produces nothing. Silence is the signal.
  */
 export async function reportGuardrails(
   evidence: SessionEvidence,
   deps: GuardrailReportDeps,
-): Promise<Violation[]> {
-  const suppress = deps.suppress ?? new Set<string>();
-  const violations = checkAll(evidence).filter(
-    (violation) => !suppress.has(violation.summary),
+): Promise<GuardrailDisposition> {
+  const disposition = disposeViolations(
+    checkAll(evidence),
+    deps.seen ?? { returned: [], escalated: [] },
   );
   const print = deps.print ?? ((message: string) => console.log(message));
   const journal = deps.journal ?? (() => {});
 
-  for (const violation of violations) {
+  for (const violation of disposition.escalated) {
     if (deps.target.kind === "run") {
-      await deps.adapter.postComment(
-        deps.target.project,
-        deps.target.ticket,
-        violationComment(violation),
-      );
       deps.store.flag(deps.target.runId, violation.summary);
       continue;
     }
@@ -434,7 +491,7 @@ export async function reportGuardrails(
     );
   }
 
-  return violations;
+  return disposition;
 }
 
 // ---------------------------------------------------------------------------
@@ -712,11 +769,19 @@ interface StoredBaseline {
   workspace: Record<string, string>;
   projects: Record<string, Record<string, string>>;
   /**
-   * Violation summaries already reported for this session. `Stop` fires at
-   * the end of every assistant turn, not once per session, so without this
-   * an interactive session would repeat the same complaint after every reply.
+   * Violation summaries handed back to the session, and those escalated past
+   * it (ADR-0027). `Stop` fires at the end of every assistant turn, not once
+   * per session, so these are what tell a first sighting from one that has
+   * had its chance — and what stops either being said twice.
    */
-  reported: string[];
+  returned?: string[];
+  escalated?: string[];
+  /**
+   * What `escalated` was called before ADR-0027 split the one state into
+   * two. Read so a baseline parked by an older session is not re-reported by
+   * a newer binary; never written.
+   */
+  reported?: string[];
   /** When the baseline was taken, so old ones can be swept. */
   takenAt: string;
 }
@@ -750,7 +815,8 @@ export function saveBaseline(
         Object.fromEntries(tips),
       ]),
     ),
-    reported: [],
+    returned: [],
+    escalated: [],
     takenAt,
   };
   mkdirSync(dirname(path), { recursive: true });
@@ -765,7 +831,7 @@ export function saveBaseline(
  */
 export function loadBaseline(
   path: string,
-): { baseline: SessionBaseline; reported: string[] } | undefined {
+): { baseline: SessionBaseline; seen: SeenViolations } | undefined {
   if (!existsSync(path)) return undefined;
   try {
     const stored = JSON.parse(readFileSync(path, "utf8")) as StoredBaseline;
@@ -779,19 +845,37 @@ export function loadBaseline(
           ]),
         ),
       },
-      reported: stored.reported ?? [],
+      seen: {
+        returned: stored.returned ?? [],
+        // A pre-ADR-0027 baseline's `reported` means "already said to the
+        // human", which is what `escalated` now means. Reading it that way
+        // keeps a session that spans the upgrade from being told twice.
+        escalated: stored.escalated ?? stored.reported ?? [],
+      },
     };
   } catch {
     return undefined;
   }
 }
 
-/** Remember what has already been said, so `Stop` does not say it each turn. */
-export function markReported(path: string, summaries: string[]): void {
-  if (!existsSync(path) || summaries.length === 0) return;
+/**
+ * Remember what this session has been told, and in which state, so `Stop`
+ * neither repeats itself nor loses track of whose turn it is (ADR-0027).
+ */
+export function markSeen(path: string, seen: SeenViolations): void {
+  if (!existsSync(path)) return;
+  if (seen.returned.length === 0 && seen.escalated.length === 0) return;
   try {
     const stored = JSON.parse(readFileSync(path, "utf8")) as StoredBaseline;
-    stored.reported = [...new Set([...(stored.reported ?? []), ...summaries])];
+    stored.returned = [
+      ...new Set([...(stored.returned ?? []), ...seen.returned]),
+    ];
+    stored.escalated = [
+      ...new Set([
+        ...(stored.escalated ?? stored.reported ?? []),
+        ...seen.escalated,
+      ]),
+    ];
     writeFileSync(path, `${JSON.stringify(stored)}\n`, "utf8");
   } catch {
     // A journal that cannot be updated is not worth failing a session over.

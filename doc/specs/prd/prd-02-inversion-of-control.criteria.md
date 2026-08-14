@@ -225,10 +225,13 @@
 
 ## R15 — Post-session guardrail hooks
 
+> ✏ Revised 2026-08-14: [ADR-0027](../../adr/0027-a-guardrail-finding-is-addressed-to-the-session-that-caused-it.md) changes **who a finding is addressed to and where it may land**. Findings 1 and 11 of [phase 20's live gate](../../plans/phases/reports/phase-20-live-gate.md) were the same fault pointing opposite ways — one check published something **false** on a client's ticket under fvermaut's account, another stated something **true** into a log nobody reads — because a finding's destination was chosen by who drove the session rather than by who could act on it. A violation now goes to **the session that caused it** first, which gets one round to fix it or to refute it; only what survives reaches a human; and **nothing is ever posted on a client's ticket**, a run's escalation being a flag that `timone status` reads. The second and third criteria below change accordingly, and a fourth is added for the round itself.
+
 > ✏ Revised 2026-08-06: [ADR-0018](../../adr/0018-the-session-bracket-belongs-to-the-hooks.md) moved the bracket out of the daemon's spawner and into `SessionStart`/`Stop` hooks, so the checks now cover **every session at the timone root** — the daemon's and fvermaut's own — rather than daemon-spawned sessions only. The criterion's opening clause widens accordingly, and a fourth rule joins the three: a commit made during the session without a `Timone-Stage` trailer ([ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md)). The trigger was a live consequence, not tidiness: the stray `email-alerts` commit that blocked a build on 2026-08-06 came from an interactive session, and would have been caught at once had the existing rules been looking at it.
 
 - **Priority:** SHOULD
-- **Status:** verified
+- **Status:** draft
+    - ✏ 2026-08-14 **dropped from `verified` by the revision above, deliberately, and for the second time.** [ADR-0027](../../adr/0027-a-guardrail-finding-is-addressed-to-the-session-that-caused-it.md) reverses what the second criterion asserted — a violation is no longer posted on the run's ticket, and no longer reaches any human before the session that caused it has had a round with it. Old evidence does not settle a changed requirement, so every clause needs re-observing. **What must be seen, on both session kinds in one pass:** a first sighting handed to the session and *nothing* recorded — no flag, no print, no journal line; the session fixing it and the run staying clean; a finding that survives flagging the run for `timone status` and **posting on no ticket**; and a session that argues its way out of a finding it did not cause, which is the case the ADR exists for and the one no test can stand in for. The machinery is built and covered by 818 tests; what is owed is the world.
     - ✏ 2026-08-08 **verified by fvermaut at [phase 15](../../plans/phases/phase-15.md)'s 15e gate — the fourth criterion now holds on live evidence.** The attribution defect recorded below is fixed: the rules read the `Timone-Session:` trailer and exclude any commit whose trailer names a different session ([the 15e gate report](../../plans/phases/reports/phase-15-live-gate.md)). Observed with the daemon's baseline taken **first**, which is the condition that produced the defect. **A clean session of either kind now produces silence** — the innocent session's `Stop` hook gave no output, no ticket comment, no flag and no journal line. **And the silence was shown to mean something rather than assumed:** run against the same repository state and the same commit, the *author* session reported it by sha while the accused session stayed quiet. The other three criteria were re-observed in the same pass — a daemon violation posted on the ticket and flagged the run, naming **exactly one file** where 14g's comment named three it never touched; an interactive violation printed and journalled with no ticket comment. With three unpushed commits from three sessions in play the daemon session reported **1 file and 1 commit, not 3**, so the inflated count is measured rather than asserted. **The rules were deliberately shown still *firing*, not merely quiet** — a filter that silenced them would be indistinguishable from one that fixed them if the gate only checked for silence.
     - ✏ 2026-08-08 **one deliberate limit of the fix, recorded rather than engineered around.** A commit carrying **no** session trailer is still attributed to whichever session is checking. Such a commit is genuinely unattributable, and over-reporting a real violation is the safe direction; the duplicate provenance line therefore survives by necessity. Observed live at the 15e gate — of three unpushed commits, the two trailed to other sessions were excluded and the untrailed one was kept. It is a test, a comment and an observation, so a later tidy-up cannot remove it silently.
     - ✏ 2026-08-08 **the false accusation on `scratch-app` #11 was corrected publicly**, on fvermaut's decision, and the two flags it raised were cleared from the ledger. Clearing a local flag does not retract a comment on a client's ticket, so a correction naming the cause, the fix and its limit was posted beneath the original rather than the original being deleted — the record of the mistake stays legible.
@@ -242,12 +245,15 @@
     - GIVEN any agent session at the timone root completes, whether the daemon spawned it or a human started it
       WHEN the guardrail hooks run
       THEN violations of the deterministic rules — commits left unpushed, `STATUS.md` written anywhere but the default branch, files touched outside `projects/<target>/` (process artifacts excepted per R2), and commits made without a `Timone-Stage` trailer — are reported loudly
+    - GIVEN a violation is found for the first time in a session
+      WHEN the guardrail hooks run
+      THEN it is handed to that session, which may not stop until it has fixed it or said why the finding is wrong — and nothing is flagged, printed, journalled or posted on that pass
     - GIVEN the completed session maps to a run in the ledger
-      WHEN a violation is reported
-      THEN it is posted on that run's ticket and the run is flagged in `timone status`
+      WHEN a violation is still standing after that round
+      THEN the run is flagged in `timone status` and **nothing is posted on the run's ticket**, whatever the violation is
     - GIVEN the completed session maps to no run
-      WHEN a violation is reported
-      THEN it is printed plainly and appended to `.timone/sessions.jsonl`, since there is no ticket to carry it
+      WHEN a violation is still standing after that round
+      THEN it is printed plainly and appended to `.timone/sessions.jsonl`, since there is no run to carry it
     - GIVEN a clean session of either kind
       WHEN the hooks run
       THEN they stay silent

@@ -2,19 +2,19 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { Command } from "commander";
 
-import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
-import type { TicketingAdapter, TicketingProject } from "../adapters/ticketing.js";
 import {
   baselinePath,
   captureBaseline,
   collectEvidence,
   journalPath,
   loadBaseline,
-  markReported,
+  markSeen,
   reportGuardrails,
   saveBaseline,
   sweepBaselines,
+  violationFeedback,
   type ReportTarget,
+  type Violation,
 } from "../daemon/hooks.js";
 import { loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
@@ -121,7 +121,6 @@ export interface CheckDeps {
   root: string;
   manifest: Manifest;
   store: RunStore;
-  adapter: TicketingAdapter;
   sessionId: string;
   print: (message: string) => void;
   journal: (line: string) => void;
@@ -137,29 +136,36 @@ export function runForSession(store: RunStore, sessionId: string): Run | undefin
   return store.all().find((run) => run.sessionId === sessionId);
 }
 
+/** What `Stop` decided, for the caller that has to act on it. */
+export interface CheckOutcome {
+  /** One line for whoever is watching the command run. */
+  account: string;
+  /**
+   * Findings handed to the session itself (ADR-0027). Non-empty means the
+   * session may not stop yet: the caller writes them where the session will
+   * read them and refuses the stop.
+   */
+  returned: Violation[];
+}
+
 /**
- * `Stop`: judge what the session changed, and report it where it belongs.
+ * `Stop`: judge what the session changed, and decide who hears about it.
  *
- * Returns a one-line account of what happened, for the caller to print. A
- * missing baseline is reported rather than passed over: the checks cannot
+ * A missing baseline is reported rather than passed over: the checks cannot
  * judge a session they have no `before` for, and silence would look exactly
  * like a clean session.
  */
-export async function runCheck(deps: CheckDeps): Promise<string> {
+export async function runCheck(deps: CheckDeps): Promise<CheckOutcome> {
   const path = baselinePath(deps.root, deps.sessionId);
   const parked = loadBaseline(path);
   if (parked === undefined) {
-    return `no baseline was taken for session ${deps.sessionId}, so nothing could be checked`;
+    return {
+      account: `no baseline was taken for session ${deps.sessionId}, so nothing could be checked`,
+      returned: [],
+    };
   }
 
   const run = runForSession(deps.store, deps.sessionId);
-  const project: TicketingProject | undefined =
-    run === undefined
-      ? undefined
-      : {
-          name: run.project,
-          repoUrl: deps.manifest.projects[run.project]?.repo_url ?? "",
-        };
 
   const evidence = await collectEvidence(deps.root, parked.baseline, {
     sessionId: deps.sessionId,
@@ -167,28 +173,37 @@ export async function runCheck(deps: CheckDeps): Promise<string> {
   });
 
   const target: ReportTarget =
-    run === undefined || project === undefined
+    run === undefined
       ? { kind: "interactive", sessionId: deps.sessionId }
-      : { kind: "run", project, runId: run.id, ticket: run.ticket };
+      : { kind: "run", runId: run.id };
 
-  const violations = await reportGuardrails(evidence, {
+  const disposition = await reportGuardrails(evidence, {
     store: deps.store,
-    adapter: deps.adapter,
     target,
     print: deps.print,
     journal: deps.journal,
-    suppress: new Set(parked.reported),
+    seen: parked.seen,
   });
 
-  markReported(
-    path,
-    violations.map((violation) => violation.summary),
-  );
+  markSeen(path, {
+    returned: disposition.returned.map((violation) => violation.summary),
+    escalated: disposition.escalated.map((violation) => violation.summary),
+  });
 
   const kind = run === undefined ? "this session" : run.id;
-  return violations.length === 0
-    ? `guardrails clean for ${kind}`
-    : `guardrails flagged ${violations.length} violation(s) for ${kind}`;
+  if (disposition.returned.length > 0) {
+    return {
+      account: `guardrails handed ${disposition.returned.length} finding(s) back to ${kind}`,
+      returned: disposition.returned,
+    };
+  }
+  return {
+    account:
+      disposition.escalated.length === 0
+        ? `guardrails clean for ${kind}`
+        : `guardrails flagged ${disposition.escalated.length} violation(s) for ${kind}`,
+    returned: [],
+  };
 }
 
 /** Append one line to the session journal, creating it if needed. */
@@ -266,16 +281,30 @@ export function registerGuardrailsCommand(program: Command): void {
           ? defaultStatePath(root)
           : resolve(options.state);
 
-      const account = await runCheck({
+      const outcome = await runCheck({
         root,
         manifest: loadManifest(resolve(root, options.manifest)),
         store: RunStore.open(statePath),
-        adapter: new GitHubTicketingAdapter(),
         sessionId: payload.session_id,
         print: (message) => console.log(message),
         journal: (line) => appendJournal(root, line),
       });
-      if (!account.startsWith("guardrails clean")) console.error(account);
+
+      // ADR-0027: a first sighting is handed to the session, and the session
+      // may not stop on it. Exit 2 is the harness's channel for that — stderr
+      // goes to the session rather than to whoever is watching — so the
+      // feedback and the account cannot share it. The account goes to stdout,
+      // where it is the session's own transcript, not its instructions.
+      if (outcome.returned.length > 0) {
+        console.error(violationFeedback(outcome.returned));
+        console.log(outcome.account);
+        process.exitCode = 2;
+        return;
+      }
+
+      if (!outcome.account.startsWith("guardrails clean")) {
+        console.error(outcome.account);
+      }
     } catch (error) {
       console.error(
         `guardrails check: ${error instanceof Error ? error.message : String(error)}`,

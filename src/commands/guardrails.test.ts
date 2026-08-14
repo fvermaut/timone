@@ -13,6 +13,7 @@ import type {
   TicketThread,
 } from "../adapters/ticketing.js";
 import type { Manifest } from "../manifest.js";
+import type { Violation } from "../daemon/hooks.js";
 import { RunStore } from "../daemon/runs.js";
 import {
   AgentSessionSpawner,
@@ -46,11 +47,6 @@ const manifest: Manifest = {
   },
 };
 
-interface PostedComment {
-  number: number;
-  body: string;
-}
-
 const noPullRequests = {
   async findPullRequest(): Promise<PullRequest | undefined> {
     return undefined;
@@ -66,29 +62,6 @@ const noPullRequests = {
   },
   async closeTicket(): Promise<void> {},
 };
-
-function fakeAdapter(): {
-  adapter: TicketingAdapter;
-  comments: PostedComment[];
-} {
-  const comments: PostedComment[] = [];
-  return {
-    adapter: {
-      async listMarkedTickets(): Promise<Ticket[]> {
-        return [];
-      },
-      async getTicket(): Promise<TicketThread> {
-        throw new Error("not needed");
-      },
-      async postComment(_project, number, body): Promise<void> {
-        comments.push({ number, body });
-      },
-      async applyLabel(): Promise<void> {},
-      ...noPullRequests,
-    },
-    comments,
-  };
-}
 
 /** A commit message carrying the provenance trailer every session owes. */
 function trailed(subject: string, sessionId: string): string {
@@ -156,14 +129,48 @@ function newStore(root: string): RunStore {
   });
 }
 
-/** Bracket a session: baseline, do `work`, then check. */
+interface StopResult {
+  account: string;
+  returned: Violation[];
+  printed: string[];
+  journalled: string[];
+}
+
+/** One `Stop`, with what each audience saw at it. */
+async function stopOnce(
+  root: string,
+  sessionId: string,
+  store: RunStore,
+): Promise<StopResult> {
+  const printed: string[] = [];
+  const journalled: string[] = [];
+  const outcome = await runCheck({
+    root,
+    manifest,
+    store,
+    sessionId,
+    print: (message) => printed.push(message),
+    journal: (line) => journalled.push(line),
+  });
+  return { ...outcome, printed, journalled };
+}
+
+/**
+ * Bracket a session: baseline, do `work`, then stop **twice**.
+ *
+ * Two stops because ADR-0027 gives the session one chance before anything
+ * reaches a human — so a single stop shows only what the session was told,
+ * and every test below asking "does this finding reach the human" needs the
+ * round after it. `Stop` fires at the end of every assistant turn, so a
+ * session that is told something and does not fix it reaches the second stop
+ * by simply carrying on, which is what these two calls are.
+ */
 async function bracket(
   root: string,
   sessionId: string,
   store: RunStore,
-  adapter: TicketingAdapter,
   work: () => void,
-): Promise<{ account: string; printed: string[]; journalled: string[] }> {
+): Promise<StopResult & { first: StopResult }> {
   await runBaseline({
     root,
     manifest,
@@ -171,18 +178,9 @@ async function bracket(
     now: new Date("2026-08-06T10:00:00Z"),
   });
   work();
-  const printed: string[] = [];
-  const journalled: string[] = [];
-  const account = await runCheck({
-    root,
-    manifest,
-    store,
-    adapter,
-    sessionId,
-    print: (message) => printed.push(message),
-    journal: (line) => journalled.push(line),
-  });
-  return { account, printed, journalled };
+  const first = await stopOnce(root, sessionId, store);
+  const second = await stopOnce(root, sessionId, store);
+  return { ...second, first };
 }
 
 describe("reading the hook payload", () => {
@@ -289,40 +287,77 @@ describe("finding the run that drove a session", () => {
 });
 
 describe("a session the daemon drove", () => {
-  it("posts on the ticket and flags the run, exactly as it did before", async () => {
-    // The regression that matters most in this slice: the path that already
-    // worked has to keep working after the bracket moved.
+  it("asks the session first, then flags the run — and posts on no ticket", async () => {
+    // ADR-0027 reversing phase 11's behaviour, on real git. What used to be
+    // one loud ticket comment is now a round with the session, and a flag
+    // for what survives it. `timone status` reads the flags; the client's
+    // thread sees nothing either way.
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter, comments } = fakeAdapter();
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-daemon");
 
-    const { printed, journalled } = await bracket(
+    // Stopped by hand rather than through `bracket`, because the ledger is
+    // the thing under test and its state between the two stops is the claim.
+    await runBaseline({
       root,
-      "session-daemon",
-      store,
-      adapter,
-      () => {
-        writeFileSync(join(projectDir, "feature.txt"), "work\n");
-        git(projectDir, "add", "-A");
-        git(projectDir, "commit", "-q", "-m", trailed("never pushed", "session-daemon"));
-      },
-    );
+      manifest,
+      sessionId: "session-daemon",
+      now: new Date("2026-08-06T10:00:00Z"),
+    });
+    writeFileSync(join(projectDir, "feature.txt"), "work\n");
+    git(projectDir, "add", "-A");
+    git(projectDir, "commit", "-q", "-m", trailed("never pushed", "session-daemon"));
 
-    expect(comments).toHaveLength(1);
-    expect(comments[0].number).toBe(7);
-    expect(comments[0].body).toContain("never reached the remote");
+    // The first stop: handed to the session, and nothing recorded anywhere.
+    const first = await stopOnce(root, "session-daemon", store);
+    expect(first.returned).toHaveLength(1);
+    expect(first.returned[0].summary).toContain("never reached the remote");
+    expect(first.account).toContain("handed");
+    expect(store.get("scratch-app#7")?.flags).toEqual([]);
+
+    // The second: it did not fix it, so the run carries it.
+    const second = await stopOnce(root, "session-daemon", store);
+    expect(second.returned).toEqual([]);
     expect(store.get("scratch-app#7")?.flags).toHaveLength(1);
+    expect(store.get("scratch-app#7")?.flags[0]).toContain(
+      "never reached the remote",
+    );
     // And nothing leaked to the interactive audience.
-    expect(printed).toEqual([]);
-    expect(journalled).toEqual([]);
+    expect(second.printed).toEqual([]);
+    expect(second.journalled).toEqual([]);
+  });
+
+  it("stops flagging once the session has fixed what it was told", async () => {
+    // The other half of the round, and the reason it is worth having: a
+    // session that pushes when asked leaves nothing on the run at all.
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-daemon");
+
+    await runBaseline({
+      root,
+      manifest,
+      sessionId: "session-daemon",
+      now: new Date("2026-08-06T10:00:00Z"),
+    });
+    writeFileSync(join(projectDir, "feature.txt"), "work\n");
+    git(projectDir, "add", "-A");
+    git(projectDir, "commit", "-q", "-m", trailed("never pushed", "session-daemon"));
+
+    expect((await stopOnce(root, "session-daemon", store)).returned).toHaveLength(1);
+
+    git(projectDir, "push", "-q", "origin", "HEAD:main");
+    const second = await stopOnce(root, "session-daemon", store);
+
+    expect(second.account).toContain("clean");
+    expect(store.get("scratch-app#7")?.flags).toEqual([]);
   });
 
   it("says nothing anywhere when the session behaved", async () => {
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter, comments } = fakeAdapter();
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-daemon");
 
@@ -330,7 +365,6 @@ describe("a session the daemon drove", () => {
       root,
       "session-daemon",
       store,
-      adapter,
       () => {
         writeFileSync(join(projectDir, "feature.txt"), "work\n");
         git(projectDir, "add", "-A");
@@ -338,8 +372,6 @@ describe("a session the daemon drove", () => {
         git(projectDir, "push", "-q", "origin", "HEAD:main");
       },
     );
-
-    expect(comments).toEqual([]);
     expect(printed).toEqual([]);
     expect(store.get("scratch-app#7")?.flags).toEqual([]);
     expect(account).toContain("clean");
@@ -352,13 +384,11 @@ describe("a session a human drove", () => {
     // checkout by a session nobody was watching.
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter, comments } = fakeAdapter();
 
     const { printed, journalled } = await bracket(
       root,
       "session-interactive",
       store,
-      adapter,
       () => {
         writeFileSync(join(projectDir, "stray.txt"), "left behind\n");
         git(projectDir, "add", "-A");
@@ -373,25 +403,21 @@ describe("a session a human drove", () => {
       rule: "unpushed",
     });
     // No run owns it, so there is nowhere to post and nothing to flag.
-    expect(comments).toEqual([]);
   });
 
   it("says nothing when the session behaved", async () => {
     const { root } = workspace();
     const store = newStore(root);
-    const { adapter, comments } = fakeAdapter();
 
     const { account, printed, journalled } = await bracket(
       root,
       "session-interactive",
       store,
-      adapter,
       () => {},
     );
 
     expect(printed).toEqual([]);
     expect(journalled).toEqual([]);
-    expect(comments).toEqual([]);
     expect(account).toContain("clean");
   });
 
@@ -401,13 +427,11 @@ describe("a session a human drove", () => {
     // declared, every honest edit would read as a containment violation.
     const { root } = workspace();
     const store = newStore(root);
-    const { adapter } = fakeAdapter();
 
     const { printed } = await bracket(
       root,
       "session-interactive",
       store,
-      adapter,
       () => {
         mkdirSync(join(root, "src"), { recursive: true });
         writeFileSync(join(root, "src", "thing.ts"), "export const x = 1;\n");
@@ -425,13 +449,11 @@ describe("a session a human drove", () => {
     // being on `main`. Nothing in the rules named the branch itself.
     const { root } = workspace();
     const store = newStore(root);
-    const { adapter, comments } = fakeAdapter();
 
     const { printed, journalled } = await bracket(
       root,
       "session-interactive",
       store,
-      adapter,
       () => {
         git(root, "checkout", "-q", "-b", "timone/29-fixture-map-notes-on-a-to-do");
         writeFileSync(join(root, "doc-artifact.md"), "an ADR that never lands\n");
@@ -446,15 +468,15 @@ describe("a session a human drove", () => {
     expect(
       journalled.map((line) => JSON.parse(line).rule as string),
     ).toContain("branch-placement");
-    // Interactive still means nothing lands on anybody's ticket.
-    expect(comments).toEqual([]);
   });
 
-  it("says the same thing once, however many turns the session takes", async () => {
-    // `Stop` fires at the end of every assistant turn, not once per session.
+  it("goes round exactly once, however many turns the session takes", async () => {
+    // `Stop` fires at the end of every assistant turn, not once per session,
+    // so ADR-0027's three states have to survive being asked repeatedly: the
+    // session is told once, the human hears once, and a session that talks
+    // for another ten turns hears nothing further about it.
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter } = fakeAdapter();
 
     await runBaseline({
       root,
@@ -467,23 +489,17 @@ describe("a session a human drove", () => {
     git(projectDir, "add", "-A");
     git(projectDir, "commit", "-q", "-m", trailed("stray", "session-chatty"));
 
-    const printed: string[] = [];
-    const deps = {
-      root,
-      manifest,
-      store,
-      adapter,
-      sessionId: "session-chatty",
-      print: (message: string) => printed.push(message),
-      journal: () => {},
-    };
+    const first = await stopOnce(root, "session-chatty", store);
+    const second = await stopOnce(root, "session-chatty", store);
+    const third = await stopOnce(root, "session-chatty", store);
 
-    const first = await runCheck(deps);
-    const second = await runCheck(deps);
-
-    expect(first).toContain("flagged");
-    expect(second).toContain("clean");
-    expect(printed).toHaveLength(1);
+    expect(first.account).toContain("handed");
+    expect(first.printed).toEqual([]);
+    expect(second.account).toContain("flagged");
+    expect(second.printed).toHaveLength(1);
+    expect(third.account).toContain("clean");
+    expect(third.printed).toEqual([]);
+    expect(third.returned).toEqual([]);
   });
 });
 
@@ -493,13 +509,11 @@ describe("a session with no baseline", () => {
     // reading it must never produce.
     const { root } = workspace();
     const store = newStore(root);
-    const { adapter, comments } = fakeAdapter();
 
-    const account = await runCheck({
+    const { account, returned } = await runCheck({
       root,
       manifest,
       store,
-      adapter,
       sessionId: "session-never-started",
       print: () => {},
       journal: () => {},
@@ -507,7 +521,8 @@ describe("a session with no baseline", () => {
 
     expect(account).toContain("no baseline");
     expect(account).not.toContain("clean");
-    expect(comments).toEqual([]);
+    // And it does not hold the session hostage over a check it could not run.
+    expect(returned).toEqual([]);
   });
 });
 
@@ -532,13 +547,11 @@ describe("the provenance trailer, read back off real commits", () => {
     // multi-line and the file list follows it in the same `git log` output.
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter } = fakeAdapter();
 
     const { printed } = await bracket(
       root,
       "session-trailers",
       store,
-      adapter,
       () => {
         writeFileSync(join(projectDir, "good.txt"), "a\n");
         git(projectDir, "add", "-A");
@@ -559,13 +572,11 @@ describe("the provenance trailer, read back off real commits", () => {
   it("flags a commit that carries no trailer at all", async () => {
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter } = fakeAdapter();
 
     const { printed } = await bracket(
       root,
       "session-untrailed",
       store,
-      adapter,
       () => {
         writeFileSync(join(projectDir, "bare.txt"), "a\n");
         git(projectDir, "add", "-A");
@@ -625,9 +636,8 @@ describe("commits another session made", () => {
     // daemon holds in-flight commits reported them as its own.
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter } = fakeAdapter();
 
-    const { printed } = await bracket(root, "mine", store, adapter, () => {
+    const { printed } = await bracket(root, "mine", store, () => {
       writeFileSync(join(projectDir, "theirs.txt"), "the daemon's work\n");
       git(projectDir, "add", "-A");
       git(projectDir, "commit", "-q", "-m", trailed("theirs", "session-daemon"));
@@ -647,9 +657,8 @@ describe("commits another session made", () => {
   it("are invisible to the STATUS.md placement rule", async () => {
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter } = fakeAdapter();
 
-    const { printed } = await bracket(root, "mine", store, adapter, () => {
+    const { printed } = await bracket(root, "mine", store, () => {
       git(projectDir, "checkout", "-q", "-b", "feature");
       writeFileSync(join(projectDir, "STATUS.md"), "# status\n");
       git(projectDir, "add", "-A");
@@ -667,7 +676,6 @@ describe("commits another session made", () => {
     // against it.
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter, comments } = fakeAdapter();
     const { run } = store.register("scratch-app", 11);
     store.activate(run.id, "session-daemon");
 
@@ -675,7 +683,6 @@ describe("commits another session made", () => {
       root,
       "session-daemon",
       store,
-      adapter,
       () => {
         // The daemon's own work, where it belongs.
         writeFileSync(join(projectDir, "feature.txt"), "work\n");
@@ -688,8 +695,6 @@ describe("commits another session made", () => {
         git(root, "commit", "-q", "-m", trailed("the report", "dd86be88"));
       },
     );
-
-    expect(comments).toEqual([]);
     expect(printed).toEqual([]);
     expect(store.get("scratch-app#11")?.flags).toEqual([]);
   });
@@ -699,9 +704,8 @@ describe("commits another session made", () => {
     // attributable, untrailed enough for the provenance rule to fire on it.
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter } = fakeAdapter();
 
-    const { printed } = await bracket(root, "mine", store, adapter, () => {
+    const { printed } = await bracket(root, "mine", store, () => {
       writeFileSync(join(projectDir, "theirs.txt"), "a\n");
       git(projectDir, "add", "-A");
       git(
@@ -724,9 +728,8 @@ describe("commits another session made", () => {
     // direction. The duplicate provenance line survives by necessity.
     const { root, projectDir } = workspace();
     const store = newStore(root);
-    const { adapter } = fakeAdapter();
 
-    const { printed } = await bracket(root, "mine", store, adapter, () => {
+    const { printed } = await bracket(root, "mine", store, () => {
       writeFileSync(join(projectDir, "orphan.txt"), "a\n");
       git(projectDir, "add", "-A");
       git(projectDir, "commit", "-q", "-m", "just a subject");
