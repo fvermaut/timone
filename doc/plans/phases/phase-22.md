@@ -1,6 +1,6 @@
 # Phase 22: a ticket is a conversation, a run is a chunk
 
-> **Status:** Awaiting approval.
+> **Status:** Approved for execution by fvermaut 2026-08-14T21:58:15Z.
 
 > **Eleventh phase of [PRD-02](../../specs/prd/prd-02-inversion-of-control.md), and the deepest change to the ledger since the daemon was built.** Governing decision: **[ADR-0026](../../adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md)** (a ticket is a durable conversation; a run is one chunk of work), accepted 2026-08-14 on fvermaut's four rulings. Standing: [ADR-0012](../../adr/0012-conversation-channels.md), [ADR-0014](../../adr/0014-artifact-first-gates.md), [ADR-0015](../../adr/0015-branch-per-driving-unit.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md), [ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md).
 
