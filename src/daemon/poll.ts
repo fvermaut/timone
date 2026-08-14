@@ -803,6 +803,14 @@ async function introduceUnmarked(
 
   for (const ticket of open) {
     if (ticket.labels.includes(MARK_LABEL)) continue;
+    // A ticket the ledger is already working, whatever its labels say. Since
+    // 20g `timone takeover` creates a run from the tracker for an open ticket
+    // that has none, and deliberately does not apply the label — so "unmarked"
+    // and "not mine" stopped being the same fact. Introducing itself here
+    // would tell the human to hand over a ticket a session is already open on,
+    // which is the lying line ADR-0024 exists to abolish; what such a ticket is
+    // owed is a statement of where it stands, not an introduction.
+    if (store.get(runId(project.name, ticket.number)) !== undefined) continue;
     if (store.introducedAt(project.name, ticket.number) !== undefined) continue;
 
     try {

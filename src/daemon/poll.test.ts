@@ -3340,6 +3340,51 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     expect(writesIn(calls.slice(before))).toEqual([]);
   });
 
+  it("says nothing on an unmarked ticket it is already working, and everything on one it is not", async () => {
+    // 20g: `timone takeover` now creates a run from the tracker for an open
+    // ticket that has none, and it deliberately does **not** apply the label —
+    // applying it fails outright on a repository onboarded before the label
+    // existed, which is the case ADR-0024 exists to rescue. So an unmarked
+    // ticket can now have a run, and telling its human to "add the `timone`
+    // label if you would like me to pick this up" while a session is open on
+    // it is a ticket lying about its own state — the one thing this phase
+    // exists to abolish.
+    //
+    // The control beside it is half the point: #6 has no run and must still
+    // get its introduction, or the fix has silenced 20d rather than corrected
+    // it.
+    const store = newStore();
+    const enrolled = store.register("scratch-app", 5).run;
+    store.park(enrolled.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "wayfinding",
+      waitCursor: "2026-08-03T12:00:00Z",
+    });
+    const { adapter, calls } = twoListings([
+      ticket(5, { labels: [] }),
+      ticket(6, { labels: [] }),
+    ]);
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: introducing(manifestWith("scratch-app")),
+      store,
+      adapter,
+      spawner,
+    };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    expect(writesOn(calls, 5)).toEqual([]);
+    expect(store.introducedAt("scratch-app", 5)).toBeUndefined();
+
+    const saidOnSix = writesOn(calls, 6);
+    expect(saidOnSix).toHaveLength(1);
+    expect(saidOnSix[0]?.body).toContain("add the `timone` label");
+  });
+
   it("asks the ledger whether it has said hello, never the ticket's thread", async () => {
     // Exactly-once is *recorded*, not inferred (ADR-0024). A store that
     // already holds the record keeps the machine quiet even though the thread
