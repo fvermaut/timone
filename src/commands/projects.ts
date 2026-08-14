@@ -57,6 +57,20 @@ function parseStack(raw: string): string[] {
   return trimmed === "" ? [] : trimmed.split(",").map((entry) => entry.trim());
 }
 
+/**
+ * The introduction switch as commander hands it over: `true` from
+ * `--introduce-unmarked`, `false` from `--no-introduce-unmarked`, and
+ * **`undefined` when neither was passed**.
+ *
+ * Three states rather than two, deliberately. `undefined` is what keeps the
+ * key out of the written manifest altogether, which is
+ * [ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)'s
+ * default reaching the file: a project nobody was asked about must carry no
+ * opinion, not a written-down `false`. Both stay silent; only one of them is a
+ * statement somebody made, and onboarding is where that statement is taken.
+ */
+type IntroduceUnmarked = boolean | undefined;
+
 /** Options accepted by `projects add`, as commander parses them. */
 interface AddOptions {
   repo: string;
@@ -64,6 +78,7 @@ interface AddOptions {
   stack: string;
   ticketing: string;
   preview?: string;
+  introduceUnmarked?: IntroduceUnmarked;
   manifest: string;
 }
 
@@ -74,6 +89,7 @@ interface UpdateOptions {
   stack?: string;
   ticketing?: string;
   preview?: string;
+  introduceUnmarked?: IntroduceUnmarked;
   manifest: string;
 }
 
@@ -93,6 +109,12 @@ function buildPatch(options: UpdateOptions): ProjectPatch | undefined {
     ...(options.repo !== undefined ? { repo_url: options.repo } : {}),
     ...(options.path !== undefined ? { path: options.path } : {}),
     ...(options.stack !== undefined ? { stack: parseStack(options.stack) } : {}),
+    // Included when it was passed *either* way: `--no-introduce-unmarked` is
+    // an answer, and a patch that dropped it because the value is falsy would
+    // refuse to turn the switch back off.
+    ...(options.introduceUnmarked !== undefined
+      ? { introduce_unmarked: options.introduceUnmarked }
+      : {}),
     ...(Object.keys(bindings).length > 0 ? { bindings } : {}),
   };
 
@@ -138,6 +160,17 @@ export function registerProjectsCommand(program: Command): void {
     .requiredOption("--stack <list>", "comma-separated technology tags")
     .requiredOption("--ticketing <backend>", "ticketing backend")
     .option("--preview <backend>", "preview-environment backend")
+    // Declared before its negation so that passing neither leaves the value
+    // undefined: commander gives a lone `--no-x` a default of true, which
+    // would be the wrong default twice over.
+    .option(
+      "--introduce-unmarked",
+      "let the daemon say hello once on this project's unmarked tickets",
+    )
+    .option(
+      "--no-introduce-unmarked",
+      "record that it must not (the same silence as omitting both)",
+    )
     .option(
       "--manifest <path>",
       "path to the timone manifest file",
@@ -165,6 +198,12 @@ export function registerProjectsCommand(program: Command): void {
         repo_url: options.repo,
         path: options.path,
         stack: parseStack(options.stack),
+        // Omitted entirely when neither flag was passed, so a project nobody
+        // was asked about is written without the key rather than with a
+        // `false` nobody chose (see {@link IntroduceUnmarked}).
+        ...(options.introduceUnmarked !== undefined
+          ? { introduce_unmarked: options.introduceUnmarked }
+          : {}),
         bindings,
       };
 
@@ -200,6 +239,14 @@ export function registerProjectsCommand(program: Command): void {
     .option("--ticketing <backend>", "ticketing backend")
     .option("--preview <backend>", "preview-environment backend")
     .option(
+      "--introduce-unmarked",
+      "let the daemon say hello once on this project's unmarked tickets",
+    )
+    .option(
+      "--no-introduce-unmarked",
+      "record that it must not (the same silence as omitting both)",
+    )
+    .option(
       "--manifest <path>",
       "path to the timone manifest file",
       "timone.yaml",
@@ -208,7 +255,7 @@ export function registerProjectsCommand(program: Command): void {
       const patch = buildPatch(options);
       if (patch === undefined) {
         console.error(
-          "Nothing to update: pass at least one of --repo, --path, --stack, --ticketing, --preview",
+          "Nothing to update: pass at least one of --repo, --path, --stack, --ticketing, --preview, --introduce-unmarked",
         );
         process.exitCode = 1;
         return;

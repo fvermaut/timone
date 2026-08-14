@@ -5,14 +5,26 @@
 #   repo_url   (required)  Git URL of the project repository.
 #   path       (required)  Local checkout location; must start with "projects/".
 #   stack      (required)  Technology tags for the project; may be empty ([]).
+#   introduce_unmarked
+#              (optional)  Whether the daemon says hello, once, on this
+#                          project's open tickets that carry no `timone` label.
+#                          Omitted means no — and omitted is what a repository
+#                          onboarded with an existing backlog should stay,
+#                          because meeting Timone on two hundred issues at once
+#                          is a worse first impression than silence (ADR-0024).
+#                          Onboarding decides it, per project.
 #   bindings   (required)  Integrations used by the project:
 #     ticketing (required)  Ticketing backend. Supported: "github".
 #     preview   (optional)  Preview-environment backend. Supported: "docker".
 #
-# Unknown keys are rejected, so typos fail fast at load time.
+# Unknown keys are rejected, so typos fail fast at load time — which matters
+# most for `introduce_unmarked`, whose every misspelling would otherwise read
+# as the default and leave a project silently mute.
 
 projects:
-  # Fully-populated project: ticketing plus Docker-based previews.
+  # Fully-populated project: ticketing, Docker-based previews, and a
+  # repository whose tickets Timone may introduce itself on — a greenfield
+  # pilot with no backlog to shout at.
   pilot-app:
     repo_url: git@github.com:fvermaut/pilot-app.git
     path: projects/pilot-app
@@ -20,11 +32,13 @@ projects:
       - typescript
       - react
       - postgres
+    introduce_unmarked: true
     bindings:
       ticketing: github
       preview: docker
 
-  # Minimal project: empty stack, no preview binding.
+  # Minimal project: empty stack, no preview binding, and no introductions —
+  # the default, and what an existing repository with open issues keeps.
   internal-tools:
     repo_url: git@github.com:fvermaut/internal-tools.git
     path: projects/internal-tools

@@ -39,6 +39,7 @@ This is **not** a `timone-grill` interview — no relentless branching, no decis
 2. **Client / project constraints** — anything external that shapes decisions: client policies, hosting target, compliance requirements beyond accessibility, data residency, or similar. State explicitly to the user: **accessibility (EAA / WCAG 2.1 AA) is always in scope regardless of the answer here** — the baseline standards tier has no opt-out (see `process.md`, "The standards library"). This question is only about *additional* constraints on top of that baseline.
 3. **Budget / timeline constraints**, if relevant to how the project should be built (e.g. "must ship an MVP in 6 weeks," "fixed-price, minimize infra cost"). Skip if the user has nothing to add.
 4. **Ticketing and preview bindings** — confirm `--ticketing github` (currently the only supported backend) and ask whether a Docker preview environment applies (`--preview docker`) or should be omitted for now.
+5. **Introducing itself on unmarked tickets** — ask whether the daemon may post one hello comment on this repository's open tickets that carry no `timone` label ([ADR-0024](../../../doc/adr/0024-every-open-ticket-answers-for-itself.md)). **Default to no, and say why**: on a repository with an existing backlog, every open issue receives that comment in the first poll cycle, and meeting a machine on two hundred tickets at once is a worse first impression than silence. Yes is the right answer for a greenfield or near-empty repository, where it is what stops a ticket nobody labelled from sitting silent with nothing on it explaining why. **This is the moment to get it right** — it is the first thing Timone says in a repository nobody invited it into, and no later stage revisits the question. Count the open issues before recommending either way (`gh issue list --repo <slug> --state open --limit 200 | wc -l`) rather than guessing.
 
 Keep this brief. Depth on requirements belongs to `timone-grill`/`timone-prd` later, not here.
 
@@ -54,8 +55,11 @@ node dist/cli.js projects add <name> \
   --path projects/<name> \
   --stack <comma-separated-stack-list> \
   --ticketing github \
-  [--preview docker]
+  [--preview docker] \
+  [--introduce-unmarked | --no-introduce-unmarked]
 ```
+
+**Pass the answer to checklist item 5, whichever way it went.** `--introduce-unmarked` for yes, `--no-introduce-unmarked` for no; passing neither is also no, and the three are not the same thing to a later reader — the negative flag records that a human was asked and declined, while an absent key records only that the project predates the question. **Prefer the explicit flag over silence**, so the manifest says a decision was taken. The same pair exists on `projects update` if the answer changes later; that is the only supported way to change it, and `timone.yaml` is still never hand-edited (ADR-0008).
 
 Then clone it:
 
@@ -261,6 +265,7 @@ A full onboarding run produces:
 Report to the user:
 
 - The manifest entry and confirmed local path.
+- **Whether this repository introduces itself on unmarked tickets** (checklist item 5), in one line, whichever way it went, and that it is now in the manifest. A decision the user took and nobody repeated back is a decision they will assume landed.
 - The product overview file path.
 - Each founding ADR's file path and number (or the one-line "no ADR" note where the gate failed).
 - The standards artifact file path, its selected stack entries, and — for an existing codebase — any conflicts that were flagged and how the user resolved them.

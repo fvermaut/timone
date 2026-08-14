@@ -352,7 +352,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
       // died is holding its project, and every ticket behind it is waiting on
       // a session that no longer exists.
       await reclaimStale(project, deps, result, log, witness, staleAfterMs);
-      await pollProject(project, deps, result, log);
+      await pollProject(project, config, deps, result, log);
       // Last, so a run whose pull request merged during `pollProject` has
       // already been completed when its preview is released — R12's "within
       // one poll cycle" is the same cycle, not the next one.
@@ -576,9 +576,17 @@ async function releasePreview(
   log(`preview ${project.name}!${pr} released`);
 }
 
-/** One project's share of a cycle. Throws only on tracker-level failures. */
+/**
+ * One project's share of a cycle. Throws only on tracker-level failures.
+ *
+ * It takes the project's manifest entry as well as its tracker identity
+ * because one thing it does is governed per project rather than for every
+ * project alike — see {@link introduceUnmarked}. `reconcilePreviews` takes the
+ * same pair for the same reason.
+ */
 async function pollProject(
   project: TicketingProject,
+  config: ProjectConfig,
   deps: PollDeps,
   result: PollResult,
   log: (message: string) => void,
@@ -641,9 +649,10 @@ async function pollProject(
   // cycle rather than a minute later.
   await reconcileCtas(project, tickets, acknowledged, threads, deps, result, log);
 
-  // And after it, on the tickets nothing above could see. Nothing in this call
-  // reaches the ledger's pickup path, which is what keeps R1 true.
-  await introduceUnmarked(project, deps, result, log);
+  // And after it, on the tickets nothing above could see — where this project
+  // has asked for that. Nothing in this call reaches the ledger's pickup path,
+  // which is what keeps R1 true.
+  await introduceUnmarked(project, config, deps, result, log);
 }
 
 /**
@@ -674,15 +683,31 @@ async function pollProject(
  * introduction on a client's ticket on the next cycle, which is the fault this
  * whole mechanism exists to prevent.
  *
- * One extra listing per project per cycle, and no per-ticket read at all: what
- * to say needs nothing from the thread.
+ * **A project that has not asked for this is not introduced to at all** — not
+ * listed, not enumerated, not asked about. ADR-0024 gives the per-project
+ * switch as *"the whole of the restraint"* on the one thing in this loop that
+ * speaks where nobody invited it, and it defaults off for a repository
+ * onboarded with an existing backlog: two hundred open issues would otherwise
+ * each meet Timone in the same cycle. **Absent means off**, so an entry
+ * written before the switch existed keeps its silence, and the return is above
+ * the listing so a silent project costs the tracker nothing rather than one
+ * request it discards — `reconcilePreviews`'s shape for an unbound project,
+ * for the same reason.
+ *
+ * One extra listing per *introducing* project per cycle, and no per-ticket
+ * read at all: what to say needs nothing from the thread.
  */
 async function introduceUnmarked(
   project: TicketingProject,
+  config: ProjectConfig,
   deps: PollDeps,
   result: PollResult,
   log: (message: string) => void,
 ): Promise<void> {
+  // First, and above everything: `!== true` rather than `=== false`, because
+  // the key being absent is the case the ADR is written for.
+  if (config.introduce_unmarked !== true) return;
+
   const { store, adapter } = deps;
 
   // Contained here rather than left to the project handler: this is the last

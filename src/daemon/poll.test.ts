@@ -57,6 +57,27 @@ function manifestWith(...names: string[]): Manifest {
   };
 }
 
+/**
+ * The same manifest with every project's introduction switch turned on.
+ *
+ * It is a transformer rather than a second builder so that it composes with
+ * whichever builder a test already uses, and — more to the point — so that
+ * `manifestWith` keeps saying what a manifest entry says when nobody has
+ * thought about this: **nothing**. ADR-0024's switch defaults off, and a
+ * default that every test fixture quietly opted into would be a default in
+ * name only.
+ */
+function introducing(manifest: Manifest): Manifest {
+  return {
+    projects: Object.fromEntries(
+      Object.entries(manifest.projects).map(([name, config]) => [
+        name,
+        { ...config, introduce_unmarked: true },
+      ]),
+    ),
+  };
+}
+
 function ticket(number: number, overrides: Partial<Ticket> = {}): Ticket {
   return {
     number,
@@ -2472,7 +2493,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
     });
 
     await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest: introducing(manifestWith("scratch-app")),
       store,
       adapter,
       spawner,
@@ -3079,6 +3100,8 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     call: string;
     number: number;
     body?: string;
+    /** Which project was spoken to, where the call says (a comment does). */
+    project?: string;
   }
 
   const writesIn = (calls: readonly SeamCall[]): SeamCall[] =>
@@ -3125,8 +3148,8 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
         const base = open.find((candidate) => candidate.number === number);
         return { ...(base ?? ticket(number)), comments: [...thread(number)] };
       },
-      async postComment(_project, number, body): Promise<void> {
-        calls.push({ call: "postComment", number, body });
+      async postComment(project, number, body): Promise<void> {
+        calls.push({ call: "postComment", number, body, project: project.name });
         thread(number).push({
           author: "fvermaut",
           body: stamp(body),
@@ -3190,7 +3213,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     ]);
     const { spawner, spawned } = fakeSpawner();
     const deps = {
-      manifest: manifestWith("scratch-app"),
+      manifest: introducing(manifestWith("scratch-app")),
       store,
       adapter,
       spawner,
@@ -3217,7 +3240,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
     const { spawner } = fakeSpawner();
     const deps = {
-      manifest: manifestWith("scratch-app"),
+      manifest: introducing(manifestWith("scratch-app")),
       store,
       adapter,
       spawner,
@@ -3242,7 +3265,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     const { spawner } = fakeSpawner();
 
     await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest: introducing(manifestWith("scratch-app")),
       store,
       adapter,
       spawner,
@@ -3266,7 +3289,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     ]);
     const { spawner } = fakeSpawner();
     const deps = {
-      manifest: manifestWith("scratch-app"),
+      manifest: introducing(manifestWith("scratch-app")),
       store,
       adapter,
       spawner,
@@ -3297,7 +3320,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     const { adapter, calls } = twoListings(open);
     const { spawner } = fakeSpawner();
     const deps = {
-      manifest: manifestWith("scratch-app"),
+      manifest: introducing(manifestWith("scratch-app")),
       store,
       adapter,
       spawner,
@@ -3328,7 +3351,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     const { spawner } = fakeSpawner();
 
     await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest: introducing(manifestWith("scratch-app")),
       store,
       adapter,
       spawner,
@@ -3354,7 +3377,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       },
     };
     const deps = {
-      manifest: manifestWith("scratch-app"),
+      manifest: introducing(manifestWith("scratch-app")),
       store,
       adapter: failing,
       spawner,
@@ -3388,7 +3411,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     const { spawner } = fakeSpawner();
 
     const result = await pollOnce({
-      manifest: manifestWithPreviews("scratch-app"),
+      manifest: introducing(manifestWithPreviews("scratch-app")),
       store,
       adapter: {
         ...adapter,
@@ -3404,6 +3427,76 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     expect(result.errors[0]).toMatch(/could not list the open issues/);
     expect(ensured).toHaveLength(1);
     expect(upserts).toHaveLength(1);
+  });
+
+  it("says nothing at all on a project that has not asked for introductions", async () => {
+    // ADR-0024's restraint, and the whole of it: the per-project switch
+    // defaults off, and *absent* is what off means — a manifest entry written
+    // before this existed asks for nothing and gets nothing. A repository
+    // onboarded with two hundred open issues would otherwise meet Timone two
+    // hundred times in its first cycle, which the ADR calls a worse first
+    // impression than silence.
+    const store = newStore();
+    const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
+    let listings = 0;
+    const counted: TicketingAdapter = {
+      ...adapter,
+      async listOpenTickets(project: TicketingProject): Promise<Ticket[]> {
+        listings += 1;
+        return adapter.listOpenTickets(project);
+      },
+    };
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter: counted,
+      spawner,
+    };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    expect(writesIn(calls)).toEqual([]);
+    expect(store.introducedAt("scratch-app", 5)).toBeUndefined();
+    // And the tracker was never asked either. A project with introductions off
+    // does not pay for a listing it would then throw away — the same shape
+    // `reconcilePreviews` uses for a project with no preview binding.
+    expect(listings).toBe(0);
+  });
+
+  it("speaks on the project that asked and stays silent on the one beside it", async () => {
+    // The switch is *per project*, which is the half a single-project test
+    // cannot show: one cycle, one daemon, one adapter and two repositories
+    // whose only difference is the switch. Exactly one introduction is posted
+    // and it names which repository got it, so the pair cannot pass by the
+    // behaviour being globally on or globally off.
+    const store = newStore();
+    const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
+    const { spawner } = fakeSpawner();
+    const both = manifestWith("quiet-app", "chatty-app");
+
+    await pollOnce({
+      manifest: {
+        projects: {
+          "quiet-app": both.projects["quiet-app"]!,
+          "chatty-app": {
+            ...both.projects["chatty-app"]!,
+            introduce_unmarked: true,
+          },
+        },
+      },
+      store,
+      adapter,
+      spawner,
+    });
+
+    const said = writesIn(calls);
+    expect(said).toHaveLength(1);
+    expect(said[0]?.project).toBe("chatty-app");
+    expect(said[0]?.body).toContain("add the `timone` label");
+    expect(store.introducedAt("chatty-app", 5)).toBeDefined();
+    expect(store.introducedAt("quiet-app", 5)).toBeUndefined();
   });
 
   it("carries on to the next ticket when one introduction cannot be posted", async () => {
@@ -3422,7 +3515,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     };
 
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest: introducing(manifestWith("scratch-app")),
       store,
       adapter: failing,
       spawner,

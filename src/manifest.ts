@@ -20,6 +20,24 @@ const projectConfigSchema = z.strictObject({
       message: 'must start with "projects/"',
     }),
   stack: z.array(z.string()),
+  /**
+   * Whether the daemon introduces itself, once, on this project's open
+   * tickets that carry no mark
+   * ([ADR-0024](../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
+   *
+   * **Absent is off, and that is the whole of the restraint.** The ADR asks
+   * for a switch "defaulting off for a repository onboarded with an existing
+   * backlog — introducing Timone to two hundred issues at once is a worse
+   * first impression than silence", and an entry written before this key
+   * existed is exactly such a repository. So it is optional rather than
+   * defaulted: `undefined` and `false` both mean silence, and no manifest
+   * already on disk acquires an opinion by being re-read.
+   *
+   * Onboarding is where it is decided (`.claude/skills/timone-onboard`),
+   * deliberately and per project — this is the first thing Timone says
+   * somewhere nobody invited it.
+   */
+  introduce_unmarked: z.boolean().optional(),
   bindings: bindingsSchema,
 });
 

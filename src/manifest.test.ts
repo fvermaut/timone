@@ -180,6 +180,87 @@ projects:
     expect(manifest.projects["internal-tools"]!.bindings.preview).toBeUndefined();
   });
 
+  it("leaves the introduction switch unset when the manifest does not mention it", () => {
+    // ADR-0024's default, and the reason it is optional rather than defaulted:
+    // an entry written before this key existed is precisely the repository the
+    // ADR is protecting — one onboarded with a backlog — and re-reading it
+    // must not give it an opinion it was never asked for.
+    const manifest = loadManifest(writeManifest(validYaml));
+    expect(
+      manifest.projects["client-alpha"]!.introduce_unmarked,
+    ).toBeUndefined();
+  });
+
+  it("accepts a project that has asked to introduce itself", () => {
+    const file = writeManifest(`
+projects:
+  chatty-app:
+    repo_url: git@github.com:fvermaut/chatty-app.git
+    path: projects/chatty-app
+    stack: []
+    introduce_unmarked: true
+    bindings:
+      ticketing: github
+`);
+    expect(loadManifest(file).projects["chatty-app"]!.introduce_unmarked).toBe(
+      true,
+    );
+  });
+
+  it("accepts a project that has been asked and said no", () => {
+    // Off is a decision somebody may have taken deliberately at onboarding,
+    // and it must be sayable — the manifest is where that decision is kept.
+    const file = writeManifest(`
+projects:
+  quiet-app:
+    repo_url: git@github.com:fvermaut/quiet-app.git
+    path: projects/quiet-app
+    stack: []
+    introduce_unmarked: false
+    bindings:
+      ticketing: github
+`);
+    expect(loadManifest(file).projects["quiet-app"]!.introduce_unmarked).toBe(
+      false,
+    );
+  });
+
+  it("rejects a misspelled introduction switch rather than silently ignoring it", () => {
+    // The whole value of the strict schema here. Every wrong spelling of this
+    // key behaves identically to the default — silence — so a typo would be a
+    // project that believes it introduces itself and never does. It fails
+    // loudly at load instead, naming the key it did not recognise.
+    const file = writeManifest(`
+projects:
+  chatty-app:
+    repo_url: git@github.com:fvermaut/chatty-app.git
+    path: projects/chatty-app
+    stack: []
+    introduce_unmarked_tickets: true
+    bindings:
+      ticketing: github
+`);
+    expect(() => loadManifest(file)).toThrowError(
+      'Invalid manifest: project "chatty-app": unknown key "introduce_unmarked_tickets"',
+    );
+  });
+
+  it("rejects a non-boolean introduction switch", () => {
+    const file = writeManifest(`
+projects:
+  chatty-app:
+    repo_url: git@github.com:fvermaut/chatty-app.git
+    path: projects/chatty-app
+    stack: []
+    introduce_unmarked: sometimes
+    bindings:
+      ticketing: github
+`);
+    expect(() => loadManifest(file)).toThrowError(
+      /project "chatty-app": field "introduce_unmarked"/,
+    );
+  });
+
   it("rejects an empty repo_url", () => {
     const file = writeManifest(`
 projects:
@@ -333,6 +414,40 @@ describe("updateProject", () => {
 });
 
 describe("serializeManifest", () => {
+  it("carries the introduction switch through a round trip, and invents none", () => {
+    // Every write of the manifest goes through here (ADR-0008), so a switch
+    // this dropped would silence a project that had asked to speak — and one
+    // this *added* would be an opinion arriving in a file nobody edited,
+    // which is the thing the default-off design exists to avoid.
+    const manifest: Manifest = {
+      projects: {
+        "chatty-app": {
+          repo_url: "git@github.com:fvermaut/chatty-app.git",
+          path: "projects/chatty-app",
+          stack: [],
+          introduce_unmarked: true,
+          bindings: { ticketing: "github" },
+        },
+        "quiet-app": {
+          repo_url: "git@github.com:fvermaut/quiet-app.git",
+          path: "projects/quiet-app",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+      },
+    };
+
+    const yamlText = serializeManifest(manifest);
+    expect(yamlText).toContain("introduce_unmarked: true");
+
+    const reloaded = parseManifest(parseYamlText(yamlText));
+    expect(reloaded).toEqual(manifest);
+    expect(reloaded.projects["quiet-app"]!.introduce_unmarked).toBeUndefined();
+    expect(Object.keys(reloaded.projects["quiet-app"]!)).not.toContain(
+      "introduce_unmarked",
+    );
+  });
+
   it("round-trips through parseManifest/loadManifest unchanged", () => {
     const manifest: Manifest = {
       projects: {
