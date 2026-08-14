@@ -166,6 +166,69 @@ describe("listMarkedTickets", () => {
   });
 });
 
+describe("listOpenTickets", () => {
+  it("asks gh for every open issue, with no label filter at all", async () => {
+    // The discriminating assertion is the absence: `--label` present here
+    // would make this listing a second copy of the marked one, and the
+    // unmarked ticket ADR-0024 exists for would stay invisible.
+    const { run, calls } = fakeRunner(JSON.stringify([ghIssue()]));
+    await new GitHubTicketingAdapter({ run }).listOpenTickets(alpha);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe("gh");
+    const args = calls[0].args;
+    expect(args.slice(0, 2)).toEqual(["issue", "list"]);
+    expect(args).not.toContain("--label");
+    expect(args[args.indexOf("--repo") + 1]).toBe("fvermaut/scratch-app");
+    expect(args[args.indexOf("--state") + 1]).toBe("open");
+  });
+
+  it("returns an unlabelled issue, which the marked listing never would", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify([ghIssue({ number: 5, labels: [] })]),
+    );
+
+    const tickets = await new GitHubTicketingAdapter({ run }).listOpenTickets(
+      alpha,
+    );
+
+    expect(tickets).toHaveLength(1);
+    expect(tickets[0].number).toBe(5);
+    expect(tickets[0].labels).toEqual([]);
+  });
+
+  it("orders tickets oldest first regardless of gh's order", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify([
+        ghIssue({ number: 9, createdAt: "2026-08-02T12:00:00Z" }),
+        ghIssue({ number: 4, createdAt: "2026-08-01T09:00:00Z", labels: [] }),
+      ]),
+    );
+    const tickets = await new GitHubTicketingAdapter({ run }).listOpenTickets(
+      alpha,
+    );
+    expect(tickets.map((ticket) => ticket.number)).toEqual([4, 9]);
+  });
+
+  it("refuses to truncate silently at the page limit", async () => {
+    // A backlog is precisely where this listing gets large, and a truncated
+    // one would introduce Timone to an arbitrary page of it.
+    const page = [ghIssue({ number: 1 }), ghIssue({ number: 2 })];
+    const { run } = fakeRunner(JSON.stringify(page));
+
+    await expect(
+      new GitHubTicketingAdapter({ run, pageLimit: 2 }).listOpenTickets(alpha),
+    ).rejects.toThrow(/page limit/i);
+  });
+
+  it("fails loudly with the raw payload when gh returns nonsense", async () => {
+    const { run } = fakeRunner("not json at all");
+    await expect(
+      new GitHubTicketingAdapter({ run }).listOpenTickets(alpha),
+    ).rejects.toThrow(/not json at all/);
+  });
+});
+
 describe("getTicket", () => {
   it("reads one issue with its comment thread", async () => {
     const { run, calls } = fakeRunner(

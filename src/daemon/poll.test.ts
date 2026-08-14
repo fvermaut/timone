@@ -99,6 +99,21 @@ const noPullRequests = {
   async closeTicket(): Promise<void> {},
 };
 
+/**
+ * The open-ticket listing for fakes whose test is not about it: this project
+ * has nothing open beyond the marked tickets it declares, so nothing here is
+ * ever introduced to.
+ *
+ * Its own spread rather than a member of `noPullRequests`, because it is the
+ * ticket surface: a fake answering the open listing out of a constant named
+ * for pull requests would be saying something it does not mean.
+ */
+const noUnmarkedTickets = {
+  async listOpenTickets(): Promise<Ticket[]> {
+    return [];
+  },
+};
+
 function fakeAdapter(
   marked: Record<string, Ticket[]>,
   failing: string[] = [],
@@ -106,6 +121,15 @@ function fakeAdapter(
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
     async listMarkedTickets(project: TicketingProject): Promise<Ticket[]> {
+      if (failing.includes(project.name)) {
+        throw new Error(`gh exploded on ${project.name}`);
+      }
+      return marked[project.name] ?? [];
+    },
+    // Every ticket this fake declares is open, and every one of them carries
+    // the mark — so the open listing is the marked listing here, and no
+    // introduction is owed on any of them.
+    async listOpenTickets(project: TicketingProject): Promise<Ticket[]> {
       if (failing.includes(project.name)) {
         throw new Error(`gh exploded on ${project.name}`);
       }
@@ -359,6 +383,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
+      ...noUnmarkedTickets,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments };
       },
@@ -853,6 +878,7 @@ describe("pollOnce — runs parked before the machinery existed", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
+      ...noUnmarkedTickets,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -933,6 +959,7 @@ describe("pollOnce — a run parked at an unbuilt stage resumes at that stage", 
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
+      ...noUnmarkedTickets,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -983,6 +1010,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
+      ...noUnmarkedTickets,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -1576,6 +1604,7 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
     },
+    ...noUnmarkedTickets,
     async getTicket(): Promise<TicketThread> {
       throw new Error("no ticket is read in this test");
     },
@@ -2151,6 +2180,7 @@ describe("pollOnce — a written answer reaches a session that ingests it", () =
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
+      ...noUnmarkedTickets,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [invitation, answer] };
       },
@@ -2214,6 +2244,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
+      ...noUnmarkedTickets,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [...thread] };
       },
@@ -2358,6 +2389,14 @@ describe("pollOnce — reading a written answer consumes it", () => {
         record("listMarkedTickets");
         return [base];
       },
+      // An unmarked ticket beside the marked one, so the recorder below has
+      // phase 20d's introduction to see as well as everything else the cycle
+      // writes. Without it the instrument would be blind to the newest write
+      // on the seam — which is the trap 20b left for 20c and 20c for 20d.
+      async listOpenTickets(): Promise<Ticket[]> {
+        record("listOpenTickets");
+        return [base, ticket(5, { labels: [] })];
+      },
       async getTicket(): Promise<TicketThread> {
         record("getTicket");
         return { ...base, comments: [...thread] };
@@ -2446,6 +2485,10 @@ describe("pollOnce — reading a written answer consumes it", () => {
     // the same thread. Asserted rather than assumed — a recorder blind to a
     // write is a test that reports silence about it.
     expect(writes.map((entry) => entry.call)).toContain("upsertComment");
+    // And phase 20d's introduction on the unmarked ticket beside it, for the
+    // same reason: a write the instrument cannot see is a write this test
+    // reports silence about.
+    expect(JSON.stringify(writes)).toContain("add the `timone` label");
     // And not one of them carries the human's words anywhere.
     expect(
       writes.filter((entry) =>
@@ -2500,6 +2543,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
+      ...noUnmarkedTickets,
       async getTicket(): Promise<TicketThread> {
         fetches += 1;
         return { ...base, comments: [invitation, answer] };
@@ -2550,6 +2594,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
+      ...noUnmarkedTickets,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -2684,6 +2729,12 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
 
     const adapter: TicketingAdapter = {
       async listMarkedTickets(): Promise<Ticket[]> {
+        return [...listed];
+      },
+      // Everything listed here carries the mark, so the two listings agree and
+      // no introduction is owed — these tests are about the standing call to
+      // action, not about who Timone says hello to.
+      async listOpenTickets(): Promise<Ticket[]> {
         return [...listed];
       },
       async getTicket(_project, number): Promise<TicketThread> {
@@ -2999,5 +3050,386 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
     });
 
     expect(writesIn(calls)).toEqual([]);
+  });
+});
+
+describe("pollOnce — an unmarked ticket is introduced to, once", () => {
+  // ADR-0024's second ruling: the `timone` label stops being the boundary of
+  // what Timone will *say* and remains the boundary of what it will *do*. The
+  // ticket this exists for is `scratch-app` #5 — "can I get a dark mode?",
+  // filed 2026-08-03 without the label and silent ever since, with nothing on
+  // it explaining why.
+  //
+  // Two properties, and the second is the one that must never break: an
+  // unmarked ticket receives exactly one comment, ever, and **never a run**.
+  // PRD-02.R1's surviving clause is that second one, and it is asserted here
+  // as a regression test rather than assumed from the shape of the loop.
+
+  /** Every call on the seam whose effect a human can see. */
+  const WRITE_CALLS = [
+    "postComment",
+    "upsertComment",
+    "applyLabel",
+    "closeTicket",
+    "postPullRequestComment",
+    "upsertPullRequestComment",
+  ];
+
+  interface SeamCall {
+    call: string;
+    number: number;
+    body?: string;
+  }
+
+  const writesIn = (calls: readonly SeamCall[]): SeamCall[] =>
+    calls.filter((entry) => WRITE_CALLS.includes(entry.call));
+
+  const writesOn = (calls: readonly SeamCall[], number: number): SeamCall[] =>
+    writesIn(calls).filter((entry) => entry.number === number);
+
+  /**
+   * A fake with the two listings the loop now makes: what carries the mark,
+   * and what is simply open. The marked listing is derived from the open one
+   * by the label, exactly as the tracker derives it, so a test cannot set up
+   * a project where the two disagree about a ticket's labels.
+   *
+   * `open` is the array the test holds, so a ticket can gain the label between
+   * cycles exactly as a human's edit does.
+   */
+  function twoListings(open: Ticket[]): {
+    adapter: TicketingAdapter;
+    calls: SeamCall[];
+  } {
+    const calls: SeamCall[] = [];
+    const threads = new Map<number, TicketThread["comments"]>();
+    let clock = 0;
+    const thread = (number: number): TicketThread["comments"] => {
+      const found = threads.get(number);
+      if (found !== undefined) return found;
+      const fresh: TicketThread["comments"] = [];
+      threads.set(number, fresh);
+      return fresh;
+    };
+    const stamp = (body: string): string =>
+      `${MACHINE_MARKER}\n\n---\n\n${body}`;
+
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return open.filter((candidate) => candidate.labels.includes("timone"));
+      },
+      async listOpenTickets(): Promise<Ticket[]> {
+        return [...open];
+      },
+      async getTicket(_project, number): Promise<TicketThread> {
+        calls.push({ call: "getTicket", number });
+        const base = open.find((candidate) => candidate.number === number);
+        return { ...(base ?? ticket(number)), comments: [...thread(number)] };
+      },
+      async postComment(_project, number, body): Promise<void> {
+        calls.push({ call: "postComment", number, body });
+        thread(number).push({
+          author: "fvermaut",
+          body: stamp(body),
+          createdAt: `2026-08-03T13:${String(clock++).padStart(2, "0")}:00Z`,
+          fromTimone: true,
+        });
+      },
+      async upsertComment(_project, number, marker, body): Promise<void> {
+        calls.push({ call: "upsertComment", number, body });
+        const comments = thread(number);
+        const existing = comments.find(
+          (comment) => comment.fromTimone && comment.body.includes(marker),
+        );
+        if (existing === undefined) {
+          comments.push({
+            author: "fvermaut",
+            body: stamp(body),
+            createdAt: `2026-08-03T13:${String(clock++).padStart(2, "0")}:00Z`,
+            fromTimone: true,
+          });
+        } else {
+          existing.body = stamp(body);
+        }
+      },
+      async applyLabel(_project, number, label): Promise<void> {
+        calls.push({ call: "applyLabel", number, body: label });
+      },
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return undefined;
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        throw new Error("no pull request exists in this test");
+      },
+      async postPullRequestComment(_project, number, body): Promise<void> {
+        calls.push({ call: "postPullRequestComment", number, body });
+      },
+      async upsertPullRequestComment(
+        _project,
+        number,
+        _marker,
+        body,
+      ): Promise<void> {
+        calls.push({ call: "upsertPullRequestComment", number, body });
+      },
+      async closeTicket(_project, number, reason): Promise<void> {
+        calls.push({ call: "closeTicket", number, body: reason });
+      },
+    };
+    return { adapter, calls };
+  }
+
+  it("creates no run for a ticket that does not carry the mark", async () => {
+    // PRD-02.R1, second criterion, re-verified rather than amended: its
+    // criterion forbids a *run* on an unmarked issue and has never forbidden a
+    // comment. Speaking to an unmarked ticket is what this slice adds; working
+    // one is what it must never do, and this is the assertion that says so.
+    const store = newStore();
+    const { adapter } = twoListings([
+      ticket(5, { labels: [] }),
+      ticket(7),
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    };
+
+    const first = await pollOnce(deps);
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    expect(store.all().map((run) => run.id)).toEqual(["scratch-app#7"]);
+    expect(store.get("scratch-app#5")).toBeUndefined();
+    expect(first.pickedUp).toEqual(["scratch-app#7"]);
+    // And no session was ever started on it either — a run is what a spawn
+    // needs, so this cannot fail on its own, but it is the consequence R1 is
+    // actually about and it costs one line to say so.
+    expect(spawned.filter((run) => run.ticket === 5)).toEqual([]);
+  });
+
+  it("introduces itself exactly once across three cycles", async () => {
+    // Three and not two: a bug that posts on cycles 1 and 3 but not 2 passes
+    // a two-cycle test, and "exactly once for the life of the daemon" is the
+    // whole promise. Counted on the seam rather than in the thread.
+    const store = newStore();
+    const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    const said = writesOn(calls, 5);
+    expect(said).toHaveLength(1);
+    expect(said[0]?.call).toBe("postComment");
+  });
+
+  it("names the label that would hand the ticket over, and ends on the ask", async () => {
+    // The point of speaking at all: a human looking at a silent ticket has no
+    // way of knowing what to do, so the one thing the comment must contain is
+    // the exact label. Hand-written here rather than composed from the same
+    // function the loop composes it with.
+    const store = newStore();
+    const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    const body = writesOn(calls, 5)[0]?.body ?? "";
+    expect(body).toContain("add the `timone` label");
+    expect(body.trimEnd().split("\n").at(-1)).toBe(
+      "**What I need from you:** nothing — add the `timone` label if you would like me to pick this up.",
+    );
+  });
+
+  it("leaves a marked ticket to the path it already had", async () => {
+    // The negative half, and the one that protects everything built before
+    // this: a ticket carrying the mark is acknowledged, run and given its
+    // standing call to action exactly as it was, and is never introduced to.
+    const store = newStore();
+    const { adapter, calls } = twoListings([
+      ticket(5, { labels: [] }),
+      ticket(7),
+    ]);
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    const saidOnSeven = writesOn(calls, 7);
+    expect(saidOnSeven.map((entry) => entry.call)).toEqual([
+      "postComment",
+      "upsertComment",
+    ]);
+    expect(saidOnSeven[0]?.body).toContain("**Picked this up.**");
+    expect(saidOnSeven[1]?.body).toContain(CTA_MARKER);
+    for (const entry of saidOnSeven) {
+      expect(entry.body).not.toContain("this repository is worked by a machine");
+    }
+  });
+
+  it("holds its peace once the label lands, without ever having been given a run", async () => {
+    // The transition a human actually makes: they read the introduction and
+    // add the label. From that cycle on the ticket is an ordinary marked one
+    // — and the introduction, having been posted once, is not repeated when
+    // the ticket loses the label again.
+    const store = newStore();
+    const open = [ticket(5, { labels: [] })];
+    const { adapter, calls } = twoListings(open);
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    };
+
+    await pollOnce(deps);
+    open[0] = ticket(5, { labels: ["timone"] });
+    await pollOnce(deps);
+    open[0] = ticket(5, { labels: [] });
+    const before = calls.length;
+    await pollOnce(deps);
+
+    expect(store.get("scratch-app#5")?.status).toBe("picked-up");
+    expect(
+      writesOn(calls, 5).filter((entry) => entry.call === "postComment"),
+    ).toHaveLength(2);
+    expect(writesIn(calls.slice(before))).toEqual([]);
+  });
+
+  it("asks the ledger whether it has said hello, never the ticket's thread", async () => {
+    // Exactly-once is *recorded*, not inferred (ADR-0024). A store that
+    // already holds the record keeps the machine quiet even though the thread
+    // is empty — which is the discriminating case: a loop reading the thread
+    // to decide would see nothing there and post.
+    const store = newStore();
+    store.recordIntroduction("scratch-app", 5);
+    const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(writesIn(calls)).toEqual([]);
+    // And it did not read the thread to find that out, either.
+    expect(calls.filter((entry) => entry.call === "getTicket")).toEqual([]);
+  });
+
+  it("writes the record down before it speaks, so a failed post is never a second comment", async () => {
+    // The asymmetry the ordering is chosen on: a post that fails after the
+    // record leaves one ticket unspoken-to and one line in `errors`, while a
+    // record written after a successful post would put a second introduction
+    // on a client's ticket the moment anything crashed between the two.
+    const store = newStore();
+    const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
+    const { spawner } = fakeSpawner();
+    const failing: TicketingAdapter = {
+      ...adapter,
+      async postComment(): Promise<void> {
+        throw new Error("gh could not comment on issue 5");
+      },
+    };
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter: failing,
+      spawner,
+    };
+
+    const first = await pollOnce(deps);
+
+    expect(first.errors).toHaveLength(1);
+    expect(first.errors[0]).toMatch(/#5/);
+    expect(store.introducedAt("scratch-app", 5)).toBeDefined();
+
+    // The next cycle stays quiet rather than trying again, which is the price
+    // of the ordering and is paid deliberately.
+    const second = await pollOnce({ ...deps, adapter });
+    expect(second.errors).toEqual([]);
+    expect(writesIn(calls)).toEqual([]);
+  });
+
+  it("costs the project nothing else in the cycle when the open listing fails", async () => {
+    // The new listing is a `gh` call that can fail on its own — a rate limit,
+    // a large repository — and it is the last thing a project's turn does.
+    // Letting it escape would take the project's preview reconciliation with
+    // it, so a repository Timone cannot enumerate would also stop telling
+    // reviewers where to look. That is a bigger consequence than the fault.
+    const store = newStore();
+    runWithPullRequest(store, "scratch-app", 7, 9);
+    const { adapter, upserts } = previewTicketing({
+      "timone/7-work": pull(9, "abc1234"),
+    });
+    const { previews, ensured } = fakePreviews();
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWithPreviews("scratch-app"),
+      store,
+      adapter: {
+        ...adapter,
+        async listOpenTickets(): Promise<Ticket[]> {
+          throw new Error("gh could not list the open issues");
+        },
+      },
+      spawner,
+      previews,
+    });
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/could not list the open issues/);
+    expect(ensured).toHaveLength(1);
+    expect(upserts).toHaveLength(1);
+  });
+
+  it("carries on to the next ticket when one introduction cannot be posted", async () => {
+    const store = newStore();
+    const { adapter, calls } = twoListings([
+      ticket(5, { labels: [] }),
+      ticket(6, { labels: [] }),
+    ]);
+    const { spawner } = fakeSpawner();
+    const failing: TicketingAdapter = {
+      ...adapter,
+      async postComment(project, number, body): Promise<void> {
+        if (number === 5) throw new Error("gh could not comment on issue 5");
+        await adapter.postComment(project, number, body);
+      },
+    };
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter: failing,
+      spawner,
+    });
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/#5/);
+    expect(writesOn(calls, 6)).toHaveLength(1);
   });
 });

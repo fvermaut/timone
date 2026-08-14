@@ -1104,6 +1104,75 @@ describe("previews", () => {
   });
 });
 
+describe("introductions", () => {
+  // The record is what makes the introduction happen once rather than every
+  // cycle for the life of the daemon — `releasePreview`'s precedent, and for
+  // the same reason: an unmarked ticket stays unmarked for ever, so anything
+  // keyed on its state alone would generate work on every poll (ADR-0024).
+
+  it("has no record of a ticket it has never introduced itself on", () => {
+    const store = newStore();
+    expect(store.introducedAt("scratch-app", 5)).toBeUndefined();
+  });
+
+  it("records when it introduced itself, and says so afterwards", () => {
+    const store = newStore();
+
+    store.recordIntroduction("scratch-app", 5);
+
+    expect(store.introducedAt("scratch-app", 5)).toBe("2026-08-02T10:00:00Z");
+  });
+
+  it("keeps the first introduction's instant when asked to record a second", () => {
+    // Recording twice is a bug upstream, and the honest answer to "when did
+    // you introduce yourself?" is still the first time. Overwriting would make
+    // the record report the most recent duplicate as if it were the original.
+    const store = newStore();
+
+    store.recordIntroduction("scratch-app", 5);
+    store.recordIntroduction("scratch-app", 5);
+
+    expect(store.introducedAt("scratch-app", 5)).toBe("2026-08-02T10:00:00Z");
+  });
+
+  it("keeps one project's introductions out of another's, and one ticket's out of another's", () => {
+    const store = newStore();
+    store.recordIntroduction("scratch-app", 5);
+
+    expect(store.introducedAt("other-app", 5)).toBeUndefined();
+    expect(store.introducedAt("scratch-app", 6)).toBeUndefined();
+  });
+
+  it("survives the daemon restarting, which is the whole point of writing it down", () => {
+    const path = statePath();
+    newStore(path).recordIntroduction("scratch-app", 5);
+
+    expect(newStore(path).introducedAt("scratch-app", 5)).toBe(
+      "2026-08-02T10:00:00Z",
+    );
+  });
+
+  it("loads a state file written before introductions existed, at version 1", () => {
+    const path = statePath();
+    const store = newStore(path);
+    store.register("scratch-app", 7);
+
+    const written = JSON.parse(readFileSync(path, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(written.version).toBe(1);
+    expect(written).not.toHaveProperty("introductions");
+
+    const reopened = newStore(path);
+    expect(reopened.introducedAt("scratch-app", 7)).toBeUndefined();
+    reopened.recordIntroduction("scratch-app", 7);
+    expect(
+      (JSON.parse(readFileSync(path, "utf8")) as { version: number }).version,
+    ).toBe(1);
+  });
+});
+
 describe("the witness — the time a daemon can vouch for having watched", () => {
   /** A store whose clock the test sets by hand, instant by instant. */
   function clockedStore(path = statePath()): {

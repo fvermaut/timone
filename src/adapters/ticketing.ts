@@ -208,17 +208,39 @@ export interface TicketingProject {
 /**
  * The seam between the process and whatever tracks tickets. Real interface
  * from day one per ADR-0004: GitHub is the first implementation, not the
- * shape. Ten capabilities, and no more — anything a stage needs beyond
+ * shape. Eleven capabilities, and no more — anything a stage needs beyond
  * these is a deliberate widening of the seam, not an incidental one. Three
  * of them are phase 13's widening: delivery and the review loop live on
  * pull requests, and the PR is stage 8's artifact (ADR-0004), so reading
  * and answering it is the ticketing seam's business, not a second adapter's.
- * The last two are phase 16's and phase 20's, and their reasoning is on the
- * calls themselves.
+ * The last three are phase 16's and phase 20's two, and their reasoning is
+ * on the calls themselves.
  */
 export interface TicketingAdapter {
   /** Open tickets carrying the mark label, oldest first. */
   listMarkedTickets(project: TicketingProject): Promise<Ticket[]>;
+
+  /**
+   * Every open ticket, marked or not, oldest first — {@link
+   * listMarkedTickets}'s twin without the permission boundary applied.
+   *
+   * Phase 20's second widening of this seam, and deliberate rather than
+   * incidental. Until
+   * [ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md) the
+   * daemon could not see an issue it was not allowed to work, so an unmarked
+   * ticket was silent for ever with nothing on it explaining why — `#5` on the
+   * pilot, filed and never spoken to. The ADR splits one boundary into two:
+   * {@link MARK_LABEL} stops bounding what Timone *says* and still bounds what
+   * it *does*. Seeing every open ticket is what makes the first half possible,
+   * and it is exactly what {@link listMarkedTickets} must keep refusing to do
+   * — **nothing may create a run from this listing** ([PRD-02.R1](../../doc/specs/prd/prd-02-inversion-of-control.criteria.md#r1--ticket-pickup)
+   * forbids a run on an unmarked issue, and has never forbidden a comment).
+   *
+   * Implementations apply the same refusal to truncate that the marked listing
+   * does: a backlog larger than one page is a listing to fail on, not to work
+   * from silently.
+   */
+  listOpenTickets(project: TicketingProject): Promise<Ticket[]>;
 
   /** One ticket with its comment thread. */
   getTicket(project: TicketingProject, number: number): Promise<TicketThread>;

@@ -1,6 +1,7 @@
 import type { Manifest, ProjectConfig } from "../manifest.js";
 import {
   CTA_MARKER,
+  MARK_LABEL,
   PREVIEW_MARKER,
   stampMachineComment,
   type PullRequest,
@@ -193,6 +194,39 @@ export function queuedComment(
     `at a time so two pieces of work never collide. ${place}`,
     "",
     "**What I need from you:** nothing right now — I'll comment here when I start.",
+  ].join("\n");
+}
+
+/**
+ * The one comment an unmarked ticket ever gets: who is reading this
+ * repository, and what hands a ticket over
+ * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
+ *
+ * **It says nothing about this ticket's state**, deliberately. It is posted
+ * once and never revised — unlike the standing call to action, which is
+ * reconciled every cycle and is the place a claim about *this* ticket
+ * belongs. A one-time comment that made such a claim would be a sentence
+ * frozen at the moment it was written, on a ticket that may be handed over
+ * five minutes later.
+ *
+ * The label is named rather than described, because the whole failure this
+ * closes is a human with no way of knowing what to do: `scratch-app` #5 was
+ * filed on 2026-08-03 and sat silent, with nothing on it explaining why.
+ */
+export function introductionComment(): string {
+  return [
+    "**Hello — this repository is worked by a machine as well as by people.**",
+    "",
+    "I'm Timone. Where I'm asked to, I take a ticket from its first reading",
+    "through to a pull request, and I write back here in plain language at every",
+    "step, so the ticket itself tells you where things stand.",
+    "",
+    `I only do that for tickets carrying the \`${MARK_LABEL}\` label. This one`,
+    "doesn't have it, so it is yours rather than mine and I am leaving it exactly",
+    "as it is. **This is the only time I'll say so here** — I won't comment on",
+    "this ticket again unless it is handed to me.",
+    "",
+    `**What I need from you:** nothing — add the \`${MARK_LABEL}\` label if you would like me to pick this up.`,
   ].join("\n");
 }
 
@@ -606,6 +640,80 @@ async function pollProject(
   // that resumed, failed or finished during this cycle says so on the same
   // cycle rather than a minute later.
   await reconcileCtas(project, tickets, acknowledged, threads, deps, result, log);
+
+  // And after it, on the tickets nothing above could see. Nothing in this call
+  // reaches the ledger's pickup path, which is what keeps R1 true.
+  await introduceUnmarked(project, deps, result, log);
+}
+
+/**
+ * Say hello, once, on every open ticket that does not carry the mark
+ * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
+ *
+ * **This is the one place in the loop that looks past the permission
+ * boundary, and it may only ever speak.** {@link MARK_LABEL} stops bounding
+ * what Timone *says* and still bounds what it *does*: nothing here registers a
+ * run, spawns a session or applies a label, and
+ * [PRD-02.R1](../../doc/specs/prd/prd-02-inversion-of-control.criteria.md#r1--ticket-pickup)
+ * — which forbids a run on an unmarked issue and has never forbidden a comment
+ * — is what that sentence is protecting.
+ *
+ * **The ledger is what makes it once, and the thread is never consulted.**
+ * `releasePreview`'s precedent: an unmarked ticket stays unmarked for ever, so
+ * an introduction decided from the ticket's own state would be posted every
+ * cycle for the life of the daemon. Reading the thread back to look for
+ * something that might be ours is the other way to answer this, and it is a
+ * guess — the machine posts under a person's account, a human may quote the
+ * comment, and a guess that goes wrong duplicates the one comment this ticket
+ * was ever meant to get.
+ *
+ * **Recorded before it is posted**, exactly as a pickup is registered before
+ * it is acknowledged. The two failure modes are not symmetrical: a post that
+ * fails after the record leaves one ticket unspoken-to and one line in
+ * `errors`, while a record that fails after the post puts a second
+ * introduction on a client's ticket on the next cycle, which is the fault this
+ * whole mechanism exists to prevent.
+ *
+ * One extra listing per project per cycle, and no per-ticket read at all: what
+ * to say needs nothing from the thread.
+ */
+async function introduceUnmarked(
+  project: TicketingProject,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
+
+  // Contained here rather than left to the project handler: this is the last
+  // thing a project's turn does, and a listing that escaped would take the
+  // project's preview reconciliation down with it — a repository Timone cannot
+  // enumerate would stop telling reviewers where to look, which is a larger
+  // consequence than the fault.
+  let open: readonly Ticket[];
+  try {
+    open = await adapter.listOpenTickets(project);
+  } catch (error) {
+    const line = `${project.name}: could not list the open tickets: ${oneLine(error)}`;
+    result.errors.push(line);
+    log(`error  ${line}`);
+    return;
+  }
+
+  for (const ticket of open) {
+    if (ticket.labels.includes(MARK_LABEL)) continue;
+    if (store.introducedAt(project.name, ticket.number) !== undefined) continue;
+
+    try {
+      store.recordIntroduction(project.name, ticket.number);
+      await adapter.postComment(project, ticket.number, introductionComment());
+      log(`hello  ${project.name}#${ticket.number}`);
+    } catch (error) {
+      const line = `${project.name}: could not introduce myself on #${ticket.number}: ${oneLine(error)}`;
+      result.errors.push(line);
+      log(`error  ${line}`);
+    }
+  }
 }
 
 /**

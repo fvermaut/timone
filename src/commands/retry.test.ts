@@ -241,6 +241,9 @@ describe("timone retry — the answer a killed session had already read", () => 
       async postPullRequestComment(): Promise<void> {},
       async upsertPullRequestComment(): Promise<void> {},
       async upsertComment(): Promise<void> {},
+      async listOpenTickets(): Promise<never[]> {
+        return [];
+      },
       async closeTicket(): Promise<void> {},
     };
     return { adapter, thread, posted };
@@ -506,6 +509,9 @@ describe("timone retry — the way back from a consumed answer", () => {
       async postPullRequestComment(): Promise<void> {},
       async upsertPullRequestComment(): Promise<void> {},
       async upsertComment(): Promise<void> {},
+      async listOpenTickets(): Promise<never[]> {
+        return [];
+      },
       async closeTicket(): Promise<void> {},
     };
   }

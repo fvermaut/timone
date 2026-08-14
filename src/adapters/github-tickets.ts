@@ -235,14 +235,31 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
   }
 
   async listMarkedTickets(project: TicketingProject): Promise<Ticket[]> {
+    return this.listIssues(project, this.markLabel);
+  }
+
+  async listOpenTickets(project: TicketingProject): Promise<Ticket[]> {
+    return this.listIssues(project, undefined);
+  }
+
+  /**
+   * The two listings, which differ only in whether the permission boundary is
+   * applied. One implementation rather than two because the truncation
+   * refusal is a *decision* — a page-limited listing is one to fail on, never
+   * one to work from — and phase 20's unlabelled listing is precisely where
+   * the page fills up first, on a repository onboarded with a backlog.
+   */
+  private async listIssues(
+    project: TicketingProject,
+    label: string | undefined,
+  ): Promise<Ticket[]> {
     const slug = repoSlug(project.repoUrl);
     const raw = await this.run("gh", [
       "issue",
       "list",
       "--repo",
       slug,
-      "--label",
-      this.markLabel,
+      ...(label === undefined ? [] : ["--label", label]),
       "--state",
       "open",
       "--json",
@@ -251,15 +268,16 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
       String(this.pageLimit),
     ]);
 
+    const what = label === undefined ? "open" : `${label}-marked`;
     const issues = parseGhJson(
       z.array(ghIssueSchema),
       raw,
-      `listing ${this.markLabel}-marked issues on ${slug}`,
+      `listing ${what} issues on ${slug}`,
     );
 
     if (issues.length >= this.pageLimit) {
       throw new Error(
-        `${slug}: ${issues.length} marked issues hit the page limit of ` +
+        `${slug}: ${issues.length} ${what} issues hit the page limit of ` +
           `${this.pageLimit} — refusing to work from a truncated list`,
       );
     }

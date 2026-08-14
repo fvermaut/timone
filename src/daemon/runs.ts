@@ -166,6 +166,28 @@ const previewRecordSchema = z.strictObject({
   updatedAt: z.string(),
 });
 
+/**
+ * That Timone has said hello on one unmarked ticket, and when.
+ *
+ * **The record is the mechanism, not a note about it**
+ * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)) —
+ * {@link previewRecordSchema}'s release half is the precedent. An unmarked
+ * ticket stays unmarked for ever, so an introduction decided from the ticket's
+ * own state would be posted on every cycle for the life of the daemon. Nothing
+ * about the ticket can carry this: the alternative is reading the thread back
+ * and guessing whether one of the comments there is ours, which is the guess
+ * that produces duplicates.
+ *
+ * The instant is the *first* one, kept rather than refreshed: it answers "when
+ * did you introduce yourself", and a re-record is a bug upstream rather than a
+ * second introduction.
+ */
+const introductionRecordSchema = z.strictObject({
+  project: z.string(),
+  ticket: z.number().int().positive(),
+  at: z.string(),
+});
+
 const stateSchema = z.strictObject({
   version: z.literal(1),
   runs: z.array(runSchema),
@@ -182,6 +204,17 @@ const stateSchema = z.strictObject({
    * simply stops recording previews.
    */
   previews: z.record(z.string(), previewRecordSchema).optional(),
+  /**
+   * Introductions, keyed `<project>#<ticket>`.
+   *
+   * **Top-level rather than a field on a run, because the tickets it is about
+   * have no run and must never get one** — that is PRD-02.R1's surviving
+   * clause and the reason this map exists at all. Optional for the same reason
+   * `previews` is: every state file written before this field existed loads
+   * unchanged, `version` stays `1`, and a daemon rolled back simply stops
+   * recording introductions.
+   */
+  introductions: z.record(z.string(), introductionRecordSchema).optional(),
   /**
    * When a poll cycle last observed the world (ADR-0020).
    *
@@ -204,6 +237,7 @@ const stateSchema = z.strictObject({
 
 export type Run = z.infer<typeof runSchema>;
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
+export type IntroductionRecord = z.infer<typeof introductionRecordSchema>;
 type State = z.infer<typeof stateSchema>;
 
 /** What a cycle's {@link RunStore.witness} call establishes about the daemon. */
@@ -772,6 +806,33 @@ export class RunStore {
     this.persist();
   }
 
+  /**
+   * When Timone introduced itself on `ticket`, or undefined where it never
+   * has. The question a cycle asks before saying hello — asked of the ledger
+   * and never of the ticket's thread, which is what keeps the answer a fact
+   * rather than a guess.
+   */
+  introducedAt(project: string, ticket: number): string | undefined {
+    this.refresh();
+    return this.state.introductions?.[introductionKey(project, ticket)]?.at;
+  }
+
+  /**
+   * Write down that Timone has now said hello on `ticket`. Idempotent, and
+   * the first instant wins: a second call is a bug upstream, not a second
+   * introduction, and the honest answer stays when the first one happened.
+   */
+  recordIntroduction(project: string, ticket: number): void {
+    this.refresh();
+    const key = introductionKey(project, ticket);
+    if (this.state.introductions?.[key] !== undefined) return;
+    this.state.introductions = {
+      ...this.state.introductions,
+      [key]: { project, ticket, at: this.now() },
+    };
+    this.persist();
+  }
+
   /** Record a guardrail violation against a run (R15). */
   flag(id: string, violation: string): Run {
     const run = this.mutable(id);
@@ -890,6 +951,11 @@ export function runId(project: string, ticket: number): string {
 /** One preview per pull request, keyed the same way runs are keyed. */
 export function previewKey(project: string, pr: number): string {
   return `${project}#${pr}`;
+}
+
+/** One introduction per ticket, keyed the same way runs are keyed. */
+export function introductionKey(project: string, ticket: number): string {
+  return `${project}#${ticket}`;
 }
 
 /** Clear the wait a run has finished waiting on. */
