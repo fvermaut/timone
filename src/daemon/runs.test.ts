@@ -303,6 +303,96 @@ describe("the holds-the-project rule", () => {
   });
 });
 
+describe("the answer a run has read and not acted on", () => {
+  // ADR-0023: reading a written answer consumes it, so the cursor moves past it
+  // before the session that will act on it exists. The window that opens there
+  // is the one the run must be able to be wound back into — and `waitCursor`
+  // cannot hold the way back, because activating the run clears it.
+
+  const invitation = "2026-08-03T09:00:00Z";
+  const readAt = "2026-08-03T09:30:00Z";
+
+  /** A run parked on a conversation whose answer the loop has just consumed. */
+  function consumed(store: RunStore, ticket: number): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.activate(run.id, `session-${ticket}`);
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "wayfinding",
+      waitCursor: invitation,
+    });
+    // What the poll loop writes when it reads their answer: the cursor moves to
+    // the answer, and the run records which answer that was.
+    store.repark(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "wayfinding",
+      waitCursor: readAt,
+      consumedAnswerAt: readAt,
+    });
+    return run.id;
+  }
+
+  it("keeps it through the transition that clears the wait, and through failure", () => {
+    const path = statePath();
+    const store = newStore(path);
+    const id = consumed(store, 26);
+
+    store.activate(id, "session-26b");
+    const active = store.get(id);
+    store.fail(id, "Claude Code process terminated by signal SIGKILL");
+
+    // The wait is gone, cursor included — that is what activating a run means.
+    expect(active?.waitCursor).toBeUndefined();
+    expect(active?.waitingKind).toBeUndefined();
+    // The answer it read is not, and it is on disk, where the next process
+    // reads it: a session dying here is the whole reason the field exists.
+    expect(active?.consumedAnswerAt).toBe(readAt);
+    expect(newStore(path).get(id)).toMatchObject({
+      status: "failed",
+      consumedAnswerAt: readAt,
+    });
+  });
+
+  it("forgets it once the run has moved on, by a new wait or the next stage", () => {
+    const store = newStore();
+    const reparked = consumed(store, 26);
+    const advanced = consumed(store, 27);
+
+    // The session asked one more thing and parked again: a new wait, and the
+    // answer that started it has been acted on.
+    store.repark(reparked, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "wayfinding",
+      waitCursor: "2026-08-03T10:00:00Z",
+    });
+    // The other settled it and walked on to the next stage. Re-recording the
+    // stage it is *already* at must not count — that happens before a resumed
+    // session runs, on the answer it was resumed with.
+    store.activate(advanced, "session-27b");
+    store.setStage(advanced, "wayfinding");
+    const resuming = store.get(advanced);
+    store.setStage(advanced, "requirements");
+
+    expect(store.get(reparked)?.consumedAnswerAt).toBeUndefined();
+    expect(resuming?.consumedAnswerAt).toBe(readAt);
+    expect(store.get(advanced)?.consumedAnswerAt).toBeUndefined();
+  });
+
+  it("forgets it when the run resolves, so nothing can reopen a settled answer", () => {
+    const store = newStore();
+    const id = consumed(store, 26);
+
+    store.activate(id, "session-26b");
+    store.complete(id);
+
+    expect(store.get(id)).toMatchObject({ status: "done" });
+    expect(store.get(id)?.consumedAnswerAt).toBeUndefined();
+  });
+});
+
 describe("promotion", () => {
   it("promotes the head of the queue when a run completes", () => {
     const store = newStore();

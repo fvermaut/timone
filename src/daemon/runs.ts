@@ -84,6 +84,31 @@ const runSchema = z.strictObject({
    */
   waitCursor: z.string().optional(),
   /**
+   * The instant of the written answer this run has read and not yet acted on
+   * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)).
+   *
+   * **It exists because {@link waitCursor} cannot carry it.** Reading an answer
+   * consumes it — the cursor advances past it as part of deciding to resume —
+   * and then {@link RunStore.activate} clears the wait, cursor included. A
+   * session killed after that left the run `failed` with nothing pointing at
+   * the answer, so `timone retry` had nothing to rewind and re-posted the
+   * original question instead. That is a silent re-ask, which is not the trade
+   * ADR-0023 accepted: it undertook that retry rewinds the marker.
+   *
+   * **Present only while the answer is outstanding.** It is written when the
+   * answer is consumed, survives `activate` and {@link RunStore.fail} — the
+   * whole point — and is dropped the moment the run shows the answer was acted
+   * on: a new wait ({@link applyPark}), the next stage ({@link
+   * RunStore.setStage}), or the run resolving ({@link RunStore.complete}). So a
+   * marker that is present always names an answer nobody has finished with, and
+   * `timone retry` can rewind to it without asking the human anything.
+   *
+   * Optional, and its absence is a legitimate state: a run that consumed
+   * nothing has none, and neither has one parked by a daemon predating the
+   * field — `retry` falls back to the cursor for those, as it did before.
+   */
+  consumedAnswerAt: z.string().optional(),
+  /**
    * The work branch this run owns, once it has one. Its presence is what
    * makes a parked run hold its project — see {@link RunStore}.
    */
@@ -245,6 +270,13 @@ export interface ParkOptions {
   stage?: PipelineStage;
   /** The instant the wait was opened; answers before it are not answers to it. */
   waitCursor?: string;
+  /**
+   * The instant of the answer this park has read and not yet acted on — set
+   * only by the consume that read it (ADR-0023). Absent on every ordinary
+   * park, which is what makes an ordinary park *forget* a marker the run was
+   * carrying: see {@link Run.consumedAnswerAt}.
+   */
+  consumedAnswerAt?: string;
 }
 
 /**
@@ -410,6 +442,12 @@ export class RunStore {
    * Mark a run as running under `sessionId`. A resuming run stops waiting:
    * whatever it was parked on has been answered, and leaving the wait behind
    * would let a later poll try to resolve it twice.
+   *
+   * **What it does not clear is {@link Run.consumedAnswerAt}.** The answer has
+   * been *read*, not acted on — that is the window ADR-0023 accepts — and this
+   * is the transition a session dies just after. A marker cleared here is the
+   * live fault of 2026-08-13: nothing left to rewind, so the question is asked
+   * again.
    */
   activate(id: string, sessionId: string): Run {
     return this.transition(id, "active", (run) => {
@@ -496,10 +534,17 @@ export class RunStore {
     return { ...run };
   }
 
-  /** Finish a run, promoting whatever is queued behind it. */
+  /**
+   * Finish a run, promoting whatever is queued behind it.
+   *
+   * A finished run holds no consumed answer: whatever it read has been acted
+   * on, and that is what "resolved" means. Left behind, the marker would let a
+   * later rewind reach back past a settled decision (ADR-0023).
+   */
   complete(id: string): Run {
     return this.transition(id, "done", (run) => {
       run.waitingOn = undefined;
+      run.consumedAnswerAt = undefined;
     });
   }
 
@@ -511,9 +556,18 @@ export class RunStore {
     });
   }
 
-  /** Record which lifecycle stage a run reached. */
+  /**
+   * Record which lifecycle stage a run reached.
+   *
+   * A run that has *moved on* has acted on whatever answer it was holding, so
+   * the consumed marker goes with the stage it belonged to (ADR-0023). Only a
+   * real change counts: the stage is also re-recorded before a resumed session
+   * runs the very stage it is resuming, and clearing the marker there would
+   * discard the answer that session was started on.
+   */
   setStage(id: string, stage: PipelineStage): Run {
     const run = this.mutable(id);
+    if (run.stage !== stage) run.consumedAnswerAt = undefined;
     run.stage = stage;
     run.updatedAt = this.now();
     this.persist();
@@ -845,11 +899,20 @@ function stopWaiting(run: Run): void {
   run.waitCursor = undefined;
 }
 
-/** Write a wait onto a run. Shared by {@link RunStore.park} and `repark`. */
+/**
+ * Write a wait onto a run. Shared by {@link RunStore.park} and `repark`.
+ *
+ * A wait is written whole, absent fields included, which is what makes the
+ * consumed marker ({@link Run.consumedAnswerAt}) transient: only the consume
+ * passes one, so every other park clears it. That is the honest reading of a
+ * park — the run is waiting on something new, so whatever answer it was
+ * holding has been acted on.
+ */
 function applyPark(run: Run, options: ParkOptions): void {
   run.waitingOn = options.waitingOn;
   run.waitingKind = options.kind;
   run.waitCursor = options.waitCursor;
+  run.consumedAnswerAt = options.consumedAnswerAt;
   if (options.stage !== undefined) run.stage = options.stage;
 }
 

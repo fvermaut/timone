@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
 import {
+  CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
   type PullRequest,
   type PullRequestThread,
@@ -15,6 +16,7 @@ import {
 import { RunStore } from "../daemon/runs.js";
 import { acquireStateLock } from "../daemon/lock.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
+import { AgentSessionSpawner } from "../daemon/session.js";
 import { runRetry } from "./retry.js";
 
 const tempDirs: string[] = [];
@@ -167,6 +169,296 @@ describe("timone retry", () => {
 
     expect(code).toBe(1);
     expect(lines.join("\n")).toMatch(/<project>#<ticket>/);
+  });
+});
+
+describe("timone retry — the answer a killed session had already read", () => {
+  // The live gate of 2026-08-13 on `scratch-app` #26. The daemon consumed the
+  // answer, spawned the session, and the session was killed — leaving the run
+  // `failed` with no cursor at all, because activating it cleared the wait.
+  // `retry` then had nothing to rewind, fell through to the entry path, and
+  // re-posted the original invitation verbatim: the human's words discarded and
+  // the same question asked again. ADR-0023 undertook that `retry` rewinds the
+  // marker, and this is that undertaking on the path the gate actually took.
+  const answer = {
+    author: "fvermaut",
+    body: "it's the draft they lose, not the phone layout",
+    createdAt: "2026-08-06T09:30:00Z",
+    fromTimone: false,
+  };
+
+  /** Whether a comment is the invitation — the thing that must be posted once. */
+  function isInvitation(body: string): boolean {
+    return /two ways to answer/i.test(body);
+  }
+
+  /**
+   * The decision ticket the conversation happens on, with a thread that really
+   * grows: what the machine posts lands on it, after everything already there.
+   * So the invitation the daemon posts is on the thread the next cycle reads,
+   * and every comment it posts across the whole sequence is countable.
+   */
+  function conversationTicket(): {
+    adapter: TicketingAdapter;
+    thread: TicketThread["comments"];
+    posted: string[];
+  } {
+    const base: Ticket = {
+      number: 26,
+      title: "which half do they lose?",
+      body: "a decision ticket off the map",
+      labels: ["timone", "wayfinder:grilling"],
+      url: "https://github.com/fvermaut/scratch-app/issues/26",
+      author: "fvermaut",
+      createdAt: "2026-08-06T08:00:00Z",
+    };
+    const thread: TicketThread["comments"] = [];
+    const posted: string[] = [];
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [...thread] };
+      },
+      async postComment(_project, _number, body): Promise<void> {
+        posted.push(body);
+        const last = thread.at(-1)?.createdAt ?? base.createdAt;
+        thread.push({
+          author: "fvermaut",
+          body: `${MACHINE_MARKER}\n\n---\n\n${body}`,
+          createdAt: new Date(Date.parse(last) + 60_000).toISOString(),
+          fromTimone: true,
+        });
+      },
+      async applyLabel(): Promise<void> {},
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return undefined;
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        throw new Error("no pull request exists in this test");
+      },
+      async postPullRequestComment(): Promise<void> {},
+      async upsertPullRequestComment(): Promise<void> {},
+      async closeTicket(): Promise<void> {},
+    };
+    return { adapter, thread, posted };
+  }
+
+  /**
+   * The real spawner over a runtime the test kills once.
+   *
+   * Real, because "the answer reaches a session rather than a fresh
+   * invitation" is a claim about the poll loop, the stage graph and the spawner
+   * together — and because the invitation being counted is the one the spawner
+   * itself posts. The kill is the runtime reporting the signal the live gate
+   * sent, which is what walks the ledger through `active` and then `failed`.
+   */
+  function spawnerDyingOnce(
+    store: RunStore,
+    adapter: TicketingAdapter,
+    prompts: string[],
+  ): SessionSpawner {
+    let killed = false;
+    return new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: {
+        async start(request) {
+          prompts.push(request.prompt);
+          if (killed) {
+            return {
+              sessionId: "session-after-retry",
+              completed: Promise.resolve({
+                sessionId: "session-after-retry",
+                ok: true,
+              }),
+            };
+          }
+          killed = true;
+          return {
+            sessionId: "session-killed",
+            completed: Promise.resolve({
+              sessionId: "session-killed",
+              ok: false,
+              error: "Claude Code process terminated by signal SIGKILL",
+            }),
+          };
+        },
+      },
+      root: "/nowhere",
+    });
+  }
+
+  it("hands back an answer whose session died active, not a fresh invitation", async () => {
+    const store = newStore();
+    const { adapter, thread, posted } = conversationTicket();
+    const prompts: string[] = [];
+    const deps = {
+      manifest,
+      store,
+      adapter,
+      spawner: spawnerDyingOnce(store, adapter, prompts),
+    };
+    const { log } = collect();
+
+    // The map's ticket is picked up and the human invited.
+    await pollOnce(deps);
+    // They answer in writing. The next cycle consumes it, spawns — and that
+    // session is killed.
+    thread.push(answer);
+    const read = await pollOnce(deps);
+    const dead = store.get("scratch-app#26");
+
+    const code = runRetry("scratch-app#26", { manifest, store, log });
+    const rearmed = store.get("scratch-app#26");
+    const again = await pollOnce(deps);
+
+    expect(read.resumed).toEqual(["scratch-app#26"]);
+    // What the fault rested on: the run was activated, which clears the wait,
+    // so the failed run has nothing left pointing at the answer it read.
+    expect(dead?.status).toBe("failed");
+    expect(dead?.waitCursor).toBeUndefined();
+    // And it is handed back anyway — to before the answer, not to now.
+    expect(code).toBe(0);
+    expect(rearmed?.status).toBe("parked");
+    expect(rearmed?.waitingKind).toBe("conversation");
+    expect(Date.parse(rearmed?.waitCursor ?? "")).toBeLessThan(
+      Date.parse(answer.createdAt),
+    );
+    // So the next cycle resumes on their words, in a second session.
+    expect(again.resumed).toEqual(["scratch-app#26"]);
+    expect(prompts).toHaveLength(2);
+    expect(prompts.at(-1)).toContain("it's the draft they lose");
+    // And the question was asked once, across the whole sequence.
+    expect(posted.filter(isInvitation)).toHaveLength(1);
+  });
+
+  it("asks the question once, counting what lands on the thread", async () => {
+    // The symptom the gate caught was not a cursor: it was the original
+    // invitation posted a second time, verbatim, under the answer it ignored.
+    // So this counts invitations on the thread rather than reading the ledger —
+    // a cursor assertion would pass with the re-ask still happening.
+    const store = newStore();
+    const { adapter, thread, posted } = conversationTicket();
+    const prompts: string[] = [];
+    const deps = {
+      manifest,
+      store,
+      adapter,
+      spawner: spawnerDyingOnce(store, adapter, prompts),
+    };
+    const { log } = collect();
+
+    await pollOnce(deps);
+    thread.push(answer);
+    await pollOnce(deps);
+    const askedBeforeRetry = posted.filter(isInvitation).length;
+
+    runRetry("scratch-app#26", { manifest, store, log });
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    // One invitation, and the recovery adds none — not on the cycle that
+    // resumes, and not on the one after it either.
+    expect(askedBeforeRetry).toBe(1);
+    expect(posted.filter(isInvitation)).toHaveLength(1);
+    // Their answer is still there, word for word: only the marker ever moved.
+    expect(thread.filter((comment) => comment.createdAt === answer.createdAt)).toEqual([
+      answer,
+    ]);
+  });
+
+  it("still rewinds a park consumed before the marker existed", async () => {
+    // 19c's route back, unchanged and not traded away for the one above. A
+    // ledger written by the previous build has the cursor sitting on the answer
+    // and no marker at all — which is also every run already parked when this
+    // build lands. The cursor is what it has, so the cursor is what it uses.
+    const store = newStore();
+    const { adapter, thread } = conversationTicket();
+    thread.push(answer);
+    const { run } = store.register("scratch-app", 26);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "wayfinding",
+      // Consumed by the previous build: the cursor moved, nothing recorded it.
+      waitCursor: answer.createdAt,
+    });
+    const legacy = store.get("scratch-app#26");
+    const prompts: string[] = [];
+    const deps = {
+      manifest,
+      store,
+      adapter,
+      spawner: spawnerDyingOnce(store, adapter, prompts),
+    };
+    const { log } = collect();
+
+    const stalled = await pollOnce(deps);
+    const code = runRetry("scratch-app#26", { manifest, store, log });
+    const again = await pollOnce(deps);
+
+    // The ledger it works from has nothing but the cursor.
+    expect(legacy?.consumedAnswerAt).toBeUndefined();
+    expect(stalled.resumed).toEqual([]);
+    expect(code).toBe(0);
+    expect(again.resumed).toEqual(["scratch-app#26"]);
+    expect(prompts.at(-1)).toContain("it's the draft they lose");
+  });
+
+  it("leaves a resolved run nothing a later retry could reopen", async () => {
+    // The other end of the window: the session did settle it. The answer has
+    // been acted on, the run is done, and the marker is gone with it — so no
+    // later retry can reach back past a decision and read that answer again.
+    const store = newStore();
+    const { adapter, thread, posted } = conversationTicket();
+    const prompts: string[] = [];
+    const project = {
+      name: "scratch-app",
+      repoUrl: "https://github.com/fvermaut/scratch-app.git",
+    };
+    const settling = new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: {
+        async start(request) {
+          prompts.push(request.prompt);
+          return {
+            sessionId: "session-settled",
+            completed: (async () => {
+              await adapter.postComment(
+                project,
+                26,
+                `${CONVERSATION_RECORD_MARKER}\n\nAgreed: it's the draft.`,
+              );
+              return { sessionId: "session-settled", ok: true };
+            })(),
+          };
+        },
+      },
+      root: "/nowhere",
+    });
+    const deps = { manifest, store, adapter, spawner: settling };
+    const { log, lines } = collect();
+
+    await pollOnce(deps);
+    thread.push(answer);
+    await pollOnce(deps);
+
+    const settled = store.get("scratch-app#26");
+    const code = runRetry("scratch-app#26", { manifest, store, log });
+
+    expect(settled?.status).toBe("done");
+    expect(settled?.consumedAnswerAt).toBeUndefined();
+    // And retry refuses it as the finished run it is, changing nothing.
+    expect(code).toBe(1);
+    expect(lines.join("\n")).toMatch(/finished/i);
+    expect(store.get("scratch-app#26")?.status).toBe("done");
+    expect(posted.filter(isInvitation)).toHaveLength(1);
   });
 });
 

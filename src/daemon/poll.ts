@@ -702,8 +702,19 @@ async function resumeAnswered(
       // spawner claims the run against the record it reads here and restores
       // that record if the session never starts, so a cursor written now
       // survives a failed spawn, while one written later would be overwritten.
+      //
+      // The same write records *which* answer was consumed, because the cursor
+      // cannot keep it: `activate` clears the wait a moment later, and a
+      // session killed after that used to leave the run failed with nothing
+      // pointing at the answer it had read — so `timone retry` re-asked the
+      // question instead of rewinding to it. One write, from the one read, so
+      // the marker and the cursor can never name different comments.
       if (resumption.consumed !== undefined) {
-        store.repark(run.id, { ...waitOf(run), waitCursor: resumption.consumed });
+        store.repark(run.id, {
+          ...waitOf(run),
+          waitCursor: resumption.consumed,
+          consumedAnswerAt: resumption.consumed,
+        });
       }
       await deps.spawner.spawn(run, project, resumption.context);
       result.resumed.push(run.id);

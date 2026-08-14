@@ -108,9 +108,15 @@ function retry(
 
   try {
     const rearmed = store.retry(run.id);
+    const readAgain = reopenConsumed(rearmed, store);
     log(
-      `${name} is re-armed at the point it stopped (${rearmed.stage ?? "the start"}). ` +
-        "The watcher picks it up on its next cycle — start `timone daemon` if it isn't running.",
+      readAgain
+        ? `${name} is re-armed, and I've wound it back to before the answer you ` +
+            "wrote on the ticket, so I read that answer again instead of asking " +
+            "you the same question twice. The watcher picks it up on its next " +
+            "cycle — start `timone daemon` if it isn't running."
+        : `${name} is re-armed at the point it stopped (${rearmed.stage ?? "the start"}). ` +
+            "The watcher picks it up on its next cycle — start `timone daemon` if it isn't running.",
     );
     return 0;
   } catch (error) {
@@ -151,9 +157,11 @@ function rewind(
   store: RunStore,
   log: (message: string) => void,
 ): number {
-  const cursor = run.waitCursor;
-  const at = cursor === undefined ? Number.NaN : Date.parse(cursor);
-  if (run.waitingKind !== "conversation" || Number.isNaN(at)) {
+  // The marker first, the cursor as a fallback. They name the same instant on a
+  // park this build consumed; the fallback is for a park consumed by a daemon
+  // that predates the marker, which has only its cursor to go back from.
+  const at = instantOf(run.consumedAnswerAt) ?? instantOf(run.waitCursor);
+  if (run.waitingKind !== "conversation" || at === undefined) {
     log(
       `${name} didn't fail — it's waiting on you: ${run.waitingOn ?? "an answer"}. ` +
         "Answer that and it carries on by itself.",
@@ -161,10 +169,9 @@ function rewind(
     return 1;
   }
 
-  store.repark(run.id, {
-    ...waitOf(run),
-    waitCursor: new Date(at - 1).toISOString(),
-  });
+  // `waitOf` carries no marker, so using one spends it: the rewound park is a
+  // park with an answer outstanding again, not one still holding a read receipt.
+  store.repark(run.id, { ...waitOf(run), waitCursor: justBefore(at) });
   log(
     `${name} is waiting on a conversation, and I've wound it back to before the ` +
       "last answer written on the ticket, so I read that answer again instead of " +
@@ -172,6 +179,58 @@ function rewind(
       "`timone daemon` if it isn't running.",
   );
   return 0;
+}
+
+/**
+ * Put a re-armed run back on the conversation it was resumed from, when it
+ * died holding an answer it had already read
+ * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)). Returns whether
+ * it did.
+ *
+ * This is {@link rewind} for the state the live gate found on 2026-08-13, and
+ * the reason that gate failed: a session killed after its run was activated
+ * leaves the run `failed` with no wait at all — no cursor, no kind, nothing to
+ * wind back. Re-arming it alone hands it to the *entry* path, which asks the
+ * question again from scratch, and the answer they wrote is never read. What
+ * survives is the marker, so the wait is rebuilt around it: the same
+ * conversation, wound back to just before the answer, which the next cycle then
+ * reads exactly as it would have.
+ *
+ * **The marker is the whole warrant.** It is present only while an answer has
+ * been read and not acted on ({@link Run.consumedAnswerAt}), so a run that
+ * failed at some later stage carries none and is re-armed as it always was.
+ * Nothing here asks the human anything, and nothing re-reads the thread to
+ * guess which comment was last read — guessing is what produced the fault.
+ */
+function reopenConsumed(run: Run, store: RunStore): boolean {
+  const at = instantOf(run.consumedAnswerAt);
+  if (at === undefined || run.stage === undefined) return false;
+
+  store.park(run.id, {
+    // Its own words rather than the channel's: what this run is waiting for is
+    // one cycle of the watcher, and the wait the session cleared is gone.
+    waitingOn: "the answer you wrote on the ticket, which I'll read again",
+    kind: "conversation",
+    waitCursor: justBefore(at),
+  });
+  return true;
+}
+
+/** An instant as milliseconds, or undefined when there is nothing to read. */
+function instantOf(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? undefined : at;
+}
+
+/**
+ * The instant just before `at` — the whole of a rewind, and exact where it
+ * matters: a comment is unread only when it is strictly later than the cursor,
+ * so the smallest step the timestamp can express makes that one comment
+ * readable again and nothing else.
+ */
+function justBefore(at: number): string {
+  return new Date(at - 1).toISOString();
 }
 
 /** Register the `retry` command on the program. */

@@ -2246,6 +2246,39 @@ describe("pollOnce — reading a written answer consumes it", () => {
     expect(spawned).toHaveLength(1);
   });
 
+  it("records which answer it consumed, before the session that reads it exists", async () => {
+    // The cursor cannot be the record: `activate` clears it the moment the
+    // session starts, and a session killed just after that left the run failed
+    // with nothing pointing at the answer it had read (ADR-0023). So the same
+    // write that moves the cursor records the instant it moved to — and, being
+    // taken from the one read of the thread, it names the very comment the
+    // session is handed rather than whatever a second read would have found.
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter } = conversationAdapter([invitation, answer]);
+    const ledger: (Run | undefined)[] = [];
+    const contexts: SpawnContext[] = [];
+    const spawner: SessionSpawner = {
+      async spawn(run, _project, context) {
+        ledger.push(store.get(run.id));
+        contexts.push(context ?? {});
+      },
+    };
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    const atSpawn = ledger[0];
+    expect(atSpawn?.waitCursor).toBe(answer.createdAt);
+    expect(atSpawn?.consumedAnswerAt).toBe(answer.createdAt);
+    // The words that instant belongs to are the words the session was given.
+    expect(contexts[0]?.feedback).toBe(answer.body);
+  });
+
   it("still hears the next thing they write, and hears only that", async () => {
     // Consuming must move the marker, never deafen the path. A second answer
     // is a second answer — and it arrives on its own, not with the first one
