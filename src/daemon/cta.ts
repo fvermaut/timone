@@ -133,6 +133,37 @@ export function ctaFor(state: TicketState): Cta {
   // falling into the wait below.
   run.status satisfies "parked";
 
+  // The map's own ticket, whose two states are ADR-0024's fourth ruling
+  // ("while questions are open, *nothing — I am working the list*; once the
+  // frontier is empty, *say go and I will write the specification*").
+  //
+  // **Read off the run, like every other branch here, and not off the map's
+  // labels.** The frontier is a fact about the tracker, but by the time it
+  // reaches here the poll loop has already written it into the run's wait —
+  // which is what lets `timone status` and the ticket say the same thing, and
+  // they would not if this branch needed a listing the terminal never makes.
+  //
+  // No command, deliberately. Every other conversation park offers the
+  // takeover; the map's stage starts no session of its own, so `timone
+  // takeover` answers "a stage I can't hold a conversation for yet". The
+  // go-ahead is written here, in a comment, exactly as any other written
+  // answer.
+  if (run.stage === "charting") {
+    return run.waitingKind === undefined
+      ? {
+          headline: "I'm working through this map's questions.",
+          needFromYou:
+            "nothing right now — I'll come back here when the last one is closed.",
+          waitingOnYou: false,
+        }
+      : {
+          headline: "Every question on this map is answered.",
+          needFromYou:
+            "say go ahead here and I'll write the specification this map has been finding its way to.",
+          waitingOnYou: true,
+        };
+  }
+
   return {
     // A park with no kind of wait is not waiting on a human at all: it is a
     // run stopped because a stage's machinery does not exist (`resolveWait`

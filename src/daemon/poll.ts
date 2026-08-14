@@ -16,10 +16,16 @@ import type {
   PreviewAdapter,
   PreviewProject,
 } from "../adapters/preview.js";
-import { instant as instantOf, readConversationRecord, readGateDecision } from "./gates.js";
+import {
+  instant as instantOf,
+  readConversationRecord,
+  readGateDecision,
+  waitCursorFrom,
+} from "./gates.js";
 import {
   classificationFromLabels,
   concludeConversation,
+  frontierIsEmpty,
   isBuilt,
   readGate,
   routeAfterTriage,
@@ -623,6 +629,13 @@ async function pollProject(
     }
   }
 
+  // Before anything is resumed: a map whose frontier emptied since the last
+  // cycle is a map that has a question to ask, and asking it is what makes
+  // the answer readable. Ordered first so a go-ahead already written — the
+  // daemon was down, or the human answered the closing summary within the
+  // minute — is picked up on this cycle rather than the next.
+  await openGoAheads(project, tickets, threads, deps, result, log);
+
   await resumeAnswered(project, deps, result, log, threads);
 
   // Hand off whatever now holds the project, if nothing is running it yet.
@@ -653,6 +666,69 @@ async function pollProject(
   // has asked for that. Nothing in this call reaches the ledger's pickup path,
   // which is what keeps R1 true.
   await introduceUnmarked(project, config, deps, result, log);
+}
+
+/**
+ * Ask a wayfinder map for its go-ahead, once its own questions are all closed
+ * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
+ *
+ * **This is the map's question being asked, and nothing else here asks it.**
+ * A map is parked with no kind of wait for as long as it is being worked — it
+ * is waiting on its own decision tickets, not on a human. The closing session
+ * empties the frontier and says so with a label, and this is the cycle that
+ * turns that into a wait a written answer can resolve.
+ *
+ * **It posts nothing.** The map's standing call to action is reconciled at
+ * the end of this same cycle and flips itself, because {@link ctaFor} reads
+ * the wait this writes — one computation, and the terminal follows it too.
+ *
+ * **The cursor is the machine's last word**, exactly as the spawner opens
+ * every other wait, and for the reason {@link waitCursorFrom} gives: a human
+ * who answers in the moment between the closing summary and this cycle must
+ * not land past their own answer. Its other half matters more here — a map is
+ * a ticket people talk on for weeks, and everything said *before* the way was
+ * clear was said about something else. It cannot agree to a question nobody
+ * had asked yet.
+ *
+ * The thread comes from the cycle's own reader, so it is the one the resume
+ * decision reads a moment later and the reconciler reads after that: opening
+ * the wait costs the tracker nothing.
+ *
+ * One-way, deliberately: a frontier that reopens (fog graduating into fresh
+ * tickets) leaves the wait standing rather than withdrawing a question the
+ * human may be in the middle of answering.
+ */
+async function openGoAheads(
+  project: TicketingProject,
+  tickets: readonly Ticket[],
+  threads: (ticket: number) => RunThreads,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store } = deps;
+
+  for (const ticket of tickets) {
+    const run = store.get(runId(project.name, ticket.number));
+    if (run === undefined || run.stage !== "charting") continue;
+    if (run.status !== "parked" || run.waitingKind !== undefined) continue;
+    if (!frontierIsEmpty(ticket.labels)) continue;
+
+    try {
+      const thread = await threads(ticket.number).ticket();
+      store.repark(run.id, {
+        waitingOn: "your go-ahead to write the specification",
+        kind: "conversation",
+        stage: run.stage,
+        waitCursor: waitCursorFrom(thread),
+      });
+      log(`asking ${run.id} — the way to the destination is clear`);
+    } catch (error) {
+      const line = `${project.name}: could not ask for the go-ahead on #${ticket.number}: ${oneLine(error)}`;
+      result.errors.push(line);
+      log(`error  ${line}`);
+    }
+  }
 }
 
 /**
@@ -1185,6 +1261,12 @@ async function resolveWait(
   // would skip it, and for a park at execution that means verifying code
   // nobody wrote.
   if (run.waitingKind === undefined) {
+    // A map being worked is the one park with no wait that is not a run
+    // stopped for want of machinery. It is waiting on its own decision
+    // tickets, and what moves it is {@link openGoAheads} finding the frontier
+    // empty — never a resume, which at this stage would spawn a session for a
+    // map nobody has agreed to write anything about.
+    if (stage === "charting") return undefined;
     if (stage !== "triage") {
       return isBuilt(stage) ? { context: { stage } } : undefined;
     }
@@ -1227,6 +1309,35 @@ async function resolveWait(
   }
 
   if (run.waitingKind === "conversation") {
+    // The map's conversation is the one whose answer is *agreement* rather
+    // than information (ADR-0024). Everywhere else a written answer re-enters
+    // the same stage, because that stage has to judge whether the answer
+    // settles the question it asked; here the question is "shall I write the
+    // specification?", nothing runs at this stage, and what the agreement
+    // starts is stage 3 — on this run, holding this project until the
+    // specification is committed.
+    //
+    // The frontier is re-checked rather than trusted: the wait was opened
+    // when it was empty, and a map that has since grown a question back is
+    // one nobody has agreed anything about. It is the same clause the
+    // `waitingKind === undefined` branch above enforces, and it is worth two
+    // copies — this is the branch that starts a build.
+    if (stage === "charting") {
+      const thread = await threads.ticket();
+      if (!frontierIsEmpty(thread.labels)) return undefined;
+
+      const answer = writtenAnswer(thread, cursor);
+      if (answer === undefined) return undefined;
+
+      const transition = concludeConversation(stage, { accepted: true });
+      return transition.kind === "advance"
+        ? {
+            context: { stage: transition.stage, feedback: answer.words },
+            consumed: answer.at,
+          }
+        : undefined;
+    }
+
     // One thread, and both halves of the decision taken from it: what the
     // session is handed, and the instant consuming it advances the cursor to
     // (ADR-0023). Splitting the pair across two reads would let the run resume

@@ -66,9 +66,14 @@ describe("wayfinderStage", () => {
     expect(wayfinderStage(["timone", "wayfinder:research"])).toBe("research");
   });
 
-  it("makes no work of the map, which is an index rather than a question", () => {
-    // Marking the map would create a run for a ticket nothing can resolve.
-    expect(wayfinderStage(["timone", "wayfinder:map"])).toBeUndefined();
+  it("sends the map to a stage of its own, beside the decision tickets", () => {
+    // ✏ ADR-0024 amends ADR-0010 here, and only here. The map used to be
+    // unroutable on purpose — an index nobody answers — and the effect was
+    // that fvermaut's "ok go ahead and write the spec" on `ivtrends` #1 had
+    // nowhere to land. It is now a ticket of its own kind, and the stage it
+    // enters is **not** `wayfinding`: see the graph, where wayfinding still
+    // has nothing following it.
+    expect(wayfinderStage(["timone", "wayfinder:map"])).toBe("charting");
   });
 
   it("yields nothing for a wayfinder type nobody defined", () => {
@@ -219,6 +224,29 @@ describe("the stage graph", () => {
     expect(isBuilt("research")).toBe(false);
   });
 
+  it("carries the map itself at process stage 2, and hands it to stage 3", () => {
+    // ADR-0024's fourth ruling. The map is the effort's own ticket: it holds
+    // no branch and runs no session of its own, and what follows it is the
+    // specification the whole map was finding its way to — which is why the
+    // `next` is here and not on `wayfinding`.
+    expect(processStage("charting")).toBe(2);
+    expect(waitFor("charting")).toBe("conversation");
+    expect(ownsBranch("charting")).toBe(false);
+    expect(isBuilt("charting")).toBe(true);
+    expect(stageAfter("charting")).toBe("requirements");
+  });
+
+  it("still has nothing following a decision ticket, now that the map has", () => {
+    // **The property most easily broken by adding the stage beside it.** A
+    // decision ticket's answer resolves that ticket and ends its run; a PRD
+    // written off one answer is the fault this clause exists to prevent
+    // (ADR-0010, and ADR-0024's own words: "decision tickets are unchanged
+    // and `wayfinding` still has nothing following it"). Asserted directly,
+    // beside the map's `next`, so the two can never be confused for one.
+    expect(stageAfter("wayfinding")).toBeUndefined();
+    expect(stageAfter("charting")).toBe("requirements");
+  });
+
   it("ends a decision ticket's run where the ticket ends, rather than in a PRD", () => {
     // The trap the clarification row sets: `stageAfter("clarification")` is
     // requirements, so a decision ticket parked at a stage copied from it
@@ -318,6 +346,12 @@ describe("the model and effort each stage runs on", () => {
     expect(effortFor("research")).toBeUndefined();
     expect(modelFor("feedback")).toBeUndefined();
     expect(effortFor("feedback")).toBeUndefined();
+    // ✏ And the second way to be one, since ADR-0024: the map's stage is
+    // built, and what happens at it is a ticket waiting rather than a session
+    // running. The session that follows the go-ahead is stage 3's.
+    expect(isBuilt("charting")).toBe(true);
+    expect(modelFor("charting")).toBeUndefined();
+    expect(effortFor("charting")).toBeUndefined();
   });
 
   it("runs the approval record on Haiku, and sends it no effort at all", () => {

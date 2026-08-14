@@ -29,7 +29,7 @@ The map is working memory with the epistemic status of a grill transcript. **Not
 
 ## The map
 
-A single issue on the project's tracker labelled `wayfinder:map` — the canonical artifact of the effort. It is an **index**, not a store: it gists closed decisions and links the tickets that hold their detail; open tickets are *not* listed in the body — they are open child tickets, found by query. Body template:
+A single issue on the project's tracker labelled `wayfinder:map` **and `timone`** — the canonical artifact of the effort. It is an **index**, not a store: it gists closed decisions and links the tickets that hold their detail; open tickets are *not* listed in the body — they are open child tickets, found by query. Body template:
 
 ```markdown
 ## Destination
@@ -51,7 +51,15 @@ A single issue on the project's tracker labelled `wayfinder:map` — the canonic
 ## Out of scope
 
 <work consciously ruled beyond the destination — never graduates>
+
+---
+
+**What I need from you:** nothing — I'm working through the questions on this map, and I'll come back here when the last one is closed.
 ```
+
+**The map carries the `timone` mark, like every ticket on it** ([ADR-0024](../../../doc/adr/0024-every-open-ticket-answers-for-itself.md), amending ADR-0010's "never becomes a run" *for the map alone*). It is the ticket that represents the effort to the human, so it is the ticket they write on — and the one transition the process could not otherwise be given, stage 2 → stage 3, is the map's own. Marked, it becomes a run parked at a stage of its own: while the frontier is open it asks for nothing and starts nothing, and once the frontier is empty **a comment agreeing is what starts the specification**. Leave the mark off and that comment lands nowhere, which is exactly what happened to `ivtrends` #1 on 2026-08-13.
+
+Its closing line is the one above while questions remain, and is rewritten when the way is clear — see [Closing the effort](#closing-the-effort). Nothing else about the map changes: it is still an index, still scaffolding rather than spec, and it still holds no decision that has not been promoted into a permanent document.
 
 **Refer by name:** in everything the human reads, tickets go by their titles (wrapping their links), never bare numbers. A wall of `#42, #43` is illegible.
 
@@ -61,7 +69,7 @@ Each ticket is a child of the map, body = the question it resolves, sized to one
 
 **Both labels, every decision ticket.** `wayfinder:<type>` says what kind of question it is; `timone` is the mark the daemon watches, and it is what gives the ticket a run — which is in turn what makes its `timone takeover` line work and what lets a written answer be picked up at all. A decision ticket created without the mark is the defect [ADR-0022](../../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md) was written about: a well-formed question nothing is listening to.
 
-**Never mark the map.** It carries `wayfinder:map` alone. The map is an index of the effort, not a question anybody can answer, so marking it would create a run for a ticket nothing can resolve.
+**Mark the map as well** — `wayfinder:map` **and `timone`**, from the moment you create it. This reverses an earlier rule that said never to; the reasoning and its consequences are above, under [The map](#the-map).
 
 **`research` is the one type the daemon cannot yet resolve unattended.** It is resolved in-session by a sub-agent (Mode 1, step 5) and normally closed before the daemon would ever list it. A `research` ticket left open and marked parks with a comment saying that machinery is not built — honest, but not what its own CTA promises, so close them in the session that fired them.
 
@@ -152,7 +160,7 @@ Invoked with a loose idea. Charting is one session's work; it hand-resolves noth
 
 1. **Name the destination** — a short grill (one question at a time, recommended answers) pinning down what this map is finding its way to. The destination fixes the scope, so it comes first.
 2. **Map the frontier, breadth-first** — fan out across the whole space, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** — the journey fits one session — you don't need a map: stop and suggest plain `timone-grill` (or `timone-prd` directly).
-3. **Create the map** (`wayfinder:map`): Destination and Notes filled, Decisions-so-far empty, the fog sketched into Not yet specified.
+3. **Create the map** (`wayfinder:map` **and `timone`**): Destination and Notes filled, Decisions-so-far empty, the fog sketched into Not yet specified, and the map's own closing line as the body template has it.
 4. **Create the tickets you can specify now** — each labelled `wayfinder:<type>` **and `timone`**, each closing on the CTA block for its type — then wire blocking in a **second pass** (tickets need ids before they can reference each other).
 5. **Fire the research sub-agents** — each `research` ticket you just created gets a fresh-context sub-agent resolving it in parallel, posting findings as its resolution comment.
 6. Stop. Report the map by name with its link, the frontier, and the suggested first working session. Update `STATUS.md` per the process convention.
@@ -170,10 +178,26 @@ Invoked with a map (URL, number, or fallback path); a ticket is optional — wit
 
 ## Closing the effort
 
-The way is clear when the frontier is empty and no fog remains. Then:
+The way is clear when the frontier is empty and no fog remains. Then, **on the map ticket, in this order**:
 
-1. Summarise the route — decisions by name, risks, deliberately open questions — for the human to accept, as any stage-2 close.
-2. Hand off to `timone-prd` (or whatever the destination names): the map's decisions are raw material; the artifact is the in-repo one.
-3. Close the map **only after the destination artifact is committed**, with a closing comment linking it.
+1. **Post the route** — decisions by name, risks, deliberately open questions — as a comment on the map. This is the summary the human reads before agreeing, and it is also the machine's last word on the ticket: **only what is written after it counts as the go-ahead**, so post it before step 2 and never after.
+2. **Rewrite the map's closing line** to ask for the go-ahead, replacing the one the body template carries:
+
+   ````markdown
+   ---
+
+   **Every question on this map is answered.** Say the word here and I'll write the specification this map has been finding its way to — a plain comment is enough.
+
+   **What I need from you:** say go ahead here, and I'll write it.
+   ````
+
+3. **Apply `wayfinder:frontier-empty` to the map.** That label is what tells the daemon the frontier is empty: on its next pass it opens the map's wait, keeps the map's standing call to action in step with it, and reads the human's next comment as the go-ahead. Without the label the map goes on asking for nothing, whatever the body says. Create the label on first use, as with the other `wayfinder:*` ones.
+4. **Stop there.** The go-ahead starts stage 3 on the map's own run, with nothing run by hand — a comment agreeing is the whole mechanism ([ADR-0024](../../../doc/adr/0024-every-open-ticket-answers-for-itself.md)). Do not invoke `timone-prd` yourself off your own reading of the map; if the human is in the session with you and asks for the specification now, that is their call and it is theirs to make, not yours to assume.
+5. **From the go-ahead until the specification is committed, the map holds its whole project** — no other ticket on it moves. That is intended, and it is worth saying in the route summary so nobody wonders why the queue stopped.
+6. Close the map **only after the destination artifact is committed**, with a closing comment linking it.
+
+**On the markdown fallback there is no daemon and no label**, so steps 3–5 have nothing to act on: write the route and the go-ahead ask into `map.md`, say plainly that the specification needs a session started by hand, and hand back. The mechanism above is the tracker path's alone.
+
+**If the frontier reopens** — fog graduating into fresh tickets after step 3 — remove `wayfinder:frontier-empty` and put the working line back in the body. The map's own wait is not withdrawn once opened (a question the human may be halfway through answering), but nothing will start the specification while a question is open again.
 
 Wayfinding produces decisions, never deliverables: no application code, no phase files, no PRDs written by this skill itself. `CONTEXT.md` (during grilling tickets), `STATUS.md`, and the fallback `doc/wayfinder/` tree are the only files it writes in the target project.

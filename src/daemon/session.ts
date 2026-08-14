@@ -483,6 +483,15 @@ export class AgentSessionSpawner implements SessionSpawner {
       // that ingests them, because re-posting the invitation they have just
       // answered is the precise failure the written path exists to prevent.
       if (!runsUnattended(stage) && feedback === undefined) {
+        // The map is the one conversation with nothing to ask yet. Its
+        // question is the whole effort's — *shall I write the specification?*
+        // — and it is not owed until its own decision tickets are all closed
+        // (ADR-0024). An invitation posted here would be a question on a
+        // ticket nobody can answer, which is this phase's fault inverted.
+        if (stage === "charting") {
+          this.holdMap(run, stage);
+          return;
+        }
         await this.openConversation(run, project, stage);
         return;
       }
@@ -1156,6 +1165,30 @@ export class AgentSessionSpawner implements SessionSpawner {
       waitCursor: waitCursorFrom(after),
     });
     this.log(`parked ${run.id} at ${stage}, waiting on a conversation`);
+  }
+
+  /**
+   * Stop on a wayfinder map, silently: it is being worked, and nobody is
+   * being asked anything ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
+   *
+   * **Nothing is posted, and that is the point.** Every other stop here has a
+   * comment of its own because it is announcing something new; this one is
+   * announcing that the effort carries on, which the map's standing call to
+   * action already says and keeps saying as the map's state changes. A
+   * comment here would be the third thing on the ticket saying the same
+   * sentence, and the first of them to go stale.
+   *
+   * No wait kind and no cursor, deliberately. A park with no kind is a run
+   * *not waiting on a human* — precisely true of a map still working its
+   * list — and the poll loop opens the real wait, with the cursor it must be
+   * answered from, on the cycle the frontier turns out to be empty.
+   */
+  private holdMap(run: Run, stage: PipelineStage): void {
+    this.stop(run, {
+      waitingOn: "this map's own questions to be answered",
+      stage,
+    });
+    this.log(`parked ${run.id} at ${stage} — working the map`);
   }
 
   /** Park a run at a stage nothing can run yet, and say so on the ticket. */

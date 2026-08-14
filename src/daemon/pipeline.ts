@@ -11,17 +11,52 @@ export const CLASSIFICATIONS = ["feature", "bug", "chore", "question"] as const;
 export type Classification = (typeof CLASSIFICATIONS)[number];
 
 /**
- * The four kinds of decision ticket a wayfinder map holds (ADR-0010), read
- * back off the `wayfinder:<type>` label the charting session applied.
+ * The kinds of ticket a wayfinder effort holds (ADR-0010), read back off the
+ * `wayfinder:<type>` label the charting session applied.
  *
- * `map` is deliberately not among them. The map is an index of the effort
- * rather than a question anybody can answer, so it never carries the mark
- * label and never becomes a run — a run on the map would be a run nothing
- * could resolve.
+ * **`map` is the fifth, and it was deliberately absent until ADR-0024.** The
+ * reasoning that kept it out was sound and is now overtaken: the map is an
+ * index of the effort rather than a question anybody can answer, so a run on
+ * it would be a run nothing could resolve. What that missed is the *last*
+ * transition — the effort closing into a specification — which is a question
+ * only the map can carry, because the map is the ticket that represents the
+ * effort to the human. On 2026-08-13 fvermaut wrote his instruction on
+ * `ivtrends` #1 and nothing was listening.
+ *
+ * So the map is a kind with a stage of its own ({@link PIPELINE_STAGES}'s
+ * `charting`), **and the decision tickets are unchanged**.
  */
-const WAYFINDER_TYPES = ["research", "grilling", "prototype", "task"] as const;
+const WAYFINDER_TYPES = [
+  "research",
+  "grilling",
+  "prototype",
+  "task",
+  "map",
+] as const;
 
 type WayfinderType = (typeof WAYFINDER_TYPES)[number];
+
+/**
+ * The label a wayfinding session applies to a map once its frontier is empty
+ * — every decision ticket closed, no fog left
+ * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
+ *
+ * **Not a `wayfinder:<type>`**, though it shares the namespace: it says
+ * nothing about what kind of ticket this is, only that this map's own
+ * questions are all answered. {@link wayfinderStage} ignores it for exactly
+ * that reason, and a map carrying it is still a `wayfinder:map`.
+ *
+ * It is a label rather than anything in the ledger because the session that
+ * closes the last decision ticket works the tracker and not the run store,
+ * and because a human reading the map can see it — the frontier is a fact
+ * about the tracker's own open issues, and this is where it is written down.
+ */
+export const FRONTIER_EMPTY_LABEL = "wayfinder:frontier-empty";
+
+/** Whether `labels` say this map's decision tickets are all closed. */
+export function frontierIsEmpty(labels: readonly string[]): boolean {
+  return labels.includes(FRONTIER_EMPTY_LABEL);
+}
 
 /**
  * The stages a run passes through. Named for what they do rather than by
@@ -32,6 +67,7 @@ export const PIPELINE_STAGES = [
   "triage",
   "clarification",
   "wayfinding",
+  "charting",
   "research",
   "requirements",
   "planning",
@@ -78,6 +114,8 @@ interface StageFacts {
  */
 interface SpawnedStage {
   built: true;
+  /** Never set here: {@link UnspawnedStage} is what carries the false. */
+  spawns?: never;
   waits: WaitKind;
   model: string;
   /**
@@ -90,17 +128,29 @@ interface SpawnedStage {
 
 /**
  * A stage no session is ever started for, and which therefore declares
- * neither. One way to be one, since ADR-0022: the machinery does not exist
- * yet. A model on it would be configuration nothing reads.
+ * neither. A model on it would be configuration nothing reads.
  *
- * It used to be two. A stage waiting on a conversation was unspawnable
- * because `spawn()` short-circuited to `openConversation` before it ever
- * reached `runStage` — but a conversation can now be **answered in writing**,
- * and the session that ingests that answer is a session the daemon starts. So
- * a conversation stage declares a model like any other spawned stage; what it
- * still never does is start *of its own accord* (see {@link runsUnattended}).
+ * **Two ways to be one, and they are different facts about a stage:**
+ *
+ * - `built: false` — the machinery does not exist yet.
+ * - `built: true, spawns: false` — the machinery exists and it is not a
+ *   session. `charting` is the first of these (ADR-0024): what happens at the
+ *   map's stage is a ticket waiting and a call to action tracking it, and the
+ *   session that follows the human's go-ahead belongs to stage 3, on the same
+ *   run. Declaring a model here would name a session nobody starts.
+ *
+ * It used to be one way, and briefly looked like a third. A stage waiting on
+ * a conversation was unspawnable because `spawn()` short-circuited to
+ * `openConversation` before it ever reached `runStage` — but a conversation
+ * can now be **answered in writing**, and the session that ingests that
+ * answer is a session the daemon starts. So a conversation stage declares a
+ * model like any other spawned stage; what it still never does is start *of
+ * its own accord* (see {@link runsUnattended}).
  */
-type UnspawnedStage = { model?: never; effort?: never } & { built: false };
+type UnspawnedStage = { model?: never; effort?: never } & (
+  | { built: false; spawns?: never }
+  | { built: true; spawns: false }
+);
 
 type StageSpec = StageFacts & (SpawnedStage | UnspawnedStage);
 
@@ -174,6 +224,31 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // that ticket and ends its run. The destination artifact is the whole
     // map's to hand to stage 3 once the effort closes, and advancing one
     // ticket into PRD-writing would write requirements off a single answer.
+  },
+  charting: {
+    // The map itself ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md),
+    // amending ADR-0010). Stage 2's other artifact: not a question anybody
+    // answers but the effort's own ticket, and the only place the stage-2 →
+    // stage-3 handover can be asked for — which is why the `next` is here and
+    // emphatically not on `wayfinding`, where it would write a specification
+    // off a single decision ticket's answer.
+    processStage: 2,
+    // The go-ahead is an ordinary written answer, read exactly as any other
+    // (ADR-0022's path, unchanged): "say go and I'll write the specification".
+    // Not a gate — a gate is an approval of something already written, and
+    // there is nothing to approve until stage 3 has run.
+    waits: "conversation",
+    // The map holds nothing while it waits. It starts holding its project the
+    // moment the go-ahead lands, because what follows *does* own a branch —
+    // and from then until the specification is committed no other ticket on
+    // that project moves. ADR-0024 records that as intended.
+    ownsBranch: false,
+    built: true,
+    // Nothing runs at this stage: the map's whole behaviour is a ticket
+    // waiting and a call to action tracking its own state. See
+    // {@link UnspawnedStage}.
+    spawns: false,
+    next: "requirements",
   },
   research: {
     // The one wayfinder type nobody waits on: its own CTA says "nothing —
@@ -292,17 +367,22 @@ export function classificationFromLabels(
 }
 
 /**
- * The stage that resolves a wayfinder decision ticket carrying `labels`, or
- * undefined when the ticket is not one.
+ * The stage a wayfinder ticket carrying `labels` enters, or undefined when
+ * the ticket is not one.
  *
  * **Derived from the labels every time, never stored on the run.** The
  * tracker holds the ticket's type; a copy of it in the ledger is a copy that
  * can disagree with a label a human has since changed.
  *
- * The split is the one ADR-0010's table draws: `research` resolves itself
- * with nobody waiting, while `grilling`, `prototype` and `task` each resolve
- * only through exchange with a human — which is a conversation, whatever
- * medium it ends up running on.
+ * Three answers, and the split is ADR-0010's own table plus ADR-0024's
+ * amendment to it:
+ *
+ * - `research` resolves itself with nobody waiting.
+ * - `grilling`, `prototype` and `task` each resolve only through exchange
+ *   with a human — a conversation, whatever medium it runs on — and their
+ *   stage has nothing following it, on purpose.
+ * - `map` is the effort itself, and its stage is the one that hands stage 2's
+ *   whole outcome to stage 3.
  */
 export function wayfinderStage(
   labels: readonly string[],
@@ -311,9 +391,12 @@ export function wayfinderStage(
     const type = label.startsWith("wayfinder:")
       ? label.slice("wayfinder:".length)
       : "";
-    if ((WAYFINDER_TYPES as readonly string[]).includes(type)) {
-      return (type as WayfinderType) === "research" ? "research" : "wayfinding";
-    }
+    if (!(WAYFINDER_TYPES as readonly string[]).includes(type)) continue;
+
+    const kind = type as WayfinderType;
+    if (kind === "research") return "research";
+    if (kind === "map") return "charting";
+    return "wayfinding";
   }
   return undefined;
 }

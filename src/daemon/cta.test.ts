@@ -219,6 +219,80 @@ describe("ctaFor", () => {
   });
 });
 
+describe("ctaFor — the wayfinder map's two states", () => {
+  /** The map ticket's run, parked at its own stage. */
+  function map(waitingKind: Run["waitingKind"]): Run {
+    return run({
+      project: "ivtrends",
+      ticket: 1,
+      status: "parked",
+      stage: "charting",
+      waitingKind,
+      waitingOn: "this map's own questions to be answered",
+    });
+  }
+
+  it("asks for nothing at all while the map still has questions open", () => {
+    // R21's fourth criterion, and the half that must never be forgotten: a
+    // map does not advance on a single answer, so while it is being worked
+    // the human is not being waited on and must not be told they are. The
+    // words are `pickedUpComment`'s kind of words rather than a new dialect.
+    const cta = ctaFor({ project: "ivtrends", ticket: 1, run: map(undefined) });
+
+    expect(cta.waitingOnYou).toBe(false);
+    expect(cta.needFromYou).toBe(
+      "nothing right now — I'll come back here when the last one is closed.",
+    );
+    expect(cta.headline).toBe("I'm working through this map's questions.");
+    expect(cta.command).toBeUndefined();
+  });
+
+  it("invites the go-ahead once the way to the destination is clear", () => {
+    // R21's fifth criterion. This is the sentence `ivtrends` #1 needed on
+    // 2026-08-13 and did not have: the machine said "nothing right now" and
+    // fvermaut answered anyway.
+    const cta = ctaFor({
+      project: "ivtrends",
+      ticket: 1,
+      run: map("conversation"),
+    });
+
+    expect(cta.waitingOnYou).toBe(true);
+    expect(cta.needFromYou).toBe(
+      "say go ahead here and I'll write the specification this map has been finding its way to.",
+    );
+    expect(cta.headline).toBe("Every question on this map is answered.");
+  });
+
+  it("names no command for the map, because none of them holds it", () => {
+    // Every other conversation park names `timone takeover`. The map's stage
+    // starts no session of its own, so the terminal has nothing to hold — and
+    // a call to action naming a command that answers "I can't hold a
+    // conversation for that yet" is worse than one naming none.
+    expect(ctaFor({ project: "ivtrends", ticket: 1, run: map("conversation") }).command)
+      .toBeUndefined();
+  });
+
+  it("says a map that broke what a broken ticket says, not what a map says", () => {
+    // The map's branch is a *parked* branch. A run that failed, is queued or
+    // is being worked reads exactly as any other ticket in that state — the
+    // map is not an exception to the rest of the computation.
+    const cta = ctaFor({
+      project: "ivtrends",
+      ticket: 1,
+      run: run({
+        project: "ivtrends",
+        ticket: 1,
+        status: "failed",
+        stage: "charting",
+      }),
+    });
+
+    expect(cta.headline).toBe("Something went wrong while I was working on this.");
+    expect(cta.command).toBe("timone retry ivtrends#1");
+  });
+});
+
 /**
  * The wait each stage's park opens, written out by hand from the stage graph
  * rather than read back from `waitFor()` — an expectation computed the
@@ -229,6 +303,11 @@ const WAIT_AT: Record<PipelineStage, Run["waitingKind"]> = {
   triage: undefined,
   clarification: "conversation",
   wayfinding: "conversation",
+  // The map's park has two kinds across its life — none while its own
+  // questions are open, a conversation once they are all closed. The
+  // conversation is the one this table is about: it is the state where a
+  // human is being waited on, and the two are covered case by case above.
+  charting: "conversation",
   research: undefined,
   requirements: "gate",
   planning: "gate",
@@ -266,8 +345,15 @@ describe("ctaFor — every stage in the graph", () => {
       // The takeover is the terminal fallback for a conversation, and only for
       // a conversation: a gate is answered by replying, a review on the pull
       // request. Naming a command that resolves neither would be a dead end.
+      //
+      // ✏ The map is the one conversation it is a dead end for, since
+      // ADR-0024: `charting` starts no session, so `takeover` refuses it by
+      // name ("a stage I can't hold a conversation for yet"). Its go-ahead is
+      // written on the ticket, which is what its own cases above assert.
       expect(cta.command).toBe(
-        kind === "conversation" ? "timone takeover scratch-app#42" : undefined,
+        kind === "conversation" && stage !== "charting"
+          ? "timone takeover scratch-app#42"
+          : undefined,
       );
     });
   }

@@ -3526,3 +3526,370 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     expect(writesOn(calls, 6)).toHaveLength(1);
   });
 });
+
+describe("pollOnce — the wayfinder map is a ticket of its own", () => {
+  // ADR-0024's fourth ruling, and the ticket the whole phase started from:
+  // `ivtrends` #1 closed its last question, the machine said "nothing right
+  // now", fvermaut replied **"ok go ahead and write the spec"** — and nothing
+  // happened, because the map was unmarked and `wayfinding` had no `next`.
+  //
+  // The map is now marked at creation and enters a stage of its own. Its two
+  // states are the whole of the behaviour: while its own questions are open
+  // it asks for nothing and starts nothing; once its frontier is empty it
+  // asks for the go-ahead, and a comment agreeing runs stage 3 on this run.
+
+  const MAP = 1;
+
+  const closingSummary = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\nthat was the last question — here is the route we walked`,
+    createdAt: "2026-08-13T09:00:00Z",
+    fromTimone: true,
+  };
+
+  const goAhead = {
+    author: "fvermaut",
+    body: "ok go ahead and write the spec",
+    createdAt: "2026-08-13T09:30:00Z",
+    fromTimone: false,
+  };
+
+  /**
+   * The tracker as a map effort leaves it: one `wayfinder:map` ticket
+   * carrying the mark, whatever the thread holds, and whatever else is open.
+   *
+   * `labels` is the array the test holds, so the frontier can empty between
+   * two cycles exactly as the closing session's `gh` call empties it.
+   */
+  function mapWorld(
+    comments: TicketThread["comments"],
+    labels: string[],
+    others: Ticket[] = [],
+  ): {
+    adapter: TicketingAdapter;
+    posted: PostedComment[];
+    ctas: PostedComment[];
+    reads: number[];
+  } {
+    const posted: PostedComment[] = [];
+    const ctas: PostedComment[] = [];
+    const reads: number[] = [];
+    const map = (): Ticket =>
+      ticket(MAP, { title: "chart the trends redesign", labels });
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [map(), ...others];
+      },
+      ...noUnmarkedTickets,
+      async getTicket(_project, number): Promise<TicketThread> {
+        reads.push(number);
+        if (number === MAP) return { ...map(), comments };
+        const other = others.find((candidate) => candidate.number === number);
+        if (other === undefined) throw new Error(`no ticket ${number}`);
+        return { ...other, comments: [] };
+      },
+      async postComment(project, number, body): Promise<void> {
+        posted.push({ project: project.name, number, body });
+      },
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+      async upsertComment(project, number, _marker, body): Promise<void> {
+        ctas.push({ project: project.name, number, body });
+      },
+    };
+    return { adapter, posted, ctas, reads };
+  }
+
+  /**
+   * The real spawner, whose runtime throws: nothing may start a session for a
+   * map that is still being worked, and a fake spawner could only restate the
+   * half of that claim living in `poll.ts`.
+   */
+  function refusingSpawner(
+    store: RunStore,
+    adapter: TicketingAdapter,
+  ): SessionSpawner {
+    return new AgentSessionSpawner({
+      manifest: manifestWith("ivtrends"),
+      store,
+      adapter,
+      runtime: {
+        async start() {
+          throw new Error("no session may start for a map");
+        },
+      },
+      root: "/nowhere",
+    });
+  }
+
+  it("stops on the map without asking the human for anything", async () => {
+    // R21 clause 4, the CTA half. A map with an open frontier is not waiting
+    // on a human, so it must not be told it is — and it must not be sent the
+    // invitation every *other* conversation stage opens, which would be a
+    // question on a ticket nobody can answer yet.
+    const store = newStore();
+    const { adapter, posted, ctas } = mapWorld([], ["timone", "wayfinder:map"]);
+    const deps = {
+      manifest: manifestWith("ivtrends"),
+      store,
+      adapter,
+      spawner: refusingSpawner(store, adapter),
+    };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    const run = store.get("ivtrends#1");
+    expect(run?.stage).toBe("charting");
+    expect(run?.status).toBe("parked");
+    expect(run?.waitingKind).toBeUndefined();
+    expect(run?.branch).toBeUndefined();
+    expect(posted.map((comment) => comment.body).join("\n")).not.toMatch(
+      /two ways to answer/i,
+    );
+    expect(ctas.at(-1)?.body).toContain(
+      "**What I need from you:** nothing right now — I'll come back here when the last one is closed.",
+    );
+  });
+
+  it("starts nothing on a map whose questions are still open", async () => {
+    // R21 clause 4's other half — *a map does not advance on a single
+    // answer*. Somebody has written on the map, as people do; the frontier is
+    // not empty, so nothing about that comment moves anything.
+    const store = newStore();
+    const { adapter, ctas } = mapWorld(
+      [closingSummary, goAhead],
+      ["timone", "wayfinder:map"],
+    );
+    const deps = {
+      manifest: manifestWith("ivtrends"),
+      store,
+      adapter,
+      spawner: refusingSpawner(store, adapter),
+    };
+
+    await pollOnce(deps);
+    const second = await pollOnce(deps);
+
+    expect(second.resumed).toEqual([]);
+    expect(second.errors).toEqual([]);
+    expect(store.get("ivtrends#1")?.stage).toBe("charting");
+    expect(store.get("ivtrends#1")?.waitingKind).toBeUndefined();
+    expect(ctas.at(-1)?.body).toContain("nothing right now");
+  });
+
+  it("asks for the go-ahead once the map's frontier is empty", async () => {
+    // R21 clause 5, the CTA half. The closing session emptied the frontier;
+    // the next cycle opens the wait and the standing call to action — one
+    // computation, the same `ctaFor` every other ticket reads — flips.
+    const store = newStore();
+    const labels = ["timone", "wayfinder:map"];
+    const { adapter, ctas, reads } = mapWorld([closingSummary], labels);
+    const deps = {
+      manifest: manifestWith("ivtrends"),
+      store,
+      adapter,
+      spawner: refusingSpawner(store, adapter),
+    };
+
+    await pollOnce(deps);
+    // The discriminating half: before the frontier empties this map is
+    // waiting on nobody, so the flip below is caused by the label and not by
+    // the map having been a conversation all along.
+    expect(store.get("ivtrends#1")?.waitingKind).toBeUndefined();
+
+    labels.push("wayfinder:frontier-empty");
+    reads.length = 0;
+    await pollOnce(deps);
+
+    // 19d's property, unbroken: opening the wait, deciding whether it has
+    // been answered and reconciling the call to action are three questions
+    // about one thread, and they are asked of one fetch of it.
+    expect(reads).toEqual([1]);
+    const run = store.get("ivtrends#1");
+    expect(run?.status).toBe("parked");
+    expect(run?.waitingKind).toBe("conversation");
+    // Asked *now*, from the machine's last word — so nothing said before the
+    // way was clear can be read as agreeing to it.
+    expect(run?.waitCursor).toBe(closingSummary.createdAt);
+    expect(ctas.at(-1)?.body).toContain(
+      "**What I need from you:** say go ahead here and I'll write the specification this map has been finding its way to.",
+    );
+    // And no command: `timone takeover` cannot hold this stage's conversation.
+    expect(ctas.at(-1)?.body).not.toContain("timone takeover");
+  });
+
+  it("refuses the go-ahead on a map that has grown a question back", async () => {
+    // Resolving a ticket clears fog, and fog graduates into fresh tickets —
+    // so a map can look finished and then not be. The wait is opened once and
+    // never withdrawn (a question the human may be mid-answer on), which is
+    // exactly why the frontier is checked again where it matters: at the
+    // branch that starts a build.
+    const store = newStore();
+    const comments = [closingSummary];
+    const labels = ["timone", "wayfinder:map"];
+    const { adapter } = mapWorld(comments, labels);
+    const deps = {
+      manifest: manifestWith("ivtrends"),
+      store,
+      adapter,
+      spawner: refusingSpawner(store, adapter),
+    };
+
+    await pollOnce(deps);
+    labels.push("wayfinder:frontier-empty");
+    await pollOnce(deps);
+    expect(store.get("ivtrends#1")?.waitingKind).toBe("conversation");
+
+    labels.splice(labels.indexOf("wayfinder:frontier-empty"), 1);
+    comments.push(goAhead);
+    const third = await pollOnce(deps);
+
+    expect(third.resumed).toEqual([]);
+    expect(third.errors).toEqual([]);
+    expect(store.get("ivtrends#1")?.stage).toBe("charting");
+  });
+});
+
+describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
+  // R21 clause 5's second half, and the sentence this phase exists for:
+  // *"ok go ahead and write the spec"*, written on the map, with nothing run
+  // by hand. The spawner is the real one over a recording runtime, because
+  // "stage 3 starts on the map's own run" is a claim about the loop, the
+  // stage graph and the spawner together — a fake spawner could only restate
+  // the third of it that lives in `poll.ts`.
+
+  const MAP = 1;
+
+  const closingSummary = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\nthat was the last question — here is the route we walked`,
+    createdAt: "2026-08-13T09:00:00Z",
+    fromTimone: true,
+  };
+
+  const goAhead = {
+    author: "fvermaut",
+    body: "ok go ahead and write the spec",
+    createdAt: "2026-08-13T09:30:00Z",
+    fromTimone: false,
+  };
+
+  /** A map whose frontier is empty and whose human has agreed, plus room for
+   * a second ticket to arrive on the project later. */
+  function world(): {
+    adapter: TicketingAdapter;
+    posted: PostedComment[];
+    others: Ticket[];
+    labels: string[];
+  } {
+    const posted: PostedComment[] = [];
+    const others: Ticket[] = [];
+    const labels = ["timone", "wayfinder:map", "wayfinder:frontier-empty"];
+    const map = (): Ticket =>
+      ticket(MAP, { title: "chart the trends redesign", labels });
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [map(), ...others];
+      },
+      ...noUnmarkedTickets,
+      async getTicket(_project, number): Promise<TicketThread> {
+        if (number === MAP) {
+          return { ...map(), comments: [closingSummary, goAhead] };
+        }
+        const other = others.find((candidate) => candidate.number === number);
+        if (other === undefined) throw new Error(`no ticket ${number}`);
+        return { ...other, comments: [] };
+      },
+      async postComment(project, number, body): Promise<void> {
+        posted.push({ project: project.name, number, body });
+      },
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+      async upsertComment(): Promise<void> {},
+    };
+    return { adapter, posted, others, labels };
+  }
+
+  /**
+   * The real spawner over a runtime that records its prompt, and probes that
+   * report a branch which moved — so the requirements stage's own gate is
+   * reached rather than its "you committed nothing" refusal.
+   */
+  function realSpawner(
+    store: RunStore,
+    adapter: TicketingAdapter,
+    prompts: string[],
+  ): SessionSpawner {
+    let commits = 0;
+    return new AgentSessionSpawner({
+      manifest: manifestWith("ivtrends"),
+      store,
+      adapter,
+      runtime: {
+        async start(request) {
+          prompts.push(request.prompt);
+          return {
+            sessionId: "session-prd",
+            completed: Promise.resolve({ sessionId: "session-prd", ok: true }),
+          };
+        },
+      },
+      root: "/nowhere",
+      repoProbe: async () => `sha-${commits++}`,
+      headProbe: async () => "sha-root",
+    });
+  }
+
+  it("runs the specification stage on the map's own run, unprompted", async () => {
+    const store = newStore();
+    const { adapter } = world();
+    const prompts: string[] = [];
+    const deps = {
+      manifest: manifestWith("ivtrends"),
+      store,
+      adapter,
+      spawner: realSpawner(store, adapter, prompts),
+    };
+
+    await pollOnce(deps);
+    const second = await pollOnce(deps);
+
+    // One run, the map's own — not a new one, and not a decision ticket's.
+    expect(second.resumed).toEqual(["ivtrends#1"]);
+    expect(store.all().map((run) => run.id)).toEqual(["ivtrends#1"]);
+    const run = store.get("ivtrends#1");
+    expect(run?.stage).toBe("requirements");
+    // Instructed with what they actually wrote, so the specification session
+    // reads the agreement rather than being told one happened.
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("ok go ahead and write the spec");
+  });
+
+  it("holds the whole project from the moment the go-ahead lands", async () => {
+    // ADR-0024's consequence, asserted rather than assumed: stage 3 owns a
+    // branch and runs serialize per project, so the map ticket holds
+    // `ivtrends` against every other ticket until the specification is done.
+    // A map ticket has never held anything before this.
+    const store = newStore();
+    const { adapter, posted, others } = world();
+    const deps = {
+      manifest: manifestWith("ivtrends"),
+      store,
+      adapter,
+      spawner: realSpawner(store, adapter, []),
+    };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+    others.push(ticket(2, { title: "the header wraps on mobile" }));
+    await pollOnce(deps);
+
+    expect(store.occupyingRun("ivtrends")?.ticket).toBe(MAP);
+    expect(store.get("ivtrends#1")?.branch).toBe(
+      "timone/1-chart-the-trends-redesign",
+    );
+    expect(store.get("ivtrends#2")?.status).toBe("queued");
+    expect(posted.find((comment) => comment.number === 2)?.body).toMatch(/#1/);
+  });
+});
