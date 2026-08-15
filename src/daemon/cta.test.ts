@@ -108,6 +108,30 @@ describe("ctaFor", () => {
     );
   });
 
+  it("asks for nothing from a ticket whose chunk was abandoned", () => {
+    // A cancelled chunk was abandoned rather than broken, so this must not
+    // read like the failure above it: no retry command, because retry refuses
+    // a cancelled run outright.
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 13,
+      run: run({
+        project: "scratch-app",
+        ticket: 13,
+        status: "cancelled",
+        stage: "planning",
+        cancellation: "you asked me to stop",
+      }),
+    });
+
+    expect(cta.headline).toBe("I stopped work on this one.");
+    expect(cta.needFromYou).toBe(
+      "nothing — while this ticket is open and marked for me I'll start it afresh on my next pass.",
+    );
+    expect(cta.waitingOnYou).toBe(false);
+    expect(cta.command).toBeUndefined();
+  });
+
   it("names the exact takeover command for a ticket waiting on a conversation", () => {
     const cta = ctaFor({
       project: "scratch-app",

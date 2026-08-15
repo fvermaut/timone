@@ -349,6 +349,53 @@ describe("pollOnce — serialization", () => {
   });
 });
 
+describe("pollOnce — a ticket that stopped being mine while its run waited", () => {
+  it("cancels the run instead of starting a session on it", async () => {
+    // Picked up on an earlier cycle, when the ticket was still open and
+    // marked; the human has closed it since. Nothing may be spawned on it —
+    // asserted on the spawner rather than on a log line, because the claim is
+    // that no session was started.
+    const store = newStore();
+    store.register("scratch-app", 7);
+    const { adapter } = fakeAdapter({ "scratch-app": [] });
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(spawned).toEqual([]);
+    expect(result.cancelled).toEqual(["scratch-app#7/1"]);
+    const run = store.get("scratch-app#7/1");
+    expect(run?.status).toBe("cancelled");
+    expect(run?.cancellation).toMatch(/no longer open and marked/i);
+  });
+
+  it("takes a fresh chunk on the ticket when it comes back", async () => {
+    // 22a meeting 22b: cancellation settles a chunk, so a ticket that is open
+    // and marked again is picked up as new work rather than being stuck
+    // behind the run that was abandoned.
+    const store = newStore();
+    store.register("scratch-app", 7);
+    const gone = fakeAdapter({ "scratch-app": [] });
+    const back = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner, spawned } = fakeSpawner();
+    const manifest = manifestWith("scratch-app");
+
+    await pollOnce({ manifest, store, adapter: gone.adapter, spawner });
+    await pollOnce({ manifest, store, adapter: back.adapter, spawner });
+
+    expect(store.runsForTicket("scratch-app", 7).map((run) => run.id)).toEqual([
+      "scratch-app#7/1",
+      "scratch-app#7/2",
+    ]);
+    expect(spawned.map((run) => run.id)).toEqual(["scratch-app#7/2"]);
+  });
+});
+
 describe("pollOnce — resilience", () => {
   it("carries on with the other projects when one fails", async () => {
     const store = newStore();
@@ -3315,6 +3362,12 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // add the label. From that cycle on the ticket is an ordinary marked one
     // — and the introduction, having been posted once, is not repeated when
     // the ticket loses the label again.
+    //
+    // Since 22b the third cycle also *abandons* the run: a ticket that has
+    // left the marked-and-open listing is one nobody is asking Timone to work,
+    // and the loop cancels rather than spawning on it. The introduction still
+    // stays unrepeated, which is what this test is about — a cancelled run is
+    // still a run, so `introduceUnmarked` keeps its peace.
     const store = newStore();
     const open = [ticket(5, { labels: [] })];
     const { adapter, calls } = twoListings(open);
@@ -3333,7 +3386,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     const before = calls.length;
     await pollOnce(deps);
 
-    expect(store.get("scratch-app#5/1")?.status).toBe("picked-up");
+    expect(store.get("scratch-app#5/1")?.status).toBe("cancelled");
     expect(
       writesOn(calls, 5).filter((entry) => entry.call === "postComment"),
     ).toHaveLength(2);

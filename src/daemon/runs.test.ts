@@ -875,6 +875,190 @@ describe("retry", () => {
   });
 });
 
+describe("cancelling a run", () => {
+  it("cancels a queued run, recording why", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    const { run } = store.register("scratch-app", 8);
+
+    const cancelled = store.cancel(run.id, "its ticket is no longer open");
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.cancellation).toBe("its ticket is no longer open");
+    expect(store.get(run.id)?.status).toBe("cancelled");
+  });
+
+  it("cancels a run that was picked up but never started", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+
+    expect(store.cancel(run.id, "its ticket is no longer open").status).toBe(
+      "cancelled",
+    );
+  });
+
+  it("cancels a run whose session is running", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+
+    expect(store.cancel(run.id, "you asked me to stop").status).toBe(
+      "cancelled",
+    );
+  });
+
+  it("cancels a parked run, and it stops waiting on the human", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "your approval of the plan",
+      kind: "gate",
+      stage: "planning",
+      waitCursor: "2026-08-02T10:00:00Z",
+    });
+
+    const cancelled = store.cancel(run.id, "you asked me to stop");
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.waitingOn).toBeUndefined();
+    expect(cancelled.waitingKind).toBeUndefined();
+  });
+
+  it("refuses to cancel a run that is already finished", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.complete(run.id);
+
+    expect(() => store.cancel(run.id, "you asked me to stop")).toThrow(
+      /cannot go from done to cancelled/,
+    );
+  });
+
+  it("cancels a failed run, so work nobody will retry can be ended", () => {
+    // Ruled by fvermaut 2026-08-15. A failure has two exits, not one: `timone
+    // retry` re-arms it and `timone cancel` abandons it. Without the second,
+    // clearing a failed run meant retrying it first — and in the window
+    // between the two commands the daemon can pick the run up and spend real
+    // money on work somebody was trying to delete.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.fail(run.id, "the stage died");
+
+    const cancelled = store.cancel(run.id, "we shipped this by hand");
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.cancellation).toBe("we shipped this by hand");
+    expect(store.get(run.id)?.status).toBe("cancelled");
+  });
+
+  it("gives a run cancelled out of failure no way back, retry included", () => {
+    // The asymmetry the ruling keeps: a failure has two exits, a cancellation
+    // has none. Taking the abandonment exit must not leave the retry one open
+    // behind it, or `timone cancel` on a failed run would be undoable by the
+    // very command it was typed instead of.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.fail(run.id, "the stage died");
+    store.cancel(run.id, "we shipped this by hand");
+
+    expect(() => store.retry(run.id)).toThrow(/was cancelled/);
+    expect(store.get(run.id)?.status).toBe("cancelled");
+  });
+
+  it("lets a ticket move on from a failure that was abandoned rather than retried", () => {
+    // The other half of the ruling. A failed chunk is unsettled on purpose —
+    // it is what `timone retry` re-arms — so cancelling it has to settle it,
+    // or the ticket would be held for ever by a chunk nobody will ever run.
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.claimBranch(first.run.id, "timone/7-reset-password");
+    store.fail(first.run.id, "the stage died");
+    store.cancel(first.run.id, "we shipped this by hand");
+
+    const second = store.register("scratch-app", 7);
+
+    expect(second.created).toBe(true);
+    expect(second.run.id).toBe("scratch-app#7/2");
+    expect(second.run.status).toBe("picked-up");
+    expect(store.liveRunForTicket("scratch-app", 7)?.id).toBe("scratch-app#7/2");
+  });
+
+  it("has no way out of cancelled, retry included", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.cancel(run.id, "its ticket is no longer open");
+
+    expect(() => store.cancel(run.id, "again")).toThrow(/nothing — it is finished/);
+    expect(() => store.retry(run.id)).toThrow();
+  });
+
+  it("refuses a retry in words a person can act on, not an assertion", () => {
+    // `timone retry` prints whatever this throws, verbatim (`retry.ts`'s
+    // `switch` has no `cancelled` case and falls through to here). So the
+    // message is a user interface, and the generic "is cancelled, not failed"
+    // would put a state-machine complaint in front of somebody who just typed
+    // a command.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.cancel(run.id, "its ticket is no longer open and marked");
+
+    expect(() => store.retry(run.id)).toThrow(
+      "scratch-app #7 was cancelled: its ticket is no longer open and marked. " +
+        "Cancelled work isn't retried — reopen the ticket and mark it for me, " +
+        "and I'll start it afresh on my next pass.",
+    );
+  });
+
+  it("says so without a reason, when none was recorded", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.cancel(run.id, "");
+
+    expect(() => store.retry(run.id)).toThrow(
+      "scratch-app #7 was cancelled. Cancelled work isn't retried — reopen the " +
+        "ticket and mark it for me, and I'll start it afresh on my next pass.",
+    );
+  });
+
+  it("frees the project for whatever was queued behind it", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.claimBranch(first.run.id, "timone/7-reset-password");
+    const second = store.register("scratch-app", 8);
+    expect(second.run.status).toBe("queued");
+
+    store.cancel(first.run.id, "you asked me to stop");
+
+    expect(store.get(second.run.id)?.status).toBe("picked-up");
+    expect(store.occupyingRun("scratch-app")?.id).toBe(second.run.id);
+  });
+
+  it("lets its ticket take a fresh chunk, because an abandoned one is settled", () => {
+    // ADR-0029's other half. A cancelled chunk that stayed unsettled would
+    // hold its ticket for ever and nothing could ever be run on it again —
+    // which is also what makes the poll loop's closed-ticket cancellation
+    // self-healing: a ticket reopened and re-marked simply starts chunk 2.
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.cancel(first.run.id, "its ticket is no longer open and marked");
+
+    const second = store.register("scratch-app", 7);
+
+    expect(second.created).toBe(true);
+    expect(second.run.id).toBe("scratch-app#7/2");
+    expect(second.run.status).toBe("picked-up");
+    expect(store.liveRunForTicket("scratch-app", 7)?.id).toBe("scratch-app#7/2");
+  });
+});
+
 describe("the heartbeat, and the runs that have stopped making one", () => {
   /** A store whose clock the test sets by hand, instant by instant. */
   function clockedStore(path = statePath()): {

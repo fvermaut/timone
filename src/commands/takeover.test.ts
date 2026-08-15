@@ -307,6 +307,34 @@ describe("resolveTakeover", () => {
     });
   });
 
+  it("says a cancelled chunk was abandoned, and what would start the work again", async () => {
+    // 22b: `cancelled` is not `parked`. With no arm of its own it fell past the
+    // parked case and told the human their ticket was parked on nothing — with
+    // the reason sitting in `cancellation`, unread, all along.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 4);
+    store.activate(run.id, "session-1");
+    store.cancel(run.id, "the ticket is no longer open and marked for me");
+
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 4 },
+      { manifest, store, adapter: fakeAdapter().adapter },
+    );
+
+    expect(resolution).toMatchObject({
+      kind: "nothing-to-do",
+      message: expect.stringContaining(
+        "scratch-app #4 was cancelled: the ticket is no longer open and " +
+          "marked for me.",
+      ),
+    });
+    // Abandoned, not broken, and never parked: the words a person reads must
+    // not hand them a fault to look for, nor a chunk to count.
+    const said = resolution.kind === "converse" ? "" : resolution.message;
+    expect(said).toMatch(/mark it for me/);
+    expect(said).not.toMatch(/parked|failed|stopped early|scratch-app#4/);
+  });
+
   it("does not guess at a park it cannot resume", async () => {
     // Phase 11 parked runs with no waiting kind at all. Guessing which
     // conversation those want would invent one.

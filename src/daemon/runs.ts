@@ -11,6 +11,11 @@ import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
  *
  * `parked` — waiting on a human — is deliberately **not** terminal: the run
  * is unfinished and will resume where it stopped.
+ *
+ * `cancelled` is the abandoned ending, and it is deliberately **not**
+ * `failed`: `failed` means the work broke and `timone retry` re-arms it, while
+ * a run that should never have existed must not be one keystroke from
+ * restarting. See {@link TRANSITIONS}, where it is the second dead end.
  */
 export type RunStatus =
   | "queued"
@@ -18,7 +23,8 @@ export type RunStatus =
   | "active"
   | "parked"
   | "done"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 /**
  * Statuses that occupy the one-session-at-a-time slot. A session is either
@@ -30,12 +36,13 @@ const RUNNING: readonly RunStatus[] = ["picked-up", "active"];
 /**
  * Statuses that end a run's hold on its project: it is over, so the next
  * queued ticket may be promoted. `failed` belongs here — a dead session must
- * not freeze the project behind it.
+ * not freeze the project behind it — and so does `cancelled`, for the same
+ * reason: abandoned work must not keep a project to itself.
  *
  * See {@link isSettled}, which is deliberately narrower and is *not* a
  * duplicate of this.
  */
-const TERMINAL: readonly RunStatus[] = ["done", "failed"];
+const TERMINAL: readonly RunStatus[] = ["done", "failed", "cancelled"];
 
 /**
  * Statuses that **settle** a chunk: the ticket is finished with it and may
@@ -55,10 +62,15 @@ const TERMINAL: readonly RunStatus[] = ["done", "failed"];
  *   refuse the retry, deleting the only road a broken chunk has back to
  *   working.
  *
- * A chunk advances only on success. Slice 22b adds `cancelled` here: an
- * abandoned chunk is settled too, because nobody is going to retry it.
+ * A chunk advances only on success — or on being abandoned. `cancelled` is
+ * **both** terminal and settled, and it has to be both: nobody is going to
+ * retry it, so a cancelled chunk that stayed unsettled would hold its ticket
+ * for ever and no work could ever be run on that ticket again. It is also what
+ * makes the poll loop's closed-ticket cancellation self-healing — a ticket
+ * reopened and re-marked simply takes its next chunk from {@link
+ * RunStore.register}.
  */
-const SETTLED: readonly RunStatus[] = ["done"];
+const SETTLED: readonly RunStatus[] = ["done", "cancelled"];
 
 /** Whether a chunk in this status lets its ticket move to the next one. */
 function isSettled(status: RunStatus): boolean {
@@ -83,14 +95,28 @@ function isSettled(status: RunStatus): boolean {
  * as long as the human took to answer.
  */
 const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
-  queued: ["picked-up"],
-  "picked-up": ["active", "parked", "failed"],
-  active: ["active", "parked", "done", "failed"],
-  parked: ["active", "done", "failed"],
+  queued: ["picked-up", "cancelled"],
+  "picked-up": ["active", "parked", "failed", "cancelled"],
+  active: ["active", "parked", "done", "failed", "cancelled"],
+  parked: ["active", "done", "failed", "cancelled"],
   done: [],
-  // The one road out of failure is `timone retry`, which re-arms the run at
-  // the stage it failed. `done` stays a dead end: finished work is history.
-  failed: ["picked-up"],
+  // Abandoned, and abandoned for good. An empty list here is the whole of
+  // "`cancelled` is deliberately not `failed`": a failure can be re-armed by
+  // `timone retry`, and a run that should never have existed must not be one
+  // keystroke from restarting. A ticket that deserves another go gets a
+  // *fresh chunk* from `register`, because cancellation settles this one.
+  cancelled: [],
+  // Failure has two roads out, and they are not the same road. `timone retry`
+  // re-arms the run at the stage it failed; `timone cancel` abandons it. The
+  // second was added by fvermaut's ruling of 2026-08-15, because without it
+  // clearing a failed run meant retrying it *first* — and the window between
+  // the two commands is one the daemon polls, so a run somebody was trying to
+  // delete could be picked up and spend real money before the second command
+  // landed. One command now ends a run whatever state it is in.
+  //
+  // `done` stays a dead end: finished work is history, and a new ticket — not
+  // an abandonment — is how it is reopened.
+  failed: ["picked-up", "cancelled"],
 };
 
 const runSchema = z.strictObject({
@@ -122,6 +148,7 @@ const runSchema = z.strictObject({
     "parked",
     "done",
     "failed",
+    "cancelled",
   ]),
   /** Lifecycle stage the run has reached, for `timone status` and for resuming. */
   stage: z.enum([...PIPELINE_STAGES]).optional(),
@@ -192,6 +219,21 @@ const runSchema = z.strictObject({
   heartbeatAt: z.string().optional(),
   /** Why a failed run failed. */
   failure: z.string().optional(),
+  /**
+   * Why a cancelled run was cancelled.
+   *
+   * **Its own field rather than {@link failure}, because a cancelled chunk was
+   * abandoned and not broken.** The two words are read by people: `timone
+   * status` prints a failure as *"stopped early"* beside the command that
+   * restarts it, and `timone takeover` reports one as something that went
+   * wrong. A cancellation is neither — nothing broke, and nothing is going to
+   * be retried — and a reason stored under `failure` would be one substitution
+   * away from being announced as a fault at every one of those surfaces.
+   *
+   * Optional, like every field added since the ledger was written, so a state
+   * file from before this existed loads unchanged at `version: 1`.
+   */
+  cancellation: z.string().optional(),
   /** Guardrail-hook violations recorded against this run (R15). */
   flags: z.array(z.string()),
   createdAt: z.string(),
@@ -563,7 +605,9 @@ export class RunStore {
    *
    * **A failed chunk is unsettled**, so it is handed back rather than
    * succeeded (ADR-0029): a chunk advances only on success, and `timone retry`
-   * is how a broken one recovers.
+   * is how a broken one recovers. A failure that nobody will retry is ended by
+   * `timone cancel` instead, which settles it — that is what lets its ticket
+   * move on rather than being held for ever by a chunk that will never run.
    *
    * Until phase 22 it was idempotent by the ticket in *any* state, finished
    * included, which is what made a ticket and a run the same object. A ticket
@@ -712,6 +756,27 @@ export class RunStore {
   }
 
   /**
+   * Abandon a run, saying why.
+   *
+   * The reason is written where a person will read it — `timone status` and
+   * `timone cancel`'s own answer — and it is a statement of what was observed
+   * rather than a verdict: the poll loop cancels on a ticket having left the
+   * marked-and-open listing, which is what it can actually see.
+   *
+   * Everything the run was waiting for goes with it, the consumed marker
+   * included. A cancelled run is nobody's business any more, and a marker left
+   * behind would let a later rewind reach back past it (ADR-0023) — the same
+   * reason {@link complete} clears it.
+   */
+  cancel(id: string, reason: string): Run {
+    return this.transition(id, "cancelled", (run) => {
+      run.cancellation = reason;
+      stopWaiting(run);
+      run.consumedAnswerAt = undefined;
+    });
+  }
+
+  /**
    * Record which lifecycle stage a run reached.
    *
    * A run that has *moved on* has acted on whatever answer it was holding, so
@@ -759,6 +824,22 @@ export class RunStore {
    */
   retry(id: string): Run {
     const run = this.mutable(id);
+    // Before the generic refusal, and written as a sentence: `timone retry`
+    // prints whatever this throws, verbatim and with no case of its own for a
+    // cancelled run, so these words are what a person sees after typing a
+    // command. What they need is why there is nothing to retry and what would
+    // start the work again — never that a status failed a comparison.
+    if (run.status === "cancelled") {
+      const because =
+        run.cancellation === undefined || run.cancellation === ""
+          ? "."
+          : `: ${run.cancellation}.`;
+      throw new Error(
+        `${run.project} #${run.ticket} was cancelled${because} Cancelled work ` +
+          "isn't retried — reopen the ticket and mark it for me, and I'll " +
+          "start it afresh on my next pass.",
+      );
+    }
     if (run.status !== "failed") {
       throw new Error(
         `Run ${id} is ${run.status}, not failed — only a failed run can be retried`,

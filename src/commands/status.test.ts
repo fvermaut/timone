@@ -184,6 +184,29 @@ describe("renderStatus", () => {
     expect(output).toMatch(/model unavailable/);
   });
 
+  it("says a cancelled chunk was stopped, without calling it a failure", () => {
+    // Typing `timone cancel` must change something the human can see, and
+    // what they see must carry the difference the ledger records: abandoned
+    // rather than broken, so no "stopped early" and no retry command.
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "cancelled",
+        cancellation: "its ticket is no longer open and marked for me",
+      }),
+    ];
+    const output = renderStatus(manifest, runs, { stateExists: true });
+
+    expect(output).toContain(
+      "scratch-app #6 was cancelled: its ticket is no longer open and marked for me",
+    );
+    expect(output).not.toMatch(/stopped early/);
+    expect(output).not.toMatch(/timone retry/);
+    expect(lineFor(output, "scratch-app")).toMatch(/idle/i);
+    expect(output).toMatch(/nothing is waiting on you/i);
+  });
+
   it("guides rather than crashes when the daemon has never run", () => {
     const output = renderStatus(manifest, [], { stateExists: false });
     expect(output).toMatch(/timone daemon/);

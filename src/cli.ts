@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
 
+import { registerCancelCommand } from "./commands/cancel.js";
 import { registerDaemonCommand } from "./commands/daemon.js";
 import { registerGuardrailsCommand } from "./commands/guardrails.js";
 import { registerProjectsCommand } from "./commands/projects.js";
@@ -44,6 +45,7 @@ export function buildProgram(): Command {
   registerStatusCommand(program);
   registerTakeoverCommand(program);
   registerRetryCommand(program);
+  registerCancelCommand(program);
 
   return program;
 }

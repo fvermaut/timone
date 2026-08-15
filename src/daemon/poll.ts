@@ -118,6 +118,8 @@ export interface PollResult {
   queued: string[];
   /** Run ids handed to the spawner this cycle. */
   spawned: string[];
+  /** Run ids abandoned this cycle, because their ticket stopped being ours. */
+  cancelled: string[];
   /** Run ids whose human wait was answered and which resumed this cycle. */
   resumed: string[];
   /** Run ids that reached a terminal state this cycle (a PR merged or closed). */
@@ -250,6 +252,20 @@ export function reclaimedReason(): string {
 }
 
 /**
+ * Why a run was abandoned before its session started, in the words of what was
+ * actually observed.
+ *
+ * **It reports the observation, not a verdict.** A `Ticket` carries no
+ * open/closed field and the listing this is judged against is the marked and
+ * open one, so the ticket having left it is the whole of the evidence — it
+ * covers a ticket closed and a mark taken off, and asserting a closure that
+ * was never read would be the ledger claiming to know something it does not.
+ */
+export function noLongerListedReason(): string {
+  return "its ticket is no longer open and marked for me";
+}
+
+/**
  * What a pull request says about its preview, in words that assume nothing.
  *
  * Two things are said outright rather than left to be discovered: it is
@@ -331,6 +347,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
     pickedUp: [],
     queued: [],
     spawned: [],
+    cancelled: [],
     resumed: [],
     completed: [],
     errors: [],
@@ -645,14 +662,37 @@ async function pollProject(
   store.promoteQueue(project.name);
   const occupier = store.occupyingRun(project.name);
   if (occupier !== undefined && occupier.status === "picked-up") {
-    try {
-      await deps.spawner.spawn(occupier, project, entryContext(occupier, tickets));
-      result.spawned.push(occupier.id);
-      log(`spawn  ${occupier.id}`);
-    } catch (error) {
-      const line = `${project.name}: could not start a session for #${occupier.ticket}: ${oneLine(error)}`;
-      result.errors.push(line);
-      log(`error  ${line}`);
+    // Before the spawn, never after it: a session started on a ticket nobody
+    // is asking about any more is work done into a void, and the whole cost of
+    // it has been paid by the time anything else could notice.
+    //
+    // **Absence from this cycle's listing is the observation, and the reason
+    // says exactly that.** There is no open/closed field on a `Ticket` and the
+    // listing is `--state open` and marked, so "closed" is not a question that
+    // can be asked here without an adapter this slice does not have. What can
+    // be seen is that the ticket is no longer in the set Timone is asked to
+    // work, which covers the ticket being closed *and* the mark being taken
+    // off it — both of which mean the same thing to the human who did it. The
+    // reason must not claim more than that.
+    //
+    // Self-healing by construction: cancelling settles the chunk (ADR-0029),
+    // so a ticket that comes back open and marked is registered as a fresh
+    // chunk on the next cycle rather than being stuck behind an abandoned one.
+    if (!tickets.some((candidate) => candidate.number === occupier.ticket)) {
+      const reason = noLongerListedReason();
+      store.cancel(occupier.id, reason);
+      result.cancelled.push(occupier.id);
+      log(`cancel ${occupier.id} — ${reason}`);
+    } else {
+      try {
+        await deps.spawner.spawn(occupier, project, entryContext(occupier, tickets));
+        result.spawned.push(occupier.id);
+        log(`spawn  ${occupier.id}`);
+      } catch (error) {
+        const line = `${project.name}: could not start a session for #${occupier.ticket}: ${oneLine(error)}`;
+        result.errors.push(line);
+        log(`error  ${line}`);
+      }
     }
   }
 

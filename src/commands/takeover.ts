@@ -152,6 +152,24 @@ export async function resolveTakeover(
           `${target.project} #${target.ticket} stopped early: ` +
           `${run.failure ?? "no reason recorded"}. Re-mark the ticket to try again.`,
       };
+    case "cancelled": {
+      // Abandoned, not broken — so the words say what `timone retry`'s own
+      // refusal says (`RunStore.retry`), and never that something went wrong.
+      // Its reason lives in `cancellation` rather than `failure` for exactly
+      // that reason, and dropping the clause when there is none beats a
+      // sentence reading "cancelled: " with nothing after it.
+      const because =
+        run.cancellation === undefined || run.cancellation === ""
+          ? "."
+          : `: ${run.cancellation}.`;
+      return {
+        kind: "nothing-to-do",
+        message:
+          `${target.project} #${target.ticket} was cancelled${because} ` +
+          "Cancelled work isn't picked up again — reopen the ticket and mark " +
+          "it for me, and I'll start it afresh on my next pass.",
+      };
+    }
     case "parked":
       break;
   }

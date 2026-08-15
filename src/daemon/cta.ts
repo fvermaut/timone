@@ -120,6 +120,20 @@ export function ctaFor(state: TicketState): Cta {
     };
   }
 
+  if (run.status === "cancelled") {
+    // Abandoned, not broken — so no retry command, which `RunStore.retry`
+    // would refuse anyway. What it says instead is the truth about what
+    // happens next: cancelling settles the chunk (ADR-0029), so a ticket that
+    // is still open and marked simply takes a fresh one on the next cycle.
+    return {
+      headline: "I stopped work on this one.",
+      needFromYou:
+        "nothing — while this ticket is open and marked for me I'll start it " +
+        "afresh on my next pass.",
+      waitingOnYou: false,
+    };
+  }
+
   if (run.waitingKind === "review" && run.pr !== undefined) {
     return {
       headline: "The work is open as a pull request.",

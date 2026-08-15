@@ -167,6 +167,19 @@ export function renderStatus(
       ];
     });
 
+  // Beside the failures rather than among them, and in its own words. A
+  // cancelled chunk was abandoned, not broken: there is no way back into it —
+  // `timone retry` refuses one — so it is stated and nothing is offered. It is
+  // reported at all because typing `timone cancel` has to change something the
+  // person who typed it can see.
+  const cancelled = runs
+    .filter((run) => run.status === "cancelled")
+    .map(
+      (run) =>
+        `${run.project} #${run.ticket} was cancelled: ` +
+        `${run.cancellation ?? "no reason recorded"}`,
+    );
+
   const waiting = runs.filter((run) => ctaOf(run).waitingOnYou);
 
   const closing =
@@ -182,6 +195,7 @@ export function renderStatus(
       : ["Nothing has run yet — start the watcher with `timone daemon`.", ""]),
     ...lines,
     ...(failures.length > 0 ? ["", ...failures] : []),
+    ...(cancelled.length > 0 ? ["", ...cancelled] : []),
     "",
     closing,
   ].join("\n");
