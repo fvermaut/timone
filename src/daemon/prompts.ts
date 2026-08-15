@@ -1042,11 +1042,18 @@ function planningPrompt(context: PromptContext): string {
     "pushed are not the same claim — a plan that never left this machine is one",
     "the session that builds it cannot read.",
     "",
-    "Then post one comment on the ticket describing, in plain words, what you",
-    "propose to build and in what order — the shape of the work, not a list of",
-    "file names. Say the building starts next, and **ask them for nothing**:",
-    "this piece was agreed when they agreed the list, and the judgement it",
-    "still owes them lands on its pull request.",
+    outcomeBlock(
+      "the phase file is committed and pushed, and the building starts next. " +
+        "Follow it with a plain-words account of what you propose to build " +
+        "and in what order — the shape of the work, not a list of file " +
+        "names — and **ask them for nothing**: this piece was agreed when " +
+        "they agreed the list, and the judgement it still owes them lands on " +
+        "its pull request.",
+      "you stopped inside the stage's own bounds — the piece cannot be " +
+        "planned as the list describes it, or planning it needs a decision " +
+        "nobody has made. Follow it with what stopped you, in words a person " +
+        "can act on.",
+    ),
     "",
     writingBlock(),
     "",

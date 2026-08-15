@@ -355,6 +355,27 @@ describe("the planning prompt", () => {
     expect(prompt).toMatch(/commit the phase file/i);
     expect(prompt).toMatch(/push it/i);
   });
+
+  it("asks for the outcome record the daemon reads it by", () => {
+    // Found live on 2026-08-15, twice, on scratch-app #31. Every wait-free
+    // working stage is judged by `afterStage` reading an outcome record off
+    // the ticket; `planning` was gated until this morning, so the approval
+    // reply was its signal and it never carried this block. ADR-0030 D1 made
+    // it wait-free and nobody moved the block across, so the session wrote
+    // the plan, posted a comment nothing could read, and the run failed with
+    // "the planning stage ended without recording an outcome, and the branch
+    // carries what it planned". No unit test could have caught it: the tests
+    // inject the outcome.
+    expect(prompt).toContain(STAGE_DONE_MARKER);
+    expect(prompt).toContain(STAGE_HANDED_MARKER);
+  });
+
+  it("still asks the human for nothing", () => {
+    // The instruction that used to live in the comment paragraph moved inside
+    // the outcome block; it must survive the move, because this is the whole
+    // of what ADR-0030 D1 bought — a piece already agreed when the list was.
+    expect(prompt).toMatch(/ask them for nothing/i);
+  });
 });
 
 describe("the execution prompt", () => {
