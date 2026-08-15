@@ -69,6 +69,14 @@ A ticket can host more than one run, a run can be ended, and a specification is 
 
 **`parseTarget` ([`takeover.ts:84`](../../../src/commands/takeover.ts)), `takeoverCommand` ([`terminal.ts:15`](../../../src/channels/terminal.ts)) and the retry CTA ([`cta.ts:119`](../../../src/daemon/cta.ts)) keep speaking `<project>#<ticket>` and are not touched.** [`prompts.ts:165`](../../../src/daemon/prompts.ts) is not touched either, per the opening.
 
+> **✏ Refined 2026-08-15** — three corrections, made during execution on fvermaut's explicit ruling that the phase proceeds under its existing stamp. Nothing new is built; all three are forced consequences of what was already approved.
+>
+> **A chunk advances only on success.** The checkbox below says *"a ticket with a terminal run accepts a second run"*, and `failed` is terminal — so as first written, a failed chunk would be succeeded by a fresh one on the next poll cycle and `timone retry` would be refused by the one-session guard. That contradicts this phase's own load-bearing rule that *"`fail` means the work broke and `retry` re-arms from it"* and that `timone retry ivtrends#1` keeps working exactly as it reads today. **Ruled by fvermaut 2026-08-15: a failed chunk keeps holding its ticket until it is retried or cancelled.** A chunk is *settled* — and the ticket moves on — only when it is `done`, or `cancelled` once 22b lands. `TERMINAL` is unchanged and still frees the project for the next queued ticket; settledness is a separate, narrower idea. Recorded as **ADR-0029**, which 22a writes.
+>
+> **[MODIFY]** `src/commands/status.test.ts`, `src/daemon/cta.test.ts` — `Run` literals in test helpers predate `seq` and fail `npm run type-check`, which is a command in 22a's own validation block. 22a cannot pass its gate without them.
+>
+> **[MODIFY]** `src/daemon/poll.test.ts`, `src/daemon/session.test.ts`, `src/commands/retry.test.ts`, `src/commands/takeover.test.ts`, `src/commands/guardrails.test.ts`, `src/commands/daemon.test.ts` — 98 assertions across six files hard-code the old `project#ticket` id. The plan granted no slice the job of moving them, so the phase could never have closed. Mechanical: id literals gain `/1`, `Run` literals gain `seq`. No assertion's *meaning* changes; any that cannot be preserved is a finding, not a licence to weaken it.
+
 **Seams under test (TDD):** `runId` and the id format; `register` opening run 2 after run 1 is terminal and returning run 1 while it lives; `liveRunForTicket` with zero, one and several runs; the load-time normalisation on a real pre-chunk `state.json` fixture; the occupancy rules still holding across two runs of the same ticket.
 
 #### Agent Validation Steps
@@ -90,7 +98,11 @@ npm run type-check
 **[MODIFY]** [`src/daemon/poll.ts`](../../../src/daemon/poll.ts) — before spawning a `picked-up` run, confirm the ticket is still open; cancel the run with a reason naming the closure when it is not. **In the poll loop, not the store** — `promoteHead` cannot reach the tracker and should not learn how.
 **[MODIFY]** [`src/commands/status.ts`](../../../src/commands/status.ts) — render `cancelled`.
 
-**This closes [findings 8 and 9](reports/phase-20-live-gate.md), which close together.**
+> **✏ Refined 2026-08-15** — made during execution on fvermaut's ruling, under the existing stamp. Both are forced consequences of adding a status to the union.
+>
+> **[MODIFY]** [`src/daemon/cta.ts`](../../../src/daemon/cta.ts) — `cta.ts:134` carries a deliberate exhaustiveness tripwire (`run.status satisfies "parked"`) which becomes a **hard compile error** the moment `cancelled` joins `RunStatus`. Without this grant 22b cannot build, so its own validation command `node dist/cli.js cancel …` cannot run. The file is already inside this phase's scope (22d modifies it); this moves it earlier. Scope is the `cancelled` branch only.
+>
+> **A closed ticket is one absent from the marked-and-open set.** The slice is told to *"confirm the ticket is still open"*, but `Ticket` carries no open/closed field anywhere ([`ticketing.ts:129`](../../../src/adapters/ticketing.ts)) and `listIssues` hard-codes `--state open` ([`github-tickets.ts:263`](../../../src/adapters/github-tickets.ts)) — so there is no way to ask the question directly without changing adapters this slice is not granted. What is free: `pollProject` already holds the marked-and-open list, so a closed ticket shows up as **absence from it**. That satisfies every assertion including [22f step 3](#22f--the-live-gate), and it is self-healing — `cancelled` is settled, so a reopened ticket takes a fresh chunk from `register`. The reason posted must say what was actually observed (no longer open and marked), not assert a closure that was not read.
 
 **Seams under test (TDD):** every non-terminal status cancels and no terminal one does; `cancelled` has no exit, `retry` refuses it; the poll loop cancels rather than spawns on a ticket closed while queued; a ticket whose only run is cancelled accepts a new run, which is 22a meeting 22b.
 
