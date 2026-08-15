@@ -188,3 +188,71 @@ The cause is load. That test calls a `workspace()` fixture that shells out to re
 4. **`breakdown` inherits chunk zero's branch, it does not cut one.** `claimBranch` returns early when the run already has a branch, so `ownsBranch: true` costs nothing and keeps the project held across the gate (ADR-0028 D2). Verified by the re-pointed gate tests, which claim a branch at `requirements` and see `breakdown` reuse it.
 5. **Nothing yet reads a breakdown off disk.** `readBreakdown`, `chunkProgress` and `isReproposal` still have no caller in `src/` outside their own tests. The stage writes the file and the gate opens over it; the poll loop learning to read it is 23f's.
 6. **`process.md` and `.claude/skills/timone-triage/SKILL.md` still describe a chore as meeting the plan gate**, and `.claude/skills/timone-execute/SKILL.md` gate 1 still refuses a phase file not stamped `Approved for execution`. ADR-0030's consequences require all three to move **in this phase**. Under D1 every per-chunk phase file is exactly what gate 1 refuses, so **execution would refuse every chunk** until that slice lands.
+
+## 23c — A chore is deliberately ungated
+
+**Built: nothing under `src/` that runs.** This slice changes no production file, and that is the slice, not a shortfall. `routeAfterTriage`'s `case "chore"` still returns `{ kind: "advance", stage: "planning" }`, untouched; 23b made `planning` wait-free, so a chore has met no gate since 23b landed. What was missing was that **nothing proved it and two documents still described the old route.** The deliverable is proof and record: two tests, and the two sentences that would otherwise let a future reader treat the loss as a bug.
+
+**The ruling, so it is on the record where 23i can quote it.** On **2026-08-15** fvermaut was asked, in plain words and with a preview of what would land on a GitHub ticket, whether a small chore — *bump the linter* — should put a plan in front of him first, or just get built with his judgement on the pull request. **He chose *just build it*.** He was shown the risk in the same breath — **nothing stops a misread chore before the work happens** — and accepted it. So a chore runs **triage → planning → execution → a pull request with no human gate at any point**, and merging that pull request is where his judgement now lands. Merging is still his act, so nothing ships unreviewed; what he gave up is being asked *before* something small is built. **This is a gate a chore had and lost on purpose.** It is not a regression, not a fix and not an improvement, and the alternative was real: ADR-0030 D3 names it — routing chores through `breakdown` keeps a gate, and a one-chunk breakdown ("one piece — do the thing") would have read naturally enough, at the cost of a gate on every chore including the ones where the answer is obviously yes.
+
+**Files touched.**
+- `src/daemon/pipeline.test.ts` — the chore arm of `routeAfterTriage` keeps its expected value and gains the property.
+- `src/daemon/session.test.ts` — a new block, `a chore meets no gate on the way to its pull request`: the walk and its control, +2 tests.
+- `process.md` — stage 1's routing sentence only (line 27). **Stage 5's row, stage 5's `Status` lifecycle and stage 6's entry gate are untouched** — they are 23e's, and two slices editing one file is why these do not run in parallel.
+- `.claude/skills/timone-triage/SKILL.md` — the routing table's chore row only (line 45).
+- `doc/plans/phases/reports/phase-23-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **The gate probe matches `gateCommentFor`'s own rendering, and derives its stage list from the graph.** `gateMarkers(stage)` renders the real comment and takes two lines out of it — the stage's headline and the `**What I need from you:**` CTA — and `gatesPostedIn(bodies)` reports *which* gates a walk posted rather than how many. Two consequences worth keeping: a re-wording of a gate comment moves the probe with it instead of leaving it silently matching nothing, and a failure reads `expected [ 'planning' ] to deeply equal []` — it names the gate it found. The gated set is `PIPELINE_STAGES.filter(waitFor === "gate")`, so a third gated stage is covered the day it exists, exactly as 23b's own derived assertion is. **Do not turn either into a literal list.**
+
+2. **`gateMarkers` throws for a gated stage `GATED` has no row for.** That is 23b's uncatchable trap arriving from a second direction, and it is deliberate: a walk that could not build a marker for a stage must fail loudly rather than conclude the stage posted nothing.
+
+3. **The walk's fake session reads its stage off the ledger.** `walkingRuntime` asks `store.get(runId)?.stage` — which is where `spawn` writes the stage *before* the session starts — and plays triage, a conversation or a work stage accordingly. One `spawn` crosses three stages here, and a fake answering the same way at each of them could not tell triage from planning. It dispatches on `waitFor(stage) === "conversation"` rather than on the name `clarification`, for the same reason as above.
+
+4. **The chore walk stops at `execution`, by giving the spawner a `planStatusProbe` that answers `undefined`.** There is no checkout to read a phase file's `Status:` line out of, so execution ends the run there. That is the excerpt's own "the run ends at `execution`", and it keeps the test hermetic — `headProbe` is stubbed too, so no `git` subprocess is spawned for a `/root/projects/scratch-app` that does not exist. The failure comment execution then posts is *not* a gate comment, which is one more body the probe has to walk past.
+
+5. **The zero-gate assertion is written first in its test.** It is the subject; the route assertions (three sessions, the third one the build, the run ending at `execution`) corroborate it. Ordering matters here because under the mutation probe below the walk *parks* at planning and starts one session fewer — with the count asserted first, the failure would have named the session count and not the gate.
+
+6. **`with human agreement at planning time` was struck from the triage skill's chore row.** It was the clause that most directly implied the gate this slice records the loss of: with stage 5 no longer stopping, there is no moment at which that agreement is collected. The un-anchored *stamp* rule itself is stage 5's and stays as it is — this removed only the restatement inside the row I was granted.
+
+**Validation evidence.**
+
+Baseline before the slice: **891 tests / 25 files**, `npm run type-check` exit 0.
+
+**No case could honestly be driven red, and every one is recorded with the mutation that proves it is not vacuous** — the behaviour was true the moment 23b landed, so a red here would have had to be fabricated.
+
+| Case (as the plan declares it) | Green on arrival | The mutation that proves it live |
+|---|---|---|
+| A chore's route reaches no gated stage — the property | ✅ | `planning` → `waits: "gate"` in `pipeline.ts` → `AssertionError: expected 'gate' to be 'none'`. Reverted. |
+| …and the value, so nothing satisfies the property by re-routing the chore | ✅ | `case "chore"` → `stage: "feedback"` → `AssertionError: expected { kind: 'advance', stage: 'feedback' } to deeply equal { kind: 'advance', stage: 'planning' }`. Reverted. |
+| Nothing else moved — feature → `clarification`, bug → `feedback`, question finishes with a reason | ✅ (three existing tests in the same `describe`, kept rather than duplicated) | `case "feature"` → `stage: "planning"` → *sends a feature to the clarification conversation* failed, the other four passed. Reverted. |
+| A chore reaches its pull request with no gate comment anywhere | ✅ | `planning` → `waits: "gate"` **plus** a `planning` row in `GATED` → `AssertionError: expected [ 'planning' ] to deeply equal []`. Reverted. |
+| The negative control: a feature gets exactly one gate comment, at `requirements` | ✅ | `openGate`'s `postComment` disabled → `AssertionError: expected [] to deeply equal [ 'requirements' ]`. Reverted. |
+
+The fourth row's mutation needed both halves: gating `planning` alone made the test fail on `planning gates but renders no comment to match on` — decision 2 doing its job, but not the evidence the assertion is about.
+
+Excerpt's validation commands, run at the end:
+
+- `npm test -- src/daemon/pipeline.test.ts src/daemon/session.test.ts` → **147 passed (2 files)**.
+- `npm run type-check` → **exit 0**, no output.
+- `npm test` → **893 passed, 25 files** (was 891 / 25).
+- `git diff --stat -- src/` → `src/daemon/pipeline.test.ts | 21 ++++--` and `src/daemon/session.test.ts | 151 +++…` — **two files, both `*.test.ts`**.
+- `grep -n -i "chore" process.md .claude/skills/timone-triage/SKILL.md` → both routing entries now carry *"a chore meets no gate before its pull request"*.
+
+Checkboxes:
+
+- ✅ **PASS** — `git diff --stat -- src/` lists only `*.test.ts`. No production file was edited; every mutation above was reverted with `git checkout` and the working tree carries none of them.
+- ✅ **PASS** — the chore walk asserts `gatesPostedIn(...)` is `[]` over the collected comment bodies, and the feature control in the same block asserts it is `["requirements"]`. Both were seen failing under the mutations in the table, so neither is passing against an adapter that collects nothing; the chore walk also asserts `comments.length > 0`.
+- ✅ **PASS** — `process.md` stage 1 and the triage skill's routing table both say it, in each file's own voice.
+- ✅ **PASS** — `git diff -U0 process.md` reports one hunk, `@@ -27 +27 @@`. Stage 5's paragraph (line 37) and stage 6's (line 39) are byte-identical; the skill's diff is one hunk at line 45.
+- ✅ **PASS** — the ruling, its date, the risk he was shown and accepted, and the pull request as where his judgement now lands are recorded above, for 23i to quote.
+
+**⚠ 23b's guardrails timeout did not reproduce.** `src/commands/guardrails.test.ts > resolves the session id against the ledger` passed in the full run (893/893 at the default timeout, 48.6 s). It is a load flake, and this slice added only two fast tests; treat 23b's warning as still standing rather than as fixed.
+
+**What 23d onward must know.**
+
+1. **`process.md` now says something stage 5's own paragraph still contradicts, on purpose, and 23e closes it.** Stage 1 says a chore meets no gate; stage 5's `Status` lifecycle still calls its `Awaiting approval` → `Approved for execution` flip *"the written trace of this stage's gate"*, and stage 6's entry gate still refuses an unstamped phase file. Both were out of this slice's grant. **Until 23e lands, `process.md` describes a gate at stage 5 that the daemon no longer opens** — the same split 23b's note 6 flagged, now with one of its two halves closed.
+2. **The same transient split reaches the triage skill's neighbour rule.** The chore row no longer says the un-anchored stamp is agreed "at planning time"; stage 5's PRD-anchoring sentence in `process.md` still says "with human agreement". Whichever slice rewrites that sentence should decide where that agreement now happens — the breakdown gate is the only human touch a chore-shaped initiative has left, and a chore does not reach it.
+3. **`gatesPostedIn` is the thing to reuse, not to copy.** Any later slice asserting a route's silence — chunk zero's merge, a re-proposal, the second chunk — should call it rather than write another `not.toMatch(/approve/)`. It lives in `session.test.ts`'s 23c block; promote it to a file-level helper the first time a second block needs it.
+4. **23b's weaker chore assertion is still in place and was deliberately left.** `session.test.ts`'s *"advances a chore to execution instead of spawning planning for ever"* closes with `not.toMatch(/single word \`approve\`/)`. It is a `planning`-only sample of what 23c now walks end to end; it costs nothing, it guards a different regression (the unbounded loop), and deleting it would have been this slice editing 23b's test for tidiness.

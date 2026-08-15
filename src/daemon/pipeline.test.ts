@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 
 import type { TicketComment } from "../adapters/ticketing.js";
 import type { GateDecision } from "./gates.js";
@@ -95,12 +95,21 @@ describe("routeAfterTriage", () => {
     });
   });
 
-  it("sends a chore straight to planning", () => {
+  it("sends a chore straight to planning, and planning stops for nobody", () => {
     // process.md stage 1: chore / technical enabler → stage 5, unanchored.
-    expect(routeAfterTriage("chore")).toEqual({
-      kind: "advance",
-      stage: "planning",
-    });
+    const chore = routeAfterTriage("chore");
+
+    expect(chore).toEqual({ kind: "advance", stage: "planning" });
+
+    // ✏ ADR-0030 D3. The route is untouched and the ruling is about where it
+    // lands: a chore skips requirements and the breakdown, and since D1 the
+    // stage it does reach no longer gates — so it meets no human between
+    // triage and its pull request, on purpose. Asserted as the property *and*
+    // as the value above, because either alone can be satisfied by the wrong
+    // change: the value by gating `planning` again and calling it a fix, the
+    // property by quietly re-pointing the chore at some other ungated stage.
+    assert(chore.kind === "advance");
+    expect(waitFor(chore.stage)).toBe("none");
   });
 
   it("sends a bug to the feedback stage", () => {

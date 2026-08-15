@@ -1583,6 +1583,157 @@ describe("a finished planning session, now that planning is wait-free", () => {
   });
 });
 
+describe("a chore meets no gate on the way to its pull request", () => {
+  // ✏ ADR-0030 D3, walked end to end rather than asserted stage by stage.
+  // `routeAfterTriage` sends a chore past requirements and the breakdown, and
+  // D1 took the gate off `planning` — so a chore now runs triage → planning →
+  // execution and reaches its pull request having been shown to nobody.
+  //
+  // **This is a gate a chore had and lost on purpose, and this block is the
+  // record of it.** fvermaut was asked on 2026-08-15 whether a small chore —
+  // bumping the linter — should put a plan in front of him first or just get
+  // built, and was told in the same breath what it costs: nothing then stops a
+  // misread chore before the work happens. He chose *just build it*, and his
+  // judgement moved to the pull request, which is still his to merge. A future
+  // reader who finds these tests should re-open the ruling before "fixing"
+  // them, not the other way round.
+
+  /**
+   * The two lines that make a comment a gate comment, taken out of
+   * {@link gateCommentFor}'s own rendering rather than retyped: the stage's
+   * headline, and the CTA the decision reader answers. Matching a log line —
+   * or the absence of a `parked` status — would say exactly the same thing
+   * about a walk that posted nothing at all.
+   */
+  function gateMarkers(stage: PipelineStage): string[] {
+    const rendered = gateCommentFor(
+      stage,
+      project,
+      "timone/7-the-page-feels-slow",
+      ["the summary the daemon puts above the link"],
+    );
+    if (rendered === undefined) {
+      throw new Error(`${stage} gates but renders no comment to match on`);
+    }
+    const lines = rendered.split("\n");
+    const cta = lines.find((line) => line.startsWith("**What I need from you:**"));
+    if (cta === undefined) throw new Error(`${stage}'s gate comment carries no CTA`);
+    return [lines[0], cta];
+  }
+
+  /** Which gates a walk actually put in front of the human, in order. */
+  function gatesPostedIn(bodies: readonly string[]): PipelineStage[] {
+    const gated = PIPELINE_STAGES.filter((stage) => waitFor(stage) === "gate");
+    return bodies.flatMap((body) =>
+      gated.filter((stage) =>
+        gateMarkers(stage).every((marker) => body.includes(marker)),
+      ),
+    );
+  }
+
+  /**
+   * A session that plays whichever stage the run is in, read off the ledger —
+   * where the spawner writes it before the session starts. One walk crosses
+   * three stages, and a fake answering the same way at each of them could not
+   * tell triage from the work that follows it.
+   */
+  function walkingRuntime(
+    store: RunStore,
+    runId: string,
+    adapter: TicketingAdapter,
+    kind: "feature" | "bug" | "chore" | "question",
+  ): ReturnType<typeof fakeRuntime> {
+    return fakeRuntime({
+      work: async () => {
+        const stage = store.get(runId)?.stage;
+        if (stage === "triage") {
+          await adapter.applyLabel(project, 7, `triage:${kind}`);
+          await adapter.postComment(project, 7, `I think this is a ${kind}.`);
+          return;
+        }
+        if (stage !== undefined && waitFor(stage) === "conversation") {
+          await adapter.postComment(
+            project,
+            7,
+            `${CONVERSATION_RECORD_MARKER}\n\nwe agreed it is the draft`,
+          );
+          return;
+        }
+        await adapter.postComment(
+          project,
+          7,
+          `${STAGE_DONE_MARKER}\n\nthe ${stage ?? "unknown"} stage is done.`,
+        );
+      },
+    });
+  }
+
+  /** A spawner whose probes never reach a checkout that does not exist. */
+  function walker(
+    store: RunStore,
+    adapter: TicketingAdapter,
+    runtime: SessionRuntime,
+  ): AgentSessionSpawner {
+    return new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      headProbe: async () => undefined,
+      // No checkout, so no phase file to read a `Status:` line out of — which
+      // is why the walk stops at execution rather than running on into
+      // verification. Everything this block asserts happens before that.
+      planStatusProbe: async () => undefined,
+    });
+  }
+
+  it("walks triage → planning → execution without asking the human anything", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const run = pickedUpRun(store);
+    const { runtime, requests } = walkingRuntime(store, run.id, adapter, "chore");
+
+    await walker(store, adapter, runtime).spawn(run, project);
+
+    // The subject of the test, asserted first so a failure names it: not one
+    // of the comments this walk posted is a gate comment. The adapter did
+    // collect them — see the control below for why that sentence alone is not
+    // enough.
+    expect(comments.length).toBeGreaterThan(0);
+    expect(gatesPostedIn(comments.map((comment) => comment.body))).toEqual([]);
+    // And the walk really did cross all three stages: three sessions, the
+    // third of them the build. Nothing stopped in between.
+    expect(requests).toHaveLength(3);
+    expect(requests[2].prompt).toMatch(/build what was planned/i);
+    expect(store.get(run.id)?.stage).toBe("execution");
+  });
+
+  it("posts exactly one gate comment on a feature walked the same way", async () => {
+    // **The control, and the assertion above is worth nothing without it.** A
+    // fake adapter that collected nothing, or a marker that matched nothing,
+    // would report a spotlessly ungated chore either way. A feature goes
+    // through the clarification conversation and then meets `requirements` —
+    // one gate, on the same walk, through the same probe.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const run = pickedUpRun(store);
+    const { runtime } = walkingRuntime(store, run.id, adapter, "feature");
+    const spawner = walker(store, adapter, runtime);
+
+    await spawner.spawn(run, project);
+    await spawner.spawn(store.get(run.id)!, project, {
+      stage: "clarification",
+      feedback: "it's the draft they lose, not the phone layout",
+    });
+
+    expect(gatesPostedIn(comments.map((comment) => comment.body))).toEqual([
+      "requirements",
+    ]);
+  });
+});
+
 describe("recording an approval in the artifact", () => {
   const settled: TicketThread = {
     ...thread,
