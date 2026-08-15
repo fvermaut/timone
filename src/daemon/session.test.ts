@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { MergeOutcome } from "../git.js";
 import type { Manifest } from "../manifest.js";
 import {
   CONVERSATION_RECORD_MARKER,
@@ -1876,6 +1877,162 @@ describe("recording an approval in the artifact", () => {
     });
 
     expect(requests[0].prompt).toMatch(/status to Active/i);
+  });
+});
+
+describe("merging chunk zero when the breakdown is approved", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  /** A run parked on `stage`'s gate, holding chunk zero's branch. */
+  function atGate(store: RunStore, stage: PipelineStage): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage,
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  /** A merge seam that records its calls and reports the given outcome. */
+  function recordingMerge(
+    outcome: MergeOutcome = { merged: true, into: "main" },
+  ): {
+    merge: (repoDir: string, branch: string) => Promise<MergeOutcome>;
+    calls: { repoDir: string; branch: string }[];
+  } {
+    const calls: { repoDir: string; branch: string }[] = [];
+    return {
+      merge: async (repoDir, branch) => {
+        calls.push({ repoDir, branch });
+        return outcome;
+      },
+      calls,
+    };
+  }
+
+  it("merges chunk zero's branch once, and only for the breakdown gate", async () => {
+    // ADR-0030 D2: approving the breakdown merges chunk zero into the default
+    // branch. Approving anything else merges nothing — a guard that fires at
+    // the wrong stage would push unapproved work to a default branch.
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    const { merge, calls } = recordingMerge();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: merge,
+    }).spawn(atGate(store, "breakdown"), project, {
+      stage: "planning",
+      approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    expect(calls).toEqual([
+      {
+        repoDir: join("/root", "projects", "scratch-app"),
+        branch: "timone/7-the-page-feels-slow",
+      },
+    ]);
+  });
+
+  it("merges nothing when the approval was the requirements gate", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    const { merge, calls } = recordingMerge();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: merge,
+    }).spawn(atGate(store, "requirements"), project, {
+      stage: "breakdown",
+      approval: {
+        stage: "requirements",
+        by: "fvermaut",
+        at: "2026-08-03T12:00:00Z",
+      },
+    });
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it("merges nothing when the approval could not be recorded", async () => {
+    // The stamp is committed and pushed first, and the merge only follows a
+    // recording session that succeeded. A merge that ran first could leave
+    // chunk zero on the default branch with no record of the approval that
+    // authorised it — so the ordering is asserted as a count of zero, which
+    // no comment can fake.
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime({ ok: false, error: "push rejected" });
+    const { merge, calls } = recordingMerge();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: merge,
+    }).spawn(atGate(store, "breakdown"), project, {
+      stage: "planning",
+      approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    expect(calls).toHaveLength(0);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+  });
+
+  it("fails the run and says why when the merge does not happen", async () => {
+    // Chunk 1 cuts from the default branch. A merge that failed quietly would
+    // have it build against a default branch carrying no specification, and
+    // nothing downstream would notice.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+    const { merge } = recordingMerge({
+      merged: false,
+      reason: "CONFLICT (content): Merge conflict in doc/specs/prd/prd-01.md",
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: merge,
+    }).spawn(atGate(store, "breakdown"), project, {
+      stage: "planning",
+      approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.failure).toMatch(/could not merge/i);
+    expect(comments.at(-1)?.body).toContain("Merge conflict in doc/specs/prd/prd-01.md");
+    // And the run did not advance: the recording session ran, planning did not.
+    expect(requests).toHaveLength(1);
+    expect(store.get("scratch-app#7/1")?.stage).not.toBe("planning");
   });
 });
 

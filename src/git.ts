@@ -7,6 +7,7 @@ const execFileAsync = promisify(execFile);
 /** Error shape thrown by promisified execFile for a failing process. */
 interface ExecFileError extends Error {
   stderr?: string;
+  stdout?: string;
 }
 
 /**
@@ -23,13 +24,15 @@ async function runGit(args: string[], cwd?: string): Promise<string> {
     );
     return stdout;
   } catch (error) {
-    const stderr = (error as ExecFileError).stderr?.trim();
+    // stdout before the exception's own text, because a conflicted `git
+    // merge` reports what conflicted on *stdout* and leaves stderr empty —
+    // and the reason for a refused merge is what goes on the ticket.
+    const said = [
+      (error as ExecFileError).stderr?.trim(),
+      (error as ExecFileError).stdout?.trim(),
+    ].find((output) => output !== undefined && output !== "");
     const reason =
-      stderr !== undefined && stderr !== ""
-        ? stderr
-        : error instanceof Error
-          ? error.message
-          : String(error);
+      said ?? (error instanceof Error ? error.message : String(error));
     throw new Error(`git ${args.join(" ")} failed: ${reason}`);
   }
 }
@@ -104,4 +107,71 @@ export async function fastForward(dir: string): Promise<{ updated: boolean }> {
   await runGit(["merge", "--ff-only", "@{u}"], dir);
   const after = (await runGit(["rev-parse", "HEAD"], dir)).trim();
   return { updated: before !== after };
+}
+
+/** What {@link mergeIntoDefault} answers: it merged, or it did not and why. */
+export type MergeOutcome =
+  | { merged: true; into: string }
+  | { merged: false; reason: string };
+
+/**
+ * True when a merge is half-done in `dir` — the tree carries `MERGE_HEAD`.
+ * Asked rather than assumed, so unwinding a refused merge never has to
+ * swallow the "there is no merge to abort" error of the case where the
+ * merge never started.
+ */
+async function mergeInProgress(dir: string): Promise<boolean> {
+  try {
+    await runGit(["rev-parse", "--verify", "MERGE_HEAD"], dir);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Merge `branch` into the repository's default branch and push it — the one
+ * place this system writes to a default branch without a pull request, and
+ * the only merge it performs other than {@link fastForward}'s pull onto an
+ * upstream. It exists for one caller: the breakdown gate's approval merging
+ * chunk zero (ADR-0030 D2, amending ADR-0015). It is not a general commit or
+ * push primitive — it authors no content, takes no message, and can move
+ * nothing but the default branch, and nothing but `branch`'s own commits onto
+ * it.
+ *
+ * A refusal comes back as a result rather than an exception, because the
+ * caller has to put the reason on a ticket: a dirty tree (which would be
+ * carried into the merge and pushed), and a merge git will not make. Anything
+ * else — a checkout or a push git rejects — throws with git's stderr, as
+ * every other function in this module does.
+ */
+export async function mergeIntoDefault(
+  dir: string,
+  branch: string,
+): Promise<MergeOutcome> {
+  if (!(await isClean(dir))) {
+    return {
+      merged: false,
+      reason: `the working tree at ${dir} has uncommitted changes`,
+    };
+  }
+
+  await fetch(dir);
+  const into = await defaultBranch(dir);
+  await runGit(["checkout", into], dir);
+  // The checkout's default branch is as old as the last time anything pulled
+  // it, and every chunk's pull request merges on the remote. Merging into a
+  // stale branch would produce a push the remote rejects.
+  await fastForward(dir);
+
+  try {
+    await runGit(["merge", "--no-edit", "--", branch], dir);
+  } catch (error) {
+    if (await mergeInProgress(dir)) await runGit(["merge", "--abort"], dir);
+    const reason = error instanceof Error ? error.message : String(error);
+    return { merged: false, reason };
+  }
+
+  await runGit(["push", "origin", into], dir);
+  return { merged: true, into };
 }

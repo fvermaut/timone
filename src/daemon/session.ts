@@ -5,6 +5,7 @@ import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 
 const execFileAsync = promisify(execFile);
 
+import { mergeIntoDefault, type MergeOutcome } from "../git.js";
 import type { Manifest } from "../manifest.js";
 import type {
   TicketingAdapter,
@@ -197,6 +198,14 @@ export interface AgentSessionSpawnerOptions {
     repoDir: string,
     branch: string,
   ) => Promise<string | undefined>;
+  /**
+   * Merges chunk zero's branch into the project's default branch and pushes
+   * it — the daemon's one write to a branch it is not standing on, reached
+   * only from the breakdown gate's approval (ADR-0030 D2). Behind a seam for
+   * the same reason as {@link repoProbe}, and defaulting to `git.ts`'s
+   * implementation.
+   */
+  mergeProbe?: (repoDir: string, branch: string) => Promise<MergeOutcome>;
   /**
    * Milliseconds between progress lines while a session works. Defaults to
    * {@link DEFAULT_PROGRESS_INTERVAL_SECONDS}.
@@ -1096,7 +1105,60 @@ export class AgentSessionSpawner implements SessionSpawner {
       return false;
     }
 
+    // Only now, with the stamp committed and pushed: approving the breakdown
+    // is one gesture with two effects (ADR-0030 D2), and a chunk zero merged
+    // before its approval was recorded would be work on the default branch
+    // with nothing on the branch saying what authorised it.
+    if (approval.stage === "breakdown") return this.mergeChunkZero(run, project);
+
     return true;
+  }
+
+  /**
+   * Merge chunk zero — the branch carrying the specification and the approved
+   * breakdown — into the project's default branch, with no pull request
+   * (ADR-0030 D2). Returns false when it did not happen, having failed the run
+   * and said why on the ticket, exactly as a failed approval record does:
+   * chunk 1 cuts from the default branch, so a silently failed merge would
+   * have it build against a default branch that does not carry the
+   * specification, and nothing downstream would notice.
+   */
+  private async mergeChunkZero(
+    run: Run,
+    project: TicketingProject,
+  ): Promise<boolean> {
+    const { store, adapter } = this.options;
+    const branch = store.get(run.id)?.branch;
+    const outcome = await this.attemptMerge(project, branch);
+
+    if (outcome.merged) {
+      this.log(`merged ${run.id} — ${branch} into ${outcome.into}`);
+      return true;
+    }
+
+    const reason = `could not merge the approved breakdown into the default branch: ${outcome.reason}`;
+    store.fail(run.id, reason);
+    await adapter.postComment(project, run.ticket, failedComment(reason));
+    return false;
+  }
+
+  /** The merge itself, with a thrown git failure reduced to a refusal. */
+  private async attemptMerge(
+    project: TicketingProject,
+    branch: string | undefined,
+  ): Promise<MergeOutcome> {
+    if (branch === undefined) {
+      return { merged: false, reason: "the run holds no work branch" };
+    }
+    const merge = this.options.mergeProbe ?? mergeIntoDefault;
+    try {
+      return await merge(
+        join(this.options.root, "projects", project.name),
+        branch,
+      );
+    } catch (error) {
+      return { merged: false, reason: oneLine(error) };
+    }
   }
 
   /**

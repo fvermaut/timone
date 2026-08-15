@@ -256,3 +256,98 @@ Checkboxes:
 2. **The same transient split reaches the triage skill's neighbour rule.** The chore row no longer says the un-anchored stamp is agreed "at planning time"; stage 5's PRD-anchoring sentence in `process.md` still says "with human agreement". Whichever slice rewrites that sentence should decide where that agreement now happens — the breakdown gate is the only human touch a chore-shaped initiative has left, and a chore does not reach it.
 3. **`gatesPostedIn` is the thing to reuse, not to copy.** Any later slice asserting a route's silence — chunk zero's merge, a re-proposal, the second chunk — should call it rather than write another `not.toMatch(/approve/)`. It lives in `session.test.ts`'s 23c block; promote it to a file-level helper the first time a second block needs it.
 4. **23b's weaker chore assertion is still in place and was deliberately left.** `session.test.ts`'s *"advances a chore to execution instead of spawning planning for ever"* closes with `not.toMatch(/single word \`approve\`/)`. It is a `planning`-only sample of what 23c now walks end to end; it costs nothing, it guards a different regression (the unbounded loop), and deleting it would have been this slice editing 23b's test for tidiness.
+
+## 23d — Chunk zero merges on approval
+
+**Built.** [ADR-0030](../../../adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D2 has a home. Approving the `breakdown` gate now records the stamp, and **then** merges chunk zero's branch into the project's default branch and pushes it — no pull request. 23b's note 3 is closed: chunk 1 no longer cuts from a default branch that does not carry the specification.
+
+**Files touched.** `src/git.ts`, `src/daemon/session.ts`, `src/daemon/prompts.ts`, `doc/adr/0015-branch-per-driving-unit.md`; tests in `src/daemon/session.test.ts` and `src/daemon/prompts.test.ts`.
+
+### The one new write path, and what it deliberately is not
+
+`git.ts` gains exactly one export:
+
+```ts
+export type MergeOutcome =
+  | { merged: true; into: string }
+  | { merged: false; reason: string };
+
+export async function mergeIntoDefault(dir: string, branch: string): Promise<MergeOutcome>
+```
+
+It refuses a dirty tree, fetches, checks out the default branch, **fast-forwards it onto its upstream**, merges `branch`, and pushes. What it cannot do, and no later slice should quietly teach it to: it takes no message and authors no content, so **it cannot commit** anything but the merge git makes; **there is no push primitive** — the push is the merge's own publication of the branch it just moved, unreachable except by having merged; and it can move **no branch but the default one**, with nothing but `branch`'s own commits. `commit` and `push` still appear nowhere else in the module.
+
+**The fast-forward is not in the plan's list and is load-bearing.** The excerpt says *fetch, checkout, merge, push*, which would fetch for no reason and then merge into however stale the checkout's default branch happened to be. Every chunk's pull request merges **on the remote**, so a checkout that has not pulled since is behind by exactly those merges — and the push at the end would be rejected as non-fast-forward. `fastForward` already existed for this; it throws on a genuinely diverged default branch, which the caller turns into a failed run.
+
+**A merge that will not go through comes back as a result, and the tree is left as it was found.** On failure the module asks whether `MERGE_HEAD` exists before running `merge --abort`, rather than aborting and swallowing "there is no merge to abort" — verified against a real repository: after a conflict, `isClean` is true and `git status --porcelain` is empty.
+
+**One shared function changed, and it had to.** `runGit`'s error message now falls back to the process's **stdout** when stderr is empty. A conflicted `git merge` writes `CONFLICT (content): Merge conflict in <path>` to **stdout** and leaves stderr blank, so without this the reason on the ticket read `Command failed: git merge --no-edit -- <branch>` — a refusal that names nothing, which defeats the point of returning a result. Every other caller is unaffected except where its reason was that same empty string.
+
+### The call site, and the two things about it that are the slice
+
+`recordApproval` gains three lines at its end; `mergeChunkZero` and `attemptMerge` are private to the spawner, and `mergeProbe` joins `repoProbe`/`headProbe`/`planStatusProbe`/`verificationReportProbe` as an injectable option defaulting to `git.ts`.
+
+1. **Guarded on `approval.stage === "breakdown"`, and on nothing else.** There is one `if`, at one call site. No gate but the breakdown's can reach the merge.
+2. **After the stamp, never before.** The merge sits *below* the `if (!outcome.ok) … return false` that judges the recording session, so a recording session that failed leaves the merge uncalled. A branch merged before its approval was recorded would be work on a default branch with nothing saying what authorised it.
+3. **A failed merge fails the run, comments the reason, and returns `false`** — which is `spawn`'s existing early return, so `planning` never starts. It reuses `failedComment` and `store.fail`, the same shape as a failed approval record.
+
+### Red-green trace
+
+| Case | Evidence |
+|---|---|
+| Merge fires for `breakdown`, once, with the run's branch | **Red seen**: `expected [] to deeply equal [ { branch, repoDir } ]` |
+| Merge fires for **no other gate** (`requirements` → zero calls) | Green on arrival — vacuous before the code existed. **Mutation probe**: merge made unconditional → `expected [ {…} ] to have a length of +0 but got 1`. Reverted. |
+| Order: a failed recording session leaves the merge **uncalled** | Green on arrival. **Mutation probe**: merge moved above the `outcome.ok` check → same length assertion fails with 1. Reverted. |
+| A failed merge fails the run, puts the reason on the ticket, and does not advance | Green on arrival. **Mutation probe**: `mergeChunkZero`'s result discarded (`return true`) → `Error: Run scratch-app#7/1 cannot go from failed to active` — the run tried to start `planning`. Reverted. |
+| The delivery prompt still forbids merging a pull request | **Red seen**: `expected 'Present the finished work…' to match /never merge (the \|this )?pull request/i` |
+
+**Three of the five were green on arrival and are recorded as such.** "No merge happened" is vacuously true before a merge exists, and reordering the writing does not change that; the mutation probes above are what prove each one is not passing on a technicality. Every mutation was reverted, and the working tree carries none of them.
+
+### `git.ts` is not unit-tested, per the excerpt — so it was proven by hand
+
+The excerpt rules that `git.ts` gets no test file and the seam the daemon depends on is the injected one, which is what the tests above use. That leaves the primitive itself unproven by the suite, so it was exercised **once, by a throwaway script in the scratchpad against a real temporary repository** (a bare origin, a clone, a chunk-zero branch) and the script deleted:
+
+- a clean merge → `{ merged: true, into: 'main' }`, the checkout left on `main`, and `origin/main` verified to carry `doc/plans/breakdowns/ticket-07.md`;
+- a dirty tree → `{ merged: false, reason: 'the working tree at … has uncommitted changes' }`, nothing fetched, nothing merged;
+- a real conflict → `{ merged: false, reason: '… CONFLICT (content): Merge conflict in README.md' }`, tree clean afterwards, no merge in progress;
+- a branch that does not exist → `{ merged: false, reason: '… not something we can merge' }`.
+
+**If a later slice does add `src/git.test.ts`, those four are the cases.**
+
+### The delivery prompt, narrowed rather than dropped
+
+Before: `**Never merge** — merging is the human's act, and the pull request exists to let them take it.`
+After: **`**Never merge the pull request** — merging it is the human's act, and the pull request exists to let them take it.`**
+
+The instruction keeps its whole force over the thing it was written about. `prompts.test.ts`'s assertion was tightened from `/never merge/i` to a pull-request-specific pattern, so a future rewording back to a blanket rule fails.
+
+### Validation evidence
+
+| Command | Result |
+|---|---|
+| `npm test -- src/daemon/session.test.ts src/daemon/prompts.test.ts` | **246 passed (2 files)** |
+| `npm run type-check` | **exit 0**, no output |
+| `npm test` | **897 passed, 25 files**, 47.9 s |
+| `npm run build` | **exit 0** |
+| `git -C projects/scratch-app status --porcelain && … branch --show-current` | **empty**, then `main` |
+
+Checkboxes:
+
+- ✅ **PASS** — the requirements case asserts `expect(calls).toHaveLength(0)` on the injected function, not a different call, and was seen failing at `got 1` under an unconditional merge.
+- ✅ **PASS** — the failed-merge case asserts `status === "failed"` **and** `requests` has length 1 **and** the stage is not `planning`. Under the swallow mutation it failed on the run trying to activate for `planning`.
+- ✅ **PASS** — `projects/scratch-app` reports nothing and sits on `main`. No test touches a real repository; the one script that did built its own in `$TMPDIR` and removed it.
+- ✅ **PASS** — [ADR-0015](../../../adr/0015-branch-per-driving-unit.md) carries a dated `✏ Amendment 2026-08-15` naming chunk zero as the exception to its ticket-path sentence and explaining that the merge is what keeps its stacking clause true. It cites [ADR-0030](../../../adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D2 rather than restating it, and it is the only `doc/` artifact this slice touched besides this section.
+- ✅ **PASS** — `.timone/state.json` was never written; nothing in this slice runs the CLI.
+
+### What is wrong in the excerpt
+
+1. **The `fetch` in the primitive's step list does nothing without a fast-forward.** Fetching updates `origin/<default>` and leaves the local default branch exactly as stale as it was, so the merge described would go into a stale branch and the push would be rejected. Resolved by adding `fastForward` after the checkout — an existing export, no new behaviour class.
+2. **"It returns a result rather than throwing on a merge conflict" under-specifies the other refusals.** A dirty tree is also a refusal the caller must put on a ticket, and a checkout or push git rejects is not. Resolved by returning results for the two the caller can explain and letting the rest throw as the module always has — with the *caller* catching, so nothing escapes into the poll loop either way.
+3. **The order the excerpt gives for the guard is looser than the ADR's.** It says the merge goes "after the recording session has committed and pushed the stamp and returned `true`", which is what was built; the ADR's own consequence about a merge with no record is the reason, and it is worth reading before anyone refactors `recordApproval`.
+
+### What 23e onward must know
+
+1. **The daemon can now write to a default branch, from exactly one place.** `mergeIntoDefault` has one caller and one guard. A slice that wants a commit, a push, or a merge from anywhere else is re-opening [ADR-0030](../../../adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D2 and D4, not filling in a detail — D4 in particular refused exactly this for ticking the breakdown.
+2. **A chunk-zero merge leaves the checkout on the default branch.** `mergeIntoDefault` does not restore the branch it was on, on either path. Nothing downstream cares today — `claimBranch` checks the run's branch out for the next stage — but a slice that starts reading the checkout's `currentBranch` after an approval should know.
+3. **`runGit`'s error text now prefers stdout when stderr is empty.** Any test asserting on a git failure message from any caller in `git.ts` is reading a slightly better string than before.
+4. **23b's note 3 is closed; its notes 5 and 6 are not.** Nothing still reads a breakdown off disk in `src/` (23f), and `process.md` stage 5/6 plus `timone-execute` gate 1 still describe the old stamp-gated phase file (23e).

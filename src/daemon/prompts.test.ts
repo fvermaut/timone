@@ -415,8 +415,13 @@ describe("the delivery prompt", () => {
     expect(prompt).toContain(STAGE_HANDED_MARKER);
   });
 
-  it("never merges — that stays a human act", () => {
-    expect(prompt).toMatch(/never merge/i);
+  it("never merges the pull request — that stays a human act", () => {
+    // Narrowed rather than dropped (ADR-0030 D2): the daemon now merges chunk
+    // zero itself, once, so a blanket "never merge" would be a rule the
+    // machine breaks. The instruction keeps its whole force for the thing it
+    // was written about — the pull request this session just opened.
+    expect(prompt).toMatch(/never merge (the |this )?pull request/i);
+    expect(prompt).toMatch(/merging (it )?is (the human's|yours)/i);
   });
 });
 

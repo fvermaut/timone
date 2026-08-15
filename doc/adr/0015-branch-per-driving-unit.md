@@ -3,6 +3,7 @@
 - **Status:** accepted
 - **Date:** 2026-08-05
 - **Source:** grill session of 2026-08-05, prompted by a contradiction the [phase 13](../plans/phases/phase-13.md) plan flagged before requesting approval
+- **✏ Amended 2026-08-15** — chunk zero is an exception to the ticket path's endpoint; see [the amendment below](#-amendment-2026-08-15--chunk-zero-ends-somewhere-other-than-a-pull-request)
 
 ## Context
 
@@ -28,6 +29,16 @@ The alternatives considered:
 - Stage 6's refusal rule is restated as intent rather than mechanism: execution refuses a dirty tree, and refuses a branch carrying commits that are neither the driving unit's own artifacts nor its resume trace.
 
 **Deliberately deferred:** a ticket that grows into multiple phases. Today one ticket yields one phase file; when that stops being true, this ADR is where the serial-phases-on-one-branch question gets taken up.
+
+## ✏ Amendment 2026-08-15 — chunk zero ends somewhere other than a pull request
+
+The deferral above stopped being deferred: [ADR-0026](0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md) made a ticket host a sequence of chunks, and [ADR-0030](0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D2 settled what happens to the first of them. Two sentences of the decision above need reading with that in front of them, and this amendment says how rather than leaving it to inference.
+
+**The ticket-path sentence acquires one exception.** "Ticket-driven work owns its `timone/<n>-<slug>` branch … until the pull request merges or closes" still describes every branch that carries code. It does not describe **chunk zero** — the branch the requirements and breakdown stages share, carrying the PRD pair and the approved breakdown and no implementation. Chunk zero's life ends when the human approves the breakdown: the daemon merges it into the default branch there and then, with no pull request opened and none to merge or close. It is the only branch in this system whose endpoint is not a pull request, and it is the only one whose whole content the human has already read and approved through the gate — which is [ADR-0030](0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D2's argument, not restated here. Every later chunk on the same ticket cuts a branch of its own and ends the ordinary way.
+
+**The stacking clause is not weakened by that — it is what keeps it true.** "The next ticket's branch always cuts from a default branch that already contains (or has declined) the previous work" was reasoned from a run holding its project until its pull request settles. A chunked ticket has work that reaches no pull request at all, so the clause would have been false for chunk 1 — it would cut from a default branch carrying no specification — had the merge not happened at the gate. **Chunk zero merging is the thing that preserves the invariant, not a hole in it.** That is also why a merge that fails fails the run: a chunk 1 cut from a default branch missing the specification is exactly the state this clause promises cannot occur.
+
+**What did not change.** Every naming rule, the two paths, and the refusal rule all stand as written. The daemon acquires one merge primitive, reachable only from the breakdown gate's approval, and nothing else about a branch's life moves.
 
 ## Consequences
 
