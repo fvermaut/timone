@@ -428,3 +428,39 @@
       THEN they agree about what that ticket needs from the human
 - **Depends on:** [R3](#r3--async-clarification-via-a-conversation) and [ADR-0023](../../adr/0023-one-answer-one-session.md). Self-healing CTAs write over the same resume path the double-answer defect lives on; building this first would multiply that defect from one answered ticket to every open one, on a timer. **Phase 19 is a hard prerequisite.**
 - **Verification hint:** read every open ticket on both projects and check each against clause 1; file an unmarked issue and confirm one comment and no run, then confirm a second cycle is silent; close a fixture map's last question and confirm the CTA flips, then answer it in writing and confirm stage 3 starts unprompted; run takeover against a ticket with no run; close a blocker and confirm the waiting ticket's CTA refreshes itself; diff `timone status` against the tickets it names.
+
+## R22 — A ticket hosts a sequence of chunks
+
+> Added 2026-08-15 by [ADR-0026](../../adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md), whose open questions are settled by [ADR-0028](../../adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) (D1–D5) and [ADR-0029](../../adr/0029-a-chunk-advances-only-on-success.md). Until phase 22 a ticket and a run were the same object — `run.id` was literally `project#ticket`, with one status, one stage, one branch — so an initiative larger than a single branch had nowhere to live. [Phase 20's live gate](../../plans/phases/reports/phase-20-live-gate.md) watched the consequence: an approved map walked straight on into building, and left alone would have built a whole milestone as one pull request nobody could judge, on a project frozen for weeks. This requirement is the split — a ticket is the durable conversation, a run is one chunk of work with its own branch and its own pull request, and one ticket hosts a sequence of them.
+
+- **Priority:** MUST
+- **Status:** draft
+    - ✏ 2026-08-15 **persisted here after [phase 22](../../plans/phases/phase-22.md), which built the ledger half of this requirement and cut the shaping half unbuilt** ([completion report](../../plans/phases/reports/phase-22-complete.md)). The text was drafted inside that phase's 22e and never reached the register when 22c–22f were cut; persisting it is the correction. **Which clauses have machinery, so a verifier is not sent looking for what does not exist:** clauses 1 and 2 (settledness) and clauses 7 and 8 (ending a chunk by command, and starting nothing on a ticket no longer open and marked) are built and were demonstrated against ledger copies at 859 green tests; **clauses 3 to 6 have no machinery at all** — the breakdown, the gate that moves onto it, chunk succession and what the thread says between chunks are re-planned as their own phase, and until it lands those four are unbuildable-against rather than failing. **Nothing here has been verified by stage 7 and nothing was observed live**, because 22f was the phase's only live gate and it was cut with the rest.
+    - ✏ 2026-08-15 **clause 1 speaks of a *settled* chunk rather than a terminal one, and the distinction is the whole of what phase 22 discovered** ([ADR-0029](../../adr/0029-a-chunk-advances-only-on-success.md)). 22e's own draft asked for *"a ticket whose run is terminal accepts a further run"*, which contradicts `timone retry`: `failed` is terminal, so the cycle after a chunk failed would have opened chunk *N+1* beside the failure, the one-session guard would belong to the new chunk, and the retry command that re-arms the broken chunk in place would be refused. `TERMINAL` keeps its one job — a run in it stops holding its project, so a queued ticket is promoted, and **a failed chunk must still free the project** — while **settledness** carries succession: `done` and `cancelled` settle a chunk and let its ticket take another, `failed` does not. The wording below is the corrected one; the draft's is superseded and is recorded here so nobody restores it.
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a ticket whose current chunk has settled — completed `done`, or ended `cancelled`
+      WHEN the daemon next registers that ticket
+      THEN the ledger holds a further chunk for it at the next sequence number (`<project>#<ticket>/<seq>`), and every earlier chunk of that ticket is still listed against it in sequence order
+    - GIVEN a ticket whose current chunk is `failed`
+      WHEN the daemon polls the project on that cycle and on every later one
+      THEN **no further chunk is opened** — the ledger still names the failed chunk as the ticket's current one — and `timone retry <project>#<ticket>` re-arms that same chunk in place, at the stage it died, keeping its branch and its sequence number
+    - GIVEN an approved specification for a ticket whose work is more than one chunk
+      WHEN the planning stage runs
+      THEN the breakdown listing the chunks in order is committed at `doc/plans/breakdowns/ticket-NN.md`, its readable list is posted as a ticket comment, and the ticket waits on **exactly one** approval — the reply that gives it both stamps the breakdown `Approved` and merges chunk zero, and no second gate comment appears before the first chunk starts building
+    - GIVEN an approved breakdown
+      WHEN a chunk's phase file is written and committed
+      THEN the chunk builds without any approval request for that phase file appearing on the ticket — between the breakdown's approval and the chunk's pull request the thread carries no gate at all
+    - GIVEN a chunk's pull request is merged
+      WHEN the daemon next polls the project
+      THEN the merged chunk is marked done in the breakdown and, where the breakdown lists a further chunk, the next chunk's run opens on the **same** ticket; where it lists none, no further run opens and the ticket is closed with a comment linking every pull request the initiative produced
+    - GIVEN a ticket between two chunks — one chunk's pull request merged, the next not yet started — and another marked ticket queued on the same project
+      WHEN the daemon next polls
+      THEN the queued ticket's run starts **in that window**, ahead of the initiative's remaining chunks, and `timone status` shows the initiative holding nothing while it does
+    - GIVEN a run in any state the ledger admits — queued, parked, active or failed
+      WHEN `timone cancel <project>#<ticket>` is run against it
+      THEN the chunk ends `cancelled` carrying a reason, its project is released, and `.timone/state.json` needs no hand-edit for any of it
+    - GIVEN a ticket that has been closed, or had its mark removed, while a run for it stands in the ledger
+      WHEN the daemon next polls the project
+      THEN that run is cancelled with a reason and **no session is spawned for it**, asserted on the spawn itself rather than on the absence of a log line
+- **Verification hint:** drive a copy of the ledger with `--state` and never the live file. Settle a fixture chunk and confirm the ticket takes a `/2`; fail one and confirm repeated cycles open nothing while `timone retry` re-arms `/1`. Then, on `scratch-app`, break a fixture specification into two chunks, approve the breakdown once, and read the ticket thread end to end: two branches, two pull requests, no gate between them, the ticket closing on the second merge. File a second marked ticket while chunk 1's pull request is open and confirm it starts between the chunks. Cancel a live fixture run by command, and close a ticket with a run queued behind it to confirm nothing is spawned and nothing is paid for.
