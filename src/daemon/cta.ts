@@ -15,7 +15,7 @@
  */
 import { MARK_LABEL } from "../adapters/ticketing.js";
 import { takeoverCommand } from "../channels/terminal.js";
-import { runId, type Run } from "./runs.js";
+import { type Run } from "./runs.js";
 
 /**
  * Everything the CTA is computed from: one ticket, and whatever the ledger and
@@ -116,7 +116,7 @@ export function ctaFor(state: TicketState): Cta {
       headline: "Something went wrong while I was working on this.",
       needFromYou: "run the command and I'll pick it up from where it stopped.",
       waitingOnYou: false,
-      command: `timone retry ${runId(state.project, state.ticket)}`,
+      command: `timone retry ${state.project}#${state.ticket}`,
     };
   }
 

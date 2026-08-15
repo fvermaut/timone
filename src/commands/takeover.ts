@@ -9,7 +9,7 @@ import type {
   TicketThread,
 } from "../adapters/ticketing.js";
 import { loadManifest, type Manifest } from "../manifest.js";
-import { RunStore, defaultStatePath, runId, type Run } from "../daemon/runs.js";
+import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import {
   waitFor,
   wayfinderStage,
@@ -126,7 +126,7 @@ export async function resolveTakeover(
     };
   }
 
-  const run = store.get(runId(target.project, target.ticket));
+  const run = store.runsForTicket(target.project, target.ticket).at(-1);
   if (run === undefined) return enrolFromTracker(target, deps);
 
   switch (run.status) {

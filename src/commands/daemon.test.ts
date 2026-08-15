@@ -162,7 +162,7 @@ describe("runDaemon — one writer, and it says who holds it", () => {
       log: () => {},
     });
 
-    expect(result.pickedUp).toEqual(["scratch-app#7"]);
+    expect(result.pickedUp).toEqual(["scratch-app#7/1"]);
     expect(existsSync(stateLockPath(statePath))).toBe(false);
   });
 });
@@ -206,7 +206,7 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
 
     // Twice a one-minute interval is two minutes; four is an absence, so the
     // quiet run gets its window back rather than being reclaimed.
-    expect(store.get("scratch-app#7")?.status).toBe("active");
+    expect(store.get("scratch-app#7/1")?.status).toBe("active");
   });
 
   it("reads the same gap as jitter at a five-minute interval", async () => {
@@ -219,6 +219,6 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     await cycle(store, set, "2026-08-06T10:01:00Z", 5 * 60 * 1000);
     await cycle(store, set, "2026-08-06T10:05:00Z", 5 * 60 * 1000);
 
-    expect(store.get("scratch-app#7")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
   });
 });

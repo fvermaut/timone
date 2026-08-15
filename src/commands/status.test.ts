@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Manifest } from "../manifest.js";
 import { ctaComment, ctaFor } from "../daemon/cta.js";
 import { reclaimedReason } from "../daemon/poll.js";
-import type { Run } from "../daemon/runs.js";
+import { runId, type Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
 
 const manifest: Manifest = {
@@ -25,7 +25,8 @@ const manifest: Manifest = {
 
 function run(overrides: Partial<Run> & Pick<Run, "project" | "ticket">): Run {
   return {
-    id: `${overrides.project}#${overrides.ticket}`,
+    id: runId(overrides.project, overrides.ticket, 1),
+    seq: 1,
     status: "active",
     flags: [],
     createdAt: "2026-08-02T10:00:00Z",

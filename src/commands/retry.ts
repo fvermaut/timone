@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
-import { RunStore, defaultStatePath, runId, type Run } from "../daemon/runs.js";
+import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
 import { waitOf } from "../daemon/session.js";
@@ -79,7 +79,7 @@ function retry(
     return 1;
   }
 
-  const run = store.get(runId(target.project, target.ticket));
+  const run = store.runsForTicket(target.project, target.ticket).at(-1);
   const name = `${target.project} #${target.ticket}`;
   if (run === undefined) {
     log(

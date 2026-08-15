@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "runs": [
+    {
+      "id": "scratch-app#4",
+      "project": "scratch-app",
+      "ticket": 4,
+      "status": "parked",
+      "stage": "triage",
+      "waitingOn": "the next stage to be built",
+      "sessionId": "f8982c83-b872-4816-be19-c753d41fef31",
+      "flags": [],
+      "createdAt": "2026-08-02T18:29:31.940Z",
+      "updatedAt": "2026-08-02T18:32:29.650Z"
+    },
+    {
+      "id": "scratch-app#6",
+      "project": "scratch-app",
+      "ticket": 6,
+      "status": "done",
+      "stage": "remediation",
+      "waitingKind": "review",
+      "waitCursor": "2026-08-06T18:44:10Z",
+      "branch": "timone/6-typing-in-the-box-is-fiddly-on-my-phone",
+      "pr": 9,
+      "sessionId": "99d3de6c-3693-4236-8c00-951cefe192d9",
+      "flags": [],
+      "createdAt": "2026-08-02T18:32:57.787Z",
+      "updatedAt": "2026-08-06T18:48:14.962Z"
+    },
+    {
+      "id": "scratch-app#10",
+      "project": "scratch-app",
+      "ticket": 10,
+      "status": "failed",
+      "stage": "planning",
+      "branch": "timone/10-throwaway-queue-promotion-test-fixture-f",
+      "sessionId": "596d3588-cd24-4e01-b306-2d40c0a0fa14",
+      "failure": "the planning stage finished without committing anything to gate",
+      "flags": [],
+      "createdAt": "2026-08-06T18:45:42.435Z",
+      "updatedAt": "2026-08-06T19:33:04.376Z"
+    },
+    {
+      "id": "ivtrends#5",
+      "project": "ivtrends",
+      "ticket": 5,
+      "status": "done",
+      "stage": "wayfinding",
+      "waitingKind": "conversation",
+      "waitCursor": "2026-08-09T15:58:02Z",
+      "flags": [],
+      "createdAt": "2026-08-09T15:58:00.473Z",
+      "updatedAt": "2026-08-09T16:28:23.585Z"
+    }
+  ],
+  "introductions": {
+    "scratch-app#5": {
+      "project": "scratch-app",
+      "ticket": 5,
+      "at": "2026-08-14T12:53:58.173Z"
+    },
+    "scratch-app#27": {
+      "project": "scratch-app",
+      "ticket": 27,
+      "at": "2026-08-14T12:53:59.752Z"
+    }
+  },
+  "observedAt": "2026-08-14T22:12:04.818Z",
+  "observingSince": "2026-08-14T20:54:50.741Z"
+}

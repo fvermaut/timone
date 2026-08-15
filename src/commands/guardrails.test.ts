@@ -208,7 +208,7 @@ describe("finding the run that drove a session", () => {
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-abc");
 
-    expect(runForSession(store, "session-abc")?.id).toBe("scratch-app#7");
+    expect(runForSession(store, "session-abc")?.id).toBe("scratch-app#7/1");
   });
 
   it("finds the run of a session started under the claim-first ordering", async () => {
@@ -274,7 +274,7 @@ describe("finding the run that drove a session", () => {
       feedback: "it's the draft they lose, not the phone layout",
     });
 
-    expect(runForSession(store, "session-resumed")?.id).toBe("scratch-app#7");
+    expect(runForSession(store, "session-resumed")?.id).toBe("scratch-app#7/1");
   });
 
   it("finds nobody for a session no run ever claimed", () => {
@@ -314,13 +314,13 @@ describe("a session the daemon drove", () => {
     expect(first.returned).toHaveLength(1);
     expect(first.returned[0].summary).toContain("never reached the remote");
     expect(first.account).toContain("handed");
-    expect(store.get("scratch-app#7")?.flags).toEqual([]);
+    expect(store.get("scratch-app#7/1")?.flags).toEqual([]);
 
     // The second: it did not fix it, so the run carries it.
     const second = await stopOnce(root, "session-daemon", store);
     expect(second.returned).toEqual([]);
-    expect(store.get("scratch-app#7")?.flags).toHaveLength(1);
-    expect(store.get("scratch-app#7")?.flags[0]).toContain(
+    expect(store.get("scratch-app#7/1")?.flags).toHaveLength(1);
+    expect(store.get("scratch-app#7/1")?.flags[0]).toContain(
       "never reached the remote",
     );
     // And nothing leaked to the interactive audience.
@@ -352,7 +352,7 @@ describe("a session the daemon drove", () => {
     const second = await stopOnce(root, "session-daemon", store);
 
     expect(second.account).toContain("clean");
-    expect(store.get("scratch-app#7")?.flags).toEqual([]);
+    expect(store.get("scratch-app#7/1")?.flags).toEqual([]);
   });
 
   it("says nothing anywhere when the session behaved", async () => {
@@ -373,7 +373,7 @@ describe("a session the daemon drove", () => {
       },
     );
     expect(printed).toEqual([]);
-    expect(store.get("scratch-app#7")?.flags).toEqual([]);
+    expect(store.get("scratch-app#7/1")?.flags).toEqual([]);
     expect(account).toContain("clean");
   });
 });
@@ -696,7 +696,7 @@ describe("commits another session made", () => {
       },
     );
     expect(printed).toEqual([]);
-    expect(store.get("scratch-app#11")?.flags).toEqual([]);
+    expect(store.get("scratch-app#11/1")?.flags).toEqual([]);
   });
 
   it("are invisible to the provenance rule", async () => {

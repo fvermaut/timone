@@ -278,7 +278,7 @@ describe("resolveTakeover", () => {
 
   it("explains a queued ticket rather than starting it out of turn", async () => {
     const store = parkedOnConversation(newStore(), 4);
-    const first = store.get("scratch-app#4");
+    const first = store.get("scratch-app#4/1");
     store.activate(first!.id, "session-again");
     store.claimBranch(first!.id, "timone/4-something");
     store.park(first!.id, { waitingOn: "approval", kind: "gate" });
@@ -352,7 +352,7 @@ describe("a ticket the ledger has never heard of", () => {
       adapter,
     });
 
-    expect(store.get("scratch-app#12")).toMatchObject({
+    expect(store.get("scratch-app#12/1")).toMatchObject({
       status: "parked",
       stage: "wayfinding",
       waitingKind: "conversation",
@@ -374,11 +374,11 @@ describe("a ticket the ledger has never heard of", () => {
     );
 
     expect(resolution).toMatchObject({ kind: "converse", stage: "triage" });
-    expect(store.get("scratch-app#5")).toMatchObject({
+    expect(store.get("scratch-app#5/1")).toMatchObject({
       status: "picked-up",
       stage: "triage",
     });
-    expect(store.get("scratch-app#5")?.waitingKind).toBeUndefined();
+    expect(store.get("scratch-app#5/1")?.waitingKind).toBeUndefined();
   });
 
   it("still refuses a closed ticket, in a sentence of its own", async () => {
@@ -470,7 +470,7 @@ describe("a ticket the ledger has never heard of", () => {
       kind: "nothing-to-do",
       message: expect.stringMatching(/queue/),
     });
-    expect(store.get("scratch-app#12")).toMatchObject({ status: "queued" });
+    expect(store.get("scratch-app#12/1")).toMatchObject({ status: "queued" });
   });
 });
 
@@ -625,7 +625,7 @@ describe("runTakeover", () => {
     // One fetch for the whole command: the wait was opened from the same
     // thread the prompt is built out of (19d's property, on this path).
     expect(asked).toEqual([12]);
-    expect(store.get("scratch-app#12")).toMatchObject({ status: "parked" });
+    expect(store.get("scratch-app#12/1")).toMatchObject({ status: "parked" });
   });
 });
 

@@ -71,7 +71,7 @@ describe("timone retry", () => {
     const code = runRetry("scratch-app#6", { manifest, store, log });
 
     expect(code).toBe(0);
-    const run = store.get("scratch-app#6");
+    const run = store.get("scratch-app#6/1");
     expect(run?.status).toBe("picked-up");
     expect(run?.stage).toBe("execution");
     expect(run?.branch).toBe("timone/6-fiddly-box");
@@ -95,7 +95,7 @@ describe("timone retry", () => {
     const code = runRetry("scratch-app#6", { manifest, store, log });
 
     expect(code).toBe(1);
-    expect(store.get("scratch-app#6")?.status).toBe("parked");
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
     expect(lines.join("\n")).toMatch(/your approval of the plan/);
   });
 
@@ -124,7 +124,7 @@ describe("timone retry", () => {
     const code = runRetry("scratch-app#6", { manifest, store, log });
 
     expect(code).toBe(1);
-    expect(store.get("scratch-app#6")?.status).toBe("failed");
+    expect(store.get("scratch-app#6/1")?.status).toBe("failed");
     expect(lines.join("\n")).toMatch(/#8|another/i);
   });
 
@@ -157,7 +157,7 @@ describe("timone retry", () => {
     const code = runRetry("scratch-app#6", { manifest, store, statePath, log });
 
     expect(code).toBe(1);
-    expect(store.get("scratch-app#6")?.status).toBe("failed");
+    expect(store.get("scratch-app#6/1")?.status).toBe("failed");
     expect(lines.join("\n")).toContain("timone daemon");
     expect(lines.join("\n")).toContain("4213");
   });
@@ -313,13 +313,13 @@ describe("timone retry — the answer a killed session had already read", () => 
     // session is killed.
     thread.push(answer);
     const read = await pollOnce(deps);
-    const dead = store.get("scratch-app#26");
+    const dead = store.get("scratch-app#26/1");
 
     const code = runRetry("scratch-app#26", { manifest, store, log });
-    const rearmed = store.get("scratch-app#26");
+    const rearmed = store.get("scratch-app#26/1");
     const again = await pollOnce(deps);
 
-    expect(read.resumed).toEqual(["scratch-app#26"]);
+    expect(read.resumed).toEqual(["scratch-app#26/1"]);
     // What the fault rested on: the run was activated, which clears the wait,
     // so the failed run has nothing left pointing at the answer it read.
     expect(dead?.status).toBe("failed");
@@ -332,7 +332,7 @@ describe("timone retry — the answer a killed session had already read", () => 
       Date.parse(answer.createdAt),
     );
     // So the next cycle resumes on their words, in a second session.
-    expect(again.resumed).toEqual(["scratch-app#26"]);
+    expect(again.resumed).toEqual(["scratch-app#26/1"]);
     expect(prompts).toHaveLength(2);
     expect(prompts.at(-1)).toContain("it's the draft they lose");
     // And the question was asked once, across the whole sequence.
@@ -391,7 +391,7 @@ describe("timone retry — the answer a killed session had already read", () => 
       // Consumed by the previous build: the cursor moved, nothing recorded it.
       waitCursor: answer.createdAt,
     });
-    const legacy = store.get("scratch-app#26");
+    const legacy = store.get("scratch-app#26/1");
     const prompts: string[] = [];
     const deps = {
       manifest,
@@ -409,7 +409,7 @@ describe("timone retry — the answer a killed session had already read", () => 
     expect(legacy?.consumedAnswerAt).toBeUndefined();
     expect(stalled.resumed).toEqual([]);
     expect(code).toBe(0);
-    expect(again.resumed).toEqual(["scratch-app#26"]);
+    expect(again.resumed).toEqual(["scratch-app#26/1"]);
     expect(prompts.at(-1)).toContain("it's the draft they lose");
   });
 
@@ -453,7 +453,7 @@ describe("timone retry — the answer a killed session had already read", () => 
     thread.push(answer);
     await pollOnce(deps);
 
-    const settled = store.get("scratch-app#26");
+    const settled = store.get("scratch-app#26/1");
     const code = runRetry("scratch-app#26", { manifest, store, log });
 
     expect(settled?.status).toBe("done");
@@ -461,7 +461,7 @@ describe("timone retry — the answer a killed session had already read", () => 
     // And retry refuses it as the finished run it is, changing nothing.
     expect(code).toBe(1);
     expect(lines.join("\n")).toMatch(/finished/i);
-    expect(store.get("scratch-app#26")?.status).toBe("done");
+    expect(store.get("scratch-app#26/1")?.status).toBe("done");
     expect(posted.filter(isInvitation)).toHaveLength(1);
   });
 });
@@ -546,12 +546,12 @@ describe("timone retry — the way back from a consumed answer", () => {
     const code = runRetry("scratch-app#6", { manifest, store, log });
     const again = await pollOnce(deps);
 
-    expect(read.resumed).toEqual(["scratch-app#6"]);
+    expect(read.resumed).toEqual(["scratch-app#6/1"]);
     // Consumed: the same thread now holds nothing outstanding.
     expect(stalled.resumed).toEqual([]);
     // And the rewind hands it back, with the human's own words.
     expect(code).toBe(0);
-    expect(again.resumed).toEqual(["scratch-app#6"]);
+    expect(again.resumed).toEqual(["scratch-app#6/1"]);
     expect(contexts.at(-1)?.feedback).toBe(answer.body);
   });
 });

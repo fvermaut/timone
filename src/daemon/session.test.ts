@@ -1103,7 +1103,7 @@ describe("the requirements gate", () => {
     const claimed: (string | undefined)[] = [];
     const { runtime } = fakeRuntime({
       work: () => {
-        claimed.push(store.get("scratch-app#7")?.branch);
+        claimed.push(store.get("scratch-app#7/1")?.branch);
       },
     });
 
@@ -1127,7 +1127,7 @@ describe("the requirements gate", () => {
     const seen: (string | undefined)[] = [];
     const { runtime } = fakeRuntime({
       work: () => {
-        seen.push(store.get("scratch-app#7")?.stage);
+        seen.push(store.get("scratch-app#7/1")?.stage);
       },
     });
 
@@ -1161,7 +1161,7 @@ describe("the requirements gate", () => {
       repoProbe: movingProbe(),
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
-    expect(store.occupyingRun("scratch-app")?.id).toBe("scratch-app#7");
+    expect(store.occupyingRun("scratch-app")?.id).toBe("scratch-app#7/1");
     expect(store.register("scratch-app", 9).run.status).toBe("queued");
   });
 
@@ -1255,7 +1255,7 @@ describe("the requirements gate", () => {
       repoProbe: movingProbe(),
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
-    const parked = store.get("scratch-app#7");
+    const parked = store.get("scratch-app#7/1");
     expect(parked?.status).toBe("parked");
     expect(parked?.waitingKind).toBe("gate");
     expect(parked?.stage).toBe("requirements");
@@ -1501,8 +1501,8 @@ describe("recording an approval in the artifact", () => {
       approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
     });
 
-    expect(store.get("scratch-app#7")?.status).toBe("failed");
-    expect(store.get("scratch-app#7")?.failure).toMatch(/could not record the approval/);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.failure).toMatch(/could not record the approval/);
     expect(comments.at(-1)?.body).toMatch(/push rejected/);
   });
 
@@ -1597,7 +1597,7 @@ describe("a gate is never opened over nothing", () => {
       repoProbe: stuckProbe,
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
-    const finished = store.get("scratch-app#7");
+    const finished = store.get("scratch-app#7/1");
     expect(finished?.status).toBe("failed");
     expect(finished?.failure).toMatch(/without committing anything to gate/);
   });
@@ -1617,7 +1617,7 @@ describe("a gate is never opened over nothing", () => {
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
     expect(comments.at(-1)!.body).toContain("`approve`");
-    expect(store.get("scratch-app#7")?.waitingKind).toBe("gate");
+    expect(store.get("scratch-app#7/1")?.waitingKind).toBe("gate");
   });
 
   it("treats a branch that did not exist before as work, once it does", async () => {
@@ -1727,7 +1727,7 @@ describe("the execution stage", () => {
       planStatusProbe: async () => "Approved for execution by fvermaut 2026-08-05",
     }).spawn(atExecution(store), project, { stage: "execution" });
 
-    const run = store.get("scratch-app#7");
+    const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
     expect(run?.failure).toMatch(/phase file/i);
     expect(comments.at(-1)?.body).toMatch(/went wrong/i);
@@ -1748,7 +1748,7 @@ describe("the execution stage", () => {
       planStatusProbe: async () => "Complete — see reports/phase-04-complete.md",
     }).spawn(atExecution(store), project, { stage: "execution" });
 
-    const run = store.get("scratch-app#7");
+    const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
     expect(run?.failure).toMatch(/outcome/i);
   });
@@ -1772,7 +1772,7 @@ describe("the execution stage", () => {
       planStatusProbe: async () => "Approved for execution by fvermaut 2026-08-05",
     }).spawn(atExecution(store), project, { stage: "execution" });
 
-    const run = store.get("scratch-app#7");
+    const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
     // The session's own comment is the report; the daemon adds nothing on top.
     expect(comments.at(-1)?.body).toContain("failed twice");
@@ -1849,7 +1849,7 @@ describe("the verification stage", () => {
     // by the prompt that opens the pull request.
     expect(requests.length).toBeGreaterThanOrEqual(2);
     expect(requests[1].prompt).toMatch(/pull request/i);
-    expect(store.get("scratch-app#7")?.stage).toBe("delivery");
+    expect(store.get("scratch-app#7/1")?.stage).toBe("delivery");
   });
 
   it("fails the run when the session said done but no report exists", async () => {
@@ -1867,7 +1867,7 @@ describe("the verification stage", () => {
       verificationReportProbe: async () => undefined,
     }).spawn(atVerification(store), project, { stage: "verification" });
 
-    const run = store.get("scratch-app#7");
+    const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
     expect(run?.failure).toMatch(/report/i);
   });
@@ -1892,7 +1892,7 @@ describe("the verification stage", () => {
         "doc/plans/phases/reports/phase-04-verification.md",
     }).spawn(atVerification(store), project, { stage: "verification" });
 
-    const run = store.get("scratch-app#7");
+    const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
     // The session's own comment is R6's failure report; nothing is added.
     expect(comments.at(-1)?.body).toContain("both loops");
@@ -1973,7 +1973,7 @@ describe("the delivery stage", () => {
       repoProbe: movingProbe(),
     }).spawn(atDelivery(store), project, { stage: "delivery" });
 
-    const run = store.get("scratch-app#7");
+    const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("parked");
     expect(run?.waitingKind).toBe("review");
     expect(run?.pr).toBe(9);
@@ -1999,7 +1999,7 @@ describe("the delivery stage", () => {
       repoProbe: movingProbe(),
     }).spawn(atDelivery(store), project, { stage: "delivery" });
 
-    const run = store.get("scratch-app#7");
+    const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
     expect(run?.failure).toMatch(/pull request/i);
     expect(comments.at(-1)?.body).toMatch(/went wrong/i);
@@ -2023,7 +2023,7 @@ describe("the delivery stage", () => {
       repoProbe: movingProbe(),
     }).spawn(atDelivery(store), project, { stage: "delivery" });
 
-    const run = store.get("scratch-app#7");
+    const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
     expect(comments.at(-1)?.body).toContain("refused delivery");
   });
@@ -2123,7 +2123,7 @@ describe("the remediation stage", () => {
       repoProbe: async () => "same-sha",
     }).spawn(atRemediation(store), project, { stage: "remediation" });
 
-    const run = store.get("scratch-app#7");
+    const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("parked");
     expect(run?.waitingKind).toBe("review");
     // The cursor advanced past the session's own reply, so only what the
@@ -2153,7 +2153,7 @@ describe("the remediation stage", () => {
       repoProbe: movingProbe(),
     }).spawn(atRemediation(store), project, { stage: "remediation" });
 
-    expect(store.get("scratch-app#7")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
     expect(comments.at(-1)?.body).toContain("moves a requirement");
   });
 });
@@ -2284,7 +2284,7 @@ describe("the model each session runs on", () => {
     }).spawn(store.get(run.id)!, project, { stage: "clarification" });
 
     expect(requests).toHaveLength(0);
-    expect(store.get("scratch-app#7")?.waitingKind).toBe("conversation");
+    expect(store.get("scratch-app#7/1")?.waitingKind).toBe("conversation");
   });
 });
 
@@ -2435,7 +2435,7 @@ describe("saying what a session is doing while it does it", () => {
       log: (message) => lines.push(message),
     }).spawn(pickedUpRun(store), project, { stage: "triage" });
 
-    expect(store.get("scratch-app#7")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
     expect(lines).toContainEqual(expect.stringContaining("$0.12"));
     expect(clock.stops).toBe(1);
   });
@@ -2522,7 +2522,7 @@ describe("saying what a session is doing while it does it", () => {
     expect(clock.stops).toBe(1);
     // Nothing printed — there was nothing to say — but the run was stamped.
     expect(lines.filter((line) => line.startsWith("work"))).toHaveLength(0);
-    expect(store.get("scratch-app#7")?.heartbeatAt).toEqual(expect.any(String));
+    expect(store.get("scratch-app#7/1")?.heartbeatAt).toEqual(expect.any(String));
   });
 
   it("stamps the heartbeat on every tick of a session that does report", async () => {
@@ -2545,7 +2545,7 @@ describe("saying what a session is doing while it does it", () => {
       ticker: clock.ticker,
     }).spawn(pickedUpRun(store), project, { stage: "triage" });
 
-    expect(store.get("scratch-app#7")?.heartbeatAt).toEqual(expect.any(String));
+    expect(store.get("scratch-app#7/1")?.heartbeatAt).toEqual(expect.any(String));
   });
 
   it("defaults to thirty seconds", () => {
@@ -2628,8 +2628,8 @@ describe("a gate is never opened over a branch that was merely created", () => {
       headProbe: async () => "sha-base",
     }).spawn(readyToPlan(store), project, { stage: "planning" });
 
-    expect(store.get("scratch-app#7")?.status).toBe("failed");
-    expect(store.get("scratch-app#7")?.failure).toMatch(/without committing anything/);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.failure).toMatch(/without committing anything/);
     expect(comments.at(-1)?.body).toContain("nothing for you to approve");
   });
 
@@ -2653,7 +2653,7 @@ describe("a gate is never opened over a branch that was merely created", () => {
       headProbe: async () => "sha-base",
     }).spawn(readyToPlan(store), project, { stage: "planning" });
 
-    expect(store.get("scratch-app#7")?.status).toBe("parked");
+    expect(store.get("scratch-app#7/1")?.status).toBe("parked");
     expect(comments.at(-1)?.body).toContain("approve");
   });
 
@@ -2682,6 +2682,6 @@ describe("a gate is never opened over a branch that was merely created", () => {
       headProbe: async () => "sha-after",
     }).spawn(store.get(run.id)!, project, { stage: "planning" });
 
-    expect(store.get("scratch-app#7")?.status).toBe("parked");
+    expect(store.get("scratch-app#7/1")?.status).toBe("parked");
   });
 });

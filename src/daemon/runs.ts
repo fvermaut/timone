@@ -27,8 +27,43 @@ export type RunStatus =
  */
 const RUNNING: readonly RunStatus[] = ["picked-up", "active"];
 
-/** Statuses a run never leaves. */
+/**
+ * Statuses that end a run's hold on its project: it is over, so the next
+ * queued ticket may be promoted. `failed` belongs here — a dead session must
+ * not freeze the project behind it.
+ *
+ * See {@link isSettled}, which is deliberately narrower and is *not* a
+ * duplicate of this.
+ */
 const TERMINAL: readonly RunStatus[] = ["done", "failed"];
+
+/**
+ * Statuses that **settle** a chunk: the ticket is finished with it and may
+ * open its next one
+ * ([ADR-0029](../../doc/adr/0029-a-chunk-advances-only-on-success.md)).
+ *
+ * The next reader will assume this duplicates {@link TERMINAL}. It does not —
+ * the two answer different questions, and `failed` answers them differently:
+ *
+ * - {@link TERMINAL} is about the **project lock**. A failed run is over, so
+ *   it stops holding the project and whatever queued behind it is promoted.
+ * - Settledness is about the **ticket's succession**. A failed chunk is still
+ *   its ticket's current business, because `timone retry <project>#<ticket>`
+ *   re-arms *that* chunk in place. Letting the ticket move on would open a
+ *   chunk beside the failure — the poll loop registers every marked ticket on
+ *   every cycle, so within a minute — and the one-session guard would then
+ *   refuse the retry, deleting the only road a broken chunk has back to
+ *   working.
+ *
+ * A chunk advances only on success. Slice 22b adds `cancelled` here: an
+ * abandoned chunk is settled too, because nobody is going to retry it.
+ */
+const SETTLED: readonly RunStatus[] = ["done"];
+
+/** Whether a chunk in this status lets its ticket move to the next one. */
+function isSettled(status: RunStatus): boolean {
+  return SETTLED.includes(status);
+}
 
 /**
  * Every transition the store will make; anything else is a bug, loudly.
@@ -59,10 +94,27 @@ const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
 };
 
 const runSchema = z.strictObject({
-  /** `<project>#<ticket>` — one run per ticket, which is what makes pickup idempotent. */
+  /** `<project>#<ticket>/<seq>` — see {@link runId}. */
   id: z.string(),
   project: z.string(),
   ticket: z.number().int().positive(),
+  /**
+   * Which chunk of its ticket this run is, counting from 1
+   * ([ADR-0026](../../doc/adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md)).
+   *
+   * A ticket is a durable conversation and hosts a sequence of chunks over its
+   * life, each with its own branch and its own pull request. This is the
+   * sequence number of one of them — not an attempt count and not a retry
+   * count: a re-armed run keeps its number, because it is the same chunk being
+   * built again.
+   *
+   * Required rather than optional, unlike the other fields added since the
+   * ledger was written. A run with no chunk number is a run whose identity is
+   * incomplete, and every such ledger is normalised on load — see
+   * {@link normaliseSequences} — so the field is never absent by the time
+   * anything reads it.
+   */
+  seq: z.number().int().positive(),
   status: z.enum([
     "queued",
     "picked-up",
@@ -367,6 +419,41 @@ export class RunStore {
   }
 
   /**
+   * Every chunk of `ticket`, in sequence order, oldest first (ADR-0026).
+   *
+   * **The last of them is the ticket's current chunk** — the live one wherever
+   * one is live, since {@link register} only opens a new sequence number once
+   * nothing of the ticket is live, and otherwise the chunk the ticket last
+   * finished on. That is what the surfaces addressed to a human ask for:
+   * `timone retry`, `timone takeover` and a ticket's call to action all speak
+   * about a ticket, and the chunk they mean is its most recent one, whether or
+   * not it is still going.
+   *
+   * Reads the file, as {@link occupyingRun} does and for the same reason.
+   */
+  runsForTicket(project: string, ticket: number): Run[] {
+    this.refresh();
+    return this.loadedRunsForTicket(project, ticket);
+  }
+
+  /**
+   * The one chunk of `ticket` that is not settled, or undefined when none has
+   * been opened or every one of them is settled (ADR-0026, ADR-0029).
+   *
+   * At most one can exist: {@link register} refuses to open a chunk while
+   * another lives, which is what keeps a ticket's work a *sequence* rather
+   * than a fan-out. `parked` counts as living — a run waiting on a human is
+   * unfinished — and so does **`failed`**, which is the surprising half: a
+   * failed chunk is what `timone retry` re-arms, so the ticket is not done
+   * with it. Only `done` (and, from 22b, `cancelled`) ends a chunk's claim on
+   * its ticket. See {@link isSettled} for why that is not {@link TERMINAL}.
+   */
+  liveRunForTicket(project: string, ticket: number): Run | undefined {
+    this.refresh();
+    return this.loadedLiveRunForTicket(project, ticket);
+  }
+
+  /**
    * The run currently holding `project`: one whose session is running or
    * about to, or one parked on a work branch it owns. Undefined when the
    * project is free — including when runs are parked awaiting answers at a
@@ -422,6 +509,28 @@ export class RunStore {
     return run === undefined ? undefined : { ...run };
   }
 
+  /** {@link runsForTicket} over the state already in hand. */
+  private loadedRunsForTicket(project: string, ticket: number): Run[] {
+    return this.state.runs
+      .filter((run) => run.project === project && run.ticket === ticket)
+      .sort((left, right) => left.seq - right.seq)
+      .map((run) => ({ ...run }));
+  }
+
+  /** {@link liveRunForTicket} over the state already in hand. */
+  private loadedLiveRunForTicket(
+    project: string,
+    ticket: number,
+  ): Run | undefined {
+    const run = this.state.runs.find(
+      (candidate) =>
+        candidate.project === project &&
+        candidate.ticket === ticket &&
+        !isSettled(candidate.status),
+    );
+    return run === undefined ? undefined : { ...run };
+  }
+
   /** {@link runningRun} over the state already in hand. */
   private loadedRunningRun(project: string): Run | undefined {
     const run = this.state.runs.find(
@@ -446,22 +555,34 @@ export class RunStore {
   }
 
   /**
-   * Register a pickup. Idempotent: a ticket already tracked — in any state,
-   * finished included — yields its existing run and `created: false`, so
-   * re-polling the same marked ticket never doubles it.
+   * Register a pickup. **Idempotent by the ticket's *live* chunk, not by the
+   * ticket** ([ADR-0026](../../doc/adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md)):
+   * a ticket with an unsettled chunk yields that chunk and `created: false`,
+   * so re-polling a marked ticket never doubles it — and a ticket whose chunks
+   * are all settled opens the next one.
+   *
+   * **A failed chunk is unsettled**, so it is handed back rather than
+   * succeeded (ADR-0029): a chunk advances only on success, and `timone retry`
+   * is how a broken one recovers.
+   *
+   * Until phase 22 it was idempotent by the ticket in *any* state, finished
+   * included, which is what made a ticket and a run the same object. A ticket
+   * is a conversation and outlives the work done under it, so a second chunk
+   * has to be openable; that is the whole of the change here.
    */
   register(project: string, ticket: number): { run: Run; created: boolean } {
     this.refresh();
-    const id = runId(project, ticket);
-    const existing = this.get(id);
-    if (existing !== undefined) return { run: existing, created: false };
+    const live = this.loadedLiveRunForTicket(project, ticket);
+    if (live !== undefined) return { run: live, created: false };
 
     const timestamp = this.now();
     const holder = this.loadedOccupyingRun(project);
+    const seq = nextSequence(this.loadedRunsForTicket(project, ticket));
     const run: Run = {
-      id,
+      id: runId(project, ticket, seq),
       project,
       ticket,
+      seq,
       status: holder === undefined ? "picked-up" : "queued",
       flags: [],
       createdAt: timestamp,
@@ -943,9 +1064,32 @@ export class RunStore {
   }
 }
 
-/** One run per ticket — the id is what makes re-pickup a no-op. */
-export function runId(project: string, ticket: number): string {
-  return `${project}#${ticket}`;
+/**
+ * A run's identity: the ticket it belongs to, and which chunk of that ticket
+ * it is ([ADR-0026](../../doc/adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md)).
+ *
+ * The trailing `/<seq>` is the whole of the change. Until phase 22 the id was
+ * `<project>#<ticket>` and a ticket therefore *was* a run, which is the
+ * identity ADR-0026 ended: one ticket now hosts a sequence of chunks, each
+ * with its own branch and its own pull request, and the ledger needs to tell
+ * them apart.
+ *
+ * **The human never types the sequence.** `timone takeover ivtrends#1` and
+ * `timone retry ivtrends#1` still name a ticket, because a ticket is what a
+ * person has an opinion about; the sequence is the machine's bookkeeping and
+ * is resolved from the ledger.
+ */
+export function runId(project: string, ticket: number, seq: number): string {
+  return `${project}#${ticket}/${seq}`;
+}
+
+/**
+ * The number the next chunk of a ticket takes: one past the highest already
+ * opened, and 1 for a ticket that has never been worked. Numbers are never
+ * reused, so a ticket's chunks read as the order they happened in.
+ */
+function nextSequence(runs: readonly Run[]): number {
+  return runs.reduce((highest, run) => Math.max(highest, run.seq), 0) + 1;
 }
 
 /** One preview per pull request, keyed the same way runs are keyed. */
@@ -1004,6 +1148,42 @@ function holdsProject(run: Run): boolean {
 }
 
 /**
+ * Bring a ledger written before a run had a chunk number into the current
+ * shape, before it is validated (ADR-0026).
+ *
+ * **The old id is the whole of the evidence, and it is enough.** Every run
+ * written under the old identity is `<project>#<ticket>` with no `/`, and
+ * every one of them was the entirety of its ticket's work — ADR-0026 says so
+ * in as many words: existing runs are "already conformant", each a ticket with
+ * exactly one chunk. So the normalisation is one rule with no judgement in it:
+ * an id with no `/` is chunk 1, and gets told so.
+ *
+ * **Idempotent, because it runs constantly.** {@link RunStore.refresh} re-reads
+ * the file at the top of every public read and every mutation, so this is on
+ * the hot path rather than a start-up step. A run whose id already carries a
+ * `/` is returned untouched, so a second pass changes nothing and allocates
+ * nothing.
+ *
+ * **It normalises rather than migrating**: `version` stays `1` and no file is
+ * rewritten on its account. The normalised shape reaches disk the next time
+ * something persists, and until then every load produces it afresh — which is
+ * also what makes a rollback survivable.
+ */
+function normaliseSequences(data: unknown): unknown {
+  if (typeof data !== "object" || data === null) return data;
+  if (!("runs" in data) || !Array.isArray(data.runs)) return data;
+  return { ...data, runs: data.runs.map(normaliseSequence) };
+}
+
+/** {@link normaliseSequences} for one run: an id with no `/` is chunk 1. */
+function normaliseSequence(run: unknown): unknown {
+  if (typeof run !== "object" || run === null) return run;
+  if (!("id" in run) || typeof run.id !== "string") return run;
+  if (run.id.includes("/")) return run;
+  return { ...run, id: `${run.id}/1`, seq: 1 };
+}
+
+/**
  * Read and validate the state file, or start empty. A file that exists but
  * cannot be read as valid state is an error naming the path: silently
  * starting fresh would re-pick-up every ticket the daemon has ever seen.
@@ -1020,7 +1200,7 @@ function readState(path: string): State {
     throw new Error(`Cannot parse daemon state file "${path}": ${reason}`);
   }
 
-  const result = stateSchema.safeParse(data);
+  const result = stateSchema.safeParse(normaliseSequences(data));
   if (!result.success) {
     const details = result.error.issues
       .map(

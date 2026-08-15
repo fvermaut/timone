@@ -205,7 +205,7 @@ describe("pollOnce — pickup and acknowledgement", () => {
     expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
     expect(comments).toHaveLength(1);
     expect(comments[0]).toMatchObject({ project: "scratch-app", number: 7 });
-    expect(result.pickedUp).toEqual(["scratch-app#7"]);
+    expect(result.pickedUp).toEqual(["scratch-app#7/1"]);
   });
 
   it("touches nothing when no ticket carries the mark", async () => {
@@ -302,7 +302,7 @@ describe("pollOnce — serialization", () => {
 
     expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
     expect(store.queue("scratch-app").map((run) => run.ticket)).toEqual([8]);
-    expect(result.queued).toEqual(["scratch-app#8"]);
+    expect(result.queued).toEqual(["scratch-app#8/1"]);
 
     const queuedAck = comments.find((comment) => comment.number === 8);
     expect(queuedAck?.body).toMatch(/queue/i);
@@ -322,8 +322,8 @@ describe("pollOnce — serialization", () => {
     };
 
     await pollOnce(deps);
-    store.activate("scratch-app#7", "session-1");
-    store.complete("scratch-app#7");
+    store.activate("scratch-app#7/1", "session-1");
+    store.complete("scratch-app#7/1");
     await pollOnce(deps);
 
     expect(store.occupyingRun("scratch-app")?.ticket).toBe(8);
@@ -342,7 +342,7 @@ describe("pollOnce — serialization", () => {
     };
 
     await pollOnce(deps);
-    store.activate("scratch-app#7", "session-1");
+    store.activate("scratch-app#7/1", "session-1");
     await pollOnce(deps);
 
     expect(spawned).toHaveLength(1);
@@ -470,7 +470,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
       spawner,
     });
 
-    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(result.resumed).toEqual(["scratch-app#6/1"]);
     expect(spawned).toHaveLength(1);
   });
 
@@ -489,7 +489,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
 
     expect(result.resumed).toEqual([]);
     expect(spawned).toEqual([]);
-    expect(store.get("scratch-app#6")?.status).toBe("parked");
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
   });
 
   it("does not read an unmarked machine comment as a concluded conversation", async () => {
@@ -545,8 +545,8 @@ describe("pollOnce — resuming a run whose human answered", () => {
       spawner,
     });
 
-    expect(store.get("scratch-app#6")?.status).toBe("done");
-    expect(result.completed).toEqual(["scratch-app#6"]);
+    expect(store.get("scratch-app#6/1")?.status).toBe("done");
+    expect(result.completed).toEqual(["scratch-app#6/1"]);
     // And nothing was started: there is no stage after this one to run.
     expect(spawned).toEqual([]);
   });
@@ -580,7 +580,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
       spawner: recording,
     });
 
-    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(result.resumed).toEqual(["scratch-app#6/1"]);
     expect(contexts).toEqual([
       {
         stage: "clarification",
@@ -648,7 +648,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
     expect(spawned).toEqual([]);
-    expect(store.get("scratch-app#6")?.status).toBe("parked");
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
   });
 
   it("leaves a quiet conversation park where it is across two consecutive cycles", async () => {
@@ -668,8 +668,8 @@ describe("pollOnce — resuming a run whose human answered", () => {
     expect(second.resumed).toEqual([]);
     expect(spawned).toEqual([]);
     expect(posted).toEqual([]);
-    expect(store.get("scratch-app#6")?.status).toBe("parked");
-    expect(store.get("scratch-app#6")?.waitCursor).toBe(invitation.createdAt);
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+    expect(store.get("scratch-app#6/1")?.waitCursor).toBe(invitation.createdAt);
   });
 
   it("advances a gate the human approved", async () => {
@@ -700,7 +700,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
       spawner: recording,
     });
 
-    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(result.resumed).toEqual(["scratch-app#6/1"]);
     // It advances *and* carries who approved and when, so the artifact can
     // record the gate rather than leaving the trace on the ticket alone.
     expect(contexts).toEqual([
@@ -867,7 +867,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
     );
 
     const store = RunStore.open(path);
-    expect(store.get("scratch-app#6")?.status).toBe("queued");
+    expect(store.get("scratch-app#6/1")?.status).toBe("queued");
 
     // Unclassified, so #4 has nothing to be resumed *into* — this test is
     // about the queue moving, not about the park being picked back up.
@@ -877,7 +877,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
     expect(spawned.map((run) => run.ticket)).toEqual([6]);
-    expect(store.get("scratch-app#4")?.status).toBe("parked");
+    expect(store.get("scratch-app#4/1")?.status).toBe("parked");
   });
 });
 
@@ -926,7 +926,7 @@ describe("pollOnce — runs parked before the machinery existed", () => {
       },
     });
 
-    expect(result.resumed).toEqual(["scratch-app#4"]);
+    expect(result.resumed).toEqual(["scratch-app#4/1"]);
     expect(contexts).toEqual([{ stage: "clarification" }]);
   });
 
@@ -940,7 +940,7 @@ describe("pollOnce — runs parked before the machinery existed", () => {
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
     expect(spawned).toEqual([]);
-    expect(store.get("scratch-app#4")?.status).toBe("parked");
+    expect(store.get("scratch-app#4/1")?.status).toBe("parked");
   });
 
   it("leaves it parked when the ticket carries no classification to route on", async () => {
@@ -1001,7 +1001,7 @@ describe("pollOnce — a run parked at an unbuilt stage resumes at that stage", 
       },
     });
 
-    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(result.resumed).toEqual(["scratch-app#6/1"]);
     expect(contexts).toEqual([{ stage: "execution" }]);
   });
 });
@@ -1078,13 +1078,13 @@ describe("pollOnce — a run parked on a pull-request review", () => {
 
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
-    expect(store.get("scratch-app#6")?.status).toBe("done");
+    expect(store.get("scratch-app#6/1")?.status).toBe("done");
     expect(posted.some((comment) => /merged/i.test(comment.body))).toBe(true);
     // A ticket whose journey ended is closed, not left open forever.
     expect(closed).toEqual(["6:completed"]);
     // R10's live half in miniature: the terminal state is what starts the
     // next ticket.
-    expect(store.get("scratch-app#8")?.status).not.toBe("queued");
+    expect(store.get("scratch-app#8/1")?.status).not.toBe("queued");
     void spawned;
   });
 
@@ -1096,7 +1096,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
 
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
-    expect(store.get("scratch-app#6")?.status).toBe("done");
+    expect(store.get("scratch-app#6/1")?.status).toBe("done");
     expect(posted.some((comment) => /without merging/i.test(comment.body))).toBe(true);
     expect(closed).toEqual(["6:not-planned"]);
   });
@@ -1126,7 +1126,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
       },
     });
 
-    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(result.resumed).toEqual(["scratch-app#6/1"]);
     expect(contexts).toMatchObject([
       {
         stage: "remediation",
@@ -1157,7 +1157,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
     expect(spawned).toEqual([]);
-    expect(store.get("scratch-app#6")?.status).toBe("parked");
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
   });
 });
 
@@ -1219,8 +1219,8 @@ describe("reclaiming a run its daemon left behind", () => {
       staleAfterMs: FOUR_INTERVALS,
     });
 
-    expect(result.reclaimed).toEqual(["scratch-app#7"]);
-    expect(store.get("scratch-app#7")?.status).toBe("failed");
+    expect(result.reclaimed).toEqual(["scratch-app#7/1"]);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
     expect(store.occupyingRun("scratch-app")).toBeUndefined();
     expect(comments.some((c) => c.body.includes("stopped before the work"))).toBe(
       true,
@@ -1238,7 +1238,7 @@ describe("reclaiming a run its daemon left behind", () => {
     store.activate(run.id, "session-gone");
     store.claimBranch(run.id, "timone/7-slow");
     store.register("scratch-app", 8);
-    expect(store.get("scratch-app#8")?.status).toBe("queued");
+    expect(store.get("scratch-app#8/1")?.status).toBe("queued");
 
     watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
     set("2026-08-06T10:09:00Z");
@@ -1250,7 +1250,7 @@ describe("reclaiming a run its daemon left behind", () => {
       staleAfterMs: FOUR_INTERVALS,
     });
 
-    expect(spawned.map((r) => r.id)).toEqual(["scratch-app#8"]);
+    expect(spawned.map((r) => r.id)).toEqual(["scratch-app#8/1"]);
   });
 
   it("never reclaims a long session that is still saying it is alive", async () => {
@@ -1280,7 +1280,7 @@ describe("reclaiming a run its daemon left behind", () => {
     });
 
     expect(result.reclaimed).toEqual([]);
-    expect(store.get("scratch-app#7")?.status).toBe("active");
+    expect(store.get("scratch-app#7/1")?.status).toBe("active");
     expect(comments).toEqual([]);
   });
 
@@ -1340,7 +1340,7 @@ describe("reclaiming a run its daemon left behind", () => {
     });
 
     expect(result.reclaimed).toEqual([]);
-    expect(store.get("scratch-app#7")?.status).toBe("parked");
+    expect(store.get("scratch-app#7/1")?.status).toBe("parked");
   });
 
   it("leaves a reclaimed run ready for `timone retry`, with its branch intact", async () => {
@@ -1363,7 +1363,7 @@ describe("reclaiming a run its daemon left behind", () => {
       staleAfterMs: FOUR_INTERVALS,
     });
 
-    const rearmed = store.retry("scratch-app#7");
+    const rearmed = store.retry("scratch-app#7/1");
     expect(rearmed.status).toBe("picked-up");
     expect(rearmed.stage).toBe("execution");
     expect(rearmed.branch).toBe("timone/7-slow");
@@ -1398,7 +1398,7 @@ describe("reclaiming a run its daemon left behind", () => {
       pollIntervalMs: POLL_INTERVAL,
     });
 
-    expect(result.reclaimed).toEqual(["scratch-app#7"]);
+    expect(result.reclaimed).toEqual(["scratch-app#7/1"]);
     expect(comments.some((c) => c.body.includes("stopped before the work"))).toBe(
       true,
     );
@@ -1426,7 +1426,7 @@ describe("reclaiming a run its daemon left behind", () => {
     });
 
     expect(result.reclaimed).toEqual([]);
-    expect(store.get("scratch-app#7")?.status).toBe("active");
+    expect(store.get("scratch-app#7/1")?.status).toBe("active");
     expect(comments.some((c) => c.body.includes("stopped before the work"))).toBe(
       false,
     );
@@ -1495,7 +1495,7 @@ describe("reclaiming a run its daemon left behind", () => {
     expect((await pollOnce(deps)).reclaimed).toEqual([]);
     set("2026-08-06T10:20:00Z");
 
-    expect((await pollOnce(deps)).reclaimed).toEqual(["scratch-app#7"]);
+    expect((await pollOnce(deps)).reclaimed).toEqual(["scratch-app#7/1"]);
   });
 
   it("grants the window on a state file no daemon has ever observed", async () => {
@@ -1515,7 +1515,7 @@ describe("reclaiming a run its daemon left behind", () => {
     });
 
     expect(result.reclaimed).toEqual([]);
-    expect(store.get("scratch-app#7")?.status).toBe("active");
+    expect(store.get("scratch-app#7/1")?.status).toBe("active");
   });
 
   it("takes one witness for the whole cycle, not one per project", async () => {
@@ -1551,7 +1551,7 @@ describe("reclaiming a run its daemon left behind", () => {
     });
 
     expect(result.reclaimed).toEqual([]);
-    expect(store.get("other-app#8")?.status).toBe("active");
+    expect(store.get("other-app#8/1")?.status).toBe("active");
     expect(lines.filter((line) => /not judging/.test(line))).toHaveLength(1);
   });
 
@@ -1575,7 +1575,7 @@ describe("reclaiming a run its daemon left behind", () => {
       pollIntervalMs: 5 * 60 * 1000,
     });
 
-    expect(result.reclaimed).toEqual(["scratch-app#7"]);
+    expect(result.reclaimed).toEqual(["scratch-app#7/1"]);
   });
 });
 
@@ -2031,7 +2031,7 @@ describe("pollOnce — a wayfinder decision ticket", () => {
       spawner: realSpawner(store, adapter),
     });
 
-    const run = store.get("scratch-app#5");
+    const run = store.get("scratch-app#5/1");
     expect(run?.stage).toBe("wayfinding");
     expect(processStage("wayfinding")).toBe(2);
     expect(run?.status).toBe("parked");
@@ -2301,7 +2301,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
     const first = await pollOnce(deps);
     const second = await pollOnce(deps);
 
-    expect(first.resumed).toEqual(["scratch-app#6"]);
+    expect(first.resumed).toEqual(["scratch-app#6/1"]);
     expect(second.resumed).toEqual([]);
     expect(spawned).toHaveLength(1);
   });
@@ -2368,7 +2368,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
     });
     const second = await pollOnce(deps);
 
-    expect(second.resumed).toEqual(["scratch-app#6"]);
+    expect(second.resumed).toEqual(["scratch-app#6/1"]);
     expect(contexts).toHaveLength(2);
     expect(contexts[1]?.feedback).toBe("and only ever on the long ones");
   });
@@ -2588,12 +2588,12 @@ describe("pollOnce — one read of one thread per parked run", () => {
 
     expect(fetches).toBe(1);
     // The same session, on the same words, at the same stage …
-    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(result.resumed).toEqual(["scratch-app#6/1"]);
     expect(contexts).toEqual([
       { stage: "clarification", feedback: answer.body },
     ]);
     // … and the same ledger write: the answer is still consumed (ADR-0023).
-    expect(store.get("scratch-app#6")?.waitCursor).toBe(answer.createdAt);
+    expect(store.get("scratch-app#6/1")?.waitCursor).toBe(answer.createdAt);
   });
 
   it("reads the pull request once to resume a review, and resumes on the same words", async () => {
@@ -2662,7 +2662,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
     });
 
     expect(fetches).toBe(1);
-    expect(result.resumed).toEqual(["scratch-app#6"]);
+    expect(result.resumed).toEqual(["scratch-app#6/1"]);
     expect(contexts).toEqual([
       {
         stage: "remediation",
@@ -2670,7 +2670,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       },
     ]);
     // A review park is not consumed, and the loop wrote nothing to the ledger.
-    const after = store.get("scratch-app#6");
+    const after = store.get("scratch-app#6/1");
     expect(after?.status).toBe("parked");
     expect(after?.waitCursor).toBe("2026-08-06T10:00:00Z");
   });
@@ -2891,11 +2891,11 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
     };
 
     await pollOnce(deps);
-    store.activate("scratch-app#7", "session-1");
+    store.activate("scratch-app#7/1", "session-1");
     await pollOnce(deps);
 
     // The state moves under it: the session running this ticket stopped badly.
-    store.fail("scratch-app#7", "the machine running it stopped");
+    store.fail("scratch-app#7/1", "the machine running it stopped");
     const before = calls.length;
     await pollOnce(deps);
 
@@ -2925,7 +2925,7 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
     };
 
     await pollOnce(deps);
-    store.activate("scratch-app#7", "session-1");
+    store.activate("scratch-app#7/1", "session-1");
     await pollOnce(deps);
     expect(
       calls.find((entry) => entry.call === "upsertComment" && entry.number === 8)
@@ -2934,7 +2934,7 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
 
     // #7's work finished and its ticket closed, so it leaves the listing —
     // and nothing else happens: no command is run, no session is started.
-    store.complete("scratch-app#7");
+    store.complete("scratch-app#7/1");
     listed.splice(0, 1);
     const before = calls.length;
     await pollOnce(deps);
@@ -3007,7 +3007,7 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
     expect(acknowledgement[0]?.call).toBe("postComment");
 
     // The standing copy lands on the next cycle instead.
-    store.activate("scratch-app#7", "session-1");
+    store.activate("scratch-app#7/1", "session-1");
     const before = calls.length;
     await pollOnce(deps);
     const standing = writesIn(calls.slice(before));
@@ -3223,9 +3223,9 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     await pollOnce(deps);
     await pollOnce(deps);
 
-    expect(store.all().map((run) => run.id)).toEqual(["scratch-app#7"]);
-    expect(store.get("scratch-app#5")).toBeUndefined();
-    expect(first.pickedUp).toEqual(["scratch-app#7"]);
+    expect(store.all().map((run) => run.id)).toEqual(["scratch-app#7/1"]);
+    expect(store.get("scratch-app#5/1")).toBeUndefined();
+    expect(first.pickedUp).toEqual(["scratch-app#7/1"]);
     // And no session was ever started on it either — a run is what a spawn
     // needs, so this cannot fail on its own, but it is the consequence R1 is
     // actually about and it costs one line to say so.
@@ -3333,7 +3333,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     const before = calls.length;
     await pollOnce(deps);
 
-    expect(store.get("scratch-app#5")?.status).toBe("picked-up");
+    expect(store.get("scratch-app#5/1")?.status).toBe("picked-up");
     expect(
       writesOn(calls, 5).filter((entry) => entry.call === "postComment"),
     ).toHaveLength(2);
@@ -3684,7 +3684,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     await pollOnce(deps);
     await pollOnce(deps);
 
-    const run = store.get("ivtrends#1");
+    const run = store.get("ivtrends#1/1");
     expect(run?.stage).toBe("charting");
     expect(run?.status).toBe("parked");
     expect(run?.waitingKind).toBeUndefined();
@@ -3718,8 +3718,8 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
 
     expect(second.resumed).toEqual([]);
     expect(second.errors).toEqual([]);
-    expect(store.get("ivtrends#1")?.stage).toBe("charting");
-    expect(store.get("ivtrends#1")?.waitingKind).toBeUndefined();
+    expect(store.get("ivtrends#1/1")?.stage).toBe("charting");
+    expect(store.get("ivtrends#1/1")?.waitingKind).toBeUndefined();
     expect(ctas.at(-1)?.body).toContain("nothing right now");
   });
 
@@ -3741,7 +3741,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     // The discriminating half: before the frontier empties this map is
     // waiting on nobody, so the flip below is caused by the label and not by
     // the map having been a conversation all along.
-    expect(store.get("ivtrends#1")?.waitingKind).toBeUndefined();
+    expect(store.get("ivtrends#1/1")?.waitingKind).toBeUndefined();
 
     labels.push("wayfinder:frontier-empty");
     reads.length = 0;
@@ -3751,7 +3751,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     // been answered and reconciling the call to action are three questions
     // about one thread, and they are asked of one fetch of it.
     expect(reads).toEqual([1]);
-    const run = store.get("ivtrends#1");
+    const run = store.get("ivtrends#1/1");
     expect(run?.status).toBe("parked");
     expect(run?.waitingKind).toBe("conversation");
     // Asked *now*, from the machine's last word — so nothing said before the
@@ -3784,7 +3784,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     await pollOnce(deps);
     labels.push("wayfinder:frontier-empty");
     await pollOnce(deps);
-    expect(store.get("ivtrends#1")?.waitingKind).toBe("conversation");
+    expect(store.get("ivtrends#1/1")?.waitingKind).toBe("conversation");
 
     labels.splice(labels.indexOf("wayfinder:frontier-empty"), 1);
     comments.push(goAhead);
@@ -3792,7 +3792,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
 
     expect(third.resumed).toEqual([]);
     expect(third.errors).toEqual([]);
-    expect(store.get("ivtrends#1")?.stage).toBe("charting");
+    expect(store.get("ivtrends#1/1")?.stage).toBe("charting");
   });
 });
 
@@ -3901,9 +3901,9 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
     const second = await pollOnce(deps);
 
     // One run, the map's own — not a new one, and not a decision ticket's.
-    expect(second.resumed).toEqual(["ivtrends#1"]);
-    expect(store.all().map((run) => run.id)).toEqual(["ivtrends#1"]);
-    const run = store.get("ivtrends#1");
+    expect(second.resumed).toEqual(["ivtrends#1/1"]);
+    expect(store.all().map((run) => run.id)).toEqual(["ivtrends#1/1"]);
+    const run = store.get("ivtrends#1/1");
     expect(run?.stage).toBe("requirements");
     // Instructed with what they actually wrote, so the specification session
     // reads the agreement rather than being told one happened.
@@ -3931,10 +3931,10 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
     await pollOnce(deps);
 
     expect(store.occupyingRun("ivtrends")?.ticket).toBe(MAP);
-    expect(store.get("ivtrends#1")?.branch).toBe(
+    expect(store.get("ivtrends#1/1")?.branch).toBe(
       "timone/1-chart-the-trends-redesign",
     );
-    expect(store.get("ivtrends#2")?.status).toBe("queued");
+    expect(store.get("ivtrends#2/1")?.status).toBe("queued");
     expect(posted.find((comment) => comment.number === 2)?.body).toMatch(/#1/);
   });
 });

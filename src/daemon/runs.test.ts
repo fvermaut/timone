@@ -1,9 +1,27 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { RunStore } from "./runs.js";
+import { RunStore, runId } from "./runs.js";
+
+/**
+ * A slice of the ledger the daemon was actually running on 2026-08-14, copied
+ * unchanged: four runs whose ids carry no chunk number, alongside the
+ * introductions and the witness a real file has. Real rather than invented,
+ * because the thing under test is whether *this* file still loads.
+ */
+const PRE_CHUNK_LEDGER = fileURLToPath(
+  new URL("./fixtures/pre-chunk-state.json", import.meta.url),
+);
 
 /** Temp dirs created by the current test, removed in afterEach. */
 const tempDirs: string[] = [];
@@ -28,6 +46,13 @@ function newStore(path = statePath()): RunStore {
     now: () => `2026-08-02T10:${String(tick++).padStart(2, "0")}:00Z`,
   });
 }
+
+describe("a run's identity", () => {
+  it("names the project, the ticket and the chunk's sequence number", () => {
+    expect(runId("scratch-app", 7, 1)).toBe("scratch-app#7/1");
+    expect(runId("ivtrends", 12, 3)).toBe("ivtrends#12/3");
+  });
+});
 
 describe("register", () => {
   it("activates a pickup on an idle project", () => {
@@ -71,14 +96,180 @@ describe("register", () => {
     expect(store.all()).toHaveLength(1);
   });
 
-  it("still tracks one run when the earlier one has finished", () => {
+  it("opens the ticket's next chunk once the previous one has finished", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.complete(first.run.id);
+
+    const second = store.register("scratch-app", 7);
+
+    expect(second.created).toBe(true);
+    expect(second.run.id).toBe("scratch-app#7/2");
+    expect(second.run.seq).toBe(2);
+    expect(second.run.status).toBe("picked-up");
+    expect(store.all()).toHaveLength(2);
+  });
+
+  it("hands back a failed chunk rather than opening the next one beside it", () => {
+    // ADR-0029: `done` settles a chunk, `failed` does not. The poll loop
+    // registers every marked ticket on every cycle, so a failed chunk that
+    // let its ticket move on would grow a fresh chunk a minute later — and
+    // `timone retry` would then be refused by the one-session guard.
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.fail(first.run.id, "the stage died");
+
+    const again = store.register("scratch-app", 7);
+
+    expect(again.created).toBe(false);
+    expect(again.run.id).toBe("scratch-app#7/1");
+    expect(again.run.status).toBe("failed");
+    expect(store.all()).toHaveLength(1);
+  });
+});
+
+describe("a ticket's chunks", () => {
+  it("has no live chunk before anything has been picked up", () => {
+    const store = newStore();
+    expect(store.liveRunForTicket("scratch-app", 7)).toBeUndefined();
+    expect(store.runsForTicket("scratch-app", 7)).toEqual([]);
+  });
+
+  it("calls the one unfinished chunk the live one", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.park(run.id, { waitingOn: "approval on the ticket", kind: "gate" });
+
+    expect(store.liveRunForTicket("scratch-app", 7)?.id).toBe(
+      "scratch-app#7/1",
+    );
+  });
+
+  it("still calls a failed chunk live, because only a retry can end it", () => {
+    // ADR-0029. `failed` is not settled: the ticket has not moved past this
+    // chunk, it is waiting for it to be retried.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.fail(run.id, "the stage died");
+
+    expect(store.liveRunForTicket("scratch-app", 7)?.id).toBe(
+      "scratch-app#7/1",
+    );
+  });
+
+  it("has no live chunk once the ticket's only chunk has finished", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-1");
     store.complete(run.id);
 
-    expect(store.register("scratch-app", 7).created).toBe(false);
+    expect(store.liveRunForTicket("scratch-app", 7)).toBeUndefined();
+    expect(store.runsForTicket("scratch-app", 7).map((r) => r.seq)).toEqual([1]);
+  });
+
+  it("lists a ticket's chunks in sequence order and lives in the last", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.complete(first.run.id);
+    const second = store.register("scratch-app", 7);
+    store.activate(second.run.id, "session-2");
+    store.complete(second.run.id);
+    const third = store.register("scratch-app", 7);
+
+    expect(store.runsForTicket("scratch-app", 7).map((r) => r.id)).toEqual([
+      "scratch-app#7/1",
+      "scratch-app#7/2",
+      "scratch-app#7/3",
+    ]);
+    expect(store.liveRunForTicket("scratch-app", 7)?.id).toBe(
+      "scratch-app#7/3",
+    );
+    expect(third.run.seq).toBe(3);
+  });
+
+  it("keeps one ticket's chunks out of another's", () => {
+    const store = newStore();
+    store.register("scratch-app", 7);
+    store.register("scratch-app", 8);
+
+    expect(store.runsForTicket("scratch-app", 8).map((r) => r.id)).toEqual([
+      "scratch-app#8/1",
+    ]);
+  });
+});
+
+describe("two chunks of one ticket", () => {
+  it("hands back the live chunk rather than opening a second beside it", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.claimBranch(first.run.id, "timone/7-reset-password");
+    store.park(first.run.id, { waitingOn: "your review", kind: "review" });
+
+    const again = store.register("scratch-app", 7);
+
+    expect(again.created).toBe(false);
+    expect(again.run.id).toBe("scratch-app#7/1");
     expect(store.all()).toHaveLength(1);
+    expect(store.occupyingRun("scratch-app")?.id).toBe("scratch-app#7/1");
+  });
+
+  it("leaves a failed chunk retryable however often the poll loop re-registers", () => {
+    // ADR-0029, and the reason for it. `poll.ts` registers every marked
+    // ticket on every cycle; if a failure let the ticket succeed to chunk 2,
+    // the one-session guard would refuse `timone retry scratch-app#7` and the
+    // broken chunk would have no road back.
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.claimBranch(first.run.id, "timone/7-reset-password");
+    store.fail(first.run.id, "the stage died");
+
+    store.register("scratch-app", 7);
+
+    expect(store.retry(first.run.id).status).toBe("picked-up");
+    expect(store.runsForTicket("scratch-app", 7).map((r) => r.id)).toEqual([
+      "scratch-app#7/1",
+    ]);
+  });
+
+  it("opens the next chunk once a retried chunk finally succeeds", () => {
+    // Failure delays succession rather than ending it: the chunk advances on
+    // the success it eventually reaches.
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.fail(first.run.id, "the stage died");
+    store.retry(first.run.id);
+    store.activate(first.run.id, "session-2");
+    store.complete(first.run.id);
+
+    const second = store.register("scratch-app", 7);
+
+    expect(second.created).toBe(true);
+    expect(second.run.id).toBe("scratch-app#7/2");
+  });
+
+  it("queues a ticket's next chunk behind another ticket's work", () => {
+    const store = newStore();
+    const first = store.register("scratch-app", 7);
+    store.activate(first.run.id, "session-1");
+    store.complete(first.run.id);
+    const other = store.register("scratch-app", 8);
+    store.activate(other.run.id, "session-2");
+    store.claimBranch(other.run.id, "timone/8-a-bug");
+
+    const second = store.register("scratch-app", 7);
+
+    expect(second.run.status).toBe("queued");
+    expect(store.queue("scratch-app").map((r) => r.id)).toEqual([
+      "scratch-app#7/2",
+    ]);
   });
 });
 
@@ -173,7 +364,7 @@ describe("the holds-the-project rule", () => {
     // its turn, because sessions serialize even when nothing is held.
     const third = store.register("scratch-app", 9);
     expect(third.run.status).toBe("queued");
-    expect(() => store.activate("scratch-app#7", "session-7b")).toThrow(
+    expect(() => store.activate("scratch-app#7/1", "session-7b")).toThrow(
       /scratch-app#8/,
     );
   });
@@ -504,6 +695,45 @@ describe("persistence", () => {
     expect(parsed.runs).toHaveLength(1);
   });
 
+  it("reads a ledger written before runs had chunk numbers", () => {
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(PRE_CHUNK_LEDGER, path);
+
+    const store = RunStore.open(path);
+
+    // Every run in the fixture is one of these four, and each was the whole of
+    // its ticket's work — so each is chunk 1 of its ticket.
+    expect(store.all().map((run) => run.id)).toEqual([
+      "scratch-app#4/1",
+      "scratch-app#6/1",
+      "scratch-app#10/1",
+      "ivtrends#5/1",
+    ]);
+    expect(store.all().map((run) => run.seq)).toEqual([1, 1, 1, 1]);
+    // Nothing else about the ledger moves.
+    expect(store.occupyingRun("scratch-app")).toBeUndefined();
+    expect(store.introducedAt("scratch-app", 5)).toBe(
+      "2026-08-14T12:53:58.173Z",
+    );
+  });
+
+  it("normalises a pre-chunk ledger once and not again", () => {
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(PRE_CHUNK_LEDGER, path);
+
+    const first = RunStore.open(path);
+    // Persist the normalised shape, then read it back through the same path.
+    first.recordIntroduction("scratch-app", 99);
+    const reopened = RunStore.open(path);
+
+    expect(reopened.all().map((run) => run.id)).toEqual(
+      first.all().map((run) => run.id),
+    );
+    expect(reopened.all().map((run) => run.seq)).toEqual([1, 1, 1, 1]);
+  });
+
   it("fails loudly on a corrupt state file rather than starting fresh", () => {
     const path = statePath();
     const store = newStore(path);
@@ -702,7 +932,7 @@ describe("the heartbeat, and the runs that have stopped making one", () => {
     set("2026-08-06T10:03:00Z");
 
     expect(store.staleRuns(FOUR_INTERVALS).map((stale) => stale.id)).toEqual([
-      "scratch-app#7",
+      "scratch-app#7/1",
     ]);
   });
 
@@ -736,7 +966,7 @@ describe("the heartbeat, and the runs that have stopped making one", () => {
       now: () => "2026-08-06T11:00:00Z",
     });
     expect(reopened.staleRuns(FOUR_INTERVALS).map((r) => r.id)).toEqual([
-      "scratch-app#7",
+      "scratch-app#7/1",
     ]);
   });
 
@@ -797,8 +1027,8 @@ describe("the heartbeat, and the runs that have stopped making one", () => {
     set("2026-08-06T10:09:00Z");
     store.fail(store.staleRuns(FOUR_INTERVALS)[0].id, "the daemon stopped");
 
-    expect(store.get("scratch-app#8")?.status).toBe("picked-up");
-    expect(store.occupyingRun("scratch-app")?.id).toBe("scratch-app#8");
+    expect(store.get("scratch-app#8/1")?.status).toBe("picked-up");
+    expect(store.occupyingRun("scratch-app")?.id).toBe("scratch-app#8/1");
   });
 
   it("has nothing more to reclaim once it has reclaimed", () => {
@@ -983,7 +1213,7 @@ describe("a heartbeat belongs to the session that wrote it", () => {
     set("2026-08-07T14:09:00Z");
 
     expect(store.staleRuns(FOUR_INTERVALS).map((r) => r.id)).toEqual([
-      "scratch-app#7",
+      "scratch-app#7/1",
     ]);
   });
 
@@ -1293,7 +1523,7 @@ describe("the witness — the time a daemon can vouch for having watched", () =>
 
     expect(store.get(run.id)?.heartbeatAt).toBe("2026-08-06T10:00:00Z");
     expect(store.staleRuns(FOUR_INTERVALS).map((r) => r.id)).toEqual([
-      "scratch-app#7",
+      "scratch-app#7/1",
     ]);
   });
 

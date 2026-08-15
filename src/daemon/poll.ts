@@ -35,7 +35,7 @@ import {
 } from "./pipeline.js";
 import { ctaComment, ctaFor, type TicketState } from "./cta.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
-import { runId, type Run, type RunStore, type Witness } from "./runs.js";
+import { type Run, type RunStore, type Witness } from "./runs.js";
 // The same comment the spawner posts when a session ends badly, because this
 // is the same kind of ending: work stopped, nothing was decided, try again.
 // `waitOf` comes from there too, so a run put back onto its wait is described
@@ -709,7 +709,7 @@ async function openGoAheads(
   const { store } = deps;
 
   for (const ticket of tickets) {
-    const run = store.get(runId(project.name, ticket.number));
+    const run = store.runsForTicket(project.name, ticket.number).at(-1);
     if (run === undefined || run.stage !== "charting") continue;
     if (run.status !== "parked" || run.waitingKind !== undefined) continue;
     if (!frontierIsEmpty(ticket.labels)) continue;
@@ -810,7 +810,7 @@ async function introduceUnmarked(
     // would tell the human to hand over a ticket a session is already open on,
     // which is the lying line ADR-0024 exists to abolish; what such a ticket is
     // owed is a statement of where it stands, not an introduction.
-    if (store.get(runId(project.name, ticket.number)) !== undefined) continue;
+    if (store.runsForTicket(project.name, ticket.number).length > 0) continue;
     if (store.introducedAt(project.name, ticket.number) !== undefined) continue;
 
     try {
@@ -874,7 +874,7 @@ async function reconcileCtas(
       const body = ctaBody({
         project: project.name,
         ticket: ticket.number,
-        run: store.get(runId(project.name, ticket.number)),
+        run: store.runsForTicket(project.name, ticket.number).at(-1),
         labels: ticket.labels,
       });
       const thread = await threads(ticket.number).ticket();

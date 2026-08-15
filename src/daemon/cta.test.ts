@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { ctaComment, ctaFor } from "./cta.js";
 import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
-import type { Run } from "./runs.js";
+import { runId, type Run } from "./runs.js";
 
 /** A run in whatever state the test needs, with the rest left plausible. */
 function run(overrides: Partial<Run> & Pick<Run, "project" | "ticket">): Run {
   return {
-    id: `${overrides.project}#${overrides.ticket}`,
+    id: runId(overrides.project, overrides.ticket, 1),
+    seq: 1,
     status: "active",
     flags: [],
     createdAt: "2026-08-13T10:00:00Z",
