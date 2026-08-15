@@ -440,7 +440,9 @@ cat .timone/state.json
 - [ ] Step 7's failure half performed, not just its success half — a merge that cannot fail has not been shown to fail safely
 - [ ] `.timone/state.json` hand-edited **zero** times across the whole gate; if it is edited once, phase 22's 22b did not land and that is a finding about the earlier phase
 - [ ] The gate report is written to `doc/plans/phases/reports/phase-23-live-gate.md` whatever the outcome, including the steps that could not be reached
-- [ ] **Human gate:** fvermaut judges step 1 — whether being asked **once** for the shape and then judging pull requests **one at a time** is the rhythm he ruled for, with two real pull requests in front of him
+- [x] **Human gate — answered 2026-08-15, and answered early.** fvermaut, unprompted and mid-gate: *"I can already tell you: yes I want 1 pull request per phase/breakdown-step."* **The rhythm is confirmed and this phase's design question is closed.**
+  - **What that answer is, and what it is not.** It is a ruling on the *design* — one pull request per piece is what he wants. It is **not** a judgement of the observed experience, because he gave it before two pull requests had ever arrived: at the time he answered, [#31](https://github.com/fvermaut/scratch-app/issues/31) had produced the two approvals and no code. The step's own wording asked for the judgement *"with two real pull requests in front of him"*, and that condition was not met. Recorded this way so nobody later reads it as a verdict on how it felt to use.
+  - **What it changes.** The remaining live steps stop being a question and become a check: not *"is this the right rhythm?"* but *"does the machinery deliver the rhythm he has now confirmed he wants?"* Whether that check is worth its cost is a separate call, taken with him.
 
 ## Dependency graph
 
