@@ -1,6 +1,6 @@
 # Phase 22: a ticket is a conversation, a run is a chunk
 
-> **Status:** Approved for execution by fvermaut 2026-08-14T21:58:15Z.
+> **Status:** Complete — see [reports/phase-22-complete.md](reports/phase-22-complete.md). Delivered as 22a and 22b only; 22c–22f were cut unbuilt by fvermaut 2026-08-15 and are re-planned as their own phase.
 
 > **Eleventh phase of [PRD-02](../../specs/prd/prd-02-inversion-of-control.md), and the deepest change to the ledger since the daemon was built.** Governing decision: **[ADR-0026](../../adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md)** (a ticket is a durable conversation; a run is one chunk of work), accepted 2026-08-14 on fvermaut's four rulings. Standing: [ADR-0012](../../adr/0012-conversation-channels.md), [ADR-0014](../../adr/0014-artifact-first-gates.md), [ADR-0015](../../adr/0015-branch-per-driving-unit.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md), [ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md).
 
@@ -122,6 +122,22 @@ node dist/cli.js cancel scratch-app#999 2>&1 || true
 - [ ] `timone retry` on a cancelled run refuses with a sentence, not a stack trace
 - [ ] The poll loop's closed-ticket check fires **before** a session is spawned, asserted on the spawn call and not on a log line
 - [ ] `.timone/state.json` needs no hand-edit to clear a fixture run — the whole point
+
+> ## ✂ Cut 2026-08-15 — 22c, 22d, 22e and 22f are not built, and are not this phase's any more
+>
+> **Ruled by fvermaut 2026-08-15, on the finding below.** This is a **reduction in scope**, so the `Approved for execution` stamp stands: what remains is a strict subset of what was approved, and [the dependency section](#dependency-graph) already said *"22a and 22b alone are worth landing even if the rest is amended"*. They were, and they are.
+>
+> **Why 22c could not be executed as planned.** It grants five files. Moving the gate touches at least nine more, and three of those are decisions rather than edits:
+>
+> - **The gate lives in [`prompts.ts`](../../../src/daemon/prompts.ts), which is not granted.** `planningPrompt` (`:896`) instructs the agent to stamp `Awaiting approval`; `executionPrompt` (`:561`) says the phase file's own `Status:` line *"is the authority on whether you may build it"*; `APPROVAL_RECORD` (`:607`) names the phase file as the artifact the approval flips. Retiring the per-chunk gate means rewriting all three.
+> - **D2 has no home.** *"Approving the breakdown merges chunk zero"* is new daemon behaviour — something must perform a merge on approval — and no granted file merges anything.
+> - **The pipeline's shape is ambiguous in the plan itself.** D1 says the breakdown is written by the planning stage; D2 says it shares a branch with requirements; the file markers say the gate *after* `requirements` opens on it. That reads as either a **new `breakdown` stage** — needing `PROMPTED_STAGES`, a `stageBody` case, a prompt, a `GATED` row, and breaking two deliberately-exhaustive tests ([`pipeline.test.ts:403`](../../../src/daemon/pipeline.test.ts), [`cta.test.ts:327`](../../../src/daemon/cta.test.ts)) — or **the existing requirements gate changing its artifact while `planning` stops gating**. Those are different builds, and a slice context holds strictly less than the planner did, so it must not be the one to choose.
+>
+> **And one the machine noticed about itself:** 22c would make a phase file gate nothing, while [`timone-execute`'s own gate 1](../../../.claude/skills/timone-execute/SKILL.md) refuses any phase file not stamped `Approved for execution`. Those contradict, and that skill is not granted either.
+>
+> **D1–D5 and [ADR-0028](../../adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) stand.** Nothing about the decisions was wrong; the plan for building them was. The breakdown is re-planned as its own phase, with the gate machinery scoped up front.
+>
+> **What this costs, named:** [PRD-02.R22](../../specs/prd/prd-02-inversion-of-control.criteria.md) is **not** added and not closed, and R5 and R10 keep their `verified` sign-off — the retirement that would have lapsed them is not built. 22e's register work belongs to whichever phase lands the breakdown. The sections below are kept verbatim, unbuilt, as that phase's raw material.
 
 ### 22c — The breakdown, and the gate that moves onto it
 
