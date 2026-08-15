@@ -10,6 +10,11 @@ import {
   type TicketThread,
 } from "../adapters/ticketing.js";
 import {
+  parseBreakdown,
+  renderBreakdown,
+  type ParsedBreakdown,
+} from "./breakdown.js";
+import {
   PROMPTED_STAGES,
   approvalRecordPrompt,
   conversationSubject,
@@ -536,5 +541,55 @@ describe("the approval-recording prompt", () => {
     const prompt = approvalRecordPrompt(approval, context);
 
     expect(prompt).toContain("git -C projects/scratch-app");
+  });
+
+  it("tells the breakdown's stamp to carry the count of pieces", () => {
+    // **The count is not decoration.** `isReproposal` compares the number the
+    // stamp names against the length of the list beneath it — that is how a
+    // breakdown that gained a chunk after its approval is recognised — and
+    // `parseBreakdown` accepts no other shape: a stamp written without the
+    // count is `malformed`, which makes the whole file unreadable and the
+    // initiative look as though it has no breakdown at all. Nothing type-checks
+    // this prompt against that parser, so it is asserted here.
+    const prompt = approvalRecordPrompt(
+      { stage: "breakdown", by: "fvermaut", at: "2026-08-15" },
+      { ...context, branch: "timone/6-typing-in-the-box" },
+    );
+
+    expect(prompt).toContain("Approved by <who> <date> — N pieces");
+    expect(prompt).toMatch(/how many pieces/i);
+    expect(prompt).toContain("doc/plans/breakdowns/ticket-06.md");
+  });
+
+  it("writes a stamp the breakdown parser actually accepts", () => {
+    // The end-to-end version of the case above, driven through 23a's own
+    // reader rather than through a regular expression written here: the shape
+    // the prompt dictates is parsed, and it has to come back approved with the
+    // count intact. This is the one assertion that would survive somebody
+    // rewording the prompt.
+    const stamped = renderBreakdown({
+      stamp: { kind: "approved", by: "fvermaut", at: "2026-08-15", pieces: 3 },
+      chunks: [
+        { title: "One", delivers: "the first piece" },
+        { title: "Two", delivers: "the second piece" },
+        { title: "Three", delivers: "the third piece" },
+      ],
+    });
+    const parsed = parseBreakdown(stamped);
+
+    expect(parsed).not.toHaveProperty("reason");
+    expect((parsed as ParsedBreakdown).stamp).toEqual({
+      kind: "approved",
+      by: "fvermaut",
+      at: "2026-08-15",
+      pieces: 3,
+    });
+    // And the prompt asks for exactly that line, verbatim.
+    const prompt = approvalRecordPrompt(
+      { stage: "breakdown", by: "fvermaut", at: "2026-08-15" },
+      context,
+    );
+    expect(stamped).toContain("Approved by fvermaut 2026-08-15 — 3 pieces");
+    expect(prompt).toContain("`Status:`");
   });
 });

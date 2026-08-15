@@ -938,9 +938,40 @@ export class AgentSessionSpawner implements SessionSpawner {
       return this.afterRemediation(run, project, outcome, producedWork);
     }
 
+    // ✏ Wait-free since ADR-0030 D1, so no longer caught by the gate branch at
+    // the top of this method — and **without this branch it would fall through
+    // to triage's**, which reads a `triage:` label off the ticket and routes on
+    // it. That is not a wrong answer, it is three: back to `clarification` on a
+    // feature, re-opening an interview the human has already had; back to
+    // `planning` on a chore, which is `spawn`'s unbounded loop spending money
+    // every turn; and a failed run reading "triage recorded no classification"
+    // on a ticket that never carried one.
+    //
+    // Judged exactly as the other unattended work stages are — the outcome the
+    // session recorded, over the artifact it owes. `producedWork` is that
+    // artifact's witness here: the branch tip moved, so a phase file exists.
+    // It is the branch-tip comparison R5 installed after the daemon once
+    // believed a session's exit code alone, and it is doing more work than
+    // usual at this stage, because with the gate gone nothing else stands
+    // between an empty branch and a build session.
+    if (stage === "planning") {
+      return this.afterWorkStage(run, project, stage, outcome, async () => ({
+        ok: producedWork,
+        observed: producedWork
+          ? "the branch carries what it planned"
+          : "nothing was committed to the branch",
+      }));
+    }
+
     // The only remaining wait-free stage is triage, and what follows it is
     // the classification it just recorded — read back off the ticket, because
     // the label is where the process says the record lives.
+    //
+    // **This is a fall-through, so it is what every future wait-free stage
+    // silently inherits**, and it type-checks whatever reaches it. A stage
+    // added above without a branch of its own lands here and gets triage's
+    // judgement applied to it — see the `planning` branch just above for what
+    // that costs.
     const kind = classificationFromLabels(ticket.labels);
     if (kind === undefined) {
       store.fail(run.id, "triage recorded no classification");

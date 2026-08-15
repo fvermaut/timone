@@ -17,6 +17,10 @@ const RUNNING = ["picked-up", "active"];
  * for the reader this command exists for.
  */
 const STAGE_LABELS: Partial<Record<PipelineStage, string>> = {
+  // The one stage whose bare name reads as the opposite of what it is: to
+  // someone glancing at a status line, "breakdown" is a thing that has gone
+  // wrong, not a session working out how to cut the job up.
+  breakdown: "working out the pieces",
   execution: "building",
   verification: "checking the result",
   delivery: "delivering",

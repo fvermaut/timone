@@ -83,3 +83,108 @@ Checkboxes:
 4. **`chunkProgress` takes a count, not a ledger.** It is deliberately ignorant of `RunStore` — the caller asks the ledger how many of the ticket's chunks have **settled `done`** and passes the number. Note the word: `runs.ts` distinguishes `TERMINAL` from `SETTLED`, and `cancelled` is settled but not done. Which of those two the caller counts is 23f's decision and this module has no opinion; it will clamp whatever it is given.
 
 5. **`renderBreakdown` is not dead code and should not be deleted as such.** It exists so the round-trip is assertable, and it is what a later slice would use if a breakdown ever needs to be produced programmatically. Today its only caller is the test.
+
+## 23b — `breakdown` becomes a pipeline stage
+
+**Built.** `breakdown` is a stage of its own between `requirements` and `planning` ([ADR-0030](../../../adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D1). It declares `processStage: 5`, `waits: "gate"`, `ownsBranch: true`, `built: true`, `next: "planning"`, on `claude-opus-5` / `high`. `requirements.next` is now `breakdown`, and **`planning` moved from `waits: "gate"` to `waits: "none"`** — it keeps its branch, its model and its `next: "execution"`, and it no longer stops for anybody. The gated set is exactly `["requirements", "breakdown"]`.
+
+**Files touched.** `src/daemon/pipeline.ts`, `src/daemon/session.ts`, `src/daemon/gate-comment.ts`, `src/daemon/prompts.ts`, `src/commands/status.ts`; tests in `pipeline.test.ts`, `cta.test.ts`, `prompts.test.ts`, `session.test.ts`, `status.test.ts`, `poll.test.ts`.
+
+### The two traps, and which one the compiler catches
+
+**The compiler catches `stageBody`.** `PROMPTED_STAGES` gaining `"breakdown"` with no `case "breakdown"` in `stageBody`'s switch is a build failure — the function returns `string` and the switch has no `default`. Seen red before the case was written: `src/daemon/prompts.ts(328,4): error TS2366: Function lacks ending return statement and return type does not include 'undefined'.` You may lean on this one; it fires at `npm run type-check`.
+
+**The compiler does not catch `GATED`.** `GATED` in `gate-comment.ts` and `STAGE_LABELS` in `status.ts` are both `Partial<Record<PipelineStage, …>>`. A gated stage with no `GATED` row is not a type error, not a build failure and not a test failure: `gateCommentFor` answers `undefined`, `openGate` reads `if (comment !== undefined)`, posts nothing, and **parks the run on the gate anyway** — so the run waits for ever for an answer to a question nobody was asked, and every surface reports it as normally waiting. The red was seen exactly that way: `breakdown gates, but has nothing to put in front of the human`, with `npm run build` and `npm run type-check` both clean at the time. The guard is `session.test.ts`'s *"gives every stage that gates something to put in front of the human"*, which **derives** the gated set from `PIPELINE_STAGES` rather than spot-checking `breakdown`. **Do not turn that into a literal list.**
+
+`STAGE_LABELS` is the same silence with a smaller cost: an unlabelled stage falls back to its own name. `breakdown` got a row anyway — bare "breakdown" on a status line reads as *something broke*, not as work in progress. It now reads `working out the pieces`.
+
+### The trap the cut did not name: `afterStage`'s fall-through
+
+**Moving `planning` to `waits: "none"` was a live regression, and it type-checked.** `afterStage` dispatches on `waitFor(stage)`, then on the stage by name, and its final fall-through assumed the only remaining wait-free stage was `triage`: it reads a `triage:<kind>` label off the ticket and routes on it. A finished planning session landed there and got triage's judgement applied to it — three different wrong answers depending on the label:
+
+- `triage:feature` → back to **`clarification`**, re-opening an interview the human had already had;
+- `triage:chore` → back to **`planning`**, which is `spawn`'s `for(;;)` with no bound — **an unbounded loop of paid sessions**;
+- no `triage:` label → the run failed on *"triage recorded no classification"*.
+
+**This was not a theoretical red.** With `planning` wait-free and no fix, `npx vitest run src/daemon/session.test.ts` did not report a failure — it spun for **258 seconds and died on `FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory`**, 4094 MB, taking the worker with it. The existing chore-driven tests were the ones that hit it.
+
+**The fix** is a `planning` branch immediately before the fall-through, using `afterWorkStage` exactly as `execution` and `verification` do, with **`producedWork` as the artifact witness**:
+
+```ts
+if (stage === "planning") {
+  return this.afterWorkStage(run, project, stage, outcome, async () => ({
+    ok: producedWork,
+    observed: producedWork
+      ? "the branch carries what it planned"
+      : "nothing was committed to the branch",
+  }));
+}
+```
+
+`producedWork` is the branch-tip comparison R5's history records being installed after the daemon once believed a session's exit code alone. It is doing more work at this stage than at any other: with the gate gone, **nothing else stands between an empty branch and a build session**. Four tests hold it, on a ticket carrying each of the three labels above plus one with the witness false.
+
+**The fall-through now carries a comment saying it is a fall-through** — every future wait-free stage inherits triage's judgement silently, and it type-checks whatever reaches it.
+
+### Decisions taken inside the slice
+
+1. **`prompts.ts` imports `breakdownPath` from `breakdown.ts`.** The excerpt says *"23b does not import `breakdown.ts`"* and then gives the reason that argues for importing — *"two slices spelling that path independently is how they drift"*. The reason won: `breakdownPrompt` interpolates `breakdownPath(ticket.number)`, so the prompt says `doc/plans/breakdowns/ticket-07.md` because that module says so. Restating it in prose would have made `readBreakdown` answer `absent` for ever the first time somebody typed `ticket-7.md`. **See "what is wrong in the excerpt" below.**
+
+2. **`APPROVAL_RECORD`'s values became `(ticket) => ({artifact, what})`** rather than flat objects. The breakdown's artifact is a path carrying the ticket's own number, and `breakdownPath` is the only place that path may be spelled — a flat string could not reach it. The `breakdown` row tells the session to write `Approved by <who> <date> — N pieces`, **counting the pieces**, because `parseBreakdown` accepts no other shape and `isReproposal` compares that count against the length of the list. Two tests hold it: one on the prompt's words, one driving the shape through 23a's own `renderBreakdown` → `parseBreakdown` round trip, so it survives a rewording.
+
+3. **`planning`'s `APPROVAL_RECORD` row was left in place**, though ADR-0030's consequences say it goes. It is now unreachable — no approval is recorded for a stage that never gates — but the phase file's `Status:` line is still what `timone-execute` gate 1 refuses to start without. Deleting this half before the skill's half moves would leave every phase file unstamped and every build refusing to start. **Whichever slice changes `timone-execute` gate 1 removes this row in the same commit.** `planningPrompt`'s `Awaiting approval` instruction is left standing for the same reason.
+
+4. **`requirements`'s `onApproval` wording changed** from *"come back with a plan"* to *"break the work up and come back with the pieces"*. Not in the excerpt's markers, but it is inside a granted file and it had become false: approving the specification now advances to `breakdown`, and a CTA describing a consequence that no longer happens is the class of defect gate comments exist to avoid.
+
+5. **The breakdown prompt spells the file's markdown out in a fenced block.** It stands alone because no skill describes a breakdown until 23e, and the shape is not decoration — anything `parseBreakdown` does not recognise is `malformed`, which is indistinguishable from *no breakdown at all*. Both shapes it dictates (`Awaiting approval`, and the approval-record row's stamp) were verified end-to-end against 23a's parser.
+
+### Tests corrected
+
+**On the plan's expected list.** `pipeline.test.ts`'s gated-set assertion (now `["requirements", "breakdown"]`, still derived from `PIPELINE_STAGES`) and its model table and `runsUnattended` rows; `cta.test.ts`'s `WAIT_AT` (gains `breakdown: "gate"`, flips `planning` to `undefined`); `session.test.ts`'s `gateCommentFor("planning", …)` pair — the "one gate mechanism for both stages" assertion is now **derived from the graph** rather than naming its two stages, and "links the plan where the plan actually lives" became "links the list of pieces where the breakdown actually lives"; and the three chore-driven gate tests, re-pointed at `requirements` (below).
+
+**Not on the list, all caused by the same graph change.** Six more, named here because the next stage-adding slice will hit them too:
+
+- `pipeline.test.ts` *"runs clarification → requirements → planning → execution"* and *"waits … on a gate at both write stages"* — the excerpt's own "Red" for the graph case, so expected in substance if not by line.
+- `pipeline.test.ts` *"advances a waiting run exactly one stage on approval"* (`readGate("planning", …)` now **throws**) and *"never advances on a change request, at either gated stage"* (same throw). The latter is now derived from `waitFor` instead of written out.
+- `session.test.ts` *"parks awaiting the building that is not built, and says so"* — re-pointed at `breakdown`, which is now the stage that stops for an answer.
+- **`poll.test.ts` *"advances a gate the human approved"*** — approving `requirements` now hands `{stage: "breakdown"}` to the spawner. **`poll.test.ts` is in no slice's file grant in this phase**; it is the fourth file the graph reaches.
+
+The three chore-driven gate tests (`refuses to gate when the stage cut a branch and committed nothing`, `gates normally…`, `still judges an existing branch…`) were **re-pointed from `planning` to `requirements`, not weakened**. They test the 2026-08-07 defect where `headBefore` was undefined because the branch did not exist; the original comment calls that "the first stage to own a branch", which *is* `requirements`. Driving them at `planning` was only ever the shortest route to a stage that both gated and owned a branch, and ADR-0030 D3 removed a chore's every gate on purpose.
+
+**One test added for D3 rather than corrected:** the chore case asserts no comment anywhere in the run contains the approval CTA — a chore now meets no gate at all, which is a ruling and not an oversight.
+
+### Validation evidence
+
+| Command | Result |
+|---|---|
+| `npm run type-check` | **exit 0**, no output |
+| `npm test -- pipeline cta prompts session` | **323 passed (4 files)** |
+| `npm test` | **890 passed, 1 failed (891 / 25 files)** — see below |
+| `npm run build` | **exit 0** |
+| `node dist/cli.js status --state <copy>` | **exit 0**, rendered clean; live ledger byte-identical afterwards |
+
+Checkboxes:
+
+- ✅ **PASS** — `npm run type-check` was seen red on the missing `stageBody` case before it was written: `src/daemon/prompts.ts(328,4): error TS2366`.
+- ✅ **PASS** — the gated-set assertion reads `["requirements", "breakdown"]` and the set is `PIPELINE_STAGES.filter(s => waitFor(s) === "gate")`, not a literal compared to a literal.
+- ✅ **PASS** — `session.test.ts` asserts `gateCommentFor` is defined for **every** stage whose `waitFor` is `"gate"`, computed from `PIPELINE_STAGES`. Seen red on `breakdown` with the build and the type-check both clean.
+- ✅ **PASS** — `node dist/cli.js status` was run against a **copy** (`--state <copy>`); `.timone/state.json` was never written and is unchanged.
+- ✅ **PASS** — this section names which trap the compiler catches and which it does not, in those words.
+
+### ⚠ The one open failure, and it is not this slice's logic
+
+`src/commands/guardrails.test.ts > finding the run that drove a session > resolves the session id against the ledger` **times out at 5000 ms** in the full suite. It is not a logic regression:
+
+- it **passes** running `guardrails.test.ts` alone (23 tests, 38 s);
+- the whole suite **passes 891/891 under `npx vitest run --testTimeout=20000`**;
+- it fails **3 runs out of 3** at the default timeout on this branch, and **0 out of 1** at the 23a baseline.
+
+The cause is load. That test calls a `workspace()` fixture that shells out to real `git` about eight times (`init`, `config`×2, `add`, `commit`, remote init, push…) inside a 5000 ms budget, in a file that spends 38 s in subprocesses. This slice added 20 tests, which was enough to push it over. **Nothing in `guardrails.test.ts` touches anything this slice changed, and it is in no slice's file grant, so it was left alone.** The fix belongs to whoever owns that file: give the git-shelling fixtures an explicit per-test timeout, or set `testTimeout` in `vitest.config`. **It will bite every subsequent slice in this phase**, since each adds tests.
+
+### What 23c onward must know
+
+1. **`poll.test.ts` is reached by the graph and is in nobody's grant.** Add it to the file markers of any slice that touches `PIPELINE_STAGES`, `STAGES` or a `next`. It was the one file outside the four the plan enumerated.
+2. **`readGate` throws on an ungated stage.** `requireWait` is loud by design, so any test naming `planning` and a gate now fails with `Stage planning waits on nothing, not on a gate` rather than with a wrong value. That is the good failure mode; do not soften it.
+3. **The merge is not built.** ADR-0030 D2 — approving the breakdown merges chunk zero into the default branch without a pull request — is **not in this slice**. Approving `breakdown` today records the stamp and advances to `planning`; nothing merges, and `src/git.ts` still has no merge-into-another-branch primitive. Chunk 1 therefore cuts from a default branch that does **not** yet carry the specification.
+4. **`breakdown` inherits chunk zero's branch, it does not cut one.** `claimBranch` returns early when the run already has a branch, so `ownsBranch: true` costs nothing and keeps the project held across the gate (ADR-0028 D2). Verified by the re-pointed gate tests, which claim a branch at `requirements` and see `breakdown` reuse it.
+5. **Nothing yet reads a breakdown off disk.** `readBreakdown`, `chunkProgress` and `isReproposal` still have no caller in `src/` outside their own tests. The stage writes the file and the gate opens over it; the poll loop learning to read it is 23f's.
+6. **`process.md` and `.claude/skills/timone-triage/SKILL.md` still describe a chore as meeting the plan gate**, and `.claude/skills/timone-execute/SKILL.md` gate 1 still refuses a phase file not stamped `Approved for execution`. ADR-0030's consequences require all three to move **in this phase**. Under D1 every per-chunk phase file is exactly what gate 1 refuses, so **execution would refuse every chunk** until that slice lands.

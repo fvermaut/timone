@@ -750,9 +750,14 @@ describe("pollOnce — resuming a run whose human answered", () => {
     expect(result.resumed).toEqual(["scratch-app#6/1"]);
     // It advances *and* carries who approved and when, so the artifact can
     // record the gate rather than leaving the trace on the ticket alone.
+    // ✏ `requirements` now advances to `breakdown` rather than to `planning`
+    // (ADR-0030 D1). What this test is about is unchanged and is the second
+    // half of the literal below: the approval travels with the transition, so
+    // the artifact can be stamped rather than the trace living only on the
+    // ticket. Only the stage the run advances *to* has moved.
     expect(contexts).toEqual([
       {
-        stage: "planning",
+        stage: "breakdown",
         approval: {
           stage: "requirements",
           by: "fvermaut",

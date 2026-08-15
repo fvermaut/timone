@@ -21,8 +21,10 @@ import {
 import { gateCommentFor } from "./gate-comment.js";
 import {
   APPROVAL_RECORD_MODEL,
+  PIPELINE_STAGES,
   effortFor,
   modelFor,
+  waitFor,
   type PipelineStage,
 } from "./pipeline.js";
 import { pollOnce } from "./poll.js";
@@ -1326,26 +1328,62 @@ describe("the plan gate", () => {
     // Asserted by construction: the two stages supply their own words, but
     // the part the human is actually judged on — the word to reply and the
     // rule that anything else is a change — is the same text both times.
-    const forRequirements = gateCommentFor("requirements", project, "b", ["x"])!;
-    const forPlanning = gateCommentFor("planning", project, "b", ["x"])!;
+    //
+    // ✏ The second stage is `breakdown` since ADR-0030 D1. Derived from the
+    // graph rather than named, so this stays an assertion about *the gated
+    // stages* and not about the two that happened to be gated when it was
+    // written — which is exactly how it came to need this edit.
+    const bodies = PIPELINE_STAGES.filter((stage) => waitFor(stage) === "gate").map(
+      (stage) => gateCommentFor(stage, project, "b", ["x"])!,
+    );
     const rule = (body: string) => body.trimEnd().split("\n").at(-1);
 
-    expect(rule(forRequirements)).toBe(rule(forPlanning));
-    expect(rule(forRequirements)).toMatch(/isn't `approve`/);
-    for (const body of [forRequirements, forPlanning]) {
+    expect(bodies).toHaveLength(2);
+    expect(new Set(bodies.map(rule)).size).toBe(1);
+    expect(rule(bodies[0])).toMatch(/isn't `approve`/);
+    for (const body of bodies) {
       expect(body).toContain("**What I need from you:** read it and reply on this ticket.");
     }
   });
 
-  it("links the plan where the plan actually lives", () => {
-    expect(gateCommentFor("planning", project, "timone/7-slow", [])).toContain(
-      "https://github.com/fvermaut/scratch-app/tree/timone/7-slow/doc/plans/phases",
+  it("links the list of pieces where the breakdown actually lives", () => {
+    // ✏ Was the phase file under `doc/plans/phases`. The artifact the second
+    // gate opens over is the breakdown (ADR-0028 D1), and a gate whose link
+    // points at the wrong directory is a gate over a 404.
+    expect(gateCommentFor("breakdown", project, "timone/7-slow", [])).toContain(
+      "https://github.com/fvermaut/scratch-app/tree/timone/7-slow/doc/plans/breakdowns",
     );
   });
 
   it("has no gate comment for a stage that has no gate", () => {
     expect(gateCommentFor("triage", project, "b", [])).toBeUndefined();
     expect(gateCommentFor("clarification", project, "b", [])).toBeUndefined();
+    // ✏ And planning, since ADR-0030 D1 moved its gate onto the breakdown.
+    // Asserted rather than merely stopped being asserted: a `GATED` row left
+    // behind for an ungated stage is dead words that would eventually be read
+    // as evidence the gate still exists.
+    expect(gateCommentFor("planning", project, "b", [])).toBeUndefined();
+  });
+
+  it("gives every stage that gates something to put in front of the human", () => {
+    // **The assertion the compiler cannot make, and the reason it is written
+    // as a derivation rather than a spot-check on the stage of the day.**
+    // `GATED` is a `Partial<Record<PipelineStage, …>>`, so a gated stage with
+    // no row is not a type error, not a build failure and not a test failure:
+    // `openGate` reads `if (comment !== undefined)`, posts nothing, and parks
+    // the run on a gate anyway — so the run waits for ever for an answer to a
+    // question nobody was ever asked. Silence is the failure mode, which is
+    // why the next gated stage has to be caught by this loop existing rather
+    // than by somebody remembering to add a case to it.
+    const gated = PIPELINE_STAGES.filter((stage) => waitFor(stage) === "gate");
+
+    expect(gated.length).toBeGreaterThan(0);
+    for (const stage of gated) {
+      expect(
+        gateCommentFor(stage, project, "timone/7-slow", ["x"]),
+        `${stage} gates, but has nothing to put in front of the human`,
+      ).toEqual(expect.any(String));
+    }
   });
 
   it("tells the planning session to stamp the file as not yet approved", async () => {
@@ -1367,7 +1405,12 @@ describe("the plan gate", () => {
     expect(requests[0].prompt).toMatch(/stay on the branch/i);
   });
 
-  it("parks awaiting the building that is not built, and says so", async () => {
+  it("parks on the breakdown's gate, and puts the pieces in front of the human", async () => {
+    // ✏ Was `planning` parking on its own gate. Since ADR-0030 D1 the stage
+    // between the specification and the build is `breakdown`, and it is the
+    // one that stops for an answer — the test is re-pointed at it rather than
+    // deleted, because the property is the same one: the stage runs, the gate
+    // goes up, and the run waits on the human before anything is built.
     const store = newStore();
     const { adapter, comments } = fakeAdapter(settled);
     const { runtime } = fakeRuntime();
@@ -1380,14 +1423,163 @@ describe("the plan gate", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
-    }).spawn(run, project, { stage: "planning", approval: undefined });
+    }).spawn(run, project, { stage: "breakdown", approval: undefined });
 
-    // Planning ran, its gate went up, and the run waits on the human — the
-    // park at execution comes only once they approve.
     const parked = store.get(run.id);
-    expect(parked?.stage).toBe("planning");
+    expect(parked?.stage).toBe("breakdown");
     expect(parked?.waitingKind).toBe("gate");
-    expect(comments.at(-1)?.body).toContain("Here's how I propose to build it.");
+    expect(comments.at(-1)?.body).toContain("Here's how I propose to break this up.");
+  });
+});
+
+describe("a finished planning session, now that planning is wait-free", () => {
+  /** A run holding chunk zero's branch, resumed into planning. */
+  function readyToPlan(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    return store.get(run.id)!;
+  }
+
+  /** A ticket carrying whatever triage did — or did not — record on it. */
+  function ticketLabelled(...labels: string[]): TicketThread {
+    return { ...thread, labels: ["timone", ...labels], comments: [] };
+  }
+
+  /** A session that closes by recording the outcome marker on the ticket. */
+  function planningRuntime(
+    adapter: TicketingAdapter,
+    marker: string = STAGE_DONE_MARKER,
+  ): ReturnType<typeof fakeRuntime> {
+    return fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${marker}\n\nHere is the phase.`);
+      },
+    });
+  }
+
+  it("advances to execution, rather than re-routing on the ticket's triage label", async () => {
+    // **The regression this branch exists to prevent, on the classification
+    // that hides it.** `afterStage` dispatches on the wait and then by name,
+    // and its final fall-through assumed the only wait-free stage left was
+    // triage — so it read the label back and routed on it. On a
+    // `triage:feature` ticket a finished planning session went *back* to
+    // clarification, re-opening an interview the human had already had.
+    const store = newStore();
+    const { adapter } = fakeAdapter(ticketLabelled("triage:feature"));
+    const { runtime, requests } = planningRuntime(adapter);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    // Two sessions, and the second is the build — not a conversation.
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    expect(requests[1].prompt).toMatch(/build what was planned/i);
+    expect(store.get("scratch-app#7/1")?.waitingKind).not.toBe("conversation");
+  });
+
+  it("advances a chore to execution instead of spawning planning for ever", async () => {
+    // **The expensive arm.** `routeAfterTriage("chore")` answers `planning`,
+    // so the fall-through sent a finished planning session straight back into
+    // planning — and `spawn`'s loop has no bound. Run against the unfixed
+    // branch this test does not fail, it exhausts a 4GB heap after four
+    // minutes; in life every turn of that loop is a paid session.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(ticketLabelled("triage:chore"));
+    const { runtime, requests } = planningRuntime(adapter);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    expect(requests.filter((r) => /plan the work for/i.test(r.prompt))).toHaveLength(1);
+    expect(requests[1].prompt).toMatch(/build what was planned/i);
+    // And ADR-0030 D3's own consequence, asserted where it happens: a chore
+    // meets no gate at all now. `routeAfterTriage` sends it past requirements
+    // and the breakdown, and this stage no longer has one — so nothing here
+    // asks the human for a word. Their judgement moves to the pull request.
+    expect(comments.map((c) => c.body).join("\n")).not.toMatch(/single word `approve`/);
+  });
+
+  it("advances a ticket carrying no classification at all", async () => {
+    // The third arm, and the one that proves the branch reads no label: with
+    // the fall-through reached, this failed the run on "triage recorded no
+    // classification" — a planning session judged by a record that belongs to
+    // a stage it is nowhere near.
+    const store = newStore();
+    const { adapter } = fakeAdapter(ticketLabelled());
+    const { runtime, requests } = planningRuntime(adapter);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    expect(store.get("scratch-app#7/1")?.failure).not.toMatch(/classification/i);
+    expect(requests[1].prompt).toMatch(/build what was planned/i);
+  });
+
+  it("fails the run when the session said done but the branch never moved", async () => {
+    // The artifact witness, asserted the other way. An ungated stage has no
+    // human between it and the build, so `producedWork` is the whole of what
+    // stands in for the gate's own "nothing to approve" guard — R5's history
+    // is the daemon once trusting a session's word alone.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(ticketLabelled("triage:feature"));
+    const { runtime, requests } = planningRuntime(adapter);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      // The branch sits on exactly the commit it started on: nothing committed.
+      repoProbe: async () => "sha-still",
+      headProbe: async () => "sha-still",
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    const run = store.get("scratch-app#7/1");
+    expect(run?.status).toBe("failed");
+    expect(run?.failure).toMatch(/branch/i);
+    expect(comments.at(-1)?.body).toMatch(/went wrong/i);
+    // And it did not advance: no build session was ever started.
+    expect(requests).toHaveLength(1);
+  });
+
+  it("stops quietly when the planning session handed the work to a person", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(ticketLabelled("triage:feature"));
+    const { runtime, requests } = planningRuntime(adapter, STAGE_HANDED_MARKER);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    // The session's own comment is the report; the daemon adds nothing on top.
+    expect(comments.at(-1)?.body).toContain("Here is the phase.");
+    expect(requests).toHaveLength(1);
   });
 });
 
@@ -2595,8 +2787,19 @@ describe("how a session's ending is judged", () => {
 });
 
 describe("a gate is never opened over a branch that was merely created", () => {
-  /** A run parked at the plan gate, ready to be resumed into planning. */
-  function readyToPlan(store: RunStore): Run {
+  /**
+   * A fresh run with no branch, ready to be resumed into the first stage that
+   * cuts one.
+   *
+   * ✏ These three drove `planning` on a `triage:chore` ticket, because that
+   * was the shortest route to a stage that both gates and owns a branch.
+   * ADR-0030 D1 made `planning` wait-free — and D3 made a chore's whole route
+   * gateless deliberately — so the property has been re-pointed at
+   * `requirements`, which is the stage the 2026-08-07 defect was actually
+   * found at: "the first stage to own a branch", in the original comment's own
+   * words. The property is untouched; only the stage carrying it has moved.
+   */
+  function readyToWrite(store: RunStore): Run {
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "s0");
     return store.get(run.id)!;
@@ -2610,7 +2813,7 @@ describe("a gate is never opened over a branch that was merely created", () => {
     const store = newStore();
     const { adapter, comments } = fakeAdapter({
       ...thread,
-      labels: ["timone", "triage:chore"],
+      labels: ["timone", "triage:feature"],
       comments: [],
     });
     const { runtime } = fakeRuntime();
@@ -2626,7 +2829,7 @@ describe("a gate is never opened over a branch that was merely created", () => {
       // and afterwards it sits on exactly the commit it was cut from.
       repoProbe: async () => (calls++ === 0 ? undefined : "sha-base"),
       headProbe: async () => "sha-base",
-    }).spawn(readyToPlan(store), project, { stage: "planning" });
+    }).spawn(readyToWrite(store), project, { stage: "requirements" });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("failed");
     expect(store.get("scratch-app#7/1")?.failure).toMatch(/without committing anything/);
@@ -2637,7 +2840,7 @@ describe("a gate is never opened over a branch that was merely created", () => {
     const store = newStore();
     const { adapter, comments } = fakeAdapter({
       ...thread,
-      labels: ["timone", "triage:chore"],
+      labels: ["timone", "triage:feature"],
       comments: [],
     });
     const { runtime } = fakeRuntime();
@@ -2651,7 +2854,7 @@ describe("a gate is never opened over a branch that was merely created", () => {
       root: "/root",
       repoProbe: async () => (calls++ === 0 ? undefined : "sha-after"),
       headProbe: async () => "sha-base",
-    }).spawn(readyToPlan(store), project, { stage: "planning" });
+    }).spawn(readyToWrite(store), project, { stage: "requirements" });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("parked");
     expect(comments.at(-1)?.body).toContain("approve");
@@ -2663,11 +2866,11 @@ describe("a gate is never opened over a branch that was merely created", () => {
     const store = newStore();
     const { adapter } = fakeAdapter({
       ...thread,
-      labels: ["timone", "triage:chore"],
+      labels: ["timone", "triage:feature"],
       comments: [],
     });
     const { runtime } = fakeRuntime();
-    const run = readyToPlan(store);
+    const run = readyToWrite(store);
     store.claimBranch(run.id, "timone/7-the-page-feels-slow");
 
     await new AgentSessionSpawner({
@@ -2680,7 +2883,7 @@ describe("a gate is never opened over a branch that was merely created", () => {
       // Deliberately equal to the "after" tip: if HEAD were consulted for a
       // branch that already exists, this would wrongly read as no work.
       headProbe: async () => "sha-after",
-    }).spawn(store.get(run.id)!, project, { stage: "planning" });
+    }).spawn(store.get(run.id)!, project, { stage: "requirements" });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("parked");
   });

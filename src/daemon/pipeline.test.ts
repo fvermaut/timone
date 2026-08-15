@@ -125,16 +125,38 @@ describe("routeAfterTriage", () => {
 });
 
 describe("the stage graph", () => {
-  it("runs clarification → requirements → planning → execution", () => {
+  it("runs clarification → requirements → breakdown → planning → execution", () => {
+    // ✏ ADR-0030 D1 put `breakdown` between the specification and the plan.
+    // The breakdown is the list of pieces the initiative is built in, approved
+    // once; `planning` then runs once per piece and writes that piece's phase
+    // file with no gate of its own.
     expect(stageAfter("clarification")).toBe("requirements");
-    expect(stageAfter("requirements")).toBe("planning");
+    expect(stageAfter("requirements")).toBe("breakdown");
+    expect(stageAfter("breakdown")).toBe("planning");
     expect(stageAfter("planning")).toBe("execution");
   });
 
-  it("waits on a conversation at clarification and on a gate at both write stages", () => {
+  it("waits on a conversation at clarification, and gates the two written proposals", () => {
+    // ✏ The gate moved with the artifact (ADR-0030 D1). `planning` is
+    // deliberately wait-free now: what the human approved is the breakdown,
+    // and a per-chunk phase file re-opening a gate they already answered is
+    // the shape the split exists to prevent.
     expect(waitFor("clarification")).toBe("conversation");
     expect(waitFor("requirements")).toBe("gate");
-    expect(waitFor("planning")).toBe("gate");
+    expect(waitFor("breakdown")).toBe("gate");
+    expect(waitFor("planning")).toBe("none");
+  });
+
+  it("keeps the breakdown on chunk zero's branch, at process stage 5", () => {
+    // ADR-0028 D2: requirements and the breakdown share one branch. `breakdown`
+    // owns a branch so the project stays held across the gate — `claimBranch`
+    // returns early when the run already has one, so it inherits rather than
+    // cuts. `processStage: 5` because it is written by the planning stage in
+    // `process.md`'s sense (ADR-0030 D1's answered objection).
+    expect(processStage("breakdown")).toBe(5);
+    expect(processStage("planning")).toBe(5);
+    expect(ownsBranch("breakdown")).toBe(true);
+    expect(isBuilt("breakdown")).toBe(true);
   });
 
   it("owns no branch before the requirements stage, and one from there on", () => {
@@ -262,6 +284,11 @@ describe("the stage graph", () => {
     expect(runsUnattended("clarification")).toBe(false);
     expect(runsUnattended("triage")).toBe(true);
     expect(runsUnattended("requirements")).toBe(true);
+    // ✏ Both halves of the split run unattended. `runsUnattended` is derived
+    // from the wait being a conversation, so `planning` losing its gate does
+    // not change this answer — asserted for both so the split is on record as
+    // having left it alone.
+    expect(runsUnattended("breakdown")).toBe(true);
     expect(runsUnattended("planning")).toBe(true);
   });
 
@@ -282,6 +309,13 @@ describe("the model and effort each stage runs on", () => {
 
     expect(modelFor("requirements")).toBe("claude-opus-5");
     expect(effortFor("requirements")).toBe("high");
+
+    // ✏ The breakdown's pair, added with the stage (ADR-0030 D1). The same as
+    // planning's, and for a stronger version of planning's reason: this is the
+    // cut of a whole initiative, approved once, and every pull request that
+    // follows is shaped by it.
+    expect(modelFor("breakdown")).toBe("claude-opus-5");
+    expect(effortFor("breakdown")).toBe("high");
 
     expect(modelFor("planning")).toBe("claude-opus-5");
     expect(effortFor("planning")).toBe("high");
@@ -365,11 +399,14 @@ describe("readGate", () => {
   it("advances a waiting run exactly one stage on approval", () => {
     expect(readGate("requirements", approval)).toEqual({
       kind: "advance",
-      stage: "planning",
+      stage: "breakdown",
     });
-    expect(readGate("planning", approval)).toEqual({
+    // ✏ Was `planning → execution`. `planning` is no longer a gate at all
+    // (ADR-0030 D1), so asking it to read one now throws — the second gate is
+    // the breakdown, and what it advances to is the per-chunk planning stage.
+    expect(readGate("breakdown", approval)).toEqual({
       kind: "advance",
-      stage: "execution",
+      stage: "planning",
     });
   });
 
@@ -384,7 +421,10 @@ describe("readGate", () => {
   });
 
   it("never advances on a change request, at either gated stage", () => {
-    for (const stage of ["requirements", "planning"] as PipelineStage[]) {
+    // ✏ Derived rather than written out, so the pair it loops over is the pair
+    // that actually gates. Written out, this test would have gone on asserting
+    // a property of `planning` after `planning` stopped having it.
+    for (const stage of PIPELINE_STAGES.filter((s) => waitFor(s) === "gate")) {
       expect(readGate(stage, changeRequest("no")).kind).toBe("repeat");
     }
   });
@@ -404,7 +444,12 @@ describe("readGate", () => {
     // the two stages differ only in what follows them.
     const gated = PIPELINE_STAGES.filter((stage) => waitFor(stage) === "gate");
 
-    expect(gated).toEqual(["requirements", "planning"]);
+    // ✏ Was `["requirements", "planning"]`. ADR-0030 D1 moved the second gate
+    // off the phase file and onto the breakdown — the list of pieces, approved
+    // once for the whole initiative. The set is still exactly two, and this
+    // literal is the alarm that says so: a third gate appearing here is a
+    // decision, not a detail.
+    expect(gated).toEqual(["requirements", "breakdown"]);
     for (const stage of gated) {
       expect(readGate(stage, approval)).toEqual({
         kind: "advance",

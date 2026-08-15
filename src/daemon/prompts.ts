@@ -8,6 +8,7 @@ import {
   type TicketThread,
 } from "../adapters/ticketing.js";
 import { takeoverCommand } from "../channels/terminal.js";
+import { breakdownPath } from "./breakdown.js";
 import { clarifyingRounds } from "./gates.js";
 import type { Classification } from "./pipeline.js";
 
@@ -17,6 +18,7 @@ export const PROMPTED_STAGES = [
   "clarification",
   "wayfinding",
   "requirements",
+  "breakdown",
   "planning",
   "execution",
   "verification",
@@ -334,6 +336,8 @@ function stageBody(
       return wayfindingPrompt(context);
     case "requirements":
       return requirementsPrompt(context);
+    case "breakdown":
+      return breakdownPrompt(context);
     case "planning":
       return planningPrompt(context);
     case "execution":
@@ -595,21 +599,52 @@ export interface RecordedApproval {
   at: string;
 }
 
-/** What each gated stage's artifact must say once the human has approved it. */
+/**
+ * What each gated stage's artifact must say once the human has approved it.
+ *
+ * Built from the ticket rather than written flat, because the breakdown's
+ * artifact is a path carrying the ticket's own number — and
+ * {@link breakdownPath} is the only place that path may be spelled.
+ */
 const APPROVAL_RECORD: Partial<
-  Record<(typeof PROMPTED_STAGES)[number], { artifact: string; what: string }>
+  Record<
+    (typeof PROMPTED_STAGES)[number],
+    (ticket: TicketThread) => { artifact: string; what: string }
+  >
 > = {
-  requirements: {
+  requirements: () => ({
     artifact: "the PRD pair under `doc/specs/prd/`",
     what: "set the PRD's status to Active, as stage 3's closing gate requires",
-  },
-  planning: {
+  }),
+  // The stamp this writes is **parsed**, not just read, and the count is the
+  // part that is easy to leave off and impossible to notice missing: anything
+  // other than `Approved by <who> <date> — N pieces` reads back as malformed,
+  // and a malformed breakdown is indistinguishable from no breakdown at all.
+  // The count is also the whole of how a re-proposal is spotted — a list longer
+  // than the number its own stamp names has gained a piece since the approval
+  // (ADR-0028 D3) — so a stamp without it silently retires that check too.
+  breakdown: (ticket) => ({
+    artifact: `the breakdown at \`${breakdownPath(ticket.number)}\``,
+    what:
+      "replace its `Status:` line with `Approved by <who> <date> — N pieces`, " +
+      "where N is how many pieces the numbered list beneath it holds — count " +
+      "them and write the number; do not guess it and do not leave it out. " +
+      "Change nothing else in the file: the list they approved is the list " +
+      "that stays",
+  }),
+  // ✏ Unreachable since ADR-0030 D1 made `planning` wait-free: no approval is
+  // ever recorded for a stage that never opens a gate. Left in place rather
+  // than removed because the phase file's `Status:` line is still what stage 6
+  // reads, and moving that off the stamp is the same phase's later slice —
+  // deleting this half of the pair before the other half moves would leave
+  // every phase file unstamped and every build refusing to start.
+  planning: () => ({
     artifact: "the phase file under `doc/plans/phases/`",
     what:
       "replace its `Status:` line with `Approved for execution by <who> <date>`, " +
       "which is the written trace of stage 5's gate and the thing stage 6 " +
       "refuses to start without",
-  },
+  }),
 };
 
 /**
@@ -625,7 +660,7 @@ export function approvalRecordPrompt(
   approval: RecordedApproval,
   context: PromptContext,
 ): string {
-  const spec = APPROVAL_RECORD[approval.stage];
+  const spec = APPROVAL_RECORD[approval.stage]?.(context.ticket);
 
   return [
     provenanceBlock(`${approval.stage} (recording the approval)`, context),
@@ -870,8 +905,91 @@ function wayfindingPrompt(context: PromptContext): string {
 }
 
 /**
- * Stage 5: cut the approved requirements into a phase of thin vertical
- * slices, on the same branch, gated exactly as the requirements were.
+ * Stage 5's first half: cut the approved specification into the pieces the
+ * initiative will be built in, and put the list up for its one approval
+ * ([ADR-0030](../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)
+ * D1).
+ *
+ * **Written to stand alone, because no skill describes a breakdown yet.** Every
+ * other prompt here hands its session to a stage skill and says little more;
+ * this one has to carry the whole instruction itself, which is why it is the
+ * longest and why it spells the file's shape out.
+ *
+ * Two details in it are load-bearing and neither is type-checked, because the
+ * file is written by a session and read by {@link readBreakdown}:
+ *
+ * - **The path is interpolated from `breakdownPath`, never restated.** It is
+ *   zero-padded to two digits, and a prompt saying `ticket-7.md` in prose would
+ *   make every later read answer `absent` — silently, for ever.
+ * - **The `Status:` and chunk lines are shown rather than described.** Anything
+ *   the parser does not recognise is `malformed`, which is the same silence
+ *   wearing a different hat.
+ */
+function breakdownPrompt(context: PromptContext): string {
+  const { ticket, branch } = context;
+
+  return [
+    `Break the work for ticket #${ticket.number} on **${context.project.name}** into pieces.`,
+    "",
+    ticketBlock(context),
+    feedbackBlock(context.feedback),
+    "",
+    reentryBlock(),
+    "",
+    `**Stay on the branch \`${branch ?? "the run's work branch"}\`** — the approved`,
+    "specification is already committed there, and it is what you are breaking",
+    "up. Read it; do not re-derive it from this ticket.",
+    "",
+    "**What you are writing is not a plan.** It is the list of pieces this",
+    "initiative will be built in, and nothing else — no slices, no seams, no",
+    "validation steps. One piece is one pull request's worth of work: a change",
+    "somebody can review in a sitting, that leaves the project working when it",
+    "lands. Each piece gets a plan of its own later, one at a time, so writing",
+    "those now would be planning against a list nobody has agreed to yet.",
+    "",
+    "Order them so each can be built and merged on its own, needing only what",
+    "is above it. Prefer few real pieces to many small ones: every piece costs",
+    "a review.",
+    "",
+    `**Commit it at \`${breakdownPath(ticket.number)}\` on that branch, and push`,
+    "it.** That exact path — it is looked for there and nowhere else, and a",
+    "file next to it under another name does not exist as far as anything can",
+    "tell. Write it in this shape, because it is read by machine as well as by",
+    "a person:",
+    "",
+    "```markdown",
+    "# Breakdown",
+    "",
+    "**Status:** Awaiting approval",
+    "",
+    "1. **<what the piece is called>** — <one line of what it delivers>",
+    "2. **<the next piece>** — <one line of what it delivers>",
+    "```",
+    "",
+    "The `Status:` line reads `Awaiting approval`, exactly those words: nobody",
+    "has approved this yet, and a file claiming otherwise would let the",
+    "building start on nobody's authority.",
+    "",
+    "Then post one comment on the ticket describing, in plain words, the shape",
+    "of the work — what gets built first, what that gets them, and what",
+    "follows. The shape, not the list read back and not a file listing. Do",
+    "**not** ask them to approve it: the machinery posts the approval request",
+    "itself, immediately after yours, and two sets of instructions would tell",
+    "them two different things.",
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
+  ].join("\n");
+}
+
+/**
+ * Stage 5's second half: cut one approved piece into a phase of thin vertical
+ * slices, on the same branch.
+ *
+ * ✏ No longer gated (ADR-0030 D1). What the human approved is the breakdown;
+ * this stage runs once per piece, and what judges the piece is its pull
+ * request.
  */
 function planningPrompt(context: PromptContext): string {
   const { ticket, branch } = context;

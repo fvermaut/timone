@@ -70,6 +70,7 @@ export const PIPELINE_STAGES = [
   "charting",
   "research",
   "requirements",
+  "breakdown",
   "planning",
   "execution",
   "verification",
@@ -277,14 +278,40 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // The PRD everything downstream is built and verified against.
     model: "claude-opus-5",
     effort: "high",
+    next: "breakdown",
+  },
+  breakdown: {
+    // ADR-0030 D1. `process.md` stage 5 — this *is* the planning stage in the
+    // sense ADR-0028 D1 means, split into its own row because one stage cannot
+    // declare two waits, and the list of pieces is gated while each piece's
+    // phase file is not. Four stages already share `processStage: 2` for the
+    // same reason, so the mapping being many-to-one is the precedent, not the
+    // exception.
+    processStage: 5,
+    waits: "gate",
+    // Chunk zero's branch, inherited rather than cut: `claimBranch` returns
+    // early when the run already has one, so this costs nothing and keeps the
+    // project held from the specification through the approval (ADR-0028 D2).
+    ownsBranch: true,
+    built: true,
+    // The one cut the human approves for the whole initiative, and the only
+    // approval standing between a specification and every pull request that
+    // follows it. A bad cut is not a bad phase, it is a bad five phases.
+    model: "claude-opus-5",
+    effort: "high",
     next: "planning",
   },
   planning: {
     processStage: 5,
-    waits: "gate",
+    // ✏ Ungated since ADR-0030 D1. The plan the human approved is the
+    // breakdown; this stage writes one chunk's phase file per visit, and a
+    // gate here would ask them again about work they have already said yes to
+    // — once per chunk. What judges the chunk is its pull request.
+    waits: "none",
     ownsBranch: true,
     built: true,
-    // Human-gated, but a bad cut costs a whole phase before anyone sees it.
+    // Unchanged: a bad cut of one chunk still costs a whole phase, and this is
+    // now the last unattended judgement before code gets written.
     model: "claude-opus-5",
     effort: "high",
     next: "execution",

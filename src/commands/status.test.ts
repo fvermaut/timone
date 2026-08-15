@@ -250,6 +250,21 @@ describe("renderStatus — the back half of the pipeline", () => {
     expect(output).not.toMatch(/execution|verification/);
   });
 
+  it("says what a run at the breakdown stage is doing, in words", () => {
+    // `STAGE_LABELS` is a `Partial` record and an unlabelled stage falls back
+    // to its own name, so nothing fails without a row here — it just prints
+    // "breakdown", which to the reader this command is written for reads as
+    // something having broken rather than as work in progress.
+    const output = renderStatus(
+      manifest,
+      [run({ project: "scratch-app", ticket: 6, status: "active", stage: "breakdown" })],
+      { stateExists: true },
+    );
+
+    expect(lineFor(output, "scratch-app")).toMatch(/working out the pieces/);
+    expect(output).not.toMatch(/\bbreakdown\b/);
+  });
+
   it("names the pull request a review wait is waiting on", () => {
     const output = renderStatus(
       manifest,

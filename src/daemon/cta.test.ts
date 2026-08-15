@@ -335,7 +335,12 @@ const WAIT_AT: Record<PipelineStage, Run["waitingKind"]> = {
   charting: "conversation",
   research: undefined,
   requirements: "gate",
-  planning: "gate",
+  // ✏ ADR-0030 D1 moved the second gate off the phase file and onto the list
+  // of pieces. `planning` runs once per piece now and stops for nobody: what
+  // judges a piece is its pull request, so a run leaving planning is a run
+  // walking straight on into the build.
+  breakdown: "gate",
+  planning: undefined,
   execution: undefined,
   verification: undefined,
   delivery: "review",

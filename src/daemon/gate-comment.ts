@@ -83,7 +83,18 @@ export function branchUrl(
   return `https://github.com/${match[1]}/tree/${branch}/${path}`;
 }
 
-/** What each gated stage puts in front of the human, and what follows it. */
+/**
+ * What each gated stage puts in front of the human, and what follows it.
+ *
+ * **A `Partial` record, and that is a trap worth naming where it lives.** A
+ * gated stage missing its row here is not a type error and not a build
+ * failure: {@link gateCommentFor} answers undefined, `openGate` reads
+ * `if (comment !== undefined)`, posts nothing, and parks the run on the gate
+ * regardless — so the run waits for ever for an answer to a question nobody
+ * was asked, and every surface reports it as normally waiting. Nothing in the
+ * compiler catches it, so `session.test.ts` derives the gated set from
+ * `PIPELINE_STAGES` and asserts a comment exists for each member.
+ */
 const GATED: Partial<
   Record<PipelineStage, { headline: string; where: string; label: string; onApproval: string }>
 > = {
@@ -91,13 +102,21 @@ const GATED: Partial<
     headline: "I've written down what I think you're asking for.",
     where: "doc/specs/prd",
     label: "what I understood you're asking for",
-    onApproval: "work out how to build it and come back with a plan.",
+    onApproval: "work out how to break the work up and come back with the pieces.",
   },
-  planning: {
-    headline: "Here's how I propose to build it.",
-    where: "doc/plans/phases",
-    label: "the plan, in full",
-    onApproval: "start building it in that order.",
+  // ✏ The second gate, since ADR-0030 D1 — it replaces `planning`'s, which was
+  // asked once per phase file. This one is asked once for the whole
+  // initiative: the human approves the list of pieces, and each piece is then
+  // judged as its own pull request rather than as another plan.
+  //
+  // The directory rather than the file, because a gate comment is built from
+  // the stage, the project and the branch, and the ticket number the filename
+  // carries is not among them. One breakdown lives there per ticket.
+  breakdown: {
+    headline: "Here's how I propose to break this up.",
+    where: "doc/plans/breakdowns",
+    label: "the pieces I'd build this in, in order",
+    onApproval: "start building them in that order, one at a time.",
   },
 };
 
