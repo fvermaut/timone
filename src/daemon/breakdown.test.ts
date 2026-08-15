@@ -75,6 +75,44 @@ describe("the breakdown round-trips", () => {
   it("preserves who approved, when, and how many pieces they saw", () => {
     expect(parseBreakdown(renderBreakdown(approved))).toEqual(approved);
   });
+
+  it("reads the stamp a real approval session wrote, timestamp and all", () => {
+    // The exact bytes off scratch-app's `main`, 2026-08-15T17:24:24Z. The
+    // session was handed the gate reply's ISO timestamp and wrote it where
+    // the instruction said `<date>` — entirely reasonable, and this pattern
+    // rejected it. A rejected stamp makes the whole file `malformed`, and an
+    // unreadable breakdown CLOSES ITS TICKET, so piece 2 of 2 would never
+    // have been built and nothing would have said why. Kept as the literal
+    // string rather than a constructed one, because what broke was the gap
+    // between what a prompt writes and what this reads, and a constructed
+    // fixture would agree with the code by definition.
+    const live = [
+      "# Breakdown",
+      "",
+      "**Status:** Approved by fvermaut 2026-08-15T17:24:24Z — 2 pieces",
+      "",
+      "1. **Putting a label on a to-do** — labels exist in the data.",
+      "2. **Looking at one label at a time** — the list narrows to one label.",
+      "",
+    ].join("\n");
+
+    const parsed = parseBreakdown(live);
+    expect("kind" in parsed && parsed.kind === "malformed").toBe(false);
+    expect(parsed).toMatchObject({
+      stamp: { kind: "approved", by: "fvermaut", pieces: 2 },
+    });
+    expect((parsed as ParsedBreakdown).chunks).toHaveLength(2);
+  });
+
+  it("still refuses a stamp with no piece count, which the count is read from", () => {
+    // The date is informational and parsed loosely on purpose; the count is
+    // not, because `isReproposal` compares against it and a wrong number
+    // there waves through work nobody approved.
+    const parsed = parseBreakdown(
+      "# Breakdown\n\n**Status:** Approved by fvermaut 2026-08-15T17:24:24Z\n\n1. **A** — a.\n",
+    );
+    expect("kind" in parsed && parsed.kind === "malformed").toBe(true);
+  });
 });
 
 describe("which chunk is next", () => {

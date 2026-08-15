@@ -36,9 +36,25 @@ export interface ParsedBreakdown {
 /** The `Status:` line, tolerating the emphasis people put around it. */
 const STATUS_LINE = /^\s*(?:\*\*|__)?Status:(?:\*\*|__)?\s*(.+?)\s*$/m;
 
-/** `Approved by <who> <date> — N pieces`, the stamp's second state. */
+/**
+ * `Approved by <who> <date> — N pieces`, the stamp's second state.
+ *
+ * **The date tolerates a time, because the thing that writes it is a prompt
+ * and the thing that reads it is this regex.** Nothing type-checks one against
+ * the other, and on 2026-08-15 that cost the live gate a whole initiative: the
+ * approval-record session was handed the gate reply's ISO timestamp, wrote
+ * `Approved by fvermaut 2026-08-15T17:24:24Z — 2 pieces` — a fair reading of
+ * `<date>` — and this pattern rejected it. A rejected stamp makes the whole
+ * breakdown `malformed`, and an unreadable breakdown **closes its ticket**, so
+ * the second of two pieces would never have been built and nothing would have
+ * said why.
+ *
+ * The count stays strict, because `isReproposal` compares against it and a
+ * wrong number there approves work nobody saw. The date is informational and
+ * is parsed loosely on purpose.
+ */
 const APPROVED_STAMP =
-  /^Approved by\s+(.+?)\s+(\d{4}-\d{2}-\d{2})\s*[—-]\s*(\d+)\s+pieces?$/;
+  /^Approved by\s+(.+?)\s+(\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+Z?)?)\s*[—-]\s*(\d+)\s+pieces?$/;
 
 /** `N. **<title>** — <what it delivers>`, one chunk of the ordered list. */
 const CHUNK_LINE = /^\s*\d+\.\s+(?:\*\*|__)(.+?)(?:\*\*|__)\s*[—-]\s*(.+?)\s*$/;
