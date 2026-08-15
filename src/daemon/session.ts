@@ -1179,7 +1179,10 @@ export class AgentSessionSpawner implements SessionSpawner {
     if (store.get(run.id)?.branch !== undefined) return;
 
     const ticket = await adapter.getTicket(project, run.ticket);
-    const branch = workBranch(ticket);
+    // The chunk's number, not the ticket's alone: a ticket hosts a sequence of
+    // chunks (ADR-0026) and each owns its own branch, so chunk 2 must not
+    // claim the one chunk 1 merged and closed. Chunk 1's name is unchanged.
+    const branch = workBranch(ticket, run.seq);
     store.claimBranch(run.id, branch);
     this.log(`branch ${run.id} → ${branch}`);
   }

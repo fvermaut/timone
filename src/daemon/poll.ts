@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import type { Manifest, ProjectConfig } from "../manifest.js";
 import {
   CTA_MARKER,
@@ -33,6 +35,7 @@ import {
   wayfinderStage,
   type PipelineStage,
 } from "./pipeline.js";
+import { chunkProgress, isReproposal, readBreakdown } from "./breakdown.js";
 import { ctaComment, ctaFor, type TicketState } from "./cta.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 import { type Run, type RunStore, type Witness } from "./runs.js";
@@ -83,6 +86,21 @@ export interface PollDeps {
   store: RunStore;
   adapter: TicketingAdapter;
   spawner: SessionSpawner;
+  /**
+   * The timone root, so the loop can reach a project's checkout at
+   * `projects/<name>/` — which is where a ticket's breakdown lives
+   * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+   * D1) and therefore where "is there another piece of this to build?" is
+   * answered.
+   *
+   * **Optional, and absent means the loop cannot read a breakdown at all**: a
+   * merged pull request then ends its ticket exactly as it did before a ticket
+   * hosted more than one chunk. That is the old behaviour rather than a new
+   * one, and it is a fixture's answer, not a daemon's: `runDaemon`'s own
+   * options require a root, so the compiler makes every real daemon state one
+   * and only a test can construct a loop without.
+   */
+  root?: string;
   /**
    * How long a run may go without a heartbeat before it is treated as
    * orphaned by a dead daemon (ADR-0020). Four progress intervals by default,
@@ -143,16 +161,95 @@ export const DEFAULT_POLL_INTERVAL_SECONDS = 60;
  */
 export const UNWITNESSED_POLL_INTERVALS = 2;
 
-/** The comment posted on the ticket when its pull request was merged. */
-export function mergedComment(pr: number): string {
+/**
+ * The comment posted on the ticket when its **last** pull request was merged
+ * and the initiative is over.
+ *
+ * It names **every** pull request the initiative produced, not only the one
+ * that just merged ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D3). A ticket built in four pieces closes on the fourth, and by then the
+ * first is weeks up the thread — so the closing comment is the one place the
+ * whole of the work is listed, and a reader arriving at the end can still find
+ * all of it.
+ */
+export function mergedComment(prs: readonly number[]): string {
+  const opening =
+    prs.length <= 1
+      ? `The work for this ticket went in with pull request ${listOf(prs)}.`
+      : `The work for this ticket went in over ${prs.length} pieces — ` +
+        `pull requests ${listOf(prs)}.`;
+
   return [
     "**Merged — this one is done.**",
     "",
-    `The work for this ticket went in with pull request #${pr}. The branch has`,
-    "served its purpose, and this ticket's journey ends here.",
+    `${opening} The branches have`,
+    "served their purpose, and this ticket's journey ends here.",
     "",
     "**What I need from you:** nothing — file a new ticket for anything else.",
   ].join("\n");
+}
+
+/**
+ * The comment posted when a piece merged and the initiative carries on.
+ *
+ * It says three things a human would otherwise have to infer: that this piece
+ * is in, how much of the list is left, and that the next one does **not** jump
+ * the queue — R22 clause 6's promise that the project is free between chunks
+ * is only kept if the person watching can see it being kept.
+ */
+export function pieceMergedComment(
+  pr: number,
+  done: number,
+  total: number,
+  next: string,
+): string {
+  return [
+    `**Merged — that's ${done} of ${total} done.**`,
+    "",
+    `Pull request #${pr} went in, and this ticket isn't finished: the next piece`,
+    `is **${next}**. I'll start it when this project is next free — it works one`,
+    "thing at a time, so anything already waiting goes first.",
+    "",
+    "**What I need from you:** nothing — I'll comment here when the next piece starts.",
+  ].join("\n");
+}
+
+/**
+ * The comment posted when a piece merged but the list of pieces has grown
+ * since the human approved it
+ * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D3).
+ *
+ * **The ticket stays open and nothing else starts.** The piece that would come
+ * next is one nobody has read, and the machine is not entitled to decide on
+ * its own that the longer list is fine. What it *is* obliged to do is say so —
+ * a ticket that simply went quiet would look exactly like a daemon that had
+ * stopped.
+ */
+export function reproposedComment(
+  pr: number,
+  listed: number,
+  approved: number,
+  path: string,
+): string {
+  return [
+    "**Merged — and I've stopped here.**",
+    "",
+    `Pull request #${pr} went in. But the list of pieces for this ticket now`,
+    `holds ${listed}, and the version you approved held ${approved} — so it has`,
+    "grown since, and the piece I would pick up next is one you have never seen.",
+    "I'm not going to build something nobody agreed to, and I'm not going to",
+    "decide on my own that the longer list is fine.",
+    "",
+    `**What I need from you:** read the list of pieces in \`${path}\` and say here whether to carry on with it.`,
+  ].join("\n");
+}
+
+/** `#9`, `#9 and #12`, `#9, #12 and #14` — a list a person reads aloud. */
+function listOf(prs: readonly number[]): string {
+  const marked = prs.map((pr) => `#${pr}`);
+  if (marked.length <= 1) return marked[0] ?? "none";
+  return `${marked.slice(0, -1).join(", ")} and ${marked.at(-1)}`;
 }
 
 /** The comment posted when the pull request was closed without merging. */
@@ -626,6 +723,16 @@ async function pollProject(
   // Tickets told where they stand a moment ago, by the acknowledgement below.
   const acknowledged = new Set<number>();
   for (const ticket of tickets) {
+    // Before the ledger is touched: this is where a ticket's *next* chunk is
+    // opened, so it is where one the human has not approved is refused. See
+    // {@link successorHeldBack} — it says nothing about a ticket's first
+    // chunk, or one it is already working.
+    const heldBack = successorHeldBack(project.name, ticket.number, deps);
+    if (heldBack !== undefined) {
+      log(`hold   ${project.name}#${ticket.number} — ${heldBack}`);
+      continue;
+    }
+
     const occupier = store.occupyingRun(project.name);
     const { run, created } = store.register(project.name, ticket.number);
     if (!created) continue;
@@ -977,18 +1084,35 @@ function standingCta(thread: TicketThread): string | undefined {
 }
 
 /**
- * Where a run that has never run anything starts, when its ticket's labels
- * say somewhere other than the default.
+ * Where a run that has never run anything starts, when its ticket's labels —
+ * or its own place in its ticket's sequence — say somewhere other than the
+ * default.
  *
- * Only a wayfinder decision ticket does. It was charted by a discovery
- * session that had already decided what kind of question it holds, so sending
- * it through triage would classify a decision as a fresh request and route it
- * into the build pipeline. Everything else gets `undefined` — the spawner's
- * own default is triage, and naming it here as well would let the two
- * disagree.
+ * Two things answer, in this order.
+ *
+ * **The labels**, for a wayfinder decision ticket. It was charted by a
+ * discovery session that had already decided what kind of question it holds,
+ * so sending it through triage would classify a decision as a fresh request
+ * and route it into the build pipeline.
+ *
+ * **The sequence number**, for a successor chunk. A ticket is a durable
+ * conversation and hosts a sequence of chunks
+ * ([ADR-0026](../../doc/adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md));
+ * triage classified it when its *first* chunk ran, and the classification is a
+ * fact about the ticket rather than about one piece of it. A second chunk sent
+ * through triage would re-classify a conversation already in flight — and
+ * re-interview the human about a feature whose breakdown they have approved.
+ * What a successor needs is a plan for its own piece, which is `planning`.
+ *
+ * **Labels first, deliberately:** a decision ticket that opens a second chunk
+ * is still a decision ticket, and the sequence rule must not quietly re-point
+ * it at the build pipeline.
+ *
+ * Everything else gets `undefined` — the spawner's own default is triage, and
+ * naming it here as well would let the two disagree.
  *
  * The labels come from the listing this cycle already made, so recognising a
- * wayfinder ticket costs the tracker nothing.
+ * wayfinder ticket costs the tracker nothing, and the sequence is on the run.
  */
 function entryContext(
   run: Run,
@@ -1000,8 +1124,10 @@ function entryContext(
 
   const labels =
     tickets.find((candidate) => candidate.number === run.ticket)?.labels ?? [];
-  const stage = wayfinderStage(labels);
-  return stage === undefined ? undefined : { stage };
+  const charted = wayfinderStage(labels);
+  if (charted !== undefined) return { stage: charted };
+
+  return run.seq > 1 ? { stage: "planning" } : undefined;
 }
 
 /**
@@ -1203,20 +1329,217 @@ async function concludeReview(
   const pr = await threads.pullRequest(run.pr);
   if (pr.state === "open") return false;
 
+  // **First, and before anything about a successor is decided.** Completing
+  // the chunk is what frees the project, and `store.complete` promotes
+  // whatever queued behind it while it was building — a bug filed on Tuesday
+  // takes the project here, in this call (R22 clause 6). This function's whole
+  // remaining job is *close the ticket or don't*: the next chunk is opened by
+  // the registration loop on a later cycle, which is what makes it queue
+  // behind the promoted work rather than ahead of it. Registering a successor
+  // from here would look identical and would starve the queue silently, which
+  // is the fault ADR-0026 split the ledger to end.
   store.complete(run.id);
-  await adapter.postComment(
-    project,
-    run.ticket,
-    pr.state === "merged" ? mergedComment(pr.number) : closedUnmergedComment(pr.number),
-  );
-  await adapter.closeTicket(
-    project,
-    run.ticket,
-    pr.state === "merged" ? "completed" : "not-planned",
-  );
+
+  if (pr.state === "merged") {
+    await concludeInitiative(run, project, pr.number, deps, result, log);
+  } else {
+    await adapter.postComment(project, run.ticket, closedUnmergedComment(pr.number));
+    await adapter.closeTicket(project, run.ticket, "not-planned");
+  }
+
   result.completed.push(run.id);
   log(`done   ${run.id} — PR #${pr.number} ${pr.state}`);
   return true;
+}
+
+/**
+ * Say what a merged pull request means for the *initiative*, now that the
+ * chunk it belonged to is finished: the ticket closes, or it stays open with a
+ * piece still to come.
+ *
+ * **It closes the ticket or it does not, and that is all it does.** It opens
+ * nothing — see {@link concludeReview} for why the ordering matters.
+ */
+async function concludeInitiative(
+  run: Run,
+  project: TicketingProject,
+  pr: number,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
+  const succession = successionOf(project.name, run.ticket, deps);
+
+  if (succession.kind === "unreadable") {
+    // The file is there and says something nobody can act on. That is a fault
+    // worth a line in the cycle's errors — unlike its *absence*, which is an
+    // ordinary state of the world, since a chore has no breakdown by design
+    // (ADR-0030 D3) — and the ticket still closes, because the alternative is
+    // leaving it open on the strength of a file nothing could read.
+    const line =
+      `${project.name}: could not read the breakdown for #${run.ticket} ` +
+      `(${succession.path}): ${succession.reason}`;
+    result.errors.push(line);
+    log(`error  ${line}`);
+  }
+
+  if (succession.kind === "reproposed") {
+    await adapter.postComment(
+      project,
+      run.ticket,
+      reproposedComment(pr, succession.listed, succession.approved, succession.path),
+    );
+    log(
+      `held   ${run.id} — the list of pieces grew to ${succession.listed} ` +
+        `since ${succession.approved} were approved`,
+    );
+    return;
+  }
+
+  if (succession.kind === "continues") {
+    await adapter.postComment(
+      project,
+      run.ticket,
+      pieceMergedComment(pr, succession.done, succession.total, succession.next),
+    );
+    log(`next   ${run.id} — piece ${succession.done + 1} of ${succession.total}`);
+    return;
+  }
+
+  const prs = store
+    .runsForTicket(project.name, run.ticket)
+    .map((chunk) => chunk.pr)
+    .filter((number): number is number => number !== undefined);
+  await adapter.postComment(project, run.ticket, mergedComment(prs));
+  await adapter.closeTicket(project, run.ticket, "completed");
+}
+
+/**
+ * What a ticket's approved list of pieces says about what happens after this
+ * chunk.
+ *
+ * **`finished` and `unlisted` are separate arms although a merged pull request
+ * treats them alike**, and that is the distinction the second reader will want
+ * to collapse. Both close the ticket — there is no next piece either way — but
+ * only `finished` is a statement *about an approved list*. `unlisted` means
+ * nobody ever wrote one, which is not a fault: a chore and a technical enabler
+ * reach a pull request without ever meeting the breakdown stage (ADR-0030 D3),
+ * and so does anything run by hand. So `unlisted` may never hold a ticket's
+ * next chunk back, and {@link successorHeldBack} relies on being able to tell
+ * the two apart.
+ *
+ * `unreadable` is separate again: a file that exists and cannot be parsed is
+ * somebody's mistake rather than a shape of work.
+ */
+type Succession =
+  | { kind: "finished" }
+  | { kind: "unlisted" }
+  | { kind: "unreadable"; path: string; reason: string }
+  | { kind: "continues"; done: number; total: number; next: string }
+  | { kind: "reproposed"; path: string; listed: number; approved: number };
+
+/**
+ * Read a ticket's breakdown against the ledger, and answer where the
+ * initiative stands.
+ *
+ * **Doneness is derived, never written**
+ * ([ADR-0030](../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)
+ * D4). Nothing here — and nothing anywhere in this loop — writes to the
+ * breakdown: the file the human approved is the file that stays on the branch,
+ * and ticking a box in it would mean the daemon committing and pushing to a
+ * client's default branch on its own account. So *which piece is next* is
+ * computed every time it is asked, from the approved list and a count the
+ * ledger already holds.
+ *
+ * **`done`, not settled.** `runs.ts` distinguishes the two and 23a left the
+ * choice here: a *cancelled* chunk delivered nothing, so the piece it was
+ * opened for is still the piece to build next, and counting it would skip one.
+ * A `done` chunk is one whose pull request reached a terminal state, which is
+ * the only evidence of a piece having actually landed.
+ *
+ * It never throws — `readBreakdown` answers instead — because this is on the
+ * path of every cycle, and an exception here takes a whole project's turn with
+ * it.
+ */
+function successionOf(
+  project: string,
+  ticket: number,
+  deps: PollDeps,
+): Succession {
+  const { store, root } = deps;
+  if (root === undefined) return { kind: "unlisted" };
+
+  const read = readBreakdown(join(root, "projects", project), ticket);
+  if (read.kind === "absent") return { kind: "unlisted" };
+  if (read.kind === "malformed") {
+    return { kind: "unreadable", path: read.path, reason: read.reason };
+  }
+
+  const { breakdown } = read;
+  if (isReproposal(breakdown) && breakdown.stamp.kind === "approved") {
+    return {
+      kind: "reproposed",
+      path: read.path,
+      listed: breakdown.chunks.length,
+      approved: breakdown.stamp.pieces,
+    };
+  }
+
+  const done = store
+    .runsForTicket(project, ticket)
+    .filter((chunk) => chunk.status === "done").length;
+  const progress = chunkProgress(breakdown, done);
+  return progress.next === undefined
+    ? { kind: "finished" }
+    : {
+        kind: "continues",
+        done: progress.done,
+        total: progress.total,
+        next: progress.next.title,
+      };
+}
+
+/**
+ * Why this ticket's **next** chunk may not be opened yet, in words for a log
+ * line — or undefined when it may.
+ *
+ * Succession rides the registration loop, which opens the next chunk of every
+ * marked ticket whose previous one has settled. That is what makes a successor
+ * queue behind work that was already waiting (R22 clause 6) — and it is also
+ * what would open a piece nobody approved, one minute after the loop refused
+ * to close the ticket over exactly that. This is where the refusal is kept.
+ *
+ * **It can only ever hold back a *successor*.** A ticket with no chunks at all
+ * is registered without a thought — the breakdown does not exist yet at that
+ * point and could not, since it is written by a stage this registration is on
+ * the way to. A ticket with a live chunk is handed that chunk back by
+ * `register` regardless. So both return early, before anything touches a disk.
+ *
+ * **A ticket with no breakdown is never held back**, which is the arm that
+ * matters most: a chore never meets the breakdown stage (ADR-0030 D3), and a
+ * guard that refused what it could not find would freeze every chore on the
+ * fleet the moment it opened its second chunk.
+ */
+function successorHeldBack(
+  project: string,
+  ticket: number,
+  deps: PollDeps,
+): string | undefined {
+  const { store } = deps;
+  if (store.liveRunForTicket(project, ticket) !== undefined) return undefined;
+  if (store.runsForTicket(project, ticket).length === 0) return undefined;
+
+  const succession = successionOf(project, ticket, deps);
+  if (succession.kind === "reproposed") {
+    return (
+      `the list of pieces has grown to ${succession.listed} since ` +
+      `${succession.approved} were approved`
+    );
+  }
+  return succession.kind === "finished"
+    ? "every piece the human approved has been built"
+    : undefined;
 }
 
 /**

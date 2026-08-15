@@ -42,6 +42,20 @@ export interface RunDaemonOptions {
    * `pollOnce` is reachable without one exactly as it always was.
    */
   statePath?: string;
+  /**
+   * The timone root, so the cycle can reach a project's checkout at
+   * `projects/<name>/` — which is where a ticket's breakdown lives and
+   * therefore how the loop knows whether a merged pull request ended a piece
+   * of an initiative or the whole of it ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+   * D1).
+   *
+   * **Required, unlike the cycle's own `root`.** This is the only place a real
+   * daemon's root is known, and the cost of forgetting it is silent: every
+   * multi-piece initiative truncated at its first merge, with the ticket
+   * closed and nothing anywhere saying a piece was skipped. So the compiler
+   * asks rather than a default answering.
+   */
+  root: string;
   intervalMs: number;
   /** How long a run may go silent before it is treated as orphaned. */
   staleAfterMs?: number;
@@ -110,6 +124,7 @@ async function poll(
       store: options.store,
       adapter: options.adapter,
       spawner: options.spawner,
+      root: options.root,
       staleAfterMs: options.staleAfterMs,
       // The cadence this loop actually keeps, so the unwitnessed-gap threshold
       // is derived from it rather than assumed (ADR-0020). A daemon told to
@@ -224,6 +239,9 @@ export function registerDaemonCommand(program: Command): void {
         manifest,
         store,
         statePath,
+        // The same root the spawner is given, from the same place: sessions
+        // run here (ADR-0007) and the checkouts sit under it.
+        root: process.cwd(),
         // One adapter for every bound project: which projects get previews is
         // the manifest's answer, not this command's (ADR-0021).
         previews: new DockerPreviewAdapter({ root: process.cwd() }),

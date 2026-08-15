@@ -20,6 +20,7 @@ import {
   conversationSubject,
   stagePrompt,
   takeoverPrompt,
+  workBranch,
   type PromptContext,
 } from "./prompts.js";
 
@@ -645,5 +646,32 @@ describe("the approval-recording prompt", () => {
     );
     expect(stamped).toContain("Approved by fvermaut 2026-08-15 — 3 pieces");
     expect(prompt).toContain("`Status:`");
+  });
+});
+
+describe("workBranch — one branch per chunk, not one per ticket", () => {
+  it("names chunk 1 exactly as it always has", () => {
+    // A literal, deliberately. 26 runs in the live ledger carry branch names
+    // rendered by this function and every one of them is a chunk 1, so a
+    // "harmless" reformatting here is a branch nothing can resolve any more.
+    expect(workBranch(ticket, 1)).toBe(
+      "timone/6-typing-in-the-box-is-fiddly-on-my-phone",
+    );
+  });
+
+  it("gives a successor chunk a branch of its own", () => {
+    // Without this, chunk 2 claims the branch chunk 1 merged and closed, and
+    // opens a pull request against itself.
+    expect(workBranch(ticket, 2)).not.toBe(workBranch(ticket, 1));
+    expect(workBranch(ticket, 2)).toBe(
+      "timone/6-typing-in-the-box-is-fiddly-on-my-phone-chunk-2",
+    );
+  });
+
+  it("keeps the prefix the branch-placement guardrail reads", () => {
+    // `hooks.ts`'s WORK_BRANCH_PREFIX. A chunk whose branch stopped starting
+    // `timone/` would be cut in the harness repo unnoticed.
+    expect(workBranch(ticket, 1).startsWith("timone/")).toBe(true);
+    expect(workBranch(ticket, 3).startsWith("timone/")).toBe(true);
   });
 });

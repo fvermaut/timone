@@ -162,10 +162,11 @@ describe("checkStatusPlacement", () => {
 /**
  * Finding 11 of phase 20's live gate, as a rule.
  *
- * A run's work branch is named from its ticket alone (`workBranch`), so the
- * name carries no repository and nothing downstream could tell that
- * `timone/29-…` had been cut at the timone root rather than in the project's
- * checkout. It sat there for three hours and collected seven artifacts.
+ * A run's work branch is named from its ticket and its chunk (`workBranch`) —
+ * never from the repository it belongs in — so nothing downstream could tell
+ * that `timone/29-…` had been cut at the timone root rather than in the
+ * project's checkout. It sat there for three hours and collected seven
+ * artifacts.
  */
 describe("checkBranchPlacement", () => {
   it("flags a run's work branch cut in the harness repo", () => {

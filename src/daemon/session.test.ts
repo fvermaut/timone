@@ -1302,6 +1302,44 @@ describe("the requirements gate", () => {
 
     expect(store.get(run.id)?.branch).toBe("timone/7-something-else");
   });
+
+  it("gives a second chunk of the same ticket a branch of its own", async () => {
+    // A ticket hosts a sequence of chunks (ADR-0026) and each owns a branch.
+    // Named from the ticket alone, chunk 2 would claim the branch chunk 1
+    // merged and closed — and open a pull request against itself.
+    const store = newStore();
+    const first = pickedUpRun(store);
+    store.activate(first.id, "session-one");
+    store.claimBranch(first.id, "timone/7-the-page-feels-slow");
+    store.complete(first.id);
+
+    const { run: second } = store.register("scratch-app", 7);
+    expect(second.seq).toBe(2);
+    store.activate(second.id, "session-earlier");
+    store.park(second.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+
+    const { adapter } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(store.get(second.id)!, project, { stage: "requirements" });
+
+    expect(store.get(second.id)?.branch).toBe(
+      "timone/7-the-page-feels-slow-chunk-2",
+    );
+    expect(store.get(second.id)?.branch).not.toBe(store.get(first.id)?.branch);
+  });
 });
 
 describe("the plan gate", () => {

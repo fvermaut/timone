@@ -1,6 +1,12 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
@@ -84,6 +90,14 @@ const idleSpawner: SessionSpawner = {
   async spawn(): Promise<void> {},
 };
 
+/**
+ * A root with no project checkouts under it, for the tests that are about the
+ * lock and the cadence rather than about what a merge means. Nothing in them
+ * reaches a breakdown, and a directory that does not exist is read as "this
+ * ticket has no list of pieces" rather than throwing.
+ */
+const noCheckouts = "/nowhere";
+
 describe("runDaemon — one writer, and it says who holds it", () => {
   it("refuses a second daemon while the first holds the ledger, naming the holder", async () => {
     const { store, statePath } = clockedStore();
@@ -105,6 +119,7 @@ describe("runDaemon — one writer, and it says who holds it", () => {
       manifest,
       store,
       statePath,
+      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter: blocking,
@@ -117,6 +132,7 @@ describe("runDaemon — one writer, and it says who holds it", () => {
       manifest,
       store: RunStore.open(statePath),
       statePath,
+      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter: quietAdapter(),
@@ -188,6 +204,7 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     await runDaemon({
       manifest,
       store,
+      root: noCheckouts,
       intervalMs,
       staleAfterMs: FOUR_INTERVALS,
       once: true,
@@ -220,5 +237,101 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     await cycle(store, set, "2026-08-06T10:05:00Z", 5 * 60 * 1000);
 
     expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+  });
+});
+
+describe("runDaemon — the loop is told where the project checkouts are", () => {
+  it("reaches a ticket's breakdown, so a mid-initiative merge does not close it", async () => {
+    // The poll loop cannot answer "is there another piece of this to build?"
+    // without a path to `projects/<name>/`, and this command is the only place
+    // a real daemon's root is known. Wired wrongly, every multi-piece
+    // initiative would be truncated at its first merge and nothing would say
+    // so — so the assertion is on the observable end of the thread, not on the
+    // field being passed.
+    const { store, statePath } = clockedStore();
+    const root = mkdtempSync(join(tmpdir(), "timone-daemon-root-"));
+    tempDirs.push(root);
+    const file = join(
+      root,
+      "projects",
+      "scratch-app",
+      "doc",
+      "plans",
+      "breakdowns",
+      "ticket-07.md",
+    );
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(
+      file,
+      [
+        "# Breakdown",
+        "",
+        "**Status:** Approved by fvermaut 2026-08-15 — 2 pieces",
+        "",
+        "1. **The ledger learns chunks** — a run carries its sequence number.",
+        "2. **The next chunk opens** — a merged pull request opens the next one.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/7-slow");
+    store.recordPullRequest(run.id, 9);
+    store.park(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "delivery",
+      waitCursor: "2026-08-06T10:00:00Z",
+    });
+
+    const marked: Ticket = {
+      number: 7,
+      title: "typing in the box is fiddly on my phone",
+      body: "the message box is hard to use on mobile",
+      labels: ["timone"],
+      url: "https://github.com/fvermaut/scratch-app/issues/7",
+      author: "fvermaut",
+      createdAt: "2026-08-06T09:00:00Z",
+    };
+    const closed: string[] = [];
+    const merged: TicketingAdapter = {
+      ...quietAdapter(),
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [marked];
+      },
+      async getTicket() {
+        return { ...marked, comments: [] };
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        return {
+          number: 9,
+          title: "piece one",
+          url: "https://github.com/fvermaut/scratch-app/pull/9",
+          state: "merged",
+          headSha: "aaaaaaa",
+          comments: [],
+        };
+      },
+      async closeTicket(_project, number, reason): Promise<void> {
+        closed.push(`${number}:${reason}`);
+      },
+    };
+
+    await runDaemon({
+      manifest,
+      store,
+      statePath,
+      root,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter: merged,
+      spawner: idleSpawner,
+      log: () => {},
+    });
+
+    expect(store.get("scratch-app#7/1")?.status).toBe("done");
+    expect(closed).toEqual([]);
   });
 });

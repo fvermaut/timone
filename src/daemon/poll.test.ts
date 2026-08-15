@@ -17,6 +17,7 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
+import { breakdownPath } from "./breakdown.js";
 import { RunStore, type Run } from "./runs.js";
 import { pollOnce, type SessionSpawner, type SpawnContext } from "./poll.js";
 import { processStage } from "./pipeline.js";
@@ -3994,5 +3995,407 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
     );
     expect(store.get("ivtrends#2/1")?.status).toBe("queued");
     expect(posted.find((comment) => comment.number === 2)?.body).toMatch(/#1/);
+  });
+});
+
+/**
+ * Chunk succession: what happens to a ticket when one of its chunks merges.
+ *
+ * A ticket is a conversation and a run is one chunk of it (ADR-0026), so a
+ * merged pull request is the end of a *piece* and only sometimes the end of
+ * the initiative. What decides which is the breakdown — the list of pieces the
+ * human approved, on the project's default branch (ADR-0028 D1) — read against
+ * how many of them the ledger has finished. Nothing is ever written back into
+ * it (ADR-0030 D4).
+ */
+describe("pollOnce — a ticket's next chunk", () => {
+  /**
+   * A workspace root holding `scratch-app`'s checkout, with `body` written as
+   * ticket 6's breakdown — or with no breakdown at all when `body` is absent,
+   * which is what a chore's ticket looks like (ADR-0030 D3).
+   */
+  function rootWith(body?: string): string {
+    const root = mkdtempSync(join(tmpdir(), "timone-root-"));
+    tempDirs.push(root);
+    if (body !== undefined) {
+      const file = join(root, "projects", "scratch-app", breakdownPath(6));
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, body, "utf8");
+    }
+    return root;
+  }
+
+  /**
+   * The artifact as a stage session writes it, spelled out rather than
+   * rendered: this is the file the poll loop meets on disk, and a fixture
+   * built by the module under test could not catch the two drifting apart.
+   *
+   * `pieces` is the count the *stamp* names, which is what a re-proposal
+   * differs from (ADR-0028 D3) — it defaults to the length of the list, so a
+   * test that says nothing about it gets a breakdown nobody has re-proposed.
+   */
+  function breakdown(titles: string[], pieces = titles.length): string {
+    return [
+      "# Breakdown",
+      "",
+      `**Status:** Approved by fvermaut 2026-08-15 — ${pieces} pieces`,
+      "",
+      ...titles.map(
+        (title, index) => `${index + 1}. **${title}** — what this piece delivers.`,
+      ),
+      "",
+    ].join("\n");
+  }
+
+  /** Chunk `seq` of ticket 6, finished on a merged pull request `pr`. */
+  function chunkDone(store: RunStore, seq: number, pr: number): Run {
+    const { run } = store.register("scratch-app", 6);
+    expect(run.seq).toBe(seq);
+    store.activate(run.id, `s${seq}`);
+    store.claimBranch(run.id, `timone/6-chunk-${seq}`);
+    store.recordPullRequest(run.id, pr);
+    return store.complete(run.id);
+  }
+
+  /** Chunk `seq` of ticket 6, parked waiting on the review of `pr`. */
+  function chunkOnReview(store: RunStore, seq: number, pr: number): Run {
+    const { run } = store.register("scratch-app", 6);
+    expect(run.seq).toBe(seq);
+    store.activate(run.id, `s${seq}`);
+    store.claimBranch(run.id, `timone/6-chunk-${seq}`);
+    store.recordPullRequest(run.id, pr);
+    return store.park(run.id, {
+      waitingOn: `your review of pull request #${pr}`,
+      kind: "review",
+      stage: "delivery",
+      waitCursor: "2026-08-06T10:00:00Z",
+    });
+  }
+
+  /**
+   * An adapter over ticket 6 and whatever else is marked, whose pull requests
+   * answer from `states`. Every comment posted and every close is recorded.
+   */
+  function successionAdapter(
+    states: Record<number, "open" | "merged" | "closed">,
+    also: Ticket[] = [],
+  ): {
+    adapter: TicketingAdapter;
+    posted: PostedComment[];
+    closed: string[];
+  } {
+    const posted: PostedComment[] = [];
+    const closed: string[] = [];
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const tickets = [base, ...also];
+    const pull = (pr: number): PullRequest => {
+      const state = states[pr];
+      if (state === undefined) throw new Error(`no pull request #${pr} here`);
+      return {
+        number: pr,
+        title: `piece ${pr}`,
+        url: `https://github.com/fvermaut/scratch-app/pull/${pr}`,
+        state,
+        headSha: "aaaaaaa",
+      };
+    };
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return tickets;
+      },
+      ...noUnmarkedTickets,
+      async getTicket(_project, number): Promise<TicketThread> {
+        const found = tickets.find((candidate) => candidate.number === number);
+        if (found === undefined) throw new Error(`no ticket ${number}`);
+        return { ...found, comments: [] };
+      },
+      async postComment(project, number, body): Promise<void> {
+        posted.push({ project: project.name, number, body });
+      },
+      async applyLabel(): Promise<void> {},
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return undefined;
+      },
+      async getPullRequestThread(_project, pr): Promise<PullRequestThread> {
+        return { ...pull(pr), comments: [] };
+      },
+      async postPullRequestComment(): Promise<void> {},
+      async upsertPullRequestComment(): Promise<void> {},
+      async upsertComment(): Promise<void> {},
+      async closeTicket(_project, number, reason): Promise<void> {
+        closed.push(`${number}:${reason}`);
+      },
+    };
+    return { adapter, posted, closed };
+  }
+
+  it("does not close the ticket when a piece of it is still unbuilt", async () => {
+    // The whole of the truncation this exists to end: chunk 1 merges, and the
+    // ticket has two more pieces the human approved.
+    const store = newStore();
+    chunkOnReview(store, 1, 9);
+    const { adapter, posted, closed } = successionAdapter({ 9: "merged" });
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
+    });
+
+    // Zero calls, not "called with something else": a guard that closed the
+    // ticket with the wrong reason would pass any weaker assertion.
+    expect(closed).toEqual([]);
+    expect(store.get("scratch-app#6/1")?.status).toBe("done");
+    // And it says so on the ticket rather than going quiet.
+    expect(
+      posted.some((comment) => /next piece/i.test(comment.body)),
+    ).toBe(true);
+  });
+
+  it("closes the ticket on the last piece, linking every pull request", async () => {
+    const store = newStore();
+    chunkDone(store, 1, 9);
+    chunkOnReview(store, 2, 12);
+    const { adapter, posted, closed } = successionAdapter({ 9: "merged", 12: "merged" });
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
+    });
+
+    expect(closed).toEqual(["6:completed"]);
+    const closing = posted.map((comment) => comment.body).join("\n");
+    // Both of them: the initiative is what ended, and its record is the pull
+    // requests it produced — one of which is three weeks up the thread.
+    expect(closing).toContain("#9");
+    expect(closing).toContain("#12");
+  });
+
+  it("still declines a pull request closed without merging, breakdown or no breakdown", async () => {
+    const store = newStore();
+    chunkOnReview(store, 1, 9);
+    const { adapter, closed } = successionAdapter({ 9: "closed" });
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
+    });
+
+    expect(closed).toEqual(["6:not-planned"]);
+    expect(store.get("scratch-app#6/1")?.status).toBe("done");
+  });
+
+  it("lets a bug queued during a chunk take the project before the next chunk", async () => {
+    // R22 clause 6, and the reason succession is not a `register` call inside
+    // `concludeReview`. A bug filed while chunk 1 was building has been
+    // waiting; completing chunk 1 promotes it *in that same call*, and the
+    // next chunk is opened by a later cycle's registration loop — so it
+    // queues behind the bug rather than in front of it. Registering the
+    // successor here would look identical and starve the queue silently.
+    const store = newStore();
+    chunkOnReview(store, 1, 9);
+    const { adapter } = successionAdapter({ 9: "merged" }, [ticket(8)]);
+    const { spawner, spawned } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
+    };
+
+    // The bug arrives while chunk 1 is still out for review.
+    expect(store.get("scratch-app#8/1")).toBeUndefined();
+
+    await pollOnce(deps);
+
+    // The window: chunk 1 is finished, the bug holds the project, and no
+    // second chunk of #6 exists yet at all.
+    expect(store.get("scratch-app#6/1")?.status).toBe("done");
+    expect(store.get("scratch-app#8/1")?.status).toBe("picked-up");
+    expect(store.get("scratch-app#6/2")).toBeUndefined();
+    // Asserted on the spawner, not on the order of two log lines: the bug's
+    // run is the one a session was started for.
+    expect(spawned.map((run) => run.id)).toEqual(["scratch-app#8/1"]);
+
+    await pollOnce(deps);
+
+    // Only now does chunk 2 open — behind the bug, which is still holding.
+    expect(store.get("scratch-app#6/2")?.status).toBe("queued");
+    expect(spawned.map((run) => run.id)).not.toContain("scratch-app#6/2");
+  });
+
+  it("opens nothing in the cycle a chunk merged, leaving the project free", async () => {
+    // The other half of the window, with nothing waiting: the cycle that ends
+    // chunk 1 must not start chunk 2 as well. A successor registered from
+    // `concludeReview` would be picked up on the spot — the project is free
+    // by then — and spawned before anything marked between cycles was ever
+    // listed, which is R22 clause 6 failing while everything still looks fine.
+    const store = newStore();
+    chunkOnReview(store, 1, 9);
+    const { adapter } = successionAdapter({ 9: "merged" });
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
+    });
+
+    expect(spawned).toEqual([]);
+    expect(store.all().map((run) => run.id)).toEqual(["scratch-app#6/1"]);
+  });
+
+
+  it("stops on a list that has grown since it was approved, and says so", async () => {
+    // ADR-0028 D3. The stamp names two pieces; the file lists three. The
+    // piece that would come next is one the human has never read, so nothing
+    // closes and nothing starts — but the ticket is told, because a ticket
+    // that simply went quiet looks exactly like a daemon that has died.
+    const store = newStore();
+    chunkDone(store, 1, 9);
+    chunkOnReview(store, 2, 12);
+    const { adapter, posted, closed } = successionAdapter({ 9: "merged", 12: "merged" });
+    const { spawner, spawned } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith(
+        breakdown(
+          ["The ledger learns chunks", "The next chunk opens", "The ticket closes"],
+          2,
+        ),
+      ),
+    };
+
+    await pollOnce(deps);
+
+    expect(closed).toEqual([]);
+    expect(
+      posted.some((comment) => /grown since/i.test(comment.body)),
+    ).toBe(true);
+
+    // And no successor starts on the cycle after, either: the registration
+    // loop would otherwise open piece 3 a minute later, which is the approval
+    // this refusal exists to wait for being granted by the clock.
+    await pollOnce(deps);
+
+    expect(store.get("scratch-app#6/3")).toBeUndefined();
+    expect(spawned).toEqual([]);
+  });
+
+  it("closes a ticket that never had a breakdown, and finishes the cycle", async () => {
+    // A chore reaches a pull request without ever meeting the breakdown stage
+    // (ADR-0030 D3), so an absent file is an ordinary shape of work and not a
+    // fault. It closes as it always did, nothing is reported as an error, and
+    // the rest of this project's turn still happens.
+    const store = newStore();
+    chunkOnReview(store, 1, 9);
+    const { adapter, closed } = successionAdapter({ 9: "merged" }, [ticket(8)]);
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith(),
+    });
+
+    expect(closed).toEqual(["6:completed"]);
+    expect(result.errors).toEqual([]);
+    // The turn carried on past the merge: the ticket waiting behind it was
+    // promoted and handed to the spawner in this same cycle.
+    expect(spawned.map((run) => run.id)).toEqual(["scratch-app#8/1"]);
+  });
+
+  it("reports a breakdown it cannot read, and still finishes the cycle", async () => {
+    // The other half: a file that exists and says nothing anyone can act on is
+    // somebody's mistake, so it earns a line in the cycle's errors. The ticket
+    // still closes — leaving it open on the strength of a file nothing could
+    // read would strand it — and the project's turn is not taken down.
+    const store = newStore();
+    chunkOnReview(store, 1, 9);
+    const { adapter, closed } = successionAdapter({ 9: "merged" }, [ticket(8)]);
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith("# Breakdown\n\nsomebody deleted the status line\n"),
+    });
+
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain("doc/plans/breakdowns/ticket-06.md");
+    expect(closed).toEqual(["6:completed"]);
+    expect(spawned.map((run) => run.id)).toEqual(["scratch-app#8/1"]);
+  });
+
+  it("enters a successor chunk at planning, never back at triage", async () => {
+    // Triage classified this ticket when its first chunk ran, and the ticket
+    // is the same conversation. Re-triaging it would classify work already in
+    // flight as a fresh request — and the spawner's default for a run with no
+    // stage is exactly that.
+    const store = newStore();
+    chunkDone(store, 1, 9);
+    const { run: second } = store.register("scratch-app", 6);
+    expect(second.seq).toBe(2);
+    expect(second.stage).toBeUndefined();
+
+    const { adapter } = successionAdapter({ 9: "merged" });
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(contexts).toEqual([{ stage: "planning" }]);
+  });
+
+  it("leaves a first chunk to enter where it always did", async () => {
+    // The discriminator is the sequence number, and this is the half that
+    // protects every run there has ever been: chunk 1 of an ordinary ticket
+    // is still handed over with no entry context at all.
+    const store = newStore();
+    const { adapter } = successionAdapter({});
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(store.get("scratch-app#6/1")?.seq).toBe(1);
+    expect(contexts).toEqual([undefined]);
   });
 });

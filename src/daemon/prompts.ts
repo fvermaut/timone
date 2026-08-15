@@ -97,9 +97,10 @@ function ticketBlock(context: PromptContext): string {
  * left checked out, and collected seven of Timone's own artifacts before
  * anyone noticed the handover claiming they were on `main`.
  *
- * The branch name cannot carry the answer — `workBranch` is computed from
- * the ticket alone and a project's branch is legitimately named the same in
- * both repos — so the instruction has to. It is appended in
+ * The branch name cannot carry the answer — `workBranch` is computed from the
+ * ticket and the chunk, neither of which names a repository, and a project's
+ * branch is legitimately named the same in both repos — so the instruction
+ * has to. It is appended in
  * {@link stagePrompt} rather than written into each stage for the reason the
  * provenance block is: a per-stage copy is a per-stage chance to forget it.
  */
@@ -691,20 +692,38 @@ export function approvalRecordPrompt(
 }
 
 /**
- * The work branch a ticket's run owns, from the requirements stage on.
+ * The work branch a ticket's chunk owns, from the requirements stage on.
  *
  * Named from the ticket rather than from the phase, because at this point
  * there is no phase yet — and a human scanning branches should be able to
  * tell which ticket each one belongs to without opening it.
+ *
+ * **The chunk number is what stops a ticket's second piece from claiming its
+ * first one's branch.** A ticket is a conversation and hosts a sequence of
+ * chunks (ADR-0026), each with its own branch and its own pull request; a name
+ * computed from the ticket alone would have chunk 2 claim `timone/<n>-<slug>`
+ * — a branch chunk 1 has already merged and closed — and open a pull request
+ * against itself.
+ *
+ * **Chunk 1 renders exactly as it always has**, and that is not tidiness: the
+ * live ledger holds runs whose recorded branch was rendered by this function
+ * before it took a sequence number, and every branch on every checkout is
+ * named that way. So the suffix appears only from chunk 2 on. `seq <= 1` and
+ * not `=== 1`, so a nonsense zero cannot produce `-chunk-0`.
+ *
+ * The `timone/` prefix is unchanged either way, which is what keeps the
+ * branch-placement guardrail (`hooks.ts`'s `WORK_BRANCH_PREFIX`) able to
+ * recognise a work branch cut in the harness repo by mistake.
  */
-export function workBranch(ticket: TicketThread): string {
+export function workBranch(ticket: TicketThread, seq: number): string {
   const slug = ticket.title
     .toLowerCase()
     .replaceAll(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40)
     .replace(/-+$/, "");
-  return `timone/${ticket.number}${slug === "" ? "" : `-${slug}`}`;
+  const branch = `timone/${ticket.number}${slug === "" ? "" : `-${slug}`}`;
+  return seq <= 1 ? branch : `${branch}-chunk-${seq}`;
 }
 
 /**

@@ -460,3 +460,97 @@ Checkboxes:
 1. **`APPROVAL_RECORD` now has exactly two rows, `requirements` and `breakdown`,** and the fallback for a stage with no row is asserted (`prompts.test.ts`, *"has no record to write for a phase file, and falls back harmlessly"*) rather than assumed. It is a `Partial` record: a *gated* stage added without a row would silently tell its recording session to *"record the approval"* in *"the artifact this stage produced"*, which is not a refusal, just useless.
 2. **Nothing in `src/` yet checks the breakdown before a build.** Gate 1 is a skill instruction, and the skill is what a session follows — the daemon does not read `readBreakdown` at any point on the path to `execution`. 23a's `readBreakdown` / `chunkProgress` / `isReproposal` still have no caller in `src/` outside their own tests. **The re-proposal refusal is therefore prose-enforced only, today.**
 3. **`planStatus` is now consulted for exactly one thing:** whether the newest phase file reads `Complete`. There is no other state the machinery reads off that line, so a slice tempted to give it a third meaning is adding a gate, not a status.
+
+## 23f — Chunk succession
+
+**Built.** A merged pull request stops meaning *the ticket is over*. `concludeReview` now reads the ticket's breakdown and closes the ticket **only when no piece remains** ([ADR-0028](../../../adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) D3); the next chunk is opened by the registration loop on a later cycle, enters at `planning`, and claims a branch of its own. 23b's note 5 and 23e's note 2 are closed for the poll loop's half: `readBreakdown`, `chunkProgress` and `isReproposal` have a caller in `src/` at last.
+
+**Files touched.** `src/daemon/poll.ts`, `src/commands/daemon.ts`, `src/daemon/prompts.ts`, `src/daemon/session.ts`; tests in `poll.test.ts`, `daemon.test.ts`, `session.test.ts`, `prompts.test.ts`, `hooks.test.ts`. **No `doc/` artifact but this section, and nothing under `.timone/`.**
+
+### The succession chain, as built
+
+1. Chunk N's pull request merges. `concludeReview` calls **`store.complete(run.id)` first**, which runs `promoteHead` — **a bug queued while chunk N was building is promoted in that call**, before anything else in this function happens.
+2. `concludeReview` then does one thing and one thing only: **close the ticket or don't**. `concludeInitiative` reads the breakdown and either closes with a comment linking every pull request the initiative produced, or comments that a piece remains, or comments that the list has grown since it was approved.
+3. Nothing registers a successor here. **The next cycle's registration loop** finds the ticket still listed, `register` opens chunk N+1 — `queued` if the promoted bug is holding, `picked-up` if nothing was waiting.
+4. `entryContext` gives a run with `seq > 1` and no stage the stage `planning`, and the spawner takes it from there.
+
+### The three traps, and what actually happened at each
+
+**1 — the ordering.** Built as above, and the excerpt's reasoning about it is *half* right. Two mutation probes:
+
+- **Registering the successor inside `concludeInitiative` *after* `store.complete`** — the obvious wrong implementation — is caught: `expected { id: 'scratch-app#6/2' } to be undefined` in the window test, and `expected [ { id: 'scratch-app#6/2' } ] to deeply equal []` **on the spawner** in *"opens nothing in the cycle a chunk merged"*. Chunk 2 is picked up on the spot, because the project is free by then, and spawned before anything marked between cycles is ever listed.
+- **Registering it *before* `store.complete`** — the case the excerpt names as *the* fault — **is inert, and no test could see it.** `register` is idempotent on the ticket's *live* chunk ([`runs.ts:617`](../../../src/daemon/runs.ts)), and chunk N is still `parked` at that point, so the call returns chunk N with `created: false` and creates nothing at all. The excerpt's *"register first and chunk N+1 takes the project ahead of a ticket that has been waiting"* cannot happen for that reason, and a second reason: `promoteHead` promotes the **oldest** queued run, so even a successor that did get queued would sit behind a bug registered earlier in the same cycle. **The ordering property is protected by the ledger, not only by this function.** The probe is recorded rather than hidden because a later reader will otherwise "restore" a guard against a fault that was never reachable.
+
+**2 — the branch.** `workBranch(ticket, seq)`. Chunk 1 renders **byte-identically to today** and is asserted against the literal `timone/6-typing-in-the-box-is-fiddly-on-my-phone`; chunk 2 takes the suffix `-chunk-2`. The suffix and not a `/2` path segment, deliberately: git refuses `refs/heads/timone/6-foo/2` while `refs/heads/timone/6-foo` exists, so the natural-looking spelling would make every second chunk unbranchable. `timone/` is untouched, so `hooks.ts`'s `WORK_BRANCH_PREFIX` still recognises a work branch cut in the harness repo.
+
+**3 — the breakdown is immutable.** Nothing writes to it. `breakdown.ts` imports `existsSync` and `readFileSync` and nothing else; `git grep -n "writeFileSync\|appendFile\|renameSync" -- src ':!*.test.ts'` finds `guardrails.ts`, `projects.ts` and `hooks.ts` and nothing in the poll path. "Which piece is next" is `chunkProgress(breakdown, done)` computed afresh every time it is asked.
+
+### Decisions taken inside the slice
+
+1. **`done`, not settled, is what counts as a finished piece.** 23a's note 4 left this open. A *cancelled* chunk delivered nothing, so the piece it was opened for is still the piece to build next; counting it would skip one silently. `status === "done"` is the only evidence a piece actually landed.
+
+2. **`PollDeps.root` is optional; `RunDaemonOptions.root` is required.** Required at the outer boundary, so the compiler asks the one place a real daemon's root is known — it caught all three existing `runDaemon` call sites, which is the point. Optional at the inner seam, so the 83 `pollOnce` fixtures in `poll.test.ts` did not all have to state a root they have no use for. **Absent means the loop cannot read a breakdown and a merged pull request ends its ticket exactly as it did before chunks existed** — the old behaviour, reachable only from a test.
+
+3. **The registration loop gained a guard, and this is not in the excerpt's markers.** See *"what is wrong in the excerpt"* below: without it a re-proposal is refused at conclude time and granted by the clock a minute later. `successorHeldBack` holds back a ticket's **next** chunk when its approved list has grown (a re-proposal) or is exhausted. It holds back nothing else: a ticket with no chunks at all is registered without a thought, a ticket with a live chunk is `register`'s business, and **a ticket with no breakdown is never held** — a chore never meets the breakdown stage (ADR-0030 D3), and a guard that refused what it could not find would freeze every chore on the fleet at its second chunk.
+
+4. **`Succession` distinguishes `finished` from `unlisted` although a merge treats them alike.** Both close the ticket; only `finished` is a statement about an *approved list*, and only `finished` may hold a successor back. The two collapsed into one is exactly how the guard in decision 3 would come to freeze chores.
+
+5. **An absent breakdown is not an error; a malformed one is.** See *"what is wrong in the excerpt"* item 2 — this is a deliberate departure from the excerpt's own wording.
+
+6. **`mergedComment` takes the list of pull requests, not one number.** It had no caller outside `poll.ts`, so the signature moved rather than growing an overload. One pull request still reads as one sentence; several read as *"went in over 3 pieces — pull requests #9, #12 and #14"*.
+
+7. **`entryContext` reads the labels before the sequence number.** A wayfinder decision ticket that opens a second chunk is still a decision ticket, and an over-broad sequence rule would re-point it at the build pipeline. Chunk 1 of an ordinary ticket is still handed over with **no** entry context at all — asserted, and the assertion was seen failing under a `seq >= 1` mutation.
+
+### Red → green
+
+| Case | Red — the failure actually seen | Green |
+|---|---|---|
+| Chunk 1's branch is byte-identical to today | Green on arrival (it is today's rendering). Held by a literal. | ✅ |
+| A successor chunk gets a branch of its own | `expected 'timone/6-typing-in-the-box-is-fiddly-…' not to be 'timone/6-typing-in-the-box-is-fiddly-…'` | ✅ |
+| `claimBranch` passes the chunk's number | Green on arrival. **Mutation**: `workBranch(ticket, 1)` in `session.ts` → `expected 'timone/7-the-page-feels-slow' to be 'timone/7-the-page-feels-slow-chunk-2'`. Reverted. | ✅ |
+| A successor enters at `planning` | `AssertionError: expected [ undefined ] to deeply equal [ { stage: 'planning' } ]` | ✅ |
+| Chunk 1 still enters with no context | Green on arrival. **Mutation**: `run.seq >= 1` → `expected [ { stage: 'planning' } ] to deeply equal [ undefined ]`. Reverted. | ✅ |
+| A non-last chunk does not close the ticket | `AssertionError: expected [ '6:completed' ] to deeply equal []` | ✅ |
+| The last chunk closes it, naming every pull request | `expected '**Merged — this one is done.**\n\nThe…' to contain '#9'` | ✅ |
+| A closed-unmerged pull request still closes `not-planned` | Green on arrival. **Mutation**: the merged path taken unconditionally → `expected [] to deeply equal [ '6:not-planned' ]`. Reverted. | ✅ |
+| A bug queued during chunk N runs before chunk N+1 | Green on arrival. **Mutation**: successor registered inside `concludeInitiative` → `expected { id: 'scratch-app#6/2' } to be undefined`. Reverted. | ✅ |
+| The merging cycle opens and spawns nothing | Green on arrival. Same mutation → `expected [ { id: 'scratch-app#6/2' } ] to deeply equal []`, **on the spawner**. Reverted. | ✅ |
+| A re-proposal does not close the ticket and starts no successor | `AssertionError: expected { id: 'scratch-app#6/3' } to be undefined` — the *comment* and *no close* halves were already green; the registration guard was not | ✅ |
+| An absent breakdown closes as today, reports nothing, and the turn carries on | Green on arrival. **Mutation**: absent read as unreadable → `expected [ Array(1) ] to deeply equal []`. Reverted. | ✅ |
+| A malformed breakdown is reported, still closes, turn carries on | Green on arrival. **Mutation**: malformed read as unlisted → `expected [] to have a length of 1 but got +0`. Reverted. | ✅ |
+| `runDaemon` threads the root through to the cycle | `AssertionError: expected [ '7:completed' ] to deeply equal []` | ✅ |
+
+**Seven of fourteen were green on arrival** and every one carries the mutation that proves it is not vacuous. Every mutation was reverted; `git diff` carries none of them.
+
+### Validation evidence
+
+| Command | Result |
+|---|---|
+| `npm test -- poll.test.ts daemon.test.ts session.test.ts prompts.test.ts hooks.test.ts` | **399 passed (5 files)** |
+| `npm run type-check` | **exit 0**, no output |
+| `npm test` | **915 passed, 25 files**, 51.1 s (was 900 / 25) |
+| `npm run build` | **exit 0** |
+| `node dist/cli.js status --state /tmp/timone-23f.json` | **exit 0**, rendered clean |
+
+Checkboxes:
+
+- ✅ **PASS** — the window test asserts `spawned.map(run => run.id)` is `["scratch-app#8/1"]` and, on the next cycle, that it does **not** contain `scratch-app#6/2`. Its companion asserts `spawned` is `[]` for the whole merging cycle, and that is the assertion the direct-register mutation broke.
+- ✅ **PASS** — `expect(closed).toEqual([])` for the non-last chunk, a call *count* of zero. Seen red at `expected [ '6:completed' ] to deeply equal []`.
+- ✅ **PASS** — `workBranch(ticket, 1)` is asserted against the literal `"timone/6-typing-in-the-box-is-fiddly-on-my-phone"`.
+- ✅ **PASS** — the CLI ran against `/tmp/timone-23f.json`; `git status --porcelain .timone/` is empty and `md5 .timone/state.json` was `27083e7ba302fea5a9b8d0ccf2561925` immediately before and immediately after the command. **The live file does change during a session, and it is not this slice's doing:** a `timone daemon` (pid 32240) has been running against it throughout, rewriting it once a poll cycle — measured at 15:00:41 with no test and no command running at all. Nothing this slice touches names `defaultStatePath`, and every test store is a `mkdtempSync` path; the five granted test files were each run alone against a checksummed file and none of them wrote it.
+
+### What is wrong in the excerpt
+
+1. **"No successor chunk is registered" for a re-proposal has no mechanism in the excerpt, and needs one.** The excerpt's own central claim is that succession rides the registration loop, which registers **every** marked ticket **every** cycle — so a re-proposed initiative is refused by `concludeReview` and then granted a minute later by `register`, and every test that drives a single cycle would pass. Resolved with `successorHeldBack` in the registration loop (decision 3), and the test drives **two** cycles so it can see it.
+2. **"The cycle records a readable error" for an *absent* breakdown is wrong, and would break every chore.** `result.errors` is *"one readable line per project that failed"* and `runDaemon` turns a non-empty `errors` into **exit code 1**. A chore reaches a pull request without ever meeting the breakdown stage (ADR-0030 D3, 23e's gate 1), so its every merge would report the project as failed and make `timone daemon --once` exit non-zero. Built the other way round: an **absent** breakdown closes the ticket silently, a **malformed** one gets the error line. Both are tested, both are mutation-proved.
+3. **The excerpt's "Red" for that case — *"a merged pull request … throws"* — is unreachable.** `readBreakdown` never throws by 23a's design, and `concludeReview` is already inside `resumeAnswered`'s try/catch, so even a throw would not take the project's turn down. The case is real; its stated failure mode is not.
+4. **The ordering fault the excerpt warns about most loudly is inert.** See trap 1 above: registering before `complete` creates nothing, because `register` hands back the ticket's live chunk. The fault that *is* real is registering **after** it.
+5. **`PollDeps` gaining a `root` breaks the type of every `runDaemon` call, not only the command's.** The grant does cover it — `src/commands/daemon.ts` is `[MODIFY]` and `runDaemon` lives there — but `daemon.test.ts`'s three call sites had to move with it, and they are in the grant too.
+
+### ⚠ What 23g onward must know
+
+1. **The standing call to action contradicts the re-proposal comment, permanently, and `cta.ts` is in nobody's grant.** `ctaFor` reads the ticket's **last run**, which after a merge is `done`, and answers *"This one is finished. — nothing."* So a re-proposed initiative gets the *"I've stopped here, tell me whether to carry on"* comment and, in the **same cycle**, a standing CTA telling the human nothing is needed. The same wrong sentence appears for one cycle between every pair of chunks, which is survivable; for a re-proposal it never goes away, and it is the exact class of lying line ADR-0024 exists to abolish. **Fixing it means `ctaFor` learning that a ticket's initiative can be held while its last run is done** — a `TicketState` field, or the poll loop passing the succession in. It is a design decision, not a patch, which is why it was left rather than improvised inside a slice that was not granted the file.
+2. **Nothing tells the human which piece is being built.** The successor's `planning` session is handed a stage and a ticket, and works out its own piece from the breakdown on the branch — the prompt says nothing about *which* one, and `chunkProgress` already computes it. If a chunk ever plans the wrong piece, this is where.
+3. **`Timone-Run:` in the provenance block is still `<project>#<ticket>` with no `/<seq>`** (`prompts.ts`'s `provenanceBlock`). Two chunks of one ticket are therefore indistinguishable in git history, which is exactly what ADR-0026 split the run id to fix. Pre-existing and outside the markers.
+4. **`successorHeldBack` costs two ledger refreshes per marked ticket per cycle**, plus one `existsSync`/`readFileSync` for a ticket whose chunks have all settled. In line with what the loop already spends per ticket (`occupyingRun` and `register` both refresh), but it is the first *disk read of a project checkout* the poll loop does, and a project whose checkout is missing simply reads as "no breakdown".
+5. **A breakdown stamped `Awaiting approval` is treated as an ordinary list.** `chunkProgress` does not look at the stamp, and `isReproposal` is false for an unapproved one — so an unapproved list would drive succession as though it had been approved. Unreachable today (chunk 1 only exists because the breakdown gate was passed, and ADR-0030 D2 merges chunk zero on approval), and named here rather than guarded because guarding it would invent a refusal nobody has asked for.
