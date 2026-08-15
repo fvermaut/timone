@@ -148,6 +148,7 @@ async function mergeInProgress(dir: string): Promise<boolean> {
 export async function mergeIntoDefault(
   dir: string,
   branch: string,
+  message: string,
 ): Promise<MergeOutcome> {
   if (!(await isClean(dir))) {
     return {
@@ -165,7 +166,16 @@ export async function mergeIntoDefault(
   await fastForward(dir);
 
   try {
-    await runGit(["merge", "--no-edit", "--", branch], dir);
+    // `-m` rather than `--no-edit`, because a merge git records as a commit
+    // is a commit this system authored, and ADR-0019 says every one of those
+    // names the stage that made it. The caller supplies the whole message,
+    // trailers included; git uses it only when it actually creates a commit,
+    // so a fast-forward still carries no message of its own and needs none —
+    // the commits it moves are sessions' own, already trailed.
+    //
+    // Found by the guardrail check on 2026-08-15, after the first live merge
+    // landed an untrailed `Merge branch …` on a client's default branch.
+    await runGit(["merge", "--no-edit", "-m", message, "--", branch], dir);
   } catch (error) {
     if (await mergeInProgress(dir)) await runGit(["merge", "--abort"], dir);
     const reason = error instanceof Error ? error.message : String(error);

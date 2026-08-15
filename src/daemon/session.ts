@@ -18,6 +18,7 @@ import {
 } from "../channels/conversation.js";
 import { TerminalChannel } from "../channels/terminal.js";
 import { gateCommentFor } from "./gate-comment.js";
+import { STAGE_TRAILER } from "./hooks.js";
 import { instant, readConversationRecord, waitCursorFrom } from "./gates.js";
 import { outcomeCursorFrom, readStageOutcome, type StageOutcome } from "./outcomes.js";
 import {
@@ -205,7 +206,11 @@ export interface AgentSessionSpawnerOptions {
    * the same reason as {@link repoProbe}, and defaulting to `git.ts`'s
    * implementation.
    */
-  mergeProbe?: (repoDir: string, branch: string) => Promise<MergeOutcome>;
+  mergeProbe?: (
+    repoDir: string,
+    branch: string,
+    message: string,
+  ) => Promise<MergeOutcome>;
   /**
    * Milliseconds between progress lines while a session works. Defaults to
    * {@link DEFAULT_PROGRESS_INTERVAL_SECONDS}.
@@ -389,6 +394,32 @@ async function gitCurrentHead(repoDir: string): Promise<string | undefined> {
 }
 
 /** Reduce an error to one readable line. */
+/**
+ * The message the chunk-zero merge commit carries.
+ *
+ * A merge git records as a commit is a commit this system authored, so
+ * [ADR-0019](../../doc/adr/0019-timone-authored-commits-carry-a-provenance-trailer.md)'s
+ * trailer is not optional on it. The merge is made by the **daemon** rather
+ * than by a spawned session, so there is no session id to name — the stage is
+ * what answers "where did this come from?", and `breakdown` is the only stage
+ * that can produce this commit.
+ *
+ * Found by the guardrail check on 2026-08-15, after the first live merge put
+ * an untrailed `Merge branch …` on a client's default branch — the rule
+ * catching the first commit made by machinery written the same day.
+ */
+export function mergeMessage(branch: string): string {
+  return [
+    `Merge the approved breakdown from ${branch}`,
+    "",
+    "The specification and the list of pieces, agreed in one gesture and",
+    "landed on the default branch so every piece cuts from a branch that",
+    "carries them (ADR-0030 D2).",
+    "",
+    `${STAGE_TRAILER}: breakdown`,
+  ].join("\n");
+}
+
 function oneLine(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.split("\n")[0];
@@ -1155,6 +1186,7 @@ export class AgentSessionSpawner implements SessionSpawner {
       return await merge(
         join(this.options.root, "projects", project.name),
         branch,
+        mergeMessage(branch),
       );
     } catch (error) {
       return { merged: false, reason: oneLine(error) };

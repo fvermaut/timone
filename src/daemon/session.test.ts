@@ -1809,6 +1809,36 @@ describe("recording an approval in the artifact", () => {
   /** Chunk zero's merge, stubbed: this block is about the record, not the merge. */
   const merged = async () => ({ merged: true as const, into: "main" });
 
+  it("gives the merge commit a message naming the stage that made it", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    const calls: string[] = [];
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: async (_dir, _branch, message) => {
+        calls.push(message);
+        return { merged: true as const, into: "main" };
+      },
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+    });
+
+    // A merge git records as a commit is a commit this system authored, and
+    // ADR-0019 admits no exception for it. The guardrail caught the first
+    // live one untrailed on a client's default branch, on 2026-08-15.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("Timone-Stage: breakdown");
+    expect(calls[0]).toContain("timone/7-the-page-feels-slow");
+  });
+
   it("writes the stamp the approved artifact must carry", async () => {
     const store = newStore();
     const { adapter } = fakeAdapter(settled);
