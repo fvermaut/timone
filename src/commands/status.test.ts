@@ -1,10 +1,57 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
+import { breakdownPath } from "../daemon/breakdown.js";
 import { ctaComment, ctaFor } from "../daemon/cta.js";
-import { reclaimedReason } from "../daemon/poll.js";
+import { checkoutOf, initiativeProgress, reclaimedReason } from "../daemon/poll.js";
 import { runId, type Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
+
+/** Temp roots created by the current test, removed in afterEach. */
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A workspace root holding `scratch-app`'s checkout with `body` as ticket
+ * `ticket`'s breakdown — or no breakdown at all when `body` is absent, which
+ * is what nearly every ticket in the live ledger looks like.
+ */
+function rootWith(ticket: number, body?: string): string {
+  const root = mkdtempSync(join(tmpdir(), "timone-status-"));
+  tempDirs.push(root);
+  if (body !== undefined) {
+    const file = join(root, "projects", "scratch-app", breakdownPath(ticket));
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, body, "utf8");
+  }
+  return root;
+}
+
+/**
+ * The artifact as a stage session writes it, spelled out rather than rendered
+ * — `poll.test.ts` spells it out for the same reason: a fixture built by the
+ * module under test could not catch the writer and the reader drifting apart.
+ */
+function breakdown(titles: string[], pieces = titles.length): string {
+  return [
+    "# Breakdown",
+    "",
+    `**Status:** Approved by fvermaut 2026-08-15 — ${pieces} pieces`,
+    "",
+    ...titles.map(
+      (title, index) => `${index + 1}. **${title}** — what this piece delivers.`,
+    ),
+    "",
+  ].join("\n");
+}
 
 const manifest: Manifest = {
   projects: {
@@ -431,6 +478,57 @@ describe("renderStatus — what a run is costing right now", () => {
   });
 });
 
+describe("renderStatus — a ticket built in pieces", () => {
+  it("names which piece of an initiative is waiting on a review", () => {
+    // ADR-0028 D4's third state on the terminal: the pull request number is
+    // what the reader navigates by, and the piece is how much of the whole
+    // this review is.
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "delivery",
+        waitingKind: "review",
+        waitingOn: "your review",
+        pr: 9,
+      }),
+    ];
+    const output = renderStatus(manifest, runs, {
+      stateExists: true,
+      root: rootWith(6, breakdown(["The ledger learns chunks", "The next chunk opens"])),
+    });
+
+    expect(lineFor(output, "scratch-app")).toContain(
+      "your review of pull request #9 — that's piece 1 of 2.",
+    );
+  });
+
+  it("says a project with no breakdown anywhere exactly what it always said", () => {
+    // The checkout has no `doc/plans/breakdowns/` at all — nearly every
+    // ticket, and every chore. Held against the literal line.
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "delivery",
+        waitingKind: "review",
+        waitingOn: "your review",
+        pr: 9,
+      }),
+    ];
+    const output = renderStatus(manifest, runs, {
+      stateExists: true,
+      root: rootWith(6),
+    });
+
+    expect(lineFor(output, "scratch-app")).toBe(
+      "scratch-app  #6 (delivering) — waiting on you: your review of pull request #9",
+    );
+  });
+});
+
 describe("renderStatus — one computation, two renderers", () => {
   it("says the same thing on the ticket and on the status line, from one call", () => {
     const parked = run({
@@ -459,6 +557,72 @@ describe("renderStatus — one computation, two renderers", () => {
     expect(
       renderStatus(manifest, [parked], { stateExists: true }),
     ).toContain(cta.needFromYou);
+  });
+
+  it("resolves an initiative's progress the same way for the ticket and the terminal", () => {
+    // R21 clause 8, asserted rather than intended. **One** progress value,
+    // resolved the way `reconcileCtas` resolves it — through `checkoutOf` and
+    // `initiativeProgress` — fed to `ctaFor` once, and both renderings of that
+    // one call are then required to carry the same sentence. `renderStatus`
+    // resolves its own value internally, so if it reached a different
+    // directory, counted different chunks, or read a different file, its line
+    // would name a different piece and this fails.
+    const root = rootWith(
+      6,
+      breakdown(["The ledger learns chunks", "The next chunk opens", "The ticket closes"]),
+    );
+    const runs = [
+      run({ project: "scratch-app", ticket: 6, status: "done", stage: "delivery", pr: 9 }),
+      run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "delivery",
+        waitingKind: "review",
+        waitingOn: "your review",
+        pr: 12,
+      }),
+    ];
+
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 6,
+      run: runs.at(-1),
+      progress: initiativeProgress(checkoutOf(root, "scratch-app"), 6, runs),
+    });
+
+    // Not agreement about nothing: the sentence they have to agree on is the
+    // one this slice added.
+    expect(cta.needFromYou).toContain("piece 2 of 3");
+    expect(ctaComment(cta)).toContain(cta.needFromYou);
+    expect(
+      renderStatus(manifest, runs, { stateExists: true, root }),
+    ).toContain(cta.needFromYou);
+  });
+
+  it("names a ticket once in its closing line however many pieces it has had", () => {
+    // A re-proposed initiative is the first state in which a *done* run is
+    // waiting on the human, and a ticket built in three pieces holds three of
+    // them. Naming the ticket once per finished piece would make the one line
+    // the reader is meant to act on read "scratch-app #6, scratch-app #6".
+    const root = rootWith(
+      6,
+      breakdown(["one", "two", "three", "four"], 2),
+    );
+    const runs = [
+      run({ project: "scratch-app", ticket: 6, status: "done", stage: "delivery", pr: 9 }),
+      run({ project: "scratch-app", ticket: 6, status: "done", stage: "delivery", pr: 12 }),
+    ];
+
+    const lastLine =
+      renderStatus(manifest, runs, { stateExists: true, root })
+        .trimEnd()
+        .split("\n")
+        .at(-1) ?? "";
+
+    expect(lastLine).toBe(
+      "**What I need from you:** answer on scratch-app #6 — each ticket says what it needs.",
+    );
   });
 
   it("names in its closing line exactly the tickets the computation is waiting on", () => {

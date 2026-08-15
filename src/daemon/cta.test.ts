@@ -195,6 +195,151 @@ describe("ctaFor", () => {
     expect(cta.waitingOnYou).toBe(false);
   });
 
+  it("says the next piece is coming while an initiative still has pieces left", () => {
+    // The state 23f left broken: between two chunks the ticket's *last* run is
+    // `done`, and the initiative is not. Answering "this one is finished" here
+    // is the stale line R21 exists to abolish, and for a re-proposed list it
+    // never goes away.
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 6,
+      run: run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "done",
+        stage: "delivery",
+      }),
+      progress: { total: 3, done: 1, next: { index: 2, title: "The next chunk opens" } },
+    });
+
+    expect(cta.headline).toBe("Piece 2 of 3 is next.");
+    expect(cta.needFromYou).toBe(
+      "nothing right now — I'll start it on my next pass.",
+    );
+    expect(cta.waitingOnYou).toBe(false);
+  });
+
+  it("still names the pull request when a review is a piece of an initiative", () => {
+    // ADR-0028 D4's third state: the review call to action, unchanged, and
+    // only gaining the piece count. The number is what a reviewer navigates
+    // by, so the piece may never be added at its expense.
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 6,
+      run: run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "delivery",
+        waitingKind: "review",
+        waitingOn: "your review",
+        pr: 9,
+      }),
+      progress: {
+        total: 3,
+        done: 1,
+        next: { index: 2, title: "The next chunk opens" },
+      },
+    });
+
+    expect(cta.needFromYou).toBe(
+      "your review of pull request #9 — that's piece 2 of 3.",
+    );
+    expect(cta.waitingOnYou).toBe(true);
+  });
+
+  it("names the piece it is building while a chunk of an initiative runs", () => {
+    // ADR-0028 D4's first state. The piece being built is the one the ledger
+    // has not finished yet, which is `next` — a live chunk is not a done one.
+    for (const status of ["picked-up", "active"] as const) {
+      const cta = ctaFor({
+        project: "scratch-app",
+        ticket: 6,
+        run: run({ project: "scratch-app", ticket: 6, status, stage: "execution" }),
+        progress: {
+          total: 3,
+          done: 1,
+          next: { index: 2, title: "The next chunk opens" },
+        },
+      });
+
+      expect(cta.headline).toBe("Building piece 2 of 3.");
+      expect(cta.needFromYou).toBe(
+        "nothing right now — I'll comment here when I do.",
+      );
+      expect(cta.waitingOnYou).toBe(false);
+    }
+  });
+
+  it("says what it always said while working a ticket that has no pieces", () => {
+    // Nearly every ticket in the live ledger has no breakdown at all, and this
+    // slice must not change one word on any of them. Held against the literal.
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 7,
+      run: run({ project: "scratch-app", ticket: 7, status: "active", stage: "execution" }),
+    });
+
+    expect(cta.headline).toBe("Picked this up.");
+    expect(cta.needFromYou).toBe(
+      "nothing right now — I'll comment here when I do.",
+    );
+  });
+
+  it("calls an initiative finished only once no piece of it remains", () => {
+    // The one state where "finished" is the true answer: the last piece
+    // merged. Same words as a ticket that never had pieces at all, because
+    // from the reader's side it is the same situation.
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 6,
+      run: run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "done",
+        stage: "delivery",
+      }),
+      progress: { total: 3, done: 3 },
+    });
+
+    expect(cta.headline).toBe("This one is finished.");
+    expect(cta.needFromYou).toBe(
+      "nothing — file a new ticket for anything else.",
+    );
+    expect(cta.waitingOnYou).toBe(false);
+  });
+
+  it("asks whether to carry on when the list of pieces grew after it was approved", () => {
+    // 23f's permanent contradiction: `reproposedComment` says "I've stopped
+    // here, tell me whether to carry on" and the standing line, in the same
+    // cycle, said nothing was needed. Two sentences on one thread, disagreeing
+    // for ever. This one is the half that has to say a human is waited on.
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 6,
+      run: run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "done",
+        stage: "delivery",
+      }),
+      progress: {
+        total: 4,
+        done: 2,
+        next: { index: 3, title: "A piece nobody has read" },
+        reproposed: true,
+      },
+    });
+
+    expect(cta.headline).toBe(
+      "The list of pieces has grown since you approved it.",
+    );
+    expect(cta.needFromYou).toBe(
+      "say here whether to carry on with the longer list.",
+    );
+    expect(cta.waitingOnYou).toBe(true);
+  });
+
   it("names what would unblock a ticket parked at a stage nobody has built", () => {
     // `scratch-app` #4 in ADR-0024's table. Nothing can move it, so no command
     // is offered — a command that does not work is worse than none — and the

@@ -36,7 +36,12 @@ import {
   type PipelineStage,
 } from "./pipeline.js";
 import { chunkProgress, isReproposal, readBreakdown } from "./breakdown.js";
-import { ctaComment, ctaFor, type TicketState } from "./cta.js";
+import {
+  ctaComment,
+  ctaFor,
+  type InitiativeProgress,
+  type TicketState,
+} from "./cta.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 import { type Run, type RunStore, type Witness } from "./runs.js";
 // The same comment the spawner posts when a session ends badly, because this
@@ -1006,7 +1011,7 @@ async function reconcileCtas(
   result: PollResult,
   log: (message: string) => void,
 ): Promise<void> {
-  const { store, adapter } = deps;
+  const { store, adapter, root } = deps;
 
   for (const ticket of tickets) {
     // A ticket acknowledged moments ago has just been told this, in these
@@ -1018,11 +1023,25 @@ async function reconcileCtas(
     if (acknowledged.has(ticket.number)) continue;
 
     try {
+      // Every chunk this ticket has had, because what the thread is asking
+      // about is the initiative and the last run is only the latest piece of
+      // it. On the cycle a piece merges, that last run is `done` and the
+      // successor has not been opened yet — which is the gap ADR-0028 D4
+      // exists to fill.
+      const chunks = store.runsForTicket(project.name, ticket.number);
       const body = ctaBody({
         project: project.name,
         ticket: ticket.number,
-        run: store.runsForTicket(project.name, ticket.number).at(-1),
+        run: chunks.at(-1),
         labels: ticket.labels,
+        progress:
+          root === undefined
+            ? undefined
+            : initiativeProgress(
+                checkoutOf(root, project.name),
+                ticket.number,
+                chunks,
+              ),
       });
       const thread = await threads(ticket.number).ticket();
       if (saysTheSame(standingCta(thread), stampMachineComment(body))) continue;
@@ -1416,6 +1435,56 @@ async function concludeInitiative(
 }
 
 /**
+ * Where a managed project's checkout is, from the timone root
+ * ([ADR-0007](../../doc/adr/0007-sessions-at-timone-root.md): everything runs
+ * at the root and projects are materialized beneath it).
+ *
+ * **The only place the poll loop and `timone status` spell this**, so the two
+ * cannot look for a ticket's breakdown in two different directories and
+ * conclude two different things about the same initiative — which is R21's
+ * original defect in a new costume.
+ */
+export function checkoutOf(root: string, project: string): string {
+  return join(root, "projects", project);
+}
+
+/**
+ * Where a ticket's initiative stands, for the two surfaces that have to say
+ * so out loud ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D4) — or undefined when the ticket has no readable list of pieces at all,
+ * which is nearly every ticket and every chore (ADR-0030 D3).
+ *
+ * **This is the single function `timone status` and the ticket both resolve
+ * the progress value through**, and that is what makes [R21 clause
+ * 8](../../doc/specs/prd/prd-02-inversion-of-control.criteria.md) hold rather
+ * than merely be intended. `ctaFor` decides what a ticket needs; this decides
+ * the one input to it that neither renderer can see for itself. Two callers
+ * computing it their own way would drift, and the drift would be invisible
+ * until a human read the terminal and the thread in the same minute.
+ *
+ * `undefined` is answered rather than thrown for the reason `readBreakdown`
+ * gives: this is on the path of every poll cycle and of every `timone status`,
+ * and a project whose checkout is missing is an ordinary state of the world.
+ */
+export function initiativeProgress(
+  repoDir: string,
+  ticket: number,
+  runs: readonly Run[],
+): InitiativeProgress | undefined {
+  const read = readBreakdown(repoDir, ticket);
+  if (read.kind !== "ok") return undefined;
+
+  // `done`, not settled — the same choice `successionOf` makes, and for the
+  // same reason: a cancelled chunk delivered nothing, so the piece it was
+  // opened for is still the piece to come.
+  const done = runs.filter((chunk) => chunk.status === "done").length;
+  const progress = chunkProgress(read.breakdown, done);
+  return isReproposal(read.breakdown)
+    ? { ...progress, reproposed: true }
+    : progress;
+}
+
+/**
  * What a ticket's approved list of pieces says about what happens after this
  * chunk.
  *
@@ -1470,7 +1539,7 @@ function successionOf(
   const { store, root } = deps;
   if (root === undefined) return { kind: "unlisted" };
 
-  const read = readBreakdown(join(root, "projects", project), ticket);
+  const read = readBreakdown(checkoutOf(root, project), ticket);
   if (read.kind === "absent") return { kind: "unlisted" };
   if (read.kind === "malformed") {
     return { kind: "unreadable", path: read.path, reason: read.reason };

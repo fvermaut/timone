@@ -15,7 +15,34 @@
  */
 import { MARK_LABEL } from "../adapters/ticketing.js";
 import { takeoverCommand } from "../channels/terminal.js";
+import { type ChunkProgress } from "./breakdown.js";
 import { type Run } from "./runs.js";
+
+/**
+ * Where a ticket's whole initiative stands, as a plain value.
+ *
+ * **This is what lets a call to action be about an initiative rather than
+ * about a run** ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D4). A ticket is a conversation and a run is one chunk of it (ADR-0026), so
+ * between two chunks the ticket's last run is `done` while the initiative is
+ * very much alive — and a computation that only ever looked at the run said
+ * *this one is finished* into that gap, on every ticket, between every pair of
+ * pieces.
+ *
+ * It is {@link ChunkProgress} plus the one fact about the *artifact* a reader
+ * of the ticket has to be told: that the list has grown since they approved
+ * it. The two are orthogonal — a re-proposed initiative is still some number
+ * of pieces through — so this is not a state wearing flags, it is two facts
+ * about one initiative.
+ *
+ * **Computed by the caller**, never here: it comes from a file in a project's
+ * checkout, and this module reads nothing. See `initiativeProgress` in
+ * `poll.ts`, which is the one function both surfaces resolve it through.
+ */
+export interface InitiativeProgress extends ChunkProgress {
+  /** Whether the list of pieces has grown since the human approved it. */
+  reproposed?: boolean;
+}
 
 /**
  * Everything the CTA is computed from: one ticket, and whatever the ledger and
@@ -26,6 +53,13 @@ export interface TicketState {
   ticket: number;
   /** The ledger's run for this ticket, or undefined when it has none. */
   run?: Run;
+  /**
+   * Where the ticket's initiative stands, or undefined when it has no
+   * breakdown at all — which is nearly every ticket, and every chore
+   * (ADR-0030 D3). Undefined means *say exactly what you said before pieces
+   * existed*, and that is what every branch below does with it.
+   */
+  progress?: InitiativeProgress;
   /**
    * The ticket's labels, as the tracker holds them. Read rather than stored on
    * the run, for the reason `wayfinderStage` gives: a copy in the ledger is a
@@ -63,6 +97,67 @@ export interface Cta {
 const WORKING_ON_IT = "nothing right now — I'll comment here when I do.";
 
 /**
+ * What a ticket says when there is genuinely nothing left: the last piece
+ * merged, and the conversation is over
+ * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D3). The words `mergedComment` closes on, so the standing line and the
+ * closing comment do not say the same thing twice over in two dialects.
+ */
+const FINISHED: Cta = {
+  headline: "This one is finished.",
+  needFromYou: "nothing — file a new ticket for anything else.",
+  waitingOnYou: false,
+};
+
+/**
+ * How a piece is spoken about: *piece 2 of 4*. The human never types or reads
+ * a chunk id or a sequence number (`CONTEXT.md`, ADR-0026), so this is the
+ * only rendering of one anywhere.
+ */
+function piece(index: number, total: number): string {
+  return `piece ${index} of ${total}`;
+}
+
+/**
+ * What a ticket with **no live chunk** says about its initiative, or undefined
+ * when the initiative has nothing left to say and the run's own answer stands.
+ *
+ * The two states here are the ones a run-shaped view could not see
+ * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D4): *between chunks*, where the next piece is coming and nothing is needed;
+ * and *re-proposed*, where the list grew since it was approved and the human
+ * is genuinely being waited on. Both were rendered as "this one is finished"
+ * before — permanently, in the second case.
+ */
+function betweenChunks(progress: InitiativeProgress | undefined): Cta | undefined {
+  if (progress === undefined) return undefined;
+
+  if (progress.reproposed === true) {
+    // `reproposedComment`'s own words, minus the file it names: what the human
+    // is being asked is a judgement, and the path is a fact this module has no
+    // business knowing (it reads nothing).
+    return {
+      headline: "The list of pieces has grown since you approved it.",
+      needFromYou: "say here whether to carry on with the longer list.",
+      waitingOnYou: true,
+    };
+  }
+
+  if (progress.next === undefined) return undefined;
+
+  return {
+    headline: `${capitalize(piece(progress.next.index, progress.total))} is next.`,
+    needFromYou: "nothing right now — I'll start it on my next pass.",
+    waitingOnYou: false,
+  };
+}
+
+/** A sentence starts on a capital, and `piece(…)` is written for mid-sentence. */
+function capitalize(sentence: string): string {
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
+}
+
+/**
  * What a ticket in `state` is asking of the human. Pure: no I/O, no clock.
  *
  * Every branch's words are the ones the ticket has already been told
@@ -71,7 +166,7 @@ const WORKING_ON_IT = "nothing right now — I'll comment here when I do.";
  * than restating it in a second dialect.
  */
 export function ctaFor(state: TicketState): Cta {
-  const { run } = state;
+  const { run, progress } = state;
 
   if (run === undefined) {
     return (state.labels ?? []).includes(MARK_LABEL)
@@ -88,19 +183,25 @@ export function ctaFor(state: TicketState): Cta {
   }
 
   if (run.status === "picked-up" || run.status === "active") {
+    // The piece under construction is the one the ledger has *not* finished,
+    // which is `next` — a live chunk is not a done one. A ticket with no
+    // breakdown keeps the words it has always had.
+    const building =
+      progress?.next === undefined
+        ? undefined
+        : piece(progress.next.index, progress.total);
     return {
-      headline: "Picked this up.",
+      headline: building === undefined ? "Picked this up." : `Building ${building}.`,
       needFromYou: WORKING_ON_IT,
       waitingOnYou: false,
     };
   }
 
   if (run.status === "done") {
-    return {
-      headline: "This one is finished.",
-      needFromYou: "nothing — file a new ticket for anything else.",
-      waitingOnYou: false,
-    };
+    // The ledger's answer is about a *chunk*; the ticket's reader is asking
+    // about the initiative. Where a breakdown says a piece remains, the piece
+    // is the answer — and only where none does is "finished" the truth.
+    return betweenChunks(progress) ?? FINISHED;
   }
 
   if (run.status === "queued") {
@@ -135,9 +236,17 @@ export function ctaFor(state: TicketState): Cta {
   }
 
   if (run.waitingKind === "review" && run.pr !== undefined) {
+    // The pull request number leads, because it is what the reviewer
+    // navigates by; the piece follows it, because it is what tells them how
+    // much of the initiative this review is. A ticket with no breakdown reads
+    // byte for byte as it always has.
+    const of =
+      progress?.next === undefined
+        ? ""
+        : ` — that's ${piece(progress.next.index, progress.total)}.`;
     return {
       headline: "The work is open as a pull request.",
-      needFromYou: `your review of pull request #${run.pr}`,
+      needFromYou: `your review of pull request #${run.pr}${of}`,
       waitingOnYou: true,
     };
   }

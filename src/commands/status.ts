@@ -3,8 +3,9 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
-import { ctaFor, type Cta } from "../daemon/cta.js";
+import { ctaFor, type Cta, type InitiativeProgress } from "../daemon/cta.js";
 import { modelFor, type PipelineStage } from "../daemon/pipeline.js";
+import { checkoutOf, initiativeProgress } from "../daemon/poll.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 
 /** Statuses that mean a session is running, or about to. */
@@ -32,6 +33,63 @@ export interface RenderStatusOptions {
   stateExists: boolean;
   /** Now, for saying how long a running session has been going. */
   now?: Date;
+  /**
+   * The timone root, so a ticket's list of pieces can be read from its
+   * project's checkout ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+   * D1 names this cost: answering *is there a next piece?* means reading a
+   * file rather than a field).
+   *
+   * **Absent means no breakdown is read and every line reads as it did before
+   * tickets had pieces.** The command itself always supplies one — sessions
+   * run at the root (ADR-0007) — so this is a fixture's answer, not a user's.
+   */
+  root?: string;
+}
+
+/**
+ * What each of one render's helpers needs beyond the run in front of it.
+ *
+ * Bundled rather than passed one by one because it travels through four
+ * functions: a second and third parameter threaded that far is the data clump
+ * `code-smells.md` names, and the next thing the ticket has to say about
+ * itself would thread a fourth.
+ */
+interface RenderContext {
+  /** Now, or undefined when the caller does not want durations. */
+  now?: Date;
+  /** Where this run's ticket's initiative stands, resolved once per ticket. */
+  progressOf: (run: Run) => InitiativeProgress | undefined;
+}
+
+/**
+ * The reader `timone status` resolves every ticket's progress through.
+ *
+ * **It is `poll.ts`'s {@link initiativeProgress}, called the same way, and
+ * that is the whole of R21 clause 8's guarantee**: the terminal and the ticket
+ * cannot disagree about where an initiative stands, because there is no second
+ * computation for them to disagree between. Memoized per ticket so a project
+ * with several waiting tickets reads each breakdown once.
+ */
+function progressReader(
+  runs: readonly Run[],
+  root: string | undefined,
+): (run: Run) => InitiativeProgress | undefined {
+  if (root === undefined) return () => undefined;
+
+  const cache = new Map<string, InitiativeProgress | undefined>();
+  return (run) => {
+    const key = `${run.project}#${run.ticket}`;
+    if (!cache.has(key)) {
+      const chunks = runs.filter(
+        (chunk) => chunk.project === run.project && chunk.ticket === run.ticket,
+      );
+      cache.set(
+        key,
+        initiativeProgress(checkoutOf(root, run.project), run.ticket, chunks),
+      );
+    }
+    return cache.get(key);
+  };
 }
 
 /**
@@ -71,17 +129,23 @@ function humanDuration(ms: number): string {
  * ticket and this command; a second opinion here is how `timone status` came
  * to ask for an answer on a ticket whose own body said nothing was needed.
  */
-function ctaOf(run: Run): Cta {
-  return ctaFor({ project: run.project, ticket: run.ticket, run });
+function ctaOf(run: Run, context: RenderContext): Cta {
+  return ctaFor({
+    project: run.project,
+    ticket: run.ticket,
+    run,
+    progress: context.progressOf(run),
+  });
 }
 
 /** What a parked run is waiting for, in the words the ticket itself carries. */
-function describeWait(run: Run): string {
-  return `waiting on you: ${ctaOf(run).needFromYou}`;
+function describeWait(run: Run, context: RenderContext): string {
+  return `waiting on you: ${ctaOf(run, context).needFromYou}`;
 }
 
 /** One run's phrase: the ticket, how far it got, and what it is doing. */
-function describeRun(run: Run, now: Date | undefined): string {
+function describeRun(run: Run, context: RenderContext): string {
+  const now = context.now;
   const stage =
     run.stage === undefined ? "" : ` (${STAGE_LABELS[run.stage] ?? run.stage})`;
   // The model is named for a working run only: it answers "what is this
@@ -93,7 +157,7 @@ function describeRun(run: Run, now: Date | undefined): string {
   const on = model === "" ? "" : ` on ${model}`;
   const what =
     run.status === "parked"
-      ? describeWait(run)
+      ? describeWait(run, context)
       : run.status === "active"
         ? `working on it now${on}${howLong(run, now)}`
         : "picked up, about to start";
@@ -115,13 +179,17 @@ function describeRun(run: Run, now: Date | undefined): string {
  * them would hide most of what is being asked of them, which is the one thing
  * this command exists to prevent.
  */
-function describeProject(project: string, runs: Run[], now: Date | undefined): string {
+function describeProject(
+  project: string,
+  runs: Run[],
+  context: RenderContext,
+): string {
   const mine = runs.filter((run) => run.project === project);
   const running = mine.filter((run) => RUNNING.includes(run.status));
   const parked = mine.filter((run) => run.status === "parked");
   const queued = mine.filter((run) => run.status === "queued");
 
-  const parts = [...running, ...parked].map((run) => describeRun(run, now));
+  const parts = [...running, ...parked].map((run) => describeRun(run, context));
   if (parts.length === 0) parts.push("idle");
 
   if (queued.length > 0) {
@@ -150,9 +218,16 @@ export function renderStatus(
       .filter((project) => !(project in manifest.projects)),
   ].filter((name, index, all) => all.indexOf(name) === index);
 
+  // One reader for the whole render, so a ticket's list of pieces is read
+  // once however many of its runs and closing lines mention it.
+  const context: RenderContext = {
+    now: options.now,
+    progressOf: progressReader(runs, options.root),
+  };
+
   const width = Math.max(...names.map((name) => name.length), 0);
   const lines = names.map(
-    (name) => `${name.padEnd(width)}  ${describeProject(name, runs, options.now)}`,
+    (name) => `${name.padEnd(width)}  ${describeProject(name, runs, context)}`,
   );
 
   // Every failure names the way back, in the same breath as the bad news.
@@ -162,7 +237,7 @@ export function renderStatus(
   const failures = runs
     .filter((run) => run.status === "failed" && run.failure !== undefined)
     .flatMap((run) => {
-      const { command } = ctaOf(run);
+      const { command } = ctaOf(run, context);
       return [
         `${run.project} #${run.ticket} stopped early: ${run.failure}`,
         ...(command === undefined
@@ -184,14 +259,20 @@ export function renderStatus(
         `${run.cancellation ?? "no reason recorded"}`,
     );
 
-  const waiting = runs.filter((run) => ctaOf(run).waitingOnYou);
+  // **By ticket, not by run.** A ticket is a conversation and a run is one
+  // chunk of it (ADR-0026), so a ticket built in three pieces holds three
+  // runs — and since a *done* run can now be waiting on the human (a
+  // re-proposed list of pieces is), naming the run would put the same ticket
+  // in this line once per piece it has had.
+  const waiting = runs
+    .filter((run) => ctaOf(run, context).waitingOnYou)
+    .map((run) => `${run.project} #${run.ticket}`)
+    .filter((name, index, all) => all.indexOf(name) === index);
 
   const closing =
     waiting.length === 0
       ? "**What I need from you:** nothing — nothing is waiting on you right now."
-      : `**What I need from you:** answer on ${waiting
-          .map((run) => `${run.project} #${run.ticket}`)
-          .join(", ")} — each ticket says what it needs.`;
+      : `**What I need from you:** answer on ${waiting.join(", ")} — each ticket says what it needs.`;
 
   return [
     ...(options.stateExists
@@ -241,6 +322,16 @@ export function registerStatusCommand(program: Command): void {
         return;
       }
 
-      console.log(renderStatus(manifest, runs, { stateExists, now: new Date() }));
+      // The root is where the command was run, which is where sessions and
+      // the daemon run too (ADR-0007) — the same directory `defaultStatePath`
+      // resolves the ledger under, so the ledger and the checkouts it talks
+      // about are read from one place.
+      console.log(
+        renderStatus(manifest, runs, {
+          stateExists,
+          now: new Date(),
+          root: process.cwd(),
+        }),
+      );
     });
 }

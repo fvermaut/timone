@@ -4398,4 +4398,90 @@ describe("pollOnce — a ticket's next chunk", () => {
     expect(store.get("scratch-app#6/1")?.seq).toBe(1);
     expect(contexts).toEqual([undefined]);
   });
+
+  /**
+   * The standing call to action on a ticket mid-initiative
+   * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+   * D4). The cycle a piece merges on is the one that exposes it: the
+   * registration loop has already run by the time the merge is concluded, so
+   * the ticket reaches {@link reconcileCtas} with its last run `done` and its
+   * successor not yet opened — and a run-shaped call to action says the
+   * initiative is over into exactly that gap.
+   */
+  function recording(adapter: TicketingAdapter): {
+    adapter: TicketingAdapter;
+    upserts: string[];
+  } {
+    const upserts: string[] = [];
+    return {
+      adapter: {
+        ...adapter,
+        async upsertComment(_project, _number, _marker, body): Promise<void> {
+          upserts.push(body);
+        },
+      },
+      upserts,
+    };
+  }
+
+  it("says the next piece is coming on the cycle a piece merged", async () => {
+    const store = newStore();
+    chunkOnReview(store, 1, 9);
+    const { adapter: base } = successionAdapter({ 9: "merged" });
+    const { adapter, upserts } = recording(base);
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
+    });
+
+    const standing = upserts.join("\n");
+    expect(standing).toContain("**Piece 2 of 2 is next.**");
+    expect(standing).toContain(
+      "**What I need from you:** nothing right now — I'll start it on my next pass.",
+    );
+    // The line this replaces, named so a regression cannot hide behind the
+    // one above: the initiative is not finished, and the ticket must not say
+    // it is.
+    expect(standing).not.toContain("This one is finished.");
+  });
+
+  it("keeps asking whether to carry on while the list of pieces is re-proposed", async () => {
+    // 23f's permanent contradiction, driven through the loop that produced
+    // it: `reproposedComment` says "I've stopped here, tell me whether to
+    // carry on" and the standing line said nothing was needed — for ever,
+    // because a held-back successor never opens and the last run stays `done`.
+    const store = newStore();
+    chunkOnReview(store, 1, 9);
+    const { adapter: base } = successionAdapter({ 9: "merged" });
+    const { adapter, upserts } = recording(base);
+    const { spawner } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: rootWith(
+        breakdown(["The ledger learns chunks", "The next chunk opens", "A piece nobody read"], 2),
+      ),
+    };
+
+    await pollOnce(deps);
+    // And on the cycle after, which is where "permanent" is: nothing has
+    // moved, so the same line must still be the one on the ticket.
+    await pollOnce(deps);
+
+    const standing = upserts.at(-1) ?? "";
+    expect(standing).toContain(
+      "**The list of pieces has grown since you approved it.**",
+    );
+    expect(standing).toContain(
+      "**What I need from you:** say here whether to carry on with the longer list.",
+    );
+    expect(standing).not.toContain("This one is finished.");
+  });
 });

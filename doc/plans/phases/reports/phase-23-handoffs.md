@@ -554,3 +554,98 @@ Checkboxes:
 3. **`Timone-Run:` in the provenance block is still `<project>#<ticket>` with no `/<seq>`** (`prompts.ts`'s `provenanceBlock`). Two chunks of one ticket are therefore indistinguishable in git history, which is exactly what ADR-0026 split the run id to fix. Pre-existing and outside the markers.
 4. **`successorHeldBack` costs two ledger refreshes per marked ticket per cycle**, plus one `existsSync`/`readFileSync` for a ticket whose chunks have all settled. In line with what the loop already spends per ticket (`occupyingRun` and `register` both refresh), but it is the first *disk read of a project checkout* the poll loop does, and a project whose checkout is missing simply reads as "no breakdown".
 5. **A breakdown stamped `Awaiting approval` is treated as an ordinary list.** `chunkProgress` does not look at the stamp, and `isReproposal` is false for an unapproved one — so an unapproved list would drive succession as though it had been approved. Unreachable today (chunk 1 only exists because the breakdown gate was passed, and ADR-0030 D2 merges chunk zero on approval), and named here rather than guarded because guarding it would invent a refusal nobody has asked for.
+
+## 23g — What the ticket says between chunks
+
+**Built.** `ctaFor` stopped being a view of a *run* and became a view of an **initiative** ([ADR-0028](../../../adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) D4). `TicketState` gained `progress?: InitiativeProgress` — where the ticket's whole list of pieces stands, computed by the caller — and three of `ctaFor`'s branches now read it. `timone status` and the poll loop resolve that value through **one exported function**, so the two surfaces cannot disagree about the same initiative (R21 clause 8). 23f's item 1 is closed.
+
+**Files touched.** `src/daemon/cta.ts`, `src/commands/status.ts`, `src/daemon/poll.ts`; tests in `cta.test.ts`, `status.test.ts`, `poll.test.ts`; this section. **Nothing under `.timone/`, no managed-project checkout, no other `doc/` artifact.**
+
+### The five sentences the ticket now carries
+
+Quoted as a person reads them on the thread — headline first, then the closing line every Timone comment ends on.
+
+| State | On the ticket |
+|---|---|
+| A chunk is building | **Building piece 2 of 3.** · *What I need from you:* nothing right now — I'll comment here when I do. |
+| Between chunks | **Piece 2 of 3 is next.** · *What I need from you:* nothing right now — I'll start it on my next pass. |
+| A pull request waits | **The work is open as a pull request.** · *What I need from you:* your review of pull request #9 — that's piece 2 of 3. |
+| The list was re-proposed | **The list of pieces has grown since you approved it.** · *What I need from you:* say here whether to carry on with the longer list. |
+| Genuinely finished | **This one is finished.** · *What I need from you:* nothing — file a new ticket for anything else. |
+
+The last row is byte-identical to what a `done` run has always rendered, and a ticket with **no** breakdown renders every row byte-identically to before this slice — that is the whole point of `progress` being optional, and it is asserted against literals on both surfaces.
+
+`waitingOnYou` is `false` for the first two and the last, `true` for the review and for the re-proposal. It is a separate fact from the sentence, and `timone status`'s closing line reads it.
+
+### One computation, one renderer each
+
+**`initiativeProgress(repoDir, ticket, runs)` in `poll.ts` is the single function both surfaces go through**, and `checkoutOf(root, project)` is the single place either of them spells where a checkout is. `reconcileCtas` calls both; `renderStatus`'s `progressReader` calls both. Neither renderer computes anything: `ctaFor` still decides, once, and `ctaComment` and `renderStatus` render what it decided. `successionOf` was moved onto `checkoutOf` too, so the loop no longer spells the path twice.
+
+The agreement is **asserted, not intended** — `status.test.ts`'s *"resolves an initiative's progress the same way for the ticket and the terminal"* resolves one progress value the way `reconcileCtas` resolves it, feeds it to `ctaFor` once, and requires both `ctaComment`'s rendering and `renderStatus`'s line to carry the resulting sentence. A `renderStatus` that reached a different directory, counted different chunks or read a different file would name a different piece and fail it.
+
+### Decisions taken inside the slice
+
+1. **`InitiativeProgress` is `ChunkProgress` plus `reproposed?: boolean`, and the flag is not optional to the design.** The excerpt's `{ done, total, next? }` cannot express a re-proposal, and a re-proposed list runs through `chunkProgress` as a perfectly ordinary *"piece 4 of 5 is next"* — the ticket cheerfully announcing a piece nobody approved, in the same cycle `reproposedComment` says it has stopped. The mutation probe for it is recorded below and it is the ugliest failure in the table. The two fields are orthogonal facts about one initiative (a re-proposed initiative is still some number of pieces through), not a state wearing flags.
+
+2. **`cta.ts` imports `ChunkProgress` as a type and nothing else.** `verbatimModuleSyntax` erases it, so the module still reads nothing and knows no path; what it avoids is a second copy of `{ total, done, next }` drifting from the first.
+
+3. **`checkoutOf` is `join(root, "projects", name)`, not `join(root, ProjectConfig.path)`.** The excerpt pointed `status.ts` at the manifest's `path`, which would have been a *second* rule — `poll.ts` and `hooks.ts` both already hard-code `projects/<name>` — and two rules for one directory is R21's original defect in a new costume. It is also unusable at one of the call sites: `renderStatus` names projects that appear in the ledger but **not** in the manifest (its own `names` computation allows it), and those have no `ProjectConfig` to read a path from. The manifest schema pins `path` to start with `projects/` anyway.
+
+4. **The between-chunks window is one cycle, and only on the merging cycle.** Inside `pollProject` the registration loop runs *before* `resumeAnswered` concludes the merge, so when `reconcileCtas` runs the ticket's last run is `done` and its successor is not open yet; the successor opens on the *next* cycle. So the lying line appeared exactly once per pair of pieces — except under a re-proposal, where `successorHeldBack` never lets the successor open and it was permanent. The re-proposal test drives **two** cycles for that reason.
+
+5. **The piece under construction is `progress.next`, not `done + 1` computed here.** A live chunk is not a done one, so the ledger's count of `done` runs already makes `next` the piece being built. Same for a chunk parked on review. One expression covers three of the five states.
+
+6. **`timone status`'s closing line now names a *ticket*, not a run.** A re-proposed initiative is the first state in which a `done` run answers `waitingOnYou: true`, and a ticket built in three pieces holds three of them — so the one line the reader is meant to act on read *"answer on scratch-app #6, scratch-app #6"*. This was **found by a test rather than reasoned about**, and the fix is a dedupe by `<project> #<ticket>` where the list is built. It is inside the markers.
+
+7. **The `run === undefined` branch is untouched.** With no run at all the ledger says the ticket has never been worked, so *"I'll pick this up on my next pass"* (marked) and *"add the `timone` label"* (unmarked) are both still true, breakdown or no breakdown — and the unmarked arm is the one CTA that must survive a live breakdown, because an unmarked ticket really is going nowhere.
+
+### Red → green
+
+| Case | Red — the failure actually seen | Green |
+|---|---|---|
+| Between chunks, the ticket does not say the initiative is finished | `AssertionError: expected 'This one is finished.' to be 'Piece 2 of 3 is next.'` — 23f's defect, verbatim | ✅ |
+| A re-proposed list asks whether to carry on | Arm removed first: `expected 'Piece 3 of 4 is next.' to be 'The list of pieces has grown since you approved it.'` — the branch order is what stops a piece nobody approved being announced | ✅ |
+| While a chunk runs, the piece is named | `AssertionError: expected 'Picked this up.' to be 'Building piece 2 of 3.'` | ✅ |
+| A run on a ticket with **no** breakdown renders exactly today's string | Green on arrival. **Mutation**: `piece(progress?.next?.index ?? 1, progress?.total ?? 1)` unconditionally → `expected 'Building piece 1 of 1.' to be 'Picked this up.'`. Reverted. | ✅ |
+| The review CTA survives and gains the piece | `expected 'your review of pull request #9' to be 'your review of pull request #9 — that's piece 2 of 3.'` | ✅ |
+| "Finished" only once no piece remains | Green on arrival. **Mutation**: exhausted-list guard dropped → `expected 'Piece 3 of 3 is next.' to be 'This one is finished.'`. Reverted. | ✅ |
+| Through the loop: the merging cycle says the next piece is coming | `expected '📌 **Where this stands** …' to contain '**Piece 2 of 2 is next.**'`, the received body carrying `**This one is finished.**` in full | ✅ |
+| Through the loop: a re-proposal keeps asking, on the cycle after too | Green on arrival (built with the arm). **Mutation**: `isReproposal` dropped from `initiativeProgress` → the ticket rendered `**Piece 2 of 3 is next.**` for a piece nobody approved. Reverted. | ✅ |
+| `timone status` names the piece under review | `expected 'scratch-app  #6 (delivering) — waiting on you: your review of pull request #9' to contain '… — that's piece 1 of 2.'` | ✅ |
+| A project whose checkout has no breakdown renders its line byte for byte | Green on arrival. **Mutation**: an unreadable breakdown answered `{total:1,done:0,next:…}` → `expected '… #9 — that's piece 1 of 1.' to be '… #9'`. Reverted. | ✅ |
+| One state, both surfaces, one sentence (R21 clause 8) | Green on arrival — it is the property, not a change. Held by `expect(cta.needFromYou).toContain("piece 2 of 3")` so it cannot pass on an empty agreement. | ✅ |
+| A ticket is named once in the closing line however many pieces it has had | `expected '… answer on scratch-app #6, scratch-app #6 …' to be '… answer on scratch-app #6 …'` — a defect this slice introduced, caught before it shipped | ✅ |
+
+**Four of twelve were green on arrival**; each carries a recorded mutation that broke it and was reverted. `git diff` carries none of them.
+
+### Validation evidence
+
+| Command | Result |
+|---|---|
+| `npm test -- src/daemon/cta.test.ts src/commands/status.test.ts src/daemon/poll.test.ts` | **176 passed (3 files)** — 38 / 30 / 108 |
+| `npm run type-check` | **exit 0**, no output |
+| `npm test` | **927 passed, 25 files**, 49.3 s (was 915 / 25) |
+| `npm run build` | **exit 0** |
+| `node dist/cli.js status --state /tmp/timone-23f.json` | **exit 0**, rendered clean and unchanged |
+
+Checkboxes:
+
+- ✅ **PASS** — no CTA on a ticket with pieces remaining says nothing is happening: the between-chunks case is asserted on both `ctaFor` and through the poll loop, and each names `**This one is finished.**` in a `not.toContain` so the regression cannot hide. No CTA asks for a label already on the ticket either — the label branch is reachable only for a ticket with **no run at all**, and `reconcileCtas` only ever sees marked tickets.
+- ✅ **PASS** — a ticket with no breakdown renders byte for byte what it rendered before, asserted against literals on both surfaces (`cta.test.ts` "says what it always said while working a ticket that has no pieces"; `status.test.ts` "says a project with no breakdown anywhere exactly what it always said", which asserts the **whole line**). Both were mutation-proved.
+- ✅ **PASS** — `status.test.ts`'s *"resolves an initiative's progress the same way for the ticket and the terminal"* resolves one value through `checkoutOf` + `initiativeProgress` (the poll loop's path), feeds it to `ctaFor` once, and requires `ctaComment`'s body and `renderStatus`'s line to carry the same sentence.
+- ✅ **PASS** — the live workspace has **no** `doc/plans/breakdowns/` under any project (`ls -d projects/*/doc/plans/breakdowns` finds nothing) and `node dist/cli.js status --state /tmp/timone-23f.json` exits 0 with its previous output. `md5 .timone/state.json` was `a60127b11fe63418a08b30a737f4aa25` immediately before and after.
+
+### What is wrong in the excerpt
+
+1. **The excerpt's red for the between-chunks case is unreachable.** It says the ticket renders *"add the `timone` label to this ticket"*. It cannot: `reconcileCtas` renders only tickets from `listMarkedTickets`, and a ticket mid-initiative has a last run (`done`), so `ctaFor` never reaches the no-run branch at all. The real red is 23f's — `**This one is finished.**` — and that is the one captured. The excerpt's paragraph reasoning that *"`ctaFor`'s existing answer for a ticket with no run is 'add the `timone` label' … the per-cycle reconciliation would write that lie onto every ticket between every pair of chunks"* is wrong about the mechanism while being right about the harm.
+2. **`{ done, total, next? }` cannot express a re-proposal**, which is the state 23f actually escalated and the only permanent one. Resolved with a fourth field; see decision 1.
+3. **`ProjectConfig.path` is the wrong source for the checkout path** — see decision 3. It would have created the second rule this slice's last checkbox exists to prevent, and it is unavailable for a ledger project the manifest does not list.
+4. **The excerpt says nothing about `timone status`'s closing line**, and the change makes a `done` run answer `waitingOnYou: true` for the first time. That duplicated the ticket in the closing line once per finished piece. Fixed inside the markers (decision 6), but the excerpt would have let it ship.
+
+### ⚠ What the next slice must know
+
+1. **`timone status` still says a project is `idle` between chunks.** `describeProject` lists running, parked and queued runs; a `done` chunk is none of those, so a project mid-initiative shows nothing on its line even though its ticket now says *"piece 2 of 3 is next"*. **This is not a disagreement** — both surfaces answer "nothing needed from you", which is what R21 clause 8 requires — but it is the one place ADR-0028 D4's *"the thread says where the initiative stands"* has no counterpart on the terminal. Changing it means changing which runs `describeProject` lists, which was outside these markers.
+2. **The re-proposal CTA cannot name the file.** `reproposedComment` ends on *"read the list of pieces in `doc/plans/breakdowns/ticket-06.md`"*; the standing line says only *"say here whether to carry on with the longer list"*, because `cta.ts` is pure and learns no path. The two now agree in substance, and the human gets the path from the merge comment directly above. If a later slice wants the path in the standing line, it belongs on `InitiativeProgress` as a value, not as a `join` inside `cta.ts`.
+3. **`reconcileCtas` now reads a breakdown once per listed ticket per cycle**, on top of `successorHeldBack`'s read of the same file for the same ticket. Two `existsSync`+`readFileSync` per marked ticket per minute. Cheap, unmemoized, and deliberately so — a cache would have to be invalidated by a file the daemon does not own. `renderStatus` memoizes per ticket within one render, because it asks up to three times per run.
+4. **`initiativeProgress` and `successionOf` are two readers of one file with two shapes**, and they answer differently on purpose: `successionOf` distinguishes `unlisted` from `unreadable` because the registration guard must never hold back a chore, while `initiativeProgress` collapses both to `undefined` because a ticket whose file cannot be read must say exactly what it said before pieces existed. Merging them would force one of those two behaviours onto the other.
+5. **A breakdown stamped `Awaiting approval` drives the standing call to action as though it were approved** — 23f's note 5, now with a second consumer. `isReproposal` is false for an unapproved list, so a ticket whose pieces nobody has agreed to would read *"piece 2 of 4 is next"*. Still unreachable for the same reason 23f gave, and still unguarded for the same reason.
