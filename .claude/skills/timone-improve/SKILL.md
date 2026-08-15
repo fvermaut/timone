@@ -97,7 +97,7 @@ For each item, one question with **three** answers:
 |---|---|---|
 | **bug fix** | behaviour diverges from the requirement it must satisfy — one left **unchanged** (a REGRESSION arriving from stage 7 defaults here), or one this pass has just **established** by amending intent | plan work → stages 6 → 7 → 8, anchored on that requirement |
 | **refinement** | the requirement is met, the quality is improvable — the delivery Standards axis's native output | plan work, **un-anchored**, protected by the regression set |
-| **plan patch** | an existing plan file is wrong, and a stage-5 amendment can still reach it | stage 5's amendment rules, re-approval semantics included |
+| **plan patch** | an existing plan file is wrong, and a stage-5 amendment can still reach it | stage 5's amendment rules — the dated ✏ marker, and **no re-approval**; see below |
 | **new sub-phase** | scope grows within a phase whose branch is still open | stage 5 amends that phase; the next free letter, dated ✏ marker |
 | **new phase** | scope grows beyond one phase | stage 5 writes a new phase file |
 | **record correction** | a committed **process artifact** misdescribes reality — the system, or what another artifact says — anything under `doc/`, plus `CONTEXT.md` and `STATUS.md` | a docs-only correction **you** make, naming the evidence for it |
@@ -107,7 +107,7 @@ For each item, one question with **three** answers:
 
 **An intent-layer item carries two.** The PRD amendment is implied by the *layer* and is yours to make; the *class* names the follow-on work the amendment requires — and an intent amendment **always** adds a verification pass on top. Put all of it in the Vehicle cell.
 
-**A merged plan file is not patchable.** *Plan patch* presumes a plan a stage-5 amendment can still reach; its re-approval semantics are meaningless on a phase already `Complete` and merged. A factual error in a merged plan file is a **record correction** — and usually not worth making at all, which is a fine thing to recommend.
+**A plan patch re-approves nothing, and a merged plan file is not patchable.** ✏ Revised 2026-08-15 ([ADR-0030](../../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D1) — **a phase file carries no approval on any branch, open or merged**, so amending one voids nothing and asks the human for nothing; do not propose a re-approval round-trip as part of this vehicle. Stage 5's re-approval rule now belongs to the **breakdown** — the committed list of pieces an initiative is built in ([ADR-0028](../../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) D1), not the cut of a phase into slices — so the one patch that does re-gate is one growing an initiative by a **piece**, which makes that list a re-proposal the human approves again. And what makes a merged plan unpatchable is no longer that its stamp has gone stale — there is no stamp — but that *plan patch* presumes a plan a stage-5 amendment can still reach, and merged work has shipped. A factual error in a merged plan file is a **record correction** — and usually not worth making at all, which is a fine thing to recommend.
 
 **Classification decides nothing about priority.** Whether an item is worth doing at all is the human's call, at the gate.
 

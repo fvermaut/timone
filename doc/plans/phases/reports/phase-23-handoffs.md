@@ -649,3 +649,81 @@ Checkboxes:
 3. **`reconcileCtas` now reads a breakdown once per listed ticket per cycle**, on top of `successorHeldBack`'s read of the same file for the same ticket. Two `existsSync`+`readFileSync` per marked ticket per minute. Cheap, unmemoized, and deliberately so — a cache would have to be invalidated by a file the daemon does not own. `renderStatus` memoizes per ticket within one render, because it asks up to three times per run.
 4. **`initiativeProgress` and `successionOf` are two readers of one file with two shapes**, and they answer differently on purpose: `successionOf` distinguishes `unlisted` from `unreadable` because the registration guard must never hold back a chore, while `initiativeProgress` collapses both to `undefined` because a ticket whose file cannot be read must say exactly what it said before pieces existed. Merging them would force one of those two behaviours onto the other.
 5. **A breakdown stamped `Awaiting approval` drives the standing call to action as though it were approved** — 23f's note 5, now with a second consumer. `isReproposal` is false for an unapproved list, so a ticket whose pieces nobody has agreed to would read *"piece 2 of 4 is next"*. Still unreachable for the same reason 23f gave, and still unguarded for the same reason.
+
+## 23h — The register, the narrative, and status
+
+**Built: nothing that runs.** **No behaviour-carrying code is modified in this sub-phase — no file under `src/` is touched — so it declares no seams under test, and its validation is checklist-based.** That is said rather than omitted, per `process.md` stage 5. `git diff --stat -- src/` is empty; the full suite and the type-check are run to prove the record moved and the machine did not.
+
+**Files touched.** `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, `doc/specs/prd/prd-02-inversion-of-control.md`, `STATUS.md`, `process.md`, `.claude/skills/timone-improve/SKILL.md`, and this section. Nothing under `.timone/`, no managed-project checkout, no `src/`.
+
+### R5 and R10 lose their sign-off, and this is the phase that finally does it
+
+Both carried a `verified` stamp describing behaviour that stopped existing when 23b and 23e landed — phase 22 was meant to move them and was cut before it could. Each now reads **`revised`**, with a `> ✏ Revised 2026-08-15` block above the entry and a `dropped from verified … deliberately` marker at the head of its evidence list. **Every existing marker stands and stops counting**, which is [R15](../../../specs/prd/prd-02-inversion-of-control.criteria.md#r15--post-session-guardrail-hooks)'s treatment of 2026-08-14 followed in shape: the revision block above the entry, the drop marker first in the list, the old evidence below it untouched, and a *what must be seen* sentence so a verifier is not left to infer the scope of the re-check.
+
+Two judgements inside them worth the next reader's attention:
+
+1. **R10 keeps the words "terminal state"; the plan excerpt's "settles" would have been wrong.** The excerpt says a queued ticket starts when the active chunk *settles*. [ADR-0029](../../../adr/0029-a-chunk-advances-only-on-success.md) and [R22](../../../specs/prd/prd-02-inversion-of-control.criteria.md#r22--a-ticket-hosts-a-sequence-of-chunks)'s own 2026-08-15 marker distinguish **terminal** — which releases the project, and which a `failed` chunk reaches — from **settled**, which is what lets a ticket open its *next* chunk and which a `failed` chunk does not. Promotion rides the first. Writing "settles" into a normative register would have said that a failed chunk holds its project for ever, which is the opposite of what `TERMINAL` was kept for. The revision block says so explicitly so the swap is not made back.
+2. **R5 gains a second clause for the *absence* of a gate.** The first clause moves the gate onto the breakdown; the second says the phase file is committed, pushed and described on the ticket with **no approval requested for it**. A one-clause revision would have left the retirement unstated and therefore uncheckable — and it is the half a re-reading is most likely to lose. Wording checked against `planningPrompt` as built: it commits **and pushes**, and posts a comment describing the shape of the work, so *"described in a ticket comment"* is what the criterion claims rather than *"referenced"*.
+
+### R22 keeps `draft`, and its clause 5 is contradicted on the record rather than quietly reworded
+
+Two markers were added. The first records that **clauses 3 to 6 now have machinery**, naming the slice each landed in, and states that the earlier marker's *"unbuildable-against rather than failing"* sentence is superseded — kept, not edited, because it is the true record of what phase 22 left, and a verifier reading only it would decline to check four checkable clauses. It also carries forward two limits from 23e and 23f/23g that a verifier would otherwise have to rediscover: the re-proposal and no-breakdown refusals are **prose-enforced only**, and an `Awaiting approval` breakdown would drive succession as though approved (unreachable, unguarded, deliberate).
+
+The second records the departure. **Clause 5's first phrase — *"the merged chunk is marked done in the breakdown"* — describes a mechanism [ADR-0030](../../../adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D4 considered and refused**, not one that was skipped: the file is immutable, doneness is derived from the ledger, progress is reported on the ticket. The behaviour the clause exists for — the next chunk opening, the ticket closing when none remains, with a comment linking every pull request — is unchanged and was built at 23f. So the marker says the clause is checkable as written **apart from that phrase**, tells a verifier not to fail it for a mark that is not in the file, names the replacement wording (*"the merged chunk counts as done from the ledger"*), and says that making the change is **stage 9's**, being an intent amendment. **The clause text itself was left alone.** Rewording it here would have made the register agree with itself about a mechanism nobody chose, and this phase writes no verdicts.
+
+**The status stays `draft`.** Nothing here has been verified by stage 7 and nothing was observed live.
+
+### The four sentences the amendment block granted, and which sense of *breakdown* each meant
+
+[ADR-0028](../../../adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) gave *breakdown* a specific meaning — the committed list of chunks an initiative is built in — and the process documents used it loosely for "the cut into slices" long before that. Each occurrence was read and judged; the word was **not** swept.
+
+| Where | Sense it meant | What was written |
+|---|---|---|
+| [`process.md`](../../../../process.md) stage 9's confirmation gate — *"stage 5's approval still answers 'is this **breakdown** executable?'"* | **Old** — the cut into slices. Its own second half gives it away: *"would let a feedback conversation silently approve **a plan** nobody has read"*, and it governs *"whatever plan work the confirmation dispatches"*. It was written before ADR-0028 existed. | The gate is stated as answering *"is this the right response to the feedback?"* and only that; what stage 5 gates is named as the breakdown **in ADR-0028's sense, said in as many words** (*"the committed list of pieces an initiative is built in, not the cut of one phase into slices"*), answering *"is this the right shape of work?"*; and dispatched work that is a single phase file is said to meet no stage-5 gate, its judgement landing on its pull request. The original's guard survives on its new footing. |
+| `process.md` stage 9's plan-patch vehicle — *"re-approval semantics included"* | **Neither, as written** — the word is absent. The *referent* is the phase file's approval, which is retired; the rule it points at now belongs to the **new** sense. | The amendment rules are named concretely (the dated marker, the next free letter) and re-approval is denied for a phase file, which carries no approval to void. Where the rule went is stated: to the **breakdown**, so a patch growing an initiative by a *piece* re-gates that list. |
+| `process.md` stage 6's completion-report elements — *"a link to the plan with its approval trace"* | **New** — what the report can now link to is the ADR-0028 artifact. | The element becomes a link to the plan **and** to the approved breakdown the piece was agreed in, with an explicit statement required where there is none — the correct state for a chore (D3) and for hand-run work. This is `timone-execute`'s own step 2, which 23e had already corrected, arriving in the spec it is meant to obey. |
+| [`timone-improve`](../../../../.claude/skills/timone-improve/SKILL.md) `:100` and `:110` | **Neither at `:100`** (the row cell, same referent as above); **new** in the replacement text. | The row cell now reads *"the dated ✏ marker, and **no re-approval**; see below"*. `:110`'s paragraph is widened and its **reason reversed rather than trimmed**: it used to say re-approval semantics are meaningless *on a merged phase*, which now distinguishes nothing, since a phase file carries no approval on **any** branch. What makes a merged plan unpatchable is that the work has shipped. Where re-approval went is stated, in the skill's voice, with the one patch that does re-gate named. |
+
+**The trap, concretely.** Sweeping the word would have produced, at `process.md:71`, a sentence asserting that stage 5's gate over the *list of pieces* is what the confirmation gate must not be collapsed into — true by accident, and it would have silently deleted the actual question the old sentence was protecting for dispatched plan work, which has no list of pieces at all. The fix for that occurrence is the only one of the four that had to **say which sense it means**, and it does.
+
+### `STATUS.md` — the count goes down, and says so
+
+The register now holds **twenty-two** entries, of which **fourteen** are verified and **eight** are outstanding, and the file's existing strikethrough convention carries every correction. A paragraph of its own — the plainest language in the file — says the number of kept promises went **down**, from sixteen to fourteen; that nothing broke; which two promises lost their tick and why (*what they promise changed*, both changes his own, on 14 August); that a third is simply new and unchecked; and that the rule *change the wording, lose the sign-off* has now been applied to Timone itself **three times**. A count that quietly went up would have been a lie, and this is the third time this file has had to say so.
+
+A new leading section says what he can do this morning that he could not yesterday — judge the shape of the work before any of it exists, **read** a piece's plan rather than answer it, and file a bug mid-milestone and be looked at in days — with an honest remainder five bullets long, led by *none of this has been watched working*. The 14 August entry's *"Nothing is built yet"* is struck through rather than deleted.
+
+### Validation evidence
+
+| Command | Result |
+|---|---|
+| `grep -n -A4 "^## R5 " …criteria.md` | R5's heading, its new `> ✏ Revised 2026-08-15` block, `- **Priority:** MUST` |
+| `grep -n -A4 "^## R10 " …criteria.md` | R10's heading, its new revision block, `- **Priority:** SHOULD` |
+| `grep -n -A4 "^## R22 " …criteria.md` | R22's heading, its `Added` block, `- **Priority:** MUST` |
+| `grep -c "Status:\*\* verified" …criteria.md` | **14** |
+| `grep -n "entries, of which" STATUS.md` | line 17, the PRD-01 sentence — see the note below |
+| `npm test` | **927 passed, 25 files**, 43.5 s — unchanged from the 23g baseline |
+| `npm run type-check` | **exit 0**, no output |
+| `git diff --stat -- src/` | empty |
+| `git status --porcelain .timone/` | empty |
+
+Checkboxes:
+
+- ✅ **PASS** — R5 and R10 both read `revised` (`- **Status:** revised` at `:94` and `:164`), each with a dated marker naming **phase 23** and stating which words moved: R5's *"the phase file is committed … and gated on approval exactly like R4"* moves onto the breakdown, R10's *"the active run"* becomes *"the active chunk"*.
+- ✅ **PASS** — the fourth command prints **14**, counted from the register. Cross-checked by listing every entry's status: R5, R10, R11, R15, R17, R20, R21, R22 outstanding; fourteen verified; twenty-two entries.
+- ✅ **PASS** — `STATUS.md` says twenty-two entries, fourteen verified, eight outstanding, and says **in words**, in its own paragraph, that the number went down and why.
+- ✅ **PASS** — R22's status is still `draft`. No verdict was written anywhere: nothing in this slice moves any requirement **to** `verified`.
+- ✅ **PASS** — the suite is still green at 927/927 across 25 files, byte-identical to 23g's figure, and the type-check still exits 0. Nothing was left behind by an earlier slice.
+
+### What is wrong in the excerpt
+
+1. **The first three validation commands no longer show the Status line, and that is the register's convention rather than a defect.** `grep -A4` on a heading now prints the revision blockquote R15 established and stops at `- **Priority:**`. The checkbox asking that R5 and R10 both read `revised` is satisfied one line further down; `grep -n -A6` shows it. The command was written before it was known that a `revised` entry gains a block above `Priority`.
+2. **`grep -n "entries, of which" STATUS.md` matches only the PRD-01 sentence at line 17**, because the PRD-02 count is written as *"twenty-two entries, of which fourteen are verified"* inside that same line — one line, both counts, so the command's output is unchanged in shape from before this slice. The assertion is checkable, but `grep -c "twenty-two entries, of which fourteen are verified" STATUS.md` → **1** is the command that actually proves it.
+3. **The excerpt says the file *"currently reads … 'Five are outstanding'"* and treats the correction as one edit.** It is two: the entry count and the verified count sit in one strikethrough chain, the outstanding count in another, and the *explanation* of the drop does not fit inside either without burying it. It was given a paragraph of its own, which is what makes it readable — the excerpt's own instruction that the drop *"must say so"* cannot be met inside a parenthetical.
+4. **The excerpt says R5's criterion *"is what moves"*, singular.** One clause cannot express a gate that moved **and** a gate that was retired; the retirement is the half that goes unchecked if it is not written down. Resolved with two clauses and a verification hint that asks the reader to read the whole thread between the breakdown's approval and the pull request.
+
+### What the live gate (23i) must know
+
+1. **Two requirements are now `revised` and one is `draft` with machinery, so the live gate is evidence for a verifier, not a verdict.** Nothing in this phase may flip anything to `verified`; that is stage 7's, and 23i's job is to produce something a stage-7 pass can read. R5's and R10's *"what must be seen"* sentences are written to be the gate's shopping list — the breakdown's gate round-trip both directions, a phase file with no gate on it anywhere in the thread, and a marked ticket starting in the window between two chunks.
+2. **R22's clause 5 will look like a failure and is not.** Nothing marks a chunk done in the breakdown file, by [ADR-0030](../../../adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D4. The marker says so; quote it rather than filing a defect.
+3. **`STATUS.md` claims nothing was observed live.** If 23i observes any of it, that claim is the sentence that must move, and it is in the new section's honest remainder — first bullet.
+4. **The stale "Waiting on you" item was left alone, deliberately.** `STATUS.md`'s first *Waiting on you* bullet still asks fvermaut to settle whether a finished list of questions should become the thing that gets built. He settled it on 2026-08-14 — the entry recording the settlement is 30 lines above it in the same file. It is outside this slice's stated scope for `STATUS.md` and predates this phase, so it was reported rather than edited. **It asks him to decide something already decided, and whoever next writes that section should strike it.**
