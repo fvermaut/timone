@@ -52,6 +52,14 @@ A specification is broken into pieces once, you approve that once, and then you 
 - **[Phase 21](phase-21.md) is still `Awaiting approval` and is independent of this one.** It shares no files: its only code slice is 21b's register and `STATUS.md` edits, which touch different requirement entries (R15) than 23h does (R5, R10, R22). If both land, whichever runs second re-reads the count rather than assuming it.
 - **A flake was seen once and not reproduced** ([phase 22's report](reports/phase-22-complete.md)): one full-suite run in eight returned a single failure. The suite's only wall-clock-sensitive tests are the real-`git` ones in `guardrails.test.ts`. A single red run that goes green on re-run is a note in the handoff, not a slice failure — a second red run at the same test is.
 
+> **✏ Refined 2026-08-15 — a latent suite flake was diagnosed during 23b and fixed at the root, outside any slice's grant.**
+>
+> `guardrails.test.ts`'s *"resolves the session id against the ledger"* began failing on every full run once 23b added twenty tests, while passing alone. It is not a logic break: a class of tests here drives **real git** on purpose — building actual repositories and shelling out a dozen times per case, because the rules they check are rules about git and a fake would prove nothing — and vitest's 5s default is not sized for it under a parallel run.
+>
+> **This is the flake [phase 22's completion report](reports/phase-22-complete.md) recorded as "seen once and not reproduced", one run in eight with its name lost to a `tail`.** 23b's added load turned it deterministic, which is how it was finally identified.
+>
+> **[MODIFY]** `vitest.config.ts` — `testTimeout: 20_000`, with the reasoning in place. Granted to no slice and taken as orchestrator-level repository maintenance, because a red suite makes every later slice unable to tell its own breakage from inherited breakage. Verified by three consecutive full runs at 891 green. Nothing in production waits on git for five seconds; this admits a real-git fixture is I/O bound and gives it room.
+
 ## Sub-phases
 
 ### 23a — The breakdown artifact
