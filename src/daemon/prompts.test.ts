@@ -331,6 +331,31 @@ describe("takeoverPrompt", () => {
   });
 });
 
+describe("the planning prompt", () => {
+  const prompt = stagePrompt("planning", {
+    ...context,
+    branch: "timone/6-typing-in-the-box",
+  });
+
+  it("writes the phase file as an artifact, and nothing waits on it", () => {
+    // ✏ ADR-0030 D1: `planning` stopped gating. What the human approved is the
+    // list of pieces; this is the plan for one of them. Asserted as an absence
+    // because the failure it guards is a prompt that still stamps a file for an
+    // approval nobody will ever be asked for — the run would not park, it would
+    // build against a file claiming it was not allowed to be built.
+    expect(prompt).not.toMatch(/awaiting approval/i);
+    expect(prompt).not.toMatch(/approval request|ask them to approve/i);
+  });
+
+  it("still commits the phase file and pushes it", () => {
+    // The other half, in the same block: a plan that is committed and not
+    // pushed is one the session that builds it cannot read, and this is the
+    // stage where dropping the push would look like tidying.
+    expect(prompt).toMatch(/commit the phase file/i);
+    expect(prompt).toMatch(/push it/i);
+  });
+});
+
 describe("the execution prompt", () => {
   const prompt = stagePrompt("execution", {
     ...context,
@@ -342,11 +367,17 @@ describe("the execution prompt", () => {
     expect(prompt).toMatch(/never a new one/i);
   });
 
-  it("leaves the entry gate to the artifact, never asserting approval", () => {
-    // The stamp is the authority (ADR-0014): the prompt names what to check,
-    // and must not itself claim the check has passed.
-    expect(prompt).toContain("Approved for execution");
-    expect(prompt).not.toMatch(/plan (is|was|has been) approved/i);
+  it("does not make the phase file's stamp the permission to build, but still flips it at the close", () => {
+    // ✏ ADR-0030 D1: what was agreed is the list of pieces, not the phase file,
+    // so nothing here may refuse to build over a `Status:` line — every chunk's
+    // phase file is unstamped by construction and execution would refuse all of
+    // them. **Both halves are asserted in one test on purpose**: they live four
+    // lines apart in the prompt, and the closing flip is what `session.ts` reads
+    // with `/^Complete\b/` to judge whether the run succeeded. Delete it with
+    // the entry gate and every chunk fails its own outcome check, silently.
+    expect(prompt).not.toMatch(/authority on whether you may/i);
+    expect(prompt).not.toContain("Approved for execution");
+    expect(prompt).toContain("Complete — see <report>");
   });
 
   it("carries both outcome markers, verbatim", () => {
@@ -546,6 +577,24 @@ describe("the approval-recording prompt", () => {
     const prompt = approvalRecordPrompt(approval, context);
 
     expect(prompt).toContain("git -C projects/scratch-app");
+  });
+
+  it("has no record to write for a phase file, and falls back harmlessly", () => {
+    // ✏ ADR-0030 D1 took `planning`'s row out of `APPROVAL_RECORD`: no approval
+    // is ever recorded for a stage that never opens a gate, so this call is
+    // unreachable in practice. It is asserted rather than assumed because
+    // `APPROVAL_RECORD` is a `Partial` record — a missing row is not a type
+    // error and not a build failure — and what a caller reaching it would get
+    // is the generic wording, not a prompt telling a session to forge stage 5's
+    // retired stamp onto a phase file.
+    const prompt = approvalRecordPrompt(
+      { stage: "planning", by: "fvermaut", at: "2026-08-15" },
+      { ...context, branch: "timone/6-typing-in-the-box" },
+    );
+
+    expect(prompt).not.toContain("Approved for execution");
+    expect(prompt).toContain("the artifact this stage produced");
+    expect(prompt).toContain("record the approval");
   });
 
   it("tells the breakdown's stamp to carry the count of pieces", () => {

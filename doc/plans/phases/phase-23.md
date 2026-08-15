@@ -358,6 +358,15 @@ node dist/cli.js status --state /tmp/timone-23f.json
 - [ ] One test feeds a single state to `ctaFor` via both `status.ts`'s path and `poll.ts`'s and asserts the two agree — R21 clause 8, asserted rather than intended
 - [ ] `node dist/cli.js status` still runs against a ledger whose projects have no `doc/plans/breakdowns/` directory at all
 
+> **✏ Refined 2026-08-15 — 23h gains four sentences 23e left contradicting, found by that slice and outside every marker in the phase.**
+>
+> Retiring the phase file's entry gate left four places still describing it, each in a file 23e was not granted. They are documentation, they carry no behaviour, and 23h is the phase's documentation slice, so they land there rather than in a slice of their own.
+>
+> **[MODIFY]** [`process.md`](../../../process.md) — stage 9's confirmation gate (`:71`) still asserts that stage 5's approval asks *"is this breakdown executable?"*, using **breakdown** in its pre-[ADR-0028](../../adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) sense of "the cut into slices", which now names a different artifact entirely; the plan-patch vehicle (`:63`) promises "re-approval semantics" for a plan that no longer has an approval to re-take; and stage 6's completion-report element still requires *"a link to the plan with its approval trace"*, a trace a phase file no longer carries.
+> **[MODIFY]** [`.claude/skills/timone-improve/SKILL.md`](../../../.claude/skills/timone-improve/SKILL.md) (`:100`, `:110`) — the same re-approval promise, in that skill's voice.
+>
+> **The word *breakdown* is the trap here.** [ADR-0028](../../adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) gave it a specific meaning — the committed list of chunks an initiative is built in — but the process documents used it loosely for "the cut into slices" long before that. 23h must read each occurrence and decide which sense was meant, not sweep the word.
+
 ### 23h — The register, the narrative, and status
 
 **[MODIFY]** [`doc/specs/prd/prd-02-inversion-of-control.criteria.md`](../../specs/prd/prd-02-inversion-of-control.criteria.md):

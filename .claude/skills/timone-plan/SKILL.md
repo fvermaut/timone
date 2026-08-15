@@ -21,7 +21,7 @@ Your output is stage 6's only input, so the phase file's quality ceiling is the 
 
 ## Input
 
-A PRD reference, a set of requirement IDs, a triage record path, or a free-form description of the work. Whatever the form, it names *scope* — never a breakdown. If the input already dictates sub-phases, treat it as a suggestion and re-derive the cut yourself; the slicing rules below are not negotiable by the requester.
+A PRD reference, a set of requirement IDs, a triage record path, or a free-form description of the work. Whatever the form, it names *scope* — never the cut itself. If the input already dictates sub-phases, treat it as a suggestion and re-derive the cut yourself; the slicing rules below are not negotiable by the requester.
 
 ## Read before you plan
 
@@ -57,7 +57,7 @@ Never invent requirement IDs, and never write a feature phase whose requirements
 
 You often cannot tell what the work implies until you have sketched the cut, so **drafting is allowed before the gates clear — writing is not.** Sketch as far as you need to see the decisions the work forces, then re-check this gate against what the sketch surfaced. What the gate forbids is the *artifact*: no phase file on disk, and no decision resolved inside one. **These are the entry gates, and they are the exception to [ADR-0014](../../../doc/adr/0014-artifact-first-gates.md), not a contradiction of it:** a stage doing its work writes the file first and gates on it, but a stage that has correctly declined to do the work writes nothing.
 
-**The un-anchored exception, and its limit.** Two kinds of work proceed **un-anchored**, with an explicit stamp in the Requirements section naming what it delivers and why it isn't PRD-bound. The stamp needs human agreement, sought at the same gate as the breakdown itself (workflow step 4), so for both the anchoring gate defers rather than terminates.
+**The un-anchored exception, and its limit.** Two kinds of work proceed **un-anchored**, with an explicit stamp in the Requirements section naming what it delivers and why it isn't PRD-bound. ✏ Revised 2026-08-15 ([ADR-0030](../../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D3) — **you write that stamp; you do not negotiate it.** It used to need human agreement sought at this stage's gate, and there is no longer such a moment: a chore reaches planning ungated and meets nothing that stops for an answer before its pull request. So write the stamp, make it good enough to be argued with, and let the argument happen where it now happens — on the pull request, with the code in front of them. The anchoring gate therefore defers rather than terminates for both.
 
 - **Chore / technical-enabler work** — what triage routes here.
 - **Refinement work dispatched by stage 9** — the delivery Standards axis's native output, which `process.md` stage 9 makes explicitly un-anchored: *"riding as un-anchored work protected by the regression set"*. It arrives from a feedback record, not a triage record, and its class is `refinement`, not `chore` — do not turn it away for failing to be a chore.
@@ -67,6 +67,29 @@ You often cannot tell what the work implies until you have sketched the cut, so 
 **A phase may be narrower than the dispatch that produced it.** When the human bounds the work to fewer items than stage 9 confirmed, carry the survivors into the phase file as an explicit queued-items table naming what is *not* being done and why. Narrowing silently leaves stage 8 reviewing against a scope no artifact records.
 
 Triage having routed a chore here **does not pre-clear the ADR gate**. Triage classifies the request's kind; it has no view on whether a decision is owed. Chores are the *most* likely stage-5 input to trip the ADR gate, because a technical enabler is by definition a change of technical direction — a stack adoption, a framework swap, a migration. Check it as carefully here as anywhere.
+
+## The breakdown — the one thing a human approves here
+
+Stage 5 produces two artifacts, and only the first of them is put in front of a human ([ADR-0030](../../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D1). This is a different kind of gate from the two above: those are entry refusals that stop the skill, this one is the closing approval the stage exists to obtain.
+
+**The breakdown is the list of pieces an initiative will be built in — and nothing else.** No slices, no seams, no validation steps: one piece is one pull request's worth of work, a change somebody can review in a sitting that leaves the project working when it lands. Order the pieces so each can be built and merged needing only what is above it, and prefer few real pieces to many small ones — every piece costs a review. It lives at `doc/plans/breakdowns/ticket-NN.md` (zero-padded to two digits) on the ticket's own branch, is written **once per initiative**, before any phase file, and is read by machine as well as by a person:
+
+```markdown
+# Breakdown
+
+**Status:** Awaiting approval
+
+1. **<what the piece is called>** — <one line of what it delivers>
+2. **<the next piece>** — <one line of what it delivers>
+```
+
+**The stamp carries the count, and the count is not decoration.** On approval the line becomes `Approved by <who> <date> — N pieces`, N being how many the numbered list beneath it holds. That number is the whole of how a list which has *grown* since the approval is recognised — a re-proposal carrying a piece the human has never seen, which stage 6 refuses to build. A stamp written in any other shape reads back as malformed, and a malformed breakdown is indistinguishable from having no breakdown at all.
+
+**This is the gate; the phase file is not.** [ADR-0014](../../../doc/adr/0014-artifact-first-gates.md) is unchanged in substance — the artifact is written first and the gate is taken against the committed file, exactly as before. Only which document is in front of the human moved. Each approved piece then gets a phase file of its own, one at a time, written ungated and judged on its pull request.
+
+**Immutable after approval** (D4): the file the human approved is the file that stays. Nothing ticks it as pieces land — which piece is next is derived from how many have been built, and progress is reported on the ticket. A session that finds itself wanting to edit an approved breakdown is re-opening that decision, not filling in a detail.
+
+**Two shapes of work have no breakdown, by design.** A chore or technical enabler triage routes here goes straight to a phase file and meets no gate before its pull request (D3). Hand-run work with no driving ticket has no ticket to hang a breakdown on. Neither absence is a gap to fill.
 
 ## Cutting the phase
 
@@ -104,8 +127,8 @@ List `projects/<name>/doc/plans/phases/`, take the highest existing `NN`, use th
 ````markdown
 # Phase NN: <Theme> — <the concrete deliverables>
 
-> **Status:** Awaiting approval.
-<You write this state — the artifact comes first and the gate is taken against it ([ADR-0014](../../../doc/adr/0014-artifact-first-gates.md)). It becomes `Approved for execution by <who> <date>` once the human has approved the committed file, and that flip is the written trace of the gate. The line has a fourth state, `Complete — see [reports/phase-NN-complete.md](…)`, stamped at phase close by stage 6; leave it to them.>
+> **Status:** Planned.
+<You write this state, and it is the only one you write. ✏ Revised 2026-08-15 ([ADR-0030](../../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D1) — the line is a **lifecycle marker, not a gate trace**: nobody approves a phase file, so it never reads `Awaiting approval` and never carries an approval stamp. It has one further state, `Complete — see [reports/phase-NN-complete.md](…)`, stamped at phase close by stage 6; leave it to them.>
 
 > **Companion phases:** <links to related phase files, each with a one-clause statement of the relationship — what it left behind, or which files it shares.> Governing decisions: <ADR links, each with the reason it binds *this* phase — not a bare citation.>
 <State the absence of either half rather than dropping it — "First phase of the project — no companion phases." still followed by the governing decisions, if any bind. An absent line reads as an oversight; a stated absence reads as checked.>
@@ -179,14 +202,14 @@ Two related traps. A probe that names an API in order to forbid it seeds that st
 
 1. Resolve the target project, then read the artifacts listed above.
 2. Check the anchoring gate, then the ADR gate. If either fires, stop, route, and write nothing. Sketching the cut to inform the ADR check is allowed here; producing a file is not.
-3. Cut the phase and draft the breakdown.
-4. Write `projects/<name>/doc/plans/phases/phase-NN.md`, stamping `> **Status:** Awaiting approval.` — **the artifact comes first, and the gate is taken against it** ([ADR-0014](../../../doc/adr/0014-artifact-first-gates.md)). The human judges the real file, with its seams and its validation blocks, rather than a summary of a plan that does not exist yet. This does **not** loosen the two gates above: a stage that has correctly declined still writes nothing at all.
-5. Commit and push it in the target project (`docs: plan phase NN — <theme>`). The phase file is a process artifact under `doc/` — the only kind of file this skill may cause to be committed; never touch anything outside `doc/…` in the client repo. Committed and pushed are not the same claim, and an unpushed plan is invisible to the person who has to approve it.
-6. **Ask for approval against the committed file, and iterate until it is approved.** Lead with what a reader needs to judge the cut — each slice's deliverable, its dependencies, its seams, plus the un-anchored stamp when it applies — and link the file rather than pasting it. Where the work is daemon-driven the approval arrives as a ticket reply (ADR-0012); in a hand-run session it is the conversation itself. **A change request rewrites the file in place**, keeping its `Awaiting approval` stamp. On approval, flip the stamp to `Approved for execution by <who> <date>` and commit that flip: stage 6 refuses to start without it, so a plan approved only in conversation is a plan nothing can execute.
+3. Cut the phase into slices.
+4. Write `projects/<name>/doc/plans/phases/phase-NN.md`, stamping `> **Status:** Planned.` The file is an artifact, not a proposal: nobody approves it and nothing waits on it ([ADR-0030](../../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D1). This does **not** loosen the two gates above: a stage that has correctly declined still writes nothing at all.
+5. Commit and push it in the target project (`docs: plan phase NN — <theme>`). The phase file is a process artifact under `doc/` — the only kind of file this skill may cause to be committed; never touch anything outside `doc/…` in the client repo. Committed and pushed are not the same claim, and an unpushed plan is invisible to the session that has to build it.
+6. **Say what you cut, and ask for nothing.** Lead with what a reader needs to follow the cut — each slice's deliverable, its dependencies, its seams, plus the un-anchored stamp when it applies — and link the file rather than pasting it. **Do not ask them to approve it.** What they agreed to was the breakdown, and the judgement this piece still owes them lands on its pull request; asking again here is a gate the process deliberately gave up. Where the work is daemon-driven the building starts straight after you — say so; in a hand-run session, say so and stop.
 
-## Amending an approved plan
+## Amending a committed plan
 
-Per the spec's amendment rule (stage 5), plans are amended in place, never silently rewritten. Mark every change made after approval with a dated marker, so execution can see what moved:
+Per the spec's amendment rule (stage 5), plans are amended in place, never silently rewritten. Mark every change made after the file was committed with a dated marker, so execution can see what moved:
 
 > ✏ Refined <date>: <what changed and why.>
 

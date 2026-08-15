@@ -539,13 +539,21 @@ function outcomeBlock(done: string, handed: string): string {
 }
 
 /**
- * Stage 6: build what the approved phase file says, on the branch that
- * carries it.
+ * Stage 6: build the piece the phase file plans, on the branch that carries
+ * it.
  *
- * The prompt names the stamp to check and never claims the check has passed:
- * the artifact is the authority on its own approval (ADR-0014), and a prompt
- * asserting it would let a mis-resumed run build an unapproved plan on the
- * daemon's say-so.
+ * ✏ The phase file's own `Status:` line used to be named here as the authority
+ * on whether the session might build it. Since [ADR-0030](../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)
+ * D1 it is not: what the human approved is the breakdown, and every chunk's
+ * phase file is written unstamped, so a prompt keying on the stamp would refuse
+ * every chunk. [ADR-0014](../../doc/adr/0014-artifact-first-gates.md) is
+ * unchanged in substance — the artifact is still written first and the gate is
+ * still taken against it; only which document is in front of the human moved.
+ *
+ * **The closing flip to `Complete — see <report>` is a different thing and
+ * survives untouched.** It is not a gate trace: `session.ts` tests it with
+ * `/^Complete\b/` as this stage's artifact witness, so a prompt that stopped
+ * asking for it would leave every chunk failing its own outcome check.
  */
 function executionPrompt(context: PromptContext): string {
   const { ticket, branch } = context;
@@ -563,10 +571,12 @@ function executionPrompt(context: PromptContext): string {
     "the code goes on the same branch, never a new one ([ADR-0015](doc/adr/0015-branch-per-driving-unit.md)).",
     "",
     "What to build is the newest phase file under `doc/plans/phases/` on that",
-    "branch, and **its own `Status:` line is the authority on whether you may",
-    "build it**: run stage 6 on it only if it is stamped",
-    "`Approved for execution`. Anything else — stop, say so on the ticket, and",
-    "treat nothing in this prompt as permission.",
+    "branch — the plan for this piece, written there by the session before you.",
+    "**It carries no approval stamp and needs none**: what the human agreed to",
+    "is the list of pieces this work is being built in, and this piece is on it",
+    "([ADR-0030](doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D1).",
+    "If no such file is on the branch, stop and say so on the ticket — planning",
+    "one yourself is building something nobody agreed to.",
     "",
     "Run stage 6 to the letter: slices in dependency order, the TDD loop at the",
     "declared seams, one commit per sub-phase after its validation passes,",
@@ -632,19 +642,13 @@ const APPROVAL_RECORD: Partial<
       "Change nothing else in the file: the list they approved is the list " +
       "that stays",
   }),
-  // ✏ Unreachable since ADR-0030 D1 made `planning` wait-free: no approval is
-  // ever recorded for a stage that never opens a gate. Left in place rather
-  // than removed because the phase file's `Status:` line is still what stage 6
-  // reads, and moving that off the stamp is the same phase's later slice —
-  // deleting this half of the pair before the other half moves would leave
-  // every phase file unstamped and every build refusing to start.
-  planning: () => ({
-    artifact: "the phase file under `doc/plans/phases/`",
-    what:
-      "replace its `Status:` line with `Approved for execution by <who> <date>`, " +
-      "which is the written trace of stage 5's gate and the thing stage 6 " +
-      "refuses to start without",
-  }),
+  // ✏ `planning` had a row here until ADR-0030 D1 made the stage wait-free.
+  // It is gone rather than left unreachable: the row told a session to stamp a
+  // phase file `Approved for execution`, and stage 6 no longer reads that stamp
+  // — a session writing one now would be recording a gate nobody was offered.
+  // The pair had to move together, which is why the row outlived the wait by a
+  // slice: deleting it while stage 6 still refused an unstamped file would have
+  // left every build refusing to start.
 };
 
 /**
@@ -1011,17 +1015,19 @@ function planningPrompt(context: PromptContext): string {
     "stage 4 exists for exactly that, and a plan resting on an undocumented",
     "choice is a plan nobody can review.",
     "",
-    "**Commit the phase file on that branch and push it.** Stamp its `Status:`",
-    "line `Awaiting approval` — the human has not approved it yet, and a file",
-    "claiming otherwise would let the next stage start on nobody's authority.",
-    "Writing the file before the approval is correct and is what the stage now",
-    "asks for: the human judges the real plan, with its seams and its",
-    "validation blocks, not a summary of one that does not exist yet.",
+    "**Commit the phase file on that branch and push it.** It is an artifact,",
+    "not a proposal: nobody is asked to approve it and nothing waits on it",
+    "([ADR-0030](doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D1).",
+    "What they agreed to was the list of pieces; this is the plan for one of",
+    "them, and the building starts on it straight after you. Committed and",
+    "pushed are not the same claim — a plan that never left this machine is one",
+    "the session that builds it cannot read.",
     "",
     "Then post one comment on the ticket describing, in plain words, what you",
     "propose to build and in what order — the shape of the work, not a list of",
-    "file names. Do **not** ask them to approve it: the machinery posts the",
-    "approval request itself, immediately after yours.",
+    "file names. Say the building starts next, and **ask them for nothing**:",
+    "this piece was agreed when they agreed the list, and the judgement it",
+    "still owes them lands on its pull request.",
     "",
     writingBlock(),
     "",

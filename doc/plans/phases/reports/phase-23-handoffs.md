@@ -351,3 +351,112 @@ Checkboxes:
 2. **A chunk-zero merge leaves the checkout on the default branch.** `mergeIntoDefault` does not restore the branch it was on, on either path. Nothing downstream cares today — `claimBranch` checks the run's branch out for the next stage — but a slice that starts reading the checkout's `currentBranch` after an approval should know.
 3. **`runGit`'s error text now prefers stdout when stderr is empty.** Any test asserting on a git failure message from any caller in `git.ts` is reading a slightly better string than before.
 4. **23b's note 3 is closed; its notes 5 and 6 are not.** Nothing still reads a breakdown off disk in `src/` (23f), and `process.md` stage 5/6 plus `timone-execute` gate 1 still describe the old stamp-gated phase file (23e).
+
+## 23e — A phase file gates nothing
+
+**Built.** The per-chunk phase file stopped being a gate and became an artifact. Nobody is asked to approve one, nothing refuses to build without a stamp on one, and no prompt writes a stamp for an approval the machinery will never request. 23b's note 6 and 23d's note 4 are closed. **The exit stamp is untouched:** `session.ts:919`'s `/^Complete\b/` is byte-identical to `HEAD` and still judged live by a mutation probe (below).
+
+**Files touched.** `src/daemon/prompts.ts`, `process.md`, `.claude/skills/timone-plan/SKILL.md`, `.claude/skills/timone-execute/SKILL.md`; tests in `src/daemon/prompts.test.ts` and `src/daemon/session.test.ts`. **`src/daemon/session.ts` was not modified** — `git diff --stat src/daemon/session.ts` is empty.
+
+### The distinction this slice turns on, restated where the next reader will look
+
+**Only the *entry* gate was retired. The phase file keeps its `Status` line and keeps its final state.** `session.ts:919` tests the newest phase file's `Status:` line with `/^Complete\b/` as execution's artifact witness, and `executionPrompt`'s closing instruction to flip the line to `Complete — see <report>` is what makes that line exist. Both survive verbatim, and the test that asserts the retirement asserts the survival **in the same case**, four lines apart in the prompt, because that is exactly where too much gets deleted. What went is the birth stamp (`Awaiting approval`), the approval stamp (`Approved for execution by <who> <date>`), and every sentence making either a precondition for building.
+
+### The pair 23b deferred, landed together
+
+`planningPrompt`'s `Awaiting approval` instruction and `APPROVAL_RECORD`'s `planning` row are gone **in the same commit as `timone-execute`'s gate 1**, which is the order 23b's decision 3 named: removing either half first would have left every phase file unstamped and every build refusing to start.
+
+- **`planningPrompt`** now says the phase file is *"an artifact, not a proposal: nobody is asked to approve it and nothing waits on it"*, still commits **and pushes** it, and closes with *"ask them for nothing"* instead of *"the machinery posts the approval request itself"* — a sentence that had become false the moment 23b made `planning` wait-free, and the same class of defect as 23b's decision 4.
+- **`executionPrompt`** stops calling the phase file's `Status:` line *"the authority on whether you may build it"*. It keeps a refusal, but a different one: **no phase file on the branch at all** stops the session, because *"planning one yourself is building something nobody agreed to."*
+- **`APPROVAL_RECORD.planning` is deleted, not left unreachable.** A comment stands where the row was saying why the pair had to move together.
+
+**The prompt no longer instructs a birth stamp of any kind, deliberately.** `> **Status:** Planned.` lives in `timone-plan`'s template, where the document layout belongs (`process.md` stage 5: *"the document layout … belongs to the plan skill, not to this spec"*). Nothing machine-read depends on the line before phase close, and re-adding a stamp instruction to the prompt is how the retired one would grow back.
+
+### `timone-execute` gate 1, in full
+
+Renamed **1 — Agreement gate**. It keys on the breakdown, keeps both routing destinations, and — the part the excerpt does not name — **says what happens when there is no breakdown at all**, which is not an edge case but two whole classes of work:
+
+> **1 — Agreement gate.** ✏ Revised 2026-08-15 ([ADR-0030] D1). **What execution refuses to start without is agreement, and what carries agreement is the breakdown — the list of pieces an initiative is being built in, at `doc/plans/breakdowns/ticket-NN.md` — not the phase file.** So for ticket-driven work: read that file, and build only when its `Status` line reads `Approved by <who> <date> — N pieces` **and** the piece this phase plans is one the list names. A breakdown still stamped `Awaiting approval` is not executable; neither is an approved one whose numbered list has since grown past the count in its own stamp, because the piece you were handed may be one nobody has seen. Route to the **human** when no breakdown was ever approved — re-planning cannot manufacture a missing approval — and to **`timone-plan`** when a re-proposal is what left the approval stale. Never execute "just the pieces that were approved" out of a list under re-proposal.
+>
+> **Two shapes of work have no breakdown by design, and their gate is not this one.** A chore or technical enabler triage routed to planning meets no gate before its pull request ([ADR-0030] D3), and hand-run work with no driving ticket was agreed by the human who invoked you. Both build; neither is refused for an absent breakdown. What still refuses is an initiative that *has* a driving ticket and no approved breakdown — there the absence means stage 5's gate never closed, and that routes to the human.
+>
+> **The phase file's `Status` line is not this gate and no longer stands in for it.** It is a lifecycle marker: stage 5 writes it `Planned`, and the only state this stage writes on it is `Complete — see <report>` at phase close. **A phase file carrying no approval stamp is the normal state, not a refusal** — every piece's plan is written that way — so never read one as permission, never treat a stamp left on an older file as this gate's answer, and never stamp a file yourself.
+
+**The second paragraph is a correction to the excerpt, not an embellishment.** Gate 1 keyed purely on "the chunk is listed in an `Approved` breakdown" would refuse **every chore** — ADR-0030 D3 routes a chore triage → planning → execution and it never sees a breakdown — reintroducing the *"execution would refuse every chunk"* bug the slice exists to fix, in a new costume. It would also refuse every hand-run phase, Timone's own included.
+
+### The un-anchored stamp: where the agreement went
+
+`process.md` stage 5 said the un-anchored stamp needs *"human agreement"*, and `timone-plan` said it was *"sought at the same gate as the breakdown itself"* — a moment that does not occur, since D3 routes a chore straight to planning, ungated. Resolved consistently with D3: **the agreement moves to the pull request.** The exact new wording, in `process.md`:
+
+> **PRD anchoring:** feature phases list the requirement IDs they deliver; technical/enabler phases are explicitly stamped un-anchored, naming what they deliver and why they are not PRD-bound. ✏ Revised 2026-08-15 ([ADR-0030] D3) — **that stamp is written, not agreed in advance.** It used to need human agreement sought at this stage's gate; a chore reaches planning ungated and meets nothing that stops for an answer before its pull request, so there is no longer a moment at which that agreement could be collected. The judgement moves to the pull request, where the stamp sits in front of the human alongside the code it justifies.
+
+and in `timone-plan`:
+
+> ✏ Revised 2026-08-15 ([ADR-0030] D3) — **you write that stamp; you do not negotiate it.** It used to need human agreement sought at this stage's gate, and there is no longer such a moment: a chore reaches planning ungated and meets nothing that stops for an answer before its pull request. So write the stamp, make it good enough to be argued with, and let the argument happen where it now happens — on the pull request, with the code in front of them.
+
+### The three sentences 23c left disagreeing, now agreeing
+
+All three of `process.md` stage 5's row, stage 5's Status-lifecycle text and stage 6's Entry gate now say the same thing: **the breakdown is what is approved, the phase file gates nothing, and the phase file's `Status` line is a lifecycle marker whose only stage-6 state is `Complete — see <report>`.** Stage 5 additionally gained a definition of the breakdown artifact, because the table row now names `doc/plans/breakdowns/ticket-NN.md` and a spec that names a path it never defines is worse than one that omits it.
+
+Two further sentences in the same paragraphs had to move with them or they would have contradicted the revision inside one line:
+
+- **Stage 5 `Amendments`** — *"an approved plan is amended in place … every change made after approval"* → *"a committed plan … every change made after it was committed"*. There is no approval to date changes from.
+- **Stage 5 `Re-approval`** — the whole rule reverted a file to `Awaiting approval`, resurrecting the retired stamp. Recast: a phase file carries no approval, so an amendment voids nothing; what *can* go stale is the breakdown, and a list that gained a piece since its stamp is a re-proposal the human must approve again.
+
+### Decisions taken inside the slice
+
+1. **The phase file's birth state is `Planned`.** The plan says the file *keeps* a `Status` line, so it needs a state at birth; `Awaiting approval` is retired and a bare or absent line would make the `Complete` flip look like an invention. `Planned` says what is true and cannot be confused with a gate. Two states now: `Planned` → `Complete — see <report>`.
+2. **`session.test.ts` was edited, and it is in no slice's grant in this phase.** Two of its tests asserted the retired instructions and the excerpt's own validation command runs the file, so it had to move. This is 23b's note 1 arriving from a second direction — **add `session.test.ts` to the file markers of any slice touching `prompts.ts`'s stage prompts or `APPROVAL_RECORD`.**
+3. **The `recording an approval in the artifact` block was re-pointed from `planning` to `breakdown`**, with `mergeProbe` stubbed. `planning` opens no gate and has no `APPROVAL_RECORD` row, so a run parked on a planning gate is a state the pipeline can no longer reach — the block was testing `recordApproval`'s mechanism through a door that no longer exists. `breakdown → planning` is the graph-correct pair; the stub keeps the block about the record rather than about 23d's merge, which has its own block.
+4. **The word *breakdown* had two meanings inside `timone-plan` and one of them was struck.** The skill used it in the old sense — the cut into sub-phases — in its Input section and its workflow step 3. Both were reworded ("the cut itself", "cut the phase into slices"), because ADR-0028 gave the word a specific artifact and a skill using it both ways teaches the wrong one.
+5. **The breakdown section is titled *"the one thing a human approves here"*, not *"this stage's one gate"*.** The skill already has a section called "The two gates" meaning entry refusals; a second heading calling something "the gate" would have made three gates of two kinds. The section says which kind it is in its first paragraph.
+
+### Validation evidence
+
+Baseline: **897 tests / 25 files**, `npm run type-check` exit 0.
+
+| Case (as the excerpt declares it) | Red — the failure actually seen | Green |
+|---|---|---|
+| Planning writes an artifact, not a gate | `AssertionError: expected 'Plan the work for ticket #6 …' not to match /awaiting approval/i` | ✅ |
+| …and it still commits **and pushes** the phase file | Green on arrival. **Mutation probe**: dropped `and push it` from the prompt → `expected '…' to match /push it/i`. Reverted. | ✅ |
+| Execution does not consult the stamp for permission | `AssertionError: expected 'Build what was planned for ticket #6 …' not to match /authority on whether you may/i` | ✅ |
+| …and the `Complete` flip instruction is still present (same test) | asserted alongside the above, `toContain("Complete — see <report>")` | ✅ |
+| No approval record exists for a phase file | `AssertionError: expected '**Every commit you make in this sessi…' not to contain 'Approved for execution'` | ✅ |
+| **The exit stamp still works** (not an excerpt case — checkbox 2, proven rather than remembered) | **Mutation probe**: `/^Complete\b/` → `/^Xomplete\b/` in `session.ts:919` → *"advances to verification when the plan flipped and the session said done"* failed with `expected 1 to be greater than or equal to 2` — the run never reached the verification session. Reverted; `git diff --stat src/daemon/session.ts` is empty. | ✅ |
+
+**The skill and `process.md` edits carry no behaviour and are validated by checklist**, as the excerpt states — nothing in `src/` reads either file.
+
+Excerpt's validation commands, run at the end:
+
+- `npm test -- src/daemon/prompts.test.ts src/daemon/session.test.ts` → **249 passed (2 files)**.
+- `npm run type-check` → **exit 0**, no output.
+- `npm test` → **900 passed, 25 files**, 49.1 s (was 897 / 25).
+- `grep -n "Approved for execution" .claude/skills/timone-execute/SKILL.md .claude/skills/timone-plan/SKILL.md process.md` → **no output, exit 1**. Not one surviving hit in any of the three, historical or otherwise.
+- `grep -rn "breakdown" process.md .claude/skills/timone-plan/SKILL.md` → the skill's new section, its template note and its un-anchored revision; `process.md`'s stage-5 row, its breakdown paragraph and stage 6's entry gate.
+
+Checkboxes:
+
+- ✅ **PASS** — the first `grep` returns nothing at all, so there is no surviving sentence making `Approved for execution` a precondition and no historical hit to explain either. Three further sentences carrying the retired rule were removed while the grep was being satisfied honestly: `timone-execute`'s frontmatter trigger (*"Use when a phase file is stamped `Approved for execution`"* — a trigger that can never fire again), its phase-close step 2 (*"the approval trace the line carried … copy it into the report's **Plan** line"* — a trace a phase file no longer has; it now names the approved breakdown, or says there is none), and its read-list bullet (*"starting with its `Status` line — that stamp is the entry gate below"*, which would have contradicted gate 1 twenty lines later). The read list gains the breakdown, since gate 1 cannot be checked without reading it.
+- ✅ **PASS** — `git grep -n "Complete — see" src/ && git grep -n '\^Complete' src/daemon/session.ts` → exit 0, finding `prompts.ts:585` (the flip instruction), `session.ts:919` (the check) and four `planStatusProbe` fixtures. Asserted from the source, and the check proven live by the mutation probe above.
+- ✅ **PASS** — stage 5's row, stage 5's Status-lifecycle text and stage 6's Entry gate all three now say the breakdown is what is approved and the phase file's `Status` line gates nothing.
+- ✅ **PASS** — full suite green, 900/900, and no artifact under `doc/` was modified other than this handoff section.
+
+### What is wrong or missing in the excerpt
+
+1. **Gate 1 keyed only on an approved breakdown refuses every chore, and every hand-run phase.** The excerpt's routing has two destinations and neither covers the case where a breakdown *correctly* does not exist. ADR-0030 D3 is explicit that a chore never reaches the breakdown, so a gate demanding one would refuse the exact class of work D3 was written to let through unattended. Resolved by naming the two no-breakdown shapes in gate 1 itself and in `process.md` stage 6.
+2. **`src/daemon/session.test.ts` is not in the excerpt's `[MODIFY]` markers, but its validation command runs it and two of its tests assert the retired instructions.** Same shape as 23b's note 1 about `poll.test.ts`.
+3. **The excerpt does not say what the phase file's `Status` line reads at birth** while requiring it to keep one. `Planned` was chosen here (decision 1); a later slice disagreeing should change `timone-plan`'s template, which is the one place it is written.
+4. **The excerpt says `process.md` stage 5's *"table row"* needs its gate column revised, but the artifact column needed it too.** The gate column now says the human approves the breakdown, which named a path the table did not list and the stage note did not define.
+
+### What is left contradicting, and is nobody's slice yet
+
+1. **`process.md` stage 9's confirmation gate still says the plan gate exists.** Line 71: *"stage 5's approval still answers 'is this breakdown executable?' for whatever plan work the confirmation dispatches — collapsing the two would let a feedback conversation silently approve a plan nobody has read."* There is no stage-5 approval of a plan any more, and the word *breakdown* in that sentence carries the pre-ADR-0028 meaning, so it now reads as though it were about the new artifact. **It was left alone deliberately** — it is in stage 9's paragraph, outside every marker this slice was given, and rewriting it changes what stage 9 must obtain before dispatching. Suggested replacement, for whoever owns it: *"stage 5's gate still answers 'is this the right list of pieces?' for whatever plan work the confirmation dispatches"*, or a plain statement that dispatched plan work is judged on its pull request.
+2. **`process.md` stage 9 and `timone-improve` both promise *"re-approval semantics"* for the plan-patch vehicle** (`process.md:63`, `timone-improve/SKILL.md:100` and `:110`). Stage 5's re-approval rule now applies to the breakdown, not to a phase file, so *plan patch* inherits nothing to re-approve. Same reason for leaving it: outside the markers, and it is stage 9's meaning to decide.
+3. **`process.md` stage 6's completion-report elements still ask for *"a link to the plan with its approval trace"*.** `timone-execute`'s own step 2 was corrected to name the approved breakdown instead; the spec sentence is loose enough to be satisfied by that reading, so it was left rather than widened.
+4. **`timone-plan`'s workflow list has no heading.** Steps 1–6 sit directly under the "Writing failure probes" section with no `## Workflow` above them. Pre-existing, unrelated, and not touched.
+
+### What 23f onward must know
+
+1. **`APPROVAL_RECORD` now has exactly two rows, `requirements` and `breakdown`,** and the fallback for a stage with no row is asserted (`prompts.test.ts`, *"has no record to write for a phase file, and falls back harmlessly"*) rather than assumed. It is a `Partial` record: a *gated* stage added without a row would silently tell its recording session to *"record the approval"* in *"the artifact this stage produced"*, which is not a refusal, just useless.
+2. **Nothing in `src/` yet checks the breakdown before a build.** Gate 1 is a skill instruction, and the skill is what a session follows — the daemon does not read `readBreakdown` at any point on the path to `execution`. 23a's `readBreakdown` / `chunkProgress` / `isReproposal` still have no caller in `src/` outside their own tests. **The re-proposal refusal is therefore prose-enforced only, today.**
+3. **`planStatus` is now consulted for exactly one thing:** whether the newest phase file reads `Complete`. There is no other state the machinery reads off that line, so a slice tempted to give it a third meaning is adding a gate, not a status.

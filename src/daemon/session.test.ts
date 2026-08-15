@@ -1387,7 +1387,13 @@ describe("the plan gate", () => {
     }
   });
 
-  it("tells the planning session to stamp the file as not yet approved", async () => {
+  it("tells the planning session to write the phase file, not to stamp it for an approval", async () => {
+    // ✏ Was asserting the prompt stamped the file `Awaiting approval`. Since
+    // ADR-0030 D1 nothing approves a phase file, and a stamp asking for an
+    // approval the machinery will never request is a file that contradicts the
+    // build about to happen on it. The absence is asserted here, at the seam
+    // that hands the prompt to a session, and the wording itself in
+    // `prompts.test.ts`.
     const store = newStore();
     const { adapter } = fakeAdapter(settled);
     const { runtime, requests } = fakeRuntime();
@@ -1402,7 +1408,8 @@ describe("the plan gate", () => {
       repoProbe: movingProbe(),
     }).spawn(run, project, { stage: "planning" });
 
-    expect(requests[0].prompt).toContain("Awaiting approval");
+    expect(requests[0].prompt).not.toContain("Awaiting approval");
+    expect(requests[0].prompt).toMatch(/commit the phase file/i);
     expect(requests[0].prompt).toMatch(/stay on the branch/i);
   });
 
@@ -1742,20 +1749,29 @@ describe("recording an approval in the artifact", () => {
     comments: [],
   };
 
-  function atPlanningGate(store: RunStore): Run {
+  /**
+   * ✏ Was `atPlanningGate`. Since ADR-0030 D1 `planning` opens no gate and has
+   * no `APPROVAL_RECORD` row, so an approval of a phase file is a state the
+   * pipeline can no longer reach — this block is re-pointed at the gate that
+   * replaced it rather than left driving a stage nothing can park on.
+   */
+  function atBreakdownGate(store: RunStore): Run {
     const run = pickedUpRun(store);
     store.activate(run.id, "session-earlier");
     store.claimBranch(run.id, "timone/7-the-page-feels-slow");
     store.park(run.id, {
       waitingOn: "your answer on the ticket",
       kind: "gate",
-      stage: "planning",
+      stage: "breakdown",
       waitCursor: "2026-08-03T09:00:00Z",
     });
     return store.get(run.id)!;
   }
 
-  it("writes the stamp stage 6 refuses to start without", async () => {
+  /** Chunk zero's merge, stubbed: this block is about the record, not the merge. */
+  const merged = async () => ({ merged: true as const, into: "main" });
+
+  it("writes the stamp the approved artifact must carry", async () => {
     const store = newStore();
     const { adapter } = fakeAdapter(settled);
     const { runtime, requests } = fakeRuntime();
@@ -1767,13 +1783,14 @@ describe("recording an approval in the artifact", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
-    }).spawn(atPlanningGate(store), project, {
-      stage: "execution",
-      approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+      mergeProbe: merged,
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
     });
 
     const [recording] = requests;
-    expect(recording.prompt).toContain("Approved for execution by <who> <date>");
+    expect(recording.prompt).toContain("Approved by <who> <date> — N pieces");
     expect(recording.prompt).toContain("fvermaut");
     expect(recording.prompt).toContain("2026-08-03T12:00:00Z");
     expect(recording.prompt).toContain("timone/7-the-page-feels-slow");
@@ -1791,18 +1808,18 @@ describe("recording an approval in the artifact", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
-      planStatusProbe: async () => "Approved for execution by fvermaut",
-    }).spawn(atPlanningGate(store), project, {
-      stage: "execution",
-      approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+      mergeProbe: merged,
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
     });
 
     // Two sessions, in that order: the recording one first, and only then
-    // the execution the approval unblocked — an approval recorded after the
-    // build started would vanish whenever the pipeline stopped between them.
+    // the stage the approval unblocked — an approval recorded after the next
+    // stage started would vanish whenever the pipeline stopped between them.
     expect(requests).toHaveLength(2);
     expect(requests[0].prompt).toContain("2026-08-03T12:00:00Z");
-    expect(requests[1].prompt).toContain(STAGE_DONE_MARKER);
+    expect(requests[1].prompt).toMatch(/plan the work for ticket #7/i);
   });
 
   it("tells the recording session to change nothing else and say nothing", async () => {
@@ -1817,9 +1834,10 @@ describe("recording an approval in the artifact", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
-    }).spawn(atPlanningGate(store), project, {
-      stage: "execution",
-      approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+      mergeProbe: merged,
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
     });
 
     expect(requests[0].prompt).toMatch(/do not revise the artifact's content/i);
@@ -1840,9 +1858,10 @@ describe("recording an approval in the artifact", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
-    }).spawn(atPlanningGate(store), project, {
-      stage: "execution",
-      approval: { stage: "planning", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
+      mergeProbe: merged,
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
     });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("failed");
