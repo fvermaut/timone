@@ -1,6 +1,6 @@
 # Phase 23: the breakdown is a stage, and a phase file gates nothing
 
-> **Status:** Awaiting approval.
+> **Status:** Approved for execution by fvermaut 2026-08-15.
 
 > **Twelfth phase of [PRD-02](../../specs/prd/prd-02-inversion-of-control.md), and the half [phase 22](phase-22.md) could not build.** Governing decision: **[ADR-0030](../../adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)** — the breakdown is a pipeline stage of its own, and chunk zero merges without a pull request. **That record is `accepted`, on fvermaut's rulings of 2026-08-15**, put to him as three plain-language questions about what he would see on a ticket rather than about the mechanism: he chose **two approvals** rather than one combined (D1's gate, and the answer that rules out a third touch at D2), **just build it** for a small chore (D3), and **leave the list of pieces alone** once approved (D4). All four decisions are normative here; this phase implements them and settles none of them. Standing: [ADR-0026](../../adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md), [ADR-0028](../../adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md), [ADR-0029](../../adr/0029-a-chunk-advances-only-on-success.md), [ADR-0012](../../adr/0012-conversation-channels.md), [ADR-0014](../../adr/0014-artifact-first-gates.md), [ADR-0015](../../adr/0015-branch-per-driving-unit.md), [ADR-0016](../../adr/0016-review-remediation-rides-the-verify-fix-shape.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md).
 
