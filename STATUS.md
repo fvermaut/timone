@@ -81,32 +81,21 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 
 ## Known problems
 
-Three are filed as bugs on [Timone's own repository](https://github.com/fvermaut/timone/issues):
+**They are all filed now**, one each, on [Timone's own repository](https://github.com/fvermaut/timone/issues). They used to live only in this file. The list below is a pointer — read the ticket for the detail.
 
-- [#1](https://github.com/fvermaut/timone/issues/1) — a stopped job could not be reached by the person it was waiting for. The 16 August work fixes this. It stays open until somebody watches it work.
-- [#3](https://github.com/fvermaut/timone/issues/3) — a message asks you for a conversation without saying what it wants to know.
-- [#4](https://github.com/fvermaut/timone/issues/4) — a handed-back message never says whether the fault is in the app or in the machine.
+The ones that would bite you in ordinary use:
 
-Not filed, and still true:
+- [#5](https://github.com/fvermaut/timone/issues/5) — a running watcher keeps using the code it started with. **Yours started at 13:22 today.** Stop it and start it again to pick up anything built since.
+- [#9](https://github.com/fvermaut/timone/issues/9) — the safety check blames the machine for a change you have not committed. Commit or stash your own work before the machine starts.
+- [#13](https://github.com/fvermaut/timone/issues/13) — a list of questions is only finished if somebody remembers to label it. This is what silently stopped the trading app.
+- [#12](https://github.com/fvermaut/timone/issues/12) — a job whose ticket was closed while it waited still starts, and is billed.
+- [#7](https://github.com/fvermaut/timone/issues/7) — a ticket that calls itself a throwaway still has its decisions written into the project for good.
 
-- **A running watcher keeps running the code it started with.** Yours started at 13:22 today, before the shorter wording was built. Stop it and start it again to pick up anything built since.
-- **The live count of how much a job has written is too low**, by two to six times. The figure printed when a job ends is correct. Unexplained since 8 August.
-- **The safety check can still blame the wrong session** for a change you made and have not committed. Commit or stash your own work before the machine starts.
-- **A ticket marked "throwaway" still has its decisions written into the project's permanent records.** It happened twice in two days. Nothing treats "this is a test" as a limit.
-- **Every message still appears under your GitHub name.** A line on each says the machine wrote it. The real fix is a separate robot account, which needs a credential from you.
-- **A job whose ticket was closed while it queued still starts, and is billed for.** Nothing re-checks the ticket between joining the queue and reaching the front.
-- **A killed session is reported as still working, for ever.** The machine may only call a job dead if it was watching. With no watcher running, nothing ever watches, so the line never corrects itself.
-- **A watcher killed outright leaves its project locked for about two minutes.** This is a deliberate trade, not a fault.
-- **The log prints "resuming" after a session has already finished.** Nothing is wrong with the behaviour, but it looks exactly like a fault that was fixed, and it is the log somebody will read while diagnosing the next problem.
-- **`timone status` does not know that one ticket can be waiting on another.** It also cannot tell a question you never answered from one you answered twice, and it says a project is idle between two pieces of the same job.
-- **Two pieces of the same job look identical in the project's history.** Every commit says which ticket it came from; none says which piece.
-- **One test fails now and then because it is slow, not because it is wrong.** It does real work with version control and runs out of its five-second allowance on a busy machine.
-- **The onboarding skill cannot repair a project.** It refuses any project already registered, which is every project that could have a file missing.
-- **Nothing notices when the standards library goes out of date.** Five entries were wrong in one weekend, each correct when written.
-- **The give-up-and-ask-a-human path has never fired**, in building, checking or delivering. The first real failure on real work is its test.
-- **Timone's own work is planned by hand**, so this file is written by hand too.
+The rest, in short: [#1](https://github.com/fvermaut/timone/issues/1) a stopped job could not be reached (the 16 August work fixes this, and it stays open until somebody watches it), [#3](https://github.com/fvermaut/timone/issues/3) and [#4](https://github.com/fvermaut/timone/issues/4) two messages that do not say enough, [#6](https://github.com/fvermaut/timone/issues/6) a misleading log line, [#8](https://github.com/fvermaut/timone/issues/8) a test that is slow rather than wrong, [#10](https://github.com/fvermaut/timone/issues/10) a wrong live count, [#11](https://github.com/fvermaut/timone/issues/11) a killed session reported as working, [#14](https://github.com/fvermaut/timone/issues/14) and [#15](https://github.com/fvermaut/timone/issues/15) two faults in what `timone status` tells you, [#16](https://github.com/fvermaut/timone/issues/16) pieces of one job indistinguishable in history, [#17](https://github.com/fvermaut/timone/issues/17) onboarding cannot repair a project, [#18](https://github.com/fvermaut/timone/issues/18) nothing notices stale standards, [#19](https://github.com/fvermaut/timone/issues/19) every message appears under your name.
 
-These last ones live only in this file. Their proper home is an issue on Timone's repository, one each. **Say the word and I will file them.**
+**Two things are on purpose and are not filed.** A watcher killed outright leaves its project locked for about two minutes — that is a deliberate trade. And Timone's own work is planned by hand, which is why this file is written by hand.
+
+**One is a gap rather than a fault**, so it is not filed either: the "I have tried and I am stopping, over to you" path exists in building, checking and delivering, and has never once fired. The first real failure on real work is its test.
 
 ---
 
