@@ -7,25 +7,13 @@
 
 ## What this gate was for, and what it cost
 
-**Phase 23 shipped 932 green tests. This gate found five defects none of them could see**, three of which were fixed during the gate and two of which are open. That ratio is the argument for live gates and it is now the third time it has held: [phase 14](phase-14.md) found six against 532 green, [phase 20](reports/phase-20-live-gate.md) found ten against 792.
+**Phase 23 shipped 932 green tests. This gate found seven defects none of them could see**, three of which were fixed during the gate and four of which are open and tracked as [issues on this repository](https://github.com/fvermaut/timone/issues). That ratio is the argument for live gates and it is now the third time it has held: [phase 14](phase-14.md) found six against 532 green, [phase 20](reports/phase-20-live-gate.md) found ten against 792.
 
-**$180.63 across 16 sessions**, over roughly fourteen hours, on a hotel connection that dropped **13 GitHub API calls** (`unexpected EOF`, `TLS handshake timeout`, `i/o timeout`) and caused **3 reclaims**.
-
-| Stage | Sessions | Cost |
-| --- | --- | --- |
-| execution | 2 | $109.59 |
-| planning | 4 | $30.73 |
-| verification | 2 | $17.97 |
-| delivery | 2 | $14.44 |
-| remediation | 2 | $3.47 |
-| breakdown | 1 | $3.09 |
-| requirements | 1 | $1.10 |
-
-**The two execution sessions are 61% of the bill** — $58.03 and $51.56. Planning cost $30.73 across four sessions because three of them died and were re-run; two of those deaths were defect 3 below, not the network.
+**$216.09 across 19 sessions**, over roughly eighteen hours, on a hotel connection that dropped **13 GitHub API calls** (`unexpected EOF`, `TLS handshake timeout`, `i/o timeout`) and caused reclaims. The per-stage breakdown is in [the closing section](#the-gate-completed); **execution is 59% of the bill**, and planning cost $30.73 across four sessions because three died and were re-run — two of those deaths were finding 3, not the network.
 
 ## Findings
 
-### 1 — A stalled run is unreachable by the human it is waiting on. **OPEN, and the worst of the five.** Tracked as [timone#1](https://github.com/fvermaut/timone/issues/1).
+### 1 — A stalled run is unreachable by the human it is waiting on. **OPEN, and the worst of the seven.** Tracked as [timone#1](https://github.com/fvermaut/timone/issues/1).
 
 Piece 2's execution ran 2h39m, stopped, and handed back to fvermaut in its own words: *"just tell me here to carry on, and I will get the missing behaviour planned properly and built."* He replied `carry on`. **Nothing read it.**
 
@@ -68,7 +56,7 @@ Two planning sessions died at $5.87 and $1.83, both with *"the planning stage en
 
 No unit test could have caught it: the tests inject the outcome. **It was diagnosed only because fvermaut asked "is it really building?" instead of taking the session's word for it** — the report had claimed progress that was not happening.
 
-### 4 — An approved breakdown was unreadable, and would have closed its ticket. **FIXED** (`737fe80`). The most dangerous of the five.
+### 4 — An approved breakdown was unreadable, and would have closed its ticket. **FIXED** (`737fe80`). The most dangerous of the seven.
 
 The approval-record session is handed the gate reply's ISO timestamp and writes it where the instruction says `<date>`, producing:
 
@@ -131,10 +119,28 @@ Every claim phase 23 makes, observed on a real ticket rather than asserted by a 
 
 **The human gate is answered** — *"I can already tell you: yes I want 1 pull request per phase/breakdown-step"* — and is [recorded in the plan with its limit](../phase-23.md): he ruled on the design before any pull request existed, and only afterwards experienced the rhythm end to end.
 
-## What this gate did not prove
+## The gate completed
 
-- **The ticket closing itself on the last merge.** Piece 2 was still building when this was written. It is the same mechanism as piece 1's succession, running once more.
-- **A bug taking its turn between chunks.** Never staged — the window existed but nothing was queued in it.
+**Written mid-flight and finished afterwards: the initiative ran to the end.** Piece 2 — *"looking at one label at a time"* — was planned, built, verified and delivered as [PR #33](https://github.com/fvermaut/scratch-app/pull/33) (+6380 −41 across 25 files) **without a single further approval**; the thread's count of approval requests never moved off **2**. On merge, the ticket closed itself:
+
+> **Merged — this one is done.** The work for this ticket went in over 2 pieces — pull requests #32 and #33.
+
+**Final cost: $216.09 across 19 sessions.** Execution is $128.24 of it — **59%** — across three sessions.
+
+| Stage | Sessions | Cost |
+| --- | --- | --- |
+| execution | 3 | $128.24 |
+| planning | 4 | $30.73 |
+| verification | 3 | $27.26 |
+| delivery | 3 | $21.96 |
+| remediation | 2 | $3.47 |
+| breakdown | 1 | $3.09 |
+| requirements | 1 | $1.10 |
+
+**Piece 2 also stalled once, legitimately** — its verification found a real accessibility defect in the new filtering (keyboard focus silently thrown to the top of the page when a filter change removes the focused element), and the fix needed a file the slice was not granted. It escalated rather than widening its own permissions, and **deliberately skipped its second attempt** because that attempt would have been byte-identical. That is the execution stage's own discipline holding under live conditions, and it is the event that exposed findings 1 and 7.
+
+## What this gate did not prove
+- **A bug taking its turn between chunks.** Never staged — the window existed, twice, and nothing was queued in it. The mechanism is unit-proven and unobserved.
 - **`timone cancel` and the closed-ticket check, live.** Both are unit-proven and neither was exercised here, because finding 2 makes `cancel` unrunnable while the daemon holds the lock.
 - **That any of this is affordable at real size.** $180 for a two-piece fixture on a bad connection is not a number to plan a milestone against, but it is not nothing either. The two execution sessions are 61% of it.
 - **That the rhythm holds at five pieces.** Two is not five, and the honest answer still arrives on `ivtrends`.
