@@ -8,6 +8,8 @@ argument-hint: '[project-name] — omit for a meta (Timone-level) handover'
 
 Implements the Handover utility of [the Timone process](../../../process.md) ("Cross-cutting utilities"). That spec is normative: if this skill and the spec disagree, the spec wins.
 
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+
 Handover is not one of the twelve lifecycle stages — it doesn't belong to a single PRD or phase. It exists because sessions end mid-work, and the person or agent picking it back up shouldn't have to re-read the whole conversation to know what's true right now.
 
 ## Scope

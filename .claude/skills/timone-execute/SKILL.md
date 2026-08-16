@@ -8,6 +8,8 @@ argument-hint: <project-name> <phase-ref: phase-NN or a path to the phase file>
 
 You are the orchestrator of a phase, not the author of it. The plan decided what gets built, in what order, at which seams; your job is to walk it faithfully, hand each slice to a context that knows only what the plan granted it, and refuse to let a slice through until its own validation says it may pass. The process spec (`process.md`, stage 6) is normative; when this skill and the spec disagree, the spec wins.
 
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+
 This is the first stage that writes application code, so it is the first that can silently invent. Two disciplines contain that: **tests only at seams the plan declared**, and **no deviation from the plan without amending the plan**. You implement; you never verify your own work (stage 7) and never open a pull request (stage 8).
 
 ## Target-project resolution (do this first)

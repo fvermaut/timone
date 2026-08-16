@@ -8,6 +8,8 @@ argument-hint: '<project-name> then the input — a grill conversation, a BRD pa
 
 Implement **stage 3 — Requirements** of [the Timone process](../../../process.md) for one managed project. The process spec is normative: when this skill and the spec disagree, the spec wins.
 
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+
 The PRD pair is the **single source of truth** for what is being built (ADR-0006). Tickets scope work and point here; they never hold requirement detail.
 
 Pipeline position: `timone-grill` → **`timone-prd`** → `timone-plan` → `timone-execute` → `timone-verify` → … → `timone-improve` (amendments).

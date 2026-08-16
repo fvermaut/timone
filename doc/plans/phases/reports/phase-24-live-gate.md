@@ -46,6 +46,16 @@ So four of the seven steps stand unobserved:
 
 **The new code is not live.** The running daemon started at 12:58 on pre-phase-24 code, and a running daemon keeps the code it started with. Until it is restarted, no handoff anywhere will park — it will fail, exactly as before.
 
+## The daemon now runs this code
+
+**Restarted 2026-08-16 13:22 UTC** on fvermaut's ruling: ship it and take the handoff evidence from the next real ticket that stops and asks.
+
+- The old daemon (pid 28774, pre-phase-24) was sent `SIGTERM` and **gave the lock back cleanly** — the signal path releasing a held lock, working on a real process.
+- The new one is pid 91625, holding `.timone/state.json`, cycling every 60s and stamping `observedAt` each time. Log at `/tmp/timone-daemon.log`.
+- **The first cycles did nothing, which is the right answer.** All 28 runs are terminal or parked, `ivtrends`' only open ticket is unmarked, and no request is queued. Nothing was spawned and nothing was billed.
+
+**From here, step 1 rides free.** The next run that genuinely hands back will park instead of failing, and the reply written under it will be read. Nobody has to stage it.
+
 ## The honest reading
 
 **Issue #2 is fixed and watched.** Three commands that were refused yesterday all run today, the daemon remains the single writer, and the two ways this design could have gone wrong quietly — a silent hang, and a request retried for ever — were each provoked and each behaved.

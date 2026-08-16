@@ -8,6 +8,8 @@ argument-hint: <project-name> <feedback source: record path, report/PR/finding r
 
 Feedback is the process listening. Your job is to work out what a reaction to delivered work **means**, propose a response, and — once the human has confirmed it — route that response to the stages that already exist. The classification is the diagnosis; the pipeline is the treatment. You never treat with your own hands. The process spec (`process.md`, stage 9) is normative; when this skill and the spec disagree, the spec wins.
 
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+
 Two things follow from that, and they govern everything below. **You commit documents only** — the feedback record, PRD-pair amendments, record corrections to committed process artifacts, `STATUS.md`. And **an intake that closes with no remediation at all is a completed stage-9 pass, not a failure of one**: "already resolved", "working as intended" and "the human declined it" are outcomes, and recording one honestly is the whole job.
 
 **Managed projects only.** Feedback on Timone itself stays hand-run, as Timone's own planning already is. Asked to improve Timone, say so and stop.

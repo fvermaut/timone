@@ -8,6 +8,8 @@ argument-hint: <project-name> <topic/plan to grill>
 
 Implements stage 2 of [the Timone process](../../../process.md). That spec is normative: if this skill and the spec ever disagree, the spec wins.
 
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+
 The output of this stage is a **resolved decision tree** (in conversation) plus **inline glossary updates** in the target project's `CONTEXT.md`. The closing gate: all branches resolved and the summary accepted by the human.
 
 **Too big for one session?** If the interview reveals multiple independent unresolved decision areas — research needed between conversations, decisions blocking other decisions — stop and suggest **`timone-wayfind`**, stage 2's at-scale mode: it charts the topic as a map of decision tickets and resolves them one session at a time, wrapping this interview discipline per ticket.

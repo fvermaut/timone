@@ -8,6 +8,8 @@ argument-hint: <project-name> <loose idea | map ref [ticket ref]>
 
 Implements stage 2's at-scale mode of [the Timone process](../../../process.md). That spec is normative: if this skill and the spec ever disagree, the spec wins. Adapted from [Matt Pocock's wayfinder](https://github.com/mattpocock/skills/blob/main/skills/engineering/wayfinder/SKILL.md) per [ADR-0010](../../../doc/adr/0010-wayfinder-discovery-maps.md), which records the deliberate deviations.
 
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+
 A loose idea has arrived, too big for one grill session and wrapped in fog: the way from here to the **destination** isn't visible yet. This skill charts the way as a **shared map** of **decision tickets** — questions whose resolution is a decision, not slices of a build — and resolves them one session at a time until nothing is left to decide.
 
 ## Target-project resolution (do this first)

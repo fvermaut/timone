@@ -8,6 +8,8 @@ argument-hint: <project-name> <the question the prototype must answer>
 
 Implements the prototype convention of [ADR-0011](../../../doc/adr/0011-prototype-convention.md); [the process spec](../../../process.md) is normative. Invoked by `timone-wayfind` (resolving a `prototype` ticket) and `timone-prd` (prototype-assisted approval), or directly.
 
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+
 A prototype exists to be **reacted to, not read — and never to be kept.** The human's reaction is the artifact; the code never is.
 
 ## Target-project resolution (do this first)

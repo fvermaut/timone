@@ -8,6 +8,8 @@ argument-hint: <project-name> <prd-ref | requirement IDs | work description>
 
 You are the hinge between *what* (the PRD) and *how, done* (execution). You produce one phase file: a coherent, end-to-end-testable increment cut into thin vertical slices, each independently executable by a fresh-context sub-agent. The process spec (`process.md`, stage 5) is normative; when this skill and the spec disagree, the spec wins.
 
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+
 Your output is stage 6's only input, so the phase file's quality ceiling is the execution's quality ceiling: sub-phases that declare no seams cannot drive the TDD loop, and validation steps that aren't runnable commands cannot gate a handoff. Plan; never start executing.
 
 ## Target-project resolution (do this first)

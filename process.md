@@ -147,8 +147,24 @@ Every stage's closing gate is either mechanical (validations pass) or human (a d
 
 **The harness routes; the human never does.** The human is assumed to know nothing about this process. Every request — ticket, comment, or raw terminal prompt — is classified and routed through stage 1 by the harness, and no surface ever requires the human to name a stage, a skill, or a process concept. This binds interactive sessions today exactly as it binds the daemon: a session receiving a raw request about a managed project runs triage first and invokes the routed skill itself.
 
-**Every message to a human ends with a CTA** — one explicit, visually set-off statement (its own line or bullet) of what the human is being asked to do. A message that asks nothing says so ("no action needed").
+**Every message to a human ends with a CTA** — one explicit, visually set-off statement (its own line or bullet) of what the human is being asked to do. A message that asks nothing says so ("no action needed"). How the rest of that message is written is [Writing to the human](#writing-to-the-human) below.
 
 **Every human wait is a session boundary** ([ADR-0013](doc/adr/0013-stateless-session-reentry.md)): sessions are never held open across a gate or an unanswered CTA; resumption re-enters statelessly from the committed artifacts and the ticket thread.
 
 The daemon orchestrates stage skills — it never reimplements them.
+
+## Writing to the human
+
+✏ Added 2026-08-16. Normative, and it binds every surface a person reads: a ticket body, a ticket comment, a pull request body, `STATUS.md`, terminal output, and what a session says in a chat window. It binds sessions and the daemon alike. It was written after fvermaut read Timone's comments on `scratch-app` #31 — several hundred words each, restating requirements he had already agreed — and said they were too long to use.
+
+**Write for someone who does not know this process and does not read English as a first language.** Short sentences. Common words. Never the rare word where a plain one works — write *established*, not *bought*. Never process vocabulary: no stage numbers, no skill names, no *criteria register*, *chunk*, *gate*, *un-anchored*, *frontier*. If a word only makes sense to someone who has read this file, it does not go in front of a human.
+
+**A ticket is for the conversation, not for the specification.** It carries three things and nothing else: what is being done, how far it has got, and what is needed from the human. Requirements, acceptance criteria, schemas, file contents, command output and technical design never appear on a ticket. They live in committed artifacts, and the ticket links to them. This is ADR-0006 read from the human's side: tickets scope work and point at the repo, and the repo holds the truth.
+
+**A comment is a few sentences.** Aim under 150 words. Anything longer is a draft that has not been cut yet — cut it before posting, do not post it and apologise for the length. Structure: one bold line saying where things stand, a short paragraph, the links, then the CTA.
+
+**Asking the human to decide is the one thing that may carry its reasoning, and it carries it short.** Keep the recommendation, one sentence of why, and one sentence of what it costs. That is the conversation itself, so it stays on the ticket rather than moving to a file the human then has to open. Everything behind those two sentences is a link. *(Decided by fvermaut on 2026-08-16, over the alternative of moving the reasoning into a committed note.)*
+
+**Do not restate what the human already told you.** A one-line confirmation that their answer was recorded is enough; the full list belongs in the artifact that now holds it.
+
+**Every message ends with a CTA**, per the rule above. "No action needed" is a CTA and must be written out.

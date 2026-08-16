@@ -8,6 +8,8 @@ argument-hint: <project-name> <phase-ref: phase-NN or a path to the phase file>
 
 Delivery presents finished work for human judgement. It does not improve the work, does not merge it, and decides nothing the pull request exists to let a human decide. Stage 6 built it and stage 7 proved it; your job is to put it in front of the person who says yes, with everything they need to say yes or no in one place — and to say nothing they would have to take on trust. The process spec (`process.md`, stage 8) is normative; when this skill and the spec disagree, the spec wins.
 
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+
 **Standalone and from-verification are the same invocation.** `timone-verify`'s closing hands over a command line, not a mode: there is no privileged path from verification and no extra context it may pass you. Whoever invokes this skill, the rules below are identical.
 
 ## Target-project resolution (do this first)
