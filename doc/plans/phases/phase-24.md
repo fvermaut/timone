@@ -1,6 +1,6 @@
 # Phase 24: a handoff is a wait, and a command asks the daemon
 
-> **Status:** Approved for execution by fvermaut 2026-08-16.
+> **Status:** Complete — see [reports/phase-24-complete.md](reports/phase-24-complete.md). Built as 24a–24g on 2026-08-16, approved for execution by fvermaut the same day. **24h, the live gate, is not run**, and until it is, both issues are closed in code and open in evidence.
 
 > **The two findings [phase 23's live gate](reports/phase-23-live-gate.md) left open**, filed as [timone#1](https://github.com/fvermaut/timone/issues/1) and [timone#2](https://github.com/fvermaut/timone/issues/2). Governing decisions: **[ADR-0031](../../adr/0031-a-handoff-is-a-wait-not-a-failure.md)** — a handoff is a wait, not a failure — and **[ADR-0032](../../adr/0032-a-human-command-asks-the-daemon-to-act.md)** — a human command asks the daemon to act. Both are `accepted`, on fvermaut's rulings of 2026-08-16 in the grill session that took the two issues together, from three options each. Standing: [ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md), [ADR-0023](../../adr/0023-one-answer-one-session.md), [ADR-0025](../../adr/0025-a-lock-holders-proof-of-life-is-its-process.md), [ADR-0012](../../adr/0012-conversation-channels.md), [ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md), [ADR-0029](../../adr/0029-a-chunk-advances-only-on-success.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md).
 
