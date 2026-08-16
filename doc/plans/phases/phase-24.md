@@ -1,12 +1,12 @@
 # Phase 24: a handoff is a wait, and a command asks the daemon
 
-> **Status:** Awaiting approval
+> **Status:** Approved for execution by fvermaut 2026-08-16.
 
 > **The two findings [phase 23's live gate](reports/phase-23-live-gate.md) left open**, filed as [timone#1](https://github.com/fvermaut/timone/issues/1) and [timone#2](https://github.com/fvermaut/timone/issues/2). Governing decisions: **[ADR-0031](../../adr/0031-a-handoff-is-a-wait-not-a-failure.md)** — a handoff is a wait, not a failure — and **[ADR-0032](../../adr/0032-a-human-command-asks-the-daemon-to-act.md)** — a human command asks the daemon to act. Both are `accepted`, on fvermaut's rulings of 2026-08-16 in the grill session that took the two issues together, from three options each. Standing: [ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md), [ADR-0023](../../adr/0023-one-answer-one-session.md), [ADR-0025](../../adr/0025-a-lock-holders-proof-of-life-is-its-process.md), [ADR-0012](../../adr/0012-conversation-channels.md), [ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md), [ADR-0029](../../adr/0029-a-chunk-advances-only-on-success.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md).
 
 ## Why this phase exists, and why it is next
 
-**Phase 23 shipped 932 green tests and its live gate found five defects none of them could see.** Three were fixed during the gate. These are the other two, and they are the two that needed a decision rather than a patch — which is why they were not attempted at 2am and are a phase of their own.
+**Phase 23 shipped 932 green tests and its live gate found seven defects none of them could see.** Three were fixed during the gate and four are open, all four filed as issues. **These are two of the four**, and they are the two that needed a decision rather than a patch — which is why they were not attempted at 2am and are a phase of their own. The other two, [timone#3](https://github.com/fvermaut/timone/issues/3) and [timone#4](https://github.com/fvermaut/timone/issues/4), are about the words Timone writes and are deliberately not here.
 
 **They are one knot, and that is the single most important thing about this plan.** On `scratch-app` [#31](https://github.com/fvermaut/scratch-app/issues/31) the execution session stopped, asked fvermaut to *"just tell me here to carry on"*, and he did. Nothing acted on it. The status box above his reply named `timone retry` — the command the daemon's own lock refuses while it is running. **Every path the ticket offered was a dead end**, and each of the two fixes is the other's escape hatch:
 
@@ -15,7 +15,7 @@
 
 **So the build order is not free, and it is the reverse of the order the issues were filed in.** The queue lands first. At every point after it the machine is strictly better than today; at every point in the other order, there is a window where a handoff parks and blocks a project with no runnable escape. Nobody may reorder 24a–24d after 24e for convenience.
 
-**It is next because the gate that found these is the third to hold the same ratio** — [phase 14](reports/phase-14-live-gate.md) found six against 532 green, [phase 20](reports/phase-20-live-gate.md) ten against 792, phase 23 five against 932 — and because both findings are live on the fixture right now.
+**It is next because the gate that found these is the third to hold the same ratio** — [phase 14](reports/phase-14-live-gate.md) found six against 532 green, [phase 20](reports/phase-20-live-gate.md) ten against 792, phase 23 seven against 932 — and because both findings are live on the fixture right now.
 
 ## Requirements
 
