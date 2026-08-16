@@ -1622,7 +1622,8 @@ describe("a finished planning session, now that planning is wait-free", () => {
       repoProbe: movingProbe(),
     }).spawn(readyToPlan(store), project, { stage: "planning" });
 
-    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.status).toBe("parked");
+    expect(store.get("scratch-app#7/1")?.waitingKind).toBe("conversation");
     // The session's own comment is the report; the daemon adds nothing on top.
     expect(comments.at(-1)?.body).toContain("Here is the phase.");
     expect(requests).toHaveLength(1);
@@ -2340,9 +2341,9 @@ describe("the execution stage", () => {
     expect(run?.failure).toMatch(/outcome/i);
   });
 
-  it("stops quietly when the session handed the work to a person", async () => {
+  it("waits, rather than failing, when the session handed the work to a person", async () => {
     const store = newStore();
-    const { adapter, comments } = fakeAdapter();
+    const { adapter, comments, ticket: thread } = fakeAdapter();
     const { runtime } = buildingRuntime(
       adapter,
       STAGE_HANDED_MARKER,
@@ -2360,8 +2361,21 @@ describe("the execution stage", () => {
     }).spawn(atExecution(store), project, { stage: "execution" });
 
     const run = store.get("scratch-app#7/1");
-    expect(run?.status).toBe("failed");
+    expect(run?.status).toBe("parked");
+    // A wait, not a failure (ADR-0031): the reply this session invited can now
+    // start something, and the cursor is the question's own instant so only
+    // what is said after it counts as an answer to it.
+    expect(run?.waitingKind).toBe("conversation");
+    expect(run?.stage).toBe("execution");
+    // The handoff comment's own instant, read off the thread the session
+    // posted into — not a clock, which a second of skew would make swallow a
+    // reply typed immediately.
+    expect(run?.waitCursor).toBe(thread.comments.at(-1)?.createdAt);
     // The session's own comment is the report; the daemon adds nothing on top.
+    // Asserted on the count, not just the last one: a `failedComment` saying
+    // "something went wrong" underneath the session's own polite question is
+    // half of what made #31 unreadable.
+    expect(comments).toHaveLength(1);
     expect(comments.at(-1)?.body).toContain("failed twice");
   });
 
@@ -2480,7 +2494,8 @@ describe("the verification stage", () => {
     }).spawn(atVerification(store), project, { stage: "verification" });
 
     const run = store.get("scratch-app#7/1");
-    expect(run?.status).toBe("failed");
+    expect(run?.status).toBe("parked");
+    expect(run?.waitingKind).toBe("conversation");
     // The session's own comment is R6's failure report; nothing is added.
     expect(comments.at(-1)?.body).toContain("both loops");
   });
@@ -2611,7 +2626,9 @@ describe("the delivery stage", () => {
     }).spawn(atDelivery(store), project, { stage: "delivery" });
 
     const run = store.get("scratch-app#7/1");
-    expect(run?.status).toBe("failed");
+    expect(run?.status).toBe("parked");
+    expect(run?.waitingKind).toBe("conversation");
+    expect(run?.stage).toBe("delivery");
     expect(comments.at(-1)?.body).toContain("refused delivery");
   });
 });
@@ -2718,7 +2735,7 @@ describe("the remediation stage", () => {
     expect(run?.waitCursor).toBe("2026-08-06T13:00:00Z");
   });
 
-  it("fails quietly when the remediation handed the work to a person", async () => {
+  it("waits, rather than failing, when the remediation handed the work to a person", async () => {
     const store = newStore();
     const { adapter, comments } = adapterWithPrThread();
     const { runtime } = fakeRuntime({
@@ -2740,7 +2757,8 @@ describe("the remediation stage", () => {
       repoProbe: movingProbe(),
     }).spawn(atRemediation(store), project, { stage: "remediation" });
 
-    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.status).toBe("parked");
+    expect(store.get("scratch-app#7/1")?.waitingKind).toBe("conversation");
     expect(comments.at(-1)?.body).toContain("moves a requirement");
   });
 });

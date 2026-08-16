@@ -8,6 +8,7 @@ const execFileAsync = promisify(execFile);
 import { mergeIntoDefault, type MergeOutcome } from "../git.js";
 import type { Manifest } from "../manifest.js";
 import type {
+  TicketComment,
   TicketingAdapter,
   TicketingProject,
   TicketThread,
@@ -439,6 +440,52 @@ function oneLine(error: unknown): string {
  * for, so a parked run has one. It is here so that releasing a claim can never
  * be the thing that throws.
  */
+/**
+ * A stage stopped part-way and asked the human for something. **Park it; do
+ * not fail it**
+ * ([ADR-0031](../../doc/adr/0031-a-handoff-is-a-wait-not-a-failure.md)).
+ *
+ * This function exists because the same three lines used to be written out
+ * three times, and all three called `store.fail` while the reason they wrote
+ * said *"handed the work to you"* — a failure whose own words described a
+ * wait. On `scratch-app` #31 the human answered that invitation with `carry
+ * on` and nothing could act on it: a failed run has no trigger but `timone
+ * retry`, and `resumeAnsweredRuns` watches parked runs only.
+ *
+ * **The wait kind is `conversation` and is reused, not invented.**
+ * `resolveWait` re-enters the *same* stage carrying the human's words for that
+ * kind, which is exactly what a stage that asked a question needs — it is the
+ * one that has to judge whether the answer settles anything. It also buys both
+ * of ADR-0022's answer paths: write on the ticket, or take over.
+ *
+ * **The cursor is the handoff comment's own instant**, so only what is said
+ * after the question can answer it. Not "now": a clock a second ahead would
+ * swallow a reply typed immediately. Not an instant computed elsewhere: the
+ * comment the wait was opened on and the comment the answer is measured
+ * against must be one comment, which is what ADR-0023 keeps intact.
+ *
+ * **Nothing is posted here.** The session's own comment is the report; a
+ * `failedComment` under it would be the machine saying "something went wrong"
+ * beneath its own polite question, which is half of what made the ticket
+ * unreadable. The standing call to action reconciles itself from the run's
+ * state and now reads *"This one is waiting on you"*.
+ */
+function handBack(
+  store: RunStore,
+  id: string,
+  stage: PipelineStage,
+  outcome: { comment: TicketComment },
+  log: (message: string) => void,
+): void {
+  store.park(id, {
+    waitingOn: "your answer to the question in my last comment.",
+    kind: "conversation",
+    stage,
+    waitCursor: outcome.comment.createdAt,
+  });
+  log(`parked ${id} — ${stage} handed back, waiting on you`);
+}
+
 export function waitOf(run: Run): ParkOptions {
   return {
     waitingOn: run.waitingOn ?? "a human",
@@ -722,11 +769,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { store, adapter } = this.options;
 
     if (outcome?.kind === "handed-to-human") {
-      store.fail(
-        run.id,
-        `the ${stage} stage stopped and handed the work to you — see the ticket`,
-      );
-      this.log(`handed ${run.id} — ${stage} stopped, see the ticket`);
+      handBack(store, run.id, stage, outcome, this.log.bind(this));
       return undefined;
     }
 
@@ -762,11 +805,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { store, adapter } = this.options;
 
     if (outcome?.kind === "handed-to-human") {
-      store.fail(
-        run.id,
-        "the remediation stopped and handed the work to you — see the ticket",
-      );
-      this.log(`handed ${run.id} — remediation stopped, see the ticket`);
+      handBack(store, run.id, "remediation", outcome, this.log.bind(this));
       return undefined;
     }
 
@@ -814,11 +853,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { store, adapter } = this.options;
 
     if (outcome?.kind === "handed-to-human") {
-      store.fail(
-        run.id,
-        "the delivery stage stopped and handed the work to you — see the ticket",
-      );
-      this.log(`handed ${run.id} — delivery stopped, see the ticket`);
+      handBack(store, run.id, "delivery", outcome, this.log.bind(this));
       return;
     }
 
