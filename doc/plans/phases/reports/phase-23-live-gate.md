@@ -90,6 +90,21 @@ It was caught only because the between-pieces call to action was missing its *"�
 
 The first stop said *"there are a few things I want to check with you"* and did not say what they were. A real user would have to start a conversation to discover the questions. This gate got past it by guessing the obvious ones and answering pre-emptively.
 
+### 7 — A handed-back message never says whether the fault is the app or the machine. **OPEN, and fvermaut found it, not the gate.**
+
+Reading [the message that stalled piece 2](https://github.com/fvermaut/scratch-app/issues/31#issuecomment-5307032400), his first question was: *"Is it a functional issue in the app? Or a problem with the run itself?"*
+
+**That is the question a person needs answered in the first line, and the message answers it four sections down.** It opens *"the fifth part is a measuring step, and it found a real fault and stopped"* — machine-speak for *a test caught a bug in the app*. Everything in it is accurate and it hides nothing; it is ordered for a reader who already knows how the machinery is built.
+
+The two things are separable and both are true here, which is exactly why they must be said separately and said first:
+
+- **The app has a real defect.** Keyboard focus is silently thrown to the top of the page when a filter change removes the element you were on — worst on the empty-filter screen, where the *"Show everything"* button destroys itself by working.
+- **The run stopped correctly, and that is not a fault at all.** Fixing it needs a file the slice was not granted, so escalating was right, and it skipped its second attempt on purpose because that attempt would have been byte-identical.
+
+A reader who cannot tell those apart cannot tell a broken product from a working process. The fix is an ordering rule for the handed-back comment — *what is wrong, whose fault, what it costs you, what I need* — not more prose.
+
+**This is also evidence for finding 1.** He read the message, understood it well enough to answer it, replied `carry on` — and was ignored. A message this careful is wasted when the reply path is dead.
+
 ## What was proven
 
 Every claim phase 23 makes, observed on a real ticket rather than asserted by a test:
