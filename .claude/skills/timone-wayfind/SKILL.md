@@ -93,18 +93,16 @@ A ticket body is the question **plus what the human is being asked to do about i
 ````markdown
 ---
 
-**Two ways to answer this — take whichever suits you.**
+**Two ways to answer — pick either.**
 
-- **Write your answer here.** A comment on this ticket is enough; you don't need to answer every part, and "I don't know, what do you suggest?" is a real answer. I'll pick it up and carry on. If what you write leaves something open, I'll ask once more here — and if it's still not settled, I'll say so rather than keep typing at you.
-- **Talk it through instead.** If it's easier said than written, run this and I'll pick up exactly where this ticket left off:
+- **Write your answer here.** A comment is enough. You don't need to answer every part, and "I don't know, what do you suggest?" is a real answer. If something is still unclear I'll ask once more here, then stop.
+- **Talk it through instead.** Run this and I'll pick up where this ticket left off:
 
   ```
   timone takeover <project>#<n>
   ```
 
-  You don't need to tell it anything else — it works out what this ticket is waiting for.
-
-**What I need from you:** answer here, or run the command — whichever you prefer.
+**What I need from you:** answer here, or run the command.
 ````
 
 **`prototype` — the takeover alone**, because there is nothing to react to until it is built:
@@ -112,7 +110,7 @@ A ticket body is the question **plus what the human is being asked to do about i
 ````markdown
 ---
 
-**This one needs something to look at first.** Run this and I'll build it and walk you through it:
+**This one needs something to look at first.** Run this and I'll build it and show it to you:
 
 ```
 timone takeover <project>#<n>
@@ -138,6 +136,8 @@ A comment on a claimed ticket, authored by the human and posted after the questi
 1. **Take it at its word and check it against the map.** A written answer is thinner than an interview by nature; it carries no hesitation you can read. Restate what you understood in the resolution comment so a misreading surfaces where the human is already looking.
 2. **If it settles the question**, resolve the ticket exactly as an interview would have: resolution comment, close, gist onto the map, ADR at decision time if it passes stage 4's test.
 3. **If it is partial or ambiguous**, post **only what is still open** — never the whole question again — and wait. Answer from the codebase anything the codebase can answer rather than asking it a second time.
+
+   **This comment is where the process goes wrong most often, so it has a hard shape.** One line confirming their answers are recorded — a short list, not a restatement of each one. Then the single thing still open, in plain words. Then your recommendation, **one sentence of why and one sentence of what it costs**, and nothing more; the rest is a link to the artifact that holds it. Then the CTA. Under 150 words in total. `scratch-app` #31 is the counter-example this rule was written from: 520 words to ask one yes-or-no question, and fvermaut said he could not use it.
 4. **One clarifying round, then stop asking in writing.** If the next answer still does not settle it, say so and hand back the takeover command. The bound is the whole reason the written path is allowed; a thread that keeps going is the ping-pong [ADR-0012](../../../doc/adr/0012-conversation-channels.md) struck out.
 
 **Claiming:** assign the ticket to yourself **before any work** — the assignee *is* the claim; open + unassigned = unclaimed. **Blocking:** use GitHub's native sub-issue and dependency relationships where `gh`/GraphQL supports them (verify once per repo); where unavailable, fall back loudly to a body line `Blocked by: #N, #M`. The **frontier** is the open, unblocked, unclaimed children. Expect other sessions to be editing the tracker concurrently.

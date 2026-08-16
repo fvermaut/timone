@@ -42,7 +42,7 @@ describe("TerminalChannel.open", () => {
     const { comment } = await new TerminalChannel().open(context);
 
     expect(comment).toMatch(/two ways to answer/i);
-    expect(comment).toMatch(/a comment on this ticket is enough/i);
+    expect(comment).toMatch(/a comment is enough/i);
   });
 
   it("says what the conversation is about, in the words the stage wrote", async () => {
@@ -66,7 +66,8 @@ describe("TerminalChannel.open", () => {
     expect(closing).toMatch(/What I need from you:/);
     expect(closing).toMatch(/answer here/i);
     expect(closing).toMatch(/run the command/i);
-    expect(closing).toMatch(/whichever you prefer/i);
+    // Both named, neither recommended: the human picks without justifying it.
+    expect(closing).not.toMatch(/better|instead|rather/i);
   });
 
   it("tells the ledger what the run is waiting for", async () => {
@@ -82,6 +83,14 @@ describe("TerminalChannel.open", () => {
   it("leaves the machine marker to the adapter", async () => {
     const { comment } = await new TerminalChannel().open(context);
     expect(comment).not.toContain(MACHINE_MARKER);
+  });
+
+  // process.md, "Writing to the human": a comment is a few sentences, under
+  // 150 words. The subject is the stage's own text and is counted with it,
+  // because the human reads one comment and not two halves of one.
+  it("stays under the length a person will actually read", async () => {
+    const { comment } = await new TerminalChannel().open(context);
+    expect(comment.split(/\s+/).filter(Boolean).length).toBeLessThan(150);
   });
 });
 
@@ -113,7 +122,7 @@ describe("TerminalChannel.conclude", () => {
     });
 
     expect(comment).toMatch(/two ways to answer/i);
-    expect(comment).toMatch(/a comment on this ticket is enough/i);
+    expect(comment).toMatch(/a comment is enough/i);
     expect(comment).toContain("timone takeover scratch-app#6");
   });
 

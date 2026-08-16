@@ -20,6 +20,16 @@ Timone's own requirements are written down as a numbered list in `doc/specs/prd/
 
 **The feedback requirement was signed off with two limits written into the record rather than left implied**, because a sign-off that hides what it did not prove is worth less than one that names it. First, that requirement lists **six** kinds of response and there are now **seven** — the wording is out of date, and correcting it is the feedback stage's own job on its own record, not something a checking pass may do. Second, one rule inside it has a live example that **does not actually prove the rule**: when you change a requirement, its old evidence stops counting and it drops out of the safety net — and that is exactly what happened to the to-do app's on-screen behaviour rule, except it would have dropped out anyway for an unrelated reason, so the rule was never the thing doing the work. Proving it properly needs a different requirement to change, and none has yet.
 
+## Just finished — tickets are written short now
+
+**2026-08-16.** You said Timone's tickets and comments were too long and too hard to read, and that a ticket should hold no requirements or technical detail — only what is happening and what you are being asked.
+
+There is now a written rule for it in `process.md`, and every skill points at it. Short sentences, common words, no words that only make sense if you have read the process. A comment is a few sentences and under 150 words. Requirements and technical detail are links to files in the repository, never text on a ticket. When Timone asks you to decide something it may keep its recommendation on the ticket, with **one** sentence of why and **one** of what it costs — that part is the conversation, and you chose to keep it where you can see it.
+
+The two longest machine-written messages were cut, and a test now fails if one grows past 150 words.
+
+**Not done yet:** this file is the worst offender left. It is long, and old news is struck through rather than removed. Nothing has been written to a real ticket under the new rule yet, so nobody has seen whether it reads better.
+
 ## Just finished — when it stops and asks you something, answering works
 
 **2026-08-16.** Two faults, and they were the same fault wearing two hats. Both found by running the machine for real on the throwaway app on 15–16 August, and neither one findable by any test — 932 of them were green at the time.

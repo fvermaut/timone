@@ -55,8 +55,23 @@ The record carries: date, the request (verbatim), kind, entry point, rationale. 
 
 **GitHub path** — only when **both** hold: an issue ref was given, **and** the project's `repo_url` in `timone.yaml` is GitHub-hosted (matches `github.com`). Then, from within `projects/<name>/`:
 
-1. `gh issue comment <n> --body "…"` — the comment carries kind, entry point, and rationale.
+1. `gh issue comment <n> --body "…"` — a short human message, in the shape below.
 2. `gh label create "triage:<kind>" …` if the label doesn't exist yet, then `gh issue edit <n> --add-label "triage:<kind>"`.
+
+**The comment is a message, not a form.** The `triage:<kind>` label carries the kind for the machine, so the comment does not repeat it as a field. Never name the entry-point skill or a stage number on the ticket — say what will happen next in the human's own terms. Keep it under 150 words. This is the shape:
+
+```markdown
+**This is a <new feature | bug | small technical job | question>.**
+
+<One or two plain sentences saying why this kind and not the nearest other one.>
+
+<One or two plain sentences saying what happens next and whether the human will
+have to do anything to make it happen.>
+
+**What I need from you:** <what they must do, or "nothing right now — I'll come back here when …">
+```
+
+**Write the `doc/triage/NNN` record as well, and link it from the comment, when the rationale will not fit in two plain sentences** — a request whose kind is genuinely arguable, or a `feature` routed anywhere other than `timone-grill`. The reasoning belongs in the file; the ticket gets the conclusion and the link. Most requests need no record on this path.
 
 **Doc-record path** — everything else (free-form request, or an issue ref against a non-GitHub remote):
 

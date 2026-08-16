@@ -32,18 +32,16 @@ export function takeoverCommand(project: string, ticket: number): string {
  */
 function invitationToAnswer(command: string): string[] {
   return [
-    "**Two ways to answer this — take whichever suits you.**",
+    "**Two ways to answer — pick either.**",
     "",
-    '- **Write your answer here.** A comment on this ticket is enough; you don\'t need to answer every part, and "I don\'t know, what do you suggest?" is a real answer. I\'ll pick it up and carry on. If what you write leaves something open, I\'ll ask once more here — and if it\'s still not settled, I\'ll say so rather than keep typing at you.',
-    "- **Talk it through instead.** If it's easier said than written, run this and I'll pick up exactly where this ticket left off:",
+    '- **Write your answer here.** A comment is enough. You don\'t need to answer every part, and "I don\'t know, what do you suggest?" is a real answer. If something is still unclear I\'ll ask once more here, then stop.',
+    "- **Talk it through instead.** Run this and I'll pick up where this ticket left off:",
     "",
     "```",
     command,
     "```",
     "",
-    "You don't need to tell it anything else — it works out what this ticket is waiting for.",
-    "",
-    "**What I need from you:** answer here, or run the command — whichever you prefer.",
+    "**What I need from you:** answer here, or run the command.",
   ];
 }
 
@@ -66,11 +64,9 @@ export class TerminalChannel implements ConversationChannel {
 
     return {
       comment: [
-        "**I need to ask you a few things before I go further.**",
+        "**I need to ask you a few things first.**",
         "",
         context.subject,
-        "",
-        "Whatever we settle, I'll write it back here.",
         "",
         ...invitationToAnswer(command),
       ].join("\n"),
@@ -98,9 +94,8 @@ export class TerminalChannel implements ConversationChannel {
       "",
       outcome.summary,
       "",
-      "This is the record — the conversation itself isn't kept, so if anything",
-      "here doesn't match what you meant, say so on this ticket and I'll fix it",
-      "before it goes any further.",
+      "This is the record — the conversation itself isn't kept. If anything",
+      "here is wrong, say so and I'll fix it.",
       "",
       "**What I need from you:** nothing right now — read it if you like, and I'll carry on.",
     ].join("\n");
