@@ -8,7 +8,12 @@
 
 ## Waiting on you
 
-**1. The trading app is stuck, and one label fixes it.** All fifteen questions on `ivtrends` are answered and closed. The map that holds them — [ivtrends #1](https://github.com/fvermaut/ivtrends/issues/1) — has no `timone` label, so nothing is watching it. If you write "go ahead" on it today, nothing will happen. This is the same failure you hit on 13 August. **Add the `timone` label to that ticket, or tell me to add it.**
+**1. The trading app is stuck, and it needs two labels.** All fifteen questions on `ivtrends` are answered and closed. The list that holds them — [ivtrends #1](https://github.com/fvermaut/ivtrends/issues/1) — carries neither label it needs, so nothing is watching it. If you write "go ahead" on it today, nothing will happen. This is the same failure you hit on 13 August.
+
+- `timone` — without it, no job is ever created for the ticket.
+- `wayfinder:frontier-empty` — this is what says the questions are all answered. It is what makes the ticket ask you for the go-ahead, and what makes your reply count as one. **This label does not exist in that repository yet and has to be created first.**
+
+**Tell me to do it and I will**, in that order. Then the ticket will ask you itself, within a minute, and you answer it in your own words.
 
 **2. One job on the to-do app needs restarting.** `scratch-app` [#13](https://github.com/fvermaut/scratch-app/issues/13) stopped on a server error. Run:
 
@@ -120,4 +125,4 @@ These last ones live only in this file. Their proper home is an issue on Timone'
 - What was built, and what each build did or did not prove: `doc/plans/phases/reports/`.
 - The to-do app has its own status file at `projects/scratch-app/STATUS.md`.
 
-**What I need from you:** add the `timone` label to [ivtrends #1](https://github.com/fvermaut/ivtrends/issues/1), or say the word and I will add it. The rest of this list can wait.
+**What I need from you:** say the word and I will put the two labels on [ivtrends #1](https://github.com/fvermaut/ivtrends/issues/1), which is the only thing standing between the trading app and its specification. The rest of this list can wait.
