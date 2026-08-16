@@ -486,7 +486,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   // after the registration loop has already walked past its ticket waits a
   // whole cycle to do anything (ADR-0032). The natural place to add a new call
   // is at the end, and the end is the one place this may not go.
-  applyRequests(deps, result, log);
+  await applyRequests(deps, result, log);
 
   // Once for the whole cycle, and before any project is looked at (ADR-0020).
   // Per-project would let the first project's fresh stamp answer for the
@@ -540,11 +540,11 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
  * queue for ever. What could not be done is said once, on the cycle's errors,
  * where the operator reads it.
  */
-function applyRequests(
+async function applyRequests(
   deps: PollDeps,
   result: PollResult,
   log: (message: string) => void,
-): void {
+): Promise<void> {
   const { statePath } = deps;
   if (statePath === undefined) return;
 
@@ -569,7 +569,7 @@ function applyRequests(
 
     let code: number;
     try {
-      code = applyRequest(request, deps, say);
+      code = await applyRequest(request, deps, say);
     } catch (error) {
       code = 1;
       say(oneLine(error));
@@ -598,11 +598,11 @@ function applyRequests(
  * of a consumed answer means, without either of them learning that a daemon
  * exists.
  */
-function applyRequest(
+async function applyRequest(
   request: QueuedRequest,
   deps: PollDeps,
   log: (message: string) => void,
-): number {
+): Promise<number> {
   const { manifest, store } = deps;
   const { body } = request;
   const target = `${body.project}#${body.ticket}`;

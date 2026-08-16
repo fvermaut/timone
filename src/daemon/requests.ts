@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -173,6 +174,50 @@ export function pending(statePath: string): PendingRequests {
  */
 export function settle(path: string): void {
   rmSync(path, { force: true });
+}
+
+/** How long a command watches for its request to be carried out. */
+export interface WaitOptions {
+  /** How often to look. */
+  intervalMs?: number;
+  /**
+   * How long to look before saying it is still queued. One poll interval plus
+   * a margin: a daemon that has not touched it by then is not about to.
+   */
+  boundMs?: number;
+  /** Injected so a test does not wait a real minute to watch a timeout. */
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const WATCH_INTERVAL_MS = 1_000;
+const WATCH_BOUND_MS = 75_000;
+
+/**
+ * Wait for the daemon to deal with one request, and answer whether it did.
+ *
+ * **A request being gone is the signal**, not the effect it had: the daemon
+ * settles a request whether or not it could carry it out, so this answers
+ * "has it been dealt with?" and leaves "what happened?" to the caller, who
+ * reads the ledger for it. One question each, and neither guesses the other's.
+ *
+ * **The bound is the point.** A command that waits for ever on a daemon that
+ * has died is the silent hang this whole path exists to avoid, so the wait
+ * ends and says so.
+ */
+export async function waitUntilSettled(
+  path: string,
+  options: WaitOptions = {},
+): Promise<boolean> {
+  const intervalMs = options.intervalMs ?? WATCH_INTERVAL_MS;
+  const boundMs = options.boundMs ?? WATCH_BOUND_MS;
+  const sleep =
+    options.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
+
+  for (let waited = 0; waited < boundMs; waited += intervalMs) {
+    if (!existsSync(path)) return true;
+    await sleep(intervalMs);
+  }
+  return !existsSync(path);
 }
 
 /** Whether a directory entry is one of ours at all. */

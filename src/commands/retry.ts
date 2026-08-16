@@ -4,7 +4,8 @@ import type { Command } from "commander";
 import { loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
-import { acquireStateLock } from "../daemon/lock.js";
+import { acquireStateLock, type LockHolder } from "../daemon/lock.js";
+import { enqueue, waitUntilSettled, type WaitOptions } from "../daemon/requests.js";
 import { waitOf } from "../daemon/session.js";
 import { parseTarget } from "./takeover.js";
 
@@ -21,6 +22,11 @@ export interface RetryDeps {
    * never reach a write.
    */
   statePath?: string;
+  /**
+   * How long to watch for the daemon to carry out a request, when it is the
+   * daemon doing it. Injected so a test does not wait a real minute.
+   */
+  wait?: WaitOptions;
   log?: (message: string) => void;
 }
 
@@ -29,8 +35,15 @@ export interface RetryDeps {
  * the pipeline that 12g had to fake three times by hand-editing the ledger.
  * Everything that is not a failed run is refused with a sentence about what
  * the ticket *is* doing, in the same discipline as `timone takeover`.
+ *
+ * **Three endings, and the third is what
+ * [ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)
+ * added.** The ledger free: re-arm it here, exactly as before. A live daemon
+ * holding it: ask, and watch. Anything else — an unreadable lock, a holder
+ * whose process is gone — is untouched, because the reclaim path owns it and
+ * it is the route out of a crash that every live gate drives.
  */
-export function runRetry(raw: string, deps: RetryDeps): number {
+export async function runRetry(raw: string, deps: RetryDeps): Promise<number> {
   const log = deps.log ?? ((message: string) => console.log(message));
   if (deps.statePath === undefined) return retry(raw, deps, log);
 
@@ -44,8 +57,15 @@ export function runRetry(raw: string, deps: RetryDeps): number {
     // the corpse of the daemon that died holding it.
   });
   if (!acquired.ok) {
-    log(acquired.error.message);
-    return 1;
+    // A refusal that names a holder is a *live* daemon: the reclaim above
+    // would have broken the lock of a dead one. So this is the one case where
+    // asking is the answer, and every other refusal reads as it always has.
+    const { holder } = acquired.error;
+    if (holder === undefined) {
+      log(acquired.error.message);
+      return 1;
+    }
+    return askForRetry(raw, deps, holder, log);
   }
 
   try {
@@ -53,6 +73,67 @@ export function runRetry(raw: string, deps: RetryDeps): number {
   } finally {
     acquired.lock.release();
   }
+}
+
+/**
+ * Ask the daemon to re-arm this run, and report **what happened** rather than
+ * that it was asked.
+ *
+ * The waiting line is not decoration: without it a human sees a command that
+ * appears to do nothing, and stops the daemon by hand — which is the habit
+ * ADR-0032 exists to remove.
+ */
+async function askForRetry(
+  raw: string,
+  deps: RetryDeps,
+  holder: LockHolder,
+  log: (message: string) => void,
+): Promise<number> {
+  const { manifest, store, statePath } = deps;
+  if (statePath === undefined) return 1;
+
+  let target: { project: string; ticket: number };
+  try {
+    target = parseTarget(raw);
+  } catch (error) {
+    log(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+  if (!(target.project in manifest.projects)) {
+    const known = Object.keys(manifest.projects).join(", ") || "none";
+    log(`I don't know a project called "${target.project}". I look after: ${known}.`);
+    return 1;
+  }
+
+  const name = `${target.project} #${target.ticket}`;
+  const path = enqueue(statePath, {
+    kind: "retry",
+    project: target.project,
+    ticket: target.ticket,
+  });
+  log(
+    `${holder.command} (pid ${holder.pid}) has the ledger, so I've asked it to ` +
+      `retry ${name} on its next pass. Watching for that.`,
+  );
+
+  if (!(await waitUntilSettled(path, deps.wait))) {
+    log(
+      `${name} is still queued — the daemon hasn't taken it yet. It will on its ` +
+        "next pass; run `timone status` to see where things stand.",
+    );
+    return 1;
+  }
+
+  const run = store.runsForTicket(target.project, target.ticket).at(-1);
+  if (run === undefined || run.status === "failed") {
+    log(
+      `The daemon read the request and did not re-arm ${name} — it is still ` +
+        `${run?.status ?? "unknown"}. Its log says why.`,
+    );
+    return 1;
+  }
+  log(`${name} is re-armed at the point it stopped (${run.stage ?? "the start"}).`);
+  return 0;
 }
 
 /** The retry itself, once this process is the ledger's only writer. */
@@ -245,7 +326,7 @@ export function registerRetryCommand(program: Command): void {
       "timone.yaml",
     )
     .option("--state <path>", "path to the daemon state file")
-    .action((ticket: string, options: { manifest: string; state?: string }) => {
+    .action(async (ticket: string, options: { manifest: string; state?: string }) => {
       let manifest: Manifest;
       try {
         manifest = loadManifest(options.manifest);
@@ -269,6 +350,6 @@ export function registerRetryCommand(program: Command): void {
         return;
       }
 
-      process.exitCode = runRetry(ticket, { manifest, store, statePath });
+      process.exitCode = await runRetry(ticket, { manifest, store, statePath });
     });
 }

@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
@@ -15,6 +15,7 @@ import {
 } from "../adapters/ticketing.js";
 import { RunStore } from "../daemon/runs.js";
 import { acquireStateLock } from "../daemon/lock.js";
+import { pending, settle } from "../daemon/requests.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { AgentSessionSpawner } from "../daemon/session.js";
 import { runRetry } from "./retry.js";
@@ -62,13 +63,13 @@ function collect(): { log: (line: string) => void; lines: string[] } {
   return { log: (line) => lines.push(line), lines };
 }
 
-describe("timone retry", () => {
-  it("re-arms a failed run at its stage, keeping everything it owned", () => {
+describe("timone retry", async () => {
+  it("re-arms a failed run at its stage, keeping everything it owned", async () => {
     const store = newStore();
     failedRun(store);
     const { log, lines } = collect();
 
-    const code = runRetry("scratch-app#6", { manifest, store, log });
+    const code = await runRetry("scratch-app#6", { manifest, store, log });
 
     expect(code).toBe(0);
     const run = store.get("scratch-app#6/1");
@@ -77,10 +78,17 @@ describe("timone retry", () => {
     expect(run?.branch).toBe("timone/6-fiddly-box");
     expect(run?.pr).toBe(9);
     expect(run?.failure).toBeUndefined();
-    expect(lines.join("\n")).toMatch(/picks it up|next cycle/i);
+    // Asserted as a literal, not a pattern: this is the sentence a human reads
+    // when no daemon holds the ledger, it is quoted verbatim in gate reports,
+    // and ADR-0032 promises this path is untouched. A "harmless" rewording
+    // would slip past a regex.
+    expect(lines.join("\n")).toBe(
+      "scratch-app #6 is re-armed at the point it stopped (execution). " +
+        "The watcher picks it up on its next cycle — start `timone daemon` if it isn't running.",
+    );
   });
 
-  it("refuses a run that is not failed, saying what it is doing", () => {
+  it("refuses a run that is not failed, saying what it is doing", async () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);
     store.activate(run.id, "s1");
@@ -92,27 +100,27 @@ describe("timone retry", () => {
     });
     const { log, lines } = collect();
 
-    const code = runRetry("scratch-app#6", { manifest, store, log });
+    const code = await runRetry("scratch-app#6", { manifest, store, log });
 
     expect(code).toBe(1);
     expect(store.get("scratch-app#6/1")?.status).toBe("parked");
     expect(lines.join("\n")).toMatch(/your approval of the plan/);
   });
 
-  it("refuses a finished run rather than resurrecting it", () => {
+  it("refuses a finished run rather than resurrecting it", async () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);
     store.activate(run.id, "s1");
     store.complete(run.id);
     const { log, lines } = collect();
 
-    const code = runRetry("scratch-app#6", { manifest, store, log });
+    const code = await runRetry("scratch-app#6", { manifest, store, log });
 
     expect(code).toBe(1);
     expect(lines.join("\n")).toMatch(/finished/i);
   });
 
-  it("refuses when the project has moved on to another ticket", () => {
+  it("refuses when the project has moved on to another ticket", async () => {
     const store = newStore();
     failedRun(store);
     // The failure freed the project; another ticket has since claimed it.
@@ -121,26 +129,29 @@ describe("timone retry", () => {
     store.claimBranch(next.id, "timone/8-other-work");
     const { log, lines } = collect();
 
-    const code = runRetry("scratch-app#6", { manifest, store, log });
+    const code = await runRetry("scratch-app#6", { manifest, store, log });
 
     expect(code).toBe(1);
     expect(store.get("scratch-app#6/1")?.status).toBe("failed");
     expect(lines.join("\n")).toMatch(/#8|another/i);
   });
 
-  it("refuses an untracked ticket and an unknown project with guidance", () => {
+  it("refuses an untracked ticket and an unknown project with guidance", async () => {
     const store = newStore();
     const { log, lines } = collect();
 
-    expect(runRetry("scratch-app#99", { manifest, store, log })).toBe(1);
-    expect(runRetry("nope#1", { manifest, store, log })).toBe(1);
+    expect(await runRetry("scratch-app#99", { manifest, store, log })).toBe(1);
+    expect(await runRetry("nope#1", { manifest, store, log })).toBe(1);
     expect(lines.join("\n")).toMatch(/timone.*label|not working on/i);
     expect(lines.join("\n")).toContain("scratch-app");
   });
 
-  it("re-arms nothing while a daemon holds the ledger, and says who has it", () => {
-    // ADR-0023: retry rewinds a run and hands it back to the loop, so it
-    // writes the ledger — and two writers of one field is the race.
+  /**
+   * ADR-0032 replaced the refusal that used to stand here. A retry writes the
+   * ledger and the daemon owns it, so the command asks and watches — and this
+   * is the fixture where nobody ever answers, which must end rather than hang.
+   */
+  it("asks the daemon holding the ledger, names it, and gives up saying so", async () => {
     const dir = mkdtempSync(join(tmpdir(), "timone-retry-lock-"));
     tempDirs.push(dir);
     const statePath = join(dir, ".timone", "state.json");
@@ -154,25 +165,99 @@ describe("timone retry", () => {
     });
     const { log, lines } = collect();
 
-    const code = runRetry("scratch-app#6", { manifest, store, statePath, log });
+    const code = await runRetry("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      log,
+      wait: { intervalMs: 1, boundMs: 3, sleep: async () => {} },
+    });
 
     expect(code).toBe(1);
-    expect(store.get("scratch-app#6/1")?.status).toBe("failed");
     expect(lines.join("\n")).toContain("timone daemon");
     expect(lines.join("\n")).toContain("4213");
+    expect(lines.join("\n")).toContain("still queued");
+    // Asked, and the ask is still there for the daemon to find.
+    expect(pending(statePath).requests.map((request) => request.body.kind)).toEqual([
+      "retry",
+    ]);
+    expect(store.get("scratch-app#6/1")?.status).toBe("failed");
   });
 
-  it("refuses a malformed target with the shape it wanted", () => {
+  /**
+   * The effect, not the errand. The daemon here is the injected sleep: it does
+   * on its "cycle" exactly what `applyRequests` does — the command's own code
+   * over the store, then settle — and the command must then report what
+   * happened rather than that it had asked.
+   */
+  it("reports what the daemon did, once it has done it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-retry-served-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-06T10:00:00Z" });
+    failedRun(store);
+    acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    const { log, lines } = collect();
+    const daemonCycle = async (): Promise<void> => {
+      const { requests } = pending(statePath);
+      for (const request of requests) {
+        store.retry("scratch-app#6/1");
+        settle(request.path);
+      }
+    };
+
+    const code = await runRetry("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      log,
+      wait: { intervalMs: 1, boundMs: 100, sleep: daemonCycle },
+    });
+
+    expect(code).toBe(0);
+    expect(lines.join("\n")).toContain("re-armed");
+    expect(lines.join("\n")).not.toContain("still queued");
+    expect(store.get("scratch-app#6/1")?.status).not.toBe("failed");
+  });
+
+  /**
+   * Only a refusal that *names a holder* is a live daemon. A lock nobody can
+   * read names nobody, and asking a daemon that may not exist to do something
+   * would be worse than saying so.
+   */
+  it("asks nobody when the lock cannot be read at all", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-retry-unreadable-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-06T10:00:00Z" });
+    failedRun(store);
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(`${statePath}.lock`, "not a lock", "utf8");
     const { log, lines } = collect();
 
-    const code = runRetry("scratch-app", { manifest, store: newStore(), log });
+    const code = await runRetry("scratch-app#6", { manifest, store, statePath, log });
+
+    expect(code).toBe(1);
+    expect(lines.join("\n")).toContain("cannot be read");
+    expect(pending(statePath).requests).toEqual([]);
+  });
+
+  it("refuses a malformed target with the shape it wanted", async () => {
+    const { log, lines } = collect();
+
+    const code = await runRetry("scratch-app", { manifest, store: newStore(), log });
 
     expect(code).toBe(1);
     expect(lines.join("\n")).toMatch(/<project>#<ticket>/);
   });
 });
 
-describe("timone retry — the answer a killed session had already read", () => {
+describe("timone retry — the answer a killed session had already read", async () => {
   // The live gate of 2026-08-13 on `scratch-app` #26. The daemon consumed the
   // answer, spawned the session, and the session was killed — leaving the run
   // `failed` with no cursor at all, because activating it cleared the wait.
@@ -315,7 +400,7 @@ describe("timone retry — the answer a killed session had already read", () => 
     const read = await pollOnce(deps);
     const dead = store.get("scratch-app#26/1");
 
-    const code = runRetry("scratch-app#26", { manifest, store, log });
+    const code = await runRetry("scratch-app#26", { manifest, store, log });
     const rearmed = store.get("scratch-app#26/1");
     const again = await pollOnce(deps);
 
@@ -360,7 +445,7 @@ describe("timone retry — the answer a killed session had already read", () => 
     await pollOnce(deps);
     const askedBeforeRetry = posted.filter(isInvitation).length;
 
-    runRetry("scratch-app#26", { manifest, store, log });
+    await runRetry("scratch-app#26", { manifest, store, log });
     await pollOnce(deps);
     await pollOnce(deps);
 
@@ -402,7 +487,7 @@ describe("timone retry — the answer a killed session had already read", () => 
     const { log } = collect();
 
     const stalled = await pollOnce(deps);
-    const code = runRetry("scratch-app#26", { manifest, store, log });
+    const code = await runRetry("scratch-app#26", { manifest, store, log });
     const again = await pollOnce(deps);
 
     // The ledger it works from has nothing but the cursor.
@@ -454,7 +539,7 @@ describe("timone retry — the answer a killed session had already read", () => 
     await pollOnce(deps);
 
     const settled = store.get("scratch-app#26/1");
-    const code = runRetry("scratch-app#26", { manifest, store, log });
+    const code = await runRetry("scratch-app#26", { manifest, store, log });
 
     expect(settled?.status).toBe("done");
     expect(settled?.consumedAnswerAt).toBeUndefined();
@@ -466,7 +551,7 @@ describe("timone retry — the answer a killed session had already read", () => 
   });
 });
 
-describe("timone retry — the way back from a consumed answer", () => {
+describe("timone retry — the way back from a consumed answer", async () => {
   const invitation = {
     author: "fvermaut",
     body: `${MACHINE_MARKER}\n\ntwo ways to answer this`,
@@ -543,7 +628,7 @@ describe("timone retry — the way back from a consumed answer", () => {
 
     const read = await pollOnce(deps);
     const stalled = await pollOnce(deps);
-    const code = runRetry("scratch-app#6", { manifest, store, log });
+    const code = await runRetry("scratch-app#6", { manifest, store, log });
     const again = await pollOnce(deps);
 
     expect(read.resumed).toEqual(["scratch-app#6/1"]);

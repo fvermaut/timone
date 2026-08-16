@@ -4,7 +4,8 @@ import type { Command } from "commander";
 import { loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
-import { acquireStateLock } from "../daemon/lock.js";
+import { acquireStateLock, type LockHolder } from "../daemon/lock.js";
+import { enqueue, waitUntilSettled, type WaitOptions } from "../daemon/requests.js";
 import { parseTarget } from "./takeover.js";
 
 export interface CancelDeps {
@@ -21,6 +22,11 @@ export interface CancelDeps {
   statePath?: string;
   /** Why, in the human's own words. */
   reason?: string;
+  /**
+   * How long to watch for the daemon to carry out a request, when it is the
+   * daemon doing it. Injected so a test does not wait a real minute.
+   */
+  wait?: WaitOptions;
   log?: (message: string) => void;
 }
 
@@ -42,7 +48,7 @@ const ASKED_TO_STOP = "you asked me to stop";
  * cancelled is refused with a sentence about what the ticket *is* doing, in
  * the same discipline as `timone retry` and `timone takeover`.
  */
-export function runCancel(raw: string, deps: CancelDeps): number {
+export async function runCancel(raw: string, deps: CancelDeps): Promise<number> {
   const log = deps.log ?? ((message: string) => console.log(message));
   if (deps.statePath === undefined) return cancel(raw, deps, log);
 
@@ -56,8 +62,14 @@ export function runCancel(raw: string, deps: CancelDeps): number {
     // refuses the command that clears up after it.
   });
   if (!acquired.ok) {
-    log(acquired.error.message);
-    return 1;
+    // Named holder means a *live* daemon — a dead one's lock was broken above.
+    // That is the case worth asking about; every other refusal is unchanged.
+    const { holder } = acquired.error;
+    if (holder === undefined) {
+      log(acquired.error.message);
+      return 1;
+    }
+    return askForCancel(raw, deps, holder, log);
   }
 
   try {
@@ -65,6 +77,72 @@ export function runCancel(raw: string, deps: CancelDeps): number {
   } finally {
     acquired.lock.release();
   }
+}
+
+/**
+ * Ask the daemon to abandon this chunk, and report what happened rather than
+ * that it was asked
+ * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
+ *
+ * This is the command [ADR-0031](../../doc/adr/0031-a-handoff-is-a-wait-not-a-failure.md)
+ * leans on: a handoff nobody wants to answer holds its project, and this is
+ * the way out of it. It was unrunnable against a live daemon until now.
+ */
+async function askForCancel(
+  raw: string,
+  deps: CancelDeps,
+  holder: LockHolder,
+  log: (message: string) => void,
+): Promise<number> {
+  const { manifest, store, statePath } = deps;
+  if (statePath === undefined) return 1;
+
+  let target: { project: string; ticket: number };
+  try {
+    target = parseTarget(raw);
+  } catch (error) {
+    log(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+  if (!(target.project in manifest.projects)) {
+    const known = Object.keys(manifest.projects).join(", ") || "none";
+    log(`I don't know a project called "${target.project}". I look after: ${known}.`);
+    return 1;
+  }
+
+  const name = `${target.project} #${target.ticket}`;
+  const path = enqueue(statePath, {
+    kind: "cancel",
+    project: target.project,
+    ticket: target.ticket,
+    ...(deps.reason === undefined ? {} : { reason: deps.reason }),
+  });
+  log(
+    `${holder.command} (pid ${holder.pid}) has the ledger, so I've asked it to ` +
+      `stop work on ${name} on its next pass. Watching for that.`,
+  );
+
+  if (!(await waitUntilSettled(path, deps.wait))) {
+    log(
+      `${name} is still queued — the daemon hasn't taken it yet. It will on its ` +
+        "next pass; run `timone status` to see where things stand.",
+    );
+    return 1;
+  }
+
+  const run = store.runsForTicket(target.project, target.ticket).at(-1);
+  if (run?.status !== "cancelled") {
+    log(
+      `The daemon read the request and did not stop ${name} — it is ` +
+        `${run?.status ?? "unknown"}. Its log says why.`,
+    );
+    return 1;
+  }
+  log(
+    `Stopped work on ${name}: ${run.cancellation ?? ASKED_TO_STOP}. I won't pick ` +
+      "this chunk up again.",
+  );
+  return 0;
 }
 
 /** The cancellation itself, once this process is the ledger's only writer. */
@@ -160,7 +238,7 @@ export function registerCancelCommand(program: Command): void {
     )
     .option("--state <path>", "path to the daemon state file")
     .action(
-      (
+      async (
         ticket: string,
         options: { manifest: string; state?: string; reason?: string },
       ) => {
@@ -187,7 +265,7 @@ export function registerCancelCommand(program: Command): void {
           return;
         }
 
-        process.exitCode = runCancel(ticket, {
+        process.exitCode = await runCancel(ticket, {
           manifest,
           store,
           statePath,
