@@ -18,7 +18,9 @@ import {
 import { outcomeCursorFrom } from "../daemon/outcomes.js";
 import { PROMPTED_STAGES, takeoverPrompt } from "../daemon/prompts.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
-import { withStateLock } from "../daemon/lock.js";
+import { acquireStateLock } from "../daemon/lock.js";
+import { enqueue, waitUntilSettled, type WaitOptions } from "../daemon/requests.js";
+import { waitOf } from "../daemon/session.js";
 
 /** A parsed `<project>#<ticket>` target. */
 export interface TakeoverTarget {
@@ -61,6 +63,11 @@ export interface TakeoverDeps {
   statePath?: string;
   adapter: TicketingAdapter;
   launcher: ProcessLauncher;
+  /**
+   * How long to watch for the daemon to hand a run over, when it is the
+   * daemon doing the claiming. Injected so a test does not wait a real minute.
+   */
+  wait?: WaitOptions;
   /** The timone root: the conversation runs here, never in the project (ADR-0007). */
   root: string;
   log?: (message: string) => void;
@@ -378,22 +385,226 @@ export async function runTakeover(
   const log = deps.log ?? ((message: string) => console.log(message));
   if (deps.statePath === undefined) return takeover(raw, deps, log);
 
-  const held = await withStateLock(
-    {
-      statePath: deps.statePath,
-      command: `timone takeover ${raw}`,
-      staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
-      // A takeover reclaims on the same evidence a daemon does — the holder's
-      // process being gone (ADR-0025). It is a question anybody can ask the
-      // OS, and withholding the answer here would leave a crashed daemon
-      // wedging the very command an operator reaches for to unwedge it.
-    },
-    () => takeover(raw, deps, log),
+  let target: TakeoverTarget;
+  try {
+    target = parseTarget(raw);
+  } catch (error) {
+    log(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+
+  const claimed = await claimForTakeover(raw, target, deps, log);
+  if (claimed.kind !== "claimed") return claimed.code;
+
+  // From here the run's *status* is what holds the project — a RUNNING status
+  // occupies the one-session slot, which is how the daemon's own sessions have
+  // always had exclusivity (ADR-0032). No lock is held across the
+  // conversation, so the daemon carries on with every other project.
+  //
+  // A signal does not run a `finally`, and Ctrl-C is how a conversation ends
+  // more often than not, so the claim is given back on that path too. A claim
+  // that outlives its session is the stuck run phase 14 closed.
+  const giveBack = (): void => releaseClaim(target, claimed.run, deps, log);
+  process.once("SIGINT", giveBack);
+  process.once("SIGTERM", giveBack);
+  try {
+    return await converse(target, claimed.run, claimed.thread, deps, log);
+  } finally {
+    process.off("SIGINT", giveBack);
+    process.off("SIGTERM", giveBack);
+    giveBack();
+  }
+}
+
+/** A claimed run, or the exit code of a takeover that never started one. */
+type Claim =
+  | { kind: "claimed"; run: Run; thread?: TicketThread }
+  | { kind: "no"; code: number };
+
+/**
+ * Take the run for this conversation, by whichever road the ledger allows.
+ *
+ * **Three roads, and only the middle one is new.** The ledger free: resolve
+ * and claim inside a hold measured in milliseconds, then give the lock
+ * straight back. A live daemon holding it: ask, and let the daemon claim.
+ * Anything else — an unreadable lock — is refused exactly as before.
+ *
+ * **Refusals keep their words wherever they can.** Where the ledger already
+ * knows this ticket, resolution is a read, so it happens here and the human
+ * gets the same sentence they have always got about a gate, a review, a
+ * finished run. Only enrolling a ticket the ledger has never heard of is a
+ * write, and only that case is handed to the daemon whole.
+ */
+async function claimForTakeover(
+  raw: string,
+  target: TakeoverTarget,
+  deps: TakeoverDeps,
+  log: (message: string) => void,
+): Promise<Claim> {
+  const { store, statePath } = deps;
+  if (statePath === undefined) return { kind: "no", code: 1 };
+
+  const acquired = acquireStateLock({
+    statePath,
+    command: `timone takeover ${raw}`,
+    staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
+    // A takeover reclaims on the same evidence a daemon does — the holder's
+    // process being gone (ADR-0025). It is a question anybody can ask the
+    // OS, and withholding the answer here would leave a crashed daemon
+    // wedging the very command an operator reaches for to unwedge it.
+  });
+
+  if (acquired.ok) {
+    try {
+      const resolution = await resolveTakeover(target, deps);
+      if (resolution.kind !== "converse") {
+        log(resolution.message);
+        return { kind: "no", code: resolution.kind === "answer-on-ticket" ? 0 : 1 };
+      }
+      if (!isPrompted(resolution.stage)) {
+        log(cannotConverse(target));
+        return { kind: "no", code: 1 };
+      }
+      return {
+        kind: "claimed",
+        run: store.claim(resolution.run.id),
+        ...(resolution.thread === undefined ? {} : { thread: resolution.thread }),
+      };
+    } finally {
+      acquired.lock.release();
+    }
+  }
+
+  const { holder } = acquired.error;
+  if (holder === undefined) {
+    log(acquired.error.message);
+    return { kind: "no", code: 1 };
+  }
+
+  // The ledger knows this ticket, so resolving it writes nothing and the
+  // refusals stay exactly as verified against R14.
+  if (store.runsForTicket(target.project, target.ticket).length > 0) {
+    const resolution = await resolveTakeover(target, deps);
+    if (resolution.kind !== "converse") {
+      log(resolution.message);
+      return { kind: "no", code: resolution.kind === "answer-on-ticket" ? 0 : 1 };
+    }
+    if (!isPrompted(resolution.stage)) {
+      log(cannotConverse(target));
+      return { kind: "no", code: 1 };
+    }
+  }
+
+  const name = `${target.project} #${target.ticket}`;
+  const path = enqueue(statePath, {
+    kind: "claim-takeover",
+    project: target.project,
+    ticket: target.ticket,
+  });
+  log(
+    `${holder.command} (pid ${holder.pid}) has the ledger, so I've asked it to ` +
+      `hand ${name} over on its next pass. Watching for that.`,
   );
 
-  if (held.ok) return held.value;
-  log(held.error.message);
-  return 1;
+  if (!(await waitUntilSettled(path, deps.wait))) {
+    log(
+      `${name} is still queued — the daemon hasn't handed it over yet. Try ` +
+        "again in a moment; `timone status` shows where it stands.",
+    );
+    return { kind: "no", code: 1 };
+  }
+
+  const run = store.runsForTicket(target.project, target.ticket).at(-1);
+  if (run === undefined || run.status !== "active") {
+    log(
+      `The daemon read the request and did not hand ${name} over — it is ` +
+        `${run?.status ?? "not in the ledger"}. Its log says why.`,
+    );
+    return { kind: "no", code: 1 };
+  }
+  return { kind: "claimed", run };
+}
+
+/**
+ * Give the run back to whatever it was waiting on.
+ *
+ * **Synchronous on every road**, which is what lets a signal handler use it:
+ * taking the lock is a file create, and leaving a request is a file write.
+ * Neither waits for anything.
+ *
+ * The claim kept the run's wait on it ({@link RunStore.claim} says so
+ * deliberately), so what it goes back to is read off the run itself rather
+ * than remembered by this process — a process that may not be alive to
+ * remember anything.
+ */
+function releaseClaim(
+  target: TakeoverTarget,
+  run: Run,
+  deps: TakeoverDeps,
+  log: (message: string) => void,
+): void {
+  const { store, statePath } = deps;
+  if (statePath === undefined) return;
+  if (store.get(run.id)?.status !== "active") return;
+
+  const acquired = acquireStateLock({
+    statePath,
+    command: "timone takeover (giving the run back)",
+    staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
+  });
+  if (acquired.ok) {
+    try {
+      store.park(run.id, waitOf(run));
+    } catch (error) {
+      log(error instanceof Error ? error.message : String(error));
+    } finally {
+      acquired.lock.release();
+    }
+    return;
+  }
+  if (acquired.error.holder === undefined) return;
+
+  enqueue(statePath, {
+    kind: "release-takeover",
+    project: target.project,
+    ticket: target.ticket,
+    outcome: "ended",
+  });
+}
+
+/**
+ * The conversation itself, holding no lock. Everything it needs was decided
+ * before the claim; all that is left is the prompt and the terminal.
+ */
+async function converse(
+  target: TakeoverTarget,
+  run: Run,
+  known: TicketThread | undefined,
+  deps: TakeoverDeps,
+  log: (message: string) => void,
+): Promise<number> {
+  const project = {
+    name: target.project,
+    repoUrl: deps.manifest.projects[target.project].repo_url,
+  };
+  const stage = run.stage;
+  if (stage === undefined || !isPrompted(stage)) {
+    log(cannotConverse(target));
+    return 1;
+  }
+
+  // Read again only where the claim had no reason to: a ticket enrolled from
+  // the tracker was already fetched to open its wait from, and fetching it
+  // twice in one command is the fault 19d closed in the poll loop.
+  const thread = known ?? (await deps.adapter.getTicket(project, target.ticket));
+  const prompt = takeoverPrompt(
+    target.project,
+    stage as (typeof PROMPTED_STAGES)[number],
+    thread,
+  );
+
+  log(`Picking up ${target.project} #${target.ticket} — over to you.`);
+  return deps.launcher.run("claude", [prompt], { cwd: deps.root });
 }
 
 /** The takeover itself, once this process is the ledger's only writer. */

@@ -49,6 +49,7 @@ import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 // at the terminal (ADR-0032).
 import { runRetry } from "../commands/retry.js";
 import { runCancel } from "../commands/cancel.js";
+import { resolveTakeover } from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
 import { type Run, type RunStore, type Witness } from "./runs.js";
 // The same comment the spawner posts when a session ends badly, because this
@@ -612,13 +613,34 @@ async function applyRequest(
       return runRetry(target, { manifest, store, log });
     case "cancel":
       return runCancel(target, { manifest, store, reason: body.reason, log });
-    case "claim-takeover":
-    case "release-takeover":
-      // Unreachable until 24d, because nothing enqueues one yet. Written as a
-      // refusal rather than a silent settle so that if 24d lands the enqueue
-      // and forgets the apply, the log says so on the first cycle.
-      log("nothing in this daemon applies a takeover request yet.");
-      return 1;
+    case "claim-takeover": {
+      // The daemon resolves as the command would, which is what makes a
+      // takeover of a ticket the ledger has never heard of work while the
+      // daemon is up: enrolling is a write, and the writer is here.
+      const resolution = await resolveTakeover(
+        { project: body.project, ticket: body.ticket },
+        { manifest, store, adapter: deps.adapter },
+      );
+      if (resolution.kind !== "converse") {
+        log(resolution.message);
+        return 1;
+      }
+      store.claim(resolution.run.id);
+      log(`${target} is the terminal's for now.`);
+      return 0;
+    }
+    case "release-takeover": {
+      const run = store.runsForTicket(body.project, body.ticket).at(-1);
+      if (run === undefined || run.status !== "active") {
+        log(`${target} is not out at the terminal — nothing to take back.`);
+        return 1;
+      }
+      // What it goes back to is read off the run: `claim` leaves the wait in
+      // place precisely so a claim can be undone by whoever finds it.
+      store.park(run.id, waitOf(run));
+      log(`${target} is back on its wait (${body.outcome}).`);
+      return 0;
+    }
   }
 }
 

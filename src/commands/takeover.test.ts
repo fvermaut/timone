@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,7 +14,8 @@ import type {
 import type { Manifest } from "../manifest.js";
 import { RunStore } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
-import { acquireStateLock } from "../daemon/lock.js";
+import { acquireStateLock, stateLockPath } from "../daemon/lock.js";
+import { enqueue, pending, settle } from "../daemon/requests.js";
 import {
   parseTarget,
   resolveTakeover,
@@ -658,9 +659,11 @@ describe("runTakeover", () => {
 });
 
 describe("takeover and the ledger's one writer", () => {
-  it("starts no session while a daemon holds the ledger, and says who has it", async () => {
-    // ADR-0023: takeover spawns a session too, and was racing the daemon by
-    // the same three faults — so it takes the same lock or it does not run.
+  it("asks the daemon holding the ledger, names it, and gives up saying so", async () => {
+    // ADR-0032 replaced the refusal that used to stand here. Exclusivity is
+    // the run's status now, not the lock, so a live daemon is asked to hand
+    // the run over rather than being a wall. This is the fixture where it
+    // never does, which must end rather than hang.
     const dir = mkdtempSync(join(tmpdir(), "timone-takeover-lock-"));
     tempDirs.push(dir);
     const statePath = join(dir, ".timone", "state.json");
@@ -685,6 +688,7 @@ describe("takeover and the ledger's one writer", () => {
       adapter,
       launcher,
       root: "/root",
+      wait: { intervalMs: 1, boundMs: 3, sleep: async () => {} },
       log: (message) => said.push(message),
     });
 
@@ -692,13 +696,21 @@ describe("takeover and the ledger's one writer", () => {
     expect(calls).toEqual([]);
     expect(said.join("\n")).toContain("timone daemon");
     expect(said.join("\n")).toContain("4213");
+    expect(said.join("\n")).toContain("still queued");
+    // Asked, and the ask is still there for the daemon to find.
+    expect(pending(statePath).requests.map((request) => request.body.kind)).toEqual([
+      "claim-takeover",
+    ]);
+    // Untouched: the conversation never started, so the run still waits.
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
   });
 
   it("creates no run from the tracker while a daemon holds the ledger", async () => {
     // Since ADR-0024 the *resolution* writes: a ticket with no run gets one.
-    // So it has to happen inside the hold, or a refused takeover would have
-    // registered a run in a ledger it was refused — phase 19's fault in a
-    // new costume.
+    // The invariant survives ADR-0032 unchanged and matters as much: a
+    // takeover that could not get the ledger must not have written to it.
+    // What changed is who enrols — the daemon does, from the request, and
+    // this command does not reach the tracker at all.
     const dir = mkdtempSync(join(tmpdir(), "timone-takeover-enrol-"));
     tempDirs.push(dir);
     const statePath = join(dir, ".timone", "state.json");
@@ -721,6 +733,7 @@ describe("takeover and the ledger's one writer", () => {
       adapter,
       launcher,
       root: "/root",
+      wait: { intervalMs: 1, boundMs: 3, sleep: async () => {} },
       log: () => {},
     });
 
@@ -753,5 +766,159 @@ describe("a ticket waiting on a pull-request review", () => {
     if (resolution.kind === "answer-on-ticket") {
       expect(resolution.message).toMatch(/pull request #9/);
     }
+  });
+});
+
+describe("takeover claims through the run, not the lock", () => {
+  /**
+   * The slice's central claim, and the only place it is observable: *during*
+   * the conversation. Asserted from inside the launcher, because before and
+   * after it the lock is free either way.
+   */
+  it("holds no lock while the conversation runs, and holds the run instead", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-claim-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-03T10:00:00Z" });
+    parkedOnConversation(store);
+    const { adapter } = fakeAdapter();
+    const seen: { lockHeld: boolean; status?: string }[] = [];
+    const launcher: ProcessLauncher = {
+      async run() {
+        seen.push({
+          lockHeld: existsSync(stateLockPath(statePath)),
+          status: store.get("scratch-app#6/1")?.status,
+        });
+        return 0;
+      },
+    };
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      log: () => {},
+    });
+
+    expect(code).toBe(0);
+    // No lock during the conversation — the daemon is free to work every
+    // other project — and the run is what stops it working this one.
+    expect(seen).toEqual([{ lockHeld: false, status: "active" }]);
+    // And it is given back afterwards, on the wait it came from.
+    const after = store.get("scratch-app#6/1");
+    expect(after?.status).toBe("parked");
+    expect(after?.waitingKind).toBe("conversation");
+    expect(after?.stage).toBe("clarification");
+  });
+
+  it("gives the claim back when the conversation throws", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-throw-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-03T10:00:00Z" });
+    parkedOnConversation(store);
+    const { adapter } = fakeAdapter();
+    const launcher: ProcessLauncher = {
+      async run() {
+        throw new Error("claude is not installed");
+      },
+    };
+
+    await expect(
+      runTakeover("scratch-app#6", {
+        manifest,
+        store,
+        statePath,
+        adapter,
+        launcher,
+        root: "/root",
+        log: () => {},
+      }),
+    ).rejects.toThrow("claude is not installed");
+
+    // A claim that outlived its session is the stuck run phase 14 closed.
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+  });
+
+  /**
+   * A signal runs no `finally`, and Ctrl-C is how a conversation ends more
+   * often than not — the fact `daemon.ts` already records about its own exit
+   * path. Driven by emitting the signal while the launcher is running.
+   */
+  it("gives the claim back on a signal", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-signal-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-03T10:00:00Z" });
+    parkedOnConversation(store);
+    const { adapter } = fakeAdapter();
+    let duringSignal: string | undefined;
+    const launcher: ProcessLauncher = {
+      async run() {
+        process.emit("SIGINT");
+        duringSignal = store.get("scratch-app#6/1")?.status;
+        return 130;
+      },
+    };
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      log: () => {},
+    });
+
+    expect(duringSignal).toBe("parked");
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+  });
+
+  /**
+   * The refusal the gate hit, gone. The daemon here is the injected sleep,
+   * doing on its "cycle" what `applyRequests` does with a claim request.
+   */
+  it("starts the conversation once the daemon has handed the run over", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-served-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-03T10:00:00Z" });
+    parkedOnConversation(store);
+    acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+    const daemonCycle = async (): Promise<void> => {
+      for (const request of pending(statePath).requests) {
+        if (request.body.kind === "claim-takeover") store.claim("scratch-app#6/1");
+        settle(request.path);
+      }
+    };
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      wait: { intervalMs: 1, boundMs: 100, sleep: daemonCycle },
+      log: () => {},
+    });
+
+    expect(code).toBe(0);
+    expect(calls).toHaveLength(1);
+    // Given back through the queue, since the daemon still holds the ledger.
+    expect(
+      pending(statePath).requests.map((request) => request.body.kind),
+    ).toEqual(["release-takeover"]);
   });
 });

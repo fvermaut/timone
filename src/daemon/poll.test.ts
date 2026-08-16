@@ -4674,3 +4674,69 @@ describe("pollOnce — requests a human left for the daemon", () => {
     expect(store.get("scratch-app#31/1")?.status).toBe("failed");
   });
 });
+
+describe("pollOnce — handing a run to the terminal and taking it back", () => {
+  it("claims a parked run for a takeover, and gives it back on release", async () => {
+    const { store, statePath } = newStoreAt();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+    });
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(6)] });
+    const { spawner, spawned } = fakeSpawner();
+    const deps = { manifest: manifestWith("scratch-app"), store, adapter, spawner, statePath };
+
+    const claiming = await pollOnce(deps);
+
+    expect(claiming.applied).toEqual(["claim-takeover scratch-app#6"]);
+    expect(store.get(run.id)?.status).toBe("active");
+    // Claimed means the project is held: the daemon starts nothing on it
+    // while the human is talking, which is the exclusivity that used to come
+    // from the lock (ADR-0032).
+    expect(spawned).toEqual([]);
+
+    enqueue(statePath, {
+      kind: "release-takeover",
+      project: "scratch-app",
+      ticket: 6,
+      outcome: "ended",
+    });
+    const releasing = await pollOnce(deps);
+
+    expect(releasing.applied).toEqual(["release-takeover scratch-app#6"]);
+    const after = store.get(run.id);
+    expect(after?.status).toBe("parked");
+    // Back on the same wait, read off the run rather than remembered by the
+    // process that claimed it — which may no longer exist.
+    expect(after?.waitingKind).toBe("conversation");
+    expect(after?.stage).toBe("clarification");
+  });
+
+  it("says so, and changes nothing, when there is nothing to hand over", async () => {
+    const { store, statePath } = newStoreAt();
+    enqueue(statePath, {
+      kind: "release-takeover",
+      project: "scratch-app",
+      ticket: 6,
+      outcome: "abandoned",
+    });
+    const { adapter } = fakeAdapter({ "scratch-app": [] });
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+    });
+
+    expect(result.applied).toEqual([]);
+    expect(result.errors.join(" ")).toContain("not out at the terminal");
+    expect(pending(statePath).requests).toEqual([]);
+  });
+});
