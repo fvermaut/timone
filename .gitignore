@@ -31,5 +31,16 @@ dist/
 # execute skill's dirty-tree rule on the next run.
 .playwright-mcp/
 
+# Loose images at the root. Sessions run from the timone root (ADR-0007), so a
+# screenshot saved under a bare name lands here — and a catch-all `git add` in an
+# unrelated session then commits it. That is exactly how `board-premium.png`, a
+# throwaway ivtrends prototype screenshot, got into 92c692c on 2026-08-11.
+# Root-anchored: images committed as process artifacts under doc/ still work.
+/*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
+
 # OS
 .DS_Store
