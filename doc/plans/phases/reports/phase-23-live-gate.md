@@ -25,7 +25,7 @@
 
 ## Findings
 
-### 1 — A stalled run is unreachable by the human it is waiting on. **OPEN, and the worst of the five.**
+### 1 — A stalled run is unreachable by the human it is waiting on. **OPEN, and the worst of the five.** Tracked as [timone#1](https://github.com/fvermaut/timone/issues/1).
 
 Piece 2's execution ran 2h39m, stopped, and handed back to fvermaut in its own words: *"just tell me here to carry on, and I will get the missing behaviour planned properly and built."* He replied `carry on`. **Nothing read it.**
 
@@ -41,7 +41,7 @@ So a stalled initiative is unreachable by the only person who can unstick it, an
 
 **Not phase 23's doing** — the handed-to-human path predates it — but phase 23 makes it reachable far more often, because a chunked initiative has many more stage boundaries to stall at.
 
-### 2 — The daemon's ledger lock refuses every command the tickets advertise. **OPEN.**
+### 2 — The daemon's ledger lock refuses every command the tickets advertise. **OPEN.** Tracked as [timone#2](https://github.com/fvermaut/timone/issues/2).
 
 Measured directly, with the daemon running:
 
@@ -88,11 +88,11 @@ It was caught only because the between-pieces call to action was missing its *"�
 
 **Caught by the automatic guardrail check on this session's own work**, within hours of the machinery being written. `00d84c9` is left as it is: amending means force-pushing a merge commit on a published default branch, to correct a record now accurate for every future merge.
 
-### 6 — Clarification asks for a conversation without saying what it wants. **OPEN, minor, pre-existing.**
+### 6 — Clarification asks for a conversation without saying what it wants. **OPEN, minor, pre-existing.** Tracked as [timone#3](https://github.com/fvermaut/timone/issues/3).
 
 The first stop said *"there are a few things I want to check with you"* and did not say what they were. A real user would have to start a conversation to discover the questions. This gate got past it by guessing the obvious ones and answering pre-emptively.
 
-### 7 — A handed-back message never says whether the fault is the app or the machine. **OPEN, and fvermaut found it, not the gate.**
+### 7 — A handed-back message never says whether the fault is the app or the machine. **OPEN, and fvermaut found it, not the gate.** Tracked as [timone#4](https://github.com/fvermaut/timone/issues/4).
 
 Reading [the message that stalled piece 2](https://github.com/fvermaut/scratch-app/issues/31#issuecomment-5307032400), his first question was: *"Is it a functional issue in the app? Or a problem with the run itself?"*
 
