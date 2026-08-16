@@ -1,4 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,6 +24,7 @@ import {
   type TicketThread,
 } from "../adapters/ticketing.js";
 import { breakdownPath } from "./breakdown.js";
+import { enqueue, pending, requestsDir } from "./requests.js";
 import { RunStore, type Run } from "./runs.js";
 import { pollOnce, type SessionSpawner, type SpawnContext } from "./poll.js";
 import { processStage } from "./pipeline.js";
@@ -4483,5 +4490,187 @@ describe("pollOnce — a ticket's next chunk", () => {
       "**What I need from you:** say here whether to carry on with the longer list.",
     );
     expect(standing).not.toContain("This one is finished.");
+  });
+});
+
+/**
+ * A store whose state path the test also holds, so it can leave a request
+ * beside the ledger the way a refused command does
+ * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
+ */
+function newStoreAt(): { store: RunStore; statePath: string } {
+  const dir = mkdtempSync(join(tmpdir(), "timone-poll-requests-"));
+  tempDirs.push(dir);
+  const statePath = join(dir, ".timone", "state.json");
+  let tick = 0;
+  const store = RunStore.open(statePath, {
+    now: () => `2026-08-16T12:${String(tick++).padStart(2, "0")}:00Z`,
+  });
+  return { store, statePath };
+}
+
+/** A run that stopped badly, which is what `timone retry` exists for. */
+function failedRun(store: RunStore, number = 31): Run {
+  const { run } = store.register("scratch-app", number);
+  store.activate(run.id, "session-1");
+  return store.fail(run.id, "the execution stage said it finished, but nothing was committed");
+}
+
+describe("pollOnce — requests a human left for the daemon", () => {
+  it("carries out a queued retry, and says whose it was", async () => {
+    const { store, statePath } = newStoreAt();
+    const run = failedRun(store);
+    enqueue(statePath, { kind: "retry", project: "scratch-app", ticket: 31 }, { by: "fvermaut" });
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(31)] });
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+    });
+
+    expect(result.applied).toEqual(["retry scratch-app#31"]);
+    expect(store.get(run.id)?.status).not.toBe("failed");
+    expect(pending(statePath).requests).toEqual([]);
+  });
+
+  /**
+   * The ordering the slice exists for, asserted on an effect rather than on
+   * two log lines: a retry applied *after* the registration loop had walked
+   * past its ticket would sit re-armed until the next cycle, sixty seconds
+   * later. Applied first, the same cycle spawns it.
+   */
+  it("applies a request before the projects are walked, so the same cycle acts on it", async () => {
+    const { store, statePath } = newStoreAt();
+    failedRun(store);
+    enqueue(statePath, { kind: "retry", project: "scratch-app", ticket: 31 });
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(31)] });
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+    });
+
+    expect(spawned.map((run) => run.id)).toEqual(["scratch-app#31/1"]);
+  });
+
+  it("carries out a queued cancellation, in the human's own words", async () => {
+    const { store, statePath } = newStoreAt();
+    const run = failedRun(store);
+    enqueue(statePath, {
+      kind: "cancel",
+      project: "scratch-app",
+      ticket: 31,
+      reason: "I have changed my mind about labels",
+    });
+    const { adapter } = fakeAdapter({ "scratch-app": [] });
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+    });
+
+    expect(result.applied).toEqual(["cancel scratch-app#31"]);
+    expect(store.get(run.id)?.status).toBe("cancelled");
+    expect(store.get(run.id)?.cancellation).toBe("I have changed my mind about labels");
+  });
+
+  /**
+   * A request that cannot be carried out is gone all the same. One that
+   * survived its own failure would be re-attempted every sixty seconds for
+   * ever — a poison pill that stops everything queued behind it.
+   */
+  it("settles a request it cannot carry out, and does not try it again", async () => {
+    const { store, statePath } = newStoreAt();
+    const { run } = store.register("scratch-app", 31);
+    store.activate(run.id, "session-1");
+    store.complete(run.id);
+    enqueue(statePath, { kind: "retry", project: "scratch-app", ticket: 31 });
+    const { adapter } = fakeAdapter({ "scratch-app": [] });
+    const { spawner } = fakeSpawner();
+    const deps = { manifest: manifestWith("scratch-app"), store, adapter, spawner, statePath };
+
+    const first = await pollOnce(deps);
+    const second = await pollOnce(deps);
+
+    expect(first.applied).toEqual([]);
+    expect(first.errors.join(" ")).toContain("could not apply retry scratch-app#31");
+    expect(pending(statePath).requests).toEqual([]);
+    expect(second.errors).toEqual([]);
+  });
+
+  it("reports an unreadable request, leaves it alone, and polls anyway", async () => {
+    const { store, statePath } = newStoreAt();
+    mkdirSync(requestsDir(statePath), { recursive: true });
+    const corrupt = join(requestsDir(statePath), "2026-08-16T12-00-00-000Z-000000-dead.json");
+    writeFileSync(corrupt, "{ not json", "utf8");
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+    });
+
+    expect(result.errors.join(" ")).toContain("unreadable request");
+    expect(readFileSync(corrupt, "utf8")).toBe("{ not json");
+    // The cycle did its actual job regardless: the marked ticket was still
+    // registered and acknowledged.
+    expect(result.pickedUp).toEqual(["scratch-app#7/1"]);
+    expect(comments).toHaveLength(1);
+  });
+
+  it("costs nothing when nobody has ever asked for anything", async () => {
+    const { store, statePath } = newStoreAt();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+    });
+
+    expect(result.applied).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(result.pickedUp).toEqual(["scratch-app#7/1"]);
+  });
+
+  /**
+   * Every existing daemon and every existing test is in this state: a cycle
+   * that was never told where the ledger lives serves nobody, and behaves
+   * exactly as it did before requests existed.
+   */
+  it("serves nobody when the cycle was never told where the ledger is", async () => {
+    const { store } = newStoreAt();
+    failedRun(store);
+    const { adapter } = fakeAdapter({ "scratch-app": [] });
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(result.applied).toEqual([]);
+    expect(store.get("scratch-app#31/1")?.status).toBe("failed");
   });
 });

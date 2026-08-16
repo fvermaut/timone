@@ -20,6 +20,7 @@ import { RunStore } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { stateLockPath } from "../daemon/lock.js";
 import { runDaemon } from "./daemon.js";
+import { enqueue } from "../daemon/requests.js";
 
 const tempDirs: string[] = [];
 
@@ -333,5 +334,38 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
 
     expect(store.get("scratch-app#7/1")?.status).toBe("done");
     expect(closed).toEqual([]);
+  });
+});
+
+describe("runDaemon — the requests waiting beside the ledger it holds", () => {
+  /**
+   * The wiring, end to end: `runDaemon` resolves one state path, takes the
+   * lock on it, and must hand that same path to the cycle — otherwise the
+   * queue is written by commands and read by nobody
+   * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
+   */
+  it("carries out a request left beside the ledger", async () => {
+    const { store, statePath } = clockedStore();
+    const { run } = store.register("scratch-app", 31);
+    store.activate(run.id, "session-1");
+    store.fail(run.id, "the execution stage stopped");
+    enqueue(statePath, { kind: "cancel", project: "scratch-app", ticket: 31 });
+
+    const said: string[] = [];
+    const code = await runDaemon({
+      manifest,
+      store,
+      statePath,
+      root: noCheckouts,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter: quietAdapter(),
+      spawner: idleSpawner,
+      log: (line) => said.push(line),
+    });
+
+    expect(code).toBe(0);
+    expect(store.get(run.id)?.status).toBe("cancelled");
+    expect(said.join("\n")).toContain("apply  cancel scratch-app#31");
   });
 });

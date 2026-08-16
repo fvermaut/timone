@@ -125,6 +125,9 @@ async function poll(
       adapter: options.adapter,
       spawner: options.spawner,
       root: options.root,
+      // The same path the lock was taken on, so the cycle serves the requests
+      // waiting beside the ledger it is holding (ADR-0032).
+      statePath: options.statePath,
       staleAfterMs: options.staleAfterMs,
       // The cadence this loop actually keeps, so the unwitnessed-gap threshold
       // is derived from it rather than assumed (ADR-0020). A daemon told to

@@ -43,6 +43,13 @@ import {
   type TicketState,
 } from "./cta.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
+// The commands themselves, called with no state path so they take no lock:
+// the daemon already holds it, and re-implementing what may be retried or
+// cancelled would be a second opinion that drifts from the one the human gets
+// at the terminal (ADR-0032).
+import { runRetry } from "../commands/retry.js";
+import { runCancel } from "../commands/cancel.js";
+import { pending, settle, type QueuedRequest } from "./requests.js";
 import { type Run, type RunStore, type Witness } from "./runs.js";
 // The same comment the spawner posts when a session ends badly, because this
 // is the same kind of ending: work stopped, nothing was decided, try again.
@@ -107,6 +114,17 @@ export interface PollDeps {
    */
   root?: string;
   /**
+   * Where the ledger lives, so the cycle can find the requests waiting beside
+   * it ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
+   *
+   * **Optional, and absent means this cycle serves nobody**: a loop built
+   * without one behaves exactly as it did before commands could ask for
+   * anything. That is the shape every existing test constructs, and it is why
+   * this is optional rather than required — `runDaemon` passes the path it
+   * already resolved for the lock, so every real daemon has one.
+   */
+  statePath?: string;
+  /**
    * How long a run may go without a heartbeat before it is treated as
    * orphaned by a dead daemon (ADR-0020). Four progress intervals by default,
    * which is four chances for a healthy session to have said something.
@@ -147,6 +165,13 @@ export interface PollResult {
   resumed: string[];
   /** Run ids that reached a terminal state this cycle (a PR merged or closed). */
   completed: string[];
+  /**
+   * What a human asked for and this cycle carried out, as `<kind> <target>`
+   * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
+   * A request the cycle could not carry out is on {@link PollResult.errors}
+   * instead, and is gone from the queue either way.
+   */
+  applied: string[];
   /** One readable line per project that failed; the cycle continued. */
   errors: string[];
 }
@@ -452,8 +477,16 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
     cancelled: [],
     resumed: [],
     completed: [],
+    applied: [],
     errors: [],
   };
+
+  // First of all, before the witness and before any project is looked at: a
+  // human asked for this while the daemon held the ledger, and a retry applied
+  // after the registration loop has already walked past its ticket waits a
+  // whole cycle to do anything (ADR-0032). The natural place to add a new call
+  // is at the end, and the end is the one place this may not go.
+  applyRequests(deps, result, log);
 
   // Once for the whole cycle, and before any project is looked at (ADR-0020).
   // Per-project would let the first project's fresh stamp answer for the
@@ -490,6 +523,103 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   }
 
   return result;
+}
+
+/**
+ * Carry out what humans asked for while the daemon held the ledger
+ * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
+ *
+ * **The daemon is still the ledger's only writer**, which is the whole of why
+ * this exists: ADR-0023's rule is kept literally true by moving the *act* here
+ * rather than by letting a second process write the file.
+ *
+ * **A request is settled whether or not it could be carried out.** The run was
+ * already re-armed, the ticket has been closed, the project has left the
+ * manifest — none of those get better by being retried every sixty seconds,
+ * and a request that survives its own failure is a poison pill that stops the
+ * queue for ever. What could not be done is said once, on the cycle's errors,
+ * where the operator reads it.
+ */
+function applyRequests(
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): void {
+  const { statePath } = deps;
+  if (statePath === undefined) return;
+
+  const { requests, unreadable } = pending(statePath);
+
+  for (const path of unreadable) {
+    // Reported and left alone. Deleting it would destroy the only evidence of
+    // whatever wrote it, and throwing would take the cycle — and therefore
+    // every project — down over one bad file.
+    const line = `unreadable request at ${path}, left where it is`;
+    result.errors.push(line);
+    log(`error  ${line}`);
+  }
+
+  for (const request of requests) {
+    const { body } = request;
+    const what = `${body.kind} ${body.project}#${body.ticket}`;
+    const said: string[] = [];
+    const say = (message: string): void => {
+      said.push(message);
+    };
+
+    let code: number;
+    try {
+      code = applyRequest(request, deps, say);
+    } catch (error) {
+      code = 1;
+      say(oneLine(error));
+    }
+    settle(request.path);
+
+    const words = said.join(" ");
+    if (code === 0) {
+      result.applied.push(what);
+      log(`apply  ${what} (asked by ${request.askedBy}) — ${words}`);
+      continue;
+    }
+    const line = `could not apply ${what} asked by ${request.askedBy}: ${words}`;
+    result.errors.push(line);
+    log(`error  ${line}`);
+  }
+}
+
+/**
+ * One request, applied by **the command's own code** rather than by a second
+ * implementation of it.
+ *
+ * `runRetry` and `runCancel` take no lock when handed no state path — the
+ * shape their own refusal tests use — so the daemon reaches the same decisions
+ * about which runs may be retried, which may be cancelled, and what a rewind
+ * of a consumed answer means, without either of them learning that a daemon
+ * exists.
+ */
+function applyRequest(
+  request: QueuedRequest,
+  deps: PollDeps,
+  log: (message: string) => void,
+): number {
+  const { manifest, store } = deps;
+  const { body } = request;
+  const target = `${body.project}#${body.ticket}`;
+
+  switch (body.kind) {
+    case "retry":
+      return runRetry(target, { manifest, store, log });
+    case "cancel":
+      return runCancel(target, { manifest, store, reason: body.reason, log });
+    case "claim-takeover":
+    case "release-takeover":
+      // Unreachable until 24d, because nothing enqueues one yet. Written as a
+      // refusal rather than a silent settle so that if 24d lands the enqueue
+      // and forgets the apply, the log says so on the first cycle.
+      log("nothing in this daemon applies a takeover request yet.");
+      return 1;
+  }
 }
 
 /**
