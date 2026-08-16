@@ -31,7 +31,9 @@ Piece 2's execution ran 2h39m, stopped, and handed back to fvermaut in its own w
 
 Three separate faults compound into that:
 
-- **A handed-back run is `failed`**, and a failed run listens for nothing. Only `timone retry` re-arms it. But the session that handed back had just invited a reply.
+- **A handed-back run is `failed`, and a failed run has no trigger.** Only `timone retry` re-arms it. But the session that handed back had just invited a reply, as though the reply were the trigger.
+
+  **Checked, because the first draft of this finding overstated it:** the reply is *not* unread. When the run was eventually re-armed by hand, the spawn prompt carried the whole ticket thread — 91,425 characters, `carry on` among them — and the resuming session read the ticket four times. **The words are carried; they simply cannot start anything.** That is a narrower defect than "the machine ignores you" and a more awkward one: the human writes into a channel the machine reads faithfully and acts on never, so the failure is invisible from their side. Nothing distinguishes a reply that will be picked up from one that will sit there indefinitely.
 - **The two messages on the ticket contradict each other.** The session's prose asks for a reply; the standing call to action, written by different machinery, says *"Something went wrong… `timone retry scratch-app#31`"*. Nothing reconciles a session's own words with the status box above them, and the human has no way to know which one the machine is actually listening to.
 - **The command the status box names cannot run** — see finding 2.
 
