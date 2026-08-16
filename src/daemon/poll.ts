@@ -32,6 +32,7 @@ import {
   readGate,
   routeAfterTriage,
   stageAfter,
+  waitFor,
   wayfinderStage,
   type PipelineStage,
 } from "./pipeline.js";
@@ -1792,6 +1793,17 @@ async function concludeLastConversation(
   const { stage, waitCursor } = run;
   if (stage === undefined || waitCursor === undefined) return false;
 
+  // A handoff parks a **work** stage on a conversation wait
+  // ([ADR-0031](../../doc/adr/0031-a-handoff-is-a-wait-not-a-failure.md)), and
+  // a work stage holds no conversation of its own. So the machine's own
+  // conversation record — written by a *conversation* stage, possibly about
+  // something else entirely on the same long-lived ticket — is not about this
+  // wait and may not settle it. Without this guard `concludeConversation`
+  // throws for such a stage, which leaves the run parked, errors every cycle
+  // and makes the human's answer unreachable for good: the exact shape of the
+  // defect this phase exists to remove, one layer down.
+  if (waitFor(stage) !== "conversation") return false;
+
   const thread = await threads.ticket();
   if (readConversationRecord(thread, waitCursor) === undefined) return false;
 
@@ -1935,7 +1947,13 @@ async function resolveWait(
     // (ADR-0023). Splitting the pair across two reads would let the run resume
     // on words it had already consumed, or consume words it never read.
     const thread = await threads.ticket();
-    const record = readConversationRecord(thread, cursor);
+    // Same guard as `concludeLastConversation`, and for the same reason: only
+    // a stage that actually holds a conversation can have its own record read
+    // as the answer to one.
+    const record =
+      waitFor(stage) === "conversation"
+        ? readConversationRecord(thread, cursor)
+        : undefined;
     if (record !== undefined) {
       const transition = concludeConversation(stage, { accepted: true });
       return transition.kind === "advance"

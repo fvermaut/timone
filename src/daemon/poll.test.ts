@@ -4740,3 +4740,201 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     expect(pending(statePath).requests).toEqual([]);
   });
 });
+
+/**
+ * The gate's own failure, as tests: a run handed back mid-build, and the word
+ * the human wrote under it
+ * ([ADR-0031](../../doc/adr/0031-a-handoff-is-a-wait-not-a-failure.md)).
+ *
+ * Nothing here drives 24e's parking code — these start from the park it
+ * produces, because what failed on scratch-app#31 was not the parking but
+ * everything after it.
+ */
+describe("pollOnce — a handoff waits, and the reply reaches it", () => {
+  const handoff = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\nthe fifth part found a real fault and stopped. Just tell me here to carry on.`,
+    createdAt: "2026-08-16T10:00:00Z",
+    fromTimone: true,
+  };
+  const carryOn = {
+    author: "fvermaut",
+    body: "carry on",
+    createdAt: "2026-08-16T10:30:00Z",
+    fromTimone: false,
+  };
+
+  /** A run handed back part-way through building, exactly as 24e parks it. */
+  function handedBack(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 31);
+    store.activate(run.id, "session-1");
+    return store.park(run.id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "execution",
+      waitCursor: handoff.createdAt,
+    });
+  }
+
+  function threadOf(...comments: TicketThread["comments"]): {
+    adapter: TicketingAdapter;
+    posted: PostedComment[];
+  } {
+    const posted: PostedComment[] = [];
+    const base = ticket(31, { labels: ["timone", "triage:feature"] });
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      ...noUnmarkedTickets,
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments };
+      },
+      async postComment(project, number, body): Promise<void> {
+        posted.push({ project: project.name, number, body });
+      },
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+    };
+    return { adapter, posted };
+  }
+
+  it("resumes the stage that stopped, carrying what the human wrote", async () => {
+    const store = newStore();
+    handedBack(store);
+    const { adapter } = threadOf(handoff, carryOn);
+    const { spawner, spawned } = fakeSpawner();
+    const contexts: (SpawnContext | undefined)[] = [];
+    const watching: SessionSpawner = {
+      async spawn(run, project, context) {
+        contexts.push(context);
+        return spawner.spawn(run, project, context);
+      },
+    };
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: watching,
+      root: "/nowhere",
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#31/1"]);
+    expect(spawned.map((run) => run.id)).toEqual(["scratch-app#31/1"]);
+    // The stage that asked the question is the one that judges the answer —
+    // not the next one, which would build on a question nobody resolved.
+    expect(contexts[0]?.stage).toBe("execution");
+    expect(contexts[0]?.feedback).toContain("carry on");
+  });
+
+  it("reads that answer once, however many cycles pass over it", async () => {
+    const store = newStore();
+    handedBack(store);
+    const { adapter } = threadOf(handoff, carryOn);
+    const { spawner, spawned } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    };
+
+    await pollOnce(deps);
+    const second = await pollOnce(deps);
+
+    expect(second.resumed).toEqual([]);
+    expect(spawned).toHaveLength(1);
+  });
+
+  it("is not answered by the machine talking to itself", async () => {
+    // The standing call to action is rewritten on the ticket every cycle. If
+    // that counted as an answer the run would resume on its own words for ever.
+    const store = newStore();
+    handedBack(store);
+    const { adapter } = threadOf(handoff, {
+      author: "fvermaut",
+      body: `${CTA_MARKER}\n\n**This one is waiting on you.**`,
+      createdAt: "2026-08-16T10:15:00Z",
+      fromTimone: true,
+    });
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    expect(result.resumed).toEqual([]);
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#31/1")?.status).toBe("parked");
+  });
+
+  it("is not answered by words written before the question", async () => {
+    const store = newStore();
+    handedBack(store);
+    const { adapter } = threadOf(
+      {
+        author: "fvermaut",
+        body: "go for it",
+        createdAt: "2026-08-16T09:00:00Z",
+        fromTimone: false,
+      },
+      handoff,
+    );
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    expect(result.resumed).toEqual([]);
+    expect(spawned).toEqual([]);
+  });
+
+  /**
+   * The hazard this slice exists to prove absent, and it is not hypothetical
+   * arithmetic: `concludeLastConversation` reads *any* machine comment
+   * carrying `CONVERSATION_RECORD_MARKER` after the cursor, and a work stage
+   * does not declare a conversation wait — so `concludeConversation` throws
+   * for it. A handoff at `execution` must be untouched by such a comment, and
+   * must still be answerable afterwards.
+   */
+  it("is neither concluded nor wedged by a conversation record from elsewhere", async () => {
+    const store = newStore();
+    handedBack(store);
+    const { adapter } = threadOf(
+      handoff,
+      {
+        author: "fvermaut",
+        body: `${CONVERSATION_RECORD_MARKER}\n\n✅ Agreed: something else entirely.`,
+        createdAt: "2026-08-16T10:10:00Z",
+        fromTimone: true,
+      },
+      carryOn,
+    );
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    // Not concluded: marking a half-built run `done` would close its ticket.
+    expect(store.get("scratch-app#31/1")?.status).not.toBe("done");
+    // And not wedged either: the human's answer still starts the work.
+    expect(result.errors).toEqual([]);
+    expect(spawned.map((run) => run.id)).toEqual(["scratch-app#31/1"]);
+  });
+});
