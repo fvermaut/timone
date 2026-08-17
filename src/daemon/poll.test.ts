@@ -1287,6 +1287,162 @@ describe("reclaiming a run its daemon left behind", () => {
     );
   });
 
+  /**
+   * A tracker for a stale run that had opened pull request #19, answering for
+   * that pull request in `state`. The reclaim tests above deal in runs that
+   * never got as far as one; these deal in the run that did.
+   */
+  function staleReviewAdapter(state: "open" | "merged" | "closed"): {
+    adapter: TicketingAdapter;
+    posted: PostedComment[];
+    closed: string[];
+  } {
+    const posted: PostedComment[] = [];
+    const closed: string[] = [];
+    const base = ticket(7);
+    const pull: PullRequestThread = {
+      number: 19,
+      title: "The volatility arithmetic",
+      url: "https://github.com/fvermaut/ivtrends/pull/19",
+      state,
+      headSha: "aaaaaaa",
+      comments: [],
+    };
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      ...noUnmarkedTickets,
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [] };
+      },
+      async postComment(project, number, body): Promise<void> {
+        posted.push({ project: project.name, number, body });
+      },
+      async applyLabel(): Promise<void> {},
+      async findPullRequest() {
+        return { ...pull };
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        return pull;
+      },
+      async postPullRequestComment(): Promise<void> {},
+      async upsertPullRequestComment(): Promise<void> {},
+      async upsertComment(): Promise<void> {},
+      async closeTicket(_project, number, reason): Promise<void> {
+        closed.push(`${number}:${reason}`);
+      },
+    };
+    return { adapter, posted, closed };
+  }
+
+  /** A stale run that got as far as opening pull request #19. */
+  function staleWithPullRequest(store: RunStore): void {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-gone");
+    store.claimBranch(run.id, "timone/7-slow");
+    store.recordPullRequest(run.id, 19);
+  }
+
+  it("finishes a stale run whose pull request merged, rather than failing it", async () => {
+    // The fault this exists for: a session that dies *after* its work is
+    // merged had its piece recorded as a crash, and ADR-0029 will not let the
+    // ticket advance past a failed chunk — so the whole initiative stopped,
+    // with the merged work already on main.
+    const { store, set } = clockedStore();
+    const { adapter, posted, closed } = staleReviewAdapter("merged");
+    const { spawner } = fakeSpawner();
+
+    staleWithPullRequest(store);
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
+    set("2026-08-06T10:09:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(store.get("scratch-app#7/1")?.status).toBe("done");
+    expect(result.reclaimed).toEqual([]);
+    expect(result.completed).toEqual(["scratch-app#7/1"]);
+    // The ticket is told its work merged, and never told the machine died.
+    expect(posted.some((c) => /stopped before the work/.test(c.body))).toBe(false);
+    expect(closed).toEqual(["7:completed"]);
+  });
+
+  it("still fails a stale run whose pull request was closed unmerged", async () => {
+    // The boundary. Only a merge says the work landed; a closed pull request
+    // says the opposite, and a failure is the honest record of that.
+    const { store, set } = clockedStore();
+    const { adapter } = staleReviewAdapter("closed");
+    const { spawner } = fakeSpawner();
+
+    staleWithPullRequest(store);
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
+    set("2026-08-06T10:09:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(result.reclaimed).toEqual(["scratch-app#7/1"]);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+  });
+
+  it("still fails a stale run whose pull request is open", async () => {
+    const { store, set } = clockedStore();
+    const { adapter } = staleReviewAdapter("open");
+    const { spawner } = fakeSpawner();
+
+    staleWithPullRequest(store);
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
+    set("2026-08-06T10:09:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(result.reclaimed).toEqual(["scratch-app#7/1"]);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+  });
+
+  it("leaves a stale run alone when its pull request cannot be read", async () => {
+    // Unreadable is not open. On a flaky link the tracker goes quiet for
+    // reasons that say nothing about the run, and guessing "failed" there
+    // would bury merged work on exactly the cycle least able to prove it.
+    const { store, set } = clockedStore();
+    // `fakeAdapter` throws from `getPullRequestThread`, which is the point.
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    staleWithPullRequest(store);
+    watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
+    set("2026-08-06T10:09:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get("scratch-app#7/1")?.status).toBe("active");
+    expect(result.errors.some((line) => /could not read PR #19/.test(line))).toBe(
+      true,
+    );
+    // Nothing was said to the human about a failure that was never established.
+    expect(comments.some((c) => /stopped before the work/.test(c.body))).toBe(false);
+  });
+
   it("promotes the run that was queued behind it in the same cycle", async () => {
     const { store, set } = clockedStore();
     const { adapter } = fakeAdapter({

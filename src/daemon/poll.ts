@@ -508,12 +508,18 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
 
   for (const [name, config] of Object.entries(manifest.projects)) {
     const project: TicketingProject = { name, repoUrl: config.repo_url };
+    // One reader per ticket for this project's whole turn in this cycle, so
+    // every question asked of a ticket's thread is answered from one fetch of
+    // it. Made here rather than inside `pollProject` because the reclaim asks
+    // one of those questions too — a stale run's pull request — and a second
+    // reader would fetch the same thread twice in the same cycle.
+    const threads = threadReaders(project, deps.adapter);
     try {
       // Before anything is picked up: a run left `active` by a daemon that
       // died is holding its project, and every ticket behind it is waiting on
       // a session that no longer exists.
-      await reclaimStale(project, deps, result, log, witness, staleAfterMs);
-      await pollProject(project, config, deps, result, log);
+      await reclaimStale(project, deps, result, log, witness, staleAfterMs, threads);
+      await pollProject(project, config, deps, result, log, threads);
       // Last, so a run whose pull request merged during `pollProject` has
       // already been completed when its preview is released — R12's "within
       // one poll cycle" is the same cycle, not the next one.
@@ -715,12 +721,52 @@ async function reclaimStale(
   log: (message: string) => void,
   witness: Witness,
   threshold: number,
+  threadsFor: (ticket: number) => RunThreads,
 ): Promise<void> {
   const { store, adapter } = deps;
   if (!witness.mayJudge) return;
 
   for (const run of store.staleRuns(threshold)) {
     if (run.project !== project.name) continue;
+
+    // The verdict on the branch is asked for before the verdict on the
+    // session, and it overrules it. A session can die *after* its pull request
+    // was merged — the merge is the human's, and it does not wait for the
+    // machine to still be alive to be true — and calling that a failure buries
+    // a piece of work that actually landed. The ticket then stalls on a chunk
+    // ADR-0029 deliberately will not advance past, so every remaining piece of
+    // the initiative waits behind a run whose only road out is a human
+    // retrying a stage with nothing left to do.
+    //
+    // Merged only. A pull request closed *without* merging says the opposite —
+    // the work did not land — so `failed` is the honest record there, and the
+    // roads ADR-0029 leaves a human are the right ones.
+    if (run.pr !== undefined) {
+      let merged: boolean;
+      try {
+        merged =
+          (await threadsFor(run.ticket).pullRequest(run.pr)).state === "merged";
+      } catch (error) {
+        // Unreadable is not open: a tracker that cannot be reached is no
+        // grounds to call a run dead, so the run keeps its status and the next
+        // cycle asks again. On a flaky link this is the difference between a
+        // slow answer and a wrong one.
+        const line =
+          `${project.name}: could not read PR #${run.pr} for #${run.ticket}, ` +
+          `so its run is left alone: ${oneLine(error)}`;
+        result.errors.push(line);
+        log(`error  ${line}`);
+        continue;
+      }
+
+      if (merged) {
+        // Through the same door a parked run leaves by, so the successor
+        // logic — the breakdown, the ticket's next piece, closing it when
+        // there is none — lives in exactly one place.
+        await concludeReview(run, project, threadsFor(run.ticket), deps, result, log);
+        continue;
+      }
+    }
 
     const reason = reclaimedReason();
     store.fail(run.id, reason);
@@ -869,14 +915,13 @@ async function pollProject(
   deps: PollDeps,
   result: PollResult,
   log: (message: string) => void,
-): Promise<void> {
-  const { store, adapter } = deps;
-
   // One reader per ticket for this project's turn, so every question the
   // cycle asks of a ticket's thread — has this wait ended, what should the
   // run resume with, does its call to action still stand — is answered from
-  // one fetch of it.
-  const threads = threadReaders(project, adapter);
+  // one fetch of it. Made by the caller, which shares it with the reclaim.
+  threads: (ticket: number) => RunThreads,
+): Promise<void> {
+  const { store, adapter } = deps;
 
   const tickets = await adapter.listMarkedTickets(project);
   // Tickets told where they stand a moment ago, by the acknowledgement below.
