@@ -411,6 +411,19 @@ export function classificationFromLabels(
  * - `map` is the effort itself, and its stage is the one that hands stage 2's
  *   whole outcome to stage 3.
  */
+/**
+ * Whether `labels` say this ticket is a wayfinder map — the effort itself,
+ * rather than one of the decisions it holds.
+ *
+ * Told apart from {@link wayfinderStage} on purpose. That answers *where does
+ * this enter*, and a map's answer to it is only true once: a map is a decision
+ * ticket for its first chunk and an initiative building its pieces after that
+ * (`entryContext` in `poll.ts` is where the difference is spent).
+ */
+export function isMap(labels: readonly string[]): boolean {
+  return labels.includes("wayfinder:map");
+}
+
 export function wayfinderStage(
   labels: readonly string[],
 ): PipelineStage | undefined {

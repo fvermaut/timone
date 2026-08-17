@@ -3860,6 +3860,72 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     expect(third.errors).toEqual([]);
     expect(store.get("ivtrends#1/1")?.stage).toBe("charting");
   });
+
+  it("never asks a map's second piece for the go-ahead again", async () => {
+    // timone#21, end to end and through the real spawner, because the failure
+    // was the loop and the spawner agreeing: chunk 2 entered at `charting`,
+    // the spawner parked it there with no wait, and the frontier label — which
+    // nothing ever takes off a map — had the next cycle park it on the
+    // go-ahead question. On `ivtrends` #1 that stopped an initiative of
+    // fourteen pieces after the first one, and it never recovered.
+    const store = newStore();
+    const labels = ["timone", "wayfinder:map", "wayfinder:frontier-empty"];
+    // The thread as a map in flight actually holds it: the go-ahead was given
+    // a day ago and the machine has spoken since, so nothing after the wait
+    // cursor a re-asked question would open can ever answer it. That is why
+    // the real one never recovered.
+    const pieceOneShipped = {
+      author: "fvermaut",
+      body: `${MACHINE_MARKER}\n\npiece 1 of 14 is merged`,
+      createdAt: "2026-08-14T07:02:00Z",
+      fromTimone: true,
+    };
+    const { adapter } = mapWorld(
+      [closingSummary, goAhead, pieceOneShipped],
+      labels,
+    );
+
+    // The map already did the thing its stage exists for: it was given the
+    // go-ahead, wrote the specification and delivered its first piece.
+    const { run: first } = store.register("ivtrends", MAP);
+    store.activate(first.id, "s1");
+    store.claimBranch(first.id, "timone/1-chunk-1");
+    store.recordPullRequest(first.id, 9);
+    store.complete(first.id);
+    const { run: second } = store.register("ivtrends", MAP);
+    expect(second.seq).toBe(2);
+
+    const prompts: string[] = [];
+    const deps = {
+      manifest: manifestWith("ivtrends"),
+      store,
+      adapter,
+      spawner: new AgentSessionSpawner({
+        manifest: manifestWith("ivtrends"),
+        store,
+        adapter,
+        runtime: {
+          async start(request) {
+            prompts.push(request.prompt);
+            return {
+              sessionId: "session-plan",
+              completed: Promise.resolve({ sessionId: "session-plan", ok: true }),
+            };
+          },
+        },
+        root: "/nowhere",
+      }),
+    };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+
+    const chunk = store.get("ivtrends#1/2");
+    expect(chunk?.stage).not.toBe("charting");
+    expect(chunk?.waitingOn ?? "").not.toMatch(/go-ahead/);
+    // And it did the one thing the stuck chunk never did: it ran.
+    expect(prompts).not.toHaveLength(0);
+  });
 });
 
 describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
@@ -4082,10 +4148,14 @@ describe("pollOnce — a ticket's next chunk", () => {
   /**
    * An adapter over ticket 6 and whatever else is marked, whose pull requests
    * answer from `states`. Every comment posted and every close is recorded.
+   *
+   * `labels` is what ticket 6 carries — a triaged feature unless a test needs
+   * the labels themselves to be the question.
    */
   function successionAdapter(
     states: Record<number, "open" | "merged" | "closed">,
     also: Ticket[] = [],
+    labels: string[] = ["timone", "triage:feature"],
   ): {
     adapter: TicketingAdapter;
     posted: PostedComment[];
@@ -4093,7 +4163,7 @@ describe("pollOnce — a ticket's next chunk", () => {
   } {
     const posted: PostedComment[] = [];
     const closed: string[] = [];
-    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const base = ticket(6, { labels });
     const tickets = [base, ...also];
     const pull = (pr: number): PullRequest => {
       const state = states[pr];
@@ -4381,6 +4451,69 @@ describe("pollOnce — a ticket's next chunk", () => {
     });
 
     expect(contexts).toEqual([{ stage: "planning" }]);
+  });
+
+  it("enters a map's successor chunk at planning, not back at charting", async () => {
+    // timone#21. A `wayfinder:map` label is read before the sequence number,
+    // which is right for a decision ticket and wrong for the map: a map is a
+    // question only once — "shall I write the specification?" — and every
+    // chunk after that one is a piece of an approved breakdown. Entering them
+    // at `charting` sent the map back to a go-ahead it was already given, and
+    // its second piece was never built.
+    const store = newStore();
+    chunkDone(store, 1, 9);
+    const { run: second } = store.register("scratch-app", 6);
+    expect(second.seq).toBe(2);
+
+    const { adapter } = successionAdapter({ 9: "merged" }, [], [
+      "timone",
+      "wayfinder:map",
+      "wayfinder:frontier-empty",
+    ]);
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(contexts).toEqual([{ stage: "planning" }]);
+  });
+
+  it("still enters a decision ticket's successor chunk at its own stage", async () => {
+    // The narrowing is the map alone. A `wayfinder:grilling` ticket that opens
+    // a second chunk is still a question for a human, and the sequence rule
+    // must not quietly re-point it at the build pipeline — the reason the
+    // labels are read first in the first place.
+    const store = newStore();
+    chunkDone(store, 1, 9);
+    const { run: second } = store.register("scratch-app", 6);
+    expect(second.seq).toBe(2);
+
+    const { adapter } = successionAdapter({ 9: "merged" }, [], [
+      "timone",
+      "wayfinder:grilling",
+    ]);
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+    });
+
+    expect(contexts).toEqual([{ stage: "wayfinding" }]);
   });
 
   it("leaves a first chunk to enter where it always did", async () => {
