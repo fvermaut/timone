@@ -107,6 +107,30 @@ describe("timone retry", async () => {
     expect(lines.join("\n")).toMatch(/your approval of the plan/);
   });
 
+  it("sends a run it cannot take further to the command that can", async () => {
+    // ADR-0033. The ordinary refusal ends "answer that and it carries on by
+    // itself", which for this park is the untruth the whole decision exists to
+    // stop — said by a second command instead of by the ticket.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    store.park(run.id, {
+      waitingOn: "me — I can't take this one further on my own.",
+      kind: "escalation",
+      stage: "verification",
+      waitCursor: "2026-08-17T10:00:00Z",
+    });
+    const { log, lines } = collect();
+
+    const code = await runRetry("scratch-app#6", { manifest, store, log });
+
+    expect(code).toBe(1);
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+    expect(lines.join("\n")).toContain("timone takeover scratch-app#6");
+    expect(lines.join("\n")).not.toMatch(/carries on by itself/);
+  });
+
   it("refuses a finished run rather than resurrecting it", async () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);

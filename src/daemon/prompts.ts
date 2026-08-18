@@ -3,6 +3,7 @@ import {
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
   STAGE_DONE_MARKER,
+  STAGE_ESCALATED_MARKER,
   STAGE_HANDED_MARKER,
   type TicketingProject,
   type TicketThread,
@@ -299,6 +300,46 @@ function feedbackBlock(feedback: string | undefined): string {
 }
 
 /**
+ * The one ending every stage owes, whatever else its own instructions say
+ * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)
+ * D2).
+ *
+ * Appended in {@link stagePrompt} rather than written into each stage, for
+ * the reason the checkout and provenance blocks are: ten copies of a rule is
+ * ten chances to word it differently, and the one stage that got it subtly
+ * wrong would be the one nobody checked.
+ *
+ * **The counter-example carries as much weight as the rule.** The failure
+ * mode this opens is a stage summoning a person it did not need, and what
+ * holds that back is saying plainly what does *not* qualify: work that is
+ * merely hard, and a question nobody has answered yet.
+ */
+function stuckBlock(): string {
+  return [
+    "**If you are given an answer you may not act on, stop and say so.** Not",
+    "every hard case — this one: you were given an answer, and doing what it",
+    "asks is outside what this step may do. Doing it anyway would break the",
+    "thing this step exists for, and asking them again gets you the same",
+    "answer, because they already answered.",
+    "",
+    "In that case post **exactly one comment**, and make its first content",
+    "line this, exactly as written:",
+    "",
+    STAGE_ESCALATED_MARKER,
+    "",
+    "Under it, in plain words: what you were asked to do, why this step may",
+    "not do it, and what you think should happen instead. Then stop and change",
+    "nothing else. A person picks it up from there with your words in front of",
+    "them, and they can do things you cannot.",
+    "",
+    "**This is not for work that is hard, and not for a question nobody has",
+    "answered yet.** If you have asked something and are waiting, wait. If the",
+    "job is difficult, do the job. This is only for the answer you may not act",
+    "on.",
+  ].join("\n");
+}
+
+/**
  * Build the instruction a session at `stage` starts from.
  *
  * Prompts are data here, not strings built at the call site, so their rules
@@ -316,6 +357,8 @@ export function stagePrompt(
   // to forget it. Stages that commit nothing carry them harmlessly.
   return [
     stageBody(stage, context),
+    "",
+    stuckBlock(),
     "",
     checkoutBlock(context),
     "",

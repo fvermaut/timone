@@ -6,6 +6,7 @@ import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock, type LockHolder } from "../daemon/lock.js";
 import { enqueue, waitUntilSettled, type WaitOptions } from "../daemon/requests.js";
+import { takeoverCommand } from "../channels/terminal.js";
 import { waitOf } from "../daemon/session.js";
 import { parseTarget } from "./takeover.js";
 
@@ -242,6 +243,21 @@ function rewind(
   // park this build consumed; the fallback is for a park consumed by a daemon
   // that predates the marker, which has only its cursor to go back from.
   const at = instantOf(run.consumedAnswerAt) ?? instantOf(run.waitCursor);
+
+  // The one park where "answer that and it carries on by itself" is false
+  // ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+  // Nothing written restarts it, so the sentence below would send the reader
+  // to write a sixth answer — which is the defect the park exists to end,
+  // said by a different command.
+  if (run.waitingKind === "escalation") {
+    log(
+      `${name} didn't fail — I stopped because I couldn't take it further on ` +
+        "my own, and writing an answer won't move it. Run this instead and " +
+        `I'll hand it to you in your terminal: ${takeoverCommand(run.project, run.ticket)}`,
+    );
+    return 1;
+  }
+
   if (run.waitingKind !== "conversation" || at === undefined) {
     log(
       `${name} didn't fail — it's waiting on you: ${run.waitingOn ?? "an answer"}. ` +

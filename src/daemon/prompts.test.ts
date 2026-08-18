@@ -5,6 +5,7 @@ import {
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
   STAGE_DONE_MARKER,
+  STAGE_ESCALATED_MARKER,
   STAGE_HANDED_MARKER,
   type TicketingProject,
   type TicketThread,
@@ -695,6 +696,29 @@ describe("workBranch — one branch per chunk, not one per ticket", () => {
     // `timone/` would be cut in the harness repo unnoticed.
     expect(workBranch(ticket, 1).startsWith("timone/")).toBe(true);
     expect(workBranch(ticket, 3).startsWith("timone/")).toBe(true);
+  });
+});
+
+describe("the rule every stage carries about an answer it may not act on", () => {
+  // ADR-0033 D2, appended in `stagePrompt` beside the checkout and provenance
+  // blocks. Ten copies of a trigger rule is ten chances to word it
+  // differently, and the one stage that got it wrong would be invisible.
+
+  it.each(PROMPTED_STAGES)("is carried by the %s prompt", (stage) => {
+    const prompt = stagePrompt(stage, context);
+
+    expect(prompt).toContain(STAGE_ESCALATED_MARKER);
+    expect(prompt).toMatch(/outside what this (step|stage) may do/i);
+  });
+
+  it("says what is not a reason to stop, beside what is", () => {
+    // The counter-example is what stops over-firing. A step that has asked
+    // nothing yet, or that merely finds the work hard, has nothing to hand
+    // over.
+    const prompt = stagePrompt("execution", context);
+
+    expect(prompt).toMatch(/hard|difficult/i);
+    expect(prompt).toMatch(/not.*(asked|question)/i);
   });
 });
 

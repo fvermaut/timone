@@ -9,6 +9,7 @@ import {
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
   STAGE_DONE_MARKER,
+  STAGE_ESCALATED_MARKER,
   STAGE_HANDED_MARKER,
   isMachineComment,
   stampMachineComment,
@@ -2471,6 +2472,48 @@ describe("the verification stage", () => {
     const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
     expect(run?.failure).toMatch(/report/i);
+  });
+
+  it("stops on a person, not on an answer, when it cannot use the one it was given", async () => {
+    // ivtrends #1, as a test. The stage read the answer, was right that
+    // acting on it was outside what it may do, and said so — five times,
+    // because saying so had nowhere to go.
+    const store = newStore();
+    const { adapter, comments, ticket: thread } = fakeAdapter();
+    const { runtime } = checkingRuntime(
+      adapter,
+      STAGE_ESCALATED_MARKER,
+      "You told me to go ahead, but two of the promises I check against " +
+        "cannot pass as they are worded. I may not reword them: if I wrote " +
+        "the promises I check against, the check would prove nothing.",
+    );
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      verificationReportProbe: async () =>
+        "doc/plans/phases/reports/phase-04-verification.md",
+    }).spawn(atVerification(store), project, { stage: "verification" });
+
+    const run = store.get("scratch-app#7/1");
+    expect(run?.status).toBe("parked");
+    expect(run?.waitingKind).toBe("escalation");
+    // The stage that stopped, not the one that would have followed: the
+    // person picking this up needs to know where it stopped.
+    expect(run?.stage).toBe("verification");
+    // The escalation comment's own instant, off the thread the session posted
+    // into — never a clock. The prompt finds the stage's account by that
+    // instant, so a second of skew loses the account entirely.
+    expect(run?.waitCursor).toBe(thread.comments.at(-1)?.createdAt);
+    // The session's own comment is the whole report. "Something went wrong"
+    // underneath a stage explaining itself clearly is the ticket ivtrends #1
+    // had.
+    expect(comments).toHaveLength(1);
+    expect(comments.at(-1)?.body).toContain("prove nothing");
   });
 
   it("stops without advancing when the gate did not pass", async () => {

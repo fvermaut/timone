@@ -1,5 +1,6 @@
 import {
   STAGE_DONE_MARKER,
+  STAGE_ESCALATED_MARKER,
   STAGE_HANDED_MARKER,
   type TicketComment,
   type TicketThread,
@@ -9,7 +10,14 @@ import { instant } from "./gates.js";
 /** How a stage's session said it ended, read off the ticket. */
 export type StageOutcome =
   | { kind: "advanced"; comment: TicketComment }
-  | { kind: "handed-to-human"; comment: TicketComment };
+  | { kind: "handed-to-human"; comment: TicketComment }
+  /**
+   * The stage was given an answer it may not act on, and said so
+   * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+   * The comment is the stage's own account of the dead end, and it is what
+   * the session opened on this run is handed.
+   */
+  | { kind: "escalated"; comment: TicketComment };
 
 /**
  * Find the outcome a stage's session recorded after `cursor`, or undefined
@@ -44,6 +52,13 @@ export function readStageOutcome(
     if (!comment.fromTimone) continue;
     if (instant(comment.createdAt) <= after) continue;
 
+    // Read above the handed marker, because an escalation *is* a handoff that
+    // has additionally given up on being answered. A comment carrying both
+    // must resolve as the stronger of the two, and this ordering is what
+    // guarantees it — not the stage remembering to write only one.
+    if (comment.body.includes(STAGE_ESCALATED_MARKER)) {
+      return { kind: "escalated", comment };
+    }
     if (comment.body.includes(STAGE_HANDED_MARKER)) {
       return { kind: "handed-to-human", comment };
     }

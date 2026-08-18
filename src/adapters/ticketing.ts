@@ -67,6 +67,20 @@ export const STAGE_HANDED_MARKER =
   "🙋 **Needs a person** · written by the machine when a stage stopped and is asking for help";
 
 /**
+ * {@link STAGE_HANDED_MARKER}'s stronger sibling: the stage was given an
+ * answer and acting on it is outside what that stage may do
+ * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+ *
+ * The difference from a handoff is what happens next, and it is the whole
+ * reason there are two markers. A handoff waits for a reply and resumes on
+ * one. This one has given up on being replied to: the stage already read the
+ * answer and was right about it, so another answer buys another pass and the
+ * same judgement — five of them, on ivtrends #1.
+ */
+export const STAGE_ESCALATED_MARKER =
+  "🆘 **Needs more than a reply** · written by the machine when a stage cannot act on the answer it was given";
+
+/**
  * The line the preview comment carries, so a pull request ends up with one of
  * them rather than one per poll cycle.
  *

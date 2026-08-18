@@ -553,6 +553,41 @@ function handBack(
   log(`parked ${id} — ${stage} handed back, waiting on you`);
 }
 
+/**
+ * A stage was given an answer it may not act on, and said so
+ * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+ *
+ * {@link handBack}'s sibling, and the one field that differs is the whole
+ * difference: the wait kind. A handoff waits for a reply and resumes on one.
+ * This wait resumes on nothing written, because the stage already read the
+ * words and was right about them — on ivtrends #1 it was right five times,
+ * at the pipeline's most expensive setting, and each rightness cost a full
+ * pass.
+ *
+ * **The cursor is the escalation comment's own instant**, for handBack's
+ * reason and one more: the prompt the escalation session starts from finds
+ * the stage's account by matching that instant, so a clock a second out would
+ * lose the account this whole path exists to carry.
+ *
+ * **Nothing is posted.** The stage's comment is the account; the standing
+ * call to action already says what a person can do about it.
+ */
+function escalate(
+  store: RunStore,
+  id: string,
+  stage: PipelineStage,
+  outcome: { comment: TicketComment },
+  log: (message: string) => void,
+): void {
+  store.park(id, {
+    waitingOn: "me — I can't take this one further on my own.",
+    kind: "escalation",
+    stage,
+    waitCursor: outcome.comment.createdAt,
+  });
+  log(`parked ${id} — ${stage} can go no further, waiting on a person`);
+}
+
 export function waitOf(run: Run): ParkOptions {
   return {
     waitingOn: run.waitingOn ?? "a human",
@@ -1138,6 +1173,16 @@ export class AgentSessionSpawner implements SessionSpawner {
     cursor: string,
   ): Promise<PipelineStage | undefined> {
     const { store, adapter } = this.options;
+
+    // **Before every other ending, and for every stage** (ADR-0033 D2). A
+    // stage handed something outside what it may do is stopped whatever kind
+    // of stage it is — the gate it would have opened and the conversation it
+    // would have re-parked on are both questions, and asking another question
+    // is the loop this closes.
+    if (outcome?.kind === "escalated") {
+      escalate(store, run.id, stage, outcome, this.log.bind(this));
+      return undefined;
+    }
 
     if (waitFor(stage) === "gate") {
       await this.openGate(run, project, stage, producedWork);

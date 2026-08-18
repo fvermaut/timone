@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   MACHINE_MARKER,
   STAGE_DONE_MARKER,
+  STAGE_ESCALATED_MARKER,
   STAGE_HANDED_MARKER,
   type TicketComment,
   type TicketThread,
@@ -107,6 +108,51 @@ describe("readStageOutcome", () => {
     );
 
     expect(outcome?.kind).toBe("handed-to-human");
+  });
+
+  it("reads an escalation marker as the stage being unable to go on", () => {
+    const outcome = readStageOutcome(
+      thread(
+        comment({
+          body: `${MACHINE_MARKER}\n\n---\n\n${STAGE_ESCALATED_MARKER}\n\nI would have to reword the promises I check against.`,
+        }),
+      ),
+      cursor,
+    );
+
+    expect(outcome?.kind).toBe("escalated");
+    expect(outcome?.comment.body).toContain("promises I check against");
+  });
+
+  it("reads an escalation over a handoff on the same comment", () => {
+    // An escalation is a handoff that has additionally given up on being
+    // answered, so the pair resolves to the stronger of the two. Precedence
+    // rather than the stage remembering not to write both: a comment carrying
+    // both would otherwise park on a conversation nothing can conclude.
+    const outcome = readStageOutcome(
+      thread(
+        comment({
+          body: `${MACHINE_MARKER}\n\n---\n\n${STAGE_HANDED_MARKER}\n${STAGE_ESCALATED_MARKER}`,
+        }),
+      ),
+      cursor,
+    );
+
+    expect(outcome?.kind).toBe("escalated");
+  });
+
+  it("never reads a human's copy of the escalation marker as one", () => {
+    const outcome = readStageOutcome(
+      thread(
+        comment({
+          body: `you said "${STAGE_ESCALATED_MARKER}" — why?`,
+          fromTimone: false,
+        }),
+      ),
+      cursor,
+    );
+
+    expect(outcome).toBeUndefined();
   });
 
   it("returns undefined on an empty thread", () => {
