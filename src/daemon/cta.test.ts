@@ -566,3 +566,55 @@ describe("ctaComment", () => {
     );
   });
 });
+
+describe("ctaFor — a run the machine broke itself", () => {
+  it("says the fault is its own when the link went, and still names the way back", () => {
+    const cta = ctaFor({
+      project: "ivtrends",
+      ticket: 1,
+      run: run({
+        project: "ivtrends",
+        ticket: 1,
+        status: "failed",
+        failure: "the session stopped on an API error (server_error)",
+      }),
+    });
+
+    expect(cta.headline).toBe("I could not reach the service I run on, so I stopped.");
+    expect(cta.waitingOnYou).toBe(false);
+    expect(cta.command).toBe("timone retry ivtrends#1");
+  });
+
+  it("says the login was refused, and that it needs fixing before the command works", () => {
+    const cta = ctaFor({
+      project: "ivtrends",
+      ticket: 1,
+      run: run({
+        project: "ivtrends",
+        ticket: 1,
+        status: "failed",
+        failure: "the session stopped on an API error (authentication_failed)",
+      }),
+    });
+
+    expect(cta.headline).toBe(
+      "My login to the service I run on was refused, so I stopped.",
+    );
+    expect(cta.needFromYou).toMatch(/login needs fixing first/);
+  });
+
+  it("keeps the old words for a failure that was about the work", () => {
+    const cta = ctaFor({
+      project: "ivtrends",
+      ticket: 1,
+      run: run({
+        project: "ivtrends",
+        ticket: 1,
+        status: "failed",
+        failure: "the planning stage said it finished, but nothing was committed",
+      }),
+    });
+
+    expect(cta.headline).toBe("Something went wrong while I was working on this.");
+  });
+});

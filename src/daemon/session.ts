@@ -18,6 +18,7 @@ import {
   type ConversationChannel,
 } from "../channels/conversation.js";
 import { TerminalChannel } from "../channels/terminal.js";
+import { technicalFault, type TechnicalFault } from "./faults.js";
 import { gateCommentFor } from "./gate-comment.js";
 import { STAGE_TRAILER } from "./hooks.js";
 import { instant, readConversationRecord, waitCursorFrom } from "./gates.js";
@@ -147,6 +148,23 @@ export function sessionOutcomeFrom(
   return { sessionId, ok: true };
 }
 
+/**
+ * How long the daemon waits before trying a stage again after the link broke,
+ * in order — so two waits are three attempts in all.
+ *
+ * A minute clears a hiccup, five clear a short outage, and the shortness of
+ * the list is the point: the ceiling is what stops a stage that breaks every
+ * time from looping, which is the risk ADR-0017 named when it declined to
+ * retry anything at all.
+ */
+export const DEFAULT_LINK_RETRY_WAITS_MS: readonly number[] = [60_000, 300_000];
+
+/** `30s`, `5m` — a wait in the shortest words that stay exact. */
+function waitWords(ms: number): string {
+  const total = Math.round(ms / 1000);
+  return total >= 60 && total % 60 === 0 ? `${total / 60}m` : `${total}s`;
+}
+
 /** The real ticker. Behind a seam so tests need no clock. */
 function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
   const handle = setInterval(onTick, intervalMs);
@@ -217,6 +235,15 @@ export interface AgentSessionSpawnerOptions {
    * {@link DEFAULT_PROGRESS_INTERVAL_SECONDS}.
    */
   progressIntervalMs?: number;
+  /**
+   * How long to wait before each further attempt at a stage whose session
+   * died on the link, in order. Defaults to
+   * {@link DEFAULT_LINK_RETRY_WAITS_MS}; an empty list turns retrying off,
+   * which is the behaviour every caller had before ADR-0034.
+   */
+  linkRetryWaitsMs?: readonly number[];
+  /** Waiting. Behind a seam so a test needs no real clock. */
+  sleep?: (ms: number) => Promise<void>;
   /** Starts a ticker. Behind a seam so tests need no real timer. */
   ticker?: (onTick: () => void, intervalMs: number) => Ticker;
   log?: (message: string) => void;
@@ -257,6 +284,46 @@ export function failedComment(reason: string): string {
     "",
     "**What I need from you:** re-mark this ticket when you want me to try again," +
       " or leave it and tell me what looks wrong.",
+  ].join("\n");
+}
+
+/**
+ * The comment posted when the machine could not reach the service it runs on,
+ * or was refused by it ([ADR-0034](../../doc/adr/0034-a-technical-stop-is-retried-not-reported.md)).
+ *
+ * A different comment from {@link failedComment} because it carries a
+ * different message. Nothing here is about the ticket, so it says whose fault
+ * it is, what was tried, and asks the reader for nothing — where the old one
+ * said "something went wrong" over a request to re-mark a ticket, which is
+ * both the wrong subject and, on a broken run, an act with no effect.
+ */
+export function unreachableComment(
+  fault: TechnicalFault,
+  reason: string,
+  attempts: number,
+): string {
+  const headline =
+    fault === "credentials"
+      ? "**My login to the service I run on was refused, so I stopped here.**"
+      : "**I could not reach the service I run on, so I stopped here.**";
+  const what =
+    fault === "credentials"
+      ? `Trying again would be refused the same way: ${reason}.`
+      : attempts > 1
+        ? `I tried ${attempts} times over a few minutes, and it ended the same way each time: ${reason}.`
+        : `It ended this way: ${reason}.`;
+  return [
+    headline,
+    "",
+    "This is a fault on my side. It is not about this ticket, and it is not",
+    "something you did.",
+    "",
+    what,
+    "",
+    "Nothing was decided here, so nothing on this ticket has changed.",
+    "",
+    "**What I need from you:** nothing on this ticket — this one is mine to fix." +
+      " The standing note on this ticket has the way to start me again once it is fixed.",
   ].join("\n");
 }
 
@@ -528,12 +595,17 @@ export class AgentSessionSpawner implements SessionSpawner {
   private readonly log: (message: string) => void;
   private readonly channel: ConversationChannel;
   private readonly progressIntervalMs: number;
+  private readonly linkRetryWaitsMs: readonly number[];
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(private readonly options: AgentSessionSpawnerOptions) {
     this.log = options.log ?? (() => {});
     this.channel = options.channel ?? new TerminalChannel();
     this.progressIntervalMs =
       options.progressIntervalMs ?? DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000;
+    this.linkRetryWaitsMs = options.linkRetryWaitsMs ?? DEFAULT_LINK_RETRY_WAITS_MS;
+    this.sleep =
+      options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
 
   async spawn(
@@ -678,7 +750,7 @@ export class AgentSessionSpawner implements SessionSpawner {
       (await this.branchHead(project, branch)) ?? (await this.currentHead(project));
 
     const effort = effortFor(stage);
-    const started = await this.startClaimed(run, {
+    const { outcome, attempts } = await this.runSession(run, stage, {
       cwd: root,
       prompt,
       model,
@@ -687,14 +759,23 @@ export class AgentSessionSpawner implements SessionSpawner {
       // runtime would have to tell apart from an intended value.
       ...(effort === undefined ? {} : { effort }),
     });
-    this.log(`session ${started.sessionId} started for ${run.id} (${stage}, ${model})`);
-
-    const outcome = await this.watch(run.id, `${run.id} (${stage})`, started);
 
     if (!outcome.ok) {
       const reason = outcome.error ?? "the session ended without a result";
+      // Whose failure it was decides which words the ticket gets (ADR-0034).
+      // A technical stop reaching here has already been tried as often as it
+      // is going to be, so what is left to say is that it was the machine's
+      // fault and not the reader's.
+      const fault = technicalFault(outcome.error);
       store.fail(run.id, reason);
-      await adapter.postComment(project, run.ticket, failedComment(reason));
+      await adapter.postComment(
+        project,
+        run.ticket,
+        fault === undefined
+          ? failedComment(reason)
+          : unreachableComment(fault, reason, attempts),
+      );
+      this.log(`failed ${run.id} — ${reason}`);
       return { ok: false };
     }
 
@@ -709,6 +790,98 @@ export class AgentSessionSpawner implements SessionSpawner {
       outcome: readStageOutcome(after, cursor),
       cursor,
     };
+  }
+
+  /**
+   * Run one stage's session, and try it again when what stopped it was the
+   * link rather than the work
+   * ([ADR-0034](../../doc/adr/0034-a-technical-stop-is-retried-not-reported.md)).
+   *
+   * **Nothing is posted between attempts**, and that is the whole point: a
+   * dropped connection is not news, and a ticket is not where it is mended.
+   * What the human sees is either the stage finishing, or — once the waits
+   * run out — one comment saying the machine could not get through.
+   *
+   * **The act is the one `timone retry` already performs**: the same stage, a
+   * fresh session, on the branch as the last attempt left it. Nothing new is
+   * being trusted here; what changes is that a human no longer has to be
+   * awake to ask for it.
+   *
+   * **A start that throws is an outcome like any other, from the second
+   * attempt on.** The first is left to throw, because {@link startClaimed}
+   * puts a parked run back on its wait before rethrowing and the poll loop
+   * reports it. From the second the run is active and claimed, so a throw
+   * escaping here would leave it that way with nobody to release it.
+   */
+  private async runSession(
+    run: Run,
+    stage: PipelineStage,
+    request: SessionRequest,
+  ): Promise<{ outcome: SessionOutcome; attempts: number }> {
+    for (let attempt = 1; ; attempt += 1) {
+      const outcome = await this.attemptSession(run, stage, request, attempt);
+      if (outcome.ok) return { outcome, attempts: attempt };
+
+      // Only a broken link is retried. A refused login would be refused
+      // again, and a stage that broke on its own work would break the same
+      // way — both are told to the human at once, in their own words.
+      const wait =
+        technicalFault(outcome.error) === "link"
+          ? this.linkRetryWaitsMs[attempt - 1]
+          : undefined;
+      if (wait === undefined) return { outcome, attempts: attempt };
+
+      this.log(
+        `retry  ${run.id} (${stage}) — ${outcome.error}; ` +
+          `trying again in ${waitWords(wait)}`,
+      );
+      await this.pause(run.id, wait);
+    }
+  }
+
+  /** One attempt at a stage's session: start it, watch it, report how it ended. */
+  private async attemptSession(
+    run: Run,
+    stage: PipelineStage,
+    request: SessionRequest,
+    attempt: number,
+  ): Promise<SessionOutcome> {
+    let started: StartedSession;
+    try {
+      started = await this.startClaimed(run, request);
+    } catch (error) {
+      if (attempt === 1) throw error;
+      return { sessionId: "unknown", ok: false, error: oneLine(error) };
+    }
+
+    this.log(
+      `session ${started.sessionId} started for ${run.id} ` +
+        `(${stage}, ${request.model})${attempt === 1 ? "" : ` — attempt ${attempt}`}`,
+    );
+    return this.watch(run.id, `${run.id} (${stage})`, started);
+  }
+
+  /**
+   * Wait between attempts, without going quiet.
+   *
+   * The heartbeat is what proves a run alive (ADR-0017, narrowed by
+   * ADR-0020), and it is stamped by the progress ticker — which belongs to a
+   * session, and between two attempts there is none. A silent wait longer
+   * than four intervals would be read on another cycle as a dead run and
+   * reclaimed: the recovery machinery killing the run it is nursing. So the
+   * ticker runs over the wait as well, stamping and printing nothing.
+   */
+  private async pause(runId: string, ms: number): Promise<void> {
+    const start = this.options.ticker ?? intervalTicker;
+    const ticker = start(() => {
+      this.options.store.heartbeat(runId);
+    }, this.progressIntervalMs);
+
+    try {
+      await this.sleep(ms);
+    } finally {
+      ticker.stop();
+    }
   }
 
   /**

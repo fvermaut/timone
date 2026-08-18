@@ -3301,3 +3301,200 @@ describe("a gate is never opened over a branch that was merely created", () => {
     expect(store.get("scratch-app#7/1")?.status).toBe("parked");
   });
 });
+
+describe("a stop the machine can survive on its own", () => {
+  /**
+   * A runtime with a script: one outcome per start, the last one repeating.
+   * `work` runs only on an outcome that succeeds, because a session that died
+   * on the link did not get as far as doing anything.
+   */
+  function flakyRuntime(
+    outcomes: readonly { ok?: boolean; error?: string }[],
+    work?: () => Promise<void>,
+  ): { runtime: SessionRuntime; starts: () => number } {
+    let started = 0;
+    const runtime: SessionRuntime = {
+      async start() {
+        const scripted = outcomes[Math.min(started, outcomes.length - 1)];
+        started += 1;
+        const sessionId = `session-abc-${started}`;
+        return {
+          sessionId,
+          completed: (async () => {
+            if (scripted.ok !== false) await work?.();
+            return { sessionId, ok: scripted.ok ?? true, error: scripted.error };
+          })(),
+        };
+      },
+    };
+    return { runtime, starts: () => started };
+  }
+
+  /** A ticker under this block's control, counting starts and stops. */
+  function handTicker(options: { ticks?: number } = {}): {
+    ticker: (onTick: () => void, intervalMs: number) => Ticker;
+    stops: number;
+    intervals: number[];
+  } {
+    const state = { stops: 0, intervals: [] as number[] };
+    return {
+      ticker: (fn, intervalMs) => {
+        state.intervals.push(intervalMs);
+        for (let i = 0; i < (options.ticks ?? 0); i += 1) fn();
+        return {
+          stop: () => {
+            state.stops += 1;
+          },
+        };
+      },
+      get stops() {
+        return state.stops;
+      },
+      get intervals() {
+        return state.intervals;
+      },
+    };
+  }
+
+  /** The classification work a triage session does when it gets that far. */
+  function classifies(adapter: TicketingAdapter): () => Promise<void> {
+    return async () => {
+      await adapter.applyLabel(project, 7, "triage:question");
+      await adapter.postComment(project, 7, "this one is a question.");
+    };
+  }
+
+  const LINK_ERROR = "the session stopped on an API error (server_error)";
+
+  it("tries the stage again when the link broke, and says nothing on the ticket", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const waits: number[] = [];
+    const { runtime, starts } = flakyRuntime(
+      [{ ok: false, error: LINK_ERROR }, { ok: true }],
+      classifies(adapter),
+    );
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(starts()).toBe(2);
+    expect(waits).toEqual([60_000]);
+    expect(store.get("scratch-app#7/1")?.status).not.toBe("failed");
+    expect(comments.map((posted) => posted.body)).not.toContainEqual(
+      expect.stringContaining("went wrong"),
+    );
+  });
+
+  it("keeps the heartbeat beating while it waits, so nothing reclaims the run", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const clock = handTicker({ ticks: 1 });
+    const { runtime } = flakyRuntime(
+      [{ ok: false, error: LINK_ERROR }, { ok: true }],
+      classifies(adapter),
+    );
+    const run = pickedUpRun(store);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      ticker: clock.ticker,
+      sleep: async () => {},
+    }).spawn(run, project, { stage: "triage" });
+
+    // Two sessions and one wait, each with a ticker of its own, each stopped.
+    expect(clock.intervals).toHaveLength(3);
+    expect(clock.stops).toBe(3);
+  });
+
+  it("gives up after the last try, and blames itself rather than the ticket", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const waits: number[] = [];
+    const { runtime, starts } = flakyRuntime([{ ok: false, error: LINK_ERROR }]);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(starts()).toBe(3);
+    expect(waits).toEqual([60_000, 300_000]);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+
+    const posted = comments.at(-1)?.body ?? "";
+    expect(posted).toMatch(/fault on my side/i);
+    expect(posted).toMatch(/3 times/);
+    expect(posted).not.toMatch(/re-mark/);
+  });
+
+  it("does not try again when the login is the thing being refused", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const waits: number[] = [];
+    const { runtime, starts } = flakyRuntime([
+      { ok: false, error: "the session stopped on an API error (authentication_failed)" },
+    ]);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(starts()).toBe(1);
+    expect(waits).toEqual([]);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(comments.at(-1)?.body ?? "").toMatch(/login/i);
+  });
+
+  it("does not try again when the stage itself broke", async () => {
+    // The other half of the rule: a failure about the work is reported at
+    // once, in the words it always had, because trying it again would only
+    // break it again.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime, starts } = flakyRuntime([{ ok: false, error: "error_max_turns" }]);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      sleep: async () => {},
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(starts()).toBe(1);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(comments.at(-1)?.body ?? "").toMatch(/Something went wrong/);
+  });
+});

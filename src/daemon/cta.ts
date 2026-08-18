@@ -16,6 +16,7 @@
 import { MARK_LABEL } from "../adapters/ticketing.js";
 import { takeoverCommand } from "../channels/terminal.js";
 import { type ChunkProgress } from "./breakdown.js";
+import { technicalFault } from "./faults.js";
 import { type Run } from "./runs.js";
 
 /**
@@ -213,6 +214,25 @@ export function ctaFor(state: TicketState): Cta {
   }
 
   if (run.status === "failed") {
+    // A stop the machine caused itself does not read like a stop about the
+    // work (ADR-0034), and the ticket's two surfaces must not disagree: the
+    // comment posted at the moment of failure says the fault was the
+    // machine's, and this note is what that comment points the reader at.
+    const fault = technicalFault(run.failure);
+    if (fault !== undefined) {
+      return {
+        headline:
+          fault === "credentials"
+            ? "My login to the service I run on was refused, so I stopped."
+            : "I could not reach the service I run on, so I stopped.",
+        needFromYou:
+          fault === "credentials"
+            ? "nothing on this ticket — my login needs fixing first, and then this command starts me again."
+            : "nothing on this ticket — this one is mine. Once it is sorted, this command starts me again.",
+        waitingOnYou: false,
+        command: `timone retry ${state.project}#${state.ticket}`,
+      };
+    }
     return {
       headline: "Something went wrong while I was working on this.",
       needFromYou: "run the command and I'll pick it up from where it stopped.",
