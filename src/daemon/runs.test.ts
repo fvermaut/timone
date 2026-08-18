@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { PipelineStage } from "./pipeline.js";
 import { RunStore, runId } from "./runs.js";
 
 /**
@@ -647,6 +648,181 @@ describe("a run parked on something nothing written can resolve", () => {
     });
 
     expect(store.get(run.id)?.consumedAnswerAt).toBeUndefined();
+  });
+});
+
+describe("the floor under a stage that does not notice", () => {
+  // ADR-0033's second detector. A stage that reads an answer and asks again at
+  // the same stage has spent a pass to reach the question it started with.
+  // Once is a stage doing its job badly; twice running is the ivtrends #1
+  // loop, and the second one stops rather than asks.
+
+  const invitation = "2026-08-03T09:00:00Z";
+
+  /** The park the poll loop writes when it consumes an answer, at `stage`. */
+  function consumedAt(store: RunStore, id: string, stage: PipelineStage, at: string): void {
+    store.repark(id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage,
+      waitCursor: at,
+      consumedAnswerAt: at,
+    });
+  }
+
+  /** A run parked at `stage`, ready to be answered. */
+  function waiting(store: RunStore, ticket: number, stage: PipelineStage): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.activate(run.id, `session-${ticket}`);
+    store.park(run.id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage,
+      waitCursor: invitation,
+    });
+    return run.id;
+  }
+
+  it("stops the second time a run reads an answer and asks again at the same stage", () => {
+    const store = newStore();
+    const id = waiting(store, 31, "verification");
+
+    // The session read their answer and posted another question at the same
+    // stage. Once: still a conversation, and the human's next answer reaches it.
+    consumedAt(store, id, "verification", "2026-08-03T09:30:00Z");
+    store.repark(id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "verification",
+      waitCursor: "2026-08-03T09:35:00Z",
+    });
+    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.reAsksAfterAnswer).toBe(1);
+
+    // Twice. The answer was read, the same question came back, and asking a
+    // third time is what this stops.
+    consumedAt(store, id, "verification", "2026-08-03T10:00:00Z");
+    store.repark(id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "verification",
+      waitCursor: "2026-08-03T10:05:00Z",
+    });
+
+    expect(store.get(id)?.waitingKind).toBe("escalation");
+    expect(store.get(id)?.reAsksAfterAnswer).toBe(2);
+  });
+
+  it("never counts a park that read no answer, however many there are", () => {
+    // The discrimination that matters. A stage asking a question nobody has
+    // answered yet is behaving correctly, and a hundred of those are still a
+    // hundred correct questions.
+    const store = newStore();
+    const id = waiting(store, 31, "clarification");
+
+    for (let round = 0; round < 100; round += 1) {
+      store.repark(id, {
+        waitingOn: "your answer to the question in my last comment.",
+        kind: "conversation",
+        stage: "clarification",
+        waitCursor: `2026-08-03T10:${String(round).padStart(2, "0")}:00Z`,
+      });
+    }
+
+    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.reAsksAfterAnswer ?? 0).toBe(0);
+  });
+
+  it("starts again when the run moves to another stage, because that is progress", () => {
+    const store = newStore();
+    const id = waiting(store, 31, "execution");
+
+    consumedAt(store, id, "execution", "2026-08-03T09:30:00Z");
+    store.repark(id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "execution",
+      waitCursor: "2026-08-03T09:35:00Z",
+    });
+    expect(store.get(id)?.reAsksAfterAnswer).toBe(1);
+
+    store.activate(id, "session-b");
+    store.setStage(id, "verification");
+    store.park(id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "verification",
+      waitCursor: "2026-08-03T11:00:00Z",
+    });
+    consumedAt(store, id, "verification", "2026-08-03T11:30:00Z");
+    store.repark(id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "verification",
+      waitCursor: "2026-08-03T11:35:00Z",
+    });
+
+    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.reAsksAfterAnswer).toBe(1);
+  });
+
+  it("counts only a re-ask, not a wait of another kind", () => {
+    // A gate and a review do not re-enter the stage that asked, so neither can
+    // be the loop this floor is under.
+    const store = newStore();
+    const id = waiting(store, 31, "requirements");
+
+    consumedAt(store, id, "requirements", "2026-08-03T09:30:00Z");
+    store.repark(id, {
+      waitingOn: "your approval of what I wrote down",
+      kind: "gate",
+      stage: "requirements",
+      waitCursor: "2026-08-03T09:35:00Z",
+    });
+    consumedAt(store, id, "requirements", "2026-08-03T10:00:00Z");
+    store.repark(id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "requirements",
+      waitCursor: "2026-08-03T10:05:00Z",
+    });
+
+    expect(store.get(id)?.waitingKind).toBe("review");
+  });
+
+  it("counts only a re-ask at the same stage", () => {
+    const store = newStore();
+    const id = waiting(store, 31, "clarification");
+
+    consumedAt(store, id, "clarification", "2026-08-03T09:30:00Z");
+    store.repark(id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "wayfinding",
+      waitCursor: "2026-08-03T09:35:00Z",
+    });
+
+    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.reAsksAfterAnswer ?? 0).toBe(0);
+  });
+
+  it("treats a run written before the counter existed as having none", () => {
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(PRE_CHUNK_LEDGER, path);
+
+    const store = RunStore.open(path);
+    const id = store.all()[0].id;
+
+    expect(store.get(id)?.reAsksAfterAnswer).toBeUndefined();
+    expect(() =>
+      store.repark(id, {
+        waitingOn: "your answer to the question in my last comment.",
+        kind: "conversation",
+        stage: store.get(id)?.stage ?? "triage",
+        waitCursor: "2026-08-03T10:00:00Z",
+      }),
+    ).not.toThrow();
   });
 });
 

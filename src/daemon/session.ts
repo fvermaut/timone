@@ -54,7 +54,12 @@ import {
   type ProgressSnapshot,
   type SessionSummary,
 } from "./progress.js";
-import type { ParkOptions, Run, RunStore } from "./runs.js";
+import {
+  ESCALATION_WAIT,
+  type ParkOptions,
+  type Run,
+  type RunStore,
+} from "./runs.js";
 
 /** What the spawner asks a runtime to run. */
 export interface SessionRequest {
@@ -580,7 +585,7 @@ function escalate(
   log: (message: string) => void,
 ): void {
   store.park(id, {
-    waitingOn: "me — I can't take this one further on my own.",
+    waitingOn: ESCALATION_WAIT,
     kind: "escalation",
     stage,
     waitCursor: outcome.comment.createdAt,

@@ -809,7 +809,14 @@ export class RunStore {
    */
   setStage(id: string, stage: PipelineStage): Run {
     const run = this.mutable(id);
-    if (run.stage !== stage) run.consumedAnswerAt = undefined;
+    // A run reaching another stage is what progress looks like, so the floor's
+    // count starts again there (ADR-0033). Resetting on any park would never
+    // accumulate; resetting on nothing would eventually stop a run that was
+    // legitimately asked twice, months apart.
+    if (run.stage !== stage) {
+      run.consumedAnswerAt = undefined;
+      run.reAsksAfterAnswer = undefined;
+    }
     run.stage = stage;
     run.updatedAt = this.now();
     this.persist();
@@ -1213,6 +1220,48 @@ function stopWaiting(run: Run): void {
 }
 
 /**
+ * How many times running a run may read an answer and ask again at the same
+ * stage before the machinery stops it
+ * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+ *
+ * Two, not one. Once is a stage that asked badly and may well settle the
+ * question with the next answer; twice running is a stage that has proved the
+ * answer does not reach what is blocking it. On ivtrends #1 it happened five
+ * times.
+ */
+const RE_ASK_LIMIT = 2;
+
+/**
+ * What a run stopped by the floor says it is waiting on.
+ *
+ * The same words `escalate` writes in `session.ts` for the stage that
+ * declares its own stop, and one copy of them, because from the ledger's side
+ * and the reader's side the two are the same situation: the difference is only
+ * who noticed.
+ */
+export const ESCALATION_WAIT = "me — I can't take this one further on my own.";
+
+/**
+ * Whether this park is a run reading an answer and asking the same stage's
+ * question again — the loop ADR-0033's floor is under.
+ *
+ * **Computed here because here is the only place both halves exist.** The
+ * consumed marker is transient by design (see {@link applyPark}), so the
+ * incoming `run` still carries it for exactly the instant before this
+ * function overwrites it, and `options` says what the run is about to wait
+ * for. Detecting this anywhere else would need the marker to live longer,
+ * which is the contract phase 19 was built to fix.
+ */
+function isReAskAfterAnswer(run: Run, options: ParkOptions): boolean {
+  return (
+    run.consumedAnswerAt !== undefined &&
+    options.kind === "conversation" &&
+    options.stage !== undefined &&
+    options.stage === run.stage
+  );
+}
+
+/**
  * Write a wait onto a run. Shared by {@link RunStore.park} and `repark`.
  *
  * A wait is written whole, absent fields included, which is what makes the
@@ -1220,12 +1269,24 @@ function stopWaiting(run: Run): void {
  * passes one, so every other park clears it. That is the honest reading of a
  * park — the run is waiting on something new, so whatever answer it was
  * holding has been acted on.
+ *
+ * **And it is where the floor lives** (ADR-0033's second detector). The
+ * transience above is what puts both facts here at once: the answer this run
+ * read, and the wait it is about to open. A stage that read an answer and
+ * asked the same question again has spent a pass to arrive where it started —
+ * twice running, and the park becomes one no answer resumes, whether or not
+ * the stage ever noticed anything was wrong.
  */
 function applyPark(run: Run, options: ParkOptions): void {
-  run.waitingOn = options.waitingOn;
-  run.waitingKind = options.kind;
+  const reAsked = isReAskAfterAnswer(run, options);
+  const count = reAsked ? (run.reAsksAfterAnswer ?? 0) + 1 : run.reAsksAfterAnswer;
+  const caught = reAsked && (count ?? 0) >= RE_ASK_LIMIT;
+
+  run.waitingOn = caught ? ESCALATION_WAIT : options.waitingOn;
+  run.waitingKind = caught ? "escalation" : options.kind;
   run.waitCursor = options.waitCursor;
   run.consumedAnswerAt = options.consumedAnswerAt;
+  run.reAsksAfterAnswer = count;
   if (options.stage !== undefined) run.stage = options.stage;
 }
 
