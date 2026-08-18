@@ -18,6 +18,7 @@ import {
   PROMPTED_STAGES,
   approvalRecordPrompt,
   conversationSubject,
+  escalationPrompt,
   stagePrompt,
   takeoverPrompt,
   workBranch,
@@ -694,5 +695,143 @@ describe("workBranch — one branch per chunk, not one per ticket", () => {
     // `timone/` would be cut in the harness repo unnoticed.
     expect(workBranch(ticket, 1).startsWith("timone/")).toBe(true);
     expect(workBranch(ticket, 3).startsWith("timone/")).toBe(true);
+  });
+});
+
+describe("the escalation prompt", () => {
+  // ADR-0033 D5. The session this prompt starts is bound to no stage: it is
+  // opened on a run the machine stopped and cannot take further, and its job
+  // is to work out what that run actually needs.
+
+  const stopped = "2026-08-17T10:00:00Z";
+  const account =
+    "I was told to go ahead to delivery, but two of the promises I check " +
+    "against are worded so that nothing can pass them. Rewording them is not " +
+    "something I may do — if I wrote the promises I check against, the check " +
+    "would prove nothing.";
+
+  const stuck: TicketThread = {
+    ...ticket,
+    number: 31,
+    title: "the page is slow when I add many items",
+    comments: [
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\n---\n\n${account}`,
+        createdAt: stopped,
+        fromTimone: true,
+      },
+      {
+        author: "fvermaut",
+        body: "yes. how many times do I need to say YES?",
+        createdAt: "2026-08-17T10:30:00Z",
+        fromTimone: false,
+      },
+    ],
+  };
+
+  const run = {
+    id: "scratch-app#31/1",
+    stage: "verification" as const,
+    branch: "timone/31-slow-page",
+    waitingOn: "me — I can't take this one further myself.",
+    waitCursor: stopped,
+  };
+
+  it("is not any stage's prompt, wearing a hat", () => {
+    // Asserted by identity against every prompt a stage has, not by looking
+    // for a word: a session handed a stage's instructions is the bound
+    // session ADR-0033 rejected, whatever it is called.
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    for (const stage of PROMPTED_STAGES) {
+      expect(prompt).not.toBe(
+        stagePrompt(stage, {
+          project: { name: "scratch-app", repoUrl: "" },
+          ticket: stuck,
+          interactive: true,
+        }),
+      );
+    }
+    expect(prompt).not.toBe(takeoverPrompt("scratch-app", "verification", stuck));
+  });
+
+  it("carries the ticket and its thread, with the voices told apart", () => {
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toContain("the page is slow when I add many items");
+    expect(prompt).toContain("how many times do I need to say YES?");
+  });
+
+  it("says where the run stopped, and what it holds", () => {
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toContain("scratch-app#31/1");
+    expect(prompt).toContain("verification");
+    expect(prompt).toContain("timone/31-slow-page");
+  });
+
+  it("carries the stopped stage's account, and says it may be wrong", () => {
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toContain("the check would prove nothing");
+    // Quoted without the thread's own plumbing: the marker is how the ticket
+    // tells the voices apart, and reading it back as part of the account
+    // would have the session treat punctuation as evidence.
+    expect(
+      prompt.slice(
+        prompt.indexOf("--- what the stage said ---"),
+        prompt.indexOf("--- end of what the stage said ---"),
+      ),
+    ).not.toContain(MACHINE_MARKER);
+    // The account is evidence, not an instruction — and the prompt has to say
+    // why: the stage that wrote it could not read the source, the decisions or
+    // the diff. On ivtrends #1 an account like this named two promises as
+    // broken when only one was.
+    expect(prompt).toMatch(/may be wrong/i);
+    expect(prompt).toMatch(/could not read|cannot read|never read/i);
+  });
+
+  it("names what normally follows as the pipeline's default, not as a decision", () => {
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toContain("delivery");
+    expect(prompt).toMatch(/you may|need not|not a decision/i);
+  });
+
+  it("carries what the human wrote after it stopped", () => {
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toMatch(/how many times do I need to say YES\?/);
+  });
+
+  it("copes with a stop nobody wrote an account for, and with silence after it", () => {
+    const bare: TicketThread = { ...stuck, comments: [] };
+
+    const prompt = escalationPrompt("scratch-app", run, bare);
+
+    expect(prompt).toContain("scratch-app#31/1");
+    expect(prompt).not.toContain("undefined");
+  });
+
+  it("grants the authority a stage does not have, in as many words", () => {
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toMatch(/whichever .*skill/i);
+    expect(prompt).toMatch(/depart/i);
+  });
+
+  it("names the record it owes", () => {
+    // The only audit an unbound session has. Its absence is a failure, not a
+    // nit: nothing else records what was done or why it departed from a
+    // default.
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toMatch(/commit/i);
+    expect(prompt).toMatch(/record/i);
+  });
+
+  it("is not a stage, and is not listed as one", () => {
+    expect(PROMPTED_STAGES as readonly string[]).not.toContain("escalation");
   });
 });

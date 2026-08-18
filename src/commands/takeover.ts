@@ -16,7 +16,11 @@ import {
   type PipelineStage,
 } from "../daemon/pipeline.js";
 import { outcomeCursorFrom } from "../daemon/outcomes.js";
-import { PROMPTED_STAGES, takeoverPrompt } from "../daemon/prompts.js";
+import {
+  PROMPTED_STAGES,
+  escalationPrompt,
+  takeoverPrompt,
+} from "../daemon/prompts.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
 import { enqueue, waitUntilSettled, type WaitOptions } from "../daemon/requests.js";
@@ -31,6 +35,16 @@ export interface TakeoverTarget {
 /** What a takeover turns out to be. */
 export type TakeoverResolution =
   | { kind: "converse"; run: Run; stage: PipelineStage; thread: TicketThread }
+  /**
+   * The machinery stopped on this one and cannot take it further itself
+   * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+   * What opens is a session bound to no stage — which is why no stage travels
+   * with this resolution, and why the stage the run stopped at is not checked
+   * against `PROMPTED_STAGES`: the stop happens at work stages no
+   * conversation exists for, and refusing there is the wedge this exists to
+   * prevent.
+   */
+  | { kind: "escalation"; run: Run; thread?: TicketThread }
   /** The ticket is waiting, but on a reply rather than on an interview. */
   | { kind: "answer-on-ticket"; message: string }
   /** Nothing to take over; the message says what *is* happening instead. */
@@ -199,6 +213,16 @@ export async function resolveTakeover(
         `its work is open as pull request #${run.pr ?? "?"}, waiting for your ` +
         "review. Comment or merge there, and I'll carry on from what you do.",
     };
+  }
+
+  // Before the conversation branch, because a run stopped this way is
+  // parked at a work stage — `verification` on ivtrends #1 — and the
+  // conversation branch would refuse it with the sentence about a stage it
+  // cannot hold a conversation for. That refusal, on the one park whose CTA
+  // hands the human this very command, is the wedged project ADR-0033's
+  // ordering exists to prevent.
+  if (run.waitingKind === "escalation") {
+    return { kind: "escalation", run };
   }
 
   if (run.waitingKind !== "conversation" || run.stage === undefined) {
@@ -408,7 +432,9 @@ export async function runTakeover(
   process.once("SIGINT", giveBack);
   process.once("SIGTERM", giveBack);
   try {
-    return await converse(target, claimed.run, claimed.thread, deps, log);
+    return claimed.escalation === true
+      ? await escalate(target, claimed.run, claimed.thread, deps, log)
+      : await converse(target, claimed.run, claimed.thread, deps, log);
   } finally {
     process.off("SIGINT", giveBack);
     process.off("SIGTERM", giveBack);
@@ -418,7 +444,7 @@ export async function runTakeover(
 
 /** A claimed run, or the exit code of a takeover that never started one. */
 type Claim =
-  | { kind: "claimed"; run: Run; thread?: TicketThread }
+  | { kind: "claimed"; run: Run; thread?: TicketThread; escalation?: true }
   | { kind: "no"; code: number };
 
 /**
@@ -457,6 +483,13 @@ async function claimForTakeover(
   if (acquired.ok) {
     try {
       const resolution = await resolveTakeover(target, deps);
+      if (resolution.kind === "escalation") {
+        return {
+          kind: "claimed",
+          run: store.claim(resolution.run.id),
+          escalation: true,
+        };
+      }
       if (resolution.kind !== "converse") {
         log(resolution.message);
         return { kind: "no", code: resolution.kind === "answer-on-ticket" ? 0 : 1 };
@@ -485,11 +518,11 @@ async function claimForTakeover(
   // refusals stay exactly as verified against R14.
   if (store.runsForTicket(target.project, target.ticket).length > 0) {
     const resolution = await resolveTakeover(target, deps);
-    if (resolution.kind !== "converse") {
+    if (resolution.kind !== "converse" && resolution.kind !== "escalation") {
       log(resolution.message);
       return { kind: "no", code: resolution.kind === "answer-on-ticket" ? 0 : 1 };
     }
-    if (!isPrompted(resolution.stage)) {
+    if (resolution.kind === "converse" && !isPrompted(resolution.stage)) {
       log(cannotConverse(target));
       return { kind: "no", code: 1 };
     }
@@ -522,7 +555,12 @@ async function claimForTakeover(
     );
     return { kind: "no", code: 1 };
   }
-  return { kind: "claimed", run };
+  // The claim cleared nothing about what the run was waiting on
+  // (`RunStore.claim` keeps the wait deliberately), so which session to open
+  // is still readable off the run the daemon handed back.
+  return run.waitingKind === "escalation"
+    ? { kind: "claimed", run, escalation: true }
+    : { kind: "claimed", run };
 }
 
 /**
@@ -607,6 +645,34 @@ async function converse(
   return deps.launcher.run("claude", [prompt], { cwd: deps.root });
 }
 
+/**
+ * The unbound session: the same terminal, and a prompt that names no stage.
+ *
+ * It reads beside {@link converse} on purpose. Everything about the command is
+ * the same — the claim, the launcher, the root — and exactly one thing differs:
+ * what the session is told it is.
+ */
+async function escalate(
+  target: TakeoverTarget,
+  run: Run,
+  known: TicketThread | undefined,
+  deps: TakeoverDeps,
+  log: (message: string) => void,
+): Promise<number> {
+  const project = {
+    name: target.project,
+    repoUrl: deps.manifest.projects[target.project].repo_url,
+  };
+  const thread = known ?? (await deps.adapter.getTicket(project, target.ticket));
+  const prompt = escalationPrompt(target.project, run, thread);
+
+  log(
+    `Picking up ${target.project} #${target.ticket} — I couldn't take this one ` +
+      "further myself. Over to you.",
+  );
+  return deps.launcher.run("claude", [prompt], { cwd: deps.root });
+}
+
 /** The takeover itself, once this process is the ledger's only writer. */
 async function takeover(
   raw: string,
@@ -622,6 +688,9 @@ async function takeover(
   }
 
   const resolution = await resolveTakeover(target, deps);
+  if (resolution.kind === "escalation") {
+    return escalate(target, resolution.run, resolution.thread, deps, log);
+  }
   if (resolution.kind !== "converse") {
     log(resolution.message);
     return resolution.kind === "answer-on-ticket" ? 0 : 1;

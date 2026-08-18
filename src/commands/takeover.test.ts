@@ -331,7 +331,10 @@ describe("resolveTakeover", () => {
     });
     // Abandoned, not broken, and never parked: the words a person reads must
     // not hand them a fault to look for, nor a chunk to count.
-    const said = resolution.kind === "converse" ? "" : resolution.message;
+    const said =
+      resolution.kind === "converse" || resolution.kind === "escalation"
+        ? ""
+        : resolution.message;
     expect(said).toMatch(/mark it for me/);
     expect(said).not.toMatch(/parked|failed|stopped early|scratch-app#4/);
   });
@@ -454,7 +457,9 @@ describe("a ticket the ledger has never heard of", () => {
         { project: "scratch-app", ticket },
         { manifest, store: newStore(), adapter },
       );
-      if (resolution.kind !== "converse") said.push(resolution.message);
+      if (resolution.kind !== "converse" && resolution.kind !== "escalation") {
+        said.push(resolution.message);
+      }
     }
 
     expect(said).toHaveLength(2);
@@ -517,6 +522,97 @@ describe("the prompt a takeover starts from", () => {
     expect(
       takeoverPrompt("scratch-app", "clarification", { ...thread, comments: [] }),
     ).toContain("(no replies yet)");
+  });
+});
+
+describe("a run the machine stopped and cannot take further", () => {
+  // ADR-0033. The escape hatch, landing before anything can create one of
+  // these: run today it refuses, because no such park exists yet.
+
+  const stopped = "2026-08-03T10:30:00Z";
+
+  /** A run parked where nothing written can start it again. */
+  function escalated(store: RunStore): RunStore {
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-message-box");
+    store.park(run.id, {
+      waitingOn: "me — I can't take this one further myself.",
+      kind: "escalation",
+      stage: "verification",
+      waitCursor: stopped,
+    });
+    return store;
+  }
+
+  it("resolves to a session bound to no stage", async () => {
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store: escalated(newStore()), adapter: fakeAdapter().adapter },
+    );
+
+    expect(resolution.kind).toBe("escalation");
+    // No stage travels with it. A resolution carrying one is the bound
+    // session ADR-0033 rejected, however the session then behaves.
+    expect(resolution).not.toHaveProperty("stage");
+  });
+
+  it("opens a session whose prompt is not the stuck stage's own", async () => {
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store: escalated(newStore()),
+      adapter,
+      launcher,
+      root: "/root",
+      log: () => {},
+    });
+
+    expect(code).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cwd).toBe("/root");
+    // By identity, not by substring: the two prompts share the ticket, so a
+    // substring match would pass for the very thing this refuses.
+    expect(calls[0].args[0]).not.toBe(
+      takeoverPrompt("scratch-app", "verification", thread),
+    );
+    expect(calls[0].args[0]).toContain("scratch-app#6/1");
+  });
+
+  it("opens it at a stage no conversation exists for, which is the point", async () => {
+    // `verification` is not a stage this command can hold a conversation for.
+    // The old refusal — "waiting at a stage I can't hold a conversation for
+    // yet" — is exactly the wedge this slice exists to prevent.
+    const logged: string[] = [];
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store: escalated(newStore()),
+      adapter,
+      launcher,
+      root: "/root",
+      log: (message) => logged.push(message),
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(logged.join("\n")).not.toMatch(/can't hold a conversation/);
+  });
+
+  it("refuses today, because nothing creates such a park yet", async () => {
+    // The same command over the parks that do exist: each keeps its own
+    // sentence, and none of them opens an unbound session.
+    const store = parkedOnConversation(newStore());
+
+    expect(
+      await resolveTakeover(
+        { project: "scratch-app", ticket: 6 },
+        { manifest, store, adapter: fakeAdapter().adapter },
+      ),
+    ).toMatchObject({ kind: "converse", stage: "clarification" });
   });
 });
 

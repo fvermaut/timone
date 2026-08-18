@@ -631,7 +631,11 @@ async function applyRequest(
         { project: body.project, ticket: body.ticket },
         { manifest, store, adapter: deps.adapter },
       );
-      if (resolution.kind !== "converse") {
+      // A run the machinery stopped on is handed over like any other
+      // (ADR-0033). Refusing here would mean the one command the ticket
+      // hands the human works while the daemon is down and not while it is
+      // up — which is every time it matters.
+      if (resolution.kind !== "converse" && resolution.kind !== "escalation") {
         log(resolution.message);
         return 1;
       }
