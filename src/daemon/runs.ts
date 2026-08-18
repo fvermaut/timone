@@ -171,6 +171,17 @@ const runSchema = z.strictObject({
    */
   waitCursor: z.string().optional(),
   /**
+   * How many times running this run has read a written answer and then asked
+   * again at the same stage — the count ADR-0033's floor keeps.
+   *
+   * Absent means none, which is what every run written before it existed
+   * means too. It is here rather than only in `applyPark`'s head because the
+   * ticket's words depend on it: a run that said it was stuck reads
+   * differently from one that had to be caught being stuck, and only this
+   * number tells them apart.
+   */
+  reAsksAfterAnswer: z.number().int().nonnegative().optional(),
+  /**
    * The instant of the written answer this run has read and not yet acted on
    * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)).
    *

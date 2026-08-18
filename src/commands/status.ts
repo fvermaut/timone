@@ -138,9 +138,19 @@ function ctaOf(run: Run, context: RenderContext): Cta {
   });
 }
 
-/** What a parked run is waiting for, in the words the ticket itself carries. */
+/**
+ * What a parked run is waiting for, in the words the ticket itself carries —
+ * and the command that moves it, where one does.
+ *
+ * The command is shown for the same reason it is put on the ticket: a line
+ * saying *run this command* without the command in it asks the reader to
+ * guess, and a run stopped where nothing written can restart it has no other
+ * way out to guess at.
+ */
 function describeWait(run: Run, context: RenderContext): string {
-  return `waiting on you: ${ctaOf(run, context).needFromYou}`;
+  const cta = ctaOf(run, context);
+  const how = cta.command === undefined ? "" : ` — ${cta.command}`;
+  return `waiting on you: ${cta.needFromYou}${how}`;
 }
 
 /** One run's phrase: the ticket, how far it got, and what it is doing. */

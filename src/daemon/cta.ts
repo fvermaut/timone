@@ -276,6 +276,36 @@ export function ctaFor(state: TicketState): Cta {
   // falling into the wait below.
   run.status satisfies "parked";
 
+  // The stop no answer reaches
+  // ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+  //
+  // **The second sentence is the whole slice.** A reader who has already
+  // written an answer — four of them, on ivtrends #1 — cannot tell from
+  // anything else on the ticket that writing a fifth will not help. Every
+  // other branch here describes a state; this one has to say what does *not*
+  // work, before it says what does.
+  //
+  // The two openings are ADR-0033 D3's two detectors. Saying which one fired
+  // is not bookkeeping leaked onto the ticket: being told "I can't do this"
+  // and being told "I asked you the same thing twice" are different pieces of
+  // news, and only the second is the machine's own fault to apologise for.
+  if (run.waitingKind === "escalation") {
+    const caught = (run.reAsksAfterAnswer ?? 0) >= 2;
+    return {
+      headline: caught
+        ? "I asked you the same thing twice, and I still can't do what you " +
+          "asked. Sorry — writing another answer here won't move it."
+        : "I can't take this one further myself. Writing another answer here " +
+          "won't move it.",
+      needFromYou:
+        "run this command. It opens this ticket with me in your terminal, " +
+        "with everything I know about where it stopped — and there I can do " +
+        "things I can't do on my own.",
+      waitingOnYou: true,
+      command: takeoverCommand(state.project, state.ticket),
+    };
+  }
+
   // The map's own ticket, whose two states are ADR-0024's fourth ruling
   // ("while questions are open, *nothing — I am working the list*; once the
   // frontier is empty, *say go and I will write the specification*").

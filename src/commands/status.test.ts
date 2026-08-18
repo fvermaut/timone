@@ -559,6 +559,29 @@ describe("renderStatus — one computation, two renderers", () => {
     ).toContain(cta.needFromYou);
   });
 
+  it("agrees about a run nothing written can restart, and shows the way out", () => {
+    // R21 clause 8 for ADR-0033's park. The same one call, rendered twice —
+    // and the terminal has to show the command as well as the sentence, or a
+    // reader of `timone status` alone is told they are being waited on with
+    // nothing they can do about it.
+    const stuck = run({
+      project: "scratch-app",
+      ticket: 31,
+      status: "parked",
+      stage: "verification",
+      waitingKind: "escalation",
+      waitingOn: "me — I can't take this one further myself.",
+      branch: "timone/31-slow-page",
+    });
+
+    const cta = ctaFor({ project: "scratch-app", ticket: 31, run: stuck });
+    const output = renderStatus(manifest, [stuck], { stateExists: true });
+
+    expect(ctaComment(cta)).toContain(cta.needFromYou);
+    expect(output).toContain(cta.needFromYou);
+    expect(output).toContain("timone takeover scratch-app#31");
+  });
+
   it("resolves an initiative's progress the same way for the ticket and the terminal", () => {
     // R21 clause 8, asserted rather than intended. **One** progress value,
     // resolved the way `reconcileCtas` resolves it — through `checkoutOf` and

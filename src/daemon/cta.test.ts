@@ -618,3 +618,121 @@ describe("ctaFor — a run the machine broke itself", () => {
     expect(cta.headline).toBe("Something went wrong while I was working on this.");
   });
 });
+
+describe("ctaFor — a run the machine cannot take further itself", () => {
+  // ADR-0033. The words a person reads when a run has stopped somewhere no
+  // answer they write can reach. The one thing five comments on ivtrends #1
+  // never told the human is the thing this branch has to say.
+
+  /** A run stopped where nothing written can start it again. */
+  function stopped(overrides: Partial<Run> = {}): Run {
+    return run({
+      project: "scratch-app",
+      ticket: 31,
+      status: "parked",
+      stage: "verification",
+      waitingKind: "escalation",
+      waitingOn: "me — I can't take this one further myself.",
+      waitCursor: "2026-08-17T10:00:00Z",
+      ...overrides,
+    });
+  }
+
+  const state = { project: "scratch-app", ticket: 31 };
+
+  it("says writing another answer will not move it, and hands over the command", () => {
+    const cta = ctaFor({ ...state, run: stopped() });
+
+    expect(`${cta.headline} ${cta.needFromYou}`).toMatch(
+      /writing (another answer|again).*(won't|will not)/i,
+    );
+    expect(cta.command).toBe("timone takeover scratch-app#31");
+    expect(cta.waitingOnYou).toBe(true);
+  });
+
+  it("reads differently when the machine had to catch itself, and apologises", () => {
+    // D3's two detectors. A run that said so itself and a run that had to be
+    // caught asking the same thing twice are not the same event, and the
+    // second is worth an apology.
+    const declared = ctaFor({ ...state, run: stopped() });
+    const caught = ctaFor({ ...state, run: stopped({ reAsksAfterAnswer: 2 }) });
+
+    expect(caught.headline).not.toBe(declared.headline);
+    expect(caught.headline).toMatch(/sorry/i);
+    // Both still say the one thing the reader could not have known, and both
+    // still hand over the same command.
+    expect(`${caught.headline} ${caught.needFromYou}`).toMatch(
+      /writing (another answer|again).*(won't|will not)/i,
+    );
+    expect(caught.command).toBe(declared.command);
+  });
+
+  it("puts none of the machine's own words on the ticket", () => {
+    // Asserted as a list, because this is the rule a hurried edit loses
+    // first. `process.md`: the reader knows nothing about any of this.
+    const forbidden = ["escalat", "stage", "park", "ledger", "waitingkind"];
+
+    for (const run of [stopped(), stopped({ reAsksAfterAnswer: 2 })]) {
+      const body = ctaComment(ctaFor({ ...state, run })).toLowerCase();
+      for (const word of forbidden) {
+        expect(body).not.toContain(word);
+      }
+    }
+  });
+
+  it("leaves every other parked shape saying what it always said", () => {
+    const conversation = ctaFor({
+      project: "scratch-app",
+      ticket: 6,
+      run: run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "clarification",
+        waitingKind: "conversation",
+        waitingOn: "a conversation in your terminal",
+      }),
+    });
+    const review = ctaFor({
+      project: "scratch-app",
+      ticket: 6,
+      run: run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "delivery",
+        waitingKind: "review",
+        waitingOn: "your review",
+        pr: 9,
+      }),
+    });
+    const gate = ctaFor({
+      project: "scratch-app",
+      ticket: 6,
+      run: run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "requirements",
+        waitingKind: "gate",
+        waitingOn: "your approval of what I wrote down",
+      }),
+    });
+    const unbuilt = ctaFor({
+      project: "scratch-app",
+      ticket: 4,
+      run: run({
+        project: "scratch-app",
+        ticket: 4,
+        status: "parked",
+        stage: "triage",
+        waitingOn: "the next stage to be built",
+      }),
+    });
+
+    expect(conversation.command).toBe("timone takeover scratch-app#6");
+    expect(review.needFromYou).toBe("your review of pull request #9");
+    expect(gate.needFromYou).toBe("your approval of what I wrote down");
+    expect(unbuilt.headline).toBe("That's as far as I can take this one for now.");
+  });
+});
