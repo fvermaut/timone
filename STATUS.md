@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-16.
+**Last updated:** 2026-08-18.
 
 ---
 
@@ -47,15 +47,27 @@ The second half of the idea is that a background watcher drives those stages fro
 | List | Where | Kept |
 |---|---|---|
 | The process | `doc/specs/prd/prd-01-process-layer.criteria.md` | 22 of 24 |
-| The automatic loop | `doc/specs/prd/prd-02-inversion-of-control.criteria.md` | 13 of 22 |
+| The automatic loop | `doc/specs/prd/prd-02-inversion-of-control.criteria.md` | 12 of 22 |
 
-Of the nine on the second list that are not kept: three lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all.
+Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below).
 
-966 automatic tests pass. Tests are not the same as somebody watching it work.
+1036 automatic tests pass. Tests are not the same as somebody watching it work.
 
 ---
 
 ## What changed recently
+
+**18 August — the machine stops asking you the same question.** On the trading app it asked you the same thing five times. You answered four times. Each answer started the same expensive job again, which read your answer, decided it could not do what you asked, and asked again. It was right every time: you were telling it to change the very promises it was checking against, and it may not write those itself.
+
+Now a job that is asked for something it may not do stops once. The ticket says so plainly, says that writing another answer will not move it, and gives you one command to run:
+
+```
+timone takeover <project>#<number>
+```
+
+That command opens the job in your terminal with everything it knows about where it stopped, and there it can do things it cannot do on its own. If a job never notices it is stuck, the machine notices for it: asking you twice about the same thing after you have already answered stops it as well, and the ticket says sorry.
+
+Nobody has watched this happen on a real ticket yet.
 
 **16 August — tickets are written short.** You said the machine's tickets and comments were too long. There is now a written rule in [`process.md`](process.md#writing-to-the-human), and every skill points at it. Short sentences, common words, no words that only make sense if you have read the process. A comment is a few sentences. Requirements and technical detail are links to files, never text on a ticket. A test fails if a message grows past 150 words.
 
@@ -73,7 +85,7 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 
 ## Not proven yet
 
-- **Nobody has watched the 15 and 16 August work run.** No real ticket has been through the list-of-pieces machinery. No stopped job has been restarted by a written reply. This is exactly the state the machine was in just before it produced the last two faults.
+- **Nobody has watched the 15, 16 and 18 August work run.** No real ticket has been through the list-of-pieces machinery. No stopped job has been restarted by a written reply. This is exactly the state the machine was in just before it produced the last two faults.
 - **The rule that a piece must not be built without your approval is written, not enforced.** A building session obeys it. Nothing checks it.
 - **One accessibility check on the to-do app is still owed.** Listen to it with VoiceOver and Safari and confirm the controls are announced sensibly. The script is in that project's own repository, at `doc/plans/phases/reports/phase-01-verification.md`. It needs about twenty minutes.
 
@@ -85,7 +97,7 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 
 The ones that would bite you in ordinary use:
 
-- [#5](https://github.com/fvermaut/timone/issues/5) — a running watcher keeps using the code it started with. **Yours started at 13:22 today.** Stop it and start it again to pick up anything built since.
+- [#5](https://github.com/fvermaut/timone/issues/5) — a running watcher keeps using the code it started with. Nothing is running right now, so the next one you start has the 18 August work in it.
 - [#9](https://github.com/fvermaut/timone/issues/9) — the safety check blames the machine for a change you have not committed. Commit or stash your own work before the machine starts.
 - [#13](https://github.com/fvermaut/timone/issues/13) — a list of questions is only finished if somebody remembers to label it. This is what silently stopped the trading app.
 - [#12](https://github.com/fvermaut/timone/issues/12) — a job whose ticket was closed while it waited still starts, and is billed.
@@ -95,7 +107,7 @@ The rest, in short: [#1](https://github.com/fvermaut/timone/issues/1) a stopped 
 
 **Two things are on purpose and are not filed.** A watcher killed outright leaves its project locked for about two minutes — that is a deliberate trade. And Timone's own work is planned by hand, which is why this file is written by hand.
 
-**One is a gap rather than a fault**, so it is not filed either: the "I have tried and I am stopping, over to you" path exists in building, checking and delivering, and has never once fired. The first real failure on real work is its test.
+**One is a gap rather than a fault**, so it is not filed either: the "I have tried and I am stopping, over to you" path exists in building, checking and delivering, and has never once fired. The first real failure on real work is its test. The same is true of the 18 August work, which is the stronger version of that path.
 
 ---
 
