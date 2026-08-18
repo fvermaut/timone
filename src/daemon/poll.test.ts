@@ -5449,3 +5449,283 @@ describe("pollOnce — a park nothing written can end", () => {
     expect(contexts[0]?.stage).toBe("remediation");
   });
 });
+
+describe("pollOnce — the loop that cost five passes cannot happen", () => {
+  // ADR-0033, end to end. Nothing new is expected in `poll.ts` here: 25a
+  // refuses to resume, 25d parks when a stage declares, 25e parks when one
+  // does not. This slice is the proof that those three meet in the loop.
+
+  const question = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\n---\n\nThe two promises can't pass as worded. I can't reword them myself.`,
+    createdAt: "2026-08-17T10:00:00Z",
+    fromTimone: true,
+  };
+
+  function threadOf(
+    number: number,
+    comments: TicketThread["comments"],
+  ): {
+    adapter: TicketingAdapter;
+    posted: PostedComment[];
+    standing: string[];
+    thread: TicketThread["comments"];
+  } {
+    const posted: PostedComment[] = [];
+    const standing: string[] = [];
+    const base = ticket(number, { labels: ["timone", "triage:feature"] });
+    const thread = [...comments];
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      ...noUnmarkedTickets,
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [...thread] };
+      },
+      async postComment(project, num, body): Promise<void> {
+        posted.push({ project: project.name, number: num, body });
+      },
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+      async upsertComment(_project, _num, _marker, body): Promise<void> {
+        standing.push(body);
+      },
+    };
+    return { adapter, posted, standing, thread };
+  }
+
+  /** A run stopped where nothing written can restart it, as 25d parks it. */
+  function stopped(store: RunStore, ticket = 31): Run {
+    const { run } = store.register("scratch-app", ticket);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, `timone/${ticket}-slow-page`);
+    return store.park(run.id, {
+      waitingOn: "me — I can't take this one further on my own.",
+      kind: "escalation",
+      stage: "verification",
+      waitCursor: question.createdAt,
+    });
+  }
+
+  it("spawns nothing over ten cycles, however often they answer", async () => {
+    // Ten, not one: the fault was a loop, and one quiet cycle proves nothing
+    // about the tenth.
+    const store = newStore();
+    stopped(store);
+    const { adapter, thread } = threadOf(31, [question]);
+    const { spawner, spawned } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    };
+
+    for (let cycle = 0; cycle < 10; cycle += 1) {
+      thread.push({
+        author: "fvermaut",
+        body: `yes. go ahead (answer ${cycle + 1})`,
+        createdAt: `2026-08-17T1${cycle}:30:00Z`,
+        fromTimone: false,
+      });
+      await pollOnce(deps);
+    }
+
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#31/1")).toMatchObject({
+      status: "parked",
+      waitingKind: "escalation",
+    });
+  });
+
+  it("keeps their words where the session that picks it up can read them", async () => {
+    // Refusing to act on an answer and losing it are different things, and
+    // only the first was decided. Nothing consumed the comment, nothing moved
+    // the cursor past it.
+    const store = newStore();
+    stopped(store);
+    const answer = {
+      author: "fvermaut",
+      body: "yes. how many times do I need to say YES?",
+      createdAt: "2026-08-17T10:30:00Z",
+      fromTimone: false,
+    };
+    const { adapter, thread } = threadOf(31, [question, answer]);
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    const run = store.get("scratch-app#31/1");
+    expect(run?.waitCursor).toBe(question.createdAt);
+    expect(run?.consumedAnswerAt).toBeUndefined();
+    expect(thread).toContainEqual(answer);
+  });
+
+  it("is not concluded by a conversation record from somewhere else", async () => {
+    // `concludeLastConversation` reads any machine comment carrying the
+    // record marker after the cursor. Concluding this run would mark it done
+    // and close a ticket whose work is unfinished and whose question is
+    // unanswered.
+    const store = newStore();
+    stopped(store);
+    const { adapter } = threadOf(31, [
+      question,
+      {
+        author: "fvermaut",
+        body: `${CONVERSATION_RECORD_MARKER}\n\n✅ Agreed: something else entirely.`,
+        createdAt: "2026-08-17T10:10:00Z",
+        fromTimone: true,
+      },
+    ]);
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    expect(store.get("scratch-app#31/1")?.status).toBe("parked");
+    expect(spawned).toEqual([]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("tells the ticket, every cycle, that writing again will not move it", async () => {
+    const store = newStore();
+    stopped(store);
+    const { adapter, standing } = threadOf(31, [question]);
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    expect(standing.at(-1)).toMatch(/won't move it/i);
+    expect(standing.at(-1)).toContain("timone takeover scratch-app#31");
+  });
+
+  it("closes the loop even when no stage ever notices", async () => {
+    // The ivtrends #1 sequence with the declaration removed: a stage that
+    // reads the answer and asks the same question again, twice. The second
+    // re-ask is parked as an escalation by the floor, and the third cycle
+    // spawns nothing.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 32);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/32-slow-page");
+    store.park(run.id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "verification",
+      waitCursor: "2026-08-17T10:00:00Z",
+    });
+
+    const { adapter, thread } = threadOf(32, [
+      { ...question, createdAt: "2026-08-17T10:00:00Z" },
+    ]);
+    const spawned: string[] = [];
+    let asked = 0;
+    // A stage that reads the answer and asks again, exactly as `handBack`
+    // parks it — the shape of a session that never recognises the dead end.
+    const asking: SessionSpawner = {
+      async spawn(run) {
+        spawned.push(run.id);
+        asked += 1;
+        const at = `2026-08-17T1${asked}:45:00Z`;
+        thread.push({
+          author: "fvermaut",
+          body: `${MACHINE_MARKER}\n\n---\n\nSo shall I go ahead? (${asked})`,
+          createdAt: at,
+          fromTimone: true,
+        });
+        store.repark(run.id, {
+          waitingOn: "your answer to the question in my last comment.",
+          kind: "conversation",
+          stage: "verification",
+          waitCursor: at,
+        });
+      },
+    };
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: asking,
+      root: "/nowhere",
+    };
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      thread.push({
+        author: "fvermaut",
+        body: `yes, go ahead (${cycle + 1})`,
+        createdAt: `2026-08-17T1${cycle}:30:00Z`,
+        fromTimone: false,
+      });
+      await pollOnce(deps);
+    }
+
+    // Two passes, not three: the second re-ask is where it stops.
+    expect(spawned).toHaveLength(2);
+    expect(store.get("scratch-app#32/1")).toMatchObject({
+      status: "parked",
+      waitingKind: "escalation",
+      stage: "verification",
+      reAsksAfterAnswer: 2,
+    });
+  });
+
+  it("leaves a handoff at the same stage resuming on `carry on`", async () => {
+    // Phase 24's own path, re-driven here because this phase's whole risk is
+    // over-reach into it.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 33);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/33-slow-page");
+    store.park(run.id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "execution",
+      waitCursor: "2026-08-17T10:00:00Z",
+    });
+    const { adapter } = threadOf(33, [
+      { ...question, createdAt: "2026-08-17T10:00:00Z" },
+      {
+        author: "fvermaut",
+        body: "carry on",
+        createdAt: "2026-08-17T10:30:00Z",
+        fromTimone: false,
+      },
+    ]);
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+      root: "/nowhere",
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#33/1"]);
+    expect(contexts[0]?.stage).toBe("execution");
+    expect(contexts[0]?.feedback).toContain("carry on");
+  });
+});
