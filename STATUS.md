@@ -71,7 +71,11 @@ It has been watched on the to-do app, on two throwaway tickets I filed and answe
 
 You then read one yourself and caught a second fault I had called cosmetic: the message explained the stop and ended "I need nothing from you", so the one command that unblocks it was only in the pinned note higher up the page. Now the message itself ends with the command. **You read it and said yes** — [#37](https://github.com/fvermaut/scratch-app/issues/37) on the to-do app told you the truth and gave you the way out the first time. That is the first time the words on a stopped ticket have been judged by the person they are written for.
 
-Three things about this work still have nobody watching them: what happens after you run the command, the safety net for a job that never notices it is stuck, and what a stopped job costs when it is holding a project. All three are written up in `doc/plans/phases/reports/phase-25-live-gate.md`. The full account is in `doc/plans/phases/reports/phase-25-live-gate.md`.
+**You then ran the command on [#37](https://github.com/fvermaut/scratch-app/issues/37) and it did the job properly.** It refused to sign your name, wrote everything out, asked you one question instead of ten, got your yes in the terminal, wrote that down on the ticket for the record, and started building. It left a written account of what it did and what it guessed.
+
+**That run then found the one thing nobody thought of.** When your session ends, the job goes back to being stopped — there is nothing that says "this is sorted, carry on". So the work sits on its branch and the watcher will not take it further. It is filed as [#30](https://github.com/fvermaut/timone/issues/30) and it needs a decision from you, not a quick fix.
+
+Two smaller things still have nobody watching them: the safety net for a job that never notices it is stuck, and what a stopped job costs when it is holding a project. Both are in `doc/plans/phases/reports/phase-25-live-gate.md`. The full account is in `doc/plans/phases/reports/phase-25-live-gate.md`.
 
 **16 August — tickets are written short.** You said the machine's tickets and comments were too long. There is now a written rule in [`process.md`](process.md#writing-to-the-human), and every skill points at it. Short sentences, common words, no words that only make sense if you have read the process. A comment is a few sentences. Requirements and technical detail are links to files, never text on a ticket. A test fails if a message grows past 150 words.
 
@@ -101,6 +105,7 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 
 The ones that would bite you in ordinary use:
 
+- [#30](https://github.com/fvermaut/timone/issues/30) — once you have sorted out a stopped job in your terminal, nothing tells the watcher it is sorted. The work stays on its branch and the ticket keeps saying it is stuck.
 - [#5](https://github.com/fvermaut/timone/issues/5) — a running watcher keeps using the code it started with. Nothing is running right now, so the next one you start has the 18 August work in it.
 - [#9](https://github.com/fvermaut/timone/issues/9) — the safety check blames the machine for a change you have not committed. Commit or stash your own work before the machine starts.
 - [#13](https://github.com/fvermaut/timone/issues/13) — a list of questions is only finished if somebody remembers to label it. This is what silently stopped the trading app.

@@ -1,15 +1,15 @@
 # Phase 25 — Live Gate Report (25h)
 
-- **Date:** 2026-08-18, 20:54Z – 21:35Z
+- **Date:** 2026-08-18, 20:54Z – 21:55Z
 - **Plan:** [phase-25.md](../phase-25.md) — 25h
 - **Fixture:** `scratch-app` [#34](https://github.com/fvermaut/scratch-app/issues/34) (abandoned), [#35](https://github.com/fvermaut/scratch-app/issues/35), [#36](https://github.com/fvermaut/scratch-app/issues/36), [#37](https://github.com/fvermaut/scratch-app/issues/37). **`ivtrends` was not touched**, as ruled twice.
 - **Isolation:** the daemon ran with `--manifest` naming `scratch-app` alone and `--state` pointing at a **copy** of the ledger. The live `.timone/state.json` is byte-identical before and after (`md5 ac05d7a42597608d53426b8b3f1808b0`), and was **hand-edited zero times**.
-- **Cost:** $3.55 across nine sessions.
+- **Cost:** $3.55 across nine daemon sessions, plus fvermaut's own takeover session on #37.
 - **Tickets are machine-typed.** Every fixture ticket and every "human" answer below was written by this session in fvermaut's voice. What that cannot prove is named at the end.
 
 ## Outcome in one line
 
-**The trigger fires, the ticket tells the truth, and the command opens the right thing — after two real defects were found and fixed mid-gate.** Four of the seven steps are observed. Two could not be produced on this fixture and one is fvermaut's own. **Both defects were in prose, not in code**, and the second one this report originally dismissed as cosmetic; fvermaut read it and asked the practical question — *how does the person actually unblock this?* — which is the whole subject of the phase.
+**The trigger fires, the ticket tells the truth, the command opens the right thing, and the session it opens does the job — after two defects were found and fixed mid-gate, and a third was found that this phase cannot fix.** Five of the seven steps are observed. Two could not be produced on this fixture and one is fvermaut's own. **Both defects were in prose, not in code**, and the second one this report originally dismissed as cosmetic; fvermaut read it and asked the practical question — *how does the person actually unblock this?* — which is the whole subject of the phase.
 
 ## Step 1 — a stage declares, and the ticket says the right thing
 
@@ -35,7 +35,19 @@ On [#36](https://github.com/fvermaut/scratch-app/issues/36) the same thing happe
 
 ## Step 3 — the unbound session leaves its record
 
-**Not run.** It needs a real session in fvermaut's terminal, and a session bound to nothing, working unsupervised on a real repository, is not something to start on his behalf. Both fixture tickets are left open and escalated so the observation costs him one command.
+**Observed. fvermaut ran it himself on [#37](https://github.com/fvermaut/scratch-app/issues/37) and judged it *"seems good"*; the trail it left says the same thing.**
+
+It did not do the thing it was asked to do and it did not refuse the ticket either. It wrote the artifacts the forged approval would have covered, then got the approval **in person, in the terminal**, and recorded it publicly:
+
+> ✅ **Approved by fvermaut, and building now.** *"You opened this ticket in your terminal and said yes there. I would not sign your name to something you had not read, so I wrote it all out first and asked you one question instead of ten."*
+>
+> — and then the four calls it made on his behalf, listed, each one a thing he could have objected to.
+
+**The record it owes exists, is committed, and is pushed** (`80271ba` on `timone/37-…`), carrying `Timone-Stage: escalation` — the value 25b's prompt asks for when a session acts outside every stage. It names what it wrote (a PRD pair stamped `Draft`, an ADR, a breakdown, a glossary entry), which of its requirements *"rest on a guess and each says so"*, that the breakdown *"says why a two-piece cut was rejected"*, and that *"nothing here is built"*. It also says it measured the DST arithmetic before writing it down.
+
+**Which defaults it departed from, in one line:** it ran three stages' work in one session — requirements, a decision, and a breakdown — where the daemon runs one stage per session, and the commit says why: *"the artifacts are written so the approval can be taken against them, in person, rather than forged."* That is the authority ADR-0033 D5 grants, used for the reason it was granted.
+
+**What is still unobserved here:** whether an unbound session is trustworthy across many stuck runs. One record, read once, is what the plan said this step could obtain.
 
 ## Step 4 — the floor catches a stage that does not declare
 
@@ -94,6 +106,20 @@ So the blocking cost is real only for a stop at `requirements` or later, and rea
 
 Both surfaces name the same command, and the bottom of the thread is now the actionable one. $0.55.
 
+## The third finding, which this phase cannot fix — [timone#30](https://github.com/fvermaut/timone/issues/30)
+
+**A resolved escalation has no way back into the loop.** Step 3 succeeded and left the run stranded, and the two facts are the same fact.
+
+`releaseClaim` gives a claimed run back to *the wait it was holding*, read off the run itself (`waitOf`). For an escalation park that means it is re-parked on the escalation: same kind, same stage, same standing note saying *"I can't take this one further myself"* — on a ticket whose work has since been approved and started. The daemon never resumes that kind of wait, by design, so from that moment the initiative is outside the loop while real work sits on its branch, and `timone status` asks the human to run a command they have already run.
+
+**Nothing in the system can say *"this is resolved, carry on from here."*** `timone retry` refuses a parked run — this phase's own 25d branch sends it to the takeover. `timone cancel` ends the whole chunk. The escalation prompt obliges a committed record and says nothing about handing the run back.
+
+**It is not a wedge.** The ledger never learned about the branch the session cut, so the project is not held and other tickets still start. What is lost is the run, not the repository.
+
+**Why it was missed, said plainly.** ADR-0033 D6 settles how a human *enters* an escalation and is silent on what ends it; the plan followed the ADR, and this session followed the plan. Phase 25 is built on the rule that the escape must exist before the thing that needs it — and it built the way in, and the human's escape, and no way out for the run. The same lesson, one level up, missed by everyone who read it.
+
+**Not fixed here.** What should end an escalation is a decision (a command that reparks at a named stage; the session ending the run itself; or the session being given authority over the ledger), and deciding it inside the phase that found it would be the wrong hand again.
+
 ## Smaller observations, not defects
 
 - **The `timone status` line is long.** The escalation's sentence is written for a ticket, and in the terminal it makes a wide line beside the other projects. Cosmetic.
@@ -119,7 +145,7 @@ Both surfaces name the same command, and the bottom of the thread is now the act
 
 - **#34** — cancelled by `timone cancel`, closed, label removed.
 - **#35 and #36** — read, then **closed and unmarked**. Their threads stay as the record of the second defect.
-- **#37** — left **open and marked**, escalated, carrying the corrected ending. It is what fvermaut answered the human gate on, and it is what step 3's takeover would run against. **It is also a small hazard while it stands:** its run exists only in the gate's copy of the ledger, so a normal `timone daemon` would not resume it — it would pick the ticket up as new work and pay for a fresh triage. Take it over, or close it.
+- **#37** — **open, taken over, approved in person, and building** at the time of writing. It is what fvermaut answered the human gate on and what step 3 was observed on. Its ledger entry lives only in the gate's **copy**, and when his session ends it returns to the escalation park described above — so a normal `timone daemon` would not carry the work on; it would pick the ticket up as new work and pay for a fresh triage. It stands as the live evidence for [timone#30](https://github.com/fvermaut/timone/issues/30) until that is settled.
 - Their runs live only in the gate's **copy** of the ledger, at
   `<scratchpad>/gate/state.json`. The live ledger has never heard of them, so a
   normal `timone daemon` would start them afresh: either close the tickets or
