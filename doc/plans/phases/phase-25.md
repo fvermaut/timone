@@ -1,6 +1,6 @@
 # Phase 25: a stage that cannot act on an answer escalates
 
-> **Status:** Planned.
+> **Status:** Planned. **Approved for execution by fvermaut on 2026-08-18**, as written and without amendment; he is building it in a separate session. Nothing is started.
 
 > **The defect [timone#28](https://github.com/fvermaut/timone/issues/28).** Governing decision: **[ADR-0033](../../adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)** — a stage that cannot act on an answer escalates — `accepted`, on fvermaut's rulings of 2026-08-18 across four questions, each answered against a recommendation. Standing: [ADR-0031](../../adr/0031-a-handoff-is-a-wait-not-a-failure.md) (extended here), [ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md), [ADR-0023](../../adr/0023-one-answer-one-session.md), [ADR-0032](../../adr/0032-a-human-command-asks-the-daemon-to-act.md), [ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md), [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md).
 
@@ -50,15 +50,17 @@ A stage that is handed an answer it may not act on says so once, and the ticket 
 - **A real failure is still a failure.** A stage that ends with no outcome still fails, still posts `failedComment`, and is still what `timone retry` exists for. Only the answer-that-cannot-be-used branch is new.
 - **The daemon stays the ledger's only writer.** [ADR-0032](../../adr/0032-a-human-command-asks-the-daemon-to-act.md)'s request queue is how the new command acts. A slice with two processes writing `state.json` has misread it.
 
-## One open choice, for fvermaut at approval
+## The one choice, settled at approval
 
-**This plan reuses `timone takeover` rather than adding `timone escalate`.** ADR-0033 D6 says the human triggers the escalation from the call to action; it does not say through which command.
+**Settled 2026-08-18: `timone takeover` is reused, and no `timone escalate` command is added.** fvermaut approved this plan as written, which is what decides it — the section is kept rather than deleted so a building session reads the reasoning instead of reopening the question.
+
+ADR-0033 D6 says the human triggers the escalation from the call to action; it does not say through which command.
 
 The case for reuse: `resolveTakeover` ([`takeover.ts`](../../../src/commands/takeover.ts)) already switches on `waitingKind` and already has an `answer-on-ticket` branch for the kinds it cannot hold a conversation for, so an `escalation` branch is where the code already asks the question. The human has used the command before, the README documents it, and [R14](../../specs/prd/prd-02-inversion-of-control.criteria.md#r14--conversation-channel-seam-with-terminal-takeover) clause 2 already frames takeover as *"it determines what the ticket is waiting on"* — an escalation park is one more thing to determine.
 
 The case against: takeover today means *hold the conversation this stage opened*, and an escalation is explicitly not that — the session opens unbound, which is a different act behind the same word.
 
-**If he prefers a separate command, 25b splits into two files and nothing else in the plan moves.**
+**Were a separate command ever preferred after all, 25b splits into two files and nothing else in the plan moves** — recorded so the door stays cheap to reopen, not as an invitation to reopen it.
 
 ## Context & Prerequisites
 
