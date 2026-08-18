@@ -503,7 +503,9 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
     staleAfterMs,
   });
   if (!witness.mayJudge) {
-    log(`witness not judging — ${whyNotJudging(witness, staleAfterMs)}`);
+    log(
+      `waiting not checking for dead runs — ${whyNotJudging(witness, staleAfterMs)}`,
+    );
   }
 
   for (const [name, config] of Object.entries(manifest.projects)) {
@@ -653,9 +655,10 @@ async function applyRequest(
 }
 
 /**
- * Why the daemon is declining to judge, in the terms an operator can act on.
+ * Why the daemon is not checking for dead runs, in the terms an operator can
+ * act on — and in plain words, because a person reads this line.
  *
- * **Three refusals, not one**, and saying which is which is the whole value of
+ * **Three reasons, not one**, and saying which is which is the whole value of
  * the line. A daemon that was away for 17m is a machine that slept; one that
  * has watched unbroken for 40s of a 2m window is a machine that just started
  * and is about to be fine. Collapsing them printed "nothing was watching for
@@ -665,17 +668,20 @@ async function applyRequest(
  */
 function whyNotJudging(witness: Witness, staleAfterMs: number): string {
   if (witness.gapMs === undefined) {
-    return "no daemon has observed this state file before, so every run gets one fresh window";
+    return (
+      `this state file is new to the daemon, so every run gets ` +
+      `a full ${humanMs(staleAfterMs)} to check in first`
+    );
   }
   if (witness.unwitnessedGap) {
     return (
-      `nothing was watching for ${humanMs(witness.gapMs)}, ` +
-      `so no run's silence over it is evidence of anything`
+      `the daemon was not running for ${humanMs(witness.gapMs)}, ` +
+      `so a run that went quiet then may still be alive`
     );
   }
   return (
-    `watching for ${humanMs(witness.watchedMs)} of the ` +
-    `${humanMs(staleAfterMs)} it would have to vouch for`
+    `the daemon has been up ${humanMs(witness.watchedMs)}, and it must ` +
+    `watch a run for ${humanMs(staleAfterMs)} before calling it dead`
   );
 }
 

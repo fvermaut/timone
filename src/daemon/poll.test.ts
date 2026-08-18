@@ -1648,7 +1648,9 @@ describe("reclaiming a run its daemon left behind", () => {
     );
     // The gate has to be able to read this off the log and know why — both
     // that judgement was withheld and how long the daemon was away.
-    expect(lines.some((line) => /not judging.*17m00s/.test(line))).toBe(true);
+    expect(
+      lines.some((line) => /not checking for dead runs.*17m00s/.test(line)),
+    ).toBe(true);
   });
 
   it("tells a young watch apart from an absence, in the words it logs", async () => {
@@ -1683,10 +1685,12 @@ describe("reclaiming a run its daemon left behind", () => {
     // The two refusals, in order, picked out of everything else the cycle
     // says — a cycle logs whatever else it did, and this test is about the
     // words of the refusal rather than about its place in the log.
-    const refusals = lines.filter((line) => line.includes("not judging"));
-    expect(refusals[0]).toMatch(/nothing was watching for 17m00s/);
-    expect(refusals[1]).toMatch(/watching for 1m00s of the 2m00s/);
-    expect(refusals[1]).not.toMatch(/nothing was watching/);
+    const refusals = lines.filter((line) =>
+      line.includes("not checking for dead runs"),
+    );
+    expect(refusals[0]).toMatch(/the daemon was not running for 17m00s/);
+    expect(refusals[1]).toMatch(/has been up 1m00s.*watch a run for 2m00s/);
+    expect(refusals[1]).not.toMatch(/was not running for/);
   });
 
   it("is delayed, not disabled: the same run is reclaimed a window later", async () => {
@@ -1768,7 +1772,9 @@ describe("reclaiming a run its daemon left behind", () => {
 
     expect(result.reclaimed).toEqual([]);
     expect(store.get("other-app#8/1")?.status).toBe("active");
-    expect(lines.filter((line) => /not judging/.test(line))).toHaveLength(1);
+    expect(
+      lines.filter((line) => /not checking for dead runs/.test(line)),
+    ).toHaveLength(1);
   });
 
   it("derives the unwitnessed gap from the poll interval it was given", async () => {
