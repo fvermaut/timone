@@ -1,15 +1,15 @@
 # Phase 25 — Live Gate Report (25h)
 
-- **Date:** 2026-08-18, 20:54Z – 21:21Z
+- **Date:** 2026-08-18, 20:54Z – 21:35Z
 - **Plan:** [phase-25.md](../phase-25.md) — 25h
-- **Fixture:** `scratch-app` [#34](https://github.com/fvermaut/scratch-app/issues/34) (abandoned), [#35](https://github.com/fvermaut/scratch-app/issues/35), [#36](https://github.com/fvermaut/scratch-app/issues/36). **`ivtrends` was not touched**, as ruled twice.
+- **Fixture:** `scratch-app` [#34](https://github.com/fvermaut/scratch-app/issues/34) (abandoned), [#35](https://github.com/fvermaut/scratch-app/issues/35), [#36](https://github.com/fvermaut/scratch-app/issues/36), [#37](https://github.com/fvermaut/scratch-app/issues/37). **`ivtrends` was not touched**, as ruled twice.
 - **Isolation:** the daemon ran with `--manifest` naming `scratch-app` alone and `--state` pointing at a **copy** of the ledger. The live `.timone/state.json` is byte-identical before and after (`md5 ac05d7a42597608d53426b8b3f1808b0`), and was **hand-edited zero times**.
-- **Cost:** $3.00 across seven sessions.
+- **Cost:** $3.55 across nine sessions.
 - **Tickets are machine-typed.** Every fixture ticket and every "human" answer below was written by this session in fvermaut's voice. What that cannot prove is named at the end.
 
 ## Outcome in one line
 
-**The trigger fires, the ticket tells the truth, and the command opens the right thing — after one real defect was found and fixed mid-gate.** Four of the seven steps are observed. Two could not be produced on this fixture and one is fvermaut's own.
+**The trigger fires, the ticket tells the truth, and the command opens the right thing — after two real defects were found and fixed mid-gate.** Four of the seven steps are observed. Two could not be produced on this fixture and one is fvermaut's own. **Both defects were in prose, not in code**, and the second one this report originally dismissed as cosmetic; fvermaut read it and asked the practical question — *how does the person actually unblock this?* — which is the whole subject of the phase.
 
 ## Step 1 — a stage declares, and the ticket says the right thing
 
@@ -61,7 +61,7 @@ Under the old behaviour those two answers were two full passes at `claude-opus-5
 
 So the blocking cost is real only for a stop at `requirements` or later, and reaching one costs a full pipeline run. Unobserved.
 
-## The defect this gate found, and the fix
+## The first defect this gate found, and the fix
 
 **A stage's escalation comment did not carry the machine header, so the daemon read its own words as the human's.** On [#34](https://github.com/fvermaut/scratch-app/issues/34) the session posted a correct, well-reasoned escalation whose **first line was the escalation marker** rather than the machine marker. Every consequence followed from that one line:
 
@@ -76,9 +76,26 @@ So the blocking cost is real only for a stop at `requirements` or later, and rea
 
 **This is worth reading twice.** 1036 green tests could not see it, the code was correct, and the whole path failed on one line of prose in a prompt.
 
+## The second defect, which this report first called cosmetic
+
+**The escalation comment left the reader with nothing to do.** #35's and #36's comments both close *"What I need from you: nothing — this one is now for a person to pick up."* This report's first version listed that under smaller observations and defended it: the standing call to action carries the command, and two comments competing to be the call to action is what [ADR-0024](../../../adr/0024-every-open-ticket-answers-for-itself.md) settled.
+
+**That defence was wrong on a fact about the thread.** The standing note is **upserted** — the daemon edits the comment where it already sits — so on any ticket with a history it is nowhere near the bottom. A person who has just finished reading the stage explain itself reaches *"nothing"*, and has to know to scroll up to a pinned comment to find the one command that moves it. `CLAUDE.md`'s rule is that **every** message to a human ends with a call to action, and this one ended with a refusal to make one.
+
+**Cause, and it is mine rather than the model's.** The fix for the first defect over-corrected. That session had escalated *and* invited a reply in the same breath, so `stuckBlock` gained *"Ask them for nothing in that comment"* — which removed the invitation and the way out together.
+
+**Fix (`prompts.ts`):** the rule now separates the two. It still forbids another question and another written answer, in as many words, and it then requires the comment to close on the exact `timone takeover <project>#<n>` command — interpolated into every stage's prompt, the same string the standing note carries — with the reason writing again will not help. Three tests: the refusal of an answer, the requirement to leave something to do, and every prompted stage carrying its own command.
+
+**Re-run, on [#37](https://github.com/fvermaut/scratch-app/issues/37):** the same fixture answer produced the same stop, and the comment now ends
+
+> **What I need from you:** not another answer here. Writing one will not move this ticket, because you have already answered and I would land in the same place. Run this instead:
+> `timone takeover scratch-app#37`
+> That opens this ticket with me in your terminal, where I can walk you through it and do things I cannot do from here.
+
+Both surfaces name the same command, and the bottom of the thread is now the actionable one. $0.55.
+
 ## Smaller observations, not defects
 
-- **Both escalation comments close with *"What I need from you: nothing"*.** That is the prompt obeying its own new rule not to ask for anything, and it is very slightly false — there *is* something to run, and the standing call to action directly below says what. Left alone deliberately: the alternative is two comments competing to be the call to action, which is what [ADR-0024](../../../adr/0024-every-open-ticket-answers-for-itself.md) settled.
 - **The `timone status` line is long.** The escalation's sentence is written for a ticket, and in the terminal it makes a wide line beside the other projects. Cosmetic.
 - **The escalation reasoning was better than the plan expected.** #36's session went and read the criteria register, found the promise the answer would reverse, and named it. That is the judgement ADR-0033 says was never the scarce resource, doing exactly what the ADR says it does.
 
@@ -93,9 +110,10 @@ So the blocking cost is real only for a stop at `requirements` or later, and rea
 ## State of the fixtures
 
 - **#34** — cancelled by `timone cancel`, closed, label removed.
-- **#35 and #36** — left **open and escalated**, so step 3 costs one command. They are fixtures and can be closed the moment they have served.
+- **#35 and #36** — left **open and escalated**, carrying the *"nothing"* ending, as the record of the second defect.
+- **#37** — left **open and escalated**, carrying the corrected ending. **This is the one to read**, and the one to run step 3's takeover against.
 - Their runs live only in the gate's **copy** of the ledger, at
   `<scratchpad>/gate/state.json`. The live ledger has never heard of them, so a
   normal `timone daemon` would start them afresh: either close the tickets or
   run the takeover against the copy —
-  `node dist/cli.js takeover scratch-app#36 --manifest <scratchpad>/gate/timone.yaml --state <scratchpad>/gate/state.json`.
+  `node dist/cli.js takeover scratch-app#37 --manifest <scratchpad>/gate/timone.yaml --state <scratchpad>/gate/state.json`.

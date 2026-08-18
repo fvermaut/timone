@@ -313,8 +313,15 @@ function feedbackBlock(feedback: string | undefined): string {
  * mode this opens is a stage summoning a person it did not need, and what
  * holds that back is saying plainly what does *not* qualify: work that is
  * merely hard, and a question nobody has answered yet.
+ *
+ * **And it names the command the comment must close on.** The first live gate
+ * on 2026-08-18 produced a comment ending *"What I need from you: nothing"*:
+ * true about answers, and false about the reader, who was left with no way to
+ * act on what they had just read. The standing call to action carries the same
+ * command, but it is *upserted* — edited where it already sits, often far up
+ * the thread — so it is not what a reader reaches at the bottom.
  */
-function stuckBlock(): string {
+function stuckBlock(context: PromptContext): string {
   return [
     "**If you are given an answer you may not act on, stop and say so.** Not",
     "every hard case — this one: you were given an answer, and doing what it",
@@ -338,9 +345,25 @@ function stuckBlock(): string {
     "change nothing else. A person picks it up from there with your words in",
     "front of them, and they can do things you cannot.",
     "",
-    "**Ask them for nothing in that comment.** No question, no \"reply and I'll",
-    "carry on\" — they have answered already, and another answer starts nothing.",
-    "The ticket tells them by itself what to run.",
+    "**Do not ask them another question, and do not invite another answer.**",
+    "No \"reply and I'll carry on\": they have already answered, and another",
+    "answer starts nothing — it spends a whole pass to reach the judgement you",
+    "have just made.",
+    "",
+    "**But never leave them with nothing to do.** End the comment the way every",
+    "message ends, with one line saying what you need from them — and what you",
+    "need is not an answer. It is this, on its own, in a fenced block:",
+    "",
+    "```",
+    takeoverCommand(context.project.name, context.ticket.number),
+    "```",
+    "",
+    "Say in your own words that writing another answer will not move it, and",
+    "that running this opens the ticket with you in their terminal, where you",
+    "can do what you could not do here. **A message that ends \"nothing\" on a",
+    "stop only a person can clear is the fault this whole rule exists to end** —",
+    "the thread's standing note says the same thing, and a reader who has just",
+    "read your comment must not have to go looking for it.",
     "",
     "**This is not for work that is hard, and not for a question nobody has",
     "answered yet.** If you have asked something and are waiting, wait. If the",
@@ -368,7 +391,7 @@ export function stagePrompt(
   return [
     stageBody(stage, context),
     "",
-    stuckBlock(),
+    stuckBlock(context),
     "",
     checkoutBlock(context),
     "",

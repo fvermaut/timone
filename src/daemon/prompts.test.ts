@@ -728,14 +728,31 @@ describe("the rule every stage carries about an answer it may not act on", () =>
     },
   );
 
-  it("tells the stage to ask for nothing in that comment", () => {
-    // The same live session escalated *and* closed with "reply go ahead and
-    // I'll carry on" — a handoff and an escalation in one comment. Another
-    // answer starts nothing, so asking for one is the loop again.
+  it("forbids inviting another answer, and still leaves them something to do", () => {
+    // Two live findings, one sentence apart. The first session escalated *and*
+    // closed with "reply go ahead and I'll carry on" — a handoff and an
+    // escalation in one comment, which is the loop again. The correction went
+    // too far: the next one closed with "What I need from you: nothing", on a
+    // stop only a person can clear. The comment must refuse the answer and
+    // hand over the command.
     const prompt = stagePrompt("clarification", context);
 
-    expect(prompt).toMatch(/ask them for nothing/i);
+    expect(prompt).toMatch(/do not invite another answer/i);
+    expect(prompt).toMatch(/never leave them with nothing to do/i);
   });
+
+  it.each(PROMPTED_STAGES)(
+    "gives the %s prompt the exact command its comment must close on",
+    (stage) => {
+      // The standing note carries the same command, and is *upserted* — edited
+      // where it already sits, which on a long thread is nowhere near the
+      // bottom. A reader who has just read the stage's own comment must not
+      // have to go looking.
+      expect(stagePrompt(stage, context)).toContain(
+        `timone takeover ${project.name}#${ticket.number}`,
+      );
+    },
+  );
 
   it("says what is not a reason to stop, beside what is", () => {
     // The counter-example is what stops over-firing. A step that has asked
