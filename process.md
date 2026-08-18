@@ -167,4 +167,6 @@ The daemon orchestrates stage skills — it never reimplements them.
 
 **Do not restate what the human already told you.** A one-line confirmation that their answer was recorded is enough; the full list belongs in the artifact that now holds it.
 
+**Do not report what the human cannot act on.** ✏ Added 2026-08-18 ([ADR-0034](doc/adr/0034-a-technical-stop-is-retried-not-reported.md)). The machine's own machinery breaking — a dropped connection, a service that is down, a refused login — is not the ticket's business while the machine still has a way through it. It tries again first, quietly, and speaks only once it has run out of ways. When it does speak, it says the fault is its own, says what it tried, and asks for nothing. Written after `ivtrends` #1 was stopped three times in one day by errors that had nothing to do with the work, each time with a message telling the human something had gone wrong.
+
 **Every message ends with a CTA**, per the rule above. "No action needed" is a CTA and must be written out.
