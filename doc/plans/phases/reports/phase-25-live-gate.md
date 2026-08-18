@@ -99,9 +99,17 @@ Both surfaces name the same command, and the bottom of the thread is now the act
 - **The `timone status` line is long.** The escalation's sentence is written for a ticket, and in the terminal it makes a wide line beside the other projects. Cosmetic.
 - **The escalation reasoning was better than the plan expected.** #36's session went and read the criteria register, found the promise the answer would reverse, and named it. That is the judgement ADR-0033 says was never the scarce resource, doing exactly what the ADR says it does.
 
+## The human gate — answered
+
+**Asked:** handed a stop the machine cannot resolve, did the ticket tell you the truth about it the first time?
+
+**fvermaut, 2026-08-18, on [#37](https://github.com/fvermaut/scratch-app/issues/37): "yes it does."**
+
+**And the question he asked before it is the more useful half of the answer.** Reading #35 he did not ask whether the explanation was true — he asked *"there are no CTAs in the escalation comments… how does 'the person' practically do to unblock this?"* The explanation was already good enough to be believed; what was missing was the way out, and he found that in the time it took to read one comment. Both defects this gate found are of that shape: the machinery was right and the last thing a person reads was not.
+
 ## What this gate does not prove
 
-- **That the words land on someone who has not been told any of this.** Every ticket and every answer here was machine-typed in fvermaut's voice. **This is the one thing only he can answer**, and it is 25h's human gate: handed a stop the machine cannot resolve, did the ticket tell you the truth about it the first time?
+- **That the words land on a reader who has been told none of this.** Every fixture ticket and every answer was machine-typed in fvermaut's voice, so what he judged is the machine's writing against a situation he already understood. That is the strongest evidence available short of a real stop on real work, and it is not the same thing.
 - **That an unbound session does the right thing** (step 3), or that it leaves a usable record.
 - **That the floor fires** on a stage that stays silent (step 4).
 - **That the block-and-promote cost is what R10's marker says** (step 7).
@@ -110,8 +118,8 @@ Both surfaces name the same command, and the bottom of the thread is now the act
 ## State of the fixtures
 
 - **#34** — cancelled by `timone cancel`, closed, label removed.
-- **#35 and #36** — left **open and escalated**, carrying the *"nothing"* ending, as the record of the second defect.
-- **#37** — left **open and escalated**, carrying the corrected ending. **This is the one to read**, and the one to run step 3's takeover against.
+- **#35 and #36** — read, then **closed and unmarked**. Their threads stay as the record of the second defect.
+- **#37** — left **open and marked**, escalated, carrying the corrected ending. It is what fvermaut answered the human gate on, and it is what step 3's takeover would run against. **It is also a small hazard while it stands:** its run exists only in the gate's copy of the ledger, so a normal `timone daemon` would not resume it — it would pick the ticket up as new work and pay for a fresh triage. Take it over, or close it.
 - Their runs live only in the gate's **copy** of the ledger, at
   `<scratchpad>/gate/state.json`. The live ledger has never heard of them, so a
   normal `timone daemon` would start them afresh: either close the tickets or
