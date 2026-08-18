@@ -51,7 +51,7 @@ The second half of the idea is that a background watcher drives those stages fro
 
 Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below).
 
-1036 automatic tests pass. Tests are not the same as somebody watching it work.
+1053 automatic tests pass. Tests are not the same as somebody watching it work.
 
 ---
 
@@ -67,7 +67,9 @@ timone takeover <project>#<number>
 
 That command opens the job in your terminal with everything it knows about where it stopped, and there it can do things it cannot do on its own. If a job never notices it is stuck, the machine notices for it: asking you twice about the same thing after you have already answered stops it as well, and the ticket says sorry.
 
-Nobody has watched this happen on a real ticket yet.
+It has been watched on the to-do app, on two throwaway tickets I filed and answered myself. It worked, and the first attempt found a real fault: the machine wrote its explanation without the header that says "this is the machine talking", so it read its own words back as yours. That is fixed. Seventeen watcher passes over a stopped job, with two more answers written on it, started nothing and cost nothing.
+
+**What is still owed is you.** Two tickets on the to-do app are stopped and waiting — [#35](https://github.com/fvermaut/scratch-app/issues/35) and [#36](https://github.com/fvermaut/scratch-app/issues/36). Read either one and tell me whether it told you the truth the first time you read it. The full account is in `doc/plans/phases/reports/phase-25-live-gate.md`.
 
 **16 August — tickets are written short.** You said the machine's tickets and comments were too long. There is now a written rule in [`process.md`](process.md#writing-to-the-human), and every skill points at it. Short sentences, common words, no words that only make sense if you have read the process. A comment is a few sentences. Requirements and technical detail are links to files, never text on a ticket. A test fails if a message grows past 150 words.
 

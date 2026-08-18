@@ -711,6 +711,32 @@ describe("the rule every stage carries about an answer it may not act on", () =>
     expect(prompt).toMatch(/outside what this (step|stage) may do/i);
   });
 
+  it.each(PROMPTED_STAGES)(
+    "asks the %s prompt for the machine header above the marker, in that order",
+    (stage) => {
+      // Found live on `scratch-app` #34, 2026-08-18: the session posted the
+      // marker as the comment's first line and left the header off. The daemon
+      // read its own words as the human's — no escalation park, and the run
+      // resumed on the machine talking to itself.
+      const prompt = stagePrompt(stage, context);
+      const marker = prompt.indexOf(STAGE_ESCALATED_MARKER);
+      const header = prompt.lastIndexOf(MACHINE_MARKER, marker);
+
+      expect(marker).toBeGreaterThan(-1);
+      expect(header).toBeGreaterThan(-1);
+      expect(prompt.slice(header, marker)).toMatch(/header|exact line/i);
+    },
+  );
+
+  it("tells the stage to ask for nothing in that comment", () => {
+    // The same live session escalated *and* closed with "reply go ahead and
+    // I'll carry on" — a handoff and an escalation in one comment. Another
+    // answer starts nothing, so asking for one is the loop again.
+    const prompt = stagePrompt("clarification", context);
+
+    expect(prompt).toMatch(/ask them for nothing/i);
+  });
+
   it("says what is not a reason to stop, beside what is", () => {
     // The counter-example is what stops over-firing. A step that has asked
     // nothing yet, or that merely finds the work hard, has nothing to hand

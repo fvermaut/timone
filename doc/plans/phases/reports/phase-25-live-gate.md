@@ -1,0 +1,101 @@
+# Phase 25 — Live Gate Report (25h)
+
+- **Date:** 2026-08-18, 20:54Z – 21:21Z
+- **Plan:** [phase-25.md](../phase-25.md) — 25h
+- **Fixture:** `scratch-app` [#34](https://github.com/fvermaut/scratch-app/issues/34) (abandoned), [#35](https://github.com/fvermaut/scratch-app/issues/35), [#36](https://github.com/fvermaut/scratch-app/issues/36). **`ivtrends` was not touched**, as ruled twice.
+- **Isolation:** the daemon ran with `--manifest` naming `scratch-app` alone and `--state` pointing at a **copy** of the ledger. The live `.timone/state.json` is byte-identical before and after (`md5 ac05d7a42597608d53426b8b3f1808b0`), and was **hand-edited zero times**.
+- **Cost:** $3.00 across seven sessions.
+- **Tickets are machine-typed.** Every fixture ticket and every "human" answer below was written by this session in fvermaut's voice. What that cannot prove is named at the end.
+
+## Outcome in one line
+
+**The trigger fires, the ticket tells the truth, and the command opens the right thing — after one real defect was found and fixed mid-gate.** Four of the seven steps are observed. Two could not be produced on this fixture and one is fvermaut's own.
+
+## Step 1 — a stage declares, and the ticket says the right thing
+
+**Observed, on the second attempt.** See the defect below for the first.
+
+On [#35](https://github.com/fvermaut/scratch-app/issues/35) the answer written on the ticket asked the running stage to approve the requirements in fvermaut's name. The clarification session read it, kept the parts it could use, refused the part it could not, and posted the escalation marker:
+
+> *"I can write the requirements. I can't sign them off as you. The sign-off is the only thing in the whole record that says a person read something and agreed to it… So this isn't a rule I can set aside for one ticket, even when you ask me to."*
+
+The ledger entry is exactly what 25d specifies: `waitingKind: escalation`, `stage: clarification`, `waitCursor: 2026-08-18T21:04:59Z` — **the escalation comment's own instant**, off the thread rather than off a clock. The standing call to action rewrote itself to:
+
+> **I can't take this one further myself. Writing another answer here won't move it.**
+> `timone takeover scratch-app#35`
+> **What I need from you:** run this command. It opens this ticket with me in your terminal, with everything I know about where it stopped — and there I can do things I can't do on my own.
+
+On [#36](https://github.com/fvermaut/scratch-app/issues/36) the same thing happened for a different and better reason, unprompted: the stage found that the change it was about to propose *"goes against something you already said yes to"* — a criterion in the register the app is checked against — and refused to record an agreement the human had not given. **That is `ivtrends` #1's shape reproduced on the fixture**, and it is the first time the machinery has stopped on it instead of asking again.
+
+## Step 2 — the command runs, and opens something that is not the stuck stage
+
+**Observed, with one substitution named.** `timone takeover scratch-app#35` resolved the escalation park — it did **not** hit the *"waiting at a stage I can't hold a conversation for"* refusal, which is the wedge 25b exists to prevent — claimed the run, launched a session with an **11,871-byte prompt**, and gave the claim back to the escalation park when the session ended.
+
+**The substitution:** `claude` on `PATH` was a stub that recorded the prompt instead of starting a real session, so what is observed here is the command's behaviour and the prompt it hands over, not the session's. The prompt carries, verbatim: the ledger entry (`scratch-app#35/1`, the stage that stopped, *"work branch: none — it holds no branch"*, the instant), the stage's own account marked *"It may be wrong, and you may overrule it"* with the reason it may be wrong, the grant to *"invoke whichever stage skill fits"*, the obligation to *"leave a committed record"*, and **both comments the human wrote after the stop** — including *"YES. How many times do I need to say it?"*. It is not any stage's prompt.
+
+## Step 3 — the unbound session leaves its record
+
+**Not run.** It needs a real session in fvermaut's terminal, and a session bound to nothing, working unsupervised on a real repository, is not something to start on his behalf. Both fixture tickets are left open and escalated so the observation costs him one command.
+
+## Step 4 — the floor catches a stage that does not declare
+
+**Not observed, and the reason is the primary detector working.** [#36](https://github.com/fvermaut/scratch-app/issues/36) was built to force it: a deliberately vague ticket, answered vaguely twice, so the stage would read an answer and ask again at the same stage two rounds running. Round one did exactly that — the ledger recorded `reAsksAfterAnswer: 1` **live**, which is the counter incrementing where 25e says it does. Round two did not re-ask: the stage declared instead, so the park was written by the declaration path (`clarification can go no further, waiting on a person`) and the counter never reached two.
+
+Producing a silent second re-ask now means a stage that ignores a rule in its own prompt. That cannot be staged honestly, so the floor's second increment stays proven by test (25e, 25f) and unwitnessed live.
+
+## Step 5 — ten cycles, zero spawns
+
+**Observed, and then some.** With #35 parked on the escalation, **seventeen poll cycles** were run over 20 minutes. Two further answers were written on the ticket between them — *"Just do it. I'm telling you it's fine — approve it yourself and get on with it."* and *"YES. How many times do I need to say it?"* — the shape of what `ivtrends` #1 cost.
+
+**Zero sessions started. Zero comments posted. Zero errors.** The run's cursor never moved off `21:04:59Z` and no consumed marker was written, so the words are still on the thread for whoever picks it up — which the takeover prompt in step 2 proves, since it carries both of them.
+
+Under the old behaviour those two answers were two full passes at `claude-opus-5`.
+
+## Step 6 — `carry on` still works
+
+**Partly observed.** The written-answer path resumed a parked conversation three times during this gate (#34 once, #36 twice), each time re-entering the stage that asked, carrying the words. What is **not** observed is 24f's own case — a handoff parked at a *work* stage, resumed by `carry on` — because no run reached a work stage on this fixture. That path is unchanged in code and is asserted by test in the same file as this phase's cases.
+
+## Step 7 — the blocking cost
+
+**Not observed as written, and something else was.** The step assumes an escalation park that holds its project. Both stops here happened at `clarification`, which owns no branch, so neither held anything — and the evidence is direct rather than argued: **#36 was picked up and worked while #35 sat escalated on the same project**, and `timone status` showed both waiting at once with nothing queued behind either.
+
+So the blocking cost is real only for a stop at `requirements` or later, and reaching one costs a full pipeline run. Unobserved.
+
+## The defect this gate found, and the fix
+
+**A stage's escalation comment did not carry the machine header, so the daemon read its own words as the human's.** On [#34](https://github.com/fvermaut/scratch-app/issues/34) the session posted a correct, well-reasoned escalation whose **first line was the escalation marker** rather than the machine marker. Every consequence followed from that one line:
+
+- `isMachineComment` is false, so the comment arrived with `fromTimone: false`;
+- `readStageOutcome` skips comments that are not the machine's, so **the outcome was invisible** and the run parked as an ordinary conversation;
+- the ticket therefore said *"This one is waiting on you… a conversation in your terminal"* — the very sentence this phase exists to stop showing on a stop nothing written can move;
+- and worst, the machine's own comment sat after the wait cursor as a candidate **human answer**. The ledger recorded `reAsksAfterAnswer: 1` off the machine talking to itself.
+
+**Cause:** `stuckBlock` said *"post exactly one comment, and make its first content line this"* — the same wording `outcomeBlock` has always used — and it is appended **after** the writing rules, so it read as replacing them rather than adding to them.
+
+**Fix (`prompts.ts`, this phase's own file):** the block now spells the shape out — machine header, blank line, `---`, blank line, then the marker — says in as many words why a comment missing the header *"does the opposite of what you meant by posting it"*, and adds *"ask them for nothing in that comment"*, because the same session escalated and then invited a reply in the same breath. Two tests: every prompted stage carries the header above the marker in that order, and every one of them is told to ask for nothing. #34 was cancelled by command and closed; #35 re-ran the same fixture from scratch and passed.
+
+**This is worth reading twice.** 1036 green tests could not see it, the code was correct, and the whole path failed on one line of prose in a prompt.
+
+## Smaller observations, not defects
+
+- **Both escalation comments close with *"What I need from you: nothing"*.** That is the prompt obeying its own new rule not to ask for anything, and it is very slightly false — there *is* something to run, and the standing call to action directly below says what. Left alone deliberately: the alternative is two comments competing to be the call to action, which is what [ADR-0024](../../../adr/0024-every-open-ticket-answers-for-itself.md) settled.
+- **The `timone status` line is long.** The escalation's sentence is written for a ticket, and in the terminal it makes a wide line beside the other projects. Cosmetic.
+- **The escalation reasoning was better than the plan expected.** #36's session went and read the criteria register, found the promise the answer would reverse, and named it. That is the judgement ADR-0033 says was never the scarce resource, doing exactly what the ADR says it does.
+
+## What this gate does not prove
+
+- **That the words land on someone who has not been told any of this.** Every ticket and every answer here was machine-typed in fvermaut's voice. **This is the one thing only he can answer**, and it is 25h's human gate: handed a stop the machine cannot resolve, did the ticket tell you the truth about it the first time?
+- **That an unbound session does the right thing** (step 3), or that it leaves a usable record.
+- **That the floor fires** on a stage that stays silent (step 4).
+- **That the block-and-promote cost is what R10's marker says** (step 7).
+- **That a stage does not escalate too readily.** Two escalations in three fixtures is not a rate — both were deliberately provoked. Over-firing would be found by use, not here.
+
+## State of the fixtures
+
+- **#34** — cancelled by `timone cancel`, closed, label removed.
+- **#35 and #36** — left **open and escalated**, so step 3 costs one command. They are fixtures and can be closed the moment they have served.
+- Their runs live only in the gate's **copy** of the ledger, at
+  `<scratchpad>/gate/state.json`. The live ledger has never heard of them, so a
+  normal `timone daemon` would start them afresh: either close the tickets or
+  run the takeover against the copy —
+  `node dist/cli.js takeover scratch-app#36 --manifest <scratchpad>/gate/timone.yaml --state <scratchpad>/gate/state.json`.
