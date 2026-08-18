@@ -584,6 +584,72 @@ describe("the answer a run has read and not acted on", () => {
   });
 });
 
+describe("a run parked on something nothing written can resolve", () => {
+  // ADR-0033's kind. This slice adds the kind and the ledger's ability to
+  // carry it; nothing creates one yet.
+
+  const stopped = "2026-08-03T09:00:00Z";
+
+  it("carries the new kind through the file, and back out of it", () => {
+    const path = statePath();
+    const store = newStore(path);
+    const { run } = store.register("scratch-app", 31);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "me — I can't take this one further myself.",
+      kind: "escalation",
+      stage: "verification",
+      waitCursor: stopped,
+    });
+
+    const reopened = RunStore.open(path);
+
+    expect(reopened.get(run.id)).toMatchObject({
+      status: "parked",
+      waitingKind: "escalation",
+      stage: "verification",
+      waitCursor: stopped,
+    });
+  });
+
+  it("does not disturb a ledger written before the kind existed", () => {
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(PRE_CHUNK_LEDGER, path);
+
+    const store = RunStore.open(path);
+
+    expect(store.all()).toHaveLength(4);
+    expect(
+      JSON.parse(readFileSync(path, "utf8")) as { version: number },
+    ).toMatchObject({ version: 1 });
+  });
+
+  it("clears a consumed answer like every other park, because none is passed", () => {
+    // The contract `applyPark` already has, asserted for the new kind because
+    // the floor is about to read the marker at exactly this instant.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 31);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "an answer",
+      kind: "conversation",
+      stage: "verification",
+      waitCursor: stopped,
+      consumedAnswerAt: stopped,
+    });
+
+    store.repark(run.id, {
+      waitingOn: "me — I can't take this one further myself.",
+      kind: "escalation",
+      stage: "verification",
+      waitCursor: stopped,
+    });
+
+    expect(store.get(run.id)?.consumedAnswerAt).toBeUndefined();
+  });
+});
+
 describe("promotion", () => {
   it("promotes the head of the queue when a run completes", () => {
     const store = newStore();

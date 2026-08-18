@@ -5233,3 +5233,219 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
     expect(spawned.map((run) => run.id)).toEqual(["scratch-app#31/1"]);
   });
 });
+
+describe("pollOnce — a park nothing written can end", () => {
+  // ADR-0033. The stage read the human's words, understood them, and judged
+  // that acting on them is outside what it may do. Handing it the same words
+  // again buys another pass and the same judgement — five times, on
+  // ivtrends #1 — so this wait does not end on a comment at all.
+
+  const stopped = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\nI can't take this one further myself.`,
+    createdAt: "2026-08-17T10:00:00Z",
+    fromTimone: true,
+  };
+  const answer = {
+    author: "fvermaut",
+    body: "yes. go ahead to delivery",
+    createdAt: "2026-08-17T10:30:00Z",
+    fromTimone: false,
+  };
+
+  function threadOf(
+    number: number,
+    ...comments: TicketThread["comments"]
+  ): { adapter: TicketingAdapter; posted: PostedComment[] } {
+    const posted: PostedComment[] = [];
+    const base = ticket(number, { labels: ["timone", "triage:feature"] });
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      ...noUnmarkedTickets,
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments };
+      },
+      async postComment(project, num, body): Promise<void> {
+        posted.push({ project: project.name, number: num, body });
+      },
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+    };
+    return { adapter, posted };
+  }
+
+  /** A run stopped at the stage that could not use the answer it was given. */
+  function escalated(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 31);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/31-slow-page");
+    return store.park(run.id, {
+      waitingOn: "me — I can't take this one further myself.",
+      kind: "escalation",
+      stage: "verification",
+      waitCursor: stopped.createdAt,
+    });
+  }
+
+  it("stays parked however plainly the human answers it", async () => {
+    const store = newStore();
+    escalated(store);
+    const { adapter } = threadOf(31, stopped, answer);
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    expect(result.resumed).toEqual([]);
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#31/1")).toMatchObject({
+      status: "parked",
+      waitingKind: "escalation",
+      stage: "verification",
+    });
+    expect(result.errors).toEqual([]);
+  });
+
+  it("holds the same words a handoff at the same stage would have resumed on", async () => {
+    // The discrimination is the kind of park, not the stage. Same stage, same
+    // words, same instant — one resumes and one does not.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 31);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/31-slow-page");
+    store.park(run.id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "verification",
+      waitCursor: stopped.createdAt,
+    });
+    const { adapter } = threadOf(31, stopped, answer);
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+      root: "/nowhere",
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#31/1"]);
+    expect(contexts[0]?.stage).toBe("verification");
+    expect(contexts[0]?.feedback).toContain("go ahead");
+  });
+
+  it("leaves a gate park answered as it always was", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-message-box");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "requirements",
+      waitCursor: stopped.createdAt,
+    });
+    const { adapter } = threadOf(6, stopped, {
+      ...answer,
+      body: "approve",
+    });
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+      root: "/nowhere",
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#6/1"]);
+    expect(contexts[0]?.stage).toBe("breakdown");
+  });
+
+  it("leaves a review park answered as it always was", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-message-box");
+    store.recordPullRequest(run.id, 9);
+    store.park(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "delivery",
+      waitCursor: stopped.createdAt,
+    });
+    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      ...noUnmarkedTickets,
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments: [] };
+      },
+      async postComment(): Promise<void> {},
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+      async findPullRequest() {
+        return {
+          number: 9,
+          title: "Fix the box",
+          url: "https://github.com/fvermaut/scratch-app/pull/9",
+          state: "open" as const,
+          headSha: "aaaaaaa",
+        };
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        return {
+          number: 9,
+          title: "Fix the box",
+          url: "https://github.com/fvermaut/scratch-app/pull/9",
+          state: "open",
+          headSha: "aaaaaaa",
+          comments: [
+            {
+              author: "fvermaut",
+              body: "Please rename this variable.",
+              createdAt: "2026-08-17T12:00:00Z",
+              fromTimone: false,
+              replyTo: "501",
+            },
+          ],
+        };
+      },
+    };
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run, _project, context) {
+          contexts.push(context);
+        },
+      },
+      root: "/nowhere",
+    });
+
+    expect(result.resumed).toEqual(["scratch-app#6/1"]);
+    expect(contexts[0]?.stage).toBe("remediation");
+  });
+});

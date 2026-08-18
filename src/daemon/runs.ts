@@ -154,8 +154,16 @@ const runSchema = z.strictObject({
   stage: z.enum([...PIPELINE_STAGES]).optional(),
   /** What a parked run is waiting for, in the human's terms. */
   waitingOn: z.string().optional(),
-  /** Which *kind* of wait that is — what an arriving answer may resolve. */
-  waitingKind: z.enum(["gate", "conversation", "review"]).optional(),
+  /**
+   * Which *kind* of wait that is — what an arriving answer may resolve.
+   *
+   * `escalation` resolves to nothing arriving: it is a run stopped where no
+   * written answer can help, waiting on a person to pick it up
+   * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+   */
+  waitingKind: z
+    .enum(["gate", "conversation", "review", "escalation"])
+    .optional(),
   /**
    * The instant the wait was opened — the gate comment, or the invitation to
    * a conversation. Anything at or before it belongs to an earlier question
@@ -392,8 +400,11 @@ export function defaultStatePath(root: string): string {
 export interface ParkOptions {
   /** What it is waiting for, in the human's terms. */
   waitingOn: string;
-  /** Which kind of wait it is, when the daemon will resume it from an answer. */
-  kind?: "gate" | "conversation" | "review";
+  /**
+   * Which kind of wait it is, when the daemon will resume it from an answer —
+   * or `escalation`, the wait no answer resumes (ADR-0033).
+   */
+  kind?: "gate" | "conversation" | "review" | "escalation";
   /** The stage it parked at, when parking moves it. */
   stage?: PipelineStage;
   /** The instant the wait was opened; answers before it are not answers to it. */

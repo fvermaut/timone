@@ -86,8 +86,17 @@ export type PipelineStage = (typeof PIPELINE_STAGES)[number];
  * wait at the end of the line: the work sits as an open pull request, and
  * what resolves it is a human's review comment, merge, or close — read off
  * the PR thread, never off the ticket.
+ *
+ * `escalation` is the odd one, and deliberately so
+ * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+ * No stage declares it — see {@link StageFacts.waits} — because it is not
+ * something a stage's own work opens. It is written onto a run whichever
+ * stage was running, when that stage has been given an answer it may not act
+ * on. Nothing written ends it: the stage already read those words and was
+ * right about them, so reading them again buys another pass and the same
+ * judgement. What ends it is a person.
  */
-export type WaitKind = "gate" | "conversation" | "review" | "none";
+export type WaitKind = "gate" | "conversation" | "review" | "escalation" | "none";
 
 interface StageFacts {
   /** The stage of `process.md` this is, for anyone comparing the two. */
@@ -374,7 +383,19 @@ export type PipelineTransition =
   | { kind: "advance"; stage: PipelineStage }
   | { kind: "repeat"; stage: PipelineStage; feedback: string }
   | { kind: "wait" }
-  | { kind: "finish"; reason: string };
+  | { kind: "finish"; reason: string }
+  /**
+   * The stage stopped because what it was asked to do next is outside what
+   * it may do — most often an answer it read, understood, and cannot act on
+   * without breaking the very check it exists to make (ADR-0033).
+   *
+   * `reason` is the stage's own account of the dead end, in its own words,
+   * and it is input to whoever picks the run up rather than an instruction:
+   * a stage sees its own ticket and its own work, not the source, the
+   * decisions or the diff. `owed` is the stage it believes should have run
+   * next, when it has a view — and it may be wrong about that too.
+   */
+  | { kind: "escalate"; reason: string; owed?: PipelineStage };
 
 /**
  * The classification a triage session recorded, read back off the ticket's

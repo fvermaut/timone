@@ -20,6 +20,7 @@ import {
   waitFor,
   wayfinderStage,
   type PipelineStage,
+  type PipelineTransition,
 } from "./pipeline.js";
 
 const reply: TicketComment = {
@@ -488,5 +489,48 @@ describe("concludeConversation", () => {
     expect(() => concludeConversation("requirements", { accepted: true })).toThrow(
       /requirements/,
     );
+  });
+});
+
+describe("the escalation wait", () => {
+  // ADR-0033. A stage that is handed an answer it may not act on stops and
+  // says so. What the run then waits on is a person, not a comment — so the
+  // kind exists here beside the other three, and the refusal to resume on
+  // written words lives with it.
+
+  it("is a kind of park, and no stage declares it as its own wait", () => {
+    // A stage's declared wait is what its *own* session opens when it ends
+    // well. An escalation is the opposite of that: it is written onto a run
+    // whichever stage was running. A stage declaring it would mean every run
+    // reaching that stage escalates.
+    for (const stage of PIPELINE_STAGES) {
+      expect(waitFor(stage)).not.toBe("escalation");
+    }
+  });
+
+  it("is not an answer any stage can be handed", () => {
+    // The same refusal `readGate` and `concludeConversation` already make for
+    // each other's answers, asserted for the new kind so nothing routes one
+    // into a stage as though a human had replied.
+    expect(() => readGate("requirements", approval)).not.toThrow();
+    expect(() => concludeConversation("requirements", { accepted: true })).toThrow(
+      /requirements/,
+    );
+  });
+
+  it("carries why the stage stopped, and what it could not get to", () => {
+    const transition: PipelineTransition = {
+      kind: "escalate",
+      reason: "the answer asks me to reword the promises I check against",
+      owed: "delivery",
+    };
+
+    expect(transition.reason).toContain("reword");
+    expect(transition.owed).toBe("delivery");
+  });
+
+  it("can name no stage at all, for a stop with nothing owed after it", () => {
+    const transition: PipelineTransition = { kind: "escalate", reason: "stuck" };
+    expect(transition.owed).toBeUndefined();
   });
 });

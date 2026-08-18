@@ -1948,6 +1948,17 @@ async function resolveWait(
       : undefined;
   }
 
+  // The one wait nothing written resolves
+  // ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+  // The stage that stopped had already read the human's answer and judged,
+  // correctly, that acting on it was outside what it may do — so resuming it
+  // on those same words spends a full pass to reach the same judgement. That
+  // is the defect this kind exists to end, and it ended five times on
+  // ivtrends #1. A person ends this one, through the command the ticket
+  // carries; the words they wrote are not lost, they are carried into the
+  // session that command opens.
+  if (run.waitingKind === "escalation") return undefined;
+
   const cursor = run.waitCursor;
   if (cursor === undefined) return undefined;
 
