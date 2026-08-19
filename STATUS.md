@@ -83,7 +83,7 @@ You then read one yourself and caught a second fault I had called cosmetic: the 
 
 It was watched on #4 itself, not on a ticket I made up. It picked the report back up, worked out why the page drags, wrote it up, and asked you to read it — and in doing so it caught a mistake it had made in August: it had told you the app already promises a tick shows up straight away, and it does not. It says so itself, on the ticket.
 
-There is a drawing of how the whole thing works now, for you rather than for the machine: `manual/how-the-daemon-works.md`.
+There is a drawing of how the whole thing works now, for you rather than for the machine. **All of this is on a branch waiting to be merged** — `docs/daemon-state-machine`. Merging it is yours.
 
 **19 August — what you sort out in your terminal now goes back to the machine.** You ruled on three questions and the work is built. The session you open clears the blockage and stops there: it writes the words a decision needs — the requirements, the reasons, a correction — and it does not build the thing. Building goes back to the watcher, where it arrives one piece at a time, each piece costs a visible amount, each stops for you where it should, and a second pair of eyes checks it. Then the session leaves one comment saying it is sorted and where to carry on, and the watcher picks it up on its next pass. Nothing for you to type. If it names a place the machine does not recognise, the ticket says so and quotes what it wrote, rather than guessing and starting the wrong work.
 
