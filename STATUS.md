@@ -51,7 +51,7 @@ The second half of the idea is that a background watcher drives those stages fro
 
 Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below).
 
-1063 automatic tests pass. Tests are not the same as somebody watching it work.
+1095 automatic tests pass. Tests are not the same as somebody watching it work.
 
 ---
 
@@ -73,7 +73,11 @@ You then read one yourself and caught a second fault I had called cosmetic: the 
 
 **You then ran the command on [#37](https://github.com/fvermaut/scratch-app/issues/37) and it did the job properly.** It refused to sign your name, wrote everything out, asked you one question instead of ten, got your yes in the terminal, wrote that down on the ticket for the record, and started building. It left a written account of what it did and what it guessed.
 
-**That run then found the one thing nobody thought of.** When your session ends, the job goes back to being stopped — there is nothing that says "this is sorted, carry on". So the work sits on its branch and the watcher will not take it further. It is filed as [#30](https://github.com/fvermaut/timone/issues/30) and it needs a decision from you, not a quick fix.
+**That run then found the one thing nobody thought of**, and it is fixed. When your session ended, the job went back to being stopped: nothing could say "this is sorted, carry on", so the work sat on its branch and the watcher would never take it further. That was [#30](https://github.com/fvermaut/timone/issues/30).
+
+**19 August — what you sort out in your terminal now goes back to the machine.** You ruled on three questions and the work is built. The session you open clears the blockage and stops there: it writes the words a decision needs — the requirements, the reasons, a correction — and it does not build the thing. Building goes back to the watcher, where it arrives one piece at a time, each piece costs a visible amount, each stops for you where it should, and a second pair of eyes checks it. Then the session leaves one comment saying it is sorted and where to carry on, and the watcher picks it up on its next pass. Nothing for you to type. If it names a place the machine does not recognise, the ticket says so and quotes what it wrote, rather than guessing and starting the wrong work.
+
+Nobody has watched this happen yet either. #37 is the ticket it will be tried on.
 
 Two smaller things still have nobody watching them: the safety net for a job that never notices it is stuck, and what a stopped job costs when it is holding a project. Both are in `doc/plans/phases/reports/phase-25-live-gate.md`. The full account is in `doc/plans/phases/reports/phase-25-live-gate.md`.
 
@@ -105,7 +109,6 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 
 The ones that would bite you in ordinary use:
 
-- [#30](https://github.com/fvermaut/timone/issues/30) — once you have sorted out a stopped job in your terminal, nothing tells the watcher it is sorted. The work stays on its branch and the ticket keeps saying it is stuck.
 - [#5](https://github.com/fvermaut/timone/issues/5) — a running watcher keeps using the code it started with. Nothing is running right now, so the next one you start has the 18 August work in it.
 - [#9](https://github.com/fvermaut/timone/issues/9) — the safety check blames the machine for a change you have not committed. Commit or stash your own work before the machine starts.
 - [#13](https://github.com/fvermaut/timone/issues/13) — a list of questions is only finished if somebody remembers to label it. This is what silently stopped the trading app.
