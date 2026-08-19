@@ -27,7 +27,7 @@ The suite went **1063 → 1096 green across 27 files**, type-check clean through
 | 26c — The loop carries on | Landed as planned. What the ticket says is computed from the thread, not stored on the run. 10 tests. | `d964af1` |
 | 26d — The session's bound | Landed, plus the unstartable-step refusal the plan did not foresee. 6 tests. | `d4b848f` |
 | 26e — The register | Landed as planned. No file under `src/` touched, asserted. | `76e3373` |
-| 26f — The live gate | **Run in part:** steps 3–6 observed, one defect found and fixed, steps 1, 2 and 7 need a person. | `7d79aa8` |
+| 26f — The live gate | **Run:** six of seven steps observed across two fixtures — steps 1 and 2 by fvermaut at his keyboard — one defect found and fixed, one more filed. Step 7 deliberately stopped. | `7d79aa8`, `<this>` |
 
 ## Deviations from the plan
 
@@ -45,11 +45,11 @@ The suite went **1063 → 1096 green across 27 files**, type-check clean through
 
 **Observed live:** the round trip, the refusal, the ticket repairing itself, and ten quiet cycles' worth of the human answering into a stop.
 
-**Argued, not observed:** that a session obeys the bound. **That is the whole of ADR-0035 D1 and it is a rule in a prompt with nothing enforcing it** — exactly as ADR-0033 D2's trigger rule is. One session, watched once, with a person present, is what would settle it.
+**Observed once, by the person it was written for:** that a session obeys the bound. On `scratch-app` #40 fvermaut opened the stop himself, and the session took his yes, wrote the requirements and the decisions, built nothing, and handed back at *preparing the work* — naming #37 in its own note as the thing it was not going to repeat. His verdict: *"it stopped right"*. **It remains a rule in a prompt with nothing enforcing it**, exactly as ADR-0033 D2's trigger rule is, and one obedient session is not a rate.
 
 ## Handoff
 
-- **Step 1 is the one that matters and it is fvermaut's:** open a stopped ticket with `timone takeover`, work it through, and watch whether the session stops at the words or starts building.
-- **`npm run build` first, restart the daemon, and drive a copy of the ledger with `--state`.**
+- **Only step 7 is left**, and it is the expensive one: let a handed-back run go all the way to a pull request through the loop.
+- **`npm run build` first, restart the daemon, and drive a copy of the ledger with `--state`** — a daemon started without the flag reads the live ledger and picks fixture tickets up as new work, which is how [timone#32](https://github.com/fvermaut/timone/issues/32) was found.
 - **Never wrap `daemon --once` in a timeout while a session may spawn** — a limit around the cycle kills the session mid-work, which is how this gate lost a requirements run at 8m31s.
-- **`scratch-app` pull request [#38](https://github.com/fvermaut/scratch-app/pull/38) is still open** from the 2026-08-18 takeover, and its ticket #37 is closed and unmarked. It is fixture work: close it unmerged unless it is wanted.
+- **The fixtures are cleaned up.** Tickets #34–#37, #39 and #40 are closed and unmarked, pull request #38 is closed unmerged, the three fixture branches are deleted, and `projects/scratch-app` is back on `main` with a clean tree. The live ledger holds one cancelled run for #40 and nothing else from this work.

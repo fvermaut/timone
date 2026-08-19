@@ -81,7 +81,11 @@ You then read one yourself and caught a second fault I had called cosmetic: the 
 
 That test found a third fault and it is fixed: once the machine had refused a note, a corrected one could never be read, so the ticket asked you to come back and then ignored what you said. The newest note now wins.
 
-**What nobody has watched is the part that needs you at the keyboard:** whether the session you open now stops where it should instead of building the whole thing.
+**And you watched the part that needed you.** You opened a stopped ticket, said yes at your keyboard, and the session wrote the requirements and stopped — it built nothing, and said in its own note that not building was the point. Then the watcher picked the work up by itself, on the same branch, at the step the note named. Your words: *it stopped right*.
+
+Two things came out of that run. The watcher you started read the real job list instead of the test copy, so it treated the test ticket as brand-new work: it said "the requirements are already approved, the next step is the plan" and then asked you for a fresh conversation anyway. That contradiction is filed as [#32](https://github.com/fvermaut/timone/issues/32) and needs your ruling. And the safety check keeps blaming this work for a merge you made yourself on 16 August — [#33](https://github.com/fvermaut/timone/issues/33).
+
+The last unwatched thing is the far end: letting a handed-back job run all the way to a pull request. Nothing is stopping it; it just costs money and nobody has spent it yet.
 
 Two smaller things still have nobody watching them: the safety net for a job that never notices it is stuck, and what a stopped job costs when it is holding a project. Both are in `doc/plans/phases/reports/phase-25-live-gate.md`. The full account is in `doc/plans/phases/reports/phase-25-live-gate.md`.
 

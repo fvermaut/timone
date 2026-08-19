@@ -1,15 +1,15 @@
 # Phase 26 — Live Gate Report (26f)
 
-- **Date:** 2026-08-19, 07:49Z – 08:20Z
+- **Date:** 2026-08-19, 07:49Z – 08:46Z
 - **Plan:** [phase-26.md](../phase-26.md) — 26f
-- **Fixture:** `scratch-app` [#39](https://github.com/fvermaut/scratch-app/issues/39). **`ivtrends` was not touched.**
-- **Isolation:** the daemon ran with `--manifest` naming `scratch-app` alone and `--state` pointing at a **copy** of the ledger. The live `.timone/state.json` is byte-identical before and after (`md5 ac05d7a42597608d53426b8b3f1808b0`) and was **hand-edited zero times**.
-- **Cost:** $0.72 recorded across two sessions, plus one requirements session killed at 8m31s whose cost was never printed.
-- **Tickets are machine-typed.** The fixture ticket, both answers on it and both handback notes were written by this session. Which of those the plan asked for, and which it did not, is said below.
+- **Fixtures:** `scratch-app` [#39](https://github.com/fvermaut/scratch-app/issues/39) (steps 3–6, driven by hand) and [#40](https://github.com/fvermaut/scratch-app/issues/40) (steps 1–3, driven by fvermaut at his keyboard). **`ivtrends` was not touched.** Both are closed and unmarked, and their branches are deleted.
+- **Isolation:** every cycle this session ran used `--manifest` naming `scratch-app` alone and `--state` pointing at a **copy** of the ledger, and the live file was **hand-edited zero times**. It did not stay untouched: the daemon fvermaut started himself carried neither flag, so the live ledger picked #40 up as new work and created its own run for it ([timone#32](https://github.com/fvermaut/timone/issues/32)). That run was ended with `timone cancel`, which is the one live write this gate caused.
+- **Cost:** $1.21 recorded across four sessions, plus two sessions killed mid-work whose cost was never printed (a requirements session at 8m31s, a planning session at ~3m).
+- **Tickets are machine-typed, except where they are not.** Both fixture tickets and every answer on them were written by this session in fvermaut's voice. #39's two handback notes were hand-written by it as well. **#40's handback was written by a session, and the yes it acted on was fvermaut's own, typed at his keyboard** — which is what makes steps 1 and 2 worth anything.
 
 ## Outcome in one line
 
-**Four of the seven steps are observed, one defect was found and fixed mid-gate, and the two steps that need a person at a keyboard are fvermaut's.** The round trip works: a note handed the run back, the machinery claimed the branch and started the named step by itself, and the ticket stopped saying it was stuck.
+**Six of the seven steps are observed, and one defect was found and fixed mid-gate.** Only step 7 — the work coming out the far end as a pull request — is unobserved, and it was deliberately stopped. The round trip works: a note handed the run back, the machinery claimed the branch and started the named step by itself, and the ticket stopped saying it was stuck.
 
 ## What #37 cost this gate, and why the fixture is new
 
@@ -19,17 +19,45 @@ So the gate ran on a fresh ticket, driven to the same stop in two cycles for $0.
 
 ## Step 1 — a takeover unblocks and stops
 
-**Not run, and it is the one step that cannot be run from here.** It needs a session at a keyboard, working with a person; the prompt's new bound is a rule about what such a session does with its freedom, and a stub cannot exercise it. What *is* checkable without a session is checked by test: the prompt forbids application code and a pull request in as many words, gives the reason, and carries the note's exact shape and the list of names it may use.
+**Observed on `scratch-app` [#40](https://github.com/fvermaut/scratch-app/issues/40), 2026-08-19, by fvermaut at his own keyboard: *"it stopped right"*.**
 
-**#37 is the evidence for why the bound was needed**, and it is not evidence that the bound works.
+The session took his yes in the terminal, wrote the requirements and the decisions on the branch, and stopped. It said so itself, unprompted, in the note it left:
+
+> **What was not done, deliberately.** Nothing was built here. The plan, the code, the check and the two reviews are each done by a session that did not write what it is looking at — **which is the part the last ticket like this one gave up**, and the reason its pull request came with *"nobody but the machine has looked at this"*.
+
+That last clause is the session naming [#37](https://github.com/fvermaut/scratch-app/issues/37) — the run this phase was written about — as the thing it was not going to repeat. It also listed the two calls it made on his behalf and said both were cheap to change while nothing was built.
+
+**One thing the bound does not cover, seen here:** the session left the fixture's checkout clean, but a stage session killed mid-work does not — see the smaller observations.
+
+**#37 remains the evidence for why the bound was needed**, and #40 is the first evidence that it holds.
 
 ## Step 2 — the ticket reads as a round trip
 
-**Partly observed, and only for the words this session wrote.** Both handback notes on the fixture were hand-written by this session — one deliberately naming a step nobody defined, one naming a real step. What a *session* writes into that comment is step 1's, and unobserved.
+**Observed on #40, in a note a session wrote rather than one this session typed.** It opens *"Settled. You said yes at your keyboard, and the work carries on without you now"*, says what was agreed in plain words, separates the two calls the machine made from the ones he made, flags a promise being narrowed on purpose, and closes:
+
+> **What I need from you: nothing.** The next thing you hear about this is a pull request.
+> ```
+> Carrying on at: preparing the work
+> ```
+
+No process vocabulary reaches the reader; the machinery's half of it is one line at the bottom.
+
+**On the earlier fixture (#39) both notes were hand-written by this session** — one naming a step nobody defined, one naming a real step — and that is what steps 5 and 3 were driven with.
 
 ## Step 3 — the next cycle carries the work on
 
-**Observed.** With the run stopped at *asking what you need*, a note naming *writing down what it needs* produced, on the very next cycle and with nothing typed:
+**Observed twice: once on a hand-written note (#39), once on a session's own (#40).**
+
+On #40 the note said *"Carrying on at: preparing the work"*, and the next cycle produced:
+
+```
+branch scratch-app#40/1 → timone/40-can-i-hide-the-ones-i-ve-finished
+session ef8f3146-9089-4559-8ea1-bf097d2dae8e started for scratch-app#40/1 (planning, claude-opus-5)
+```
+
+**The branch the machinery claimed is the branch the takeover session had already been working on** — arrived at from the ticket and the chunk, not from the note, which named none. That is the phase's own rule paying off rather than being asserted.
+
+On #39, with the run stopped at *asking what you need*, a note naming *writing down what it needs* produced, on the very next cycle and with nothing typed:
 
 ```
 branch scratch-app#39/1 → timone/39-can-i-star-the-ones-that-matter
@@ -60,7 +88,17 @@ The name is quoted exactly as it was written, which is what lets a person see wh
 
 ## Step 7 — the work reaches a pull request through the loop
 
-**Not run.** It is a full build, check and delivery on the fixture — the expensive half of the gate — and it follows step 1. Left for fvermaut to start when he wants it.
+**Not run, and deliberately stopped part-way.** The #40 run was handed back and started planning; three minutes in, fvermaut called the ticket done, and the cycle was killed rather than allowed to build, check and deliver. What is proven is that the loop takes the work back and starts the named step by itself; what a whole initiative looks like coming out the other side is unobserved.
+
+## What running it without the flags found — [timone#32](https://github.com/fvermaut/timone/issues/32)
+
+**A ticket whose requirements were written and approved was re-triaged from scratch, and the triage session said so while being routed as if it had not been.** fvermaut started a daemon without `--state`, so the live ledger — which had never heard of #40 — registered it as new work. Triage ran, read the branch, and wrote:
+
+> **Routing:** requirements and breakdown are already approved for this ticket — the next open step is the build plan (`timone-plan`), not another round of requirements discovery.
+
+**And was then routed to another round of requirements discovery**, because routing reads the classification label and nothing else. The ticket asked him for a conversation it had already had, and a paid session produced the contradiction.
+
+**Two ledgers is a fixture accident; the path is not.** A lost or reset ledger reaches the same place, which phase 20's report already names as a class. Filed rather than fixed: whether triage may route on what it finds is a process decision.
 
 ## The defect this gate found, and the fix
 
@@ -77,12 +115,12 @@ The name is quoted exactly as it was written, which is what lets a person see wh
 ## Smaller observations, not defects
 
 - **The refusal's words survived contact with the situation that produces them.** *"That's mine to get wrong, not yours"* reads as intended on a real ticket, under a real name nobody defined.
+- **A stage session killed mid-work leaves the shared checkout dirty.** The planning session on #40 was three minutes in when it was stopped; it left five modified source files and an untracked probe test in `projects/scratch-app`, uncommitted. Nothing owns that mess: the next session inherits it, and the guardrail that reads the working tree blames whoever is stopping ([timone#9](https://github.com/fvermaut/timone/issues/9)'s neighbourhood). Discarded by hand here.
 - **A cycle that spawns a session runs for as long as the session does.** Obvious in hindsight, and worth writing down: a ten-minute limit around `daemon --once` kills whatever the session was doing. Anything driving a real stage session should run it in the background.
 
 ## What this gate does not prove
 
-- **That a session opened on a stop obeys the bound** — writes the words, not the software, and hands back. That is step 1, it needs a person, and it is the whole of ADR-0035 D1.
-- **That what a session writes in the note reads well to a person** (step 2's other half).
-- **That the work reaches a pull request through the loop afterwards** (step 7).
+- **That a session obeys the bound reliably.** It obeyed once, watched by the person it was working with, and said in its own words why it was not repeating #37. One session is not a rate — over-obedience is invisible here too, and a session that judges the bound wrong would look exactly like one that judges it right until someone reads the branch.
+- **That the work reaches a pull request through the loop afterwards** (step 7), since the run was stopped at planning.
 - **That handing back works from any step but this one.** One path was driven: a stop at *asking what you need*, handed back to *writing down what it needs*.
 - **That the round trip survives a session dying mid-step.** It was killed here by accident, not by design, and what the machinery would have done about it was cancelled rather than watched.
