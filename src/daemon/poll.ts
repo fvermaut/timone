@@ -24,7 +24,8 @@ import {
   readGateDecision,
   waitCursorFrom,
 } from "./gates.js";
-import { readHandback } from "./outcomes.js";
+import { readHandback, type Handback } from "./outcomes.js";
+import { PROMPTED_STAGES } from "./prompts.js";
 import {
   classificationFromLabels,
   concludeConversation,
@@ -34,6 +35,7 @@ import {
   readGate,
   routeAfterTriage,
   stageAfter,
+  stageLabel,
   waitFor,
   wayfinderStage,
   type PipelineStage,
@@ -1491,8 +1493,39 @@ async function resumeAnswered(
 }
 
 /**
- * The step a handback note named that this machine does not recognise, or
- * undefined when there is no such note
+ * The step a handback note hands the run back to, or undefined when the note
+ * names one this machine cannot use
+ * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
+ * D3).
+ *
+ * **Two ways to be unusable, and the run stays stopped for both.** A name
+ * nobody defined is the obvious one. The other is a name that is perfectly
+ * real and has no machinery behind it — `looking something up` is a step of
+ * this process that no session exists for — and starting it would fail the
+ * run and put *"something went wrong"* on a ticket whose stop the human had
+ * just cleared. Refusing is not the same as guessing wrong: it costs a person
+ * a second visit, and the ticket says so.
+ *
+ * **Naming nothing means the step it stopped at**, which is the honest
+ * reading of a stop cleared without anything being written.
+ */
+function handbackStage(
+  handback: Handback,
+  stopped: PipelineStage,
+): PipelineStage | undefined {
+  if (handback.kind === "unknown") return undefined;
+  const named = handback.kind === "at" ? handback.stage : stopped;
+  return canStart(named) ? named : undefined;
+}
+
+/** Whether the daemon has a session it can start for `stage`. */
+function canStart(stage: PipelineStage): boolean {
+  return isBuilt(stage) && (PROMPTED_STAGES as readonly string[]).includes(stage);
+}
+
+/**
+ * The step a handback note named that this machine cannot use, or undefined
+ * when there is no such note
  * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
  * D3).
  *
@@ -1507,7 +1540,13 @@ function misreadStep(run: Run | undefined, thread: TicketThread): string | undef
     return undefined;
   }
   const handback = readHandback(thread, run.waitCursor);
-  return handback?.kind === "unknown" ? handback.named : undefined;
+  if (handback === undefined) return undefined;
+  if (handback.kind === "unnamed") return undefined;
+  if (handbackStage(handback, run.stage ?? "triage") !== undefined) return undefined;
+  // Either nobody defined the name, or nothing can run the step it names. The
+  // person reading the ticket needs the words that were written down, not the
+  // reason the machinery could not use them.
+  return handback.kind === "unknown" ? handback.named : stageLabel(handback.stage);
 }
 
 /**
@@ -1998,16 +2037,8 @@ async function resolveWait(
     const handback = readHandback(thread, cursor);
     if (handback === undefined) return undefined;
 
-    // A name nobody defined is refused rather than guessed: starting a
-    // session at the wrong step, on a branch carrying half-built work, is
-    // worse than staying stopped. The ticket says so — `ctaFor` reads the
-    // same note and quotes the name back.
-    if (handback.kind === "unknown") return undefined;
-
-    // Naming nothing means carry on where it stopped, which is the honest
-    // reading of a stop cleared without anything being written.
-    const resume = handback.kind === "at" ? handback.stage : stage;
-    return isBuilt(resume) ? { context: { stage: resume } } : undefined;
+    const resume = handbackStage(handback, stage);
+    return resume === undefined ? undefined : { context: { stage: resume } };
   }
 
   if (run.waitingKind === "gate") {

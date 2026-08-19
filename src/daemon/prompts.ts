@@ -1,6 +1,8 @@
 import {
   CLARIFICATION_MARKER,
   CONVERSATION_RECORD_MARKER,
+  HANDBACK_MARKER,
+  HANDBACK_STEP_PREFIX,
   MACHINE_MARKER,
   STAGE_DONE_MARKER,
   STAGE_ESCALATED_MARKER,
@@ -11,7 +13,12 @@ import {
 import { takeoverCommand } from "../channels/terminal.js";
 import { breakdownPath } from "./breakdown.js";
 import { clarifyingRounds } from "./gates.js";
-import { stageAfter, type Classification, type PipelineStage } from "./pipeline.js";
+import {
+  stageAfter,
+  stageLabel,
+  type Classification,
+  type PipelineStage,
+} from "./pipeline.js";
 
 /** The stages that have a prompt. Extended as stages are built. */
 export const PROMPTED_STAGES = [
@@ -1250,20 +1257,41 @@ export function escalationPrompt(
           "",
         ]),
     humanWordsBlock(run, ticket),
-    "**Do whatever actually resolves it.** Read enough to understand the stop —",
-    "the source, the phase files, the decisions under `doc/adr/`, the diff on",
-    "the branch — then act. You may invoke whichever stage skill fits, more",
-    "than one, or none at all. **Where a skill's default does not fit this",
-    "case, depart from it** — deliberately, knowing what the default was, and",
-    "saying so.",
+    "**Clear what is in the way — and stop there.** Read enough to understand",
+    "the stop: the source, the phase files, the decisions under `doc/adr/`, the",
+    "diff on the branch. Then do what unblocks it.",
+    "",
+    "You may invoke whichever stage skill fits, more than one, or none at all,",
+    "and **where a skill's default does not fit this case, depart from it** —",
+    "deliberately, knowing what the default was, and saying so.",
+    "",
+    "**What unblocking means here: write the words, not the software.** The",
+    "requirements this decision needs, a decision record, a promise reworded, a",
+    "correction to what the record says — those are yours to write, and they",
+    "are what the person in front of you can agree to now.",
+    "",
+    "**Do not write application code, and do not open a pull request.** Not",
+    "because you could not: because building here throws away everything the",
+    "machinery gives this work. Through the machinery the work arrives one piece at a time,",
+    "each piece costs a visible amount, every commit says which step made it,",
+    "each step stops for the human where it should, and a fresh session checks",
+    "what another one built. A session at a keyboard that runs all the",
+    "way to a pull request buys an hour and spends all five. **This happened on",
+    "2026-08-18**, which is why you are being told.",
     "",
     "**Leave a committed record before you finish.** Name what you did, why,",
     "and every place you departed from a default. Nothing else records an",
     "unbound session: the ledger holds only that the run stopped, and the next",
     "person to read this ticket has your commit and nothing else.",
     "",
-    "**If the right answer is that nothing should change, that is an answer** —",
-    "record it, tell the human plainly on the ticket, and stop.",
+    handbackBlock(project, ticket, run),
+    "",
+    "**If the right answer is that no work should happen at all**, that is an",
+    "answer too. Do not hand it back — end it, and say why:",
+    "",
+    "```",
+    `timone cancel ${project}#${ticket.number}`,
+    "```",
     "",
     writingBlock(),
     "",
@@ -1319,6 +1347,57 @@ function stoppedAccountBlock(run: StoppedRun, ticket: TicketThread): string {
     "under `doc/adr/`, or the diff on the branch. An account exactly like this",
     "one told a human to reword two promises when only one of them needed new",
     "words. Check it before you act on it.",
+  ].join("\n");
+}
+
+/**
+ * How this session gives the work back to the machinery
+ * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
+ * D2/D3).
+ *
+ * **The names are generated, never typed out.** The reader resolves against
+ * the same map, so a step added later cannot leave this prompt offering a
+ * name the loop would refuse. Only steps the daemon can actually start are
+ * offered: naming one it cannot would fail the run and tell the human
+ * something went wrong, over a stop they had just cleared.
+ */
+function handbackBlock(
+  project: string,
+  ticket: TicketThread,
+  run: StoppedRun,
+): string {
+  const stopped = run.stage === undefined ? undefined : stageLabel(run.stage);
+
+  return [
+    "**Then hand the work back, in your closing comment.** That comment is the",
+    "one a person reads and the one the machinery reads. Under the machine",
+    "header, make the next line this, exactly as written:",
+    "",
+    HANDBACK_MARKER,
+    "",
+    "Say plainly what was settled. Then, on a line of its own, name where the",
+    "work carries on:",
+    "",
+    "```",
+    `${HANDBACK_STEP_PREFIX} building`,
+    "```",
+    "",
+    "**Use one of these names and no other.** Anything else is refused rather",
+    "than guessed at — the machinery will not start work at a step it is not",
+    "sure of; the ticket will say so, and a person has to come back.",
+    "",
+    ...PROMPTED_STAGES.map((stage) => `- ${stageLabel(stage)}`),
+    "",
+    "**Name where the work now stands, not where it stopped.** If the",
+    "requirements are written and agreed, the next step is building — sending",
+    `it back to ${stopped === undefined ? "the step that stopped" : `"${stopped}"`}`,
+    "would redo what the person in front of you has just settled. **Leave the",
+    "line out entirely** and it carries on where it stopped, which is right",
+    "when nothing new was written.",
+    "",
+    "Nothing else is needed: no command for them to run, nothing for them to",
+    `type. The machinery reads your comment on its next pass and carries`,
+    `${project} #${ticket.number} on by itself.`,
   ].join("\n");
 }
 

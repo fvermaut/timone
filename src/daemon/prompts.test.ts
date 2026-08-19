@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   CLARIFICATION_MARKER,
+  HANDBACK_MARKER,
+  HANDBACK_STEP_PREFIX,
   CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
   STAGE_DONE_MARKER,
@@ -15,6 +17,7 @@ import {
   renderBreakdown,
   type ParsedBreakdown,
 } from "./breakdown.js";
+import { stageLabel } from "./pipeline.js";
 import {
   PROMPTED_STAGES,
   approvalRecordPrompt,
@@ -900,5 +903,60 @@ describe("the escalation prompt", () => {
 
   it("is not a stage, and is not listed as one", () => {
     expect(PROMPTED_STAGES as readonly string[]).not.toContain("escalation");
+  });
+
+  // ADR-0035. Everything below is the half phase 25 left out: where this
+  // session's job ends, and how it gives the work back.
+
+  it("says building is not its job, and says why", () => {
+    // scratch-app #37, 2026-08-18: the session got the approval and then
+    // carried the whole feature to a pull request in the terminal. The rule
+    // needs the reason with it — a rule with no reason is one a capable
+    // session talks itself out of.
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toMatch(/do not write .*code/i);
+    expect(prompt).toMatch(/pull request/i);
+    expect(prompt).toMatch(/one piece at a time|piece by piece/i);
+  });
+
+  it("names what it may write instead", () => {
+    // The line is artifacts, not code: the decision, the promises, the record.
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toMatch(/requirements|promises|decision/i);
+  });
+
+  it("gives the exact shape of the note that hands the work back", () => {
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toContain(HANDBACK_MARKER);
+    expect(prompt).toContain(HANDBACK_STEP_PREFIX);
+  });
+
+  it("lists every step it may name, and only steps that can be started", () => {
+    // Generated from the same map the reader resolves against, so a step
+    // added later cannot leave the prompt offering a name the loop refuses —
+    // and an unstartable one is never offered, since naming it would fail the
+    // run rather than carry it on.
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    for (const stage of PROMPTED_STAGES) {
+      expect(prompt).toContain(stageLabel(stage));
+    }
+    expect(prompt).not.toContain(stageLabel("research"));
+    expect(prompt).not.toContain(stageLabel("feedback"));
+  });
+
+  it("warns that a name off that list is refused, not guessed", () => {
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toMatch(/refuse|won't|will not/i);
+  });
+
+  it("names the other honest ending, for work that should not happen", () => {
+    const prompt = escalationPrompt("scratch-app", run, stuck);
+
+    expect(prompt).toContain("timone cancel scratch-app#31");
   });
 });

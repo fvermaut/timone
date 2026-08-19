@@ -30,7 +30,7 @@ import { breakdownPath } from "./breakdown.js";
 import { enqueue, pending, requestsDir } from "./requests.js";
 import { RunStore, type Run } from "./runs.js";
 import { pollOnce, type SessionSpawner, type SpawnContext } from "./poll.js";
-import { processStage } from "./pipeline.js";
+import { processStage, stageLabel } from "./pipeline.js";
 import { AgentSessionSpawner } from "./session.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
@@ -5891,6 +5891,32 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     // the machine wrote down wrong.
     expect(standing.at(-1)).toContain("the last bit");
     expect(standing.at(-1)).toContain("timone takeover scratch-app#41");
+  });
+
+  it("refuses a step it knows the name of but cannot start", async () => {
+    // `looking something up` is a real name for a real step with no machinery
+    // behind it. Starting it would fail the run and put "something went wrong"
+    // on a ticket whose stop the human had just cleared — so it is refused in
+    // the same breath, and named, as a word nobody defined.
+    const store = newStore();
+    stopped(store);
+    const { adapter, standing } = threadOf(
+      question,
+      handback(stageLabel("research")),
+    );
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#41/1")?.status).toBe("parked");
+    expect(standing.at(-1)).toContain(stageLabel("research"));
   });
 
   it("is not resolved by the stage's own account of why it stopped", async () => {
