@@ -115,10 +115,16 @@ describe("routeAfterTriage", () => {
     expect(waitFor(chore.stage)).toBe("none");
   });
 
-  it("sends a bug to the feedback stage", () => {
+  it("sends a bug straight to planning, because triage already read enough", () => {
+    // ✏ Was the feedback stage, retired by
+    // [ADR-0036](../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md).
+    // A bug now means what D3 says: the code breaks a promise that is written
+    // down. Triage established that by reading the register, so there is
+    // nothing left to diagnose. A complaint about a promise nobody made is a
+    // `feature`, and a wrong document is a `chore`.
     expect(routeAfterTriage("bug")).toEqual({
       kind: "advance",
-      stage: "feedback",
+      stage: "planning",
     });
   });
 
@@ -194,11 +200,6 @@ describe("the stage graph", () => {
     expect(isBuilt("execution")).toBe(true);
     expect(isBuilt("verification")).toBe(true);
     expect(isBuilt("delivery")).toBe(true);
-    // ✏ Acting on a bug-classified ticket is stage 9's daemon path, built in
-    // phase 27. Until then `routeAfterTriage` sent every bug into it and every
-    // one of them parked for good — one of stage 1's four classifications
-    // routed into nothing at all.
-    expect(isBuilt("feedback")).toBe(true);
     // Every stage the graph can route to must be runnable. This is the whole
     // assertion, and the individual lines above are its worked examples.
     expect(PIPELINE_STAGES.filter((stage) => !isBuilt(stage))).toEqual([]);
@@ -471,11 +472,11 @@ describe("readGate", () => {
     // once for the whole initiative. The set is still exactly two, and this
     // literal is the alarm that says so: a third gate appearing here is a
     // decision, not a detail.
-    // ✏ Was `["requirements", "breakdown"]`. Phase 27 built stage 9, whose
-    // diagnosis is gated for the same reason a specification is: a machine
-    // that decides what is wrong *and* fixes it leaves nowhere to disagree.
-    // The literal stays the alarm — a fourth gate here is a decision.
-    expect(gated).toEqual(["requirements", "breakdown", "feedback"]);
+    // ✏ Back to two. Phase 27 added a third for stage 9's diagnosis;
+    // [ADR-0036](../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md)
+    // retired the stage, and its gate went with it. The literal stays the
+    // alarm — a third gate here is a decision.
+    expect(gated).toEqual(["requirements", "breakdown"]);
     for (const stage of gated) {
       expect(readGate(stage, approval)).toEqual({
         kind: "advance",

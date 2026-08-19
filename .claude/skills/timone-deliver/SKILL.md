@@ -33,7 +33,7 @@ Each gate stops delivery. When one fires you write **nothing** into the project,
 
 **3 — Verification gate.** Read the verification report at `doc/plans/phases/reports/phase-NN-verification.md`, latest iteration.
 - **No report at all** → route to **`timone-verify`**. A `Complete` stamp is stage 6 vouching for its own work; stage 7 is what makes it presentable.
-- **The stage-7 gate did not pass** — any MUST criterion neither PASS nor HUMAN-CHECK, any unresolved regression, any register line reading `failed`, or any BLOCKED verdict — → route to **stage 9** (`timone-improve`), not back to stage 7. A failed pass has already spent its fix loops; re-running verification cannot manufacture a different answer.
+- **The stage-7 gate did not pass** — any MUST criterion neither PASS nor HUMAN-CHECK, any unresolved regression, any register line reading `failed`, or any BLOCKED verdict — → file it as a ticket for **stage 1**, not back to stage 7 (✏ 2026-08-19: stage 9 until [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired it). A failed pass has already spent its fix loops; re-running verification cannot manufacture a different answer.
 - **An unperformed HUMAN-CHECK is not this gate firing.** See below.
 
 **4 — Platform gate.** The pull request *is* this stage's artifact ([ADR-0004](../../../doc/adr/0004-github-first-adapter-pair.md)), so there is no fallback surface:
@@ -223,6 +223,6 @@ Report to the user, in this order:
 3. Both axes' finding counts, **stated separately** — never a combined total.
 4. The delivery report's path.
 5. Every outstanding HUMAN-CHECK now carried in the PR.
-6. The next invocation, for anything the human wants acted on: `/timone-improve <project> <what to act on>` — stage 9 names the source it is given and never hunts for one, so name the findings or the report.
+6. The next invocation, for anything the human wants acted on: file it as a ticket and let stage 1 read it — ✏ 2026-08-19, [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired stage 9. Triage names the source it is given and never hunts for one, so name the findings or the report.
 
 Delivery presents and records. It never fixes with its own hands, never merges, and never writes the criteria register. Stop here.

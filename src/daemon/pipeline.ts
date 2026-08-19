@@ -76,7 +76,6 @@ export const PIPELINE_STAGES = [
   "verification",
   "delivery",
   "remediation",
-  "feedback",
 ] as const;
 
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
@@ -404,36 +403,6 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     effort: "high",
     next: "verification",
   },
-  feedback: {
-    processStage: 9,
-    label: "looking into what went wrong",
-    // **A gate, because a diagnosis is not a decision to act.** Stage 9
-    // classifies what a reaction *means* and proposes a response; the human
-    // confirms it, and only then does anything get built. That is the same
-    // shape as the specification gate and it reuses the same machinery: the
-    // record is committed and readable before the question is asked, so what
-    // is approved is the document rather than a paraphrase of it.
-    waits: "gate",
-    // It writes the feedback record, so it holds its project from the moment
-    // the diagnosis starts until the human has answered. A bug diagnosis that
-    // ran beside another ticket's build would be reading a working copy
-    // somebody else was changing.
-    ownsBranch: true,
-    // Built by phase 27. Until then `routeAfterTriage` sent every `bug` here
-    // and every one of them parked for the life of the ledger — one of stage
-    // 1's four classifications routed into nothing at all.
-    built: true,
-    // The judgement is what layer a complaint belongs to: a change of intent,
-    // a gap in what was built, or a record that is simply wrong. Getting that
-    // wrong sends a PRD amendment through a build, or a defect through a
-    // document edit.
-    model: "claude-opus-5",
-    effort: "high",
-    // Approving the diagnosis dispatches it, and the first stage that can act
-    // on it is planning — ADR-0016's carve-out is the *other* road, taken by a
-    // review comment on an open pull request, which never comes through here.
-    next: "planning",
-  },
 };
 
 /** What a stage's outcome does to the run that reached it. */
@@ -539,7 +508,13 @@ export function routeAfterTriage(kind: Classification): PipelineTransition {
     case "chore":
       return { kind: "advance", stage: "planning" };
     case "bug":
-      return { kind: "advance", stage: "feedback" };
+      // ✏ Was the feedback stage, until [ADR-0036](../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md)
+      // retired it. A bug now means what D3 says it means — the code breaks a
+      // promise that is actually written down — so there is nothing left to
+      // diagnose and the work is ready to be planned. A complaint about a
+      // promise nobody made is a `feature` and a wrong document is a `chore`,
+      // and telling those apart is triage's job now, not a later stage's.
+      return { kind: "advance", stage: "planning" };
     case "question":
       return {
         kind: "finish",

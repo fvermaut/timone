@@ -43,7 +43,7 @@ The entry point follows the stage-1 routing table — restated here, no variants
 | Kind | Entry point |
 |---|---|
 | feature | **`timone-grill`** (stage 2) — or **`timone-prd`** (stage 3) directly, *only* when the requirements are already unambiguous; skipping grill must be justified in the rationale. When the request spans multiple independent unresolved decision areas, *recommend* **`timone-wayfind`** (stage 2 at scale) in the rationale — the human decides |
-| bug / post-delivery observation | **`timone-improve`** (stage 9) |
+| bug (the code breaks a criterion you can name) | **`timone-plan`** (stage 5), anchored on that criterion |
 | chore / technical enabler | **`timone-plan`** (stage 5), un-anchored — the phase gets stamped un-anchored per the PRD-anchoring rule. **A chore meets no gate before its pull request** ([ADR-0030](../../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D3): it skips stages 2 and 3, and stage 5 no longer stops for an approval, so it runs on into stage 6 and is judged on the PR. Deliberate, not an oversight — fvermaut was shown the cost (nothing stops a misread chore before the work happens) and chose it. **So your rationale below is the last thing a human reads before the work is built**: a request classified `chore` by mistake is built by mistake, and getting the kind right matters more here than anywhere else in this table |
 | question | no pipeline entry — **answer it now**, from the project's artifacts (`doc/standards.md`, ADRs, specs, code) rather than from memory |
 

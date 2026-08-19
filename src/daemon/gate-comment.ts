@@ -118,18 +118,6 @@ const GATED: Partial<
     label: "the pieces I'd build this in, in order",
     onApproval: "start building them in that order, one at a time.",
   },
-  // ✏ The third gate, since phase 27 built stage 9. What is approved here is a
-  // *diagnosis*, not a plan: the machine says what it thinks went wrong and
-  // what it would do, and nothing is built until the human agrees with the
-  // first half. The wording is deliberately about the reading rather than the
-  // fixing — someone who disagrees with the diagnosis must feel invited to say
-  // so, and "shall I fix it?" invites only yes or no.
-  feedback: {
-    headline: "I've had a look at what went wrong.",
-    where: "doc/feedback",
-    label: "what I think is wrong, and what I'd do about it",
-    onApproval: "work out how to do it and get started.",
-  },
 };
 
 /**

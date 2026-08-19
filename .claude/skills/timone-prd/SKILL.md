@@ -12,7 +12,7 @@ Implement **stage 3 — Requirements** of [the Timone process](../../../process.
 
 The PRD pair is the **single source of truth** for what is being built (ADR-0006). Tickets scope work and point here; they never hold requirement detail.
 
-Pipeline position: `timone-grill` → **`timone-prd`** → `timone-plan` → `timone-execute` → `timone-verify` → … → `timone-improve` (amendments).
+Pipeline position: `timone-grill` → **`timone-prd`** → `timone-plan` → `timone-execute` → `timone-verify` → … and back here for amendments, which this skill owns since [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired stage 9.
 
 ---
 
@@ -71,7 +71,7 @@ The **requirement ID** is the join key between the two files, and between the PR
 
 - Format: `PRD-NN.R<k>` (e.g. `PRD-04.R2`). Within the criteria file, blocks are headed `R<k>`.
 - IDs are **stable forever**: never renumber, never reuse, never delete.
-- A requirement whose intent changes keeps its ID, gets its criteria updated, `Status: revised`, and a dated `> ✏ Revised <date>: <reason>` marker (applied by `timone-improve`).
+- A requirement whose intent changes keeps its ID, gets its criteria updated, `Status: revised`, and a dated `> ✏ Revised <date>: <reason>` marker (applied here — this skill owns the PRD, and has owned its amendments since [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired stage 9).
 - An obsolete requirement is marked `DEPRECATED` with a one-line reason — the block stays in the file.
 - New needs always get the next unused `R<k>`.
 
@@ -123,7 +123,7 @@ resolve as the PRD matures.>
 
 > Formal register for [prd-NN-<slug>.md](prd-NN-<slug>.md).
 > Maintained by: timone-prd (creation), timone-verify (status),
-> timone-improve (revisions). Requirement IDs are stable — never renumber.
+> timone-prd (revisions). Requirement IDs are stable — never renumber.
 
 ## R1 — <short requirement title>
 
@@ -152,7 +152,7 @@ resolve as the PRD matures.>
 | Field | Values | Rules |
 | ----- | ------ | ----- |
 | Priority | `MUST` / `SHOULD` / `NICE` | `MUST` = the deliverable fails without it; drives automated verification and regression |
-| Status | `draft` / `verified` / `failed` / `revised` / `deprecated` | `draft` on creation; `verified`/`failed` set by the `timone-verify` verifier; `revised`/`deprecated` set by `timone-improve` |
+| Status | `draft` / `verified` / `failed` / `revised` / `deprecated` | `draft` on creation; `verified`/`failed` set by the `timone-verify` verifier; `revised`/`deprecated` set here, with the amendment |
 | Verify-via | `api` / `browser` / `human` | `api` = checkable via HTTP/CLI/DB from a terminal (these also form the standing regression suite); `browser` = requires driving the UI; `human` = subjective (UX feel, visual quality) — both `browser` and `human` are reported as HUMAN-CHECK with a precise manual script until tooling covers them |
 
 ### Strictness rules

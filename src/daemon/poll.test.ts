@@ -1017,7 +1017,9 @@ describe("pollOnce — runs parked before the machinery existed", () => {
     });
 
     expect(result.resumed).toEqual(["scratch-app#4/1"]);
-    expect(contexts.at(-1)?.stage).toBe("feedback");
+    // ✏ `feedback` until ADR-0036 retired the stage; a bug now goes straight
+    // to planning, because triage read enough to know it is one.
+    expect(contexts.at(-1)?.stage).toBe("planning");
   });
 
   it("leaves it parked when the ticket carries no classification to route on", async () => {
