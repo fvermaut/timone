@@ -2,6 +2,7 @@
 
 > **Tier: BASELINE — applies to every managed project, no selection, no opt-out.**
 > **Status: Approved 2026-07-19 (fvermaut).**
+> ✏ Amended 2026-08-19, **approved 2026-08-19 (fvermaut)**: the *Reading a screen of figures* section. It is the craft this entry has never carried, and its absence is why nothing in the pipeline could fail [ivtrends#22](https://github.com/fvermaut/ivtrends/pull/22) on how it looked ([ADR-0039](../../doc/adr/0039-the-look-is-gated-twice.md)). Its rules are derived from the `ivtrends` evidence; **primary sources are still owed** and tracked as [timone#39](https://github.com/fvermaut/timone/issues/39) — the section is normative meanwhile.
 > ✏ Amended 2026-07-26, approved 2026-07-26: the disabled-in-flight rule is scoped to controls whose repeat activation is *unintended*. As written it collided with [baseline/accessibility.md](accessibility.md) — measurably, executing `scratch-app` phase 01 — since disabling a focused control blurs it and focus never returns (WCAG 2.4.3).
 
 Cross-project UI/UX invariants (Next.js/React). Project-specific design systems live in each project's `doc/standards.md`. Accessibility is governed by [baseline/accessibility.md](accessibility.md), not restated here.
@@ -13,6 +14,17 @@ Loading, empty, error, and partial-data states are acceptance criteria for every
 - **Loading:** < ~0.1 s no indicator; ~1–10 s wait indicator; > ~10 s determinate progress + cancel ([NN/g, Response Times](https://www.nngroup.com/articles/response-times-3-important-limits/)). Prefer skeletons matching the final layout (no content jump) over spinners ([NN/g, Skeleton Screens](https://www.nngroup.com/articles/skeleton-screens/)); in Next.js: `loading.tsx` / Suspense fallbacks. Never flash an indicator for sub-100 ms responses.
 - **Empty:** no blank regions — state what will appear, why it's empty, and offer the primary action that fills it ([NN/g, Empty States](https://www.nngroup.com/articles/empty-state-interface-design/)). Distinguish "no data yet" from "filter matched nothing" (the latter keeps the filter visible and offers to clear it).
 - **Error:** say what happened and what to do next, in the user's language — never a raw exception, bare status code, or stack trace ([NN/g, Error-Message Guidelines](https://www.nngroup.com/articles/error-message-guidelines/)). Every fetch-level error offers retry; a failed mutation never destroys what the user typed.
+
+## Reading a screen of figures
+
+Every rule above is behavioural and machine-checkable. None of them is about whether a screen can be *read*, which is why a board of 520 rows could pass the whole baseline and be rejected on sight.
+
+- **A column is as wide as its widest figure, plus its padding. Never stretch a table to fill the viewport.** Stretching puts empty space between a name and its number, and comparing down a column is what a table is for. Wide content scrolls in its own container — which the responsive posture already requires — rather than being spread to fit.
+- **Figures that are compared vertically are set tabular** (`font-variant-numeric: tabular-nums`, [MDN](https://developer.mozilla.org/en-US/docs/Web/CSS/font-variant-numeric)), right-aligned, and keep their trailing zeros. Proportional digits make a column of numbers ragged at the decimal point and defeat scanning.
+- **Density is a stated decision, not an accident.** A screen built for scanning many rows declares its row height and offers the operator the looser alternative; a screen built for reading one thing does not need the choice. Either way the number is chosen, not inherited from a component library's default padding.
+- **A screen has an explicit ground and a small number of foreground levels.** Primary figure, supporting label, and dimmed or absent value should be distinguishable without reading them. Three levels is usually enough and more than four is noise.
+- **Meaning carried by colour is carried by something else too.** This is the accessibility baseline's rule (1.4.1) and it is restated here because it is where a dense screen breaks it first: sector dots, up/down figures and state marks are exactly the places a hue ends up alone.
+- **A repeated visual element means one thing.** The same mark used for two facts on one screen is a defect, however convenient — it was found and fixed in `ivtrends`' own prototype for that reason.
 
 ## Responsive posture
 

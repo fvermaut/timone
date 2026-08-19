@@ -129,6 +129,25 @@ The loop the spec mandates, restated with no variants:
 
 *How* to test on this stack — seam selection, mocking discipline, the pyramid, fixtures, flake posture — is `standards/testing.md`'s, which reaches the slice through the standards library. Do not restate it here or in the slice prompt; the plan already picked the seams, and the standard already decides the rest.
 
+## The shell slice's look check
+
+✏ 2026-08-19 ([ADR-0039](../../../doc/adr/0039-the-look-is-gated-twice.md)). A shell sub-phase ([ADR-0038](../../../doc/adr/0038-a-screens-shell-is-built-before-its-behaviours.md)) carries one validation step nothing else does, and it does not close without it.
+
+**Spawn a fresh context that did not build the shell.** Give it two things to open side by side at the same window size: the built shell, and the reference the plan names — the kept prototype, or the project's `doc/design.md`. It reports differences; it does not fix them and it does not judge taste.
+
+**It is a named comparison, never a pixel diff.** Pixel comparison against a screen that was deliberately adapted fails always and means nothing. The list is fixed:
+
+- density — row height, and whether the looser alternative exists
+- figures — tabular or not, alignment, trailing zeros
+- column sizing — content-sized, or stretched to the viewport
+- ink levels — how many foreground weights, and are they distinguishable
+- signal colours, and whether anything is carried by hue alone
+- the treatment of any frozen or sticky region
+
+**Every difference is fixed, or written down with its reason.** The reflow and accessibility adaptations [ADR-0037](../../../doc/adr/0037-a-prototype-that-settles-a-look-is-kept-and-only-its-presentation-crosses.md) requires are the expected content of that list — a prototype normally fails the baseline, so a clean comparison with an empty list is the suspicious outcome, not the good one. The list goes in the slice's handoff note and is carried into the completion report, because it is what the human actually approves at stage 8's look gate.
+
+**An unexplained difference fails the slice's validation** like any other failing check, under the bounded retries below. A builder that writes a long enough reason list can pass this gate by construction; that is deliberate — the alternative is a machine judging taste — and it is why the list, not the verdict, is the artifact.
+
 ## The transition gate and escalation
 
 A sub-phase is complete only when **its own validation block passes**. Run the commands as written — including the deliberate failure probes, whose expected non-zero exits are part of the assertion, not noise to filter out. Every checkbox in the block gets an explicit outcome. Evidence that is missing, ambiguous, or doesn't cover an assertion counts as a failed attempt, not a pass.

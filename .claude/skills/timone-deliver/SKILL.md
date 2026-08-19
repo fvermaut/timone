@@ -25,7 +25,7 @@ Delivery presents finished work for human judgement. It does not improve the wor
 
 Each gate stops delivery. When one fires you write **nothing** into the project, push nothing, open nothing, state which gate fired and why in one short paragraph, and name the skill or the human to route to. A stopped delivery is a valid, complete outcome of this skill.
 
-**Their order is fixed: 1 → 2 → 3 → 4.** Gates about the work precede gates about where it goes, so a project whose phase was never verified hears *that* rather than a complaint about its git host. Fire the first one that applies and stop; do not report the others speculatively.
+**Their order is fixed: 1 → 2 → 3 → 4 → 5.** Gates about the work precede gates about where it goes, so a project whose phase was never verified hears *that* rather than a complaint about its git host. Fire the first one that applies and stop; do not report the others speculatively.
 
 **1 — Input gate.** A project name plus a phase reference: `phase-01`, `01`, or a path. Resolve it to exactly one file under `projects/<name>/doc/plans/phases/phase-NN.md`. Ambiguous, absent, or no phase given → say which phase files exist, and stop. **Never pick a phase for the user**: delivering the wrong branch is not a mistake a later gate catches.
 
@@ -36,7 +36,16 @@ Each gate stops delivery. When one fires you write **nothing** into the project,
 - **The stage-7 gate did not pass** — any MUST criterion neither PASS nor HUMAN-CHECK, any unresolved regression, any register line reading `failed`, or any BLOCKED verdict — → file it as a ticket for **stage 1**, not back to stage 7 (✏ 2026-08-19: stage 9 until [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired it). A failed pass has already spent its fix loops; re-running verification cannot manufacture a different answer.
 - **An unperformed HUMAN-CHECK is not this gate firing.** See below.
 
-**4 — Platform gate.** The pull request *is* this stage's artifact ([ADR-0004](../../../doc/adr/0004-github-first-adapter-pair.md)), so there is no fallback surface:
+**4 — Look gate.** ✏ 2026-08-19 ([ADR-0039](../../../doc/adr/0039-the-look-is-gated-twice.md)). **A phase carrying a user-facing screen does not get a pull request until the human has seen the built screen beside its reference and said yes.**
+
+- **Skip it entirely** when the phase built no user-facing screen. Say so in the delivery report rather than leaving its absence to inference.
+- **Otherwise: stand the app up, capture the screen, and put it in front of them** next to the reference the phase file names — the kept prototype ([ADR-0037](../../../doc/adr/0037-a-prototype-that-settles-a-look-is-kept-and-only-its-presentation-crosses.md)), or the project's `doc/design.md`. Hand over the shell slice's recorded difference list from the completion report: that list is the substance of what they are approving, since a difference explained there is a difference this process accepted on the builder's word.
+- **Ask once, plainly, and end with the call to action.** The question is "does this look right" — not a review, not a checklist. Their yes is recorded in the delivery report with the date.
+- **A "no" stops delivery.** Write nothing, push nothing, open nothing. It is not a review finding and it does not go back to stage 7: it re-enters **stage 1** as a later request, per [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md). Say that in one short paragraph and stop — a stopped delivery is a valid, complete outcome.
+
+**This does not reverse the HUMAN-CHECK rule below.** A scripted accessibility check is *evidence*, gathered later, and withholding the PR would hide it from the person who discharges it. The look gate is a *judgement*, and it is the judgement the pull request exists to obtain — presenting a screen its owner has not seen is not presenting it.
+
+**5 — Platform gate.** The pull request *is* this stage's artifact ([ADR-0004](../../../doc/adr/0004-github-first-adapter-pair.md)), so there is no fallback surface:
 - The project's `repo_url` in `timone.yaml` is not GitHub-hosted (does not match `github.com`) → refuse **loudly** and route to the human. Unlike stage 1's triage record there is no doc-record substitute: a delivery record with no review surface would mean shipping nothing while reporting success.
 - `gh` is not installed, or `gh auth status` fails → refuse the same way, naming the missing prerequisite. Never attempt `gh auth login`; it is interactive and it is the human's.
 
@@ -105,6 +114,7 @@ Silence is a valid report. An axis that always finds something is padding, not r
 - **Branch:** `phase-NN-<slug>` @ `<sha>`
 - **Base:** `<base>` — <why: the project's default branch, or "phase-MM-<slug> is complete but unmerged; this phase was stacked on it">
 - **Pull request:** <URL, added when opened — see below>
+- **Look gate:** <"no user-facing screen in this phase" | "seen and approved by <who> on <date>, against <the reference>"> — [ADR-0039](../../../doc/adr/0039-the-look-is-gated-twice.md)
 
 ## Scope
 
