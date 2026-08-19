@@ -1,4 +1,6 @@
 import {
+  HANDBACK_MARKER,
+  HANDBACK_STEP_PREFIX,
   STAGE_DONE_MARKER,
   STAGE_ESCALATED_MARKER,
   STAGE_HANDED_MARKER,
@@ -6,6 +8,7 @@ import {
   type TicketThread,
 } from "../adapters/ticketing.js";
 import { instant } from "./gates.js";
+import { stageFromLabel, type PipelineStage } from "./pipeline.js";
 
 /** How a stage's session said it ended, read off the ticket. */
 export type StageOutcome =
@@ -67,5 +70,73 @@ export function readStageOutcome(
     }
   }
 
+  return undefined;
+}
+
+/**
+ * A session's note that a stop has been cleared and the work carries on
+ * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)).
+ *
+ * **Three answers, because a caller has three things to do.** A step named is
+ * a run to resume there; nothing named is a run to resume where it stopped;
+ * and a name nobody defined is a refusal with something to say — the ticket
+ * quotes the name back and the run stays where it is. Collapsing the last two
+ * would make a refusal indistinguishable from silence, and then nothing can
+ * tell the human why nothing happened.
+ *
+ * A fourth answer is the absence of one: `undefined`, meaning no note.
+ */
+export type Handback =
+  | { kind: "at"; stage: PipelineStage; comment: TicketComment }
+  | { kind: "unnamed"; comment: TicketComment }
+  | { kind: "unknown"; named: string; comment: TicketComment };
+
+/**
+ * Find the handback note posted after `cursor`, or undefined while none has
+ * been.
+ *
+ * The rules are {@link readStageOutcome}'s, for the same reasons: only the
+ * machine's own comment counts, so a human quoting the marker back moves
+ * nothing; and only what was written after the stop opened can answer it.
+ */
+export function readHandback(
+  thread: TicketThread,
+  cursor: string,
+): Handback | undefined {
+  const after = instant(cursor);
+
+  for (const comment of thread.comments) {
+    if (!comment.fromTimone) continue;
+    if (instant(comment.createdAt) <= after) continue;
+    if (!comment.body.includes(HANDBACK_MARKER)) continue;
+
+    const named = namedStep(comment.body);
+    if (named === undefined) return { kind: "unnamed", comment };
+
+    const stage = stageFromLabel(named);
+    return stage === undefined
+      ? { kind: "unknown", named, comment }
+      : { kind: "at", stage, comment };
+  }
+
+  return undefined;
+}
+
+/**
+ * The step a handback note names, as the session wrote it, or undefined when
+ * it named none.
+ *
+ * The name is returned unresolved so an unrecognised one can be quoted back
+ * on the ticket. Everything after the prefix on that line is the name: a
+ * session writing two words means a step of two words, and truncating at the
+ * first space would turn *"checking the result"* into a name nobody defined.
+ */
+function namedStep(body: string): string | undefined {
+  for (const line of body.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith(HANDBACK_STEP_PREFIX)) continue;
+    const named = trimmed.slice(HANDBACK_STEP_PREFIX.length).trim();
+    if (named !== "") return named;
+  }
   return undefined;
 }

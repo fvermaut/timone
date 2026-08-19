@@ -81,6 +81,32 @@ export const STAGE_ESCALATED_MARKER =
   "🆘 **Needs more than a reply** · written by the machine when a stage cannot act on the answer it was given";
 
 /**
+ * The line a session writes when a stop has been cleared and the work goes
+ * back to the machinery
+ * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)).
+ *
+ * **{@link STAGE_ESCALATED_MARKER}'s other half.** That one says *a person is
+ * needed and no answer will do*; this one says *the person came, we settled
+ * it, carry on*. It is the only thing that ends an escalation: not the
+ * human's words, which the stage had already read and was right about, but
+ * the machine's own record of the session they went through together — the
+ * same shape as a conversation record, and read the same way.
+ */
+export const HANDBACK_MARKER =
+  "🔁 **Picking it back up** · written by the machine when a stop has been cleared and the work goes on without you";
+
+/**
+ * The line under {@link HANDBACK_MARKER} naming where the work carries on, in
+ * the plain words `stageLabel` gives a step — *"Carrying on at: building"*.
+ *
+ * A line rather than a hidden field: the ticket is the record, and a person
+ * reading this thread is owed the same fact the machinery is reading. Absent
+ * means *carry on where it stopped*, which is the honest default for a stop
+ * cleared without anything being written.
+ */
+export const HANDBACK_STEP_PREFIX = "Carrying on at:";
+
+/**
  * The line the preview comment carries, so a pull request ends up with one of
  * them rather than one per poll cycle.
  *

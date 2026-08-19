@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   MACHINE_MARKER,
   STAGE_DONE_MARKER,
+  HANDBACK_MARKER,
+  HANDBACK_STEP_PREFIX,
   STAGE_ESCALATED_MARKER,
   STAGE_HANDED_MARKER,
   type TicketComment,
   type TicketThread,
 } from "../adapters/ticketing.js";
-import { readStageOutcome } from "./outcomes.js";
+import { readHandback, readStageOutcome } from "./outcomes.js";
 
 const cursor = "2026-08-06T10:00:00Z";
 
@@ -175,5 +177,81 @@ describe("readStageOutcome", () => {
     );
 
     expect(outcome?.kind).toBe("handed-to-human");
+  });
+});
+
+describe("readHandback", () => {
+  // ADR-0035 D2/D3. A person and the machine cleared a stop in the terminal;
+  // the session says so on the ticket and names where the work carries on.
+  // Nothing writes one of these yet — this is the reader, landing first.
+
+  /** The note as a session writes it: header, marker, words, the step. */
+  function note(step?: string, overrides: Partial<TicketComment> = {}) {
+    const named = step === undefined ? "" : `\n\n${HANDBACK_STEP_PREFIX} ${step}`;
+    return comment({
+      body: `${MACHINE_MARKER}\n\n---\n\n${HANDBACK_MARKER}\n\nWe went through it together and it is settled.${named}`,
+      ...overrides,
+    });
+  }
+
+  it("reads the step a session named", () => {
+    const handback = readHandback(thread(note("building")), cursor);
+
+    expect(handback).toMatchObject({ kind: "at", stage: "execution" });
+  });
+
+  it("reads a step named in any case, with room around it", () => {
+    const handback = readHandback(thread(note("  Building  ")), cursor);
+
+    expect(handback).toMatchObject({ kind: "at", stage: "execution" });
+  });
+
+  it("says so when the note names nothing, which is not the same as no note", () => {
+    // Distinct answers on purpose: naming nothing means carry on where it
+    // stopped, and no note at all means the run is still stopped.
+    expect(readHandback(thread(note()), cursor)).toMatchObject({ kind: "unnamed" });
+    expect(readHandback(thread(), cursor)).toBeUndefined();
+  });
+
+  it("refuses a name nobody defined, and carries it so the ticket can quote it", () => {
+    const handback = readHandback(thread(note("the last bit")), cursor);
+
+    expect(handback).toMatchObject({ kind: "unknown", named: "the last bit" });
+  });
+
+  it("is never a human's copy of the marker", () => {
+    // The gate trap, for this marker by name: the machine's own bookkeeping
+    // must not be movable by someone quoting it back.
+    expect(
+      readHandback(thread(note("building", { fromTimone: false })), cursor),
+    ).toBeUndefined();
+  });
+
+  it("ignores a note at or before the cursor", () => {
+    // A stop is answered only by what was written after it opened.
+    expect(
+      readHandback(thread(note("building", { createdAt: cursor })), cursor),
+    ).toBeUndefined();
+  });
+
+  it("is not the stage's own account of why it stopped", () => {
+    // An escalation comment must never resolve the escalation it declares.
+    const escalation = comment({
+      body: `${MACHINE_MARKER}\n\n---\n\n${STAGE_ESCALATED_MARKER}\n\nI can't sign that as you.`,
+    });
+
+    expect(readHandback(thread(escalation), cursor)).toBeUndefined();
+  });
+
+  it("takes the first note after the cursor, not the last", () => {
+    const handback = readHandback(
+      thread(
+        note("building", { createdAt: "2026-08-06T11:00:00Z" }),
+        note("delivering", { createdAt: "2026-08-06T12:00:00Z" }),
+      ),
+      cursor,
+    );
+
+    expect(handback).toMatchObject({ kind: "at", stage: "execution" });
   });
 });
