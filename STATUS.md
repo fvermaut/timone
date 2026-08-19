@@ -2,35 +2,37 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-18.
+**Last updated:** 2026-08-19.
 
 ---
 
 ## Waiting on you
 
-**1. The trading app is stuck, and it needs two labels.** All fifteen questions on `ivtrends` are answered and closed. The list that holds them — [ivtrends #1](https://github.com/fvermaut/ivtrends/issues/1) — carries neither label it needs, so nothing is watching it. If you write "go ahead" on it today, nothing will happen. This is the same failure you hit on 13 August.
+**1. The trading app's latest piece stopped, and it was not its fault.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) has delivered four pieces. The fifth stopped on a server error at the other end. It needs one command:
 
-- `timone` — without it, no job is ever created for the ticket.
-- `wayfinder:frontier-empty` — this is what says the questions are all answered. It is what makes the ticket ask you for the go-ahead, and what makes your reply count as one. **This label does not exist in that repository yet and has to be created first.**
+```
+timone retry ivtrends#1
+```
 
-**Tell me to do it and I will**, in that order. Then the ticket will ask you itself, within a minute, and you answer it in your own words.
+The ticket has both labels it needs now, so once it is running again it carries on by itself.
 
-**2. One job on the to-do app needs restarting.** `scratch-app` [#13](https://github.com/fvermaut/scratch-app/issues/13) stopped on a server error. Run:
+**2. One job on the to-do app needs restarting.** `scratch-app` [#13](https://github.com/fvermaut/scratch-app/issues/13) stopped on a server error too:
 
 ```
 timone retry scratch-app#13
 ```
 
-**3. One old job should be thrown away.** `scratch-app` #10 was a throwaway test ticket. It is closed, but its job is still recorded as stopped. Run:
+**3. One old job should be thrown away.** `scratch-app` #10 was a throwaway test ticket. It is closed, but its job is still recorded as stopped:
 
 ```
 timone cancel scratch-app#10
 ```
 
-**4. Two rules need your ruling.** Neither blocks anything.
+**4. Three rules need your ruling.** None of them blocks anything today.
 
 - You asked for two things that cannot both be true: every open ticket must say what happens next, **and** a repository joined with a big backlog stays silent. On such a repository, an unlabelled ticket would say nothing. Which rule wins?
 - On 14 August the machine was supposed to give up and hand a conversation back to your terminal. It worked the answer out instead, and you called that a pass. Should the rule change, or the behaviour?
+- **New, from yesterday's test:** a ticket whose requirements are already written and agreed was picked up as brand-new work. The sorting step read the branch, said *"the next open step is the build plan, not another round of requirements discovery"* — and was then sent into another round of requirements discovery, because it routes on the label and nothing else. Should it be allowed to route on what it finds? ([#32](https://github.com/fvermaut/timone/issues/32))
 
 **5. Nothing you can do about `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4).** It is waiting at a step that has never been built. It stays there until that step exists. It is listed so you are not left wondering.
 
@@ -49,7 +51,7 @@ The second half of the idea is that a background watcher drives those stages fro
 | The process | `doc/specs/prd/prd-01-process-layer.criteria.md` | 22 of 24 |
 | The automatic loop | `doc/specs/prd/prd-02-inversion-of-control.criteria.md` | 12 of 22 |
 
-Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below).
+Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below). **Nothing on that list moved on 19 August**, deliberately — four of the promises gained notes about what happened, and a promise only gets its tick back when somebody who did not build the thing checks it.
 
 1096 automatic tests pass. Tests are not the same as somebody watching it work.
 
@@ -99,14 +101,19 @@ Two smaller things still have nobody watching them: the safety net for a job tha
 
 **14 August — one written answer sets one session going, not two.** You proved this yourself, by answering three throwaway questions in your own words and judging the replies.
 
+**Both of these are finished and closed** — the two pieces of work are written up in `doc/plans/phases/reports/phase-25-*.md` and `phase-26-*.md`, and the two faults they were for are closed on Timone's own list ([#28](https://github.com/fvermaut/timone/issues/28), [#30](https://github.com/fvermaut/timone/issues/30)). What was watched and what was not is in the reports, said plainly.
+
 Earlier work is in the reports under `doc/plans/phases/reports/`, one file per piece of work. It used to be repeated here at length; it is not any more.
 
 ---
 
 ## Not proven yet
 
-- **Nobody has watched the 15, 16 and 18 August work run.** No real ticket has been through the list-of-pieces machinery. No stopped job has been restarted by a written reply. This is exactly the state the machine was in just before it produced the last two faults.
-- **The rule that a piece must not be built without your approval is written, not enforced.** A building session obeys it. Nothing checks it.
+- **Nobody has watched the 15 and 16 August work run.** No real ticket has been through the list-of-pieces machinery, and no stopped job has been restarted by a written reply. The 18 and 19 August work *has* been watched, on throwaway tickets — that is the difference between those two lines.
+- **Two rules are written and nothing enforces them.** A piece must not be built without your approval; and a session you open on a stopped job must not build it. Sessions obeyed both when watched. Nothing checks either.
+- **The safety net has never fired in the wild.** If a step never notices it is stuck, the machine is supposed to notice after you have answered the same thing twice. That is proven by test and has not been seen live, because every step that was watched noticed by itself.
+- **A stopped job that is holding a project has not been watched blocking one.** It is the cost you accepted on 16 August, and it is still only argued.
+- **A handed-back job has not been watched running all the way to a pull request.** It was stopped on purpose when the test ticket was done.
 - **One accessibility check on the to-do app is still owed.** Listen to it with VoiceOver and Safari and confirm the controls are announced sensibly. The script is in that project's own repository, at `doc/plans/phases/reports/phase-01-verification.md`. It needs about twenty minutes.
 
 ---
@@ -117,11 +124,14 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 
 The ones that would bite you in ordinary use:
 
-- [#5](https://github.com/fvermaut/timone/issues/5) — a running watcher keeps using the code it started with. Nothing is running right now, so the next one you start has the 18 August work in it.
+- [#5](https://github.com/fvermaut/timone/issues/5) — a running watcher keeps using the code it started with. Nothing is running right now, so the next one you start has everything below in it.
+- [#32](https://github.com/fvermaut/timone/issues/32) — the sorting step can see the work is further along and is routed as if it were not, on the same ticket, in the same breath.
 - [#9](https://github.com/fvermaut/timone/issues/9) — the safety check blames the machine for a change you have not committed. Commit or stash your own work before the machine starts.
 - [#13](https://github.com/fvermaut/timone/issues/13) — a list of questions is only finished if somebody remembers to label it. This is what silently stopped the trading app.
 - [#12](https://github.com/fvermaut/timone/issues/12) — a job whose ticket was closed while it waited still starts, and is billed.
 - [#7](https://github.com/fvermaut/timone/issues/7) — a ticket that calls itself a throwaway still has its decisions written into the project for good.
+
+- [#23](https://github.com/fvermaut/timone/issues/23) — the safety check blames this work for merges you made yourself in the browser, and counts one of them once per branch it sits on. It has now been filed three times by three different sessions; the duplicates are closed.
 
 The rest, in short: [#1](https://github.com/fvermaut/timone/issues/1) a stopped job could not be reached (the 16 August work fixes this, and it stays open until somebody watches it), [#3](https://github.com/fvermaut/timone/issues/3) and [#4](https://github.com/fvermaut/timone/issues/4) two messages that do not say enough, [#6](https://github.com/fvermaut/timone/issues/6) a misleading log line, [#8](https://github.com/fvermaut/timone/issues/8) a test that is slow rather than wrong, [#10](https://github.com/fvermaut/timone/issues/10) a wrong live count, [#11](https://github.com/fvermaut/timone/issues/11) a killed session reported as working, [#14](https://github.com/fvermaut/timone/issues/14) and [#15](https://github.com/fvermaut/timone/issues/15) two faults in what `timone status` tells you, [#16](https://github.com/fvermaut/timone/issues/16) pieces of one job indistinguishable in history, [#17](https://github.com/fvermaut/timone/issues/17) onboarding cannot repair a project, [#18](https://github.com/fvermaut/timone/issues/18) nothing notices stale standards, [#19](https://github.com/fvermaut/timone/issues/19) every message appears under your name.
 
