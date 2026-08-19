@@ -51,7 +51,7 @@ The second half of the idea is that a background watcher drives those stages fro
 
 Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below).
 
-1095 automatic tests pass. Tests are not the same as somebody watching it work.
+1096 automatic tests pass. Tests are not the same as somebody watching it work.
 
 ---
 
@@ -77,7 +77,11 @@ You then read one yourself and caught a second fault I had called cosmetic: the 
 
 **19 August — what you sort out in your terminal now goes back to the machine.** You ruled on three questions and the work is built. The session you open clears the blockage and stops there: it writes the words a decision needs — the requirements, the reasons, a correction — and it does not build the thing. Building goes back to the watcher, where it arrives one piece at a time, each piece costs a visible amount, each stops for you where it should, and a second pair of eyes checks it. Then the session leaves one comment saying it is sorted and where to carry on, and the watcher picks it up on its next pass. Nothing for you to type. If it names a place the machine does not recognise, the ticket says so and quotes what it wrote, rather than guessing and starting the wrong work.
 
-Nobody has watched this happen yet either. #37 is the ticket it will be tried on.
+**Half of it has been watched.** On a throwaway ticket, a note saying "carry on at writing down what it needs" made the watcher pick the job up by itself, take the branch and start that step, and the ticket stopped saying it was stuck — nothing typed. A note naming a place the machine does not know left the job where it was and said so, quoting the words back. Writing another answer still started nothing.
+
+That test found a third fault and it is fixed: once the machine had refused a note, a corrected one could never be read, so the ticket asked you to come back and then ignored what you said. The newest note now wins.
+
+**What nobody has watched is the part that needs you at the keyboard:** whether the session you open now stops where it should instead of building the whole thing.
 
 Two smaller things still have nobody watching them: the safety net for a job that never notices it is stuck, and what a stopped job costs when it is holding a project. Both are in `doc/plans/phases/reports/phase-25-live-gate.md`. The full account is in `doc/plans/phases/reports/phase-25-live-gate.md`.
 

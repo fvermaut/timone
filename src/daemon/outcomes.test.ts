@@ -243,15 +243,38 @@ describe("readHandback", () => {
     expect(readHandback(thread(escalation), cursor)).toBeUndefined();
   });
 
-  it("takes the first note after the cursor, not the last", () => {
+  it("takes the newest note, so a refused one can be corrected", () => {
+    // Found by phase 26's live gate on `scratch-app` #39: reading the *first*
+    // note left a run that had named a step nobody defined stuck for good.
+    // The ticket asked the person to come back and say where to pick it up —
+    // and the note they came back with could never be read, because an
+    // earlier one was already there. The machine's latest word is the one
+    // that counts, exactly as it is everywhere a person can correct
+    // themselves.
     const handback = readHandback(
       thread(
-        note("building", { createdAt: "2026-08-06T11:00:00Z" }),
-        note("delivering", { createdAt: "2026-08-06T12:00:00Z" }),
+        note("the rest of it", { createdAt: "2026-08-06T11:00:00Z" }),
+        note("building", { createdAt: "2026-08-06T12:00:00Z" }),
       ),
       cursor,
     );
 
     expect(handback).toMatchObject({ kind: "at", stage: "execution" });
+  });
+
+  it("reports the newest note even when the newest is the unusable one", () => {
+    // The other direction, and it must not be clever: a session that named a
+    // good step and then corrected itself to a bad one is refused. Preferring
+    // the usable note would have the machinery act on something its own last
+    // word withdrew.
+    const handback = readHandback(
+      thread(
+        note("building", { createdAt: "2026-08-06T11:00:00Z" }),
+        note("the rest of it", { createdAt: "2026-08-06T12:00:00Z" }),
+      ),
+      cursor,
+    );
+
+    expect(handback).toMatchObject({ kind: "unknown", named: "the rest of it" });
   });
 });

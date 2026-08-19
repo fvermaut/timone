@@ -95,9 +95,20 @@ export type Handback =
  * Find the handback note posted after `cursor`, or undefined while none has
  * been.
  *
- * The rules are {@link readStageOutcome}'s, for the same reasons: only the
+ * Two rules are {@link readStageOutcome}'s, for the same reasons: only the
  * machine's own comment counts, so a human quoting the marker back moves
  * nothing; and only what was written after the stop opened can answer it.
+ *
+ * **The third rule is this one's own: the *newest* note wins, where a stage
+ * outcome is the first.** They are different situations. A stage's outcome is
+ * one closing comment and a second would be a contradiction; a handback can
+ * be corrected, and has to be. Phase 26's live gate found the cost of getting
+ * this wrong on `scratch-app` [#39](https://github.com/fvermaut/scratch-app/issues/39):
+ * a note naming a step nobody defined was refused, the ticket asked the person
+ * to come back and say where to pick it up, and the note they came back with
+ * could never be read — an earlier one held the answer for ever. It cuts both
+ * ways deliberately: a good note corrected to a bad one is refused, because
+ * the machinery must not act on something its own last word withdrew.
  */
 export function readHandback(
   thread: TicketThread,
@@ -105,7 +116,8 @@ export function readHandback(
 ): Handback | undefined {
   const after = instant(cursor);
 
-  for (const comment of thread.comments) {
+  for (let index = thread.comments.length - 1; index >= 0; index -= 1) {
+    const comment = thread.comments[index];
     if (!comment.fromTimone) continue;
     if (instant(comment.createdAt) <= after) continue;
     if (!comment.body.includes(HANDBACK_MARKER)) continue;
