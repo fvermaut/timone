@@ -944,8 +944,12 @@ describe("the escalation prompt", () => {
     for (const stage of PROMPTED_STAGES) {
       expect(prompt).toContain(stageLabel(stage));
     }
-    expect(prompt).not.toContain(stageLabel("research"));
-    expect(prompt).not.toContain(stageLabel("feedback"));
+    // ✏ The examples of an unstartable step used to be `research` and
+    // `feedback`; phase 27 built both, so they are now offered like any other.
+    // The property is unchanged and is asserted where it still bites: the
+    // map's own stage is built and starts no session, so its name must not be
+    // on the list.
+    expect(prompt).not.toContain(stageLabel("charting"));
   });
 
   it("warns that a name off that list is refused, not guessed", () => {

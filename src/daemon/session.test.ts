@@ -38,6 +38,7 @@ import {
 } from "./progress.js";
 import {
   AgentSessionSpawner,
+  parkedComment,
   sessionOutcomeFrom,
   type ProgressReader,
   type SessionRequest,
@@ -476,7 +477,12 @@ describe("routing after triage", () => {
     expect(comments.at(-1)?.body).toMatch(/question rather than something to build/i);
   });
 
-  it("parks a bug at the stage that would act on it, saying it isn't built", async () => {
+  it("sends a bug to the stage that acts on it, and gates what it finds", async () => {
+    // ✏ The inverse of what this asserted until phase 27. A bug used to reach
+    // `feedback`, find nothing there, and park for the life of the ledger —
+    // one of stage 1's four classifications routed into nothing at all. Now it
+    // runs the stage and stops on the diagnosis, which is a question the human
+    // can actually answer.
     const store = newStore();
     const { adapter, comments } = fakeAdapter();
     const { runtime } = classifyingRuntime("bug", adapter);
@@ -494,7 +500,9 @@ describe("routing after triage", () => {
     const parked = store.get(run.id);
     expect(parked?.status).toBe("parked");
     expect(parked?.stage).toBe("feedback");
-    expect(comments.at(-1)?.body).toMatch(/isn't built yet/i);
+    expect(parked?.waitingKind).toBe("gate");
+    expect(comments.at(-1)?.body).toMatch(/what I need from you/i);
+    expect(comments.at(-1)?.body).not.toMatch(/isn't built yet/i);
   });
 
   it("fails loudly when triage recorded no classification at all", async () => {
@@ -1010,24 +1018,19 @@ describe("run lifecycle", () => {
     expect(comments[0].number).toBe(7);
   });
 
-  it("ends the parking comment with a call to action", async () => {
-    const store = newStore();
-    const { adapter, comments } = fakeAdapter();
-    const { runtime } = classifyingRuntime("bug", adapter);
+  it("ends the parking comment with a call to action", () => {
+    // ✏ Driven directly rather than through a `bug`, because phase 27 built
+    // the last two unbuilt stages and nothing routes into one any more. The
+    // guard is kept, not retired: the next stage added to the graph arrives
+    // unbuilt, and this is the comment its ticket gets.
+    for (const stage of PIPELINE_STAGES) {
+      const body = parkedComment(stage);
+      const lastLine = body.trimEnd().split("\n").at(-1) ?? "";
 
-    await new AgentSessionSpawner({
-      manifest,
-      store,
-      adapter,
-      runtime,
-      root: "/root",
-      repoProbe: movingProbe(),
-    }).spawn(pickedUpRun(store), project);
-
-    const body = comments.at(-1)!.body;
-    const lastLine = body.trimEnd().split("\n").at(-1) ?? "";
-    expect(lastLine).toMatch(/\*\*What I need from you:\*\*/);
-    expect(body).not.toMatch(/timone-\w+|sub-phase/i);
+      expect(lastLine).toMatch(/\*\*What I need from you:\*\*/);
+      expect(body).toMatch(/isn't built yet/i);
+      expect(body).not.toMatch(/timone-\w+|sub-phase/i);
+    }
   });
 
   it("fails the run when the session ends badly, and says so on the ticket", async () => {
@@ -1378,7 +1381,9 @@ describe("the plan gate", () => {
     );
     const rule = (body: string) => body.trimEnd().split("\n").at(-1);
 
-    expect(bodies).toHaveLength(2);
+    // ✏ Three since phase 27 built stage 9. Still derived from the graph, so
+    // this stays an assertion about *the gated stages*.
+    expect(bodies).toHaveLength(3);
     expect(new Set(bodies.map(rule)).size).toBe(1);
     expect(rule(bodies[0])).toMatch(/isn't `approve`/);
     for (const body of bodies) {
@@ -3539,5 +3544,184 @@ describe("a stop the machine can survive on its own", () => {
     expect(starts()).toBe(1);
     expect(store.get("scratch-app#7/1")?.status).toBe("failed");
     expect(comments.at(-1)?.body ?? "").toMatch(/Something went wrong/);
+  });
+});
+
+
+describe("the two stages phase 27 built", () => {
+  /** A ticket carrying whatever labels the test needs. */
+  function ticketLabelled(...labels: string[]): TicketThread {
+    return { ...thread, labels: ["timone", ...labels], comments: [] };
+  }
+
+  /** A session that closes by recording `marker` on the ticket. */
+  function closingRuntime(
+    adapter: TicketingAdapter,
+    marker: string,
+  ): ReturnType<typeof fakeRuntime> {
+    return fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${marker}\n\nThat's what I found.`);
+      },
+    });
+  }
+
+  /** A session that closes having posted nothing at all. */
+  function silentRuntime(): ReturnType<typeof fakeRuntime> {
+    return fakeRuntime({ ok: true });
+  }
+
+  describe("looking something up", () => {
+    it("ends its own run, because nothing follows it", async () => {
+      // ADR-0010: a research answer resolves its ticket and feeds the map.
+      // Advancing on one would write requirements off a single lookup.
+      const store = newStore();
+      const { adapter } = fakeAdapter(ticketLabelled("wayfinder:research"));
+      const { runtime } = closingRuntime(adapter, STAGE_DONE_MARKER);
+      const run = pickedUpRun(store);
+
+      await new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+        repoProbe: movingProbe(),
+      }).spawn(run, project, { stage: "research" });
+
+      expect(store.get(run.id)?.status).toBe("done");
+    });
+
+    it("never falls through to triage's judgement", async () => {
+      // The defect that kept this stage unbuilt for three phases. Wait-free
+      // stages without a branch of their own land on triage's, which reads a
+      // `triage:` label off the ticket — and a wayfinder ticket carries none,
+      // so every research run died on "triage recorded no classification".
+      const store = newStore();
+      const { adapter, comments } = fakeAdapter(ticketLabelled("wayfinder:research"));
+      const { runtime } = closingRuntime(adapter, STAGE_DONE_MARKER);
+      const run = pickedUpRun(store);
+
+      await new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+        repoProbe: movingProbe(),
+      }).spawn(run, project, { stage: "research" });
+
+      expect(store.get(run.id)?.failure).toBeUndefined();
+      for (const comment of comments) {
+        expect(comment.body).not.toMatch(/no classification/i);
+      }
+    });
+
+    it("fails the run when the session recorded no outcome", async () => {
+      // Its answer is a comment on the ticket, and the marker is that comment.
+      // A session that posted neither did not answer anything.
+      const store = newStore();
+      const { adapter } = fakeAdapter(ticketLabelled("wayfinder:research"));
+      const { runtime } = silentRuntime();
+      const run = pickedUpRun(store);
+
+      await new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+        repoProbe: movingProbe(),
+      }).spawn(run, project, { stage: "research" });
+
+      expect(store.get(run.id)?.status).toBe("failed");
+    });
+
+    it("parks rather than failing when it needs to ask somebody", async () => {
+      const store = newStore();
+      const { adapter } = fakeAdapter(ticketLabelled("wayfinder:research"));
+      const { runtime } = closingRuntime(adapter, STAGE_HANDED_MARKER);
+      const run = pickedUpRun(store);
+
+      await new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+        repoProbe: movingProbe(),
+      }).spawn(run, project, { stage: "research" });
+
+      const parked = store.get(run.id);
+      expect(parked?.status).toBe("parked");
+      expect(parked?.waitingKind).toBe("conversation");
+    });
+  });
+
+  describe("looking into what went wrong", () => {
+    it("gates the diagnosis rather than acting on it", async () => {
+      // The stage diagnoses; it never treats. What stands between a diagnosis
+      // and a build is the human, exactly as with a specification.
+      const store = newStore();
+      const { adapter, comments } = fakeAdapter(ticketLabelled("triage:bug"));
+      const { runtime } = closingRuntime(adapter, STAGE_DONE_MARKER);
+      const run = pickedUpRun(store);
+
+      await new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+        repoProbe: movingProbe(),
+      }).spawn(run, project, { stage: "feedback" });
+
+      const parked = store.get(run.id);
+      expect(parked?.status).toBe("parked");
+      expect(parked?.waitingKind).toBe("gate");
+      expect(comments.at(-1)?.body).toContain("I've had a look at what went wrong.");
+    });
+
+    it("holds its project while the diagnosis is being read", async () => {
+      // It writes the record, so it owns a branch — and a branch is what makes
+      // a parked run keep its project.
+      const store = newStore();
+      const { adapter } = fakeAdapter(ticketLabelled("triage:bug"));
+      const { runtime } = closingRuntime(adapter, STAGE_DONE_MARKER);
+      const run = pickedUpRun(store);
+
+      await new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+        repoProbe: movingProbe(),
+      }).spawn(run, project, { stage: "feedback" });
+
+      expect(store.get(run.id)?.branch).toBeDefined();
+      expect(store.occupyingRun("scratch-app")?.id).toBe(run.id);
+    });
+
+    it("fails rather than gating over a branch it committed nothing to", async () => {
+      // The one failure a gate must never have: a reply of `approve` would
+      // advance the pipeline past a step nobody did.
+      const store = newStore();
+      const { adapter, comments } = fakeAdapter(ticketLabelled("triage:bug"));
+      const { runtime } = closingRuntime(adapter, STAGE_DONE_MARKER);
+      const run = pickedUpRun(store);
+
+      await new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+        repoProbe: async () => "sha-unchanged",
+      }).spawn(run, project, { stage: "feedback" });
+
+      expect(store.get(run.id)?.status).toBe("failed");
+      expect(comments.at(-1)?.body).not.toContain("I've had a look at what went wrong.");
+    });
   });
 });

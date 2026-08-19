@@ -769,11 +769,28 @@ export class RunStore {
     });
   }
 
-  /** End a run in failure, promoting whatever is queued behind it. */
+  /**
+   * End a run in failure, promoting whatever is queued behind it.
+   *
+   * **The whole wait goes, not just the words for it.** It used to clear
+   * `waitingOn` alone and leave the kind and the cursor behind, which made a
+   * failed run the one state carrying a wait nothing was waiting on — `ctaFor`
+   * answers on the status before it ever reaches a wait branch, and `activate`
+   * cleared the leftovers on the next retry. Dead data that looks live is what
+   * a later reader builds on, so it is cleared here, where the wait ends.
+   *
+   * **What survives is {@link Run.consumedAnswerAt}, deliberately** (ADR-0023).
+   * That is the marker `timone retry` rewinds a re-armed run to, and it is the
+   * one fact about a dead session that is still owed to somebody: they wrote an
+   * answer, it was read, and nothing acted on it. The `waitCursor` fallback
+   * beside it in `retry` is only ever reached on a **parked** run — a failed one
+   * takes the `store.retry` path — so clearing the cursor here costs that
+   * fallback nothing.
+   */
   fail(id: string, reason: string): Run {
     return this.transition(id, "failed", (run) => {
       run.failure = reason;
-      run.waitingOn = undefined;
+      stopWaiting(run);
     });
   }
 

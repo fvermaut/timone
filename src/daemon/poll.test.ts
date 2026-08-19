@@ -26,7 +26,7 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
-import { breakdownPath } from "./breakdown.js";
+import { breakdownPath, fromWorkingTree } from "./breakdown.js";
 import { enqueue, pending, requestsDir } from "./requests.js";
 import { RunStore, type Run } from "./runs.js";
 import { pollOnce, type SessionSpawner, type SpawnContext } from "./poll.js";
@@ -993,17 +993,31 @@ describe("pollOnce — runs parked before the machinery existed", () => {
     expect(contexts).toEqual([{ stage: "clarification" }]);
   });
 
-  it("leaves it parked when what follows still isn't built", async () => {
+  it("picks a bug back up now that the stage that acts on it exists", async () => {
+    // ✏ The inverse of what this asserted until phase 27, and the inversion is
+    // the fix. A bug routed to a stage nothing could run, so it parked here
+    // and stayed parked for the life of the ledger — `scratch-app` #4 sat in
+    // exactly this state while `STATUS.md` listed it under *nothing you can do
+    // about it*. The stage exists now, so the run resumes into it.
     const store = newStore();
     parkedAwaitingMachinery(store, ["timone", "triage:bug"]);
     const adapter = labelledAdapter(["timone", "triage:bug"]);
-    const { spawner, spawned } = fakeSpawner();
+    const contexts: (SpawnContext | undefined)[] = [];
+    const spawner: SessionSpawner = {
+      async spawn(_run, _project, context) {
+        contexts.push(context);
+      },
+    };
 
-    // A bug routes to the feedback stage, which is phase 13's and later.
-    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
 
-    expect(spawned).toEqual([]);
-    expect(store.get("scratch-app#4/1")?.status).toBe("parked");
+    expect(result.resumed).toEqual(["scratch-app#4/1"]);
+    expect(contexts.at(-1)?.stage).toBe("feedback");
   });
 
   it("leaves it parked when the ticket carries no classification to route on", async () => {
@@ -4384,6 +4398,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
     });
 
@@ -4409,6 +4426,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
     });
 
@@ -4431,6 +4451,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
     });
 
@@ -4454,6 +4477,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
     };
 
@@ -4494,6 +4520,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
     });
 
@@ -4517,6 +4546,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(
         breakdown(
           ["The ledger learns chunks", "The next chunk opens", "The ticket closes"],
@@ -4556,6 +4588,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(),
     });
 
@@ -4581,6 +4616,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith("# Breakdown\n\nsomebody deleted the status line\n"),
     });
 
@@ -4741,6 +4779,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
     });
 
@@ -4770,6 +4811,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       store,
       adapter,
       spawner,
+      // A plain fixture directory, not a clone: the production default reads the
+      // approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(
         breakdown(["The ledger learns chunks", "The next chunk opens", "A piece nobody read"], 2),
       ),
@@ -5894,15 +5938,19 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
   });
 
   it("refuses a step it knows the name of but cannot start", async () => {
-    // `looking something up` is a real name for a real step with no machinery
-    // behind it. Starting it would fail the run and put "something went wrong"
-    // on a ticket whose stop the human had just cleared — so it is refused in
-    // the same breath, and named, as a word nobody defined.
+    // `keeping the list of questions` is a real name for a real step that no
+    // session is ever started for. Starting it would fail the run and put
+    // "something went wrong" on a ticket whose stop the human had just
+    // cleared — so it is refused, and named.
+    //
+    // ✏ It used to be `research`, which phase 27 built. The property under
+    // test is *a real step with nothing behind it*, and the graph still has
+    // one, so the test keeps its subject and changes its example.
     const store = newStore();
     stopped(store);
     const { adapter, standing } = threadOf(
       question,
-      handback(stageLabel("research")),
+      handback(stageLabel("charting")),
     );
     const { spawner, spawned } = fakeSpawner();
 
@@ -5916,7 +5964,33 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
 
     expect(spawned).toEqual([]);
     expect(store.get("scratch-app#41/1")?.status).toBe("parked");
-    expect(standing.at(-1)).toContain(stageLabel("research"));
+    expect(standing.at(-1)).toContain(stageLabel("charting"));
+  });
+
+  it("says a real step it cannot run is real, not gibberish", async () => {
+    // The two refusals were one message until phase 27, and the one message
+    // was wrong about this half: it told the reader the machine could not read
+    // its own handwriting, when the note said something perfectly well
+    // defined. They would have gone off to correct a note that was right.
+    const store = newStore();
+    stopped(store);
+    const { adapter, standing } = threadOf(
+      question,
+      handback(stageLabel("charting")),
+    );
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    const said = standing.at(-1) ?? "";
+    expect(said).toContain("That is a real step");
+    expect(said).not.toContain("I don't know what that means");
   });
 
   it("is not resolved by the stage's own account of why it stopped", async () => {

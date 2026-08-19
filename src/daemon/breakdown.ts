@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -122,7 +123,86 @@ export type BreakdownRead =
   | { kind: "malformed"; path: string; reason: string };
 
 /**
- * Read a ticket's breakdown out of a project checkout.
+ * Where a breakdown's text is read from. Two exist, and every caller says
+ * which — there is deliberately **no default**.
+ *
+ * The parameter exists because the answer used to be "whatever is checked out
+ * right now", which is not a point in the project's history at all. Sessions
+ * switch branches in the same checkout the poll loop reads, so *which piece is
+ * next* depended on what the last session happened to leave behind. Making the
+ * source an argument means the next caller has to answer the question rather
+ * than inherit somebody else's answer, which is the whole of the fix.
+ *
+ * Returns undefined when the file is not there — an ordinary state of the
+ * world. Throwing is reserved for a source that could not look.
+ */
+export type BreakdownSource = (
+  repoDir: string,
+  path: string,
+) => string | undefined;
+
+/**
+ * The file as it sits in the working tree. **Correct only when the caller
+ * owns the checkout** — a test fixture, or a session working on its own
+ * branch. Never right for the poll loop.
+ */
+export const fromWorkingTree: BreakdownSource = (repoDir, path) => {
+  const full = join(repoDir, path);
+  if (!existsSync(full)) return undefined;
+  return readFileSync(full, "utf8");
+};
+
+/**
+ * The file as it stands on the project's **default branch** — the one place an
+ * approved breakdown is guaranteed to be, because approving one merges chunk
+ * zero there ([ADR-0030](../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)
+ * D2).
+ *
+ * **Before that merge it answers "absent", and that is the honest answer.** A
+ * breakdown on a work branch is a proposal: nobody has approved it, no piece
+ * may be counted from it, and a ticket whose call to action counted pieces off
+ * one was describing a list the human had never seen.
+ *
+ * **Any git failure reads as absent**, deliberately. A path that is not a
+ * repository, a clone with no `origin/HEAD`, a repository mid-rebase — none of
+ * them is evidence that a breakdown exists, and the poll loop asks this of
+ * every marked ticket on every cycle. The one thing that would be lost by
+ * guessing the other way is the `unreadable` arm, and that arm still fires for
+ * what it was built for: a file that *is* on the default branch and does not
+ * parse.
+ *
+ * Synchronous, matching what it replaced. These are two short `git` calls on a
+ * local repository, on a loop that runs once a minute.
+ */
+export const fromDefaultBranch: BreakdownSource = (repoDir, path) => {
+  const ref = defaultBranchOf(repoDir);
+  if (ref === undefined) return undefined;
+  try {
+    return execFileSync("git", ["show", `${ref}:${path}`], {
+      cwd: repoDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return undefined;
+  }
+};
+
+/** The default branch's ref, or undefined when the repository cannot say. */
+function defaultBranchOf(repoDir: string): string | undefined {
+  try {
+    return execFileSync(
+      "git",
+      ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+      { cwd: repoDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Read a ticket's breakdown out of a project, from wherever `source` looks.
  *
  * **It returns an answer; it never throws.** The poll loop asks this of every
  * marked ticket on every cycle, and a project with no breakdown yet — or one
@@ -131,19 +211,25 @@ export type BreakdownRead =
  * poll turn down with it.
  *
  * Every arm carries the path it looked at, so a log line or a ticket comment
- * can say *which* file, on a machine the reader is not sitting at.
+ * can say *which* file, on a machine the reader is not sitting at. The path is
+ * the repository-relative one, because that is what identifies the file
+ * whichever branch it was read from.
  */
-export function readBreakdown(repoDir: string, ticket: number): BreakdownRead {
-  const path = join(repoDir, breakdownPath(ticket));
-  if (!existsSync(path)) return { kind: "absent", path };
+export function readBreakdown(
+  repoDir: string,
+  ticket: number,
+  source: BreakdownSource,
+): BreakdownRead {
+  const path = breakdownPath(ticket);
 
-  let text: string;
+  let text: string | undefined;
   try {
-    text = readFileSync(path, "utf8");
+    text = source(repoDir, path);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { kind: "malformed", path, reason };
   }
+  if (text === undefined) return { kind: "absent", path };
 
   const parsed = parseBreakdown(text);
   return "kind" in parsed

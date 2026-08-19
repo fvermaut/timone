@@ -25,6 +25,7 @@ export const PROMPTED_STAGES = [
   "triage",
   "clarification",
   "wayfinding",
+  "research",
   "requirements",
   "breakdown",
   "planning",
@@ -32,6 +33,7 @@ export const PROMPTED_STAGES = [
   "verification",
   "delivery",
   "remediation",
+  "feedback",
 ] as const;
 
 export interface PromptContext {
@@ -418,6 +420,8 @@ function stageBody(
       return clarificationPrompt(context);
     case "wayfinding":
       return wayfindingPrompt(context);
+    case "research":
+      return researchPrompt(context);
     case "requirements":
       return requirementsPrompt(context);
     case "breakdown":
@@ -432,6 +436,8 @@ function stageBody(
       return deliveryPrompt(context);
     case "remediation":
       return remediationPrompt(context);
+    case "feedback":
+      return feedbackPrompt(context);
   }
 }
 
@@ -852,6 +858,127 @@ function requirementsPrompt(context: PromptContext): string {
     "them to approve it and do not invent an approval instruction: the",
     "machinery posts the approval request itself, immediately after yours, and",
     "two different sets of instructions would tell them two different things.",
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
+  ].join("\n");
+}
+
+/**
+ * Stage 2's unattended mode: one wayfinder question the machine can settle by
+ * itself ([ADR-0010](../../doc/adr/0010-wayfinder-discovery-maps.md)).
+ *
+ * **The only stage-2 session nobody is waiting on**, which is what makes it
+ * wait-free and what makes its ending its own. The answer resolves the ticket
+ * and feeds the map; nothing follows it in the graph, so this session's
+ * closing comment is the last thing that happens on this run.
+ */
+function researchPrompt(context: PromptContext): string {
+  return [
+    `Answer the question on ticket #${context.ticket.number} of **${context.project.name}** yourself.`,
+    "",
+    ticketBlock(context),
+    feedbackBlock(context.feedback),
+    "",
+    reentryBlock(),
+    "",
+    "**This ticket is one question on a shared map**, charted because the idea",
+    "behind it was too big to settle in one sitting — and marked as one nobody",
+    "needs to be asked about. Its body is the single question it exists to",
+    "resolve. Run the at-scale requirements-discovery stage on it —",
+    "`timone-wayfind`, working through the map — following that skill's rules",
+    "for a ticket of this type.",
+    "",
+    "**Resolve it from sources, not from the human.** Read the project's own",
+    "code and committed documents first; go outside them only for what they",
+    "cannot answer, and say where each answer came from. **Ask nobody",
+    "anything** — this ticket was charted precisely because it needed no",
+    "conversation, and a question posted here waits for someone who is not",
+    "coming.",
+    "",
+    "**Say so when you cannot settle it.** A lookup that comes back",
+    "inconclusive is a real result and recording it honestly is the whole job;",
+    "an answer invented to close a ticket is worse than an open ticket,",
+    "because a decision gets made on it.",
+    "",
+    "**One ticket per session.** Post the answer as this ticket's resolution",
+    "comment, **close** it, and append the one-line gist to the map's",
+    "decisions. If what you found is a decision that is hard to reverse or",
+    "carries a real trade-off, record it as an ADR at decision time.",
+    "",
+    "**Do not write the destination artifact.** No requirements, no PRD, no",
+    "phase file, and no application code: the map produces decisions, and what",
+    "it is finding its way to gets written once the whole effort closes.",
+    "",
+    outcomeBlock(
+      "you settled the question — or established that it cannot be settled " +
+        "from the sources — and posted the answer on the ticket.",
+      "you cannot resolve this one without asking somebody. Follow it with " +
+        "the one thing you need to know.",
+    ),
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
+  ].join("\n");
+}
+
+/**
+ * Stage 9: work out what a bug report actually means, and propose what to do
+ * about it.
+ *
+ * **It diagnoses; it never treats.** The record is committed and gated, and
+ * the human's approval is what dispatches it into planning — the same shape as
+ * the specification gate, and for the same reason: a machine that both decides
+ * what is wrong and fixes it has no step where anybody could disagree.
+ *
+ * **Not the road a review comment takes.** A concrete change-requesting
+ * comment on an open pull request is already the human's confirmation, and its
+ * fix rides the verify-fix shape through `remediation`
+ * ([ADR-0016](../../doc/adr/0016-review-remediation-rides-the-verify-fix-shape.md)).
+ * Nothing routes such a comment here.
+ */
+function feedbackPrompt(context: PromptContext): string {
+  const { ticket, branch } = context;
+
+  return [
+    `Work out what ticket #${ticket.number} on **${context.project.name}** is really reporting, and what should be done about it.`,
+    "",
+    ticketBlock(context),
+    feedbackBlock(context.feedback),
+    "",
+    reentryBlock(),
+    "",
+    `**Work on the branch \`${branch ?? "the run's work branch"}\`**, cut from the`,
+    "project's default branch — create it if it does not exist, and do all of",
+    "this stage's work there. Nothing goes on the default branch.",
+    "",
+    "Run stage 9 for this ticket. **The ticket itself is the feedback source**",
+    "— its body and its thread are the intake, and its items are exactly what",
+    "they raise. Anything else you notice while reading is surfaced, never",
+    "acted on.",
+    "",
+    "Work out, for each item, which layer it belongs to: the intent changed,",
+    "what was built does not match what was agreed, or the record is simply",
+    "wrong. That classification is the work. Where correcting a committed",
+    "document is the whole fix, make that correction here and say so.",
+    "",
+    "**Commit the feedback record on that branch and push it.** Committed and",
+    "pushed are not the same claim: a record that exists only here is invisible",
+    "to the person who has to read it, and this stage is not finished until it",
+    "is on the remote.",
+    "",
+    "**Propose, and stop there.** Write no phase file, no requirements and no",
+    "application code — what happens next is the human's to allow, and the",
+    "machinery asks them immediately after you.",
+    "",
+    "Then post one comment on the ticket saying, in plain words, what you think",
+    "went wrong and what you would do about it — the substance, not a file",
+    "listing. Do **not** ask them to approve it and do not invent an approval",
+    "instruction: the machinery posts the approval request itself, immediately",
+    "after yours, and two different sets of instructions would tell them two",
+    "different things.",
     "",
     writingBlock(),
     "",
