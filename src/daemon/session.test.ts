@@ -477,15 +477,15 @@ describe("routing after triage", () => {
     expect(comments.at(-1)?.body).toMatch(/question rather than something to build/i);
   });
 
-  it("sends a bug to the stage that acts on it, and gates what it finds", async () => {
-    // ✏ The inverse of what this asserted until phase 27. A bug used to reach
-    // `feedback`, find nothing there, and park for the life of the ledger —
-    // one of stage 1's four classifications routed into nothing at all. Now it
-    // runs the stage and stops on the diagnosis, which is a question the human
-    // can actually answer.
+  it("sends a bug to planning, with nothing left to ask about", async () => {
+    // ✏ Rewritten twice in one day, and the second rewrite is the ruling. Phase
+    // 27 sent a bug to a diagnosis stage that gated its findings; ADR-0036
+    // retired that stage, because working out what a report really is belongs
+    // to triage and triage now reads the documents. So a `bug` label means the
+    // code breaks a promise that is written down, and that is ready to plan.
     const store = newStore();
-    const { adapter, comments } = fakeAdapter();
-    const { runtime } = classifyingRuntime("bug", adapter);
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = classifyingRuntime("bug", adapter);
     const run = pickedUpRun(store);
 
     await new AgentSessionSpawner({
@@ -497,12 +497,8 @@ describe("routing after triage", () => {
       repoProbe: movingProbe(),
     }).spawn(run, project);
 
-    const parked = store.get(run.id);
-    expect(parked?.status).toBe("parked");
-    expect(parked?.stage).toBe("feedback");
-    expect(parked?.waitingKind).toBe("gate");
-    expect(comments.at(-1)?.body).toMatch(/what I need from you/i);
-    expect(comments.at(-1)?.body).not.toMatch(/isn't built yet/i);
+    expect(store.get(run.id)?.stage).toBe("planning");
+    expect(requests.at(-1)?.prompt).toContain("phase");
   });
 
   it("fails loudly when triage recorded no classification at all", async () => {
@@ -1381,9 +1377,10 @@ describe("the plan gate", () => {
     );
     const rule = (body: string) => body.trimEnd().split("\n").at(-1);
 
-    // ✏ Three since phase 27 built stage 9. Still derived from the graph, so
-    // this stays an assertion about *the gated stages*.
-    expect(bodies).toHaveLength(3);
+    // ✏ Back to two: phase 27 added stage 9's gate and ADR-0036 retired the
+    // stage. Still derived from the graph, so this stays an assertion about
+    // *the gated stages*.
+    expect(bodies).toHaveLength(2);
     expect(new Set(bodies.map(rule)).size).toBe(1);
     expect(rule(bodies[0])).toMatch(/isn't `approve`/);
     for (const body of bodies) {
@@ -3658,70 +3655,4 @@ describe("the two stages phase 27 built", () => {
     });
   });
 
-  describe("looking into what went wrong", () => {
-    it("gates the diagnosis rather than acting on it", async () => {
-      // The stage diagnoses; it never treats. What stands between a diagnosis
-      // and a build is the human, exactly as with a specification.
-      const store = newStore();
-      const { adapter, comments } = fakeAdapter(ticketLabelled("triage:bug"));
-      const { runtime } = closingRuntime(adapter, STAGE_DONE_MARKER);
-      const run = pickedUpRun(store);
-
-      await new AgentSessionSpawner({
-        manifest,
-        store,
-        adapter,
-        runtime,
-        root: "/root",
-        repoProbe: movingProbe(),
-      }).spawn(run, project, { stage: "feedback" });
-
-      const parked = store.get(run.id);
-      expect(parked?.status).toBe("parked");
-      expect(parked?.waitingKind).toBe("gate");
-      expect(comments.at(-1)?.body).toContain("I've had a look at what went wrong.");
-    });
-
-    it("holds its project while the diagnosis is being read", async () => {
-      // It writes the record, so it owns a branch — and a branch is what makes
-      // a parked run keep its project.
-      const store = newStore();
-      const { adapter } = fakeAdapter(ticketLabelled("triage:bug"));
-      const { runtime } = closingRuntime(adapter, STAGE_DONE_MARKER);
-      const run = pickedUpRun(store);
-
-      await new AgentSessionSpawner({
-        manifest,
-        store,
-        adapter,
-        runtime,
-        root: "/root",
-        repoProbe: movingProbe(),
-      }).spawn(run, project, { stage: "feedback" });
-
-      expect(store.get(run.id)?.branch).toBeDefined();
-      expect(store.occupyingRun("scratch-app")?.id).toBe(run.id);
-    });
-
-    it("fails rather than gating over a branch it committed nothing to", async () => {
-      // The one failure a gate must never have: a reply of `approve` would
-      // advance the pipeline past a step nobody did.
-      const store = newStore();
-      const { adapter, comments } = fakeAdapter(ticketLabelled("triage:bug"));
-      const { runtime } = closingRuntime(adapter, STAGE_DONE_MARKER);
-      const run = pickedUpRun(store);
-
-      await new AgentSessionSpawner({
-        manifest,
-        store,
-        adapter,
-        runtime,
-        root: "/root",
-        repoProbe: async () => "sha-unchanged",
-      }).spawn(run, project, { stage: "feedback" });
-
-      expect(store.get(run.id)?.status).toBe("failed");
-      expect(comments.at(-1)?.body).not.toContain("I've had a look at what went wrong.");
-    });
-  });
 });

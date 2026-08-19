@@ -134,14 +134,13 @@ flowchart TD
 
     TR -->|feature| CL["clarification<br/><i>asking what you need</i>"]
     TR -->|chore| PL["planning<br/><i>preparing the work</i>"]
-    TR -->|bug| FB["feedback<br/><i>looking into what went wrong</i>"]
+    TR -->|bug| PL
     TR -->|question| ANS(["Answered — ticket closed"])
 
     CL --> RQ["requirements<br/><i>writing down what it needs</i>"]
     CH --> RQ
     WF --> ENDW(["Decision recorded — run done"])
     RS --> ENDR(["Answer posted — run done"])
-    FB -->|gate| PL
 
     RQ -->|gate| BD["breakdown<br/><i>working out the pieces</i>"]
     BD -->|gate, then merge| PL
@@ -169,7 +168,6 @@ flowchart TD
 | `verification` | checking the result | 7 | — | yes | `delivery` | yes |
 | `delivery` | delivering | 8 | review | yes | — (the PR ends it) | yes |
 | `remediation` | acting on your review | 9 | — | yes | `verification` | yes |
-| `feedback` | looking into what went wrong | 9 | gate | yes | `planning` | yes |
 
 The table is `STAGES` in `src/daemon/pipeline.ts`. It is data, not code: the
 daemon orchestrates the stage skills and never reimplements them.
@@ -177,8 +175,8 @@ daemon orchestrates the stage skills and never reimplements them.
 Every session runs on Opus 5 except `triage` (Sonnet 5) and the short
 approval-recording session (Haiku 4.5), which is not a stage.
 
-**Three gates, and only three.** The human approves the specification, approves
-the list of pieces, and approves a bug diagnosis before anything is built from it. Everything else is judged by the pull request. A gate
+**Two gates, and only two.** The human approves the specification, and approves
+the list of pieces. Everything else is judged by the pull request. A gate
 over an empty branch fails the run rather than asking for a signature on a
 blank.
 
@@ -325,10 +323,13 @@ reasoning is what stops them coming back.
 1. **One of the four triage classes went nowhere.** A `bug` routed to
    `feedback`, and `feedback` had never been built — so every bug ticket was
    triaged, advanced, and parked on *"That's as far as I can take this one for
-   now"* for ever. `research` was the same. **Fixed:** both stages are built.
-   `feedback` writes a diagnosis, commits it, and gates it; `research` answers
-   its question on the ticket and ends its own run. Every stage the graph can
-   route to now runs, and a test asserts exactly that rather than listing them.
+   now"* for ever. `research` was the same. **Fixed twice.** Phase 27 built both
+   stages. Then the live gate showed that the `feedback` stage was doing
+   triage's job with the documents open, so
+   [ADR-0036](../doc/adr/0036-feedback-is-triage-with-the-documents-open.md)
+   retired it: triage now reads before it decides, and a bug goes straight to
+   planning. `research` answers on the ticket and ends its own run. Every stage
+   the graph can route to runs, and a test asserts that rather than listing them.
 
 2. **The list of pieces was read from the working checkout** — whatever branch a
    session happened to leave behind, which is not a point in the project's

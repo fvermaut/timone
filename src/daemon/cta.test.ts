@@ -490,7 +490,6 @@ const WAIT_AT: Record<PipelineStage, Run["waitingKind"]> = {
   verification: undefined,
   delivery: "review",
   remediation: undefined,
-  feedback: undefined,
 };
 
 describe("ctaFor — every stage in the graph", () => {

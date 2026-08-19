@@ -33,7 +33,6 @@ export const PROMPTED_STAGES = [
   "verification",
   "delivery",
   "remediation",
-  "feedback",
 ] as const;
 
 export interface PromptContext {
@@ -436,8 +435,6 @@ function stageBody(
       return deliveryPrompt(context);
     case "remediation":
       return remediationPrompt(context);
-    case "feedback":
-      return feedbackPrompt(context);
   }
 }
 
@@ -924,68 +921,6 @@ function researchPrompt(context: PromptContext): string {
   ].join("\n");
 }
 
-/**
- * Stage 9: work out what a bug report actually means, and propose what to do
- * about it.
- *
- * **It diagnoses; it never treats.** The record is committed and gated, and
- * the human's approval is what dispatches it into planning — the same shape as
- * the specification gate, and for the same reason: a machine that both decides
- * what is wrong and fixes it has no step where anybody could disagree.
- *
- * **Not the road a review comment takes.** A concrete change-requesting
- * comment on an open pull request is already the human's confirmation, and its
- * fix rides the verify-fix shape through `remediation`
- * ([ADR-0016](../../doc/adr/0016-review-remediation-rides-the-verify-fix-shape.md)).
- * Nothing routes such a comment here.
- */
-function feedbackPrompt(context: PromptContext): string {
-  const { ticket, branch } = context;
-
-  return [
-    `Work out what ticket #${ticket.number} on **${context.project.name}** is really reporting, and what should be done about it.`,
-    "",
-    ticketBlock(context),
-    feedbackBlock(context.feedback),
-    "",
-    reentryBlock(),
-    "",
-    `**Work on the branch \`${branch ?? "the run's work branch"}\`**, cut from the`,
-    "project's default branch — create it if it does not exist, and do all of",
-    "this stage's work there. Nothing goes on the default branch.",
-    "",
-    "Run stage 9 for this ticket. **The ticket itself is the feedback source**",
-    "— its body and its thread are the intake, and its items are exactly what",
-    "they raise. Anything else you notice while reading is surfaced, never",
-    "acted on.",
-    "",
-    "Work out, for each item, which layer it belongs to: the intent changed,",
-    "what was built does not match what was agreed, or the record is simply",
-    "wrong. That classification is the work. Where correcting a committed",
-    "document is the whole fix, make that correction here and say so.",
-    "",
-    "**Commit the feedback record on that branch and push it.** Committed and",
-    "pushed are not the same claim: a record that exists only here is invisible",
-    "to the person who has to read it, and this stage is not finished until it",
-    "is on the remote.",
-    "",
-    "**Propose, and stop there.** Write no phase file, no requirements and no",
-    "application code — what happens next is the human's to allow, and the",
-    "machinery asks them immediately after you.",
-    "",
-    "Then post one comment on the ticket saying, in plain words, what you think",
-    "went wrong and what you would do about it — the substance, not a file",
-    "listing. Do **not** ask them to approve it and do not invent an approval",
-    "instruction: the machinery posts the approval request itself, immediately",
-    "after yours, and two different sets of instructions would tell them two",
-    "different things.",
-    "",
-    writingBlock(),
-    "",
-    "Then stop.",
-  ].join("\n");
-}
-
 /** Stage 1: work out what kind of request this is, and record it. */
 function triagePrompt(context: PromptContext): string {
   const { ticket } = context;
@@ -1002,9 +937,37 @@ function triagePrompt(context: PromptContext): string {
     "stage 1 on the raw text above — do not assume what kind of request it is,",
     "and do not act on it beyond classifying it.",
     "",
+    "**Read the project's own documents before you decide, and decide on what",
+    "you find rather than on the words the reporter used**",
+    "([ADR-0036](doc/adr/0036-feedback-is-triage-with-the-documents-open.md) D2).",
+    "Open the criteria register and the PRD narrative, the delivery and",
+    "verification reports for the work the request touches, and the history of",
+    "the files it points at. Read what the request cites and what you need in",
+    "order to judge it — do not go looking through the project for problems",
+    "nobody reported.",
+    "",
+    "**This is the whole of the classification, and the three kinds are defined",
+    "by what the documents say** (ADR-0036 D3):",
+    "",
+    "- A complaint that something is missing, slow, awkward or absent, where",
+    "  **no criterion promises it**, is a `feature`. Nothing is broken — the",
+    "  promise was never made. This is the one people most often file as a bug.",
+    "- A complaint that the software does not do what a criterion **actually",
+    "  says**, quoted, is a `bug`. Name the criterion in your rationale. If you",
+    "  cannot name one, it is not a bug.",
+    "- A complaint that a committed document is **wrong** — a register, a",
+    "  report, a standard — is a `chore`, and what gets fixed is the document.",
+    "- A question that wants an answer rather than a change is a `question`.",
+    "",
+    "A report that was filed as a bug and turns out to be a feature is a normal",
+    "outcome and is what this reading is for. Say so plainly in your rationale,",
+    "including when it contradicts an earlier comment on the ticket — a wrong",
+    "classification left standing sends real work down the wrong road.",
+    "",
     "Record the outcome the way the process requires: the classification and its",
     `rationale as a comment on ticket #${ticket.number}, and a \`triage:<kind>\` label`,
-    "on the issue.",
+    "on the issue. **Say what you read**, so the person can see the answer came",
+    "from the documents rather than from a guess.",
     "",
     writingBlock(),
     "",

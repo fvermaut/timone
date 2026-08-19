@@ -47,7 +47,7 @@ Name one yourself when you want to (`/timone-<stage> <project> …`); otherwise 
 | # | Skill | What it does |
 |---|-------|--------------|
 | 0 | `timone-onboard` | register, clone, doc tree, overview, founding ADRs |
-| 1 | `timone-triage` | classify a request and route it |
+| 1 | `timone-triage` | read the project's documents, classify a request and route it |
 | 2 | `timone-grill` / `timone-wayfind` | requirements interview — one sitting, or a map of questions |
 | 3 | `timone-prd` | persist the PRD pair (narrative + criteria register) |
 | 4 | `timone-adr` | record an architecture decision |
@@ -55,7 +55,6 @@ Name one yourself when you want to (`/timone-<stage> <project> …`); otherwise 
 | 6 | `timone-execute` | build the phase, TDD, slice by slice |
 | 7 | `timone-verify` | check observable behaviour against the criteria |
 | 8 | `timone-deliver` | two-axis review, then open the pull request |
-| 9 | `timone-improve` | triage feedback, amend or correct, dispatch the rest |
 
 Plus two cross-cutting utilities: `timone-prototype` (something clickable to react to) and `timone-handover` (resume in a fresh session).
 

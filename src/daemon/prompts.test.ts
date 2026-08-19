@@ -145,6 +145,34 @@ describe("the triage prompt", () => {
     expect(stagePrompt("triage", { project, ticket })).toContain("triage:<kind>");
   });
 
+  it("tells the session to read the project's documents before deciding", () => {
+    // ADR-0036 D2. This is what stage 9 used to do, and deleting that stage
+    // without this leaves nothing in the process that ever opens the register.
+    const prompt = stagePrompt("triage", { project, ticket });
+
+    expect(prompt).toMatch(/criteria register/i);
+    expect(prompt).toMatch(/before you decide/i);
+  });
+
+  it("carries the three definitions a classification now turns on", () => {
+    // D3. A complaint about a promise nobody made is a feature, a wrong
+    // document is a chore, and only a break from a written promise is a bug.
+    const prompt = stagePrompt("triage", { project, ticket });
+
+    expect(prompt).toMatch(/no criterion promises it/i);
+    expect(prompt).toMatch(/cannot name one, it is not a bug/i);
+    expect(prompt).toMatch(/committed document is/i);
+  });
+
+  it("expects a bug report to turn out to be something else, and says so", () => {
+    // The failure this replaces: scratch-app #4 was called a bug in August on
+    // a misreading of the register, and nothing revisited it for 17 days.
+    const prompt = stagePrompt("triage", { project, ticket });
+
+    expect(prompt).toMatch(/filed as a bug and turns out to be a feature/i);
+    expect(prompt).toMatch(/contradicts an earlier comment/i);
+  });
+
   it("does not send the session past its own stage", () => {
     expect(stagePrompt("triage", { project, ticket })).toMatch(
       /do not act on it beyond classifying/i,

@@ -49,7 +49,7 @@ Each gate stops the skill. When one fires you write **no phase file**, state whi
 **Anchoring gate.** Feature work must be anchored to requirement IDs. Three cases:
 
 - **No PRD coverage** — user-visible behaviour the PRD doesn't cover → stop. Route to `timone-grill` when the requirements are genuinely unresolved (open branches: unanswered behaviour questions, undecided edge cases, no agreed acceptance criteria) or to `timone-prd` when they are settled and merely unwritten. When a triage record exists, its rationale usually already says which — prefer it over your own guess; absent any signal, prefer `timone-grill`, since grilling a clear requirement is cheap and persisting an unclear one is not.
-- **Scope contradicts existing requirements** — the request is named in the PRD's out-of-scope list, or reverses an active criterion → stop. This is an intent change, not a gap, and intent changes amend the PRD before any code moves: route to `timone-improve` (stage 9). Never plan work that contradicts an active MUST.
+- **Scope contradicts existing requirements** — the request is named in the PRD's out-of-scope list, or reverses an active criterion → stop. This is an intent change, not a gap, and intent changes amend the PRD before any code moves: route to `timone-prd` (stage 3), which owns the amendment. Never plan work that contradicts an active MUST.
 - **PRD exists but is not `Active`** — the narrative's status line still reads `Draft` → stop. Stage 3's gate is "human approves the requirement list; PRD becomes Active", so a Draft PRD means that gate never closed and the requirements are not ratified. Route to `timone-prd` to close it. (Do not confuse this with the *requirement-level* `Status: draft` in the criteria register — that means "not yet verified" and is the normal state of unbuilt work. The narrative's status is the one that gates planning.)
 - **Covered** — quote the IDs and proceed.
 
@@ -215,7 +215,7 @@ Per the spec's amendment rule (stage 5), plans are amended in place, never silen
 
 > ✏ Refined <date>: <what changed and why.>
 
-Sub-phases added mid-phase keep the next free letter and carry the same marker inline. Scope that grows beyond an amendment is a new phase, not a bigger one; post-delivery plan changes belong to `timone-improve` (stage 9), not here.
+Sub-phases added mid-phase keep the next free letter and carry the same marker inline. Scope that grows beyond an amendment is a new phase, not a bigger one; a post-delivery plan change is a fresh ticket through stage 1, not a bigger phase here.
 
 
 ## Commit provenance
