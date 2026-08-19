@@ -1,15 +1,17 @@
 # Phase 27 — Live Gate Report
 
-- **Date:** 2026-08-19, 17:08Z – 17:15Z
+- **Date:** 2026-08-19, 17:08Z – 17:26Z
 - **Plan:** [phase-27.md](../phase-27.md) — 27a, the only sub-phase that earns a gate
 - **Fixture:** `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4). **`ivtrends` was not touched** — every cycle ran with `--manifest` naming `scratch-app` alone.
-- **Cost:** $2.32, one session, 6m22s working, 21 turns, Opus 5.
+- **Cost:** $2.32 for the diagnosis session (6m22s, 21 turns, Opus 5), plus the approval-record and planning sessions of the second half.
 
 **The ticket is not machine-typed.** #4 was filed as an ordinary bug report on 2026-08-02 and triaged as one. Nothing about it was staged for this gate, and it had been stuck for seventeen days at the exact stop this phase exists to clear. That is what makes it worth running.
 
 ## Outcome in one line
 
-**27a works, up to the gate.** A bug ticket that no version of this machine could act on was picked up, diagnosed, committed and put in front of the human as a question they can answer. The half that is not observed is the half only fvermaut can give: the approval, and the planning session that follows it.
+**27a works, and the second half found a real gap in it.** A bug ticket that no version of this machine could act on was picked up, diagnosed, committed and put in front of the human as a question they could answer. fvermaut approved it. The run then advanced to the wrong stage — and the stage refused, correctly, and said why in plain words.
+
+So both halves are now observed, and the honest summary is: **the road out of the bug classification exists and works; where it points is wrong for one of the three layers stage 9 can find.**
 
 ## Two deviations, stated up front
 
@@ -53,9 +55,44 @@ One file, [`doc/feedback/005-the-page-feels-slow.md`](https://github.com/fvermau
 
 The comment it wrote for the human says that in four sentences, admits the earlier error as its own, and flags its proposed numbers — *"with 100 to-dos on the page, a tick shows within a fifth of a second"* — as its guess and not fvermaut's.
 
-## What is not observed
+## Second half — the approval, and the gap it exposed
 
-**The approval, and what follows it.** Approving is the judgement this gate exists to obtain, and it is not this session's to give. What that would exercise is `readGate("feedback", approve) → planning`, which the unit suite covers and no live run has.
+**fvermaut replied `approve` at 17:22:26Z**, at his own keyboard. His own daemon — restarted by him, running this branch's build — read it on its next cycle. Nothing here was driven by this session.
+
+**Predicted before the resume, and written down before it ran:**
+
+> The diagnosis's own recommendation is two steps: amend PRD-01 with a new R8 *first*, then plan and build anchored on it. The graph's `next` after `feedback` is `planning`. So the run goes straight to writing a phase file, against a criterion that does not exist.
+
+**Observed, in order:**
+
+1. The gate read the approval and a short session stamped it into the artifact — commit `5f2b1b2`, *"Record approval on feedback 005"*.
+2. The run advanced to **`planning`**, skipping stage 3. The prediction held.
+3. **The planning session refused and escalated.** No phase file was written; the branch still carries two commits and neither is a plan.
+
+Its own words on the ticket, unprompted:
+
+> I am the part that works out how to build things. I am not allowed to write requirements. That split is deliberate: what the app promises and how it gets built must not be decided in the same pass. The requirements file still says nothing about speed. If I planned the work now, I would be planning against a promise that only exists in a note, and the check at the end would have nothing to measure the result against.
+>
+> Nothing is wrong with your answer. Answering again will not move it — you already said the right thing. The writing-down step simply never ran, and it has to run before me.
+
+That is the failure the feedback record had argued against three hours earlier, in almost the same terms: *"the code work would have been built against a standard nobody agreed to, and finished against a threshold nobody set."*
+
+### The finding
+
+**`feedback`'s `next: "planning"` is wrong for an intent-layer item.** Stage 9 sorts feedback into three layers, and only one of them — an implementation gap — is ready for stage 5. An intent change owes stage 3 first, and a record-is-wrong item may owe nothing at all.
+
+**27a is incomplete, not wrong.** The road out of the `bug` classification exists and every step of it works. It points one stage too far along for one of the three layers.
+
+**Two ways to close it, and choosing is a decision rather than a detail:**
+
+- **Route by layer.** `feedback` would have to record which layer it found somewhere the daemon can read, and the graph would branch on it — the shape `routeAfterTriage` already has.
+- **Always route to `requirements`.** Simpler and one road; it costs a stage-3 session on every remediation, including the ones that change no intent at all.
+
+**Not fixed in this phase.** It is fvermaut's call, and the run is parked safely in the meantime.
+
+### What the escalation is worth on its own
+
+ADR-0033's guard was built for a stage handed an *answer* it may not act on. This is the first time it has caught a **routing** mistake — the machinery sending a stage work that belongs to another stage — and it caught it before anything was written, explained it to the human without process vocabulary, and told them the one command that moves it. The graph was wrong and the ticket still said something true and actionable.
 
 ## Smaller observations
 
