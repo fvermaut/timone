@@ -101,6 +101,23 @@ export type WaitKind = "gate" | "conversation" | "review" | "escalation" | "none
 interface StageFacts {
   /** The stage of `process.md` this is, for anyone comparing the two. */
   processStage: number;
+  /**
+   * What this step is called when a person is told about it — in `timone
+   * status`, and in the note an escalation session writes to say where the
+   * work carries on ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
+   * D3).
+   *
+   * **It lives here so it cannot be partial.** It was a map in `status.ts`
+   * covering five stages of thirteen, which was survivable while nothing read
+   * it back; a name the machinery *parses* has to exist for every stage and
+   * name exactly one. Being a field of this table makes the first true by
+   * construction — the compiler will not accept a stage without one — and
+   * {@link stageFromLabel} carries the second.
+   *
+   * Written for someone who has never heard of this process: never the
+   * stage's own name, never a number.
+   */
+  label: string;
   /** What the run waits on when the stage's session finishes. */
   waits: WaitKind;
   /**
@@ -191,6 +208,7 @@ export const APPROVAL_RECORD_MODEL = "claude-haiku-4-5";
 const STAGES: Record<PipelineStage, StageSpec> = {
   triage: {
     processStage: 1,
+    label: "sorting the request",
     waits: "none",
     ownsBranch: false,
     built: true,
@@ -204,6 +222,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
   },
   clarification: {
     processStage: 2,
+    label: "asking what you need",
     waits: "conversation",
     ownsBranch: false,
     built: true,
@@ -223,6 +242,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // what it produces is a decision — never a slice of a build, which is why
     // it owns no branch.
     processStage: 2,
+    label: "talking a question through",
     waits: "conversation",
     ownsBranch: false,
     built: true,
@@ -243,6 +263,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // emphatically not on `wayfinding`, where it would write a specification
     // off a single decision ticket's answer.
     processStage: 2,
+    label: "keeping the list of questions",
     // The go-ahead is an ordinary written answer, read exactly as any other
     // (ADR-0022's path, unchanged): "say go and I'll write the specification".
     // Not a gate — a gate is an approval of something already written, and
@@ -264,6 +285,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // The one wayfinder type nobody waits on: its own CTA says "nothing —
     // I'm resolving this one myself and will post what I find here".
     processStage: 2,
+    label: "looking something up",
     waits: "none",
     ownsBranch: false,
     // **Not built, and that is the honest word rather than a placeholder.**
@@ -281,6 +303,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
   },
   requirements: {
     processStage: 3,
+    label: "writing down what it needs",
     waits: "gate",
     ownsBranch: true,
     built: true,
@@ -297,6 +320,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // same reason, so the mapping being many-to-one is the precedent, not the
     // exception.
     processStage: 5,
+    label: "working out the pieces",
     waits: "gate",
     // Chunk zero's branch, inherited rather than cut: `claimBranch` returns
     // early when the run already has one, so this costs nothing and keeps the
@@ -312,6 +336,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
   },
   planning: {
     processStage: 5,
+    label: "preparing the work",
     // ✏ Ungated since ADR-0030 D1. The plan the human approved is the
     // breakdown; this stage writes one chunk's phase file per visit, and a
     // gate here would ask them again about work they have already said yes to
@@ -327,6 +352,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
   },
   execution: {
     processStage: 6,
+    label: "building",
     waits: "none",
     ownsBranch: true,
     built: true,
@@ -338,6 +364,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
   },
   verification: {
     processStage: 7,
+    label: "checking the result",
     waits: "none",
     ownsBranch: true,
     built: true,
@@ -348,6 +375,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
   },
   delivery: {
     processStage: 8,
+    label: "delivering",
     waits: "review",
     ownsBranch: true,
     built: true,
@@ -362,6 +390,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // confirmed intake, and its fix rides the verify-fix shape — so what
     // follows a remediation is a full verification, then re-delivery.
     processStage: 9,
+    label: "acting on your review",
     waits: "none",
     ownsBranch: true,
     built: true,
@@ -372,6 +401,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
   },
   feedback: {
     processStage: 9,
+    label: "looking into what went wrong",
     waits: "none",
     ownsBranch: false,
     built: false,
@@ -493,6 +523,31 @@ export function routeAfterTriage(kind: Classification): PipelineTransition {
 /** The stage that follows `stage`, or undefined at the end of the line. */
 export function stageAfter(stage: PipelineStage): PipelineStage | undefined {
   return STAGES[stage].next;
+}
+
+/**
+ * What this step is called when a person is told about it. Total: every stage
+ * has one, and the compiler enforces it.
+ */
+export function stageLabel(stage: PipelineStage): string {
+  return STAGES[stage].label;
+}
+
+/**
+ * The stage a plain name refers to, or undefined when no stage answers to it
+ * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
+ * D3).
+ *
+ * **Forgiving about how it was typed, exact about which words.** A session
+ * writing `Building` means the same step; one writing `build` means nothing
+ * anybody defined, and the undefined is the answer — a caller that guessed
+ * would start a session at the wrong step, on a branch carrying half-built
+ * work.
+ */
+export function stageFromLabel(label: string): PipelineStage | undefined {
+  const wanted = label.trim().toLowerCase();
+  if (wanted === "") return undefined;
+  return PIPELINE_STAGES.find((stage) => STAGES[stage].label === wanted);
 }
 
 /** What a run at `stage` waits for once the stage's work is done. */

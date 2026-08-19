@@ -14,6 +14,8 @@ import {
   ownsBranch,
   processStage,
   readGate,
+  stageFromLabel,
+  stageLabel,
   routeAfterTriage,
   runsUnattended,
   stageAfter,
@@ -489,6 +491,70 @@ describe("concludeConversation", () => {
     expect(() => concludeConversation("requirements", { accepted: true })).toThrow(
       /requirements/,
     );
+  });
+});
+
+describe("one name per step, in one place", () => {
+  // ADR-0035 D3. The name a person reads for a step is now read *back* by the
+  // machinery — an escalation session names the step to carry on at, in these
+  // words — so the map has to be total and unambiguous. It was neither: it
+  // lived in `status.ts` and covered five stages of thirteen.
+
+  it("gives every stage a name written for a person", () => {
+    // A loop rather than a list, so a stage added later cannot quietly ship
+    // without one.
+    for (const stage of PIPELINE_STAGES) {
+      expect(stageLabel(stage)).not.toBe("");
+      expect(stageLabel(stage).trim()).toBe(stageLabel(stage));
+    }
+  });
+
+  it("round-trips every name back to its own stage", () => {
+    for (const stage of PIPELINE_STAGES) {
+      expect(stageFromLabel(stageLabel(stage))).toBe(stage);
+    }
+  });
+
+  it("gives no two stages the same name", () => {
+    // Uniqueness is what makes the round trip a fact rather than a hope: two
+    // stages sharing a name is a handback that starts the wrong one.
+    const labels = PIPELINE_STAGES.map((stage) => stageLabel(stage));
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("yields nothing for a name nobody defined", () => {
+    // The refusal ADR-0035 D3 asks for. Guessing here starts a session at the
+    // wrong step on a branch of half-built work.
+    expect(stageFromLabel("whatever")).toBeUndefined();
+    expect(stageFromLabel("")).toBeUndefined();
+    expect(stageFromLabel("   ")).toBeUndefined();
+  });
+
+  it("forgives the case and the spacing a session writes it with", () => {
+    // Forgiving about how it was typed, exact about which words: a session
+    // writing "Building" means the same step, and one writing "build" does
+    // not mean anything.
+    expect(stageFromLabel("  Building  ")).toBe("execution");
+    expect(stageFromLabel("BUILDING")).toBe("execution");
+    expect(stageFromLabel("build")).toBeUndefined();
+  });
+
+  it("keeps the five names `timone status` already shipped", () => {
+    // Not a rewrite of what a person has already learned to read.
+    expect(stageLabel("execution")).toBe("building");
+    expect(stageLabel("verification")).toBe("checking the result");
+    expect(stageLabel("delivery")).toBe("delivering");
+    expect(stageLabel("remediation")).toBe("acting on your review");
+    expect(stageLabel("breakdown")).toBe("working out the pieces");
+  });
+
+  it("names no step in the words the process uses for itself", () => {
+    // R9 and `process.md`'s writing rule: these reach a person, on a ticket
+    // and in the terminal. "triage" and "remediation" are not words this
+    // reader has.
+    for (const stage of PIPELINE_STAGES) {
+      expect(stageLabel(stage)).not.toContain(stage);
+    }
   });
 });
 

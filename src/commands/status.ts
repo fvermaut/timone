@@ -4,7 +4,7 @@ import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
 import { ctaFor, type Cta, type InitiativeProgress } from "../daemon/cta.js";
-import { modelFor, type PipelineStage } from "../daemon/pipeline.js";
+import { modelFor, stageLabel } from "../daemon/pipeline.js";
 import { checkoutOf, initiativeProgress } from "../daemon/poll.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 
@@ -17,17 +17,6 @@ const RUNNING = ["picked-up", "active"];
  * back half earns a phrase, because "execution" answers less than "building"
  * for the reader this command exists for.
  */
-const STAGE_LABELS: Partial<Record<PipelineStage, string>> = {
-  // The one stage whose bare name reads as the opposite of what it is: to
-  // someone glancing at a status line, "breakdown" is a thing that has gone
-  // wrong, not a session working out how to cut the job up.
-  breakdown: "working out the pieces",
-  execution: "building",
-  verification: "checking the result",
-  delivery: "delivering",
-  remediation: "acting on your review",
-};
-
 export interface RenderStatusOptions {
   /** False when the daemon has never written a state file. */
   stateExists: boolean;
@@ -157,7 +146,7 @@ function describeWait(run: Run, context: RenderContext): string {
 function describeRun(run: Run, context: RenderContext): string {
   const now = context.now;
   const stage =
-    run.stage === undefined ? "" : ` (${STAGE_LABELS[run.stage] ?? run.stage})`;
+    run.stage === undefined ? "" : ` (${stageLabel(run.stage)})`;
   // The model is named for a working run only: it answers "what is this
   // costing me right now", which is not a question about a parked one.
   const model =

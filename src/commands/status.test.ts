@@ -7,6 +7,7 @@ import type { Manifest } from "../manifest.js";
 import { breakdownPath } from "../daemon/breakdown.js";
 import { ctaComment, ctaFor } from "../daemon/cta.js";
 import { checkoutOf, initiativeProgress, reclaimedReason } from "../daemon/poll.js";
+import { stageLabel } from "../daemon/pipeline.js";
 import { runId, type Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
 
@@ -97,14 +98,20 @@ describe("renderStatus", () => {
     expect(lineFor(output, "other-app")).toMatch(/idle/i);
   });
 
-  it("shows the active ticket and the stage it reached", () => {
+  it("shows the active ticket and the step it reached, in words a person has", () => {
     const runs = [
       run({ project: "scratch-app", ticket: 7, status: "active", stage: "triage" }),
     ];
     const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
 
     expect(line).toMatch(/#7/);
-    expect(line).toMatch(/triage/);
+    // It said "triage" until 2026-08-19. Eight of thirteen steps had no plain
+    // name and fell back on their own spelling, which is the process talking
+    // to itself on the one surface written for someone who knows none of it
+    // (R9). Now every step has one, because a session has to be able to name
+    // a step back to the machinery (ADR-0035 D3) and a partial map cannot.
+    expect(line).toContain(stageLabel("triage"));
+    expect(line).not.toMatch(/triage/);
   });
 
   it("names who is waited on, and what for, when a run is parked", () => {
