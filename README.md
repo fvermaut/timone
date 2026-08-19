@@ -8,6 +8,7 @@
 - **Driven by tickets.** A daemon watches the managed projects' issue trackers, picks up tickets carrying the `timone` label, and walks them through the process. You never name a stage or a skill — write the ticket in plain language.
 - **You are asked, never assumed.** A ticket waiting on you says so and says what to do about it: reply on the ticket, or run the `timone takeover` line it hands you. **Merging stays yours.**
 - **Everything is traceable.** Every commit Timone makes ends with `Timone-Stage:`, `Timone-Session:` and, when a ticket drove it, `Timone-Run: <project>#<ticket>` — so auditing a repo is a `git log --grep` away.
+- **Every state is written down.** [doc/daemon-state-machine.md](doc/daemon-state-machine.md) draws what the daemon does: the states a piece of work can be in, the moves between them, and what makes it move.
 - **Client repos receive only process artifacts** (`doc/…`, `CONTEXT.md`). Harness files never leave this repository.
 
 Sessions always run at the timone repo root, never inside a managed project ([ADR-0007](doc/adr/0007-sessions-at-timone-root.md)).
