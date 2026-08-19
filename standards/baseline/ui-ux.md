@@ -2,7 +2,7 @@
 
 > **Tier: BASELINE — applies to every managed project, no selection, no opt-out.**
 > **Status: Approved 2026-07-19 (fvermaut).**
-> ⚠ **Amended 2026-08-19 — AWAITING APPROVAL.** The *Reading a screen of figures* section below is a draft: it is the craft this entry has never carried, and its absence is why nothing in the pipeline could fail [ivtrends#22](https://github.com/fvermaut/ivtrends/pull/22) on how it looked ([ADR-0039](../../doc/adr/0039-the-look-is-gated-twice.md)). **Only the sections above and below it are normative until fvermaut approves.** Its rules are derived from the `ivtrends` evidence rather than from primary sources; the sources are owed before approval.
+> ✏ Amended 2026-08-19, **approved 2026-08-19 (fvermaut)**: the *Reading a screen of figures* section. It is the craft this entry has never carried, and its absence is why nothing in the pipeline could fail [ivtrends#22](https://github.com/fvermaut/ivtrends/pull/22) on how it looked ([ADR-0039](../../doc/adr/0039-the-look-is-gated-twice.md)). Its rules are derived from the `ivtrends` evidence; **primary sources are still owed** and tracked as [timone#39](https://github.com/fvermaut/timone/issues/39) — the section is normative meanwhile.
 > ✏ Amended 2026-07-26, approved 2026-07-26: the disabled-in-flight rule is scoped to controls whose repeat activation is *unintended*. As written it collided with [baseline/accessibility.md](accessibility.md) — measurably, executing `scratch-app` phase 01 — since disabling a focused control blurs it and focus never returns (WCAG 2.4.3).
 
 Cross-project UI/UX invariants (Next.js/React). Project-specific design systems live in each project's `doc/standards.md`. Accessibility is governed by [baseline/accessibility.md](accessibility.md), not restated here.
@@ -16,8 +16,6 @@ Loading, empty, error, and partial-data states are acceptance criteria for every
 - **Error:** say what happened and what to do next, in the user's language — never a raw exception, bare status code, or stack trace ([NN/g, Error-Message Guidelines](https://www.nngroup.com/articles/error-message-guidelines/)). Every fetch-level error offers retry; a failed mutation never destroys what the user typed.
 
 ## Reading a screen of figures
-
-> ⚠ **Draft, awaiting approval — see the header.** Primary sources owed.
 
 Every rule above is behavioural and machine-checkable. None of them is about whether a screen can be *read*, which is why a board of 520 rows could pass the whole baseline and be rejected on sight.
 
