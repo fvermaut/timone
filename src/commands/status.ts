@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
+import {
+  fromDefaultBranch,
+  type BreakdownSource,
+} from "../daemon/breakdown.js";
 import { ctaFor, type Cta, type InitiativeProgress } from "../daemon/cta.js";
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
 import { checkoutOf, initiativeProgress } from "../daemon/poll.js";
@@ -33,6 +37,17 @@ export interface RenderStatusOptions {
    * run at the root (ADR-0007) — so this is a fixture's answer, not a user's.
    */
   root?: string;
+  /**
+   * Where that list is read from. Defaults to the project's default branch,
+   * which is the only place an approved breakdown is guaranteed to be
+   * (ADR-0030 D2) — and, since phase 27, the only place either surface looks.
+   *
+   * **Injected for the same reason `root` is**: a fixture hands over a plain
+   * directory. The command supplies nothing, so it takes the default, which
+   * keeps R21 clause 8 true — the terminal and the ticket read the same file
+   * from the same ref.
+   */
+  breakdownSource?: BreakdownSource;
 }
 
 /**
@@ -62,6 +77,7 @@ interface RenderContext {
 function progressReader(
   runs: readonly Run[],
   root: string | undefined,
+  source: BreakdownSource | undefined,
 ): (run: Run) => InitiativeProgress | undefined {
   if (root === undefined) return () => undefined;
 
@@ -74,7 +90,12 @@ function progressReader(
       );
       cache.set(
         key,
-        initiativeProgress(checkoutOf(root, run.project), run.ticket, chunks),
+        initiativeProgress(
+          checkoutOf(root, run.project),
+          run.ticket,
+          chunks,
+          source ?? fromDefaultBranch,
+        ),
       );
     }
     return cache.get(key);
@@ -221,7 +242,7 @@ export function renderStatus(
   // once however many of its runs and closing lines mention it.
   const context: RenderContext = {
     now: options.now,
-    progressOf: progressReader(runs, options.root),
+    progressOf: progressReader(runs, options.root, options.breakdownSource),
   };
 
   const width = Math.max(...names.map((name) => name.length), 0);

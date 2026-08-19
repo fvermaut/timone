@@ -1261,6 +1261,40 @@ export class AgentSessionSpawner implements SessionSpawner {
       }));
     }
 
+    // ✏ Built since phase 27, and it needs a branch here for the reason the
+    // fall-through below spells out: it is wait-free, so without one it lands
+    // on triage's judgement, which reads a `triage:` label off the ticket — and
+    // a wayfinder ticket carries none, so every research run would die on
+    // "triage recorded no classification". That is precisely the defect that
+    // kept this stage declared `built: false` for three phases.
+    //
+    // **Nothing follows it, so an advance ends the run.** A research answer
+    // resolves its own ticket and feeds the map (ADR-0010); the map's own
+    // ticket is what hands stage 2's outcome to stage 3.
+    //
+    // **The outcome marker is the whole of the evidence, and legitimately so.**
+    // Every other unattended stage is judged against an artifact on a branch,
+    // because it owes one. This stage owes an *answer on the ticket*, and the
+    // marker is a comment on that ticket — `readStageOutcome` only sees one
+    // that Timone posted after this session began. There is nothing else to
+    // check that would not be checking the same comment twice.
+    if (stage === "research") {
+      if (outcome?.kind === "handed-to-human") {
+        handBack(store, run.id, stage, outcome, this.log.bind(this));
+        return undefined;
+      }
+      if (outcome?.kind === "advanced") {
+        store.complete(run.id);
+        this.log(`done   ${run.id} — ${stage} answered it`);
+        return undefined;
+      }
+      const reason = `the ${stage} stage ended without recording an outcome`;
+      store.fail(run.id, reason);
+      await adapter.postComment(project, run.ticket, failedComment(reason));
+      this.log(`failed ${run.id} — ${reason}`);
+      return undefined;
+    }
+
     // The only remaining wait-free stage is triage, and what follows it is
     // the classification it just recorded — read back off the ticket, because
     // the label is where the process says the record lives.

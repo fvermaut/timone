@@ -288,18 +288,23 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     label: "looking something up",
     waits: "none",
     ownsBranch: false,
-    // **Not built, and that is the honest word rather than a placeholder.**
-    // The daemon cannot yet judge an unattended stage-2 session's outcome:
-    // the spawner's post-stage judgement ends in a fall-through that assumes
-    // the only remaining wait-free stage is triage and reads a classification
-    // off the ticket's labels — which a wayfinder ticket does not carry, so a
-    // run reaching it would die on "triage recorded no classification".
-    //
-    // Declared here anyway, rather than left out, because that is what keeps
-    // a marked `wayfinder:research` ticket from being *triaged as a fresh
-    // request*: it enters at a stage of its own, parks, and says plainly that
-    // the machinery is not built. Wrong-but-loud beats routed-into-the-build.
-    built: false,
+    // Built by phase 27. What kept it unbuilt was the spawner's post-stage
+    // fall-through, which assumed the only wait-free stage was triage and read
+    // a classification off the ticket's labels — which a wayfinder ticket does
+    // not carry, so a run reaching it died on "triage recorded no
+    // classification". `afterStage` now has a branch of its own for it, which
+    // is what the fall-through's own comment said any new wait-free stage had
+    // to be given.
+    built: true,
+    // Not the cheap model, for `triage`'s reason wearing stage 2's clothes:
+    // what this stage produces is an answer somebody's decision rests on, and
+    // a lookup that is confidently wrong is worse than one that says it could
+    // not find out. Judging what a source is worth is the work here.
+    model: "claude-opus-5",
+    effort: "high",
+    // **Nothing follows, on purpose** — `wayfinding`'s reasoning exactly. A
+    // research answer resolves its own ticket and feeds the map; advancing on
+    // one would write requirements off a single lookup.
   },
   requirements: {
     processStage: 3,
@@ -402,9 +407,32 @@ const STAGES: Record<PipelineStage, StageSpec> = {
   feedback: {
     processStage: 9,
     label: "looking into what went wrong",
-    waits: "none",
-    ownsBranch: false,
-    built: false,
+    // **A gate, because a diagnosis is not a decision to act.** Stage 9
+    // classifies what a reaction *means* and proposes a response; the human
+    // confirms it, and only then does anything get built. That is the same
+    // shape as the specification gate and it reuses the same machinery: the
+    // record is committed and readable before the question is asked, so what
+    // is approved is the document rather than a paraphrase of it.
+    waits: "gate",
+    // It writes the feedback record, so it holds its project from the moment
+    // the diagnosis starts until the human has answered. A bug diagnosis that
+    // ran beside another ticket's build would be reading a working copy
+    // somebody else was changing.
+    ownsBranch: true,
+    // Built by phase 27. Until then `routeAfterTriage` sent every `bug` here
+    // and every one of them parked for the life of the ledger — one of stage
+    // 1's four classifications routed into nothing at all.
+    built: true,
+    // The judgement is what layer a complaint belongs to: a change of intent,
+    // a gap in what was built, or a record that is simply wrong. Getting that
+    // wrong sends a PRD amendment through a build, or a defect through a
+    // document edit.
+    model: "claude-opus-5",
+    effort: "high",
+    // Approving the diagnosis dispatches it, and the first stage that can act
+    // on it is planning — ADR-0016's carve-out is the *other* road, taken by a
+    // review comment on an open pull request, which never comes through here.
+    next: "planning",
   },
 };
 

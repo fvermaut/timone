@@ -194,8 +194,14 @@ describe("the stage graph", () => {
     expect(isBuilt("execution")).toBe(true);
     expect(isBuilt("verification")).toBe(true);
     expect(isBuilt("delivery")).toBe(true);
-    // Acting on a bug-classified ticket is stage 9's daemon path — not built.
-    expect(isBuilt("feedback")).toBe(false);
+    // ✏ Acting on a bug-classified ticket is stage 9's daemon path, built in
+    // phase 27. Until then `routeAfterTriage` sent every bug into it and every
+    // one of them parked for good — one of stage 1's four classifications
+    // routed into nothing at all.
+    expect(isBuilt("feedback")).toBe(true);
+    // Every stage the graph can route to must be runnable. This is the whole
+    // assertion, and the individual lines above are its worked examples.
+    expect(PIPELINE_STAGES.filter((stage) => !isBuilt(stage))).toEqual([]);
   });
 
   it("sends a remediation through the full check again — never straight back to the PR", () => {
@@ -246,16 +252,20 @@ describe("the stage graph", () => {
     expect(isBuilt("wayfinding")).toBe(true);
   });
 
-  it("leaves a research ticket unattended, and says plainly it is not built yet", () => {
+  it("resolves a research ticket unattended, and ends its own run", () => {
     // Nobody waits on a research ticket — its CTA promises the machine will
-    // resolve it. What is missing is the daemon's ability to judge such a
-    // session's outcome, so the stage exists and is honestly unbuilt: a
-    // marked research ticket parks and says so rather than being triaged.
+    // resolve it. ✏ Built in phase 27: what was missing was the daemon's
+    // ability to judge such a session's outcome, and `afterStage` now has a
+    // branch of its own for it.
     expect(processStage("research")).toBe(2);
     expect(waitFor("research")).toBe("none");
     expect(runsUnattended("research")).toBe(true);
     expect(ownsBranch("research")).toBe(false);
-    expect(isBuilt("research")).toBe(false);
+    expect(isBuilt("research")).toBe(true);
+    // Nothing follows it, exactly as nothing follows `wayfinding`: a research
+    // answer feeds the map, and advancing on one would write requirements off
+    // a single lookup.
+    expect(stageAfter("research")).toBeUndefined();
   });
 
   it("carries the map itself at process stage 2, and hands it to stage 3", () => {
@@ -388,10 +398,10 @@ describe("the model and effort each stage runs on", () => {
     // session the daemon starts at that very stage. Re-pointed rather than
     // deleted — the property is real, and the unbuilt stages are where it
     // still holds.
-    expect(modelFor("research")).toBeUndefined();
-    expect(effortFor("research")).toBeUndefined();
-    expect(modelFor("feedback")).toBeUndefined();
-    expect(effortFor("feedback")).toBeUndefined();
+    // ✏ Both examples this used to name — `research` and `feedback` — were
+    // built by phase 27, so they now declare a model like every other spawned
+    // stage. The property survives them: the one remaining way to start no
+    // session is `charting`, asserted just below.
     // ✏ And the second way to be one, since ADR-0024: the map's stage is
     // built, and what happens at it is a ticket waiting rather than a session
     // running. The session that follows the go-ahead is stage 3's.
@@ -461,7 +471,11 @@ describe("readGate", () => {
     // once for the whole initiative. The set is still exactly two, and this
     // literal is the alarm that says so: a third gate appearing here is a
     // decision, not a detail.
-    expect(gated).toEqual(["requirements", "breakdown"]);
+    // ✏ Was `["requirements", "breakdown"]`. Phase 27 built stage 9, whose
+    // diagnosis is gated for the same reason a specification is: a machine
+    // that decides what is wrong *and* fixes it leaves nowhere to disagree.
+    // The literal stays the alarm — a fourth gate here is a decision.
+    expect(gated).toEqual(["requirements", "breakdown", "feedback"]);
     for (const stage of gated) {
       expect(readGate(stage, approval)).toEqual({
         kind: "advance",

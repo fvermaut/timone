@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
-import { breakdownPath } from "../daemon/breakdown.js";
+import { breakdownPath, fromWorkingTree } from "../daemon/breakdown.js";
 import { ctaComment, ctaFor } from "../daemon/cta.js";
 import { checkoutOf, initiativeProgress, reclaimedReason } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
@@ -503,6 +503,9 @@ describe("renderStatus — a ticket built in pieces", () => {
     ];
     const output = renderStatus(manifest, runs, {
       stateExists: true,
+      // A plain fixture directory, not a clone: the production default reads
+      // the approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(6, breakdown(["The ledger learns chunks", "The next chunk opens"])),
     });
 
@@ -527,6 +530,9 @@ describe("renderStatus — a ticket built in pieces", () => {
     ];
     const output = renderStatus(manifest, runs, {
       stateExists: true,
+      // A plain fixture directory, not a clone: the production default reads
+      // the approved list off the default branch (ADR-0030 D2).
+      breakdownSource: fromWorkingTree,
       root: rootWith(6),
     });
 
@@ -618,7 +624,12 @@ describe("renderStatus — one computation, two renderers", () => {
       project: "scratch-app",
       ticket: 6,
       run: runs.at(-1),
-      progress: initiativeProgress(checkoutOf(root, "scratch-app"), 6, runs),
+      progress: initiativeProgress(
+        checkoutOf(root, "scratch-app"),
+        6,
+        runs,
+        fromWorkingTree,
+      ),
     });
 
     // Not agreement about nothing: the sentence they have to agree on is the
@@ -626,7 +637,7 @@ describe("renderStatus — one computation, two renderers", () => {
     expect(cta.needFromYou).toContain("piece 2 of 3");
     expect(ctaComment(cta)).toContain(cta.needFromYou);
     expect(
-      renderStatus(manifest, runs, { stateExists: true, root }),
+      renderStatus(manifest, runs, { stateExists: true, root, breakdownSource: fromWorkingTree }),
     ).toContain(cta.needFromYou);
   });
 
@@ -645,7 +656,7 @@ describe("renderStatus — one computation, two renderers", () => {
     ];
 
     const lastLine =
-      renderStatus(manifest, runs, { stateExists: true, root })
+      renderStatus(manifest, runs, { stateExists: true, root, breakdownSource: fromWorkingTree })
         .trimEnd()
         .split("\n")
         .at(-1) ?? "";

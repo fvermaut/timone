@@ -24,7 +24,7 @@ request. A run that is `parked` at `delivery` waiting on an `escalation` is
 stuck and needs a person at a terminal.
 
 Words: a ticket is a conversation, a run is a **chunk** of it
-([ADR-0026](adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md)). The human
+([ADR-0026](../doc/adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md)). The human
 never sees the word chunk — they read *"piece 2 of 4"*.
 
 ## 1. From ticket to run
@@ -51,7 +51,7 @@ Rules behind the diagram:
 - **A new run opens only when the last one settled** — `done` or `cancelled`. A
   `failed` run is *not* settled: it holds its ticket, and `timone retry` is the
   road back. This is deliberate; see
-  [ADR-0029](adr/0029-a-chunk-advances-only-on-success.md).
+  [ADR-0029](../doc/adr/0029-a-chunk-advances-only-on-success.md).
 - **Where the new run enters the process:**
 
   | Situation | Entry stage |
@@ -130,16 +130,18 @@ flowchart TD
 
     START -.->|wayfinder label| WF["wayfinding<br/><i>talking a question through</i>"]
     START -.->|wayfinder:map| CH["charting<br/><i>keeping the list of questions</i>"]
-    START -.->|wayfinder:research| RS["research ⛔ not built"]
+    START -.->|wayfinder:research| RS["research<br/><i>looking something up</i>"]
 
     TR -->|feature| CL["clarification<br/><i>asking what you need</i>"]
     TR -->|chore| PL["planning<br/><i>preparing the work</i>"]
-    TR -->|bug| FB["feedback ⛔ not built"]
+    TR -->|bug| FB["feedback<br/><i>looking into what went wrong</i>"]
     TR -->|question| ANS(["Answered — ticket closed"])
 
     CL --> RQ["requirements<br/><i>writing down what it needs</i>"]
     CH --> RQ
     WF --> ENDW(["Decision recorded — run done"])
+    RS --> ENDR(["Answer posted — run done"])
+    FB -->|gate| PL
 
     RQ -->|gate| BD["breakdown<br/><i>working out the pieces</i>"]
     BD -->|gate, then merge| PL
@@ -159,7 +161,7 @@ flowchart TD
 | `clarification` | asking what you need | 2 | conversation | no | `requirements` | yes |
 | `wayfinding` | talking a question through | 2 | conversation | no | — (run ends) | yes |
 | `charting` | keeping the list of questions | 2 | conversation | no | `requirements` | yes, no session |
-| `research` | looking something up | 2 | — | no | — | **no** |
+| `research` | looking something up | 2 | — | no | — (run ends) | yes |
 | `requirements` | writing down what it needs | 3 | gate | yes | `breakdown` | yes |
 | `breakdown` | working out the pieces | 5 | gate | yes | `planning` | yes |
 | `planning` | preparing the work | 5 | — | yes | `execution` | yes |
@@ -167,7 +169,7 @@ flowchart TD
 | `verification` | checking the result | 7 | — | yes | `delivery` | yes |
 | `delivery` | delivering | 8 | review | yes | — (the PR ends it) | yes |
 | `remediation` | acting on your review | 9 | — | yes | `verification` | yes |
-| `feedback` | looking into what went wrong | 9 | — | no | — | **no** |
+| `feedback` | looking into what went wrong | 9 | gate | yes | `planning` | yes |
 
 The table is `STAGES` in `src/daemon/pipeline.ts`. It is data, not code: the
 daemon orchestrates the stage skills and never reimplements them.
@@ -175,14 +177,14 @@ daemon orchestrates the stage skills and never reimplements them.
 Every session runs on Opus 5 except `triage` (Sonnet 5) and the short
 approval-recording session (Haiku 4.5), which is not a stage.
 
-**Two gates, and only two.** The human approves the specification, and approves
-the list of pieces. Everything after that is judged by the pull request. A gate
+**Three gates, and only three.** The human approves the specification, approves
+the list of pieces, and approves a bug diagnosis before anything is built from it. Everything else is judged by the pull request. A gate
 over an empty branch fails the run rather than asking for a signature on a
 blank.
 
 **Approving the breakdown does two things at once.** It stamps the artifact, and
 it merges that branch into the default branch with no pull request
-([ADR-0030](adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)).
+([ADR-0030](../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)).
 Every later piece is cut from a default branch that already carries the
 specification.
 
@@ -236,7 +238,7 @@ Rules that make the waits safe:
 - **Two re-asks and it escalates itself.** A stage that read an answer and asked
   the same question again, twice running, is stopped by the machinery whether or
   not it noticed. This is
-  [ADR-0033](adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)'s floor.
+  [ADR-0033](../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)'s floor.
 
 ## 5. One poll cycle, in order
 
@@ -246,10 +248,10 @@ went wrong when it was elsewhere.
 1. **Apply what humans asked for.** `timone retry`, `cancel` and `takeover` do
    not write the ledger while the daemon holds it — they leave a request file,
    and the daemon carries it out here. First, so a retry does not wait a whole
-   cycle. ([ADR-0032](adr/0032-a-human-command-asks-the-daemon-to-act.md))
+   cycle. ([ADR-0032](../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md))
 2. **Witness.** Record that a daemon was watching, once for the whole cycle. A
    run is only judged dead if somebody was listening throughout.
-   ([ADR-0020](adr/0020-liveness-is-judged-only-over-witnessed-time.md))
+   ([ADR-0020](../doc/adr/0020-liveness-is-judged-only-over-witnessed-time.md))
 3. Then, per project:
    1. **Reclaim dead runs.** A run left `active` by a daemon that died is
       holding its project. If its pull request merged in the meantime, that
@@ -314,42 +316,43 @@ Computed once, in `ctaFor`, and rendered by both the ticket comment and
 | `failed`, network or login | "I could not reach the service I run on." | fix it, then `timone retry` |
 | `cancelled` | "I stopped work on this one." | nothing — a fresh run starts next pass |
 
-## 8. Where the model is uneven
+## 8. Where the model was uneven
 
-Written down because the point of drawing the machine is to see where it does
-not close. None of these is breaking anything today.
+Drawing the machine is what made these visible. All five were fixed in
+[phase 27](../doc/plans/phases/phase-27.md); they are kept here because the
+reasoning is what stops them coming back.
 
-1. **One of the four triage classes goes nowhere.** A `bug` is routed to
-   `feedback`, and `feedback` is `built: false`. So every bug ticket is triaged,
-   advances, and parks on "That's as far as I can take this one for now" — for
-   ever. `research` is the same. Both are honest in the code; the practical
-   effect is that bugs cannot be worked by the daemon at all.
+1. **One of the four triage classes went nowhere.** A `bug` routed to
+   `feedback`, and `feedback` had never been built — so every bug ticket was
+   triaged, advanced, and parked on *"That's as far as I can take this one for
+   now"* for ever. `research` was the same. **Fixed:** both stages are built.
+   `feedback` writes a diagnosis, commits it, and gates it; `research` answers
+   its question on the ticket and ends its own run. Every stage the graph can
+   route to now runs, and a test asserts exactly that rather than listing them.
 
-2. **The list of pieces is read from the working checkout.** `initiativeProgress`
-   and `successionOf` read `projects/<name>/doc/plans/breakdowns/ticket-NN.md`
-   from whatever the working tree currently has checked out — not from a named
-   ref. After the breakdown merges into the default branch this is reliable.
-   Before it merges, the file only exists on the run's branch, so "which piece
-   is next" depends on what the last session left checked out. Two surfaces read
-   it: the ticket's call to action and `timone status`.
+2. **The list of pieces was read from the working checkout** — whatever branch a
+   session happened to leave behind, which is not a point in the project's
+   history at all. **Fixed:** it is read from the default branch, which is where
+   approving a breakdown puts it. Before that merge the answer is *absent*,
+   which is honest: a breakdown on a work branch is a proposal nobody has
+   approved, and counting pieces off one describes a list the human never saw.
 
-3. **"Chunk zero" has no number.** ADR-0030 names the specification-and-breakdown
-   work chunk zero, but it is not a run of its own: it happens inside run
-   `seq: 1`, which then goes on to build piece 1 on the same branch. So `seq`
-   counts pieces and chunk zero is not counted. Nothing is broken; the word does
-   not match the ledger.
+3. **"Chunk zero" had no number.** The word named work that is not a run of its
+   own. **Fixed:** the glossary defines it — chunk zero is carried by chunk 1,
+   chunk numbers count pieces, and the word names the work rather than a row in
+   the ledger.
 
-4. **A failed run keeps its wait; a cancelled one does not.** `fail()` clears
-   `waitingOn` but leaves `waitingKind` and `waitCursor` behind. `cancel()`
-   clears all three. Nothing reads a failed run's wait, and `retry` clears it a
-   moment later, so this is harmless — but the two endings record different
-   things for no stated reason.
+4. **A failed run kept a wait nothing was waiting on.** Failing cleared the
+   words and left the kind and the cursor behind. **Fixed:** failing clears the
+   whole wait, as cancelling already did. What survives is the marker for an
+   answer that was read and never acted on — that is what `timone retry` rewinds
+   to, and it is still owed to whoever wrote it.
 
-5. **A handback to a real-but-unbuilt step is reported as a misread name.** If a
-   session writes "carry on at *looking something up*", the daemon refuses —
-   correctly, nothing can run that step — but the ticket then says *"I wrote down
-   'looking something up' and I don't know what that means."* The name is
-   perfectly well defined. The message is wrong about why it was refused.
+5. **Two different refusals read as one message.** A handback naming a step
+   nobody defined and a handback naming a real step with no session behind it
+   both produced *"I don't know what that means"* — which sent a reader off to
+   correct a note that had nothing wrong with it. **Fixed:** the second now says
+   the step is real and the machine cannot run it yet.
 
 ## Where this lives in the code
 

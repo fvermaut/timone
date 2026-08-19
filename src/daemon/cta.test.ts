@@ -755,7 +755,7 @@ describe("ctaFor — the machine could not read its own note", () => {
   const state = { project: "scratch-app", ticket: 41, run: stopped };
 
   it("quotes back the name it did not understand, and owns the fault", () => {
-    const cta = ctaFor({ ...state, misreadStep: "the last bit" });
+    const cta = ctaFor({ ...state, misreadStep: { named: "the last bit", kind: "unknown" as const } });
 
     expect(`${cta.headline} ${cta.needFromYou}`).toContain("the last bit");
     expect(cta.command).toBe("timone takeover scratch-app#41");
@@ -766,14 +766,14 @@ describe("ctaFor — the machine could not read its own note", () => {
     // Two different pieces of news: "I can't do this" and "I wrote myself a
     // note I can't read". The second is the machine's own mess.
     const declared = ctaFor(state);
-    const misread = ctaFor({ ...state, misreadStep: "the last bit" });
+    const misread = ctaFor({ ...state, misreadStep: { named: "the last bit", kind: "unknown" as const } });
 
     expect(misread.headline).not.toBe(declared.headline);
   });
 
   it("puts none of the machine's own words on the ticket", () => {
     const body = ctaComment(
-      ctaFor({ ...state, misreadStep: "the last bit" }),
+      ctaFor({ ...state, misreadStep: { named: "the last bit", kind: "unknown" as const } }),
     ).toLowerCase();
 
     for (const word of ["escalat", "stage", "park", "ledger", "handback", "marker"]) {

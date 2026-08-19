@@ -1999,3 +1999,55 @@ describe("the witness — the time a daemon can vouch for having watched", () =>
     ).toBe(1);
   });
 });
+
+
+describe("a failed run stops waiting", () => {
+  /** A run parked on a gate, then killed mid-stage. */
+  function failedAtAGate(): { store: RunStore; id: string } {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "requirements",
+      waitCursor: "2026-08-19T09:00:00Z",
+    });
+    store.activate(run.id, "session-2");
+    store.fail(run.id, "the session ended without a result");
+    return { store, id: run.id };
+  }
+
+  it("carries no wait at all once it has failed", () => {
+    // ✏ It used to clear the words and keep the kind and the cursor, which
+    // made a failed run the one state holding a wait nothing was waiting on.
+    // Dead data that looks live is what a later reader builds on.
+    const { store, id } = failedAtAGate();
+    const run = store.get(id);
+
+    expect(run?.status).toBe("failed");
+    expect(run?.waitingOn).toBeUndefined();
+    expect(run?.waitingKind).toBeUndefined();
+    expect(run?.waitCursor).toBeUndefined();
+  });
+
+  it("keeps the answer it read and never acted on", () => {
+    // The one fact about a dead session still owed to somebody (ADR-0023):
+    // they wrote an answer, it was read, and nothing acted on it. `timone
+    // retry` rewinds to this, so clearing it here would silently re-ask.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-19T09:00:00Z",
+      consumedAnswerAt: "2026-08-19T09:30:00Z",
+    });
+    store.activate(run.id, "session-2");
+    store.fail(run.id, "killed mid-stage");
+
+    expect(store.get(run.id)?.consumedAnswerAt).toBe("2026-08-19T09:30:00Z");
+  });
+});

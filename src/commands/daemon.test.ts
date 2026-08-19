@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -241,6 +242,33 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
   });
 });
 
+/**
+ * Turn a fixture directory into something shaped like a clone: one commit on
+ * `main`, and an `origin/HEAD` symref pointing at it. That pair is what
+ * `fromDefaultBranch` resolves, so a fixture without it reads as a project
+ * with no breakdown at all.
+ */
+function commitOnDefaultBranch(repoDir: string): void {
+  const git = (...args: string[]): void => {
+    execFileSync("git", args, {
+      cwd: repoDir,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@example.com",
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@example.com",
+      },
+    });
+  };
+  git("init", "-b", "main");
+  git("add", ".");
+  git("commit", "-m", "fixture");
+  git("update-ref", "refs/remotes/origin/main", "HEAD");
+  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+}
+
 describe("runDaemon — the loop is told where the project checkouts are", () => {
   it("reaches a ticket's breakdown, so a mid-initiative merge does not close it", async () => {
     // The poll loop cannot answer "is there another piece of this to build?"
@@ -275,6 +303,12 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
       ].join("\n"),
       "utf8",
     );
+    // ✏ A real clone since phase 27, because the loop reads the approved list
+    // off the default branch rather than off whatever is checked out. Writing
+    // the file alone used to be enough and is exactly what stopped being
+    // enough — a session leaves this checkout on its own work branch, and the
+    // list of pieces must not depend on that.
+    commitOnDefaultBranch(join(root, "projects", "scratch-app"));
 
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "s1");

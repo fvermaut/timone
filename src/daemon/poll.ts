@@ -40,7 +40,13 @@ import {
   wayfinderStage,
   type PipelineStage,
 } from "./pipeline.js";
-import { chunkProgress, isReproposal, readBreakdown } from "./breakdown.js";
+import {
+  chunkProgress,
+  fromDefaultBranch,
+  isReproposal,
+  readBreakdown,
+  type BreakdownSource,
+} from "./breakdown.js";
 import {
   ctaComment,
   ctaFor,
@@ -152,6 +158,17 @@ export interface PollDeps {
    * binding says *which* adapter, never *whether* to have one at all.
    */
   previews?: PreviewAdapter;
+  /**
+   * Where a ticket's approved list of pieces is read from. Defaults to the
+   * project's default branch, which is the only place an approved breakdown is
+   * guaranteed to be (ADR-0030 D2).
+   *
+   * **Injected so a test can hand over a plain directory**, not so a deployment
+   * can choose: every real daemon takes the default. It was a working-tree read
+   * until phase 27, which made "which piece is next" depend on the branch the
+   * last session happened to leave checked out.
+   */
+  breakdownSource?: BreakdownSource;
   /** Progress sink; defaults to silence (the command wires stdout). */
   log?: (message: string) => void;
 }
@@ -1259,6 +1276,7 @@ async function reconcileCtas(
                 checkoutOf(root, project.name),
                 ticket.number,
                 chunks,
+                deps.breakdownSource ?? fromDefaultBranch,
               ),
       });
       if (saysTheSame(standingCta(thread), stampMachineComment(body))) continue;
@@ -1535,7 +1553,10 @@ function canStart(stage: PipelineStage): boolean {
  * not read my own note* would be a second copy of something the thread says,
  * free to disagree with it the moment the session posts a corrected note.
  */
-function misreadStep(run: Run | undefined, thread: TicketThread): string | undefined {
+function misreadStep(
+  run: Run | undefined,
+  thread: TicketThread,
+): TicketState["misreadStep"] {
   if (run?.waitingKind !== "escalation" || run.waitCursor === undefined) {
     return undefined;
   }
@@ -1543,10 +1564,17 @@ function misreadStep(run: Run | undefined, thread: TicketThread): string | undef
   if (handback === undefined) return undefined;
   if (handback.kind === "unnamed") return undefined;
   if (handbackStage(handback, run.stage ?? "triage") !== undefined) return undefined;
-  // Either nobody defined the name, or nothing can run the step it names. The
-  // person reading the ticket needs the words that were written down, not the
-  // reason the machinery could not use them.
-  return handback.kind === "unknown" ? handback.named : stageLabel(handback.stage);
+
+  // **Which of the two refusals fired, and not just the words that triggered
+  // it.** Both leave the run stopped and both are the machine's own mess, but
+  // they are different news to the person holding the ticket: a name nobody
+  // defined is a note to rewrite, and a real step with no session behind it is
+  // a note that was right and a machine that is not finished. Until phase 27
+  // the ticket said the first about both, which sent a reader off to correct a
+  // note that had nothing wrong with it.
+  return handback.kind === "unknown"
+    ? { named: handback.named, kind: "unknown" }
+    : { named: stageLabel(handback.stage), kind: "unbuilt" };
 }
 
 /**
@@ -1759,8 +1787,13 @@ export function initiativeProgress(
   repoDir: string,
   ticket: number,
   runs: readonly Run[],
+  // The approved list, never the proposal: the default is the default branch,
+  // which is where approving a breakdown puts it (ADR-0030 D2). A
+  // checkout-relative read made this depend on the branch the last session
+  // happened to leave behind.
+  source: BreakdownSource = fromDefaultBranch,
 ): InitiativeProgress | undefined {
-  const read = readBreakdown(repoDir, ticket);
+  const read = readBreakdown(repoDir, ticket, source);
   if (read.kind !== "ok") return undefined;
 
   // `done`, not settled — the same choice `successionOf` makes, and for the
@@ -1828,7 +1861,11 @@ function successionOf(
   const { store, root } = deps;
   if (root === undefined) return { kind: "unlisted" };
 
-  const read = readBreakdown(checkoutOf(root, project), ticket);
+  const read = readBreakdown(
+    checkoutOf(root, project),
+    ticket,
+    deps.breakdownSource ?? fromDefaultBranch,
+  );
   if (read.kind === "absent") return { kind: "unlisted" };
   if (read.kind === "malformed") {
     return { kind: "unreadable", path: read.path, reason: read.reason };
