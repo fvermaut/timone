@@ -67,6 +67,17 @@ export interface TicketState {
    * copy that can disagree with a label a human has since changed.
    */
   labels?: readonly string[];
+  /**
+   * The step a handback note named that this machine does not recognise
+   * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
+   * D3), quoted exactly as the session wrote it.
+   *
+   * Read off the thread by the caller for the same reason `labels` is: it is
+   * a fact about a comment, not about the run, and a copy in the ledger would
+   * be free to disagree with the thread the moment a corrected note is
+   * posted.
+   */
+  misreadStep?: string;
 }
 
 /** What one open ticket is asking of the human. */
@@ -290,6 +301,28 @@ export function ctaFor(state: TicketState): Cta {
   // and being told "I asked you the same thing twice" are different pieces of
   // news, and only the second is the machine's own fault to apologise for.
   if (run.waitingKind === "escalation") {
+    // The machine wrote itself a note and cannot read it back
+    // ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
+    // D3). Refusing to guess is right — a guess starts work at the wrong step
+    // on a branch of half-finished work — but refusing in silence would leave
+    // the reader watching a ticket that says the same thing for ever, having
+    // already done what it asked. It is the machine's own mess, and it says
+    // so; the name is quoted exactly, because that is what the person needs
+    // in order to see what went wrong.
+    if (state.misreadStep !== undefined) {
+      return {
+        headline:
+          `I picked this back up and then lost my footing: I wrote down ` +
+          `"${state.misreadStep}" as the place to carry on, and I don't know ` +
+          "what that means. That's mine to get wrong, not yours.",
+        needFromYou:
+          "run this command and tell me where to pick it up. Everything we " +
+          "settled is safe — it's written down.",
+        waitingOnYou: true,
+        command: takeoverCommand(state.project, state.ticket),
+      };
+    }
+
     const caught = (run.reAsksAfterAnswer ?? 0) >= 2;
     return {
       headline: caught

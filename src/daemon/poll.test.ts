@@ -14,8 +14,11 @@ import type { Preview, PreviewAdapter } from "../adapters/preview.js";
 import {
   CONVERSATION_RECORD_MARKER,
   CTA_MARKER,
+  HANDBACK_MARKER,
+  HANDBACK_STEP_PREFIX,
   MACHINE_MARKER,
   PREVIEW_MARKER,
+  STAGE_ESCALATED_MARKER,
   type PullRequest,
   type PullRequestThread,
   type Ticket,
@@ -5727,5 +5730,220 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     expect(result.resumed).toEqual(["scratch-app#33/1"]);
     expect(contexts[0]?.stage).toBe("execution");
     expect(contexts[0]?.feedback).toContain("carry on");
+  });
+});
+
+describe("pollOnce — a stop cleared in the terminal goes back to the machine", () => {
+  // ADR-0035. The other half of phase 25: a person and the machine settled it
+  // together, the session says so on the ticket, and the work carries on
+  // without a second command being typed.
+
+  const question = {
+    author: "fvermaut",
+    body: `${MACHINE_MARKER}\n\n---\n\nI can't sign that off as you.`,
+    createdAt: "2026-08-19T10:00:00Z",
+    fromTimone: true,
+  };
+
+  function handback(step: string | undefined, extra = ""): TicketThread["comments"][number] {
+    const named = step === undefined ? "" : `\n\n${HANDBACK_STEP_PREFIX} ${step}`;
+    return {
+      author: "fvermaut",
+      body: `${MACHINE_MARKER}\n\n---\n\n${HANDBACK_MARKER}\n\nWe went through it and you approved it.${named}${extra}`,
+      createdAt: "2026-08-19T10:30:00Z",
+      fromTimone: true,
+    };
+  }
+
+  function threadOf(...comments: TicketThread["comments"]): {
+    adapter: TicketingAdapter;
+    standing: string[];
+  } {
+    const standing: string[] = [];
+    const base = ticket(41, { labels: ["timone", "triage:feature"] });
+    const adapter: TicketingAdapter = {
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return [base];
+      },
+      ...noUnmarkedTickets,
+      async getTicket(): Promise<TicketThread> {
+        return { ...base, comments };
+      },
+      async postComment(): Promise<void> {},
+      async applyLabel(): Promise<void> {},
+      ...noPullRequests,
+      async upsertComment(_project, _number, _marker, body): Promise<void> {
+        standing.push(body);
+      },
+    };
+    return { adapter, standing };
+  }
+
+  /** A run stopped where nothing written can restart it, as 25d parks it. */
+  function stopped(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 41);
+    store.activate(run.id, "session-1");
+    return store.park(run.id, {
+      waitingOn: "me — I can't take this one further on my own.",
+      kind: "escalation",
+      stage: "clarification",
+      waitCursor: question.createdAt,
+    });
+  }
+
+  it("starts the step the note names, exactly once", async () => {
+    const store = newStore();
+    stopped(store);
+    const { adapter } = threadOf(question, handback("building"));
+    const contexts: (SpawnContext | undefined)[] = [];
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        // Claims the run as the real spawner does. That claim is what makes
+        // the note read once — activating clears the wait, exactly as it does
+        // for an approved gate. Deliberately not a consume: a spawn that
+        // fails leaves the note readable and the next cycle tries again,
+        // where a consumed note would be lost with the session.
+        async spawn(run: Run, _project: unknown, context?: SpawnContext) {
+          contexts.push(context);
+          store.activate(run.id, "session-2");
+        },
+      },
+      root: "/nowhere",
+    };
+
+    const first = await pollOnce(deps);
+    const second = await pollOnce(deps);
+
+    expect(first.resumed).toEqual(["scratch-app#41/1"]);
+    expect(contexts.map((context) => context?.stage)).toEqual(["execution"]);
+    expect(second.resumed).toEqual([]);
+    expect(contexts).toHaveLength(1);
+  });
+
+  it("starts the step it stopped at when the note names none", async () => {
+    const store = newStore();
+    stopped(store);
+    const { adapter } = threadOf(question, handback(undefined));
+    const contexts: (SpawnContext | undefined)[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(_run: Run, _project: unknown, context?: SpawnContext) {
+          contexts.push(context);
+        },
+      },
+      root: "/nowhere",
+    });
+
+    expect(contexts[0]?.stage).toBe("clarification");
+  });
+
+  it("reads no branch out of the note, whatever the note says", async () => {
+    // The branch is computed where it has always been computed, from the
+    // ticket and the chunk (`claimBranch`). A comment that could name one
+    // would let a comment redirect the work.
+    const store = newStore();
+    stopped(store);
+    const { adapter } = threadOf(
+      question,
+      handback("building", "\n\nBranch: timone/somebody-elses-work"),
+    );
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    expect(store.get("scratch-app#41/1")?.branch).toBeUndefined();
+  });
+
+  it("refuses a step it does not know, says so, and starts nothing", async () => {
+    const store = newStore();
+    stopped(store);
+    const { adapter, standing } = threadOf(question, handback("the last bit"));
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    expect(spawned).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(store.get("scratch-app#41/1")).toMatchObject({
+      status: "parked",
+      waitingKind: "escalation",
+    });
+    // And it says which name it could not read, so the person can see what
+    // the machine wrote down wrong.
+    expect(standing.at(-1)).toContain("the last bit");
+    expect(standing.at(-1)).toContain("timone takeover scratch-app#41");
+  });
+
+  it("is not resolved by the stage's own account of why it stopped", async () => {
+    const store = newStore();
+    stopped(store);
+    const { adapter } = threadOf(question, {
+      author: "fvermaut",
+      body: `${MACHINE_MARKER}\n\n---\n\n${STAGE_ESCALATED_MARKER}\n\nI can't do that part.`,
+      createdAt: "2026-08-19T10:15:00Z",
+      fromTimone: true,
+    });
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    });
+
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#41/1")?.waitingKind).toBe("escalation");
+  });
+
+  it("still starts nothing on the human writing again, ten cycles running", async () => {
+    // Phase 25's guarantee, re-driven here because this is the slice where it
+    // could be lost: the words are read by the same branch that now reads the
+    // note.
+    const store = newStore();
+    stopped(store);
+    const answers = [question];
+    const { adapter } = threadOf(...answers);
+    const { spawner, spawned } = fakeSpawner();
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      root: "/nowhere",
+    };
+
+    for (let cycle = 0; cycle < 10; cycle += 1) {
+      answers.push({
+        author: "fvermaut",
+        body: `yes, go ahead (${cycle + 1})`,
+        createdAt: `2026-08-19T1${cycle}:45:00Z`,
+        fromTimone: false,
+      });
+      await pollOnce(deps);
+    }
+
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#41/1")?.waitingKind).toBe("escalation");
   });
 });

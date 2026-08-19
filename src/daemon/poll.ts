@@ -24,6 +24,7 @@ import {
   readGateDecision,
   waitCursorFrom,
 } from "./gates.js";
+import { readHandback } from "./outcomes.js";
 import {
   classificationFromLabels,
   concludeConversation,
@@ -1238,11 +1239,17 @@ async function reconcileCtas(
       // successor has not been opened yet — which is the gap ADR-0028 D4
       // exists to fill.
       const chunks = store.runsForTicket(project.name, ticket.number);
+      // Read before the call to action is computed, not after: since
+      // ADR-0035 one of the things a ticket may need to say is read off its
+      // own thread — a handback note naming a step the machine does not know.
+      // It is the same cached read the resume decision already made.
+      const thread = await threads(ticket.number).ticket();
       const body = ctaBody({
         project: project.name,
         ticket: ticket.number,
         run: chunks.at(-1),
         labels: ticket.labels,
+        misreadStep: misreadStep(chunks.at(-1), thread),
         progress:
           root === undefined
             ? undefined
@@ -1252,7 +1259,6 @@ async function reconcileCtas(
                 chunks,
               ),
       });
-      const thread = await threads(ticket.number).ticket();
       if (saysTheSame(standingCta(thread), stampMachineComment(body))) continue;
 
       await adapter.upsertComment(project, ticket.number, CTA_MARKER, body);
@@ -1482,6 +1488,26 @@ async function resumeAnswered(
     }
     return;
   }
+}
+
+/**
+ * The step a handback note named that this machine does not recognise, or
+ * undefined when there is no such note
+ * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
+ * D3).
+ *
+ * **Computed rather than stored**, and that is deliberate. It is a fact about
+ * a comment on the thread, not about the run, and the ledger already carries
+ * one truth about this run — that it is stopped. A field saying *and I could
+ * not read my own note* would be a second copy of something the thread says,
+ * free to disagree with it the moment the session posts a corrected note.
+ */
+function misreadStep(run: Run | undefined, thread: TicketThread): string | undefined {
+  if (run?.waitingKind !== "escalation" || run.waitCursor === undefined) {
+    return undefined;
+  }
+  const handback = readHandback(thread, run.waitCursor);
+  return handback?.kind === "unknown" ? handback.named : undefined;
 }
 
 /**
@@ -1952,19 +1978,37 @@ async function resolveWait(
       : undefined;
   }
 
-  // The one wait nothing written resolves
-  // ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
-  // The stage that stopped had already read the human's answer and judged,
-  // correctly, that acting on it was outside what it may do — so resuming it
-  // on those same words spends a full pass to reach the same judgement. That
-  // is the defect this kind exists to end, and it ended five times on
-  // ivtrends #1. A person ends this one, through the command the ticket
-  // carries; the words they wrote are not lost, they are carried into the
-  // session that command opens.
-  if (run.waitingKind === "escalation") return undefined;
-
   const cursor = run.waitCursor;
   if (cursor === undefined) return undefined;
+
+  // The wait no *answer* resolves
+  // ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+  // The stage that stopped had already read the human's words and judged,
+  // correctly, that acting on them was outside what it may do — so resuming
+  // it on those same words spends a full pass to reach the same judgement.
+  // That ended five times on ivtrends #1.
+  //
+  // **What does resolve it is the machine's own record of the session the
+  // person opened** ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)),
+  // in the same shape as a conversation record and read the same way. Without
+  // it a stop the human had already cleared stayed stopped for ever, with the
+  // ticket still asking them to run the command they had just run.
+  if (run.waitingKind === "escalation") {
+    const thread = await threads.ticket();
+    const handback = readHandback(thread, cursor);
+    if (handback === undefined) return undefined;
+
+    // A name nobody defined is refused rather than guessed: starting a
+    // session at the wrong step, on a branch carrying half-built work, is
+    // worse than staying stopped. The ticket says so — `ctaFor` reads the
+    // same note and quotes the name back.
+    if (handback.kind === "unknown") return undefined;
+
+    // Naming nothing means carry on where it stopped, which is the honest
+    // reading of a stop cleared without anything being written.
+    const resume = handback.kind === "at" ? handback.stage : stage;
+    return isBuilt(resume) ? { context: { stage: resume } } : undefined;
+  }
 
   if (run.waitingKind === "gate") {
     const thread = await threads.ticket();

@@ -736,3 +736,54 @@ describe("ctaFor — a run the machine cannot take further itself", () => {
     expect(unbuilt.headline).toBe("That's as far as I can take this one for now.");
   });
 });
+
+describe("ctaFor — the machine could not read its own note", () => {
+  // ADR-0035 D3. A session cleared a stop and named a step nobody defined.
+  // Refusing to guess is right; refusing in silence would leave the person
+  // watching a ticket that says nothing has changed and never will.
+
+  const stopped = run({
+    project: "scratch-app",
+    ticket: 41,
+    status: "parked",
+    stage: "clarification",
+    waitingKind: "escalation",
+    waitingOn: "me — I can't take this one further on my own.",
+    waitCursor: "2026-08-19T10:00:00Z",
+  });
+
+  const state = { project: "scratch-app", ticket: 41, run: stopped };
+
+  it("quotes back the name it did not understand, and owns the fault", () => {
+    const cta = ctaFor({ ...state, misreadStep: "the last bit" });
+
+    expect(`${cta.headline} ${cta.needFromYou}`).toContain("the last bit");
+    expect(cta.command).toBe("timone takeover scratch-app#41");
+    expect(cta.waitingOnYou).toBe(true);
+  });
+
+  it("reads differently from the stop it started as", () => {
+    // Two different pieces of news: "I can't do this" and "I wrote myself a
+    // note I can't read". The second is the machine's own mess.
+    const declared = ctaFor(state);
+    const misread = ctaFor({ ...state, misreadStep: "the last bit" });
+
+    expect(misread.headline).not.toBe(declared.headline);
+  });
+
+  it("puts none of the machine's own words on the ticket", () => {
+    const body = ctaComment(
+      ctaFor({ ...state, misreadStep: "the last bit" }),
+    ).toLowerCase();
+
+    for (const word of ["escalat", "stage", "park", "ledger", "handback", "marker"]) {
+      expect(body).not.toContain(word);
+    }
+  });
+
+  it("says the ordinary thing when no note was misread", () => {
+    expect(ctaFor(state).headline).toBe(
+      "I can't take this one further myself. Writing another answer here won't move it.",
+    );
+  });
+});
