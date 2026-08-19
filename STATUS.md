@@ -34,7 +34,9 @@ timone cancel scratch-app#10
 - On 14 August the machine was supposed to give up and hand a conversation back to your terminal. It worked the answer out instead, and you called that a pass. Should the rule change, or the behaviour?
 - **New, from yesterday's test:** a ticket whose requirements are already written and agreed was picked up as brand-new work. The sorting step read the branch, said *"the next open step is the build plan, not another round of requirements discovery"* — and was then sent into another round of requirements discovery, because it routes on the label and nothing else. Should it be allowed to route on what it finds? ([#32](https://github.com/fvermaut/timone/issues/32))
 
-**5. Nothing you can do about `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4).** It is waiting at a step that has never been built. It stays there until that step exists. It is listed so you are not left wondering.
+**5. The slow-page report is unstuck, and now it needs you.** `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4) sat for seventeen days at a step that had never been built. That step exists now, and it has looked at the problem and written up what it thinks. Read what it says on the ticket and reply there — `approve` if you agree, or say what you want different.
+
+It found a mistake it had made itself in August: it had told you the app already promises a tick shows up straight away, and it does not. So it wants to write that promise down first, and it has guessed the numbers. The numbers are the part worth arguing with.
 
 ---
 
@@ -53,7 +55,7 @@ The second half of the idea is that a background watcher drives those stages fro
 
 Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below). **Nothing on that list moved on 19 August**, deliberately — four of the promises gained notes about what happened, and a promise only gets its tick back when somebody who did not build the thing checks it.
 
-1096 automatic tests pass. Tests are not the same as somebody watching it work.
+1134 automatic tests pass. Tests are not the same as somebody watching it work.
 
 ---
 
@@ -76,6 +78,12 @@ You then read one yourself and caught a second fault I had called cosmetic: the 
 **You then ran the command on [#37](https://github.com/fvermaut/scratch-app/issues/37) and it did the job properly.** It refused to sign your name, wrote everything out, asked you one question instead of ten, got your yes in the terminal, wrote that down on the ticket for the record, and started building. It left a written account of what it did and what it guessed.
 
 **That run then found the one thing nobody thought of**, and it is fixed. When your session ended, the job went back to being stopped: nothing could say "this is sorted, carry on", so the work sat on its branch and the watcher would never take it further. That was [#30](https://github.com/fvermaut/timone/issues/30).
+
+**19 August — bug reports go somewhere now.** Drawing the whole machine out on one page showed that one of the four kinds of request it sorts into had nowhere to go: a bug was sorted, sent on to a step that had never been built, and stopped there for good. `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4) had been sitting like that since 2 August. That step is built, and four smaller mismatches the drawing exposed are fixed with it.
+
+It was watched on #4 itself, not on a ticket I made up. It picked the report back up, worked out why the page drags, wrote it up, and asked you to read it — and in doing so it caught a mistake it had made in August: it had told you the app already promises a tick shows up straight away, and it does not. It says so itself, on the ticket.
+
+There is a drawing of how the whole thing works now, for you rather than for the machine. **All of this is on a branch waiting to be merged** — `docs/daemon-state-machine`. Merging it is yours.
 
 **19 August — what you sort out in your terminal now goes back to the machine.** You ruled on three questions and the work is built. The session you open clears the blockage and stops there: it writes the words a decision needs — the requirements, the reasons, a correction — and it does not build the thing. Building goes back to the watcher, where it arrives one piece at a time, each piece costs a visible amount, each stops for you where it should, and a second pair of eyes checks it. Then the session leaves one comment saying it is sorted and where to carry on, and the watcher picks it up on its next pass. Nothing for you to type. If it names a place the machine does not recognise, the ticket says so and quotes what it wrote, rather than guessing and starting the wrong work.
 
