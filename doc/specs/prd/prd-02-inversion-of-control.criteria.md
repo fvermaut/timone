@@ -495,6 +495,36 @@
       THEN that run is cancelled with a reason and **no session is spawned for it**, asserted on the spawn itself rather than on the absence of a log line
 - **Verification hint:** drive a copy of the ledger with `--state` and never the live file. Settle a fixture chunk and confirm the ticket takes a `/2`; fail one and confirm repeated cycles open nothing while `timone retry` re-arms `/1`. Then, on `scratch-app`, break a fixture specification into two chunks, approve the breakdown once, and read the ticket thread end to end: two branches, two pull requests, no gate between them, the ticket closing on the second merge. File a second marked ticket while chunk 1's pull request is open and confirm it starts between the chunks. Cancel a live fixture run by command, and close a ticket with a run queued behind it to confirm nothing is spawned and nothing is paid for.
 
+## R23 — A run is isolated from fvermaut's machine
+
+> Added 2026-08-20 by [ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md), [ADR-0042](../../adr/0042-timone-acts-under-its-own-identity.md) and [ADR-0043](../../adr/0043-the-humans-checkout-is-theirs-alone.md). Until now a daemon-spawned session ran in the daemon's own process and edited `projects/<name>/` — the same folder fvermaut opens in an editor — with `bypassPermissions` and the host's borrowed credentials. This requirement is the promise that neither is true any more: a run's work happens in a container built from the git remotes, under Timone's own scoped identity, and nothing the machine does reaches fvermaut's disk. **It is the non-goal *"sandboxing beyond the R15 path-containment hook"* being retired**, ahead of the first managed client project rather than because of one.
+
+- **Priority:** MUST
+- **Status:** draft
+    - ✏ 2026-08-20 — **drafted from fvermaut's seven rulings of 2026-08-20 and the three ADRs above, and awaiting his confirmation of the wording.** The register's own standing note warns that inventing a MUST inside a plan file is stage 3's work done by the wrong hand; this one is written here, in the register, from answers he gave, and it is his to amend before the phase that builds it is executed. **Nothing is built. No clause has machinery.**
+    - ✏ 2026-08-20 — **clause 2 is the discriminating one and the only one that measures the problem that was actually reported.** The rest can all pass while a merge and a `git switch` still collide, because the daemon's own git work is a second machine user of the same folder and boxing sessions does not touch it. A verifier who checks only that sessions run in containers has checked the easy half.
+- **Verify-via:** api
+- **Criteria:**
+    - GIVEN a marked ticket on a managed project
+      WHEN the daemon spawns the session for it
+      THEN that session's work happens inside a container created for that run and destroyed when it ends, whose content came from cloning timone and the target project from their git remotes, with **no path from fvermaut's filesystem mounted into it**
+    - GIVEN a run building on a managed project
+      WHEN fvermaut switches branch, edits files or runs any git command in `projects/<name>/` while it builds
+      THEN the run completes unaffected and his checkout stays exactly where he left it — and across the whole run **no git operation performed by the daemon or by any session touched that folder**, asserted on the folder rather than inferred from the run having succeeded
+    - GIVEN a daemon running at one commit of timone
+      WHEN two runs start an hour apart, whatever the default branch has moved to in between
+      THEN both containers hold timone at **that same commit** — and a daemon whose own checkout carries uncommitted changes **refuses to spawn a run and says so**, rather than running the pushed rules while fvermaut reads different ones
+    - GIVEN a verification pass that needs the project's database and a browser
+      WHEN it runs inside the container
+      THEN the project's services are running **beside** it on a private network and are reached by name, the browser leg of the pass runs to completion inside the container, and the container has **no docker socket, no docker CLI and no ability to create a container**
+    - GIVEN any comment, commit, branch or pull request the machine produces
+      WHEN its author is inspected on the forge
+      THEN it is **Timone's own account and not fvermaut's** — and the credential held inside the container opens the target repository alone, proved by an attempted read or push against a second managed repository being refused
+    - GIVEN a step ticket's pull request ready to merge, and the chunk-zero merge that carries no pull request at all
+      WHEN each is merged
+      THEN both are performed **through the forge**, and neither requires or produces a local checkout of the project anywhere on fvermaut's machine
+- **Verification hint:** on `scratch-app`, never on a live project. Drive one real marked ticket end to end and, while it builds, switch branch in `projects/scratch-app` and leave it there — then check `git status` and the reflog in that folder afterwards for any move the machine made. Inspect the running container for mounts and for a docker socket, and try a push from inside it to a second managed repository. Stop the daemon with an uncommitted change in timone and confirm it refuses rather than spawns. Read the ticket thread and the commits for authorship.
+
 ---
 
 ## Owed — a requirement nobody has written yet
