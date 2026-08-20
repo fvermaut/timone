@@ -31,6 +31,14 @@ export interface CommitEvidence {
   files: string[];
   /** The commit message's trailer lines, verbatim (ADR-0019). */
   trailers: string[];
+  /**
+   * The committer's email. `noreply@github.com` on a merge the GitHub merge
+   * button made — see {@link isPlatformMerge}. Optional so evidence built
+   * before this field existed still type-checks.
+   */
+  committerEmail?: string;
+  /** How many parents the commit has. Two or more means a merge. */
+  parentCount?: number;
 }
 
 /** What one repository did during a session. */
@@ -296,17 +304,55 @@ export function checkPathContainment(evidence: SessionEvidence): Violation[] {
  * convention landed is unmarked, and nothing is rewritten: absence proves
  * nothing about existing history, and this rule never claims otherwise.
  */
-export function checkProvenance(evidence: SessionEvidence): Violation[] {
-  const untrailed = [...evidence.projects, evidence.workspace].flatMap((repo) =>
-    repo.commits
-      .filter(
-        (commit) =>
-          !commit.trailers.some((line) =>
-            line.startsWith(`${STAGE_TRAILER}:`),
-          ),
-      )
-      .map((commit) => `- ${repo.repo} ${commit.sha} on \`${commit.branch}\``),
+/**
+ * A merge commit the hosting platform made on the session's behalf — the
+ * GitHub merge button, not a session.
+ *
+ * **Nothing can satisfy this rule for such a commit.** It is created
+ * server-side, by a person clicking Merge, and there is no stage that made it;
+ * the only way to stamp one is to force-push the branch it landed on and
+ * rewrite published history, which is worse than the finding. Every pull
+ * request this repository has ever merged has this shape, so reporting them
+ * trains a reader to ignore the check — and the next genuine missing trailer
+ * gets ignored with it.
+ *
+ * Deliberately narrow: a merge a *session* makes locally has the session as
+ * its committer and is still reported. Two parents alone is not enough.
+ */
+function isPlatformMerge(commit: CommitEvidence): boolean {
+  return (
+    (commit.parentCount ?? 0) > 1 &&
+    commit.committerEmail === "noreply@github.com"
   );
+}
+
+export function checkProvenance(evidence: SessionEvidence): Violation[] {
+  // One line per commit, not per place it can be reached from. A commit is
+  // listed against every branch containing it, so a session that cuts three
+  // branches off `main` saw the same missing trailer reported four times — the
+  // count at the top of the warning stopped meaning anything, and the real
+  // finding was buried in repeats of itself.
+  const branchesBySha = new Map<string, { repo: string; branches: string[] }>();
+  for (const repo of [...evidence.projects, evidence.workspace]) {
+    for (const commit of repo.commits) {
+      if (commit.trailers.some((line) => line.startsWith(`${STAGE_TRAILER}:`))) {
+        continue;
+      }
+      if (isPlatformMerge(commit)) continue;
+      const key = `${repo.repo} ${commit.sha}`;
+      const seen = branchesBySha.get(key);
+      if (seen === undefined) {
+        branchesBySha.set(key, { repo: repo.repo, branches: [commit.branch] });
+      } else if (!seen.branches.includes(commit.branch)) {
+        seen.branches.push(commit.branch);
+      }
+    }
+  }
+
+  const untrailed = [...branchesBySha.entries()].map(([key, { branches }]) => {
+    const where = branches.map((name) => `\`${name}\``).join(", ");
+    return `- ${key} on ${where}`;
+  });
 
   if (untrailed.length === 0) return [];
 
@@ -681,7 +727,7 @@ async function commitsOn(
 ): Promise<CommitEvidence[]> {
   const log = await git(dir, [
     "log",
-    "--pretty=format:%x00%H%x01%B%x02",
+    "--pretty=format:%x00%H%x03%ce%x03%P%x01%B%x02",
     "--name-only",
     ...revArgs,
   ]);
@@ -690,13 +736,16 @@ async function commitsOn(
   for (const block of log.split("\0")) {
     if (block.trim() === "") continue;
     const [header, afterBody = ""] = block.split("\x02");
-    const [sha, body = ""] = header.split("\x01");
+    const [meta = "", body = ""] = header.split("\x01");
+    const [sha = "", committerEmail = "", parents = ""] = meta.split("\x03");
     if (sha.trim() === "") continue;
     commits.push({
       sha: sha.trim().slice(0, 7),
       branch,
       files: afterBody.split("\n").filter((line) => line.trim() !== ""),
       trailers: trailersOf(body),
+      committerEmail: committerEmail.trim(),
+      parentCount: parents.trim() === "" ? 0 : parents.trim().split(/\s+/).length,
     });
   }
   return commits;

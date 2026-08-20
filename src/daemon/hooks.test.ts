@@ -528,6 +528,58 @@ describe("checkProvenance", () => {
     expect(violation.detail.join("\n")).toContain("aaa1111");
   });
 
+  it("reports a commit once, however many branches reach it", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      { sha: "aaa1111", branch: "main", files: ["src/x.ts"], trailers: [] },
+      { sha: "aaa1111", branch: "feat/one", files: ["src/x.ts"], trailers: [] },
+      { sha: "aaa1111", branch: "feat/two", files: ["src/x.ts"], trailers: [] },
+    ];
+
+    const [violation] = checkProvenance(evidence);
+
+    expect(violation.summary).toContain("1 commit(s)");
+    const lines = violation.detail.filter((line) => line.includes("aaa1111"));
+    expect(lines).toHaveLength(1);
+    // The branches are still named — that is useful; repeating the commit is not.
+    expect(lines[0]).toContain("main");
+    expect(lines[0]).toContain("feat/two");
+  });
+
+  it("ignores a merge the GitHub merge button made", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "bbb2222",
+        branch: "main",
+        files: [],
+        trailers: [],
+        committerEmail: "noreply@github.com",
+        parentCount: 2,
+      },
+    ];
+
+    expect(checkProvenance(evidence)).toEqual([]);
+  });
+
+  it("still flags a merge a session made itself", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "ccc3333",
+        branch: "main",
+        files: [],
+        trailers: [],
+        committerEmail: "someone@example.com",
+        parentCount: 2,
+      },
+    ];
+
+    const [violation] = checkProvenance(evidence);
+
+    expect(violation.detail.join("\n")).toContain("ccc3333");
+  });
+
   it("accepts a run-driven commit carrying all three lines", () => {
     const evidence = cleanEvidence();
     projectRepo(evidence).commits = [
