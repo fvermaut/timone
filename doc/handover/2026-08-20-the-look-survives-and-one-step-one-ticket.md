@@ -6,7 +6,7 @@
 
 A rejected screen on `ivtrends` turned into three days of process change. The look now survives the prototype that settled it, a screen's shell is built before its behaviours, and the look is gated twice — all merged. Separately, one step is now one ticket instead of fourteen pieces hanging off one thread, which is decided and merged but **not built**: [phase 29](../plans/phases/phase-29.md) plans the daemon work and is waiting to be executed. `ivtrends` has been wound back to the day its questions were all answered, keeping every decision and deleting every line of code.
 
-**The one thing that will bite the next session: [PR #43](https://github.com/fvermaut/timone/pull/43) is open and unmerged, and `phase-29.md` lives on its branch.** It is not on `main`. Executing 29 without merging it first will fail to find the plan.
+✏ **Updated 2026-08-20, later the same day: [PR #43](https://github.com/fvermaut/timone/pull/43) is merged and there is no blocker.** `phase-29.md`, the R22 amendment and the ADR-0040 correction are all on `main`, and no pull request is open on this repository. Phase 29 is ready to execute as it stands.
 
 ## Done this session
 
@@ -19,7 +19,6 @@ A rejected screen on `ivtrends` turned into three days of process change. The lo
 
 ## In flight / blocked
 
-- **[PR #43](https://github.com/fvermaut/timone/pull/43) — open, unmerged, and blocking phase 29.** It carries `phase-29.md`, the R22 amendment, and a correction to ADR-0040. fvermaut has not spoken to it. **Merge it before executing 29.**
 - **[Phase 29](../plans/phases/phase-29.md) — planned, not started.** Nine slices. Deliberately not executed: the daemon runs against real projects and half a change to its scheduling loop is worse than none.
 - **`ivtrends` — idle and deliberately unmarked.** It has no code, no breakdown and no plan. Its next step is a new breakdown cut under ADR-0040, which wants phase 29 built first so the step tickets actually open.
 - **Two `ivtrends` phase plans were deleted in the revert** — the universe repaint and the board rebuild. They are at the tag if wanted, but both were written against the old ticket model and should be re-cut rather than restored.
@@ -33,8 +32,9 @@ A rejected screen on `ivtrends` turned into three days of process change. The lo
 
 ## Exact next action
 
-1. **Merge [PR #43](https://github.com/fvermaut/timone/pull/43)** — or `phase-29.md` will not be on `main`.
-2. Then: `/timone-execute` is for managed projects, and Timone is not one, so phase 29 is executed the way Timone's own phases always are — hand-run, slice by slice, from [`doc/plans/phases/phase-29.md`](../plans/phases/phase-29.md).
+**Execute phase 29**, from [`doc/plans/phases/phase-29.md`](../plans/phases/phase-29.md) on `main`. `timone-execute` is for managed projects and Timone is not one, so this is hand-run, slice by slice, the way Timone's own phases always are. Start at 29a and 29b — they share no files and may run in parallel.
+
+`main` is at `1a4eb2e`, no pull request is open, and `timone guardrails check` is clean.
 
 Two things the plan pins down that a fresh reader should not re-litigate: **29c asserts idempotence** (opening fourteen issues is the first loud, external, un-undoable thing this system does), and **29g deletes settledness last**, after the new path carries traffic.
 
