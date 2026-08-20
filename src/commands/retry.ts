@@ -195,10 +195,10 @@ function retry(
       readAgain
         ? `${name} is re-armed, and I've wound it back to before the answer you ` +
             "wrote on the ticket, so I read that answer again instead of asking " +
-            "you the same question twice. The watcher picks it up on its next " +
+            "you the same question twice. The daemon picks it up on its next " +
             "cycle — start `timone daemon` if it isn't running."
         : `${name} is re-armed at the point it stopped (${rearmed.stage ?? "the start"}). ` +
-            "The watcher picks it up on its next cycle — start `timone daemon` if it isn't running.",
+            "The daemon picks it up on its next cycle — start `timone daemon` if it isn't running.",
     );
     return 0;
   } catch (error) {
@@ -211,7 +211,7 @@ function retry(
 
 /**
  * Put a conversation's marker back to before the last answer read from it
- * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)), so the watcher
+ * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)), so the daemon
  * reads that answer again.
  *
  * This is the other half of consuming an answer. Reading one moves the marker
@@ -272,7 +272,7 @@ function rewind(
   log(
     `${name} is waiting on a conversation, and I've wound it back to before the ` +
       "last answer written on the ticket, so I read that answer again instead of " +
-      "leaving it sitting there. The watcher picks it up on its next cycle — start " +
+      "leaving it sitting there. The daemon picks it up on its next cycle — start " +
       "`timone daemon` if it isn't running.",
   );
   return 0;
@@ -305,7 +305,7 @@ function reopenConsumed(run: Run, store: RunStore): boolean {
 
   store.park(run.id, {
     // Its own words rather than the channel's: what this run is waiting for is
-    // one cycle of the watcher, and the wait the session cleared is gone.
+    // one cycle of the daemon, and the wait the session cleared is gone.
     waitingOn: "the answer you wrote on the ticket, which I'll read again",
     kind: "conversation",
     waitCursor: justBefore(at),

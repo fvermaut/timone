@@ -297,7 +297,7 @@ export function renderStatus(
   return [
     ...(options.stateExists
       ? []
-      : ["Nothing has run yet — start the watcher with `timone daemon`.", ""]),
+      : ["Nothing has run yet — start it with `timone daemon`.", ""]),
     ...lines,
     ...(failures.length > 0 ? ["", ...failures] : []),
     ...(cancelled.length > 0 ? ["", ...cancelled] : []),

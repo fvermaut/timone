@@ -84,7 +84,7 @@ describe("timone retry", async () => {
     // would slip past a regex.
     expect(lines.join("\n")).toBe(
       "scratch-app #6 is re-armed at the point it stopped (execution). " +
-        "The watcher picks it up on its next cycle — start `timone daemon` if it isn't running.",
+        "The daemon picks it up on its next cycle — start `timone daemon` if it isn't running.",
     );
   });
 
