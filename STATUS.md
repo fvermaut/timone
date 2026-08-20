@@ -2,13 +2,19 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-20.
+**Last updated:** 2026-08-20, late evening.
 
 ---
 
 ## Waiting on you
 
+> **Read this first, it is new.** I was asked to build the one-step-one-ticket work and the container work, one after the other. **The container work started and three of its twelve pieces are built.** The one-step-one-ticket work **did not start at all** — reading the code against the plan first turned up four things only you can settle, and two of them would have broken something that works today. Nothing was built on a guess. Details in item 5.
+
+**0. One thing changed that you will notice.** From now on, **the daemon will not start any job while there are uncommitted changes in the Timone folder**. It says which files, in the daemon's log. This is on purpose — every job has to follow one saved copy of the rules, and running rules you cannot see on screen is the confusion this prevents. But it is live *now*, before the container work that it was built for. So if you start the daemon and nothing happens, check the log and commit or undo your own edits first.
+
 **1. Make a GitHub account for Timone.** This is new, and nothing about running agents in containers can start until it exists. Create an account — any name you like — and invite it to `ivtrends` and `scratch-app`. About an hour, once.
+
+**Also confirm the wording of the container promise.** It was written from your seven rulings and marked "awaiting your confirmation", and it is what the whole container plan is measured against. It is in `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, called R23 — six short paragraphs. Read them and say yes, or say what is wrong. Five minutes, and twelve pieces of work are waiting behind it.
 
 Today the machine has no account of its own. It borrows yours. That is why every comment it writes looks like you wrote it, and it is also why an agent working on one project can currently reach every repository you can. Its own account fixes both.
 
@@ -32,7 +38,16 @@ timone retry scratch-app#13
 timone cancel scratch-app#10
 ```
 
-**5. Three rules need your ruling.** None of them blocks anything today.
+**5. Four decisions block the one-step-one-ticket work. It cannot start without them.**
+
+This is the work that splits a big job into one ticket per step, so a thread stops reaching 73 comments. The plan for it is written. Reading it against the code before building found four things the plan cannot decide for itself. They are written up in full at the top of `doc/plans/phases/phase-29.md`; here they are in short.
+
+- **A deletion in the plan would stop `timone retry` from working.** The decision you approved says to delete a piece of bookkeeping because the only thing using it is going away. That is not right — it is also what keeps a **failed** job sitting still so `timone retry` can restart it where it broke. Delete it as written and either failed work stops being restartable, or the machine opens a new job beside the failure and then refuses your retry. **Keep the piece and delete only the counting, or change the behaviour on purpose?** I think keep it, but it is your decision because it is your decision that is wrong. ([#51](https://github.com/fvermaut/timone/issues/51))
+- **Which number does `timone retry` take after the change?** Today a job belongs to the ticket you filed. After the change, each step is its own ticket. So does a job belong to the step's number or to the original one? If the step's, then the command you are told to type becomes `timone retry scratch-app#27` for a step you never filed. If the original, nothing records which step a merged pull request finished. **It changes what you type, so it is yours.**
+- **Should `timone status` be allowed to get slower?** To say which step is live it has to ask GitHub, and today it answers instantly from a local file. Three ways out: remember the answer locally, show less, or accept the wait. **Which?**
+- **How does one step say it is waiting for another?** GitHub can now record this itself, and there is also a plain "Blocked by: #12" line written into the ticket. Nothing in the code reads either yet. **Native, the written line, or both?** Two pieces of the work need the same answer, so nothing starts until this one is settled.
+
+**Three older rules also need a ruling.** None of them blocks anything today.
 
 - You asked for two things that cannot both be true: every open ticket must say what happens next, **and** a repository joined with a big backlog stays silent. On such a repository, an unlabelled ticket would say nothing. Which rule wins?
 - On 14 August the machine was supposed to give up and hand a conversation back to your terminal. It worked the answer out instead, and you called that a pass. Should the rule change, or the behaviour?
@@ -64,6 +79,20 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 ---
 
 ## What changed recently
+
+**20 August, late — three pieces of the box are built, and the other work stopped before it started.** The branch is `phase-30-work-in-a-box`, nothing is merged, and there is no pull request yet.
+
+Built and checked:
+
+- **A job now says what to clone and at which exact version**, instead of naming a folder on your disk. Nothing behaves differently yet — it is the shape the container work needs, changed on its own so it can be read on its own.
+- **The daemon refuses to start a job when your Timone folder has uncommitted changes**, and names the files. See item 0 above: this is live now.
+- **The box itself exists** — a container image with node, the tools, GitHub's command, the Claude command and all three browsers. It has no way to make containers of its own, and that is checked rather than assumed. It is 3.3 GB and takes about seven minutes to build the first time.
+
+One check earned its keep. All three browsers load a page perfectly well on the small default shared memory, so the browser test would **not** have caught that the setting was too small — Chromium would have died later, on a real page, looking like an unrelated crash. The check measures the number instead. The container has to be started with `--shm-size=1g`, and the piece that starts containers has to pass it.
+
+**Nothing else in the container work can start**, and the reason is item 1: the machine has no account of its own. Four of the twelve pieces need it. Reading the plan against the code also found that the piece meant to stop the machine touching your folder would, as written, have forbidden two things it promises not to touch — the safety check and the preview machinery. That is written into the plan now, not discovered later.
+
+**Five faults were filed that had been carried in somebody's head since 17 August** — [#47](https://github.com/fvermaut/timone/issues/47) a call to GitHub can hang for ever, [#48](https://github.com/fvermaut/timone/issues/48) a dropped connection fails the job instead of being retried, [#49](https://github.com/fvermaut/timone/issues/49) a slow cycle is reported as the machine not running at all, [#50](https://github.com/fvermaut/timone/issues/50) a failed connection is reported as a branch that does not exist, and [#51](https://github.com/fvermaut/timone/issues/51) the deletion in item 5. There is also a likely cause for the test that fails now and then, added to [#8](https://github.com/fvermaut/timone/issues/8).
 
 **18 August — the machine stops asking you the same question.** On the trading app it asked you the same thing five times. You answered four times. Each answer started the same expensive job again, which read your answer, decided it could not do what you asked, and asked again. It was right every time: you were telling it to change the very promises it was checking against, and it may not write those itself.
 
