@@ -40,6 +40,7 @@ import {
   AgentSessionSpawner,
   parkedComment,
   sessionOutcomeFrom,
+  sessionRequest,
   type ProgressReader,
   type SessionRequest,
   type SessionRuntime,
@@ -3655,4 +3656,94 @@ describe("the two stages phase 27 built", () => {
     });
   });
 
+});
+
+describe("the request builder", () => {
+  /**
+   * A commit as `git rev-parse HEAD` reports it. Written out rather than read
+   * from a repository: the point of these tests is that the request carries
+   * whatever the daemon was pinned to, and a value the code could recompute
+   * would prove nothing.
+   */
+  const TIMONE_COMMIT = "4f0d1c9b7a2e6d5c3b8a19f0e7d6c5b4a3928170";
+  const TIMONE_REMOTE = "https://github.com/fvermaut/timone.git";
+
+  it("pins timone to the commit the daemon is running", () => {
+    const request = sessionRequest({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-opus-4-6",
+      workspace: {
+        timone: { remote: TIMONE_REMOTE, commit: TIMONE_COMMIT },
+        project,
+        branch: "timone/7-the-page-feels-slow",
+      },
+    });
+
+    expect(request.workspace?.timone).toEqual({
+      remote: TIMONE_REMOTE,
+      commit: TIMONE_COMMIT,
+    });
+  });
+
+  it("refuses a timone version that is a branch name rather than a commit", () => {
+    expect(() =>
+      sessionRequest({
+        cwd: "/root",
+        prompt: "go",
+        model: "claude-opus-4-6",
+        workspace: {
+          timone: { remote: TIMONE_REMOTE, commit: "main" },
+          project,
+          branch: "timone/7-the-page-feels-slow",
+        },
+      }),
+    ).toThrow(/commit/);
+  });
+
+  it("names the target project's work branch, and where to clone it from", () => {
+    const request = sessionRequest({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-opus-4-6",
+      workspace: {
+        timone: { remote: TIMONE_REMOTE, commit: TIMONE_COMMIT },
+        project,
+        branch: "timone/7-the-page-feels-slow",
+      },
+    });
+
+    expect(request.workspace?.project).toEqual({
+      name: "scratch-app",
+      remote: "https://github.com/fvermaut/scratch-app.git",
+      branch: "timone/7-the-page-feels-slow",
+    });
+  });
+
+  it("hands the in-process runtime what it received before, when no workspace is named", () => {
+    const request = sessionRequest({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-opus-4-6",
+    });
+
+    // Strictly: a `workspace` key set to undefined is not the same request as
+    // one without it, and the in-process runtime must see the second.
+    expect(request).toStrictEqual({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-opus-4-6",
+    });
+  });
+
+  it("leaves the effort key out, rather than undefined, for a stage that declares none", () => {
+    const request = sessionRequest({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-haiku-4-5",
+      effort: undefined,
+    });
+
+    expect(Object.keys(request)).toEqual(["cwd", "prompt", "model"]);
+  });
 });

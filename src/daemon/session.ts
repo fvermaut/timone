@@ -61,6 +61,42 @@ import {
   type RunStore,
 } from "./runs.js";
 
+/**
+ * Timone itself, at one exact commit — never a branch name (ADR-0041 D2).
+ * Two runs started an hour apart follow identical rules only if the version
+ * is fixed when the run starts, and a branch moves.
+ */
+export interface TimonePin {
+  remote: string;
+  commit: string;
+}
+
+/**
+ * What a run's copy of the world is made of: the remotes it is cloned from
+ * and the versions it is held at (ADR-0041 D1).
+ *
+ * A runtime that runs the session in this process has no use for it — it is
+ * already standing in a checkout. A runtime that builds a container has
+ * nothing else: the remotes are the only source of truth, and that is what
+ * makes the container disposable.
+ */
+export interface SessionWorkspace {
+  timone: TimonePin;
+  /**
+   * The target project, at the branch this chunk's run works on — the layout
+   * ADR-0007 already fixed, `projects/<name>/`, said in the terms a clone
+   * needs.
+   */
+  project: { name: string; remote: string; branch: string };
+}
+
+/** What a workspace is assembled from: the pin, the project, its branch. */
+export interface WorkspaceInput {
+  timone: TimonePin;
+  project: TicketingProject;
+  branch: string;
+}
+
 /** What the spawner asks a runtime to run. */
 export interface SessionRequest {
   /** Always the timone root — sessions never run inside a managed project. */
@@ -79,6 +115,72 @@ export interface SessionRequest {
    * something unambiguous to omit.
    */
   effort?: EffortLevel;
+  /**
+   * What to clone, and at which versions. Absent when the caller cannot name
+   * a version — the in-process runtime ignores the field entirely, so a
+   * request without one runs exactly as it always did.
+   */
+  workspace?: SessionWorkspace;
+}
+
+/** What {@link sessionRequest} is given to assemble a request from. */
+export interface SessionRequestInput {
+  cwd: string;
+  prompt: string;
+  model: string;
+  /** Absent, or undefined, for a stage that declares no effort. */
+  effort?: EffortLevel;
+  /** Absent until the caller can name the versions to clone at. */
+  workspace?: WorkspaceInput;
+}
+
+/** A git object name as `git rev-parse` reports one: 40 hexadecimal digits. */
+const COMMIT = /^[0-9a-f]{40}$/;
+
+/**
+ * The one place a {@link SessionRequest} is assembled. Both spawn paths go
+ * through it so that the rules a request has to obey — the effort key is
+ * absent rather than undefined, the timone version is a commit and not a
+ * branch — are stated once instead of at every build site.
+ *
+ * Throws when the timone version is not a commit. That is a wiring mistake,
+ * not a domain failure: a request built from a branch name would start a run
+ * whose rules can move under it, which is the whole thing ADR-0041 D2 exists
+ * to prevent, and it must stop at the build rather than surface as two runs
+ * that behaved differently for no visible reason.
+ */
+export function sessionRequest(input: SessionRequestInput): SessionRequest {
+  const commit = input.workspace?.timone.commit;
+  if (commit !== undefined && !COMMIT.test(commit)) {
+    throw new Error(
+      `timone must be pinned to a commit, not "${commit}" (ADR-0041 D2)`,
+    );
+  }
+  return {
+    cwd: input.cwd,
+    prompt: input.prompt,
+    model: input.model,
+    // Spread rather than assigned, so a stage with no effort produces a
+    // request with no `effort` key — not one set to undefined, which the
+    // runtime would have to tell apart from an intended value. The same
+    // holds for a request nobody gave a workspace.
+    ...(input.effort === undefined ? {} : { effort: input.effort }),
+    ...(input.workspace === undefined
+      ? {}
+      : { workspace: workspaceOf(input.workspace) }),
+  };
+}
+
+/** The pin, the project and the branch, said the way a clone needs them. */
+function workspaceOf(input: WorkspaceInput): SessionWorkspace {
+  return {
+    timone: input.timone,
+    project: {
+      name: input.project.name,
+      remote: input.project.repoUrl,
+      branch: input.branch,
+    },
+  };
 }
 
 /** How a session ended. */
@@ -789,16 +891,11 @@ export class AgentSessionSpawner implements SessionSpawner {
     const headBefore =
       (await this.branchHead(project, branch)) ?? (await this.currentHead(project));
 
-    const effort = effortFor(stage);
-    const { outcome, attempts } = await this.runSession(run, stage, {
-      cwd: root,
-      prompt,
-      model,
-      // Spread rather than assigned, so a stage with no effort produces a
-      // request with no `effort` key — not one set to undefined, which the
-      // runtime would have to tell apart from an intended value.
-      ...(effort === undefined ? {} : { effort }),
-    });
+    const { outcome, attempts } = await this.runSession(
+      run,
+      stage,
+      sessionRequest({ cwd: root, prompt, model, effort: effortFor(stage) }),
+    );
 
     if (!outcome.ok) {
       const reason = outcome.error ?? "the session ended without a result";
@@ -1413,11 +1510,10 @@ export class AgentSessionSpawner implements SessionSpawner {
     // Its own declared model, never the runtime's default: this is the second
     // `runtime.start` site and not a `PipelineStage`, so nothing in the graph
     // speaks for it. Haiku carries no effort at all.
-    const started = await this.startClaimed(run, {
-      cwd: root,
-      prompt,
-      model: APPROVAL_RECORD_MODEL,
-    });
+    const started = await this.startClaimed(
+      run,
+      sessionRequest({ cwd: root, prompt, model: APPROVAL_RECORD_MODEL }),
+    );
     this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
 
     const outcome = await this.watch(run.id, `${run.id} (approval record)`, started);
