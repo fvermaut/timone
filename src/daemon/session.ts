@@ -5,7 +5,12 @@ import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 
 const execFileAsync = promisify(execFile);
 
-import { mergeIntoDefault, type MergeOutcome } from "../git.js";
+import {
+  checkoutVersion,
+  mergeIntoDefault,
+  uncommittedFiles,
+  type MergeOutcome,
+} from "../git.js";
 import type { Manifest } from "../manifest.js";
 import type {
   TicketComment,
@@ -88,6 +93,76 @@ export interface SessionWorkspace {
    * needs.
    */
   project: { name: string; remote: string; branch: string };
+}
+
+/**
+ * The daemon's own checkout, as the spawn path has to see it: which version
+ * of Timone this is, and what in it has not been committed (ADR-0041 D2).
+ */
+export interface TimoneCheckout {
+  /**
+   * The version a run started now would follow. Absent when `dir` is not a
+   * git checkout at all — which a running daemon never reaches, since its
+   * root *is* its own repository, and which is therefore a wiring mistake
+   * rather than a state to report to anybody.
+   */
+  pin?: TimonePin;
+  /**
+   * Repo-relative paths carrying changes nobody has committed — staged,
+   * unstaged and untracked alike.
+   *
+   * Files git was told to ignore are never among them. That is not a filter
+   * applied here: `git status --porcelain` leaves them out, which is why
+   * `node_modules/` and `dist/` are not work anybody has to commit.
+   */
+  uncommitted: string[];
+}
+
+/**
+ * Read the daemon's own checkout. Behind a seam on the spawner for the same
+ * reason as {@link AgentSessionSpawnerOptions.repoProbe}.
+ *
+ * **What is outstanding is read first, and separately from the version.** A
+ * checkout with no `origin` has no version to pin and still has work in it
+ * nobody has committed, and it is the second of those that stops a run.
+ */
+export async function readTimoneCheckout(dir: string): Promise<TimoneCheckout> {
+  const uncommitted = await uncommittedFiles(dir);
+  const pin = await checkoutVersion(dir);
+  return { ...(pin === undefined ? {} : { pin }), uncommitted };
+}
+
+/**
+ * How many files the refusal names before it starts counting.
+ *
+ * A tree with two hundred changes in it produces a line nobody reads, and the
+ * first ten are enough to recognise what is going on.
+ */
+const NAMED_IN_REFUSAL = 10;
+
+/**
+ * What the daemon says when it will not start a run because its own folder
+ * has changes in it that nobody has committed (ADR-0041 D2).
+ *
+ * **Read by a person, not by a stage**, and by one who has never heard the
+ * word "pin": it goes to the terminal the daemon runs in, not onto a client's
+ * ticket. Nothing here is about the ticket, and saying it there would be the
+ * machine airing its own housekeeping in front of somebody's work.
+ *
+ * **One line.** The poll loop reports a refused spawn through `oneLine`,
+ * which keeps the first line and drops the rest — so a message that put the
+ * file names on line two would name nothing at all where it is read.
+ */
+export function uncommittedRefusal(files: readonly string[]): string {
+  const named = files.slice(0, NAMED_IN_REFUSAL);
+  const rest = files.length - named.length;
+  const list = [...named, ...(rest > 0 ? [`and ${rest} more`] : [])].join(", ");
+  return (
+    `I did not start this session. There are changes in Timone's own folder ` +
+    `that are not committed: ${list}. Every run has to use the same saved ` +
+    `copy of my rules, so I stop rather than guess. Commit these files, or ` +
+    `undo them, and I will start on my next check.`
+  );
 }
 
 /** What a workspace is assembled from: the pin, the project, its branch. */
@@ -337,6 +412,13 @@ export interface AgentSessionSpawnerOptions {
     branch: string,
     message: string,
   ) => Promise<MergeOutcome>;
+  /**
+   * Reads the daemon's own checkout: which version of Timone it is running,
+   * and what in it has not been committed (ADR-0041 D2). Behind a seam for
+   * the same reason as {@link repoProbe}, and defaulting to
+   * {@link readTimoneCheckout} against {@link root}.
+   */
+  timoneProbe?: (dir: string) => Promise<TimoneCheckout>;
   /**
    * Milliseconds between progress lines while a session works. Defaults to
    * {@link DEFAULT_PROGRESS_INTERVAL_SECONDS}.
@@ -761,6 +843,27 @@ export class AgentSessionSpawner implements SessionSpawner {
       throw new Error(
         `Refusing to spawn a session for "${project.name}": it is not declared in the manifest`,
       );
+    }
+
+    // **Once per run, and here rather than per stage** (ADR-0041 D2). A run
+    // walks several stages between two human waits, and the version it
+    // follows must be the one it started on: a pin re-read at every stage is
+    // not a pin, it is a branch with extra steps.
+    //
+    // **Before anything is claimed and before any session starts**, including
+    // the approval record's — every one of those is a session, and a refusal
+    // that arrived after one of them would already have spent it.
+    const checkout = await this.timoneCheckout();
+    if (checkout.uncommitted.length > 0) {
+      // Thrown rather than written on the ticket, exactly as the manifest
+      // refusal above is. The poll loop catches it, reports it in the
+      // daemon's own log and leaves the run untouched, so the next cycle
+      // starts it as soon as the changes are committed — where failing the
+      // run would leave every marked ticket needing `timone retry` by hand.
+      throw new Error(uncommittedRefusal(checkout.uncommitted));
+    }
+    if (checkout.pin !== undefined) {
+      this.log(`pinned ${run.id} — timone at ${checkout.pin.commit.slice(0, 7)}`);
     }
 
     let stage: PipelineStage = context.stage ?? run.stage ?? "triage";
@@ -1199,6 +1302,21 @@ export class AgentSessionSpawner implements SessionSpawner {
       waitCursor: thread.comments.at(-1)?.createdAt ?? "",
     });
     this.log(`parked ${run.id} at delivery, waiting on PR #${pr.number}`);
+  }
+
+  /**
+   * The daemon's own checkout, as this run must see it. A read that fails
+   * answers "no version, nothing outstanding" rather than throwing: the
+   * refusal in `spawn` is about work somebody has not committed, and a root that
+   * is not a checkout at all is a different fault with a different fix.
+   */
+  private async timoneCheckout(): Promise<TimoneCheckout> {
+    const probe = this.options.timoneProbe ?? readTimoneCheckout;
+    try {
+      return await probe(this.options.root);
+    } catch {
+      return { uncommitted: [] };
+    }
   }
 
   /** The phase file's status text on `branch`, or undefined without one. */

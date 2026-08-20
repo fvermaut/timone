@@ -44,6 +44,7 @@ import {
   type ProgressReader,
   type SessionRequest,
   type SessionRuntime,
+  type TimoneCheckout,
   type Ticker,
 } from "./session.js";
 
@@ -250,6 +251,19 @@ function movingProbe(): () => Promise<string> {
   return async () => (calls++ === 0 ? "sha-before" : "sha-after");
 }
 
+/**
+ * A timone checkout with nothing outstanding in it (ADR-0041 D2).
+ *
+ * Needed by any test whose `root` is a **real** repository: the spawn path
+ * reads that folder for real before it starts anything, so such a test would
+ * otherwise pass or fail on whether somebody happened to have uncommitted
+ * work at the moment it ran. Every other test points `root` at a path that is
+ * no checkout at all, where the real probe finds nothing and says so.
+ */
+function cleanCheckout(): () => Promise<TimoneCheckout> {
+  return async () => ({ uncommitted: [] });
+}
+
 /** A picked-up run on scratch-app#7. */
 function pickedUpRun(store: RunStore): Run {
   return store.register("scratch-app", 7).run;
@@ -267,6 +281,7 @@ describe("spawn configuration", () => {
       adapter,
       runtime,
       root: "/Users/fvermaut/dev/timone",
+      timoneProbe: cleanCheckout(),
     }).spawn(pickedUpRun(store), project);
 
     expect(requests[0].cwd).toBe("/Users/fvermaut/dev/timone");
@@ -3745,5 +3760,107 @@ describe("the request builder", () => {
     });
 
     expect(Object.keys(request)).toEqual(["cwd", "prompt", "model"]);
+  });
+});
+
+describe("a timone checkout with uncommitted work in it", () => {
+  const PIN = {
+    remote: "https://github.com/fvermaut/timone.git",
+    commit: "4f0d1c9b7a2e6d5c3b8a19f0e7d6c5b4a3928170",
+  };
+
+  /** A checkout carrying `files` that nobody has committed. */
+  function carrying(...files: string[]): () => Promise<TimoneCheckout> {
+    return async () => ({ pin: PIN, uncommitted: files });
+  }
+
+  it("refuses to start a session, and names the files", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = classifyingRuntime("feature", adapter);
+
+    const spawning = new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      timoneProbe: carrying("process.md", ".claude/skills/timone-plan/SKILL.md"),
+    }).spawn(pickedUpRun(store), project);
+
+    await expect(spawning).rejects.toThrow(/process\.md/);
+    // On the spawn itself, never on a log line: the promise it refuses with
+    // is only half the claim, and the half that matters is that no session
+    // was asked for.
+    expect(requests).toEqual([]);
+  });
+
+  it("leaves the run where it was, so the next check picks it up", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime } = classifyingRuntime("feature", adapter);
+    const run = pickedUpRun(store);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      timoneProbe: carrying("process.md"),
+    })
+      .spawn(run, project)
+      .catch(() => {});
+
+    // Not failed and not parked: nothing about this ticket went wrong, and a
+    // run failed here would need `timone retry` on every ticket once the
+    // human commits. Nothing is said on the ticket either — this is between
+    // the machine and the person running it.
+    expect(store.get(run.id)?.status).toBe("picked-up");
+    expect(comments).toEqual([]);
+  });
+});
+
+describe("the version a run follows is fixed when the run starts", () => {
+  /** A run holding a branch, ready to be resumed into planning. */
+  function readyToPlan(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    return store.get(run.id)!;
+  }
+
+  it("reads the checkout once, however many stages the run walks", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:chore"],
+      comments: [],
+    });
+    const { runtime, requests } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${STAGE_DONE_MARKER}\n\nDone.`);
+      },
+    });
+
+    let reads = 0;
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      timoneProbe: async () => {
+        reads += 1;
+        return { uncommitted: [] };
+      },
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    // Two sessions in one run — planning, then the build it hands to.
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    // A version re-read between them is not a version this run is held at.
+    expect(reads).toBe(1);
   });
 });
