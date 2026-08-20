@@ -1,6 +1,6 @@
 # ADR-0029: A chunk advances only on success
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0040](0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)
 - **Date:** 2026-08-15
 - **Source:** fvermaut's ruling of 2026-08-15, put to him as the hazard slice 22a's handoff flagged: *a failed chunk keeps holding its ticket until it is retried or cancelled*
 - **Extends:** [ADR-0026](0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md), which made one ticket host a sequence of chunks without saying what moves a ticket from one chunk to the next
