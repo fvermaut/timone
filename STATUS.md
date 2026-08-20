@@ -2,13 +2,17 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-19.
+**Last updated:** 2026-08-20.
 
 ---
 
 ## Waiting on you
 
-**1. The trading app's latest piece stopped, and it was not its fault.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) has delivered four pieces. The fifth stopped on a server error at the other end. It needs one command:
+**1. Make a GitHub account for Timone.** This is new, and nothing about running agents in containers can start until it exists. Create an account — any name you like — and invite it to `ivtrends` and `scratch-app`. About an hour, once.
+
+Today the machine has no account of its own. It borrows yours. That is why every comment it writes looks like you wrote it, and it is also why an agent working on one project can currently reach every repository you can. Its own account fixes both.
+
+**2. The trading app's latest piece stopped, and it was not its fault.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) has delivered four pieces. The fifth stopped on a server error at the other end. It needs one command:
 
 ```
 timone retry ivtrends#1
@@ -16,25 +20,25 @@ timone retry ivtrends#1
 
 The ticket has both labels it needs now, so once it is running again it carries on by itself.
 
-**2. One job on the to-do app needs restarting.** `scratch-app` [#13](https://github.com/fvermaut/scratch-app/issues/13) stopped on a server error too:
+**3. One job on the to-do app needs restarting.** `scratch-app` [#13](https://github.com/fvermaut/scratch-app/issues/13) stopped on a server error too:
 
 ```
 timone retry scratch-app#13
 ```
 
-**3. One old job should be thrown away.** `scratch-app` #10 was a throwaway test ticket. It is closed, but its job is still recorded as stopped:
+**4. One old job should be thrown away.** `scratch-app` #10 was a throwaway test ticket. It is closed, but its job is still recorded as stopped:
 
 ```
 timone cancel scratch-app#10
 ```
 
-**4. Three rules need your ruling.** None of them blocks anything today.
+**5. Three rules need your ruling.** None of them blocks anything today.
 
 - You asked for two things that cannot both be true: every open ticket must say what happens next, **and** a repository joined with a big backlog stays silent. On such a repository, an unlabelled ticket would say nothing. Which rule wins?
 - On 14 August the machine was supposed to give up and hand a conversation back to your terminal. It worked the answer out instead, and you called that a pass. Should the rule change, or the behaviour?
 - **New, from yesterday's test:** a ticket whose requirements are already written and agreed was picked up as brand-new work. The sorting step read the branch, said *"the next open step is the build plan, not another round of requirements discovery"* — and was then sent into another round of requirements discovery, because it routes on the label and nothing else. Should it be allowed to route on what it finds? ([#32](https://github.com/fvermaut/timone/issues/32))
 
-**5. The slow-page report is unstuck, and now it needs you.** `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4) sat for seventeen days at a step that had never been built. That step exists now, and it has looked at the problem and written up what it thinks. Read what it says on the ticket and reply there — `approve` if you agree, or say what you want different.
+**6. The slow-page report is unstuck, and now it needs you.** `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4) sat for seventeen days at a step that had never been built. That step exists now, and it has looked at the problem and written up what it thinks. Read what it says on the ticket and reply there — `approve` if you agree, or say what you want different.
 
 It found a mistake it had made itself in August: it had told you the app already promises a tick shows up straight away, and it does not. So it wants to write that promise down first, and it has guessed the numbers. The numbers are the part worth arguing with.
 
@@ -78,6 +82,18 @@ You then read one yourself and caught a second fault I had called cosmetic: the 
 **You then ran the command on [#37](https://github.com/fvermaut/scratch-app/issues/37) and it did the job properly.** It refused to sign your name, wrote everything out, asked you one question instead of ten, got your yes in the terminal, wrote that down on the ticket for the record, and started building. It left a written account of what it did and what it guessed.
 
 **That run then found the one thing nobody thought of**, and it is fixed. When your session ended, the job went back to being stopped: nothing could say "this is sorted, carry on", so the work sat on its branch and the daemon would never take it further. That was [#30](https://github.com/fvermaut/timone/issues/30).
+
+**20 August — agents will work in a box, and the machine will stop touching your folder.** You asked for this: switching branch while an agent builds breaks its work. It is planned, not built.
+
+Every job the daemon starts will run in a fresh container that fetches Timone and the project from GitHub and is thrown away after. Nothing from your disk goes in. The project's database starts next to it, from the compose file the project already keeps for previews, and the container gets no control over docker itself — that shortcut would hand the agent your laptop back.
+
+Reading the code turned up something you did not know: your folder has **two** machine users, not one. The daemon itself also checks branches out there and merges there. Boxing the agents alone would have left your problem in place, in a form that is harder to see. So merging and reading branches move to GitHub, and `projects/` becomes yours alone.
+
+Playwright does work in a container. There is a step in the plan that proves it rather than assuming it: the same check runs inside a box and outside one, and the two answers must match.
+
+The plan is `doc/plans/phases/phase-30.md` — twelve pieces, the first four fix your branch problem and the rest build the wall. The reasons are in `doc/adr/`, numbers 41, 42 and 43. **It runs after the one-step-one-ticket work and before the trading app restarts**, which is the order you chose.
+
+One thing to know: after this, a project with no compose file cannot be built by an agent at all. `ivtrends` has not got one.
 
 **19 August — bug reports go somewhere now.** Drawing the whole machine out on one page showed that one of the four kinds of request it sorts into had nowhere to go: a bug was sorted, sent on to a step that had never been built, and stopped there for good. `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4) had been sitting like that since 2 August. That step is built, and four smaller mismatches the drawing exposed are fixed with it.
 
