@@ -5,8 +5,18 @@
 - **Source:** fvermaut's ruling of 2026-08-20 — *"I also want to change the behaviour of the breakdown, and have 1 step = 1 ticket (otherwise the wayfinding ticket becomes unmanageable)"* — and the two decisions taken in the session that followed
 - **Supersedes:** [ADR-0029](0029-a-chunk-advances-only-on-success.md) entirely — settledness, and the statuses that confer it, exist only to serve a count this decision removes
 - **Amends:** [ADR-0028](0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) D3 and D4; [ADR-0030](0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D4's derived-doneness half. **D1 and D2 of both stand untouched** — the breakdown is still a committed artifact and still the one thing the human approves
-- **Closes:** [timone#41](https://github.com/fvermaut/timone/issues/41), by construction rather than by repair
+- ~~**Closes:** [timone#41](https://github.com/fvermaut/timone/issues/41)~~ — **struck 2026-08-20: #41 was not a real defect.** See the correction below.
 - **Standing:** [ADR-0014](0014-artifact-first-gates.md), [ADR-0006](0006-specs-in-repo-single-source-of-truth.md), [ADR-0015](0015-branch-per-driving-unit.md)
+
+## ✏ Correction, 2026-08-20 — one of the two reasons given below was false
+
+**The count model was not broken.** This ADR was written citing [timone#41](https://github.com/fvermaut/timone/issues/41), which reported that the daemon believed `ivtrends`' board was already built. It did not. That report simulated the pointer with `SETTLED` (`done` + `cancelled`); the function that actually computes it — `initiativeProgress` in `poll.ts`, *"the single function `timone status` and the ticket both resolve the progress value through"* — counts `done` alone, and carries a comment saying precisely why: *"a cancelled chunk delivered nothing, so the piece it was opened for is still the piece to come."* Measured against the real breakdown and the real ledger, it answered **piece 5 — The board**, which was correct. `SETTLED` serves `register`, which answers a different question: whether the ticket's current chunk is still open.
+
+**What survives, and it is the reason this decision was taken:** the 73-comment thread. That is measured, it is what fvermaut asked to fix, and nothing about it depended on the count.
+
+**What changes below:** the third paragraph of Context, and D3's claim to close #41 by construction. Deleting settledness is still right, on a narrower and honest ground — under one ticket per step there is no count for it to feed, so its only consumer goes away. It is not a repair of a bug, because there was no bug.
+
+Nothing in D1, D2 or D4 depended on the false premise.
 
 ## Context
 
@@ -14,7 +24,7 @@
 
 **The shape that works was already in the process, on the other half of the lifecycle.** The same initiative's *discovery* ran as a wayfinder map: ticket #1 with one child per question, `#5` through `#16`, each carrying its own conversation and closing when its question was answered. Those tickets ran about three comments each and were easy to follow. Nothing was ever wrong with the model — it was simply never applied to the build.
 
-**And the count model had a second, quieter cost.** Because all chunks hung off one ticket, "which piece is next" had to be *derived*, and it was derived by counting settled runs in the ledger. On `ivtrends` #1 that count says five pieces are settled; four have shipped. Run 2 was cancelled and its work restarted as run 3, `cancelled` settles a chunk (ADR-0029), and so one piece was counted twice. The pointer has been silently one ahead ever since, and would have skipped the board entirely. Nothing in `timone status` shows the pointer, so three pieces went by before anyone looked.
+**And the count model looked as though it had a second, quieter cost — see the correction above; it did not.** Because all chunks hung off one ticket, "which piece is next" had to be *derived*, and it was derived by counting settled runs in the ledger. On `ivtrends` #1 that count says five pieces are settled; four have shipped. Run 2 was cancelled and its work restarted as run 3, `cancelled` settles a chunk (ADR-0029), and so one piece was counted twice. The pointer has been silently one ahead ever since, and would have skipped the board entirely. Nothing in `timone status` shows the pointer, so three pieces went by before anyone looked.
 
 That is not a bug in the arithmetic. It is what deriving a fact about *work* from a count of *runs* buys you: runs and pieces are not the same thing, and every place they diverge — a cancellation, a restart, a hand-opened chunk — the count drifts and nothing notices.
 
@@ -43,7 +53,7 @@ A step whose ticket declares a dependency on another open step is not eligible. 
 
 ### D3 — Settledness is deleted, not reworked
 
-ADR-0029 exists to answer *"is this ticket finished with this chunk?"* so that a count could advance. There is no count, so there is no question. `SETTLED`, and the rule that `done` and `cancelled` confer it, go.
+ADR-0029 exists to answer *"is this ticket finished with this chunk?"* so that a count could advance. Under one ticket per step there is no count, so there is no question. **This is a removal of something made unnecessary, not the repair of a defect** — the count was working correctly (see the correction above). `SETTLED`, and the rule that `done` and `cancelled` confer it, go.
 
 **`TERMINAL` stays and keeps its own job unchanged** — *"is this run's hold on the project over?"* — which was always the separate question ADR-0029 was careful to distinguish. A failed or cancelled run still frees its project.
 
