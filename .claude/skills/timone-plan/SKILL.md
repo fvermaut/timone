@@ -89,6 +89,12 @@ Stage 5 produces two artifacts, and only the first of them is put in front of a 
 
 **This is the gate; the phase file is not.** [ADR-0014](../../../doc/adr/0014-artifact-first-gates.md) is unchanged in substance — the artifact is written first and the gate is taken against the committed file, exactly as before. Only which document is in front of the human moved. Each approved piece then gets a phase file of its own, one at a time, written ungated and judged on its pull request.
 
+**On approval, one ticket per step opens** — ✏ 2026-08-20 ([ADR-0040](../../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)). Each step ticket is a child of the initiative's ticket, carries that step's one-line description and a link to the breakdown, and **declares any step it depends on**. The initiative's ticket becomes a map: links to its children and nothing else.
+
+Write the dependencies down even when the list order makes them look obvious. Under the old count they were implicit in the order; they are not any more, and a step that should have declared one gets picked up early. This is the single thing most likely to go wrong with the new shape.
+
+**Which step is next is the first step ticket that is open, unblocked and unassigned.** Nothing counts runs. Do not write progress back anywhere — a closed ticket is a done step, and that is the whole of it.
+
 **Immutable after approval** (D4): the file the human approved is the file that stays. Nothing ticks it as pieces land — which piece is next is derived from how many have been built, and progress is reported on the ticket. A session that finds itself wanting to edit an approved breakdown is re-opening that decision, not filling in a detail.
 
 **Two shapes of work have no breakdown, by design.** A chore or technical enabler triage routes here goes straight to a phase file and meets no gate before its pull request (D3). Hand-run work with no driving ticket has no ticket to hang a breakdown on. Neither absence is a gap to fill.
