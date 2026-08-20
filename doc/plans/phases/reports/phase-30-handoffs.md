@@ -47,3 +47,139 @@ No test reaches the network or starts a model: the five new tests call one pure 
 - 30h supplies a workspace by passing `workspace: { timone, project, branch }` to `sessionRequest()` — `project` is the `TicketingProject` the spawner already has in `spawn()`, and `branch` is `store.get(run.id)?.branch`, which is **undefined for a run that has not cut one yet**. The branch a run will use is derivable with `workBranch(ticket, seq)`, already imported in `session.ts`; deciding which of the two 30h uses is 30h's call, not a defect here.
 - The timone remote and commit have no source anywhere in the daemon yet. Nothing reads `git rev-parse HEAD`, and nothing implements ADR-0041 D2's "a daemon with uncommitted changes refuses to spawn". Both are still owed. The builder will throw if handed anything that is not 40 hex digits, so whatever resolves the pin must resolve it fully, not to a short sha and not to `HEAD`.
 - `agentSdkRuntime` was deliberately left untouched. It reads `request.cwd`, `prompt`, `model`, `effort` and nothing else, so it already ignores the new field.
+
+## 30g — The base image
+
+**Built.** The box a daemon-spawned run happens in. `Dockerfile` at the repository root builds `timone-agent` on Playwright's own published image, adds the toolchain, `gh`, the Claude Code CLI and the library that drives the browsers, and adds **no docker CLI**. `.dockerignore` keeps the host out of the build: the context is deny-by-default, so `projects/` — every client repository on this machine — cannot reach an image layer. `docker/image-check.mjs`, copied in at `/opt/timone/image-check.mjs`, is the script that asserts the five properties the plan names, and it fails loudly rather than reading a number off a `df` line.
+
+Nothing else changed. No file under `src/`, no `package.json`, no test config.
+
+**Files touched.**
+
+- `Dockerfile` — created. `FROM mcr.microsoft.com/playwright:v1.62.1-noble`, then apt (`ca-certificates`, `curl`, `git`, `jq`, `openssh-client`, `unzip`), `gh` from the vendor's release tarball, `@anthropic-ai/claude-code`, and `playwright` into `/opt/timone` with the browser download skipped. Every version is an `ARG` with a pinned default.
+- `.dockerignore` — created. `*` then `!docker/image-check.mjs`, followed by explicit re-denies for `projects/`, `node_modules/`, `dist/`, `.timone/`, `.git/`, `daemon.log`, `*.png`, `.playwright-mcp/`.
+- `docker/image-check.mjs` — created. The source of the check script; the Dockerfile copies it to `/opt/timone/image-check.mjs`.
+- `doc/plans/phases/reports/phase-30-handoffs.md` — this section appended.
+
+**Decisions taken inside the slice.**
+
+- **Base tag: `mcr.microsoft.com/playwright:v1.62.1-noble`.** This repo pins no Playwright version anywhere — `standards/testing.md` names Playwright but no version, `.mcp.json` runs `@playwright/mcp@latest`, and `package.json` has no Playwright dependency at all. So there was nothing to match, and the rule was "current stable, pinned". `v1.62.1` is the newest tag Microsoft publishes; `noble` is Ubuntu 24.04 LTS. The tag resolves to a multi-arch manifest, so the same line builds on this arm64 laptop and on an amd64 server. **Never `latest`** — ADR-0041 D2 makes two runs an hour apart follow identical rules, and a floating base tag would make that untrue for the image.
+- **`/dev/shm` is fixed at run time, with `--shm-size=1g`, and the image cannot fix it alone.** Measured: the image run with no flag gets **64 MiB**, docker's default. The alternative — `--disable-dev-shm-usage` — was rejected: it is a *browser launch argument*, so it would have to be injected into every managed project's own Playwright config, which is code we do not own and must not edit. The container's run arguments are code we do own. **This is 30h's to pass** (see below).
+- **The shm floor is 256 MiB, not 1 GiB.** Playwright's guidance is 1 GiB, which is what the daemon should pass; the floor sits below it so a smaller but workable size still passes, and far above 64 MiB so the docker default can never pass.
+- **`gh` comes from the release tarball, not the apt channel.** The apt channel serves whatever it serves on the day of the build. A tarball URL carries the version as a number in the Dockerfile.
+- **`playwright` is npm-installed into `/opt/timone` with `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`.** The browsers are already in the base image at `/ms-playwright`; this adds only the library that drives them, and a second copy of the browsers would have doubled the image for nothing.
+- **The container runs as root, as the base image does.** No user was added. The wall here is the container, not a uid inside it; if 30h or a later slice wants `pwuser` (which the base image already provides), that is a change to the run, not to this file.
+
+**Validation evidence.**
+
+**No red→green trace applies.** The plan says so in as many words — "the image is not unit-testable and this slice does not pretend otherwise" — and this slice added no unit-testable behaviour. What follows is every command as run, with its real output.
+
+*Build context.* `.dockerignore` was written before the first build. Buildkit reports:
+
+```
+#3 [internal] load .dockerignore
+#3 transferring context: 826B done
+#4 [internal] load build context
+#4 transferring context: 3.76kB done
+```
+
+**3.76 kB** — not hundreds of megabytes. Proved rather than inferred: a probe build of `FROM scratch` + `COPY . /ctx` against the same context, exported and listed, contains exactly one file:
+
+```
+ctx/docker/image-check.mjs
+```
+
+`projects/`, `node_modules/`, `dist/`, `.timone/`, `.git/` and the four root PNGs are all absent from the context.
+
+*Build.*
+
+```
+docker build -t timone-agent .
+```
+
+- **Wall time, first build: 6 min 42 s.** Broken down by step: base image `FROM` 58.6 s, apt 58.1 s, `gh` 9.6 s, **`npm install -g @anthropic-ai/claude-code` 251.3 s** (the bulk of it), `npm install playwright` 22.5 s, `COPY` 0.0 s.
+- **Rebuild after changing only `image-check.mjs`: 18.8 s.** That is the cost every future edit to the check script pays; the six-minute figure is paid once per base or version change.
+- **Image size: 3.33 GB**, against a base image of **2.79 GB** — so this slice adds about 540 MB.
+
+*The five assertions.* Assertions (1), (2), (4) and the reading for (5):
+
+```
+$ docker run --rm timone-agent /bin/sh -c '
+  node -v && gh --version && claude --version &&
+  ! command -v docker && ! test -e /var/run/docker.sock && df -h /dev/shm'
+v24.18.1
+gh version 2.97.0 (2026-07-31)
+https://github.com/cli/cli/releases/tag/v2.97.0
+2.1.238 (Claude Code)
+Filesystem      Size  Used Avail Use% Mounted on
+shm              64M     0   64M   0% /dev/shm
+exit=0
+```
+
+Node is v24.18.1, comfortably over the `>=22` this repo's `package.json` requires.
+
+Assertion (3), and (5) as a number rather than a `df` line. **Run with no flag, the image fails its own check** — which is the point:
+
+```
+$ docker run --rm timone-agent node /opt/timone/image-check.mjs
+FAIL  /dev/shm size — 64 MiB against a floor of 256 MiB
+PASS  no docker CLI — not on PATH
+PASS  no docker socket — /var/run/docker.sock absent
+PASS  chromium loads a page — version 151.0.7922.34
+PASS  firefox loads a page — version 153.0
+PASS  webkit loads a page — version 26.5
+
+1 check(s) failed: /dev/shm size
+exit=1
+```
+
+Run the way 30h must run it, everything passes:
+
+```
+$ docker run --rm --shm-size=1g timone-agent node /opt/timone/image-check.mjs
+PASS  /dev/shm size — 1024 MiB against a floor of 256 MiB
+PASS  no docker CLI — not on PATH
+PASS  no docker socket — /var/run/docker.sock absent
+PASS  chromium loads a page — version 151.0.7922.34
+PASS  firefox loads a page — version 153.0
+PASS  webkit loads a page — version 26.5
+
+all checks passed
+exit=0
+```
+
+Summary of the five, all against the built image: (1) the CLI answers `--version` — **pass**, `2.1.238`; (2) `gh` is present — **pass**, `2.97.0`; (3) each browser launches headless **and loads a real page** — **pass**, Chromium 151.0.7922.34, Firefox 153.0, WebKit 26.5; (4) `docker` is absent and `/var/run/docker.sock` does not exist — **pass**; (5) `/dev/shm` measured against a floor — **64 MiB by default, 1024 MiB with the flag**, floor 256 MiB.
+
+*Non-vacuity.* The script was broken deliberately twice and watched failing, then reverted.
+
+- **The browser leg.** The test page was changed to serve `a page that says the wrong thing` while the check still expected its marker. All three browsers reported the wrong text, so all three really navigated and read the DOM rather than merely launching:
+
+  ```
+  FAIL  chromium loads a page — page loaded but read "a page that says the wrong thing"
+  FAIL  firefox loads a page — page loaded but read "a page that says the wrong thing"
+  FAIL  webkit loads a page — page loaded but read "a page that says the wrong thing"
+  3 check(s) failed  /  exit=1
+  ```
+
+  Reverted; the rebuilt image is green, and the deliberately broken image was deleted.
+
+- **The docker-absence leg.** A dummy executable was mounted at `/usr/local/bin/docker` and an empty file at `/var/run/docker.sock`. Both checks flipped, so neither is a check that can only ever say yes:
+
+  ```
+  FAIL  no docker CLI — /usr/local/bin/docker
+  FAIL  no docker socket — /var/run/docker.sock present
+  2 check(s) failed  /  exit=1
+  ```
+
+- **The shm leg** proved itself without being touched: 64 MiB fails, 1024 MiB passes, same script, same image.
+
+*Note worth carrying.* Even at 64 MiB of shared memory, all three browsers loaded the small test page fine. That is exactly why the plan insisted assertion (5) be a number against a floor: the browser leg would not have caught it, and the failure it prevents shows up later, mid-run, looking like an unrelated crash.
+
+**What 30h must know.**
+
+- **Pass `--shm-size=1g` on every `docker run` that starts an agent box.** The image cannot set it, and without it Chromium dies on real pages while the browsers still pass a shallow smoke test. 30h's red-green case (5) asserts on "the arguments actually passed" — **`--shm-size=1g` belongs in that assertion** alongside "nothing from the host filesystem is mounted".
+- **Mount nothing.** The image and the check script both assume it. `/var/run/docker.sock` must never appear in a run's arguments; the check will catch it if it does, and that check is worth running in CI against whatever 30h builds.
+- **The image is `timone-agent`, built from the repository root.** It is **not a preview** — no preview vocabulary, no preview adapter, nothing in `src/adapters/docker-preview.ts` applies to it.
+- **Startup cost is real and it is front-loaded, not per-run.** 3.33 GB and six and a half minutes to build once; a run pays only container start. Whatever 30h does, it must not rebuild the image per run.
+- **The check script is a run-time gate 30h can reuse.** `docker run --rm --shm-size=1g timone-agent node /opt/timone/image-check.mjs` exits non-zero on any failure, so it works as a preflight before a session is handed to a fresh box.
+- **Node inside the box is v24.18.1** and `npm` is the base image's. Nothing about the Claude Code CLI's install path was customised: `claude` is on `PATH` at `/usr/bin/claude`, `gh` at `/usr/local/bin/gh`, `node` at `/usr/bin/node`.
