@@ -1,6 +1,6 @@
 # Phase 29: One step, one ticket — the daemon stops counting runs
 
-> **Status:** In progress — **every code slice built, and the live gate (29h) has run.** It found four defects, all fixed. **The one thing outstanding is fvermaut's judgement** that the thread is followable, plus the end-to-end half he chose not to run. 29i waits on that. on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
+> **Status:** Complete — 2026-08-21. Ten slices built, the live gate run, and **fvermaut read the four tickets and said they made sense**, which was the gate's whole question. Report: [phase-29-complete.md](reports/phase-29-complete.md). **One thing is owed and is written down rather than implied: clause 5 has never fired live** — no step was built through to a merged pull request, so closing a step on its merge, and closing an initiative after the last one, are unit-proven and unwatched. on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 > **Companion phases:** [phase-22](phase-22.md) — it built the ledger half of R22, `TERMINAL`, and the settledness predicate this phase removes. [phase-23](phase-23.md) — it built the breakdown artifact, its parser, the `breakdown` pipeline stage, the chunk-zero merge, and chunk succession; **this phase changes what 23f decided and leaves the rest standing**. [phase-27](phase-27.md) — the feedback path, retired by ADR-0036, whose routing this must not disturb.
 >
@@ -588,6 +588,8 @@ Break a fixture specification into three steps, approve the breakdown once, and 
 ---
 
 ### Sub-phase 29i: Close the phase
+
+> **✅ Done 2026-08-21.** `CONTEXT.md` gains **step ticket**, **map ticket**, **hold** and **dropped step**; `Chunk` and `Breakdown` are corrected and `Chunk` points at the word that replaced it. `.claude/skills/timone-wayfind/SKILL.md:143` no longer offers the `Blocked by:` body line, and [ADR-0010](../../adr/0010-wayfinder-discovery-maps.md)'s consequence naming it is marked superseded rather than rewritten. The manual says which number `timone retry` and `timone cancel` take, and that a held step is the exception to *"cancelling frees the ticket to open a fresh one"*. R22 carries what was built, what the gate found, and the two limits.
 
 **[MODIFY]** `STATUS.md`, and the R22 marker with what was actually built.
 
