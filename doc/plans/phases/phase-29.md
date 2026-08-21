@@ -1,6 +1,6 @@
 # Phase 29: One step, one ticket — the daemon stops counting runs
 
-> **Status:** In progress — **29a, 29b and 29c built** on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
+> **Status:** In progress — **29a, 29b, 29c and 29d built** on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 > **Companion phases:** [phase-22](phase-22.md) — it built the ledger half of R22, `TERMINAL`, and the settledness predicate this phase removes. [phase-23](phase-23.md) — it built the breakdown artifact, its parser, the `breakdown` pipeline stage, the chunk-zero merge, and chunk succession; **this phase changes what 23f decided and leaves the rest standing**. [phase-27](phase-27.md) — the feedback path, retired by ADR-0036, whose routing this must not disturb.
 >
@@ -316,6 +316,16 @@ npm run build && npx vitest run src/daemon/session.test.ts
 ---
 
 ### Sub-phase 29d: The daemon takes the next step ticket
+
+> **✅ Built 2026-08-21.** The frontier decides pickup: `surveyInitiatives` reads each initiative's steps once per cycle and does all three jobs with that one query — telling a step from an ordinary ticket, choosing the next one, and writing the cached picture. Twenty-one cases across three files.
+>
+> **The trap this slice's own correction warns about was avoided, and a worse one was found.** `entryContext` routed on `run.seq > 1` to mean *a later piece of an approved list*. **A step's run is always `seq` 1**, so that test answers no for every step there is — all fourteen would have entered at triage and re-interviewed the human about a list they had already approved. Being a step is what carries the fact now, the first one included. The plan named this consequence; it did not say that it breaks the *first* step as well as the later ones.
+>
+> **`MAP_LABEL` is new**, and is what keeps the daemon off the initiative's own ticket. A label rather than "has children" because the loop already holds every marked ticket's labels — so it costs no call — and because it is visible to a human reading the tracker. **29c applies it last**, after every step exists: a map with no children is a ticket nothing will ever pick up, proved by mutation.
+>
+> **`HELD_LABEL_DESCRIPTION` was wrong and is corrected.** It said *"Timone stopped this step"*, which is only the cancel case; the label goes on at claim.
+>
+> **Between this slice and 29e the closing behaviour is wrong, deliberately.** `concludeInitiative` still closes `run.ticket`, which is now a step. 29e owns it.
 
 **[MODIFY]** `src/daemon/poll.ts` — ~~`initiativeProgress` and the second call site~~ read step tickets through 29a/29b instead of counting runs. **[MODIFY]** `src/daemon/cta.ts` — `InitiativeProgress` stops extending `ChunkProgress`.
 

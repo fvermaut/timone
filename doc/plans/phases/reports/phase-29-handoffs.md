@@ -165,3 +165,57 @@ Full suite: **1173 tests, 1169 green.**
 **What this slice does not prove.** That anything reads the tickets it opens — 29d is the frontier's first consumer. That the hold label is ever *applied* — 29d's act. And it has never run against real GitHub: `createStep`'s argument vector is asserted, and `gh issue create --parent` was verified by hand on `scratch-app` #42/#43, but no live approval has opened a real set of step tickets. **That is 29h's job and it is the one that matters**, because this is the slice whose mistakes cannot be undone by re-running.
 
 **A note on the suite, filed rather than carried.** Five tests now fail intermittently on a full run — all 20s timeouts, all shelling out to git, all passing alone, and all failing identically with this branch's changes stashed. Reported on [timone#8](https://github.com/fvermaut/timone/issues/8) with the counts from three runs. It is not this phase's doing and this phase cannot avoid tripping over it.
+
+## 29d — The daemon takes the next step ticket
+
+**Built.** The frontier decides which step gets a run. `surveyInitiatives` (`src/daemon/poll.ts`) runs once per project per cycle, before the ticket loop, and reads each initiative's step tickets with **one** query that does three jobs: it tells a step ticket from an ordinary one, it chooses the step to take, and — as a side effect, never a second call — it writes the cached picture `timone status` renders from.
+
+**Files touched.**
+
+- `src/daemon/steps.ts` — `MAP_LABEL`, `MAP_LABEL_DESCRIPTION`; `HELD_LABEL_DESCRIPTION` corrected.
+- `src/daemon/runs.ts` — `initiativeRecordSchema`, the `initiatives` map on the state, `rememberInitiative`, `initiativeFor`, `initiativeKey`.
+- `src/daemon/poll.ts` — `Frontier`, `surveyInitiatives`, the two skips and the claim in the ticket loop, `progressOfPicture`, `initiativeProgress`'s new first branch, `entryContext`'s successor test.
+- `src/daemon/cta.ts` — `InitiativeProgress` stands alone.
+- `src/daemon/session.ts` — 29c applies `MAP_LABEL`, last.
+- `src/commands/status.ts` — `pictures` on `RenderStatusOptions`, threaded to `progressReader`; the CLI supplies it from the store.
+- `runs.test.ts` (+6), `poll.test.ts` (+12), `session.test.ts` (+3).
+
+**The finding, and it is the dangerous kind: `entryContext` routed on `run.seq > 1`.**
+
+The plan predicted this one and it was worse than it reads. `entryContext` (`poll.ts`) used `run.seq > 1` to mean *a later piece of a list the human has already approved* — which routes the run to `planning` instead of triage. **A step's run is always `seq` 1**, because the step is its own ticket and hosts one run. So the test now answers **no for every step there is**: all fourteen pieces of a fourteen-step initiative would have entered at triage and re-interviewed the human about a list they approved before any of the tickets existed.
+
+Being a step *is* being a successor now — the first one included, since the approval that opened it came before it. The sequence test is kept beside it for a ledger written before any of this. Two red-green cases, and a third asserting an ordinary ticket still enters at triage.
+
+**Decisions taken inside the slice.**
+
+- **`MAP_LABEL` is how the initiative stays out of the loop**, rather than "has children". The loop already holds every marked ticket's labels, so reading it costs nothing and adds no call; and it is **visible** — a human can see on the tracker which ticket is the map. The alternative, calling `listSteps` for every marked ticket to find out, is a query per ticket per cycle to answer a question a label answers for free.
+- **29c applies it last, after every step exists.** A map with no children is a ticket nothing will ever pick up: the daemon skips it as a map and there is nothing else to take. Proved by mutation — moving the `applyLabel` above the creation loop turns exactly that case red and leaves the other two green.
+- **The hold is applied at claim, and `HELD_LABEL_DESCRIPTION` was wrong.** It said *"Timone stopped this step"*, which describes only the cancel case. The label goes on the moment the step is taken, so the description now says so and still says how to hand the step back.
+- **The picture carries `nextTitle`.** The renderer needs the next step's name and the ledger is the only thing it may read, so the one field it needs travels with the number. `next.index` is derived from the step's position in `steps`, not stored — one fact, one place.
+- **`surveyInitiatives` never throws.** A tracker that cannot list one initiative's children leaves that initiative alone for a cycle with a line in the errors. Taking the project's whole turn down over it would stop every other ticket on it.
+- **`initiativeProgress` gained a branch rather than a rewrite.** With a picture it answers from the tracker; without one it counts runs exactly as before. That second path is not dead code — it is every chore, everything run by hand, and every ledger written before this daemon started.
+- **`InitiativeProgress` stops extending `ChunkProgress`.** Same three fields, different fact: they meant *chunks counted out of the ledger* and now mean *step tickets read off the tracker*. Inheriting would tie it to a type 29g deletes.
+
+**Validation evidence.**
+
+`npm run build && npx vitest run src/daemon/poll.test.ts` — **161 passed**, twelve of them this slice's, all red first. `src/daemon/runs.test.ts` — **126 passed**, six this slice's, all red first. `src/daemon/session.test.ts` — **131 passed**, three this slice's, both mutations catching the right case.
+
+The four cases the plan asks for, and what they became:
+
+1. *steps 1–2 closed → step 3 next* — **"opens a run on the first step that is not done"**, asserted on the ledger's runs, not on a comment.
+2. *a cancelled run against an open step leaves that step next* — **"leaves a held step alone and takes the next one instead"**. The mechanism changed with blocker B's ruling: it is the hold label, not a count that excludes `cancelled`.
+3. *a failed run still opens no new step and `timone retry` re-arms in place* — **unchanged and still passing**, because `isSettled` and `register`'s guard were not touched. R22 clause 2 does not move.
+4. *every step closed → none* — **"opens nothing when every step is closed"**.
+
+Plus eight the plan did not list: the map never gets a run; fourteen steps do not become fourteen runs; a person's takeover is respected; a blocked step is skipped whatever its position; the claim is applied; no assignee is ever written; the picture is written; and an ordinary marked ticket is untouched.
+
+Full suite: **1196 tests, 1191 green.** The five failures are the known timeout flakes on [timone#8](https://github.com/fvermaut/timone/issues/8).
+
+**The plan's checks, answered.**
+
+- **All four red→green; case (3) run against the pre-change behaviour** — cases 1, 2 and 4 were written and seen red. Case (3) is the regression guard and was **not** rewritten: it is the existing suite, which passes unchanged, which is the stronger form of what the check asks for.
+- **Every ledger test builds a real ledger in a temp directory; the repository's own `.timone/state.json` is never opened** — `statePath()` in `runs.test.ts` and `newStore()` in `poll.test.ts`, both `mkdtempSync` under `tmpdir()`.
+
+**What this slice does not prove.** That a step's run ever *finishes* — closing is 29e, and `concludeInitiative` still closes `run.ticket`, which is now a step ticket rather than the initiative. **Between this slice and 29e the closing behaviour is wrong**, and deliberately so: a merged step's pull request will close the step and post the initiative's closing comment on the step ticket. It is one slice's gap on an unmerged branch, and 29e is the slice that owns it.
+
+And nothing here has run against real GitHub.
