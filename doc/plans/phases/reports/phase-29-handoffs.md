@@ -375,7 +375,7 @@ Full suite: **1210 tests, 1205 green** — the five known flakes on [timone#8](h
 
 **What this slice does not prove.** That any human has read the new sentence. **That is 29h**, and this slice is the reason the gate has something to read: the plan makes 29h depend on it precisely so the words are judged on a real ticket by the person they are written for.
 
-## 29h — The live gate: attempted, blocked, and the blocker is the system working
+## 29h — The live gate: first attempt, blocked (superseded — it ran; see below)
 
 **Not run. It could not be, and the reason is not a fault.**
 
@@ -408,3 +408,56 @@ Error: Project scratch-app is held by run scratch-app#4/1
 - `timone cancel scratch-app#4` — drop that run. The ticket and its analysis stay; only the run goes.
 
 Then the fixture is two steps from running: put the `timone` label back on #44, and re-park its run at the breakdown gate. Both are recorded here so the next session does not re-derive them.
+
+## 29h — The live gate, run: four defects, all fixed
+
+**It ran.** fvermaut cancelled `scratch-app#4` to free the project, and the gate went end to end from an approved breakdown to three step tickets, a map, and the frontier claiming the first step. **The human half — his judgement that the thread is followable — is still owed and is the only thing outstanding.**
+
+**What it produced, on `fvermaut/scratch-app`.**
+
+- **[#45](https://github.com/fvermaut/scratch-app/issues/45)** — the initiative, now labelled `timone:map`, its body replaced by a list of links to its children and nothing else.
+- **[#46](https://github.com/fvermaut/scratch-app/issues/46), [#47](https://github.com/fvermaut/scratch-app/issues/47), [#48](https://github.com/fvermaut/scratch-app/issues/48)** — one ticket per step, in the approved order, each a native child of #45, each carrying its line and a link to the breakdown.
+- **The chain is native and correct:** `46` waits for nothing, `47` waits for `46`, `48` waits for `47` — read back off `gh issue list --json blockedBy`.
+- **The frontier took `#46`** and no other: not the map, not the two blocked ones. It applied `timone:held`, and `timone status` rendered `#46 (step 1 of 3 of #45)`.
+
+**Cost.** Two Haiku approval-record sessions ($0.05 and $0.13) and one Opus planning session that should never have started ($4.86 — defect 1). Roughly $5, and it bought four defects.
+
+### The four defects
+
+**1 — the initiative's own run walked on into planning.** After opening the steps, `recordApproval` returned true and the run advanced to `planning`, so the machine spent nine and a half minutes of Opus planning the whole initiative **on the map ticket**. That is the chunk model wearing the new model's clothes, and no unit test could have caught it: every 29c test asserted the tickets that were opened and none asserted what the run did next. Approving a breakdown now ends that run.
+
+**2 — the hold label could not be created.** `HELD_LABEL_DESCRIPTION` was 111 characters; GitHub caps label descriptions at **100** and refuses with `HTTP 422: Validation Failed`, naming no field. `ensureLabel` correctly re-threw, `openStepTickets` logged *"stopped part way"*, and **no step ticket was opened at all** — while defect 1 meant the run carried on regardless, so nothing looked wrong until the map ticket had a plan on it. The two defects hid each other, which is the argument for the gate in one sentence.
+
+**3 — the map said "This one is finished." with nothing built.** No step was *eligible* — the first was held, the other two waited on it — and `betweenChunks` read *no next piece* as *no pieces left*. Those are not the same thing, and telling a reader an untouched initiative is finished is the opposite of what ADR-0040 is for.
+
+**4 — a waiting step said "I'll pick this up on my next pass."** `#47` waits on `#46`, so the frontier passes over it every cycle. A ticket promising a pass that never comes is exactly what ADR-0040 set out to end. The survey already knew which steps were blocked; it now says so, and the ticket says it is waiting for the piece before it.
+
+**All four are fixed and asserted.** Defects 3 and 4 were found by *reading the standing notes the gate wrote* — not by any assertion — which is the part of a live gate no test replaces.
+
+### What the thread says now
+
+```
+#45  0 of 3 pieces are done, and none of the rest can start yet.
+     → have a look at the pieces below — one of them is either
+       stopped or waiting for another.
+#46  I stopped work on this one, and I won't start it again by myself.
+     → either remove the `timone:held` label and I'll start it afresh,
+       or close this ticket and I'll carry on without it.
+#47  This one is waiting for the piece before it.
+     → nothing — I'll start it as soon as the piece it waits for is done.
+```
+
+`#46` was cancelled deliberately, so the thread shows a **dropped** step as well as a waiting one — which exercises 29j on a real ticket rather than in a fixture.
+
+### What is still owed
+
+- **The human gate.** fvermaut reads #45 and its three children and says whether the thread is followable. Nothing substitutes for it.
+- **The end-to-end half was not run, by his choice** — no step was built to a merged pull request, so **29e's closing has never fired live**. It is unit-proven and unwatched, and that is the honest state.
+- **`scratch-app#4` is unmarked.** It was cancelled to free the project. Re-marking it would restart it from scratch on the next pass and spend money nobody asked for, so the label is left off and the ticket says so, with `timone takeover scratch-app#4` as the way back in.
+
+### Notes on running it
+
+Two things cost a cycle each and are worth knowing.
+
+- **A `waitCursor` set in the future silently swallows the approval.** The first clean attempt set the cursor to 18:10 and posted the approval at 18:02; the gate decision reads only comments *after* the cursor, so the cycle did nothing and said nothing. Read the comment's own timestamp, then set the cursor before it.
+- **Piping the daemon through `tail` hides the log until it exits.** The first run showed an empty output file for ten minutes while a $4.86 session ran. Redirect to a file instead.
