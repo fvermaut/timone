@@ -21,11 +21,14 @@ import {
   STAGE_ESCALATED_MARKER,
   type PullRequest,
   type PullRequestThread,
+  type Step,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
+import { noStepWrites } from "../adapters/ticketing.stubs.js";
+import { HELD_LABEL, MAP_LABEL } from "./steps.js";
 import { breakdownPath, fromWorkingTree } from "./breakdown.js";
 import { enqueue, pending, requestsDir } from "./requests.js";
 import { RunStore, type Run } from "./runs.js";
@@ -132,16 +135,20 @@ const noPullRequests = {
 };
 
 /**
- * The open-ticket listing for fakes whose test is not about it: this project
- * has nothing open beyond the marked tickets it declares, so nothing here is
- * ever introduced to.
+ * The two ticket listings no fake here is *about*: the open one, and the step
+ * children of an initiative. This project has nothing open beyond the marked
+ * tickets it declares, and no initiative in these tests has been broken into
+ * step tickets, so nothing here is ever introduced to either.
  *
  * Its own spread rather than a member of `noPullRequests`, because it is the
- * ticket surface: a fake answering the open listing out of a constant named
- * for pull requests would be saying something it does not mean.
+ * ticket surface: a fake answering these out of a constant named for pull
+ * requests would be saying something it does not mean.
  */
-const noUnmarkedTickets = {
+const noOtherListings = {
   async listOpenTickets(): Promise<Ticket[]> {
+    return [];
+  },
+  async listSteps(): Promise<Step[]> {
     return [];
   },
 };
@@ -152,6 +159,11 @@ function fakeAdapter(
 ): { adapter: TicketingAdapter; comments: PostedComment[] } {
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
+    ...noStepWrites,
+    // No initiative in this test is broken into step tickets.
+    async listSteps(): Promise<Step[]> {
+      return [];
+    },
     async listMarkedTickets(project: TicketingProject): Promise<Ticket[]> {
       if (failing.includes(project.name)) {
         throw new Error(`gh exploded on ${project.name}`);
@@ -459,10 +471,11 @@ describe("pollOnce — resuming a run whose human answered", () => {
     const posted: PostedComment[] = [];
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments };
       },
@@ -959,10 +972,11 @@ describe("pollOnce — runs parked before the machinery existed", () => {
   function labelledAdapter(labels: string[]): TicketingAdapter {
     const base = ticket(4, { labels });
     return {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -1056,10 +1070,11 @@ describe("pollOnce — a run parked at an unbuilt stage resumes at that stage", 
     parkedAtExecution(store);
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -1107,10 +1122,11 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     const closed: string[] = [];
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -1328,10 +1344,11 @@ describe("reclaiming a run its daemon left behind", () => {
       comments: [],
     };
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -1863,10 +1880,11 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
 } {
   const upserts: Upsert[] = [];
   const adapter: TicketingAdapter = {
+    ...noStepWrites,
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
     },
-    ...noUnmarkedTickets,
+    ...noOtherListings,
     async getTicket(): Promise<TicketThread> {
       throw new Error("no ticket is read in this test");
     },
@@ -2439,10 +2457,11 @@ describe("pollOnce — a written answer reaches a session that ingests it", () =
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const posted: PostedComment[] = [];
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [invitation, answer] };
       },
@@ -2503,10 +2522,11 @@ describe("pollOnce — reading a written answer consumes it", () => {
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const thread = [...comments];
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [...thread] };
       },
@@ -2647,6 +2667,11 @@ describe("pollOnce — reading a written answer consumes it", () => {
       calls.push({ call, args });
     };
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
+      // No initiative in this test is broken into step tickets.
+      async listSteps(): Promise<Step[]> {
+        return [];
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         record("listMarkedTickets");
         return [base];
@@ -2802,10 +2827,11 @@ describe("pollOnce — one read of one thread per parked run", () => {
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     let fetches = 0;
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         fetches += 1;
         return { ...base, comments: [invitation, answer] };
@@ -2853,10 +2879,11 @@ describe("pollOnce — one read of one thread per parked run", () => {
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     let fetches = 0;
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -2990,6 +3017,11 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
     };
 
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
+      // No initiative in this test is broken into step tickets.
+      async listSteps(): Promise<Step[]> {
+        return [];
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         return [...listed];
       },
@@ -3378,6 +3410,11 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       `${MACHINE_MARKER}\n\n---\n\n${body}`;
 
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
+      // No initiative in this test is broken into step tickets.
+      async listSteps(): Promise<Step[]> {
+        return [];
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         return open.filter((candidate) => candidate.labels.includes("timone"));
       },
@@ -3869,10 +3906,11 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     const map = (): Ticket =>
       ticket(MAP, { title: "chart the trends redesign", labels });
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(_project, number): Promise<TicketThread> {
         reads.push(number);
         if (number === MAP) return { ...map(), comments };
@@ -4147,10 +4185,11 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
     const map = (): Ticket =>
       ticket(MAP, { title: "chart the trends redesign", labels });
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(_project, number): Promise<TicketThread> {
         if (number === MAP) {
           return { ...map(), comments: [closingSummary, goAhead] };
@@ -4358,10 +4397,11 @@ describe("pollOnce — a ticket's next chunk", () => {
       };
     };
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return tickets;
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(_project, number): Promise<TicketThread> {
         const found = tickets.find((candidate) => candidate.number === number);
         if (found === undefined) throw new Error(`no ticket ${number}`);
@@ -4387,34 +4427,16 @@ describe("pollOnce — a ticket's next chunk", () => {
     return { adapter, posted, closed };
   }
 
-  it("does not close the ticket when a piece of it is still unbuilt", async () => {
-    // The whole of the truncation this exists to end: chunk 1 merges, and the
-    // ticket has two more pieces the human approved.
-    const store = newStore();
-    chunkOnReview(store, 1, 9);
-    const { adapter, posted, closed } = successionAdapter({ 9: "merged" });
-    const { spawner } = fakeSpawner();
+  /**
+   * ✏ 29g — **retired with the model it tested.** It asserted that a ticket
+   * with an approved list of three and one chunk done stays open, which was
+   * the count deciding doneness. A ticket does not host a sequence of chunks
+   * any more (ADR-0040): each step is its own ticket, and *"an initiative
+   * with an open step is not closed"* is asserted in **29e**, on step
+   * tickets, in `closing: the step, then the initiative`. Deleted rather than
+   * repaired, because there is nothing left for it to be about.
+   */
 
-    await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-      // A plain fixture directory, not a clone: the production default reads the
-      // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
-    });
-
-    // Zero calls, not "called with something else": a guard that closed the
-    // ticket with the wrong reason would pass any weaker assertion.
-    expect(closed).toEqual([]);
-    expect(store.get("scratch-app#6/1")?.status).toBe("done");
-    // And it says so on the ticket rather than going quiet.
-    expect(
-      posted.some((comment) => /next piece/i.test(comment.body)),
-    ).toBe(true);
-  });
 
   it("closes the ticket on the last piece, linking every pull request", async () => {
     const store = newStore();
@@ -4463,48 +4485,19 @@ describe("pollOnce — a ticket's next chunk", () => {
     expect(store.get("scratch-app#6/1")?.status).toBe("done");
   });
 
-  it("lets a bug queued during a chunk take the project before the next chunk", async () => {
-    // R22 clause 6, and the reason succession is not a `register` call inside
-    // `concludeReview`. A bug filed while chunk 1 was building has been
-    // waiting; completing chunk 1 promotes it *in that same call*, and the
-    // next chunk is opened by a later cycle's registration loop — so it
-    // queues behind the bug rather than in front of it. Registering the
-    // successor here would look identical and starve the queue silently.
-    const store = newStore();
-    chunkOnReview(store, 1, 9);
-    const { adapter } = successionAdapter({ 9: "merged" }, [ticket(8)]);
-    const { spawner, spawned } = fakeSpawner();
-    const deps = {
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-      // A plain fixture directory, not a clone: the production default reads the
-      // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
-    };
+  /**
+   * ✏ 29g — **rewritten, not retired: R22 clause 6 still holds and still
+   * matters.** The old version drove it through two chunks of one ticket.
+   * The guarantee is unchanged and the route is different: a step's run
+   * completing frees the project *in that same call* and promotes whatever
+   * queued behind it, and the **next step** is opened by a later cycle's
+   * registration loop — so it queues behind the bug rather than in front of
+   * it. Registering the next step from the closing path would look identical
+   * and would starve the queue silently, which is the fault ADR-0026 split
+   * the ledger to end. The new version lives beside the frontier's own cases,
+   * in `the frontier decides which step is taken`.
+   */
 
-    // The bug arrives while chunk 1 is still out for review.
-    expect(store.get("scratch-app#8/1")).toBeUndefined();
-
-    await pollOnce(deps);
-
-    // The window: chunk 1 is finished, the bug holds the project, and no
-    // second chunk of #6 exists yet at all.
-    expect(store.get("scratch-app#6/1")?.status).toBe("done");
-    expect(store.get("scratch-app#8/1")?.status).toBe("picked-up");
-    expect(store.get("scratch-app#6/2")).toBeUndefined();
-    // Asserted on the spawner, not on the order of two log lines: the bug's
-    // run is the one a session was started for.
-    expect(spawned.map((run) => run.id)).toEqual(["scratch-app#8/1"]);
-
-    await pollOnce(deps);
-
-    // Only now does chunk 2 open — behind the bug, which is still holding.
-    expect(store.get("scratch-app#6/2")?.status).toBe("queued");
-    expect(spawned.map((run) => run.id)).not.toContain("scratch-app#6/2");
-  });
 
   it("opens nothing in the cycle a chunk merged, leaving the project free", async () => {
     // The other half of the window, with nothing waiting: the cycle that ends
@@ -4769,34 +4762,16 @@ describe("pollOnce — a ticket's next chunk", () => {
     };
   }
 
-  it("says the next piece is coming on the cycle a piece merged", async () => {
-    const store = newStore();
-    chunkOnReview(store, 1, 9);
-    const { adapter: base } = successionAdapter({ 9: "merged" });
-    const { adapter, upserts } = recording(base);
-    const { spawner } = fakeSpawner();
+  /**
+   * ✏ 29g — **retired with the model it tested.** It asserted the
+   * *"that's 1 of 2 done, next is X"* comment posted on a ticket each time
+   * one of its chunks merged. A merged step now says so on **its own**
+   * ticket, and how far the initiative has got is carried by the map
+   * ticket's standing note — kept up to date every cycle rather than
+   * appended once per merge, which is strictly more current. The step's own
+   * closing is asserted in 29e; the standing note's progress in 29f.
+   */
 
-    await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-      // A plain fixture directory, not a clone: the production default reads the
-      // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
-    });
-
-    const standing = upserts.join("\n");
-    expect(standing).toContain("**Piece 2 of 2 is next.**");
-    expect(standing).toContain(
-      "**What I need from you:** nothing right now — I'll start it on my next pass.",
-    );
-    // The line this replaces, named so a regression cannot hide behind the
-    // one above: the initiative is not finished, and the ticket must not say
-    // it is.
-    expect(standing).not.toContain("This one is finished.");
-  });
 
   it("keeps asking whether to carry on while the list of pieces is re-proposed", async () => {
     // 23f's permanent contradiction, driven through the loop that produced
@@ -5127,10 +5102,11 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
     const posted: PostedComment[] = [];
     const base = ticket(31, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments };
       },
@@ -5309,10 +5285,11 @@ describe("pollOnce — a park nothing written can end", () => {
     const posted: PostedComment[] = [];
     const base = ticket(number, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments };
       },
@@ -5442,10 +5419,11 @@ describe("pollOnce — a park nothing written can end", () => {
     });
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -5525,10 +5503,11 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     const base = ticket(number, { labels: ["timone", "triage:feature"] });
     const thread = [...comments];
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [...thread] };
       },
@@ -5808,10 +5787,11 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     const standing: string[] = [];
     const base = ticket(41, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
+      ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments };
       },
@@ -6047,5 +6027,719 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
 
     expect(spawned).toEqual([]);
     expect(store.get("scratch-app#41/1")?.waitingKind).toBe("escalation");
+  });
+});
+
+/**
+ * 29d — the daemon takes the *next step ticket*, not the next chunk of a
+ * count.
+ *
+ * The trap this block exists to catch is the one the plan names: a change that
+ * rewrites the wording and leaves the loop still deciding what to build from
+ * the ledger. Every case here asserts on **which run was opened**, never on a
+ * comment.
+ */
+describe("the frontier decides which step is taken", () => {
+  const MAP = 7;
+
+  /** An initiative's map ticket, and the step tickets hanging under it. */
+  function initiative(
+    steps: Partial<Step>[],
+  ): { tickets: Ticket[]; steps: Step[] } {
+    const built = steps.map((overrides, index) => ({
+      number: 51 + index,
+      title: `${index + 1}. Piece ${index + 1}`,
+      state: "open" as const,
+      labels: ["timone"],
+      assignees: [] as string[],
+      blockedBy: [] as Step["blockedBy"],
+      dependenciesIncomplete: false,
+      ...overrides,
+    }));
+    return {
+      tickets: [
+        ticket(MAP, { labels: ["timone", MAP_LABEL] }),
+        ...built.map((step) =>
+          ticket(step.number, { title: step.title, labels: step.labels }),
+        ),
+      ],
+      steps: built,
+    };
+  }
+
+  function trackerFor(
+    marked: Ticket[],
+    steps: Step[],
+  ): { adapter: TicketingAdapter; labelled: { number: number; label: string }[] } {
+    const base = fakeAdapter({ alpha: marked });
+    const labelled: { number: number; label: string }[] = [];
+    return {
+      adapter: {
+        ...base.adapter,
+        async listSteps(): Promise<Step[]> {
+          return steps.map((step) => ({ ...step }));
+        },
+        async applyLabel(_project, number, label): Promise<void> {
+          labelled.push({ number, label });
+        },
+      },
+      labelled,
+    };
+  }
+
+  const idleSpawner: SessionSpawner = { async spawn(): Promise<void> {} };
+
+  /** (1) Steps 1–2 closed → step 3 is the one that gets a run. */
+  it("opens a run on the first step that is not done", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { state: "closed" },
+      {},
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 53)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+    expect(store.runsForTicket("alpha", 52)).toEqual([]);
+  });
+
+  /**
+   * The map ticket is marked — it is the ticket the human filed — and it must
+   * never get a run of its own, or the daemon works the initiative and its
+   * steps at the same time.
+   */
+  it("never opens a run on the map ticket", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{}, {}]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", MAP)).toEqual([]);
+  });
+
+  /** Fourteen marked steps must not become fourteen runs at once. */
+  it("opens one run, not one per step", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative(Array.from({ length: 14 }, () => ({})));
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    const opened = steps.filter(
+      (step) => store.runsForTicket("alpha", step.number).length > 0,
+    );
+    expect(opened.map((step) => step.number)).toEqual([51]);
+  });
+
+  /**
+   * (2) A step the machine dropped stays dropped. The hold label is the only
+   * thing keeping it out of the frontier, so this is the case that proves the
+   * whole of `timone cancel` still means something a cycle later.
+   */
+  it("leaves a held step alone and takes the next one instead", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([
+      { labels: ["timone", HELD_LABEL] },
+      {},
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+  });
+
+  /** A step a person took is theirs; the machine does not start it underneath them. */
+  it("leaves a step a person has taken alone", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{ assignees: ["fvermaut"] }, {}]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+  });
+
+  /** A step waiting on an open one is not eligible, whatever its position. */
+  it("skips a blocked step even when it sorts first", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([
+      {
+        blockedBy: [
+          {
+            number: 52,
+            url: "https://github.com/fvermaut/scratch-app/issues/52",
+            open: true,
+          },
+        ],
+      },
+      {},
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+  });
+
+  /**
+   * The claim. Without it the next cycle sees the same step open, unheld and
+   * unclaimed, and every ruling about dropping work is decoration.
+   */
+  it("holds the step it claims, so the next cycle leaves it alone", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{}, {}]);
+    const { adapter, labelled } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(labelled).toContainEqual({ number: 51, label: HELD_LABEL });
+  });
+
+  /** The machine never writes an assignee: that field is the human's half. */
+  it("never assigns anybody to anything", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{}, {}]);
+    const { adapter, labelled } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    for (const step of steps) expect(step.assignees).toEqual([]);
+    expect(labelled.every((entry) => entry.label !== "assignee")).toBe(true);
+  });
+
+  /** (4) Every step closed → nothing is taken up. */
+  it("opens nothing when every step is closed", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { state: "closed" },
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    for (const step of steps) {
+      expect(store.runsForTicket("alpha", step.number)).toEqual([]);
+    }
+  });
+
+  /**
+   * The cached picture — 29f renders from it and makes no forge call of its
+   * own, so a cycle that does not write it leaves `timone status` with
+   * nothing to say.
+   */
+  it("writes down what it saw, so status need not ask GitHub", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{ state: "closed" }, {}, {}]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.initiativeFor("alpha", 52)).toMatchObject({
+      initiative: MAP,
+      steps: [51, 52, 53],
+      done: 1,
+      next: 52,
+    });
+  });
+
+  /** A ticket that is nobody's step is untouched by any of this. */
+  it("leaves an ordinary marked ticket exactly as it was", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter({ alpha: [ticket(3)] });
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 3)).toHaveLength(1);
+  });
+});
+
+/**
+ * 29d — a step's run enters at `planning`, not at triage.
+ *
+ * Under the old model this was `run.seq > 1`: chunk 1 came from the
+ * initiative's own run, and every chunk after it entered at planning because
+ * the human had already approved the list. A step's run is always `seq` 1, so
+ * that test now answers no for every step there is — which would send all
+ * fourteen back through triage to re-interview a human who has approved the
+ * list already.
+ */
+describe("where a step's run enters the pipeline", () => {
+  const MAP = 7;
+  const idleSpawner = (
+    seen: { run: Run; context?: { stage?: string } }[],
+  ): SessionSpawner => ({
+    async spawn(run, _project, context): Promise<void> {
+      seen.push({ run, context: context as { stage?: string } | undefined });
+    },
+  });
+
+  function tracker(steps: Step[]): TicketingAdapter {
+    const tickets = [
+      ticket(MAP, { labels: ["timone", MAP_LABEL] }),
+      ...steps.map((step) =>
+        ticket(step.number, { title: step.title, labels: step.labels }),
+      ),
+    ];
+    const base = fakeAdapter({ alpha: tickets });
+    return {
+      ...base.adapter,
+      async listSteps(): Promise<Step[]> {
+        return steps.map((step) => ({ ...step }));
+      },
+      async applyLabel(): Promise<void> {},
+    };
+  }
+
+  const step = (number: number, overrides: Partial<Step> = {}): Step => ({
+    number,
+    title: `${number - 50}. Piece ${number - 50}`,
+    state: "open",
+    labels: ["timone"],
+    assignees: [],
+    blockedBy: [],
+    dependenciesIncomplete: false,
+    ...overrides,
+  });
+
+  it("enters at planning, because the human approved the list already", async () => {
+    const store = newStore();
+    const seen: { run: Run; context?: { stage?: string } }[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter: tracker([step(51), step(52)]),
+      spawner: idleSpawner(seen),
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].run.ticket).toBe(51);
+    expect(seen[0].context?.stage).toBe("planning");
+  });
+
+  /** The very first step is a successor too: the list was approved before it. */
+  it("enters the first step at planning as well, not only the later ones", async () => {
+    const store = newStore();
+    const seen: { run: Run; context?: { stage?: string } }[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter: tracker([step(51)]),
+      spawner: idleSpawner(seen),
+    });
+
+    expect(seen[0]?.context?.stage).toBe("planning");
+  });
+
+  /** A ticket that is nobody's step still enters where it always did. */
+  it("leaves an ordinary ticket entering at triage", async () => {
+    const store = newStore();
+    const seen: { run: Run; context?: { stage?: string } }[] = [];
+    const { adapter } = fakeAdapter({ alpha: [ticket(3)] });
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner(seen),
+    });
+
+    expect(seen[0]?.context).toBeUndefined();
+  });
+});
+
+/**
+ * 29e — a merged pull request closes **its step**, and only the last one
+ * closes the initiative.
+ *
+ * Under one step, one ticket the run's ticket *is* the step, so the merge
+ * path's old act — close `run.ticket` and say the initiative is finished —
+ * would close the step while announcing the whole initiative on it.
+ */
+describe("closing: the step, then the initiative", () => {
+  const MAP = 7;
+
+  const step = (number: number, overrides: Partial<Step> = {}): Step => ({
+    number,
+    title: `${number - 50}. Piece ${number - 50}`,
+    state: "open",
+    labels: ["timone"],
+    assignees: [],
+    blockedBy: [],
+    dependenciesIncomplete: false,
+    ...overrides,
+  });
+
+  /**
+   * A cycle in which `live`'s pull request has merged. `steps` is what the
+   * tracker answers *after* that step is closed, which is what the closing
+   * path reads.
+   */
+  async function mergeCycle(
+    store: RunStore,
+    live: number,
+    pr: number,
+    steps: Step[],
+  ): Promise<{ closed: number[]; comments: PostedComment[] }> {
+    const closed: number[] = [];
+    const comments: PostedComment[] = [];
+    const tickets = [
+      ticket(MAP, { labels: ["timone", MAP_LABEL] }),
+      ...steps.map((s) => ticket(s.number, { title: s.title, labels: s.labels })),
+    ];
+    const base = fakeAdapter({ alpha: tickets });
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async listSteps(): Promise<Step[]> {
+        return steps.map((s) => ({
+          ...s,
+          state: s.number === live ? "closed" : s.state,
+        }));
+      },
+      async applyLabel(): Promise<void> {},
+      async postComment(project, number, body): Promise<void> {
+        comments.push({ project: project.name, number, body });
+      },
+      async closeTicket(_project, number): Promise<void> {
+        closed.push(number);
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        return {
+          number: pr,
+          title: "the piece",
+          url: `https://github.com/fvermaut/scratch-app/pull/${pr}`,
+          state: "merged",
+          headSha: "abc",
+          comments: [],
+        };
+      },
+    };
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: { async spawn(): Promise<void> {} },
+    });
+    return { closed, comments };
+  }
+
+  /** Puts `step` into the ledger as a delivered run whose PR is `pr`. */
+  function delivered(store: RunStore, step: number, pr: number): void {
+    const { run } = store.register("alpha", step);
+    store.activate(run.id, `session-${step}`);
+    store.claimBranch(run.id, `timone/${step}-piece`);
+    store.recordPullRequest(run.id, pr);
+    store.park(run.id, {
+      waitingOn: `your review of pull request #${pr}`,
+      kind: "review",
+      stage: "delivery",
+      waitCursor: "2026-08-02T10:00:00Z",
+    });
+  }
+
+  /** (1) A merge closes the step, and leaves the initiative open. */
+  it("closes the step and not the initiative when another step is open", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 51,
+    });
+    delivered(store, 51, 90);
+
+    const { closed, comments } = await mergeCycle(store, 51, 90, [
+      step(51),
+      step(52),
+    ]);
+
+    expect(closed).toContain(51);
+    expect(closed).not.toContain(MAP);
+    // And it says the right thing on the right ticket. The old closing put
+    // the *initiative's* words — "this ticket's journey ends here" — on the
+    // step, which closes the same ticket and tells the human the whole thing
+    // is over. That is the half of this case that discriminates.
+    const said = comments.find((comment) => comment.number === 51)?.body ?? "";
+    expect(said).toContain("this step is done");
+    expect(said).not.toContain("journey ends here");
+  });
+
+  /** (2) The last merge closes both. */
+  it("closes the initiative when its last step closes", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51],
+      done: 0,
+      next: 51,
+    });
+    delivered(store, 51, 90);
+
+    const { closed } = await mergeCycle(store, 51, 90, [step(51)]);
+
+    expect(closed).toContain(51);
+    expect(closed).toContain(MAP);
+  });
+
+  /**
+   * (3) File order is not doneness. The merged step is last in the list and
+   * an earlier one is still open, so the initiative stays open.
+   */
+  it("does not close the initiative when an earlier step is still open", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 52,
+    });
+    delivered(store, 52, 91);
+
+    const { closed } = await mergeCycle(store, 52, 91, [step(51), step(52)]);
+
+    expect(closed).toContain(52);
+    expect(closed).not.toContain(MAP);
+  });
+
+  /**
+   * (4) A dropped step does not stop the initiative closing, and the closing
+   * comment says what was actually delivered. An initiative that refuses to
+   * close because one step was abandoned is a thread that never ends.
+   */
+  it("closes with the count delivered when a step was dropped", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 52,
+    });
+    // 51 was dropped: a run that was cancelled, and no pull request.
+    const dropped = store.register("alpha", 51).run;
+    store.cancel(dropped.id, "not worth doing after all");
+    delivered(store, 52, 91);
+
+    const { closed, comments } = await mergeCycle(store, 52, 91, [
+      step(51, { state: "closed" }),
+      step(52),
+    ]);
+
+    expect(closed).toContain(MAP);
+    const closing = comments.find((comment) => comment.number === MAP)?.body ?? "";
+    expect(closing).toContain("1 of 2");
+    expect(closing.toLowerCase()).toContain("dropped");
+  });
+
+  /** A ticket in no initiative closes exactly as it always did. */
+  it("leaves an ordinary ticket's closing untouched", async () => {
+    const store = newStore();
+    delivered(store, 3, 92);
+    const closed: number[] = [];
+    const base = fakeAdapter({ alpha: [ticket(3)] });
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async closeTicket(_project, number): Promise<void> {
+        closed.push(number);
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        return {
+          number: 92,
+          title: "the work",
+          url: "https://github.com/fvermaut/scratch-app/pull/92",
+          state: "merged",
+          headSha: "abc",
+          comments: [],
+        };
+      },
+    };
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: { async spawn(): Promise<void> {} },
+    });
+
+    expect(closed).toEqual([3]);
+  });
+});
+
+/**
+ * R22 clause 6 under one step, one ticket — the queue is not starved.
+ *
+ * The old cover for this drove two chunks of one ticket and went with the
+ * chunk model in 29g. The guarantee did not go with it.
+ */
+describe("a bug filed during a step takes the project before the next step", () => {
+  const MAP = 7;
+
+  const aStep = (number: number, overrides: Partial<Step> = {}): Step => ({
+    number,
+    title: `${number - 50}. Piece ${number - 50}`,
+    state: "open",
+    labels: ["timone"],
+    assignees: [],
+    blockedBy: [],
+    dependenciesIncomplete: false,
+    ...overrides,
+  });
+
+  it("promotes the waiting bug, and opens the next step behind it", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 51,
+    });
+
+    // Step 51 is out for review; a bug was filed while it was building.
+    const { run } = store.register("alpha", 51);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/51-piece");
+    store.recordPullRequest(run.id, 90);
+    store.park(run.id, {
+      waitingOn: "your review of pull request #90",
+      kind: "review",
+      stage: "delivery",
+      waitCursor: "2026-08-02T10:00:00Z",
+    });
+    store.register("alpha", 8);
+
+    const steps = [aStep(51), aStep(52)];
+    const tickets = [
+      ticket(MAP, { labels: ["timone", MAP_LABEL] }),
+      ticket(51),
+      ticket(52),
+      ticket(8),
+    ];
+    const base = fakeAdapter({ alpha: tickets });
+    const spawned: string[] = [];
+    // The tracker answers honestly across the cycle: step 51 is **open** when
+    // the survey runs at the top of it, and closed only once the merge path
+    // has closed it. A fake that reported it closed from the start would let
+    // the frontier take step 52 in the very cycle the bug is promoted, and
+    // this test would be asserting a race that production does not have.
+    const closed = new Set<number>();
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async listSteps(): Promise<Step[]> {
+        return steps.map((s) => ({
+          ...s,
+          state: closed.has(s.number) ? "closed" : s.state,
+        }));
+      },
+      async applyLabel(): Promise<void> {},
+      async closeTicket(_project, number): Promise<void> {
+        closed.add(number);
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        return {
+          number: 90,
+          title: "the piece",
+          url: "https://github.com/fvermaut/scratch-app/pull/90",
+          state: "merged",
+          headSha: "abc",
+          comments: [],
+        };
+      },
+    };
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(run): Promise<void> {
+          spawned.push(run.id);
+        },
+      },
+    });
+
+    // The window: the step is finished, the bug holds the project, and no run
+    // exists for step 52 at all yet.
+    expect(store.get("alpha#51/1")?.status).toBe("done");
+    expect(store.get("alpha#8/1")?.status).toBe("picked-up");
+    expect(store.runsForTicket("alpha", 52)).toEqual([]);
+    // Asserted on the spawner, not on two log lines: the bug is the run a
+    // session was started for.
+    expect(spawned).toContain("alpha#8/1");
+    expect(spawned).not.toContain("alpha#52/1");
   });
 });

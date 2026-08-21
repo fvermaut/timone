@@ -6,11 +6,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import type {
   PullRequest,
   PullRequestThread,
+  Step,
   Ticket,
   TicketingAdapter,
   TicketingProject,
   TicketThread,
 } from "../adapters/ticketing.js";
+import { noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import { RunStore } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
@@ -175,6 +177,11 @@ function fakeAdapter(open: readonly Ticket[] = []): {
   const asked: number[] = [];
   const listings: string[] = [];
   const adapter: TicketingAdapter = {
+    ...noStepWrites,
+    // No initiative in this test is broken into step tickets.
+    async listSteps(): Promise<Step[]> {
+      return [];
+    },
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
     },
@@ -335,7 +342,12 @@ describe("resolveTakeover", () => {
       resolution.kind === "converse" || resolution.kind === "escalation"
         ? ""
         : resolution.message;
+    // ✏ 29j, corrected: `#4` is **not** a step of any initiative, so its
+    // cancelled chunk is opened again on the next cycle exactly as it always
+    // was. The hold label belongs to a dropped step and naming it here would
+    // point at a gesture with no effect.
     expect(said).toMatch(/mark it for me/);
+    expect(said).not.toMatch(/timone:held/);
     expect(said).not.toMatch(/parked|failed|stopped early|scratch-app#4/);
   });
 

@@ -14,9 +14,11 @@ import type { Manifest } from "../manifest.js";
 import type {
   PullRequest,
   PullRequestThread,
+  Step,
   Ticket,
   TicketingAdapter,
 } from "../adapters/ticketing.js";
+import { noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { stateLockPath } from "../daemon/lock.js";
@@ -64,6 +66,11 @@ const manifest: Manifest = {
 /** An adapter that answers an empty ticket list and swallows comments. */
 function quietAdapter(): TicketingAdapter {
   return {
+    ...noStepWrites,
+    // No initiative in this test is broken into step tickets.
+    async listSteps(): Promise<Step[]> {
+      return [];
+    },
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
     },
@@ -270,7 +277,7 @@ function commitOnDefaultBranch(repoDir: string): void {
 }
 
 describe("runDaemon — the loop is told where the project checkouts are", () => {
-  it("reaches a ticket's breakdown, so a mid-initiative merge does not close it", async () => {
+  it("reaches a ticket's breakdown, so a list that has regrown is not closed over", async () => {
     // The poll loop cannot answer "is there another piece of this to build?"
     // without a path to `projects/<name>/`, and this command is the only place
     // a real daemon's root is known. Wired wrongly, every multi-piece
@@ -295,10 +302,19 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
       [
         "# Breakdown",
         "",
+        // ✏ 29g: the stamp names **two** and the list holds three, so this is
+        // a re-proposal — a list that grew after it was approved (ADR-0028
+        // D3). That is what the loop must notice, and noticing it means
+        // reading the file, which means having been told the root. Before
+        // 29g this fixture proved the same thing through a mid-initiative
+        // merge not closing the ticket; a ticket does not host a sequence of
+        // chunks any more, so that observation stopped discriminating while
+        // the thing it was observing — the root reaching the loop — did not.
         "**Status:** Approved by fvermaut 2026-08-15 — 2 pieces",
         "",
         "1. **The ledger learns chunks** — a run carries its sequence number.",
         "2. **The next chunk opens** — a merged pull request opens the next one.",
+        "3. **The ticket closes** — the last merge ends the conversation.",
         "",
       ].join("\n"),
       "utf8",
@@ -367,6 +383,10 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
     });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("done");
+    // Not closed: the list grew after it was approved, so the human is asked
+    // rather than the ticket being finished on their behalf. A loop that
+    // never got the root could not have read the file and would have closed
+    // it, which is what makes this assertion about the plumbing.
     expect(closed).toEqual([]);
   });
 });

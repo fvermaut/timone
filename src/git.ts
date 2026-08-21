@@ -64,6 +64,55 @@ export async function isClean(dir: string): Promise<boolean> {
   return status.trim() === "";
 }
 
+/**
+ * Where `dir` was cloned from and which commit it stands on — the two things
+ * a container needs in order to rebuild it
+ * ([ADR-0041](../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) D1).
+ *
+ * The commit is asked for in full and never abbreviated: a run is pinned to
+ * this value, and a short name is ambiguous by design.
+ *
+ * Undefined when `dir` is not a checkout, has no `origin`, or carries no
+ * commit yet — three different ways of saying "there is no version here",
+ * none of which is worth telling the three apart for.
+ */
+export async function checkoutVersion(
+  dir: string,
+): Promise<{ remote: string; commit: string } | undefined> {
+  try {
+    const remote = (await runGit(["remote", "get-url", "origin"], dir)).trim();
+    const commit = (await runGit(["rev-parse", "HEAD"], dir)).trim();
+    if (remote === "" || commit === "") return undefined;
+    return { remote, commit };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The paths in `dir` carrying changes that are not committed — staged,
+ * unstaged and untracked alike — renames counted at their destination.
+ *
+ * **Files git was told to ignore are never among them.** That is not a filter
+ * applied here: `git status --porcelain` leaves them out, which is what makes
+ * `node_modules/` and `dist/` not work anybody has to commit.
+ *
+ * Throws when `dir` is not a checkout, as everything else in this module
+ * does. Empty means the tree is clean, and only that.
+ */
+export async function uncommittedFiles(dir: string): Promise<string[]> {
+  const status = await runGit(["status", "--porcelain"], dir);
+  return status
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      const path = line.slice(3);
+      const arrow = path.indexOf(" -> ");
+      return arrow === -1 ? path : path.slice(arrow + 4);
+    })
+    .map((path) => path.replace(/^"|"$/g, ""));
+}
+
 /** Name of the currently checked-out branch (or "HEAD" when detached). */
 export async function currentBranch(dir: string): Promise<string> {
   return (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], dir)).trim();

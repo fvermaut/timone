@@ -9,8 +9,17 @@ import {
 } from "../daemon/breakdown.js";
 import { ctaFor, type Cta, type InitiativeProgress } from "../daemon/cta.js";
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
-import { checkoutOf, initiativeProgress } from "../daemon/poll.js";
-import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
+import {
+  checkoutOf,
+  initiativeProgress,
+  progressOf,
+} from "../daemon/poll.js";
+import {
+  RunStore,
+  defaultStatePath,
+  type InitiativeRecord,
+  type Run,
+} from "../daemon/runs.js";
 
 /** Statuses that mean a session is running, or about to. */
 const RUNNING = ["picked-up", "active"];
@@ -24,6 +33,22 @@ const RUNNING = ["picked-up", "active"];
 export interface RenderStatusOptions {
   /** False when the daemon has never written a state file. */
   stateExists: boolean;
+  /**
+   * The picture the daemon's last cycle wrote of the initiative a ticket
+   * belongs to, or undefined for a ticket in no initiative it has seen.
+   *
+   * **This is why `timone status` is still instant and still synchronous.**
+   * Under one step, one ticket the honest answer to *which step is live* lives
+   * on the tracker — and asking for it would put a `gh` call in front of a
+   * waiting human, which is the thing ADR-0044 D5 refused. So the daemon
+   * writes what it saw each cycle and this reads it off disk. The picture is
+   * at most one poll interval stale, which costs a wrong line and never a
+   * wrong decision.
+   *
+   * **Absent means say what you said before**, which is what a fixture wants
+   * and what a ledger written by an older daemon gives.
+   */
+  pictures?: (project: string) => readonly InitiativeRecord[];
   /** Now, for saying how long a running session has been going. */
   now?: Date;
   /**
@@ -63,6 +88,8 @@ interface RenderContext {
   now?: Date;
   /** Where this run's ticket's initiative stands, resolved once per ticket. */
   progressOf: (run: Run) => InitiativeProgress | undefined;
+  /** Every initiative of a project the daemon has a picture of. */
+  initiativesOf: (project: string) => readonly InitiativeRecord[];
 }
 
 /**
@@ -75,27 +102,29 @@ interface RenderContext {
  * with several waiting tickets reads each breakdown once.
  */
 function progressReader(
-  runs: readonly Run[],
   root: string | undefined,
   source: BreakdownSource | undefined,
+  picture: (project: string, ticket: number) => InitiativeRecord | undefined,
 ): (run: Run) => InitiativeProgress | undefined {
-  if (root === undefined) return () => undefined;
-
   const cache = new Map<string, InitiativeProgress | undefined>();
   return (run) => {
     const key = `${run.project}#${run.ticket}`;
     if (!cache.has(key)) {
-      const chunks = runs.filter(
-        (chunk) => chunk.project === run.project && chunk.ticket === run.ticket,
-      );
+      const seen = picture(run.project, run.ticket);
+      // Without a root there is no checkout to read the approved list from, so
+      // a re-proposal cannot be seen — but how far the work has got still can,
+      // because that comes off the ledger. Before 29g this answered nothing at
+      // all, since everything it knew came from the file.
       cache.set(
         key,
-        initiativeProgress(
-          checkoutOf(root, run.project),
-          run.ticket,
-          chunks,
-          source ?? fromDefaultBranch,
-        ),
+        root === undefined
+          ? progressOf(seen)
+          : initiativeProgress(
+              checkoutOf(root, run.project),
+              run.ticket,
+              source ?? fromDefaultBranch,
+              seen,
+            ),
       );
     }
     return cache.get(key);
@@ -166,6 +195,7 @@ function describeWait(run: Run, context: RenderContext): string {
 /** One run's phrase: the ticket, how far it got, and what it is doing. */
 function describeRun(run: Run, context: RenderContext): string {
   const now = context.now;
+  const where = stepOf(run, context);
   const stage =
     run.stage === undefined ? "" : ` (${stageLabel(run.stage)})`;
   // The model is named for a working run only: it answers "what is this
@@ -187,7 +217,47 @@ function describeRun(run: Run, context: RenderContext): string {
       ? ""
       : ` ⚠ ${run.flags.length} automatic check(s) failed — see the ticket`;
 
-  return `#${run.ticket}${stage} — ${what}${flags}`;
+  return `#${run.ticket}${where}${stage} — ${what}${flags}`;
+}
+
+/**
+ * Where a run's ticket sits in its initiative — ` (step 2 of 3 of #7)` — or
+ * nothing at all for a ticket in no initiative.
+ *
+ * **This is the thing nothing has ever displayed.** The daemon has always had
+ * an opinion about which piece comes next and there has never been a way to
+ * see it, which is why a wrong one could go unnoticed for a day
+ * ([timone#41](https://github.com/fvermaut/timone/issues/41)).
+ */
+function stepOf(run: Run, context: RenderContext): string {
+  const picture = context
+    .initiativesOf(run.project)
+    .find((record) => record.steps.includes(run.ticket));
+  if (picture === undefined) return "";
+
+  const position = picture.steps.indexOf(run.ticket) + 1;
+  return ` (step ${position} of ${picture.steps.length} of #${picture.initiative})`;
+}
+
+/**
+ * What an initiative with no run of its own is doing — the gap between two
+ * steps, when the last one has merged and the next has not been taken up.
+ *
+ * Without it the project's line reads `idle`, which is true of the project and
+ * false of the work: a fourteen-step initiative is alive for the whole minute
+ * between every pair of pieces, and a reader told `idle` fourteen times would
+ * be right to conclude nothing was happening.
+ *
+ * **An initiative every one of whose steps is closed says nothing**, because
+ * it is finished rather than waiting.
+ */
+function describeInitiative(picture: InitiativeRecord): string | undefined {
+  if (picture.done >= picture.steps.length) return undefined;
+
+  const where = `#${picture.initiative} — ${picture.done} of ${picture.steps.length} done`;
+  return picture.next === undefined || picture.nextTitle === undefined
+    ? `${where}, nothing to take up yet`
+    : `${where}, next is ${picture.nextTitle}`;
 }
 
 /**
@@ -210,6 +280,17 @@ function describeProject(
   const queued = mine.filter((run) => run.status === "queued");
 
   const parts = [...running, ...parked].map((run) => describeRun(run, context));
+
+  // An initiative whose live step already has a run above is not named again:
+  // that run's own phrase says where it is. This is for the initiatives with
+  // no run at all — the gap between two steps.
+  const busy = new Set(mine.map((one) => one.ticket));
+  for (const picture of context.initiativesOf(project)) {
+    if (picture.steps.some((step) => busy.has(step))) continue;
+    const said = describeInitiative(picture);
+    if (said !== undefined) parts.push(said);
+  }
+
   if (parts.length === 0) parts.push("idle");
 
   if (queued.length > 0) {
@@ -242,7 +323,16 @@ export function renderStatus(
   // once however many of its runs and closing lines mention it.
   const context: RenderContext = {
     now: options.now,
-    progressOf: progressReader(runs, options.root, options.breakdownSource),
+    initiativesOf: (project) => options.pictures?.(project) ?? [],
+    progressOf: progressReader(
+      options.root,
+      options.breakdownSource,
+      (project, ticket) =>
+        (options.pictures?.(project) ?? []).find(
+          (record) =>
+            record.initiative === ticket || record.steps.includes(ticket),
+        ),
+    ),
   };
 
   const width = Math.max(...names.map((name) => name.length), 0);
@@ -334,8 +424,10 @@ export function registerStatusCommand(program: Command): void {
       const stateExists = existsSync(statePath);
 
       let runs: Run[];
+      let store: RunStore;
       try {
-        runs = RunStore.open(statePath).all();
+        store = RunStore.open(statePath);
+        runs = store.all();
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
@@ -351,6 +443,7 @@ export function registerStatusCommand(program: Command): void {
           stateExists,
           now: new Date(),
           root: process.cwd(),
+          pictures: (project) => store.initiativesFor(project),
         }),
       );
     });

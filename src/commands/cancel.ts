@@ -1,4 +1,6 @@
 import { resolve } from "node:path";
+import { heldStepWayOut } from "../daemon/dropped.js";
+import { HELD_LABEL } from "../daemon/steps.js";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
@@ -214,8 +216,10 @@ function cancel(
   try {
     store.cancel(run.id, reason);
     log(
-      `Stopped work on ${name}: ${reason}. I won't pick this chunk up again — ` +
-        "if the ticket is open and marked for me, I'll start it afresh on my next pass.",
+      `Stopped work on ${name}: ${reason}. I won't pick this up again — ` +
+        (heldStepWayOut(store, run.project, run.ticket) ??
+          "if the ticket is open and marked for me, I'll start it afresh on " +
+            "my next pass."),
     );
     return 0;
   } catch (error) {

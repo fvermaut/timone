@@ -7,6 +7,7 @@ import {
   type PullRequest,
   type PullRequestComment,
   type PullRequestThread,
+  type Step,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
@@ -83,12 +84,40 @@ const ghCommentSchema = z.looseObject({
   url: z.string().optional(),
 });
 
+/** One `blockedBy` node: its own state travels with it, and its own repo. */
+const ghDependencySchema = z.looseObject({
+  number: z.number().int().positive(),
+  state: z.enum(["OPEN", "CLOSED"]),
+  url: z.string(),
+});
+
+/**
+ * A child issue with the fields a step needs, over and above a ticket's.
+ * `parent` is how the children of an initiative are told from everything else
+ * in the repository — there is no `--parent` filter on `gh issue list`.
+ */
+const ghStepSchema = ghIssueSchema.extend({
+  state: z.enum(["OPEN", "CLOSED"]),
+  assignees: z.array(z.looseObject({ login: z.string() })),
+  blockedBy: z.looseObject({
+    nodes: z.array(ghDependencySchema),
+    totalCount: z.number().int().nonnegative(),
+  }),
+  parent: z.looseObject({ number: z.number().int().positive() }).nullable(),
+});
+
 const ghIssueWithCommentsSchema = ghIssueSchema.extend({
   comments: z.array(ghCommentSchema),
 });
 
 /** The JSON fields requested from `gh issue list`. */
 const LIST_FIELDS = "number,title,body,labels,url,author,createdAt";
+/**
+ * What a step needs beyond a ticket. `closed` is deliberately not asked for:
+ * `state` already says it, and two fields for one fact is two chances to
+ * disagree.
+ */
+const STEP_FIELDS = `${LIST_FIELDS},state,assignees,blockedBy,parent`;
 /** `gh issue view` additionally carries the thread. */
 const VIEW_FIELDS = `${LIST_FIELDS},comments`;
 
@@ -206,6 +235,37 @@ function toTicket(issue: z.infer<typeof ghIssueSchema>): Ticket {
   };
 }
 
+/**
+ * A `Blocked by:` line written in a body, verbatim.
+ *
+ * Matched to be **reported, never obeyed**: a dependency is GitHub's native
+ * relation and nothing else ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+ * D6). The line is still offered by `.claude/skills/timone-wayfind/SKILL.md`,
+ * which is how a human comes to write one in good faith, and silence is the
+ * failure mode ADR-0040 names as the one to watch. Nothing parses the numbers
+ * out of it — the whole line goes back so the machine can quote it.
+ */
+const BODY_DEPENDENCY_LINE = /^[ \t]*(?:\*\*|__)?Blocked by:.*$/im;
+
+function toStep(issue: z.infer<typeof ghStepSchema>): Step {
+  const line = BODY_DEPENDENCY_LINE.exec(issue.body)?.[0].trim();
+  return {
+    number: issue.number,
+    title: issue.title,
+    state: issue.state === "CLOSED" ? "closed" : "open",
+    labels: issue.labels.map((label) => label.name),
+    assignees: issue.assignees.map((who) => who.login),
+    blockedBy: issue.blockedBy.nodes.map((node) => ({
+      number: node.number,
+      url: node.url,
+      open: node.state === "OPEN",
+    })),
+    dependenciesIncomplete:
+      issue.blockedBy.totalCount > issue.blockedBy.nodes.length,
+    ...(line === undefined ? {} : { bodyDependencyLine: line }),
+  };
+}
+
 export interface GitHubTicketingOptions {
   /** Injected subprocess runner; defaults to running `gh` for real. */
   run?: CommandRunner;
@@ -240,6 +300,53 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
 
   async listOpenTickets(project: TicketingProject): Promise<Ticket[]> {
     return this.listIssues(project, undefined);
+  }
+
+  /**
+   * An initiative's step tickets, open and closed alike, in the order its
+   * approved breakdown put them.
+   *
+   * `gh issue list` has no parent filter, so the children are picked out of
+   * the repository's issues here. Ordering is by **number ascending**, which
+   * is the breakdown's order because 29c opens one ticket per step in the
+   * order the human approved — gh's own newest-first answer would run the
+   * initiative backwards.
+   */
+  async listSteps(
+    project: TicketingProject,
+    initiative: number,
+  ): Promise<Step[]> {
+    const slug = repoSlug(project.repoUrl);
+    const raw = await this.run("gh", [
+      "issue",
+      "list",
+      "--repo",
+      slug,
+      "--state",
+      "all",
+      "--json",
+      STEP_FIELDS,
+      "--limit",
+      String(this.pageLimit),
+    ]);
+
+    const issues = parseGhJson(
+      z.array(ghStepSchema),
+      raw,
+      `listing the steps of ${slug}#${initiative}`,
+    );
+
+    if (issues.length >= this.pageLimit) {
+      throw new Error(
+        `${slug}: ${issues.length} issues hit the page limit of ` +
+          `${this.pageLimit} — refusing to choose a step from a truncated list`,
+      );
+    }
+
+    return issues
+      .filter((issue) => issue.parent?.number === initiative)
+      .map(toStep)
+      .sort((a, b) => a.number - b.number);
   }
 
   /**
@@ -287,6 +394,99 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
       .sort(
         (a, b) => a.createdAt.localeCompare(b.createdAt) || a.number - b.number,
       );
+  }
+
+  async createStep(
+    project: TicketingProject,
+    initiative: number,
+    step: { title: string; body: string },
+  ): Promise<number> {
+    const slug = repoSlug(project.repoUrl);
+    const raw = await this.run("gh", [
+      "issue",
+      "create",
+      "--repo",
+      slug,
+      "--title",
+      step.title,
+      "--body",
+      step.body,
+      "--label",
+      this.markLabel,
+      // The parent in the same call as the create, so a step can never exist
+      // as an orphan: an initiative's children are found *by* their parent,
+      // and one that failed to be linked is invisible to the frontier while
+      // being perfectly visible to a human reading the tracker.
+      "--parent",
+      String(initiative),
+    ]);
+
+    const created = /\/issues\/(\d+)\s*$/.exec(raw.trim());
+    if (created === null) {
+      throw new Error(
+        `${slug}: opened a step for #${initiative} but could not read its ` +
+          `number from an answer that is not an issue url: ${raw.trim()}`,
+      );
+    }
+    return Number(created[1]);
+  }
+
+  async blockStep(
+    project: TicketingProject,
+    step: number,
+    waitsFor: number,
+  ): Promise<void> {
+    await this.run("gh", [
+      "issue",
+      "edit",
+      String(step),
+      "--repo",
+      repoSlug(project.repoUrl),
+      "--add-blocked-by",
+      String(waitsFor),
+    ]);
+  }
+
+  async setTicketBody(
+    project: TicketingProject,
+    number: number,
+    body: string,
+  ): Promise<void> {
+    await this.run("gh", [
+      "issue",
+      "edit",
+      String(number),
+      "--repo",
+      repoSlug(project.repoUrl),
+      "--body",
+      body,
+    ]);
+  }
+
+  async ensureLabel(
+    project: TicketingProject,
+    label: string,
+    description = "",
+  ): Promise<void> {
+    try {
+      await this.run("gh", [
+        "label",
+        "create",
+        label,
+        "--repo",
+        repoSlug(project.repoUrl),
+        "--description",
+        description,
+      ]);
+    } catch (error) {
+      // The label already being there is the ordinary case on every run after
+      // the first, and this method's whole promise is that it is one. Any
+      // other failure — no permission, no repository — still travels, because
+      // swallowing those would turn a claim that is never applied into
+      // silence, which is the failure mode this phase watches for.
+      const said = error instanceof Error ? error.message : String(error);
+      if (!/already exists/i.test(said)) throw error;
+    }
   }
 
   async getTicket(

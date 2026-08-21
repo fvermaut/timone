@@ -14,8 +14,8 @@
  * needs is a question about state, not about the tracker.
  */
 import { MARK_LABEL } from "../adapters/ticketing.js";
+import { HELD_LABEL } from "./steps.js";
 import { takeoverCommand } from "../channels/terminal.js";
-import { type ChunkProgress } from "./breakdown.js";
 import { technicalFault } from "./faults.js";
 import { type Run } from "./runs.js";
 
@@ -30,17 +30,29 @@ import { type Run } from "./runs.js";
  * *this one is finished* into that gap, on every ticket, between every pair of
  * pieces.
  *
- * It is {@link ChunkProgress} plus the one fact about the *artifact* a reader
- * of the ticket has to be told: that the list has grown since they approved
- * it. The two are orthogonal — a re-proposed initiative is still some number
- * of pieces through — so this is not a state wearing flags, it is two facts
- * about one initiative.
+ * It carries how far the initiative has got, plus the one fact about the
+ * *artifact* a reader of the ticket has to be told: that the list has grown
+ * since they approved it. The two are orthogonal — a re-proposed initiative is
+ * still some number of pieces through — so this is not a state wearing flags,
+ * it is two facts about one initiative.
+ *
+ * **✏ 29d: it no longer extends `ChunkProgress`.** It carried the same three
+ * fields by inheritance while those fields meant *chunks counted out of the
+ * ledger*. They now mean *step tickets read off the tracker*, which is the
+ * same shape and a different fact, and inheriting from the counting model
+ * would tie this to a type 29g deletes.
  *
  * **Computed by the caller**, never here: it comes from a file in a project's
  * checkout, and this module reads nothing. See `initiativeProgress` in
  * `poll.ts`, which is the one function both surfaces resolve it through.
  */
-export interface InitiativeProgress extends ChunkProgress {
+export interface InitiativeProgress {
+  /** How many steps the initiative has. */
+  total: number;
+  /** How many of them are done. */
+  done: number;
+  /** The step to take next, or absent when none is. `index` counts from 1. */
+  next?: { index: number; title: string };
   /** Whether the list of pieces has grown since the human approved it. */
   reproposed?: boolean;
 }
@@ -87,6 +99,20 @@ export interface TicketState {
    * posted.
    */
   misreadStep?: { named: string; kind: "unknown" | "unbuilt" };
+  /**
+   * Whether this ticket is a **step waiting on another step**, and so one the
+   * frontier will pass over every cycle
+   * ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)).
+   *
+   * Absent means *not known to be waiting*, which is the honest default: a
+   * chore, a bug, and every ticket that is nobody's step all sit here, and
+   * they are all things the machine really will pick up on its next pass.
+   *
+   * ✏ Added by phase 29's live gate, which found a step that waited on
+   * another announcing *"I'll pick this up on my next pass."* on its own
+   * ticket. It never would have.
+   */
+  blocked?: boolean;
 }
 
 /** What one open ticket is asking of the human. */
@@ -101,7 +127,18 @@ export interface Cta {
    *
    * A run that stopped early needs the human too, and this is false for it:
    * what it needs is a command rather than an answer, and `timone status`
-   * reports that in its own sentence beside {@link Cta.command}. The two
+   * reports that in its own sentence beside {@link Cta.command}.
+   *
+   * **✏ 29j — a *dropped* step needs the human and is still false here**, and
+   * the reason is worth writing down because the opposite looks right. Its
+   * two ways on are gestures on the tracker rather than a command, so there
+   * is nothing to report beside {@link Cta.command} either — which reads like
+   * an argument for setting this true. It is not: `timone status` lists every
+   * cancelled run with its reason regardless, so the step is never invisible;
+   * and the daemon cancels a run when its ticket is **closed**, so true would
+   * ask the human to act on a ticket that is already shut.
+   *
+   * The two
    * fields are independent facts about one CTA — who is being waited on, and
    * whether anything they can type moves it.
    */
@@ -164,7 +201,22 @@ function betweenChunks(progress: InitiativeProgress | undefined): Cta | undefine
     };
   }
 
-  if (progress.next === undefined) return undefined;
+  if (progress.next === undefined) {
+    // **No *eligible* step is not the same as no step left**, and reading the
+    // first as the second is how an initiative with nothing built announced
+    // *"This one is finished."* on its own ticket — found by phase 29's live
+    // gate, on the thread it was opened to read. A step can be ineligible
+    // because the machine is holding it or because it waits on another, and
+    // in both cases the initiative is very much alive.
+    if (progress.done >= progress.total) return undefined;
+    return {
+      headline: `${progress.done} of ${progress.total} pieces are done, and none of the rest can start yet.`,
+      needFromYou:
+        "have a look at the pieces below — one of them is either stopped or " +
+        "waiting for another.",
+      waitingOnYou: true,
+    };
+  }
 
   return {
     headline: `${capitalize(piece(progress.next.index, progress.total))} is next.`,
@@ -190,6 +242,14 @@ export function ctaFor(state: TicketState): Cta {
   const { run, progress } = state;
 
   if (run === undefined) {
+    if (state.blocked === true) {
+      return {
+        headline: "This one is waiting for the piece before it.",
+        needFromYou:
+          "nothing — I'll start it as soon as the piece it waits for is done.",
+        waitingOnYou: false,
+      };
+    }
     return (state.labels ?? []).includes(MARK_LABEL)
       ? {
           headline: "I'll pick this up on my next pass.",
@@ -262,15 +322,61 @@ export function ctaFor(state: TicketState): Cta {
   }
 
   if (run.status === "cancelled") {
-    // Abandoned, not broken — so no retry command, which `RunStore.retry`
-    // would refuse anyway. What it says instead is the truth about what
-    // happens next: cancelling settles the chunk (ADR-0029), so a ticket that
-    // is still open and marked simply takes a fresh one on the next cycle.
+    // ✏ 29j: **the work is dropped, and it stays dropped.** This branch used
+    // to promise *"while this ticket is open and marked for me I'll start it
+    // afresh on my next pass"*, on the strength of ADR-0029: cancelling
+    // settled the chunk, and an open marked ticket simply took a fresh one.
+    // Both halves are false now. `timone cancel` **drops** the work
+    // ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+    // D2), and the `timone:held` label the machine leaves behind is exactly
+    // what keeps the frontier off the step (D3). A ticket told to wait for a
+    // pass that never comes sits open for ever, which is the failure ADR-0040
+    // set out to end.
+    //
+    // **Both ways on, and the label is named rather than described.** A
+    // reader who has to look up what "the hold" is cannot act on the sentence
+    // in front of them. **Neither way is a `timone` command** — one is
+    // removing a label, the other is closing the ticket, and both are two
+    // clicks in any GitHub view (D7) — so there is no `command` to print, and
+    // reaching for `timone retry` here would name a command the ledger
+    // refuses outright.
+    //
+    // **`waitingOnYou` stays false**, as {@link Cta.waitingOnYou}'s own
+    // docblock says it must, and the slice that wrote this branch tried true
+    // first on the argument that a dropped step would otherwise appear on no
+    // terminal surface. **That argument is false**: `timone status` lists
+    // every cancelled run with its reason, unconditionally
+    // (`status.ts`'s `cancelled` block), so the step is visible either way.
+    // And true is worse than merely unnecessary — the daemon cancels a run
+    // when its ticket is **closed** (`poll.ts`'s `no longer open and marked`),
+    // and the flag would then put *"answer on scratch-app #6"* in front of a
+    // human whose ticket is already shut.
+    //
+    // The two ways on are carried where they can be acted on: this call to
+    // action, on the ticket, which exists only while the ticket is open.
+    // **And only for a ticket the machine is actually holding.** A cancelled
+    // run is settled, so `loadedLiveRunForTicket` answers nothing for it and
+    // `register` opens a **fresh** run next cycle — which is still exactly
+    // what happens to an ordinary ticket whose chunk was cancelled. What
+    // changed is that a dropped *step* now carries the hold label, and that
+    // is the ticket the machine will not take up. Saying these words to an
+    // unheld ticket would name a gesture with no effect and promise a stop
+    // that is not coming.
+    if (!(state.labels ?? []).includes(HELD_LABEL)) {
+      return {
+        headline: "I stopped work on this one.",
+        needFromYou:
+          "nothing — while this ticket is open and marked for me I'll start it " +
+          "afresh on my next pass.",
+        waitingOnYou: false,
+      };
+    }
+
     return {
-      headline: "I stopped work on this one.",
+      headline: "I stopped work on this one, and I won't start it again by myself.",
       needFromYou:
-        "nothing — while this ticket is open and marked for me I'll start it " +
-        "afresh on my next pass.",
+        `either remove the \`${HELD_LABEL}\` label and I'll start it afresh, ` +
+        "or close this ticket and I'll carry on without it.",
       waitingOnYou: false,
     };
   }

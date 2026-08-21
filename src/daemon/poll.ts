@@ -8,6 +8,7 @@ import {
   stampMachineComment,
   type PullRequest,
   type PullRequestThread,
+  type Step,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
@@ -41,7 +42,6 @@ import {
   type PipelineStage,
 } from "./pipeline.js";
 import {
-  chunkProgress,
   fromDefaultBranch,
   isReproposal,
   readBreakdown,
@@ -62,7 +62,9 @@ import { runRetry } from "../commands/retry.js";
 import { runCancel } from "../commands/cancel.js";
 import { resolveTakeover } from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
-import { type Run, type RunStore, type Witness } from "./runs.js";
+import {
+  type InitiativeRecord, type Run, type RunStore, type Witness } from "./runs.js";
+import { HELD_LABEL, MAP_LABEL, nextStep } from "./steps.js";
 // The same comment the spawner posts when a session ends badly, because this
 // is the same kind of ending: work stopped, nothing was decided, try again.
 // `waitOf` comes from there too, so a run put back onto its wait is described
@@ -237,6 +239,66 @@ export function mergedComment(prs: readonly number[]): string {
     "",
     `${opening} The branches have`,
     "served their purpose, and this ticket's journey ends here.",
+    "",
+    "**What I need from you:** nothing — file a new ticket for anything else.",
+  ].join("\n");
+}
+
+/**
+ * The comment posted on a **step** when its pull request merged.
+ *
+ * Short, because the step's ticket is not where the initiative is discussed:
+ * the map ticket carries that, and this one carries a single piece of work
+ * that is now finished.
+ */
+export function stepMergedComment(pr: number): string {
+  return [
+    "**Merged — this step is done.**",
+    "",
+    `Pull request #${pr} went in. This step's ticket ends here; the rest of`,
+    "the work carries on under the main ticket.",
+    "",
+    "**What I need from you:** nothing.",
+  ].join("\n");
+}
+
+/**
+ * The comment that closes an **initiative**, once no step of it is open.
+ *
+ * **It states what was actually delivered, never what was planned.** A step
+ * can be closed because it was *dropped* — cancelled, then closed by a human
+ * who moved on — and an initiative that refused to close over one abandoned
+ * step would be a thread that never ends, which is the failure ADR-0040
+ * exists to fix
+ * ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+ * D4).
+ *
+ * **Built versus dropped is inferred and never asked.** One fact decides it:
+ * a step whose run delivered a merged pull request was built, and a step
+ * closed without one was dropped. No label, no comment convention, and
+ * nothing the human has to remember to do — the tempting alternatives all put
+ * a gesture between them and a thread that should simply finish.
+ */
+export function initiativeClosedComment(
+  built: readonly number[],
+  dropped: readonly number[],
+  prs: readonly number[],
+): string {
+  const total = built.length + dropped.length;
+  const opening =
+    dropped.length === 0
+      ? `All ${total} pieces were built.`
+      : `${built.length} of ${total} pieces were built — ` +
+        `${dropped.length === 1 ? "one was" : `${dropped.length} were`} ` +
+        `dropped: ${listOf(dropped.map((step) => step))}.`;
+
+  return [
+    "**Done — this ticket is finished.**",
+    "",
+    opening,
+    prs.length === 0
+      ? "Nothing was merged for it."
+      : `The work went in with pull ${prs.length === 1 ? "request" : "requests"} ${listOf(prs)}.`,
     "",
     "**What I need from you:** nothing — file a new ticket for anything else.",
   ].join("\n");
@@ -939,6 +1001,91 @@ async function releasePreview(
  * project alike — see {@link introduceUnmarked}. `reconcilePreviews` takes the
  * same pair for the same reason.
  */
+/**
+ * What this cycle knows about every initiative on a project: which tickets are
+ * steps, and which step of each is the one to take next.
+ */
+interface Frontier {
+  isStep(ticket: number): boolean;
+  isNext(ticket: number): boolean;
+  /**
+   * A step that waits on another step which is still open — one the frontier
+   * passes over every cycle, and which must not be told it will be picked up
+   * on the next pass.
+   */
+  isBlocked(ticket: number): boolean;
+}
+
+/**
+ * Read every initiative's step tickets **once**, decide the frontier of each,
+ * and write down what was seen.
+ *
+ * **One query per initiative per cycle, and it does three jobs.** It is what
+ * tells a step ticket from an ordinary one, what chooses the step to take, and
+ * — as a side effect and not as a second call — what fills the cached picture
+ * `timone status` renders from
+ * ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+ * D5). Asking the tracker again to answer the third would put a `gh` call in
+ * front of a waiting human, which is the thing that ruling refused.
+ *
+ * It never throws. A tracker that cannot list one initiative's children leaves
+ * that initiative alone for a cycle, with a line in the errors; taking the
+ * project's whole turn down over it would stop every other ticket on it too.
+ */
+async function surveyInitiatives(
+  project: TicketingProject,
+  tickets: readonly Ticket[],
+  deps: PollDeps,
+  log: (message: string) => void,
+): Promise<Frontier> {
+  const { store, adapter } = deps;
+  const steps = new Set<number>();
+  const next = new Set<number>();
+  const blocked = new Set<number>();
+
+  for (const map of tickets.filter((t) => t.labels.includes(MAP_LABEL))) {
+    let children: Step[];
+    try {
+      children = await adapter.listSteps(project, map.number);
+    } catch (error) {
+      log(
+        `error  ${project.name}: could not read the steps of #${map.number} — ` +
+          `${oneLine(error)}`,
+      );
+      continue;
+    }
+
+    for (const child of children) {
+      steps.add(child.number);
+      if (
+        child.state === "open" &&
+        (child.dependenciesIncomplete || child.blockedBy.some((d) => d.open))
+      ) {
+        blocked.add(child.number);
+      }
+    }
+    const eligible = nextStep(children);
+    if (eligible !== undefined) next.add(eligible.number);
+
+    store.rememberInitiative({
+      project: project.name,
+      initiative: map.number,
+      title: map.title,
+      steps: children.map((child) => child.number),
+      done: children.filter((child) => child.state === "closed").length,
+      ...(eligible === undefined
+        ? {}
+        : { next: eligible.number, nextTitle: eligible.title }),
+    });
+  }
+
+  return {
+    isStep: (ticket) => steps.has(ticket),
+    isNext: (ticket) => next.has(ticket),
+    isBlocked: (ticket) => blocked.has(ticket),
+  };
+}
+
 async function pollProject(
   project: TicketingProject,
   config: ProjectConfig,
@@ -954,9 +1101,23 @@ async function pollProject(
   const { store, adapter } = deps;
 
   const tickets = await adapter.listMarkedTickets(project);
+  const frontier = await surveyInitiatives(project, tickets, deps, log);
   // Tickets told where they stand a moment ago, by the acknowledgement below.
   const acknowledged = new Set<number>();
   for (const ticket of tickets) {
+    // A map ticket is a conversation, not work: the runs belong to the steps
+    // it points at. Without this the daemon works the initiative and its own
+    // children at the same time, on the same project.
+    if (ticket.labels.includes(MAP_LABEL)) continue;
+
+    // A step that is not the frontier waits its turn. This is what stops a
+    // fourteen-step initiative becoming fourteen runs in one cycle: every
+    // step carries the mark — it has to, or nothing could ever pick it up —
+    // so the mark alone can no longer decide.
+    if (frontier.isStep(ticket.number) && !frontier.isNext(ticket.number)) {
+      continue;
+    }
+
     // Before the ledger is touched: this is where a ticket's *next* chunk is
     // opened, so it is where one the human has not approved is refused. See
     // {@link successorHeldBack} — it says nothing about a ticket's first
@@ -971,6 +1132,16 @@ async function pollProject(
     const { run, created } = store.register(project.name, ticket.number);
     if (!created) continue;
     acknowledged.add(ticket.number);
+
+    // The claim, and it is the whole of how a dropped step stays dropped: the
+    // next cycle finds this step held and passes over it, and after a
+    // `timone cancel` it goes on finding it held for ever — until a human
+    // removes the label, which is how they hand the step back (ADR-0044 D7).
+    // Nothing removes it here, and nothing writes an assignee: that field is
+    // the human's half of the same rule and the machine only ever reads it.
+    if (frontier.isStep(ticket.number)) {
+      await adapter.applyLabel(project, ticket.number, HELD_LABEL);
+    }
 
     if (run.status === "queued") {
       result.queued.push(run.id);
@@ -1026,7 +1197,15 @@ async function pollProject(
       log(`cancel ${occupier.id} — ${reason}`);
     } else {
       try {
-        await deps.spawner.spawn(occupier, project, entryContext(occupier, tickets));
+        await deps.spawner.spawn(
+          occupier,
+          project,
+          entryContext(
+            occupier,
+            tickets,
+            store.initiativeFor(project.name, occupier.ticket) !== undefined,
+          ),
+        );
         result.spawned.push(occupier.id);
         log(`spawn  ${occupier.id}`);
       } catch (error) {
@@ -1041,7 +1220,16 @@ async function pollProject(
   // where its run stands *now*, and everything above is what moves it. A run
   // that resumed, failed or finished during this cycle says so on the same
   // cycle rather than a minute later.
-  await reconcileCtas(project, tickets, acknowledged, threads, deps, result, log);
+  await reconcileCtas(
+    project,
+    tickets,
+    acknowledged,
+    frontier,
+    threads,
+    deps,
+    result,
+    log,
+  );
 
   // And after it, on the tickets nothing above could see — where this project
   // has asked for that. Nothing in this call reaches the ledger's pickup path,
@@ -1235,6 +1423,7 @@ async function reconcileCtas(
   project: TicketingProject,
   tickets: readonly Ticket[],
   acknowledged: ReadonlySet<number>,
+  frontier: Frontier,
   threads: (ticket: number) => RunThreads,
   deps: PollDeps,
   result: PollResult,
@@ -1268,6 +1457,7 @@ async function reconcileCtas(
         ticket: ticket.number,
         run: chunks.at(-1),
         labels: ticket.labels,
+        blocked: frontier.isBlocked(ticket.number),
         misreadStep: misreadStep(chunks.at(-1), thread),
         progress:
           root === undefined
@@ -1275,8 +1465,8 @@ async function reconcileCtas(
             : initiativeProgress(
                 checkoutOf(root, project.name),
                 ticket.number,
-                chunks,
                 deps.breakdownSource ?? fromDefaultBranch,
+                store.initiativeFor(project.name, ticket.number),
               ),
       });
       if (saysTheSame(standingCta(thread), stampMachineComment(body))) continue;
@@ -1378,10 +1568,23 @@ function standingCta(thread: TicketThread): string | undefined {
  *
  * The labels come from the listing this cycle already made, so recognising a
  * wayfinder ticket costs the tracker nothing, and the sequence is on the run.
+ *
+ * **✏ 29d — what "successor" means has moved fields, and the old test now
+ * answers no for every step there is.** Under
+ * [ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)
+ * a step is its own ticket and hosts one run, so `run.seq > 1` — which used
+ * to mean *a later piece of an approved list* — is `false` for all fourteen
+ * pieces of a fourteen-step initiative. That fact lives in the ticket's
+ * position among its siblings now, and being a step at all is what carries
+ * it: the approval that opened the step came before the step existed. The
+ * sequence test is kept beside it for a ledger written before any of this.
  */
 function entryContext(
   run: Run,
   tickets: readonly Ticket[],
+  // Whether this run's ticket is a step of an initiative — see the successor
+  // note below.
+  isStep: boolean,
 ): SpawnContext | undefined {
   // A run that has already reached a stage is resuming rather than entering,
   // and where it resumes is the ledger's answer, not the label's.
@@ -1389,7 +1592,15 @@ function entryContext(
 
   const labels =
     tickets.find((candidate) => candidate.number === run.ticket)?.labels ?? [];
-  const successor = run.seq > 1;
+  // ✏ 29d: a **step ticket** is what a successor is now, and `run.seq > 1` is
+  // what it used to be. The two are not the same test and the old one now
+  // answers no for every step there is: a step's run is always `seq` 1,
+  // because the step is its own ticket and hosts one run. Left alone, all
+  // fourteen steps of an initiative would enter at triage and re-interview a
+  // human who approved the list before any of them existed. Being a step *is*
+  // being a successor — the first one included, since the approval that
+  // opened it came before it.
+  const successor = isStep || run.seq > 1;
 
   if (!(successor && isMap(labels))) {
     const charted = wayfinderStage(labels);
@@ -1705,6 +1916,18 @@ async function concludeInitiative(
   log: (message: string) => void,
 ): Promise<void> {
   const { store, adapter } = deps;
+
+  // Under one step, one ticket `run.ticket` is a **step**, so the closing
+  // splits in two: this step's ticket ends here, and the initiative ends only
+  // when no step of it is open (ADR-0040). Everything below this block is the
+  // path for a ticket that is nobody's step — a chore, anything run by hand,
+  // anything from before this daemon started — and is unchanged.
+  const picture = store.initiativeFor(project.name, run.ticket);
+  if (picture !== undefined) {
+    await concludeStep(run, project, pr, picture.initiative, deps, log);
+    return;
+  }
+
   const succession = successionOf(project.name, run.ticket, deps);
 
   if (succession.kind === "unreadable") {
@@ -1752,6 +1975,69 @@ async function concludeInitiative(
 }
 
 /**
+ * Close a merged **step**, and then the initiative if that was the last one
+ * open.
+ *
+ * **The tracker is asked again, deliberately.** The cached picture is from the
+ * cycle's own survey, taken before this step closed, so it cannot answer
+ * *is anything still open?*. This is one call on a path that runs when a pull
+ * request merges — rare, and never in front of a waiting human, which is the
+ * only place ADR-0044 D5 forbids one.
+ */
+async function concludeStep(
+  run: Run,
+  project: TicketingProject,
+  pr: number,
+  initiative: number,
+  deps: PollDeps,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
+
+  await adapter.postComment(project, run.ticket, stepMergedComment(pr));
+  await adapter.closeTicket(project, run.ticket, "completed");
+  log(`closed ${run.id} — step #${run.ticket} of #${initiative}`);
+
+  const steps = await adapter.listSteps(project, initiative);
+  if (steps.some((step) => step.state === "open")) {
+    log(
+      `open   ${project.name}#${initiative} — ` +
+        `${steps.filter((step) => step.state === "open").length} steps left`,
+    );
+    return;
+  }
+
+  // Built versus dropped, inferred from one fact and nothing else: a step
+  // whose run delivered a merged pull request was built. A dropped step's run
+  // was cancelled and carries none, so it needs no label and no question.
+  const built: number[] = [];
+  const dropped: number[] = [];
+  const prs: number[] = [];
+  for (const step of steps) {
+    const merged = store
+      .runsForTicket(project.name, step.number)
+      .find((candidate) => candidate.status === "done" && candidate.pr !== undefined);
+    if (merged?.pr === undefined) {
+      dropped.push(step.number);
+      continue;
+    }
+    built.push(step.number);
+    prs.push(merged.pr);
+  }
+
+  await adapter.postComment(
+    project,
+    initiative,
+    initiativeClosedComment(built, dropped, prs),
+  );
+  await adapter.closeTicket(project, initiative, "completed");
+  log(
+    `closed ${project.name}#${initiative} — ${built.length} of ${steps.length}` +
+      (dropped.length === 0 ? "" : `, ${dropped.length} dropped`),
+  );
+}
+
+/**
  * Where a managed project's checkout is, from the timone root
  * ([ADR-0007](../../doc/adr/0007-sessions-at-timone-root.md): everything runs
  * at the root and projects are materialized beneath it).
@@ -1765,45 +2051,76 @@ export function checkoutOf(root: string, project: string): string {
   return join(root, "projects", project);
 }
 
+
 /**
- * Where a ticket's initiative stands, for the two surfaces that have to say
- * so out loud ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
- * D4) — or undefined when the ticket has no readable list of pieces at all,
- * which is nearly every ticket and every chore (ADR-0030 D3).
+ * How far an initiative has got, from the picture the last cycle wrote.
  *
- * **This is the single function `timone status` and the ticket both resolve
- * the progress value through**, and that is what makes [R21 clause
- * 8](../../doc/specs/prd/prd-02-inversion-of-control.criteria.md) hold rather
- * than merely be intended. `ctaFor` decides what a ticket needs; this decides
- * the one input to it that neither renderer can see for itself. Two callers
- * computing it their own way would drift, and the drift would be invisible
- * until a human read the terminal and the thread in the same minute.
+ * Every number here came off the tracker: `done` is how many of its step
+ * tickets are closed, and `next` is the step the frontier chose. Nothing is
+ * counted from the ledger, which is the point — a cancelled run leaves its
+ * step ticket open, so the step is still the step to come without anything
+ * having to remember to exclude it.
+ */
+/**
+ * Where a ticket's initiative stands, for the two surfaces that have to say so
+ * out loud ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D4) — or undefined when there is nothing to say.
  *
- * `undefined` is answered rather than thrown for the reason `readBreakdown`
- * gives: this is on the path of every poll cycle and of every `timone status`,
- * and a project whose checkout is missing is an ordinary state of the world.
+ * **✏ 29g: the count comes off the tracker and the re-proposal comes off the
+ * artifact, and they are two different facts from two different places.**
+ *
+ * - *How far it has got* is `done` step tickets out of the steps that exist,
+ *   read by the daemon's own survey and cached in the ledger. Counting `done`
+ *   runs against an approved list is gone with `chunkProgress`
+ *   ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)).
+ * - *Whether the list has grown since the human approved it* is still read
+ *   from the **file**, and must be: the committed artifact is the gate
+ *   ([ADR-0014](../../doc/adr/0014-artifact-first-gates.md),
+ *   [ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ *   D3), and no number of step tickets can tell you what a human agreed to.
+ *
+ * **Deleting the second along with the first is the mistake this docblock
+ * exists to stop**, and it was made once here before the tests caught it: a
+ * re-proposed initiative then reported *"this one is finished"* and the
+ * approval gate stopped existing.
  */
 export function initiativeProgress(
   repoDir: string,
   ticket: number,
-  runs: readonly Run[],
-  // The approved list, never the proposal: the default is the default branch,
-  // which is where approving a breakdown puts it (ADR-0030 D2). A
-  // checkout-relative read made this depend on the branch the last session
-  // happened to leave behind.
-  source: BreakdownSource = fromDefaultBranch,
+  source: BreakdownSource,
+  picture: InitiativeRecord | undefined,
 ): InitiativeProgress | undefined {
+  const progress = progressOf(picture);
   const read = readBreakdown(repoDir, ticket, source);
-  if (read.kind !== "ok") return undefined;
+  const regrown = read.kind === "ok" && isReproposal(read.breakdown);
 
-  // `done`, not settled — the same choice `successionOf` makes, and for the
-  // same reason: a cancelled chunk delivered nothing, so the piece it was
-  // opened for is still the piece to come.
-  const done = runs.filter((chunk) => chunk.status === "done").length;
-  const progress = chunkProgress(read.breakdown, done);
-  return isReproposal(read.breakdown)
-    ? { ...progress, reproposed: true }
-    : progress;
+  if (!regrown) return progress;
+  // No picture, and the list has regrown. `total` is the count the file lists
+  // and `done` is nought — both true statements about **step tickets**, of
+  // which this initiative has none yet. Neither is rendered: the re-proposal
+  // branch of the call to action answers before it reaches them, because what
+  // the human is being asked is a judgement rather than a number.
+  const listed = read.kind === "ok" ? read.breakdown.chunks.length : 0;
+  return { total: listed, done: 0, ...progress, reproposed: true };
+}
+
+/** {@link progressOfPicture}, tolerating a ticket no picture lists. */
+export function progressOf(
+  picture: InitiativeRecord | undefined,
+): InitiativeProgress | undefined {
+  return picture === undefined ? undefined : progressOfPicture(picture);
+}
+
+export function progressOfPicture(picture: InitiativeRecord): InitiativeProgress {
+  const position =
+    picture.next === undefined ? -1 : picture.steps.indexOf(picture.next);
+  return position < 0 || picture.next === undefined || picture.nextTitle === undefined
+    ? { total: picture.steps.length, done: picture.done }
+    : {
+        total: picture.steps.length,
+        done: picture.done,
+        next: { index: position + 1, title: picture.nextTitle },
+      };
 }
 
 /**
@@ -1881,18 +2198,16 @@ function successionOf(
     };
   }
 
-  const done = store
-    .runsForTicket(project, ticket)
-    .filter((chunk) => chunk.status === "done").length;
-  const progress = chunkProgress(breakdown, done);
-  return progress.next === undefined
-    ? { kind: "finished" }
-    : {
-        kind: "continues",
-        done: progress.done,
-        total: progress.total,
-        next: progress.next.title,
-      };
+  // ✏ 29g: **it is finished, and there is no counting left to do.** A ticket
+  // that reaches here has a readable, approved, un-regrown breakdown and no
+  // step tickets — because a ticket that *has* them never reaches this
+  // function at all, `concludeInitiative` having handed it to `concludeStep`
+  // first. So there is no next chunk to open: chunks are gone, and what
+  // replaced them is a ticket per step (ADR-0040). Its run merged, and the
+  // conversation ends, exactly as it did before a ticket hosted more than one
+  // of them.
+  void store;
+  return { kind: "finished" };
 }
 
 /**

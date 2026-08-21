@@ -5,7 +5,12 @@ import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 
 const execFileAsync = promisify(execFile);
 
-import { mergeIntoDefault, type MergeOutcome } from "../git.js";
+import {
+  checkoutVersion,
+  mergeIntoDefault,
+  uncommittedFiles,
+  type MergeOutcome,
+} from "../git.js";
 import type { Manifest } from "../manifest.js";
 import type {
   TicketComment,
@@ -20,6 +25,18 @@ import {
 import { TerminalChannel } from "../channels/terminal.js";
 import { technicalFault, type TechnicalFault } from "./faults.js";
 import { gateCommentFor } from "./gate-comment.js";
+import {
+  fromDefaultBranch,
+  readBreakdown,
+  type BreakdownSource,
+  type Chunk,
+} from "./breakdown.js";
+import {
+  HELD_LABEL,
+  HELD_LABEL_DESCRIPTION,
+  MAP_LABEL,
+  MAP_LABEL_DESCRIPTION,
+} from "./steps.js";
 import { STAGE_TRAILER } from "./hooks.js";
 import { instant, readConversationRecord, waitCursorFrom } from "./gates.js";
 import { outcomeCursorFrom, readStageOutcome, type StageOutcome } from "./outcomes.js";
@@ -61,6 +78,112 @@ import {
   type RunStore,
 } from "./runs.js";
 
+/**
+ * Timone itself, at one exact commit — never a branch name (ADR-0041 D2).
+ * Two runs started an hour apart follow identical rules only if the version
+ * is fixed when the run starts, and a branch moves.
+ */
+export interface TimonePin {
+  remote: string;
+  commit: string;
+}
+
+/**
+ * What a run's copy of the world is made of: the remotes it is cloned from
+ * and the versions it is held at (ADR-0041 D1).
+ *
+ * A runtime that runs the session in this process has no use for it — it is
+ * already standing in a checkout. A runtime that builds a container has
+ * nothing else: the remotes are the only source of truth, and that is what
+ * makes the container disposable.
+ */
+export interface SessionWorkspace {
+  timone: TimonePin;
+  /**
+   * The target project, at the branch this chunk's run works on — the layout
+   * ADR-0007 already fixed, `projects/<name>/`, said in the terms a clone
+   * needs.
+   */
+  project: { name: string; remote: string; branch: string };
+}
+
+/**
+ * The daemon's own checkout, as the spawn path has to see it: which version
+ * of Timone this is, and what in it has not been committed (ADR-0041 D2).
+ */
+export interface TimoneCheckout {
+  /**
+   * The version a run started now would follow. Absent when `dir` is not a
+   * git checkout at all — which a running daemon never reaches, since its
+   * root *is* its own repository, and which is therefore a wiring mistake
+   * rather than a state to report to anybody.
+   */
+  pin?: TimonePin;
+  /**
+   * Repo-relative paths carrying changes nobody has committed — staged,
+   * unstaged and untracked alike.
+   *
+   * Files git was told to ignore are never among them. That is not a filter
+   * applied here: `git status --porcelain` leaves them out, which is why
+   * `node_modules/` and `dist/` are not work anybody has to commit.
+   */
+  uncommitted: string[];
+}
+
+/**
+ * Read the daemon's own checkout. Behind a seam on the spawner for the same
+ * reason as {@link AgentSessionSpawnerOptions.repoProbe}.
+ *
+ * **What is outstanding is read first, and separately from the version.** A
+ * checkout with no `origin` has no version to pin and still has work in it
+ * nobody has committed, and it is the second of those that stops a run.
+ */
+export async function readTimoneCheckout(dir: string): Promise<TimoneCheckout> {
+  const uncommitted = await uncommittedFiles(dir);
+  const pin = await checkoutVersion(dir);
+  return { ...(pin === undefined ? {} : { pin }), uncommitted };
+}
+
+/**
+ * How many files the refusal names before it starts counting.
+ *
+ * A tree with two hundred changes in it produces a line nobody reads, and the
+ * first ten are enough to recognise what is going on.
+ */
+const NAMED_IN_REFUSAL = 10;
+
+/**
+ * What the daemon says when it will not start a run because its own folder
+ * has changes in it that nobody has committed (ADR-0041 D2).
+ *
+ * **Read by a person, not by a stage**, and by one who has never heard the
+ * word "pin": it goes to the terminal the daemon runs in, not onto a client's
+ * ticket. Nothing here is about the ticket, and saying it there would be the
+ * machine airing its own housekeeping in front of somebody's work.
+ *
+ * **One line.** The poll loop reports a refused spawn through `oneLine`,
+ * which keeps the first line and drops the rest — so a message that put the
+ * file names on line two would name nothing at all where it is read.
+ */
+export function uncommittedRefusal(files: readonly string[]): string {
+  const named = files.slice(0, NAMED_IN_REFUSAL);
+  const rest = files.length - named.length;
+  const list = [...named, ...(rest > 0 ? [`and ${rest} more`] : [])].join(", ");
+  return (
+    `I did not start this session. There are changes in Timone's own folder ` +
+    `that are not committed: ${list}. Every run has to use the same saved ` +
+    `copy of my rules, so I stop rather than guess. Commit these files, or ` +
+    `undo them, and I will start on my next check.`
+  );
+}
+
+/** What a workspace is assembled from: the pin, the project, its branch. */
+export interface WorkspaceInput {
+  timone: TimonePin;
+  project: TicketingProject;
+  branch: string;
+}
+
 /** What the spawner asks a runtime to run. */
 export interface SessionRequest {
   /** Always the timone root — sessions never run inside a managed project. */
@@ -79,6 +202,72 @@ export interface SessionRequest {
    * something unambiguous to omit.
    */
   effort?: EffortLevel;
+  /**
+   * What to clone, and at which versions. Absent when the caller cannot name
+   * a version — the in-process runtime ignores the field entirely, so a
+   * request without one runs exactly as it always did.
+   */
+  workspace?: SessionWorkspace;
+}
+
+/** What {@link sessionRequest} is given to assemble a request from. */
+export interface SessionRequestInput {
+  cwd: string;
+  prompt: string;
+  model: string;
+  /** Absent, or undefined, for a stage that declares no effort. */
+  effort?: EffortLevel;
+  /** Absent until the caller can name the versions to clone at. */
+  workspace?: WorkspaceInput;
+}
+
+/** A git object name as `git rev-parse` reports one: 40 hexadecimal digits. */
+const COMMIT = /^[0-9a-f]{40}$/;
+
+/**
+ * The one place a {@link SessionRequest} is assembled. Both spawn paths go
+ * through it so that the rules a request has to obey — the effort key is
+ * absent rather than undefined, the timone version is a commit and not a
+ * branch — are stated once instead of at every build site.
+ *
+ * Throws when the timone version is not a commit. That is a wiring mistake,
+ * not a domain failure: a request built from a branch name would start a run
+ * whose rules can move under it, which is the whole thing ADR-0041 D2 exists
+ * to prevent, and it must stop at the build rather than surface as two runs
+ * that behaved differently for no visible reason.
+ */
+export function sessionRequest(input: SessionRequestInput): SessionRequest {
+  const commit = input.workspace?.timone.commit;
+  if (commit !== undefined && !COMMIT.test(commit)) {
+    throw new Error(
+      `timone must be pinned to a commit, not "${commit}" (ADR-0041 D2)`,
+    );
+  }
+  return {
+    cwd: input.cwd,
+    prompt: input.prompt,
+    model: input.model,
+    // Spread rather than assigned, so a stage with no effort produces a
+    // request with no `effort` key — not one set to undefined, which the
+    // runtime would have to tell apart from an intended value. The same
+    // holds for a request nobody gave a workspace.
+    ...(input.effort === undefined ? {} : { effort: input.effort }),
+    ...(input.workspace === undefined
+      ? {}
+      : { workspace: workspaceOf(input.workspace) }),
+  };
+}
+
+/** The pin, the project and the branch, said the way a clone needs them. */
+function workspaceOf(input: WorkspaceInput): SessionWorkspace {
+  return {
+    timone: input.timone,
+    project: {
+      name: input.project.name,
+      remote: input.project.repoUrl,
+      branch: input.branch,
+    },
+  };
 }
 
 /** How a session ended. */
@@ -184,6 +373,51 @@ export interface SessionRuntime {
   start(request: SessionRequest): Promise<StartedSession>;
 }
 
+/** How a step ticket is titled: the chunk's number, then its name. */
+function stepTitle(index: number, title: string): string {
+  return `${index + 1}. ${title}`;
+}
+
+/**
+ * What a step ticket says. Short, and every technical word is a link: a
+ * ticket carries what is being done and what is needed, and the detail lives
+ * in the committed artifact it points at (`process.md`, *Writing to the
+ * human*).
+ */
+function stepBody(
+  chunk: Chunk,
+  initiative: number,
+  breakdownPath: string,
+): string {
+  return [
+    chunk.delivers,
+    "",
+    `Part of #${initiative}. The full list is in \`${breakdownPath}\`.`,
+  ].join("\n");
+}
+
+/**
+ * The initiative's ticket, rewritten as the map of its children.
+ *
+ * Each line is the step's **number**, which GitHub renders as a live link
+ * carrying its title and whether it is closed — so the map shows how far the
+ * work has got without anything having to keep a tally up to date.
+ */
+function initiativeMap(
+  steps: { number: number; chunk: Chunk }[],
+  breakdownPath: string,
+): string {
+  return [
+    "This is built in pieces. Each one is its own ticket below.",
+    "",
+    ...steps.map(
+      (step, index) => `${index + 1}. #${step.number} — ${step.chunk.delivers}`,
+    ),
+    "",
+    `The list was approved in \`${breakdownPath}\`.`,
+  ].join("\n");
+}
+
 export interface AgentSessionSpawnerOptions {
   manifest: Manifest;
   store: RunStore;
@@ -235,6 +469,20 @@ export interface AgentSessionSpawnerOptions {
     branch: string,
     message: string,
   ) => Promise<MergeOutcome>;
+  /**
+   * Reads a ticket's approved breakdown off the project's default branch —
+   * the list of steps this spawner then opens one ticket for. Behind a seam
+   * for the same reason as {@link repoProbe}, and defaulting to
+   * `breakdown.ts`'s `fromDefaultBranch`.
+   */
+  breakdownSource?: BreakdownSource;
+  /**
+   * Reads the daemon's own checkout: which version of Timone it is running,
+   * and what in it has not been committed (ADR-0041 D2). Behind a seam for
+   * the same reason as {@link repoProbe}, and defaulting to
+   * {@link readTimoneCheckout} against {@link root}.
+   */
+  timoneProbe?: (dir: string) => Promise<TimoneCheckout>;
   /**
    * Milliseconds between progress lines while a session works. Defaults to
    * {@link DEFAULT_PROGRESS_INTERVAL_SECONDS}.
@@ -661,6 +909,27 @@ export class AgentSessionSpawner implements SessionSpawner {
       );
     }
 
+    // **Once per run, and here rather than per stage** (ADR-0041 D2). A run
+    // walks several stages between two human waits, and the version it
+    // follows must be the one it started on: a pin re-read at every stage is
+    // not a pin, it is a branch with extra steps.
+    //
+    // **Before anything is claimed and before any session starts**, including
+    // the approval record's — every one of those is a session, and a refusal
+    // that arrived after one of them would already have spent it.
+    const checkout = await this.timoneCheckout();
+    if (checkout.uncommitted.length > 0) {
+      // Thrown rather than written on the ticket, exactly as the manifest
+      // refusal above is. The poll loop catches it, reports it in the
+      // daemon's own log and leaves the run untouched, so the next cycle
+      // starts it as soon as the changes are committed — where failing the
+      // run would leave every marked ticket needing `timone retry` by hand.
+      throw new Error(uncommittedRefusal(checkout.uncommitted));
+    }
+    if (checkout.pin !== undefined) {
+      this.log(`pinned ${run.id} — timone at ${checkout.pin.commit.slice(0, 7)}`);
+    }
+
     let stage: PipelineStage = context.stage ?? run.stage ?? "triage";
     let feedback = context.feedback;
 
@@ -789,16 +1058,11 @@ export class AgentSessionSpawner implements SessionSpawner {
     const headBefore =
       (await this.branchHead(project, branch)) ?? (await this.currentHead(project));
 
-    const effort = effortFor(stage);
-    const { outcome, attempts } = await this.runSession(run, stage, {
-      cwd: root,
-      prompt,
-      model,
-      // Spread rather than assigned, so a stage with no effort produces a
-      // request with no `effort` key — not one set to undefined, which the
-      // runtime would have to tell apart from an intended value.
-      ...(effort === undefined ? {} : { effort }),
-    });
+    const { outcome, attempts } = await this.runSession(
+      run,
+      stage,
+      sessionRequest({ cwd: root, prompt, model, effort: effortFor(stage) }),
+    );
 
     if (!outcome.ok) {
       const reason = outcome.error ?? "the session ended without a result";
@@ -1102,6 +1366,21 @@ export class AgentSessionSpawner implements SessionSpawner {
       waitCursor: thread.comments.at(-1)?.createdAt ?? "",
     });
     this.log(`parked ${run.id} at delivery, waiting on PR #${pr.number}`);
+  }
+
+  /**
+   * The daemon's own checkout, as this run must see it. A read that fails
+   * answers "no version, nothing outstanding" rather than throwing: the
+   * refusal in `spawn` is about work somebody has not committed, and a root that
+   * is not a checkout at all is a different fault with a different fix.
+   */
+  private async timoneCheckout(): Promise<TimoneCheckout> {
+    const probe = this.options.timoneProbe ?? readTimoneCheckout;
+    try {
+      return await probe(this.options.root);
+    } catch {
+      return { uncommitted: [] };
+    }
   }
 
   /** The phase file's status text on `branch`, or undefined without one. */
@@ -1413,11 +1692,10 @@ export class AgentSessionSpawner implements SessionSpawner {
     // Its own declared model, never the runtime's default: this is the second
     // `runtime.start` site and not a `PipelineStage`, so nothing in the graph
     // speaks for it. Haiku carries no effort at all.
-    const started = await this.startClaimed(run, {
-      cwd: root,
-      prompt,
-      model: APPROVAL_RECORD_MODEL,
-    });
+    const started = await this.startClaimed(
+      run,
+      sessionRequest({ cwd: root, prompt, model: APPROVAL_RECORD_MODEL }),
+    );
     this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
 
     const outcome = await this.watch(run.id, `${run.id} (approval record)`, started);
@@ -1432,9 +1710,123 @@ export class AgentSessionSpawner implements SessionSpawner {
     // is one gesture with two effects (ADR-0030 D2), and a chunk zero merged
     // before its approval was recorded would be work on the default branch
     // with nothing on the branch saying what authorised it.
-    if (approval.stage === "breakdown") return this.mergeChunkZero(run, project);
+    if (approval.stage === "breakdown") {
+      if (!(await this.mergeChunkZero(run, project))) return false;
+
+      // **And the run stops here, either way.** Approving a breakdown turns
+      // this ticket into a *map* of its steps
+      // ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)):
+      // planning belongs to each step's own run, one at a time, behind
+      // whatever else is queued. Letting this run walk on into `planning` is
+      // the chunk model wearing the new model's clothes — it planned the whole
+      // initiative on the map ticket, for nine minutes of Opus, and phase 29's
+      // live gate is what caught it.
+      const failure = await this.openStepTickets(run, project);
+      if (failure !== undefined) {
+        // A failure here leaves an approved breakdown with no steps, so
+        // nothing will ever pick the work up. It is a fault and is recorded as
+        // one — the alternative, which is what shipped, was to carry on and
+        // build the whole thing as if the steps had never been the point.
+        store.fail(run.id, failure);
+        await adapter.postComment(project, run.ticket, failedComment(failure));
+        return false;
+      }
+      store.complete(run.id);
+      return false;
+    }
 
     return true;
+  }
+
+  /**
+   * Open one ticket per step of an approved breakdown, as children of the
+   * initiative's own ticket, and turn that ticket into a map of them
+   * ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)).
+   *
+   * **This is TypeScript and must never become an instruction in
+   * `approvalRecordPrompt`.** Idempotence is the whole deliverable here, and
+   * idempotence cannot be asserted about a prompt: a model told "create only
+   * what is missing" is a hope, not a guard. Fourteen issues opened twice is
+   * worse than fourteen never opened, and re-running is the ordinary case —
+   * a retry, a redelivered comment, a daemon restarted mid-cycle.
+   *
+   * It answers rather than throws. A tracker that fell over on the seventh
+   * create leaves six real tickets behind, and the next cycle opens the other
+   * eight; taking the run down with it would turn a partial success into a
+   * failed initiative.
+   */
+  private async openStepTickets(
+    run: Run,
+    project: TicketingProject,
+  ): Promise<string | undefined> {
+    const { adapter, root } = this.options;
+    const read = readBreakdown(
+      join(root, "projects", project.name),
+      run.ticket,
+      this.options.breakdownSource ?? fromDefaultBranch,
+    );
+    if (read.kind !== "ok") {
+      return (
+        `the approved breakdown at ${read.path} is ${read.kind}, so no step ` +
+        "tickets could be opened"
+      );
+    }
+
+    try {
+      // Before anything can be held, the label has to exist — a state nobody
+      // created is a state nobody can be in, which is why `timone-wayfind`
+      // creates its own on first use. **29c owns this, not 29d**; both slices
+      // assuming the other did it shows up as a claim silently not applied.
+      await adapter.ensureLabel(project, HELD_LABEL, HELD_LABEL_DESCRIPTION);
+      await adapter.ensureLabel(project, MAP_LABEL, MAP_LABEL_DESCRIPTION);
+
+      // The existing children are what makes a re-run free. They are matched
+      // by title, and the title carries the chunk's number — so two chunks
+      // that happen to be called the same thing are still two tickets, and a
+      // child a human opened by hand matches nothing and is left alone.
+      const existing = await adapter.listSteps(project, run.ticket);
+      const byTitle = new Map(existing.map((step) => [step.title, step.number]));
+
+      const opened: { number: number; chunk: Chunk }[] = [];
+      let previous: number | undefined;
+      for (const [index, chunk] of read.breakdown.chunks.entries()) {
+        const title = stepTitle(index, chunk.title);
+        let number = byTitle.get(title);
+
+        if (number === undefined) {
+          number = await adapter.createStep(project, run.ticket, {
+            title,
+            body: stepBody(chunk, run.ticket, read.path),
+          });
+          // The chain is written only for a ticket this run opened. A step
+          // that already existed already carries its relation, and writing it
+          // again is the second `blockedBy` edge case (2) forbids.
+          if (previous !== undefined) {
+            await adapter.blockStep(project, number, previous);
+          }
+        }
+        previous = number;
+        opened.push({ number, chunk });
+      }
+
+      await adapter.setTicketBody(
+        project,
+        run.ticket,
+        initiativeMap(opened, read.path),
+      );
+      // Last, and only once the children exist: from here the daemon reads
+      // this ticket as a map and never opens a run on it. Marking it before
+      // its steps were opened would strand the initiative — a map with no
+      // children is a ticket nothing will ever pick up.
+      await adapter.applyLabel(project, run.ticket, MAP_LABEL);
+      this.log(`steps ${run.id} — ${read.breakdown.chunks.length} steps stand`);
+      return undefined;
+    } catch (error) {
+      // The tickets already opened are real and stay — re-running opens only
+      // what is missing, which is what 29c's idempotence is for. What must not
+      // happen is this run carrying on as though the steps existed.
+      return `could not open the step tickets: ${oneLine(error)}`;
+    }
   }
 
   /**

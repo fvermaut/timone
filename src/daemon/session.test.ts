@@ -15,11 +15,14 @@ import {
   stampMachineComment,
   type PullRequest,
   type PullRequestThread,
+  type Step,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
+import { noStepWrites } from "../adapters/ticketing.stubs.js";
+import type { BreakdownSource } from "./breakdown.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
   APPROVAL_RECORD_MODEL,
@@ -40,9 +43,11 @@ import {
   AgentSessionSpawner,
   parkedComment,
   sessionOutcomeFrom,
+  sessionRequest,
   type ProgressReader,
   type SessionRequest,
   type SessionRuntime,
+  type TimoneCheckout,
   type Ticker,
 } from "./session.js";
 
@@ -163,6 +168,11 @@ function fakeAdapter(initial: TicketThread = thread): {
   let clock = 0;
 
   const adapter: TicketingAdapter = {
+    ...noStepWrites,
+    // No initiative in this test is broken into step tickets.
+    async listSteps(): Promise<Step[]> {
+      return [];
+    },
     async listMarkedTickets(): Promise<Ticket[]> {
       return [ticket];
     },
@@ -249,6 +259,19 @@ function movingProbe(): () => Promise<string> {
   return async () => (calls++ === 0 ? "sha-before" : "sha-after");
 }
 
+/**
+ * A timone checkout with nothing outstanding in it (ADR-0041 D2).
+ *
+ * Needed by any test whose `root` is a **real** repository: the spawn path
+ * reads that folder for real before it starts anything, so such a test would
+ * otherwise pass or fail on whether somebody happened to have uncommitted
+ * work at the moment it ran. Every other test points `root` at a path that is
+ * no checkout at all, where the real probe finds nothing and says so.
+ */
+function cleanCheckout(): () => Promise<TimoneCheckout> {
+  return async () => ({ uncommitted: [] });
+}
+
 /** A picked-up run on scratch-app#7. */
 function pickedUpRun(store: RunStore): Run {
   return store.register("scratch-app", 7).run;
@@ -266,6 +289,7 @@ describe("spawn configuration", () => {
       adapter,
       runtime,
       root: "/Users/fvermaut/dev/timone",
+      timoneProbe: cleanCheckout(),
     }).spawn(pickedUpRun(store), project);
 
     expect(requests[0].cwd).toBe("/Users/fvermaut/dev/timone");
@@ -1784,6 +1808,87 @@ describe("a chore meets no gate on the way to its pull request", () => {
   });
 });
 
+/**
+ * A tracker that actually remembers what was opened on it, rather than only
+ * recording that a call happened.
+ *
+ * 29c's deliverable is idempotence, and idempotence cannot be asserted against
+ * a fake with no memory: "running it again creates nothing" is only meaningful
+ * if the second run can *see* what the first one did. So this fake serves
+ * `listSteps` out of the same array `createStep` appends to.
+ */
+function trackerWithSteps(initial: TicketThread = thread): {
+  adapter: TicketingAdapter;
+  steps: Step[];
+  calls: string[];
+  bodies: Map<number, string>;
+  labels: string[];
+} {
+  const base = fakeAdapter(initial);
+  const steps: Step[] = [];
+  const calls: string[] = [];
+  const bodies = new Map<number, string>();
+  const labels: string[] = [];
+  let next = 50;
+
+  const adapter: TicketingAdapter = {
+    ...base.adapter,
+    async listSteps(_project, initiative): Promise<Step[]> {
+      calls.push(`listSteps(${initiative})`);
+      return steps.map((step) => ({ ...step }));
+    },
+    async createStep(_project, initiative, step): Promise<number> {
+      const number = ++next;
+      calls.push(`createStep(${initiative}, ${step.title})`);
+      steps.push({
+        number,
+        title: step.title,
+        state: "open",
+        labels: ["timone"],
+        assignees: [],
+        blockedBy: [],
+        dependenciesIncomplete: false,
+      });
+      return number;
+    },
+    async blockStep(_project, step, waitsFor): Promise<void> {
+      calls.push(`blockStep(${step}, ${waitsFor})`);
+      const found = steps.find((candidate) => candidate.number === step);
+      found?.blockedBy.push({
+        number: waitsFor,
+        url: `https://github.com/fvermaut/scratch-app/issues/${waitsFor}`,
+        open: true,
+      });
+    },
+    async setTicketBody(_project, number, body): Promise<void> {
+      calls.push(`setTicketBody(${number})`);
+      bodies.set(number, body);
+    },
+    async ensureLabel(_project, label): Promise<void> {
+      calls.push(`ensureLabel(${label})`);
+      labels.push(label);
+    },
+  };
+  return { adapter, steps, calls, bodies, labels };
+}
+
+/** A breakdown of `count` chunks, approved, as the default branch holds it. */
+function approvedBreakdown(count: number): BreakdownSource {
+  const lines = Array.from(
+    { length: count },
+    (_unused, index) => `${index + 1}. **Piece ${index + 1}** — it delivers ${index + 1}`,
+  );
+  const text = [
+    "# Breakdown",
+    "",
+    `**Status:** Approved by fvermaut 2026-08-03 — ${count} pieces`,
+    "",
+    ...lines,
+    "",
+  ].join("\n");
+  return () => text;
+}
+
 describe("recording an approval in the artifact", () => {
   const settled: TicketThread = {
     ...thread,
@@ -1868,30 +1973,56 @@ describe("recording an approval in the artifact", () => {
     expect(recording.prompt).toContain("timone/7-the-page-feels-slow");
   });
 
-  it("records it before the run moves on, not after", async () => {
+  /**
+   * ✏ The guarantee here is unchanged; what it can be observed through is.
+   *
+   * It used to assert **two** sessions — the recording one, then the planning
+   * one the approval unblocked. Under ADR-0040 approving a breakdown does not
+   * unblock planning *on this ticket*: it turns the ticket into a map, and
+   * planning belongs to each step's own run. So the second session is gone,
+   * and the ordering is asserted against the acts that remain — record first,
+   * then merge chunk zero, then open the steps. An approval recorded after
+   * any of them would vanish whenever the pipeline stopped in between.
+   */
+  it("records it before anything acts on it, not after", async () => {
     const store = newStore();
-    const { adapter } = fakeAdapter(settled);
-    const { runtime, requests } = fakeRuntime();
+    const tracker = trackerWithSteps(settled);
+    const order: string[] = [];
+    const { runtime, requests } = fakeRuntime({
+      work: () => {
+        order.push("record");
+      },
+    });
+    const text = [
+      "# Breakdown",
+      "",
+      "**Status:** Approved by fvermaut 2026-08-03 — 1 pieces",
+      "",
+      "1. **One** — it delivers one",
+      "",
+    ].join("\n");
 
     await new AgentSessionSpawner({
       manifest,
       store,
-      adapter,
+      adapter: tracker.adapter,
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
-      mergeProbe: merged,
+      mergeProbe: async () => {
+        order.push("merge");
+        return { merged: true as const, into: "main" };
+      },
+      breakdownSource: () => text,
     }).spawn(atBreakdownGate(store), project, {
       stage: "planning",
       approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
     });
 
-    // Two sessions, in that order: the recording one first, and only then
-    // the stage the approval unblocked — an approval recorded after the next
-    // stage started would vanish whenever the pipeline stopped between them.
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(1);
     expect(requests[0].prompt).toContain("2026-08-03T12:00:00Z");
-    expect(requests[1].prompt).toMatch(/plan the work for ticket #7/i);
+    expect(order).toEqual(["record", "merge"]);
+    expect(tracker.calls.some((call) => call.startsWith("createStep"))).toBe(true);
   });
 
   it("tells the recording session to change nothing else and say nothing", async () => {
@@ -3655,4 +3786,591 @@ describe("the two stages phase 27 built", () => {
     });
   });
 
+});
+
+describe("the request builder", () => {
+  /**
+   * A commit as `git rev-parse HEAD` reports it. Written out rather than read
+   * from a repository: the point of these tests is that the request carries
+   * whatever the daemon was pinned to, and a value the code could recompute
+   * would prove nothing.
+   */
+  const TIMONE_COMMIT = "4f0d1c9b7a2e6d5c3b8a19f0e7d6c5b4a3928170";
+  const TIMONE_REMOTE = "https://github.com/fvermaut/timone.git";
+
+  it("pins timone to the commit the daemon is running", () => {
+    const request = sessionRequest({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-opus-4-6",
+      workspace: {
+        timone: { remote: TIMONE_REMOTE, commit: TIMONE_COMMIT },
+        project,
+        branch: "timone/7-the-page-feels-slow",
+      },
+    });
+
+    expect(request.workspace?.timone).toEqual({
+      remote: TIMONE_REMOTE,
+      commit: TIMONE_COMMIT,
+    });
+  });
+
+  it("refuses a timone version that is a branch name rather than a commit", () => {
+    expect(() =>
+      sessionRequest({
+        cwd: "/root",
+        prompt: "go",
+        model: "claude-opus-4-6",
+        workspace: {
+          timone: { remote: TIMONE_REMOTE, commit: "main" },
+          project,
+          branch: "timone/7-the-page-feels-slow",
+        },
+      }),
+    ).toThrow(/commit/);
+  });
+
+  it("names the target project's work branch, and where to clone it from", () => {
+    const request = sessionRequest({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-opus-4-6",
+      workspace: {
+        timone: { remote: TIMONE_REMOTE, commit: TIMONE_COMMIT },
+        project,
+        branch: "timone/7-the-page-feels-slow",
+      },
+    });
+
+    expect(request.workspace?.project).toEqual({
+      name: "scratch-app",
+      remote: "https://github.com/fvermaut/scratch-app.git",
+      branch: "timone/7-the-page-feels-slow",
+    });
+  });
+
+  it("hands the in-process runtime what it received before, when no workspace is named", () => {
+    const request = sessionRequest({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-opus-4-6",
+    });
+
+    // Strictly: a `workspace` key set to undefined is not the same request as
+    // one without it, and the in-process runtime must see the second.
+    expect(request).toStrictEqual({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-opus-4-6",
+    });
+  });
+
+  it("leaves the effort key out, rather than undefined, for a stage that declares none", () => {
+    const request = sessionRequest({
+      cwd: "/root",
+      prompt: "go",
+      model: "claude-haiku-4-5",
+      effort: undefined,
+    });
+
+    expect(Object.keys(request)).toEqual(["cwd", "prompt", "model"]);
+  });
+});
+
+describe("a timone checkout with uncommitted work in it", () => {
+  const PIN = {
+    remote: "https://github.com/fvermaut/timone.git",
+    commit: "4f0d1c9b7a2e6d5c3b8a19f0e7d6c5b4a3928170",
+  };
+
+  /** A checkout carrying `files` that nobody has committed. */
+  function carrying(...files: string[]): () => Promise<TimoneCheckout> {
+    return async () => ({ pin: PIN, uncommitted: files });
+  }
+
+  it("refuses to start a session, and names the files", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, requests } = classifyingRuntime("feature", adapter);
+
+    const spawning = new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      timoneProbe: carrying("process.md", ".claude/skills/timone-plan/SKILL.md"),
+    }).spawn(pickedUpRun(store), project);
+
+    await expect(spawning).rejects.toThrow(/process\.md/);
+    // On the spawn itself, never on a log line: the promise it refuses with
+    // is only half the claim, and the half that matters is that no session
+    // was asked for.
+    expect(requests).toEqual([]);
+  });
+
+  it("leaves the run where it was, so the next check picks it up", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime } = classifyingRuntime("feature", adapter);
+    const run = pickedUpRun(store);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      timoneProbe: carrying("process.md"),
+    })
+      .spawn(run, project)
+      .catch(() => {});
+
+    // Not failed and not parked: nothing about this ticket went wrong, and a
+    // run failed here would need `timone retry` on every ticket once the
+    // human commits. Nothing is said on the ticket either — this is between
+    // the machine and the person running it.
+    expect(store.get(run.id)?.status).toBe("picked-up");
+    expect(comments).toEqual([]);
+  });
+});
+
+describe("the version a run follows is fixed when the run starts", () => {
+  /** A run holding a branch, ready to be resumed into planning. */
+  function readyToPlan(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    return store.get(run.id)!;
+  }
+
+  it("reads the checkout once, however many stages the run walks", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:chore"],
+      comments: [],
+    });
+    const { runtime, requests } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(project, 7, `${STAGE_DONE_MARKER}\n\nDone.`);
+      },
+    });
+
+    let reads = 0;
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      timoneProbe: async () => {
+        reads += 1;
+        return { uncommitted: [] };
+      },
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    // Two sessions in one run — planning, then the build it hands to.
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    // A version re-read between them is not a version this run is held at.
+    expect(reads).toBe(1);
+  });
+});
+
+/**
+ * 29c — the first thing this system does that is loud, external and not
+ * undone by re-running it. Fourteen issues opened twice is worse than
+ * fourteen never opened, so idempotence is the deliverable rather than a
+ * nicety, and every case here is about what a *second* run does.
+ */
+describe("approval opens one ticket per step", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  function atBreakdownGate(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "breakdown",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  async function approve(
+    store: RunStore,
+    adapter: TicketingAdapter,
+    breakdownSource: BreakdownSource,
+  ): Promise<void> {
+    const { runtime } = fakeRuntime();
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: async () => ({ merged: true as const, into: "main" }),
+      breakdownSource,
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: {
+        stage: "breakdown",
+        by: "fvermaut",
+        at: "2026-08-03T12:00:00Z",
+      },
+    });
+  }
+
+  /** (1) A clean initiative gets one ticket per chunk, in the approved order. */
+  it("opens one ticket per chunk, in the breakdown's order", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+
+    await approve(store, tracker.adapter, approvedBreakdown(14));
+
+    expect(tracker.steps).toHaveLength(14);
+    expect(tracker.steps.map((step) => step.title)).toEqual(
+      Array.from({ length: 14 }, (_u, i) => `${i + 1}. Piece ${i + 1}`),
+    );
+  });
+
+  /**
+   * (2) The case the slice exists for. A second approval — a retry, a
+   * re-delivered comment, a daemon restart — must open nothing at all.
+   */
+  it("opens nothing at all when it runs again", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+
+    await approve(store, tracker.adapter, approvedBreakdown(14));
+    const afterFirst = [...tracker.steps];
+    tracker.calls.length = 0;
+
+    await approve(newStore(), tracker.adapter, approvedBreakdown(14));
+
+    expect(tracker.steps).toEqual(afterFirst);
+    expect(tracker.calls.filter((call) => call.startsWith("createStep"))).toEqual([]);
+    expect(tracker.calls.filter((call) => call.startsWith("blockStep"))).toEqual([]);
+  });
+
+  /**
+   * (3) A partial failure is the realistic shape of "not undoable": fourteen
+   * creates, the seventh throws, and the daemon comes back an hour later.
+   */
+  it("opens exactly the missing ones after a partial failure", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+    let opened = 0;
+    const flaky: TicketingAdapter = {
+      ...tracker.adapter,
+      async createStep(project, initiative, step): Promise<number> {
+        if (++opened === 7) throw new Error("gh fell over on the seventh");
+        return tracker.adapter.createStep(project, initiative, step);
+      },
+    };
+
+    await expect(approve(store, flaky, approvedBreakdown(14))).resolves.toBeUndefined();
+    expect(tracker.steps).toHaveLength(6);
+
+    tracker.calls.length = 0;
+    await approve(newStore(), tracker.adapter, approvedBreakdown(14));
+
+    expect(tracker.steps).toHaveLength(14);
+    expect(tracker.calls.filter((call) => call.startsWith("createStep"))).toHaveLength(8);
+  });
+
+  /**
+   * (4) The dependency is the **native relation**, asserted as a call and not
+   * as body text. The breakdown artifact has no dependency field, so the
+   * order it was approved in is the dependency: each step waits for the one
+   * before it, which is exactly what a chunk advancing only on success meant.
+   */
+  it("chains each step to the one before it, as the native relation", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+
+    await approve(store, tracker.adapter, approvedBreakdown(3));
+
+    const [first, second, third] = tracker.steps;
+    expect(first.blockedBy).toEqual([]);
+    expect(second.blockedBy.map((d) => d.number)).toEqual([first.number]);
+    expect(third.blockedBy.map((d) => d.number)).toEqual([second.number]);
+  });
+
+  /** (5) The initiative's own ticket becomes a map of its children. */
+  it("rewrites the initiative's body into a map of its steps", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+
+    await approve(store, tracker.adapter, approvedBreakdown(3));
+
+    const map = tracker.bodies.get(7) ?? "";
+    for (const step of tracker.steps) expect(map).toContain(`#${step.number}`);
+    expect(map).toContain("it delivers 1");
+  });
+
+  /**
+   * A step born carrying either half of a claim is one the frontier never
+   * returns, and fourteen of them is an initiative that never starts.
+   */
+  it("opens every step unheld and unassigned", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+
+    await approve(store, tracker.adapter, approvedBreakdown(3));
+
+    for (const step of tracker.steps) {
+      expect(step.labels).not.toContain("timone:held");
+      expect(step.assignees).toEqual([]);
+    }
+  });
+
+  /**
+   * A state label nobody created is a state nobody can be in. 29c takes this
+   * job rather than 29d, and says so — both slices assuming the other did it
+   * shows up as a claim silently not applied.
+   */
+  it("makes sure the hold label exists before anything can apply it", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+
+    await approve(store, tracker.adapter, approvedBreakdown(3));
+
+    expect(tracker.labels).toContain("timone:held");
+  });
+
+  /** A breakdown that cannot be read opens nothing, rather than guessing. */
+  it("opens nothing when the breakdown cannot be read", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+
+    await approve(store, tracker.adapter, () => undefined);
+
+    expect(tracker.steps).toEqual([]);
+  });
+});
+
+/**
+ * 29d's half of the approval: the initiative's own ticket stops being work.
+ * Its own block rather than a case inside 29c's, because it is the change
+ * that keeps the daemon from running the initiative and its children at once.
+ */
+describe("approval turns the initiative into a map", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  function atBreakdownGate(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "breakdown",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  async function approve(adapter: TicketingAdapter, chunks: number): Promise<void> {
+    const store = newStore();
+    const { runtime } = fakeRuntime();
+    const text = [
+      "# Breakdown",
+      "",
+      `**Status:** Approved by fvermaut 2026-08-03 — ${chunks} pieces`,
+      "",
+      ...Array.from(
+        { length: chunks },
+        (_u, i) => `${i + 1}. **Piece ${i + 1}** — it delivers ${i + 1}`,
+      ),
+      "",
+    ].join("\n");
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: async () => ({ merged: true as const, into: "main" }),
+      breakdownSource: () => text,
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: {
+        stage: "breakdown",
+        by: "fvermaut",
+        at: "2026-08-03T12:00:00Z",
+      },
+    });
+  }
+
+  it("marks the initiative as a map, so no run is ever opened on it", async () => {
+    const tracker = trackerWithSteps(settled);
+    const applied: { number: number; label: string }[] = [];
+    const adapter: TicketingAdapter = {
+      ...tracker.adapter,
+      async applyLabel(_project, number, label): Promise<void> {
+        applied.push({ number, label });
+      },
+    };
+
+    await approve(adapter, 3);
+
+    expect(applied).toContainEqual({ number: 7, label: "timone:map" });
+  });
+
+  /**
+   * A map with no children is a ticket nothing will ever pick up: the daemon
+   * skips it as a map, and there is nothing else to take. So the label goes on
+   * last, after every step exists.
+   */
+  it("does not mark it a map when opening the steps failed", async () => {
+    const tracker = trackerWithSteps(settled);
+    const applied: { number: number; label: string }[] = [];
+    const adapter: TicketingAdapter = {
+      ...tracker.adapter,
+      async createStep(): Promise<number> {
+        throw new Error("gh fell over on the first");
+      },
+      async applyLabel(_project, number, label): Promise<void> {
+        applied.push({ number, label });
+      },
+    };
+
+    await approve(adapter, 3);
+
+    expect(applied).not.toContainEqual({ number: 7, label: "timone:map" });
+  });
+
+  it("makes sure the map label exists before applying it", async () => {
+    const tracker = trackerWithSteps(settled);
+
+    await approve(tracker.adapter, 3);
+
+    expect(tracker.labels).toContain("timone:map");
+  });
+});
+
+/**
+ * ✏ Found by phase 29's live gate, 2026-08-21, at a cost of $4.86.
+ *
+ * Approving a breakdown opened the step tickets **and then let the
+ * initiative's own run walk on into planning** — so the machine planned the
+ * whole initiative on the map ticket, which is precisely the model ADR-0040
+ * replaces. Nine and a half minutes of Opus, on a ticket that is meant to
+ * become a list of links.
+ *
+ * And when the opening *failed*, it did the same thing with no steps in
+ * existence at all: `openStepTickets` catches, logs, and returns, and
+ * `recordApproval` returned true regardless.
+ */
+describe("approval ends the initiative's own run", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  function atBreakdownGate(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "breakdown",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  async function approve(
+    store: RunStore,
+    adapter: TicketingAdapter,
+  ): Promise<SessionRequest[]> {
+    const { runtime, requests } = fakeRuntime();
+    const text = [
+      "# Breakdown",
+      "",
+      "**Status:** Approved by fvermaut 2026-08-03 — 3 pieces",
+      "",
+      "1. **One** — it delivers one",
+      "2. **Two** — it delivers two",
+      "3. **Three** — it delivers three",
+      "",
+    ].join("\n");
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: async () => ({ merged: true as const, into: "main" }),
+      breakdownSource: () => text,
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: {
+        stage: "breakdown",
+        by: "fvermaut",
+        at: "2026-08-03T12:00:00Z",
+      },
+    });
+    return requests;
+  }
+
+  /**
+   * The initiative's ticket is a **map**. Its run's job ends when the steps
+   * exist; planning belongs to each step's own run, one at a time, behind
+   * whatever else is queued.
+   */
+  it("does not plan the initiative once its steps are open", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+
+    const requests = await approve(store, tracker.adapter);
+
+    expect(tracker.steps).toHaveLength(3);
+    // One request, and it is the approval-record session. A second would be
+    // the planning session this defect used to start.
+    expect(requests).toHaveLength(1);
+    expect(store.get("scratch-app#7/1")?.status).toBe("done");
+  });
+
+  /**
+   * And the failing case, which is the one the gate actually hit: the hold
+   * label could not be created, so no step ticket was opened — and the run
+   * carried on and planned the initiative anyway.
+   */
+  it("fails loudly when the steps could not be opened, rather than planning it", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+    const broken: TicketingAdapter = {
+      ...tracker.adapter,
+      async ensureLabel(): Promise<void> {
+        throw new Error("HTTP 422: Validation Failed");
+      },
+    };
+
+    const requests = await approve(store, broken);
+
+    expect(tracker.steps).toEqual([]);
+    expect(requests).toHaveLength(1);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.failure).toMatch(/422|steps/i);
+  });
 });

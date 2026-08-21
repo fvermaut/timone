@@ -1,0 +1,22 @@
+# What docker is allowed to see when it builds the agent's box.
+#
+# The box gets its content by cloning from git remotes, never from this
+# machine (ADR-0041 D1). So the build context is deny-by-default: the only
+# file the image copies in is the check script, and everything else stays
+# out. The rule that matters most is `projects/` — it holds the client
+# repositories, and baking client source into an image layer is the exact
+# opposite of what this image is for.
+*
+!docker/image-check.mjs
+
+# Belt and braces. The list above already excludes these, but a later
+# `!something` line could quietly let one back in, and .dockerignore is
+# last-match-wins. These stay out whatever is added above them.
+projects/
+node_modules/
+dist/
+.timone/
+.git/
+daemon.log
+*.png
+.playwright-mcp/

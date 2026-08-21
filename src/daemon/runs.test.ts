@@ -1252,8 +1252,8 @@ describe("cancelling a run", () => {
 
     expect(() => store.retry(run.id)).toThrow(
       "scratch-app #7 was cancelled: its ticket is no longer open and marked. " +
-        "Cancelled work isn't retried — reopen the ticket and mark it for me, " +
-        "and I'll start it afresh on my next pass.",
+        "Cancelled work isn't retried — reopen the ticket and mark it for " +
+        "me, and I'll start it afresh on my next pass.",
     );
   });
 
@@ -1263,8 +1263,8 @@ describe("cancelling a run", () => {
     store.cancel(run.id, "");
 
     expect(() => store.retry(run.id)).toThrow(
-      "scratch-app #7 was cancelled. Cancelled work isn't retried — reopen the " +
-        "ticket and mark it for me, and I'll start it afresh on my next pass.",
+      "scratch-app #7 was cancelled. Cancelled work isn't retried — reopen " +
+        "the ticket and mark it for me, and I'll start it afresh on my next pass.",
     );
   });
 
@@ -2049,5 +2049,146 @@ describe("a failed run stops waiting", () => {
     store.fail(run.id, "killed mid-stage");
 
     expect(store.get(run.id)?.consumedAnswerAt).toBe("2026-08-19T09:30:00Z");
+  });
+});
+
+/**
+ * 29d — the picture `timone status` renders from.
+ *
+ * `timone status` answers instantly, and it does that by reading a picture the
+ * daemon wrote rather than asking GitHub while the human waits (ADR-0044 D5).
+ * The daemon takes it as a side effect of the eligibility query it already
+ * makes, so no extra call is added anywhere.
+ */
+describe("the cached picture of an initiative", () => {
+  const picture = {
+    project: "scratch-app",
+    initiative: 7,
+    title: "the lists could be smarter",
+    steps: [51, 52, 53],
+    done: 1,
+    next: 52,
+  };
+
+  it("remembers what the last cycle saw", () => {
+    const store = newStore();
+
+    store.rememberInitiative(picture);
+
+    expect(store.initiativeFor("scratch-app", 52)).toMatchObject({
+      initiative: 7,
+      steps: [51, 52, 53],
+      done: 1,
+      next: 52,
+    });
+  });
+
+  /** Any of its steps finds it, not only the live one. */
+  it("is found from any of its steps", () => {
+    const store = newStore();
+
+    store.rememberInitiative(picture);
+
+    for (const step of [51, 52, 53]) {
+      expect(store.initiativeFor("scratch-app", step)?.initiative).toBe(7);
+    }
+  });
+
+  it("knows nothing about a step of no initiative it has seen", () => {
+    const store = newStore();
+
+    store.rememberInitiative(picture);
+
+    expect(store.initiativeFor("scratch-app", 99)).toBeUndefined();
+    expect(store.initiativeFor("ivtrends", 52)).toBeUndefined();
+  });
+
+  /**
+   * The picture is a *snapshot*, so a later cycle replaces it whole. A merge
+   * that closed a step must not leave the old count sitting beside the new
+   * one, which is what merging the records rather than replacing them would
+   * do.
+   */
+  it("is replaced whole by the next cycle, never merged", () => {
+    const store = newStore();
+    store.rememberInitiative(picture);
+
+    store.rememberInitiative({ ...picture, steps: [51, 52], done: 2, next: undefined });
+
+    expect(store.initiativeFor("scratch-app", 51)).toMatchObject({
+      steps: [51, 52],
+      done: 2,
+    });
+    expect(store.initiativeFor("scratch-app", 51)?.next).toBeUndefined();
+    expect(store.initiativeFor("scratch-app", 53)).toBeUndefined();
+  });
+
+  it("survives a reload, because another process is what reads it", () => {
+    const path = statePath();
+    newStore(path).rememberInitiative(picture);
+
+    expect(newStore(path).initiativeFor("scratch-app", 52)?.initiative).toBe(7);
+  });
+
+  /** Every field added since the ledger was written leaves `version` at 1. */
+  it("leaves a ledger written before it existed loading unchanged", () => {
+    const path = statePath();
+    const store = newStore(path);
+    store.register("scratch-app", 7);
+
+    expect(() => newStore(path).runsForTicket("scratch-app", 7)).not.toThrow();
+  });
+});
+
+describe("an initiative's picture is found from the map as well", () => {
+  /**
+   * The map ticket is the thread the human reads, so its standing note is the
+   * one that most needs to say how far the work has got. It is not one of its
+   * own children, so a lookup that matched only the steps left the map the
+   * one ticket in the system with nothing to report.
+   */
+  it("is found from the initiative's own number", () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "scratch-app",
+      initiative: 7,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 51,
+    });
+
+    expect(store.initiativeFor("scratch-app", 7)?.initiative).toBe(7);
+  });
+});
+
+/**
+ * The other half of the same refusal. A **step** the machine dropped is held
+ * and stays stopped; the ticket above is not a step, so its chunk is simply
+ * opened again. Both sentences are true and neither may be said to the other.
+ */
+describe("refusing to retry a step the machine is holding", () => {
+  it("names the label to remove, because that is what would start it", () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "scratch-app",
+      initiative: 7,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 51,
+    });
+    const { run } = store.register("scratch-app", 51);
+    store.cancel(run.id, "you asked me to stop");
+
+    expect(() => store.retry(run.id)).toThrow(/remove the `timone:held` label/);
+  });
+
+  it("does not tell an ordinary ticket to remove a label it has not got", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.cancel(run.id, "you asked me to stop");
+
+    expect(() => store.retry(run.id)).toThrow(/mark it for me/);
   });
 });

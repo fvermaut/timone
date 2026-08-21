@@ -103,6 +103,19 @@ stateDiagram-v2
 Read `TRANSITIONS` in `src/daemon/runs.ts` for the same table in code. Anything
 not drawn above throws.
 
+**✏ 2026-08-21 — which ticket number `timone retry` and `timone cancel` take.**
+Since [ADR-0044](../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+D1 a run belongs to a **step ticket**, not to the job you filed. So the commands
+name a step:
+
+```
+timone retry scratch-app#46      # the step, not the job it belongs to
+timone cancel scratch-app#46
+```
+
+`timone status` prints the step number beside its place in the job — for example
+`#46 (step 1 of 3 of #45)` — so the number to type is the one on screen.
+
 | Status | Meaning | What it holds | How it leaves |
 |---|---|---|---|
 | `queued` | Waiting behind another run on the same project. | nothing | The run ahead ends. |
@@ -118,9 +131,23 @@ Two points that are easy to get wrong:
 - **`parked` is not an ending.** It is the normal state of a run waiting for a
   person. Most of a run's wall-clock life is spent here.
 - **`cancelled` is not `failed`.** A failure can be re-armed with one keystroke;
-  work that should never have existed must not be. Cancelling also *settles* the
-  chunk, so the ticket is free to open a fresh one — which is what makes a
-  re-opened ticket self-healing.
+  work that should never have existed must not be. Cancelling *settles* the
+  chunk, so an ordinary ticket is free to open a fresh one — which is what makes
+  a re-opened ticket self-healing.
+
+  **✏ 2026-08-21 — a *step* is the exception, and it is the common case now.**
+  Under [ADR-0040](../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)
+  each piece of a job is its own ticket. When the machine starts one it puts the
+  `timone:held` label on it, and cancelling leaves that label there. A held step
+  is one the machine will **not** take up again
+  ([ADR-0044](../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+  D2). There are two ways on, and the ticket says both: remove the label and it
+  starts afresh, or close the ticket and the job carries on without that piece.
+
+  **A dropped step does not stop the job finishing.** The job closes saying how
+  many pieces were really built — "13 of 14" — and works out which is which from
+  whether a pull request was merged. Nothing is asked of you and no label decides
+  it.
 
 ## 3. The stage graph
 

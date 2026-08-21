@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { HELD_LABEL } from "./steps.js";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
@@ -301,6 +302,36 @@ const introductionRecordSchema = z.strictObject({
   at: z.string(),
 });
 
+/**
+ * What the last cycle saw of one initiative and its step tickets.
+ *
+ * **It is a cache and nothing in the loop depends on it.** The tracker is the
+ * authority on which steps exist and which are closed; this is the daemon
+ * writing down what it just read, so that `timone status` can answer without
+ * a network call in front of a waiting human
+ * ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+ * D5). It is at most one poll interval stale, and being stale costs a wrong
+ * line on a terminal — never a wrong decision.
+ */
+const initiativeRecordSchema = z.strictObject({
+  project: z.string(),
+  /** The map ticket's number — the conversation the human filed. */
+  initiative: z.number().int().positive(),
+  title: z.string(),
+  /** Its step tickets, in the order the approved breakdown put them. */
+  steps: z.array(z.number().int().positive()),
+  /** How many of them are closed. */
+  done: z.number().int().nonnegative(),
+  /** The step the frontier would take next, or absent when none is eligible. */
+  next: z.number().int().positive().optional(),
+  /**
+   * That step's title, so a renderer can name it without asking the tracker.
+   * Absent exactly when `next` is — the two are one fact.
+   */
+  nextTitle: z.string().optional(),
+  at: z.string(),
+});
+
 const stateSchema = z.strictObject({
   version: z.literal(1),
   runs: z.array(runSchema),
@@ -337,6 +368,16 @@ const stateSchema = z.strictObject({
    * `1`. Its absence means nobody was listening, which is not the same as
    * nothing having happened — see {@link RunStore.witness}.
    */
+  /**
+   * The cached picture of each initiative, keyed `<project>#<initiative>`.
+   *
+   * Top-level for the same reason `introductions` is: it is about a ticket
+   * that has no run and must never get one — an initiative's ticket is a map
+   * of its children, and the runs belong to the children. Optional for the
+   * same reason as well, so `version` stays `1` and a ledger written before
+   * this existed loads unchanged.
+   */
+  initiatives: z.record(z.string(), initiativeRecordSchema).optional(),
   observedAt: z.string().optional(),
   /**
    * When the daemon's current unbroken watch began (ADR-0020).
@@ -351,6 +392,7 @@ const stateSchema = z.strictObject({
 export type Run = z.infer<typeof runSchema>;
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
 export type IntroductionRecord = z.infer<typeof introductionRecordSchema>;
+export type InitiativeRecord = z.infer<typeof initiativeRecordSchema>;
 type State = z.infer<typeof stateSchema>;
 
 /** What a cycle's {@link RunStore.witness} call establishes about the daemon. */
@@ -880,10 +922,20 @@ export class RunStore {
         run.cancellation === undefined || run.cancellation === ""
           ? "."
           : `: ${run.cancellation}.`;
+      // The way out depends on whether this ticket is a **step**. A dropped
+      // step is held — by the label — and stays stopped until a human takes
+      // the hold off. Any other ticket's cancelled chunk is settled, so the
+      // next cycle simply opens a fresh one, which is what it has always
+      // done. One sentence for each, and neither is said to the other.
+      const held =
+        this.loadedInitiativeFor(run.project, run.ticket) !== undefined
+          ? `remove the \`${HELD_LABEL}\` label from the ticket and I'll start ` +
+            "it afresh, or close it and I'll carry on without it."
+          : "reopen the ticket and mark it for me, and I'll start it afresh " +
+            "on my next pass.";
       throw new Error(
         `${run.project} #${run.ticket} was cancelled${because} Cancelled work ` +
-          "isn't retried — reopen the ticket and mark it for me, and I'll " +
-          "start it afresh on my next pass.",
+          `isn't retried — ${held}`,
       );
     }
     if (run.status !== "failed") {
@@ -1060,6 +1112,72 @@ export class RunStore {
    * and never of the ticket's thread, which is what keeps the answer a fact
    * rather than a guess.
    */
+  /**
+   * Write down what this cycle saw of an initiative, replacing whatever the
+   * last one wrote.
+   *
+   * **Replaced whole, never merged.** The picture is a snapshot; a merge would
+   * leave a step the tracker no longer lists sitting beside the ones it does,
+   * and a count from one cycle beside a list from another.
+   */
+  rememberInitiative(picture: Omit<InitiativeRecord, "at">): void {
+    this.refresh();
+    this.state.initiatives = {
+      ...this.state.initiatives,
+      [initiativeKey(picture.project, picture.initiative)]: {
+        ...picture,
+        at: this.now(),
+      },
+    };
+    this.persist();
+  }
+
+  /**
+   * The initiative a step belongs to, as of the last cycle that looked — or
+   * undefined for a ticket no cached picture lists.
+   *
+   * Undefined is an ordinary answer rather than a fault: a chore has no
+   * initiative, and neither has anything the daemon has not polled since it
+   * started.
+   */
+  initiativeFor(project: string, ticket: number): InitiativeRecord | undefined {
+    this.refresh();
+    return Object.values(this.state.initiatives ?? {}).find(
+      (record) =>
+        record.project === project &&
+        // The **map's own number** as well as its steps'. The map ticket is
+        // the thread the human reads, so it is the one whose standing note
+        // most needs to say how far the work has got — and it is not one of
+        // its own children, so matching only the steps left it the one ticket
+        // in the system with nothing to report.
+        (record.initiative === ticket || record.steps.includes(ticket)),
+    );
+  }
+
+  /** {@link initiativeFor} without a reload, for use inside a mutation. */
+  private loadedInitiativeFor(
+    project: string,
+    ticket: number,
+  ): InitiativeRecord | undefined {
+    return Object.values(this.state.initiatives ?? {}).find(
+      (record) =>
+        record.project === project &&
+        (record.initiative === ticket || record.steps.includes(ticket)),
+    );
+  }
+
+  /**
+   * Every initiative of `project` the daemon has a picture of, oldest ticket
+   * first — what `timone status` needs to say that an initiative is alive
+   * between two of its steps, when no run exists to hang the line on.
+   */
+  initiativesFor(project: string): InitiativeRecord[] {
+    this.refresh();
+    return Object.values(this.state.initiatives ?? {})
+      .filter((record) => record.project === project)
+      .sort((a, b) => a.initiative - b.initiative);
+  }
+
   introducedAt(project: string, ticket: number): string | undefined {
     this.refresh();
     return this.state.introductions?.[introductionKey(project, ticket)]?.at;
@@ -1222,6 +1340,11 @@ function nextSequence(runs: readonly Run[]): number {
 /** One preview per pull request, keyed the same way runs are keyed. */
 export function previewKey(project: string, pr: number): string {
   return `${project}#${pr}`;
+}
+
+/** How an initiative's cached picture is keyed in the ledger. */
+function initiativeKey(project: string, initiative: number): string {
+  return `${project}#${initiative}`;
 }
 
 /** One introduction per ticket, keyed the same way runs are keyed. */
