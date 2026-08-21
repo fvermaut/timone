@@ -1973,30 +1973,56 @@ describe("recording an approval in the artifact", () => {
     expect(recording.prompt).toContain("timone/7-the-page-feels-slow");
   });
 
-  it("records it before the run moves on, not after", async () => {
+  /**
+   * ✏ The guarantee here is unchanged; what it can be observed through is.
+   *
+   * It used to assert **two** sessions — the recording one, then the planning
+   * one the approval unblocked. Under ADR-0040 approving a breakdown does not
+   * unblock planning *on this ticket*: it turns the ticket into a map, and
+   * planning belongs to each step's own run. So the second session is gone,
+   * and the ordering is asserted against the acts that remain — record first,
+   * then merge chunk zero, then open the steps. An approval recorded after
+   * any of them would vanish whenever the pipeline stopped in between.
+   */
+  it("records it before anything acts on it, not after", async () => {
     const store = newStore();
-    const { adapter } = fakeAdapter(settled);
-    const { runtime, requests } = fakeRuntime();
+    const tracker = trackerWithSteps(settled);
+    const order: string[] = [];
+    const { runtime, requests } = fakeRuntime({
+      work: () => {
+        order.push("record");
+      },
+    });
+    const text = [
+      "# Breakdown",
+      "",
+      "**Status:** Approved by fvermaut 2026-08-03 — 1 pieces",
+      "",
+      "1. **One** — it delivers one",
+      "",
+    ].join("\n");
 
     await new AgentSessionSpawner({
       manifest,
       store,
-      adapter,
+      adapter: tracker.adapter,
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
-      mergeProbe: merged,
+      mergeProbe: async () => {
+        order.push("merge");
+        return { merged: true as const, into: "main" };
+      },
+      breakdownSource: () => text,
     }).spawn(atBreakdownGate(store), project, {
       stage: "planning",
       approval: { stage: "breakdown", by: "fvermaut", at: "2026-08-03T12:00:00Z" },
     });
 
-    // Two sessions, in that order: the recording one first, and only then
-    // the stage the approval unblocked — an approval recorded after the next
-    // stage started would vanish whenever the pipeline stopped between them.
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(1);
     expect(requests[0].prompt).toContain("2026-08-03T12:00:00Z");
-    expect(requests[1].prompt).toMatch(/plan the work for ticket #7/i);
+    expect(order).toEqual(["record", "merge"]);
+    expect(tracker.calls.some((call) => call.startsWith("createStep"))).toBe(true);
   });
 
   it("tells the recording session to change nothing else and say nothing", async () => {
@@ -4236,5 +4262,115 @@ describe("approval turns the initiative into a map", () => {
     await approve(tracker.adapter, 3);
 
     expect(tracker.labels).toContain("timone:map");
+  });
+});
+
+/**
+ * ✏ Found by phase 29's live gate, 2026-08-21, at a cost of $4.86.
+ *
+ * Approving a breakdown opened the step tickets **and then let the
+ * initiative's own run walk on into planning** — so the machine planned the
+ * whole initiative on the map ticket, which is precisely the model ADR-0040
+ * replaces. Nine and a half minutes of Opus, on a ticket that is meant to
+ * become a list of links.
+ *
+ * And when the opening *failed*, it did the same thing with no steps in
+ * existence at all: `openStepTickets` catches, logs, and returns, and
+ * `recordApproval` returned true regardless.
+ */
+describe("approval ends the initiative's own run", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  function atBreakdownGate(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "breakdown",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  async function approve(
+    store: RunStore,
+    adapter: TicketingAdapter,
+  ): Promise<SessionRequest[]> {
+    const { runtime, requests } = fakeRuntime();
+    const text = [
+      "# Breakdown",
+      "",
+      "**Status:** Approved by fvermaut 2026-08-03 — 3 pieces",
+      "",
+      "1. **One** — it delivers one",
+      "2. **Two** — it delivers two",
+      "3. **Three** — it delivers three",
+      "",
+    ].join("\n");
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: async () => ({ merged: true as const, into: "main" }),
+      breakdownSource: () => text,
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: {
+        stage: "breakdown",
+        by: "fvermaut",
+        at: "2026-08-03T12:00:00Z",
+      },
+    });
+    return requests;
+  }
+
+  /**
+   * The initiative's ticket is a **map**. Its run's job ends when the steps
+   * exist; planning belongs to each step's own run, one at a time, behind
+   * whatever else is queued.
+   */
+  it("does not plan the initiative once its steps are open", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+
+    const requests = await approve(store, tracker.adapter);
+
+    expect(tracker.steps).toHaveLength(3);
+    // One request, and it is the approval-record session. A second would be
+    // the planning session this defect used to start.
+    expect(requests).toHaveLength(1);
+    expect(store.get("scratch-app#7/1")?.status).toBe("done");
+  });
+
+  /**
+   * And the failing case, which is the one the gate actually hit: the hold
+   * label could not be created, so no step ticket was opened — and the run
+   * carried on and planned the initiative anyway.
+   */
+  it("fails loudly when the steps could not be opened, rather than planning it", async () => {
+    const store = newStore();
+    const tracker = trackerWithSteps(settled);
+    const broken: TicketingAdapter = {
+      ...tracker.adapter,
+      async ensureLabel(): Promise<void> {
+        throw new Error("HTTP 422: Validation Failed");
+      },
+    };
+
+    const requests = await approve(store, broken);
+
+    expect(tracker.steps).toEqual([]);
+    expect(requests).toHaveLength(1);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(store.get("scratch-app#7/1")?.failure).toMatch(/422|steps/i);
   });
 });

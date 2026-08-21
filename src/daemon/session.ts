@@ -1712,8 +1712,27 @@ export class AgentSessionSpawner implements SessionSpawner {
     // with nothing on the branch saying what authorised it.
     if (approval.stage === "breakdown") {
       if (!(await this.mergeChunkZero(run, project))) return false;
-      await this.openStepTickets(run, project);
-      return true;
+
+      // **And the run stops here, either way.** Approving a breakdown turns
+      // this ticket into a *map* of its steps
+      // ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)):
+      // planning belongs to each step's own run, one at a time, behind
+      // whatever else is queued. Letting this run walk on into `planning` is
+      // the chunk model wearing the new model's clothes — it planned the whole
+      // initiative on the map ticket, for nine minutes of Opus, and phase 29's
+      // live gate is what caught it.
+      const failure = await this.openStepTickets(run, project);
+      if (failure !== undefined) {
+        // A failure here leaves an approved breakdown with no steps, so
+        // nothing will ever pick the work up. It is a fault and is recorded as
+        // one — the alternative, which is what shipped, was to carry on and
+        // build the whole thing as if the steps had never been the point.
+        store.fail(run.id, failure);
+        await adapter.postComment(project, run.ticket, failedComment(failure));
+        return false;
+      }
+      store.complete(run.id);
+      return false;
     }
 
     return true;
@@ -1739,7 +1758,7 @@ export class AgentSessionSpawner implements SessionSpawner {
   private async openStepTickets(
     run: Run,
     project: TicketingProject,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const { adapter, root } = this.options;
     const read = readBreakdown(
       join(root, "projects", project.name),
@@ -1747,10 +1766,10 @@ export class AgentSessionSpawner implements SessionSpawner {
       this.options.breakdownSource ?? fromDefaultBranch,
     );
     if (read.kind !== "ok") {
-      this.log(
-        `steps ${run.id} — opened none: the breakdown at ${read.path} is ${read.kind}`,
+      return (
+        `the approved breakdown at ${read.path} is ${read.kind}, so no step ` +
+        "tickets could be opened"
       );
-      return;
     }
 
     try {
@@ -1801,10 +1820,12 @@ export class AgentSessionSpawner implements SessionSpawner {
       // children is a ticket nothing will ever pick up.
       await adapter.applyLabel(project, run.ticket, MAP_LABEL);
       this.log(`steps ${run.id} — ${read.breakdown.chunks.length} steps stand`);
+      return undefined;
     } catch (error) {
-      // Loud in the log, and nothing else: the tickets already opened are
-      // real and stay, and the next cycle opens the rest.
-      this.log(`steps ${run.id} — stopped part way: ${oneLine(error)}`);
+      // The tickets already opened are real and stay — re-running opens only
+      // what is missing, which is what 29c's idempotence is for. What must not
+      // happen is this run carrying on as though the steps existed.
+      return `could not open the step tickets: ${oneLine(error)}`;
     }
   }
 

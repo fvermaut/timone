@@ -27,9 +27,17 @@ import { type Step } from "../adapters/ticketing.js";
  */
 export const HELD_LABEL = "timone:held";
 
-/** What the hold label says on the tracker, for whoever reads it there. */
+/**
+ * What the hold label says on the tracker, for whoever reads it there.
+ *
+ * **Under 100 characters, and that is a hard limit rather than a style.**
+ * GitHub refuses a longer one with `HTTP 422: Validation Failed` and says
+ * nothing about which field was wrong — which is exactly how phase 29's live
+ * gate failed, at 111 characters, with the 422 surfacing as *"stopped part
+ * way"* and no step tickets opened. See {@link MAP_LABEL_DESCRIPTION}.
+ */
 export const HELD_LABEL_DESCRIPTION =
-  "Timone has taken this step — while this label is on it will not start it again; remove it to hand the step back";
+  "Timone stopped this step. Remove this label to hand it back and it starts again.";
 
 /**
  * The label that says a ticket is an initiative's **map** rather than work.
@@ -45,9 +53,9 @@ export const HELD_LABEL_DESCRIPTION =
  */
 export const MAP_LABEL = "timone:map";
 
-/** What the map label says on the tracker, for whoever reads it there. */
+/** What the map label says on the tracker. Under 100 characters — see {@link HELD_LABEL_DESCRIPTION}. */
 export const MAP_LABEL_DESCRIPTION =
-  "This ticket is the map of an initiative — the work happens on the tickets listed in it";
+  "The map of a job. The work happens on the tickets listed in it, not here.";
 
 /**
  * The first step that is **open, unblocked, unheld and unclaimed**, or

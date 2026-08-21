@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { type Dependency, type Step } from "../adapters/ticketing.js";
-import { HELD_LABEL, HELD_LABEL_DESCRIPTION, nextStep } from "./steps.js";
+import {
+  HELD_LABEL,
+  HELD_LABEL_DESCRIPTION,
+  MAP_LABEL_DESCRIPTION,
+  nextStep,
+} from "./steps.js";
 
 /**
  * A step ticket as the frontier sees it, with the free shape as its default:
@@ -123,6 +128,25 @@ describe("the hold label is named from one place", () => {
   });
 
   it("says what removing it does, for whoever reads it on the tracker", () => {
-    expect(HELD_LABEL_DESCRIPTION).toContain("remove");
+    expect(HELD_LABEL_DESCRIPTION.toLowerCase()).toContain("remove");
+  });
+});
+
+/**
+ * ✏ Found by phase 29's live gate. GitHub refuses a label description over
+ * 100 characters with `HTTP 422: Validation Failed`, naming no field. At 111
+ * characters the hold label could not be created, `openStepTickets` gave up,
+ * and no step ticket was opened — while the run carried on regardless.
+ *
+ * A unit test is worth more than a comment here because the limit is
+ * invisible: nothing in the type system, the linter or the local build knows
+ * about it, and the only other place it shows up is a 422 in a daemon log.
+ */
+describe("a label description GitHub will accept", () => {
+  it.each([
+    ["the hold", HELD_LABEL_DESCRIPTION],
+    ["the map", MAP_LABEL_DESCRIPTION],
+  ])("keeps %s under GitHub's 100-character limit", (_which, description) => {
+    expect(description.length).toBeLessThanOrEqual(100);
   });
 });
