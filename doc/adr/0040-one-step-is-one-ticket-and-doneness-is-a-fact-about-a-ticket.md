@@ -53,17 +53,33 @@ A step whose ticket declares a dependency on another open step is not eligible. 
 
 ### D3 — Settledness is deleted, not reworked
 
+> **✏ Corrected 2026-08-21 — this decision is wrong as written, and is superseded by [ADR-0044](0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D-note. `SETTLED` and `isSettled` stay; only the *count* goes.**
+>
+> The paragraph below argues that settledness exists solely to advance a count, so removing the count removes the question. **That premise is false**, and this ADR's own correction section above says so in passing without noticing the contradiction: *"`SETTLED` serves `register`, which answers a different question."*
+>
+> The predicate has one real consumer and it is not a count. `isSettled` (`src/daemon/runs.ts:76`) is called by `loadedLiveRunForTicket` (`runs.ts:585-596`), which `register` (`runs.ts:639`) uses at `runs.ts:641` to refuse opening a second run while one is still live. `register`'s own docblock states the behaviour it buys: *"A failed chunk is unsettled, so it is handed back rather than succeeded — a chunk advances only on success, and `timone retry` is how a broken one recovers."* That is [PRD-02.R22](../specs/prd/prd-02-inversion-of-control.criteria.md#r22--a-ticket-hosts-a-sequence-of-chunks) clause 2, which [phase 29](../plans/phases/phase-29.md) is required not to regress.
+>
+> Deleting the predicate as written gives one of two outcomes, both defects: failed work stops being retryable in place, or a second run opens beside the failure and the one-session guard then refuses the retry — the exact fault [ADR-0029](0029-a-chunk-advances-only-on-success.md) was written to prevent. Either way `timone retry` stops working, and `timone retry` is a command the human is told to type today.
+>
+> **This is the same mistake as the #41 citation corrected above**: a claim about what the code does, made without reading it, load-bearing for a deletion. It was caught by a pre-flight read on 2026-08-20 before any of phase 29 was built, filed as [timone#51](https://github.com/fvermaut/timone/issues/51), and ruled on by fvermaut on 2026-08-21 — **keep the predicate, delete only the counting.**
+>
+> What that leaves of this decision is intact and still right: `chunkProgress` and `ChunkProgress` go, because deriving *which piece is next* from an arithmetic over runs is what one-step-one-ticket replaces. The paragraph below stands as the record of the reasoning that was wrong.
+
 ADR-0029 exists to answer *"is this ticket finished with this chunk?"* so that a count could advance. Under one ticket per step there is no count, so there is no question. **This is a removal of something made unnecessary, not the repair of a defect** — the count was working correctly (see the correction above). `SETTLED`, and the rule that `done` and `cancelled` confer it, go.
 
 **`TERMINAL` stays and keeps its own job unchanged** — *"is this run's hold on the project over?"* — which was always the separate question ADR-0029 was careful to distinguish. A failed or cancelled run still frees its project.
 
 **A cancelled step is one ticket that is still open.** It cannot be double-counted because there is nothing counting; it is simply the next eligible step again, which is what actually happened on `ivtrends` and what the ledger could not represent.
 
+> **✏ Reversed 2026-08-21 by [ADR-0044](0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D2.** *"Simply the next eligible step again"* means a cancel is undone on the next poll cycle — the human types `timone cancel`, and sixty seconds later the same step starts building again. `timone cancel` has meant *throw this work away* since it was built, and it is what the human is told to type to discard a job. The word keeps that meaning: a cancelled step's ticket stays open and is **not** taken up again, held by the assignee, with a call to action offering retry or close.
+
 ### D4 — A step ticket closes on its own merge; the initiative closes when its children do
 
 ADR-0028 D3 said an initiative's ticket closes when its last chunk's pull request merges. Now: **a step ticket closes when its own pull request merges**, carrying that pull request as its closing link. **The initiative's ticket closes when every step ticket is closed**, with a closing comment linking them all.
 
 A breakdown that gains a step after approval is still a re-proposal and still re-gates (ADR-0028 D3's surviving half); the newly approved list opens tickets for the steps that do not have one.
+
+> **✏ Extended 2026-08-21 by [ADR-0044](0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D4.** This clause says closed means done and stops there, so a step the human closed because they no longer wanted it would count as delivered and the initiative would close claiming every piece was built. It now closes saying what was actually delivered, and built-versus-dropped is **inferred** — closed with a merged pull request is built, closed without one is dropped — rather than asked for, since a plain Close is recorded by GitHub as *completed*. The asymmetry this exposes is recorded there and left open: a list that **grows** after approval re-gates, and a list that **shrinks** passes silently.
 
 ## Consequences
 
