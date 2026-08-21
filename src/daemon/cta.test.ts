@@ -122,6 +122,7 @@ describe("ctaFor", () => {
     const cta = ctaFor({
       project: "scratch-app",
       ticket: 13,
+      labels: ["timone", "timone:held"],
       run: run({
         project: "scratch-app",
         ticket: 13,
@@ -148,6 +149,7 @@ describe("ctaFor", () => {
     const cta = ctaFor({
       project: "scratch-app",
       ticket: 13,
+      labels: ["timone", "timone:held"],
       run: run({ project: "scratch-app", ticket: 13, status: "cancelled" }),
     });
 
@@ -166,6 +168,7 @@ describe("ctaFor", () => {
     const cta = ctaFor({
       project: "scratch-app",
       ticket: 13,
+      labels: ["timone", "timone:held"],
       run: run({ project: "scratch-app", ticket: 13, status: "cancelled" }),
     });
 
@@ -187,6 +190,7 @@ describe("ctaFor", () => {
     const cta = ctaFor({
       project: "scratch-app",
       ticket: 13,
+      labels: ["timone", "timone:held"],
       run: run({ project: "scratch-app", ticket: 13, status: "cancelled" }),
     });
 
@@ -233,6 +237,7 @@ describe("ctaFor", () => {
     const state = {
       project: "scratch-app",
       ticket: 13,
+      labels: ["timone", "timone:held"],
       run: run({ project: "scratch-app", ticket: 13, status: "cancelled" }),
     };
 
@@ -891,5 +896,59 @@ describe("ctaFor — the machine could not read its own note", () => {
     expect(ctaFor(state).headline).toBe(
       "I can't take this one further myself. Writing another answer here won't move it.",
     );
+  });
+});
+
+/**
+ * 29j, corrected — **the two ways out belong to a *held* ticket, and only to
+ * one.**
+ *
+ * A cancelled run is settled, so `loadedLiveRunForTicket` answers nothing for
+ * it and `register` opens a **fresh** run on the next cycle. That is still
+ * true for any ticket the machine is not holding: an ordinary ticket whose
+ * chunk was cancelled *is* taken up again, exactly as it always was.
+ *
+ * What changed is that the machine now **holds** a step it dropped, with a
+ * label, and a held ticket is the one it will not take up. Telling an
+ * unheld ticket to remove a label it does not carry names a gesture with no
+ * effect, and promises a stop that is not going to happen.
+ *
+ * Found by asking what a cycle would post on `scratch-app#4` — a real ticket,
+ * not a step — before running one.
+ */
+describe("a cancelled run on a ticket the machine is not holding", () => {
+  const cancelled = (labels: string[]) =>
+    ctaFor({
+      project: "scratch-app",
+      ticket: 4,
+      labels,
+      run: run({
+        project: "scratch-app",
+        ticket: 4,
+        status: "cancelled",
+        cancellation: "you asked me to stop",
+      }),
+    });
+
+  it("says it will start again, because it will", () => {
+    const cta = cancelled(["timone"]);
+
+    expect(cta.needFromYou).toContain("start it afresh on my next pass");
+    expect(cta.needFromYou).not.toContain("timone:held");
+  });
+
+  it("does not name a label the ticket is not carrying", () => {
+    expect(cancelled(["timone"]).needFromYou).not.toContain("remove");
+  });
+
+  /** With no labels read at all, the safe answer is the one that is true. */
+  it("says the same when nothing told it what labels the ticket has", () => {
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 4,
+      run: run({ project: "scratch-app", ticket: 4, status: "cancelled" }),
+    });
+
+    expect(cta.needFromYou).toContain("start it afresh on my next pass");
   });
 });

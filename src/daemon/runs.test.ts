@@ -1252,9 +1252,8 @@ describe("cancelling a run", () => {
 
     expect(() => store.retry(run.id)).toThrow(
       "scratch-app #7 was cancelled: its ticket is no longer open and marked. " +
-        "Cancelled work isn't retried — remove the `timone:held` label from " +
-        "the ticket and I'll start it afresh, or close it and I'll carry on " +
-        "without it.",
+        "Cancelled work isn't retried — reopen the ticket and mark it for " +
+        "me, and I'll start it afresh on my next pass.",
     );
   });
 
@@ -1264,9 +1263,8 @@ describe("cancelling a run", () => {
     store.cancel(run.id, "");
 
     expect(() => store.retry(run.id)).toThrow(
-      "scratch-app #7 was cancelled. Cancelled work isn't retried — remove " +
-        "the `timone:held` label from the ticket and I'll start it afresh, " +
-        "or close it and I'll carry on without it.",
+      "scratch-app #7 was cancelled. Cancelled work isn't retried — reopen " +
+        "the ticket and mark it for me, and I'll start it afresh on my next pass.",
     );
   });
 
@@ -2161,5 +2159,36 @@ describe("an initiative's picture is found from the map as well", () => {
     });
 
     expect(store.initiativeFor("scratch-app", 7)?.initiative).toBe(7);
+  });
+});
+
+/**
+ * The other half of the same refusal. A **step** the machine dropped is held
+ * and stays stopped; the ticket above is not a step, so its chunk is simply
+ * opened again. Both sentences are true and neither may be said to the other.
+ */
+describe("refusing to retry a step the machine is holding", () => {
+  it("names the label to remove, because that is what would start it", () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "scratch-app",
+      initiative: 7,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 51,
+    });
+    const { run } = store.register("scratch-app", 51);
+    store.cancel(run.id, "you asked me to stop");
+
+    expect(() => store.retry(run.id)).toThrow(/remove the `timone:held` label/);
+  });
+
+  it("does not tell an ordinary ticket to remove a label it has not got", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.cancel(run.id, "you asked me to stop");
+
+    expect(() => store.retry(run.id)).toThrow(/mark it for me/);
   });
 });

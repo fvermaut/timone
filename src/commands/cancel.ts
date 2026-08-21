@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { heldStepWayOut } from "../daemon/dropped.js";
 import { HELD_LABEL } from "../daemon/steps.js";
 import type { Command } from "commander";
 
@@ -215,9 +216,10 @@ function cancel(
   try {
     store.cancel(run.id, reason);
     log(
-      `Stopped work on ${name}: ${reason}. I won't pick this up again by ` +
-        `myself — remove the \`${HELD_LABEL}\` label from the ticket and I'll ` +
-        "start it afresh, or close it and I'll carry on without it.",
+      `Stopped work on ${name}: ${reason}. I won't pick this up again — ` +
+        (heldStepWayOut(store, run.project, run.ticket) ??
+          "if the ticket is open and marked for me, I'll start it afresh on " +
+            "my next pass."),
     );
     return 0;
   } catch (error) {

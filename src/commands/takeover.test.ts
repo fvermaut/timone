@@ -342,10 +342,12 @@ describe("resolveTakeover", () => {
       resolution.kind === "converse" || resolution.kind === "escalation"
         ? ""
         : resolution.message;
-    // ✏ 29j: the way out is removing the hold label, not re-marking the
-    // ticket — the mark never came off, and the label is what holds the step.
-    expect(said).toMatch(/timone:held/);
-    expect(said).toMatch(/close it/);
+    // ✏ 29j, corrected: `#4` is **not** a step of any initiative, so its
+    // cancelled chunk is opened again on the next cycle exactly as it always
+    // was. The hold label belongs to a dropped step and naming it here would
+    // point at a gesture with no effect.
+    expect(said).toMatch(/mark it for me/);
+    expect(said).not.toMatch(/timone:held/);
     expect(said).not.toMatch(/parked|failed|stopped early|scratch-app#4/);
   });
 

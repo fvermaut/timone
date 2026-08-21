@@ -922,10 +922,20 @@ export class RunStore {
         run.cancellation === undefined || run.cancellation === ""
           ? "."
           : `: ${run.cancellation}.`;
+      // The way out depends on whether this ticket is a **step**. A dropped
+      // step is held — by the label — and stays stopped until a human takes
+      // the hold off. Any other ticket's cancelled chunk is settled, so the
+      // next cycle simply opens a fresh one, which is what it has always
+      // done. One sentence for each, and neither is said to the other.
+      const held =
+        this.loadedInitiativeFor(run.project, run.ticket) !== undefined
+          ? `remove the \`${HELD_LABEL}\` label from the ticket and I'll start ` +
+            "it afresh, or close it and I'll carry on without it."
+          : "reopen the ticket and mark it for me, and I'll start it afresh " +
+            "on my next pass.";
       throw new Error(
         `${run.project} #${run.ticket} was cancelled${because} Cancelled work ` +
-          `isn't retried — remove the \`${HELD_LABEL}\` label from the ticket ` +
-          "and I'll start it afresh, or close it and I'll carry on without it.",
+          `isn't retried — ${held}`,
       );
     }
     if (run.status !== "failed") {
@@ -1140,6 +1150,18 @@ export class RunStore {
         // most needs to say how far the work has got — and it is not one of
         // its own children, so matching only the steps left it the one ticket
         // in the system with nothing to report.
+        (record.initiative === ticket || record.steps.includes(ticket)),
+    );
+  }
+
+  /** {@link initiativeFor} without a reload, for use inside a mutation. */
+  private loadedInitiativeFor(
+    project: string,
+    ticket: number,
+  ): InitiativeRecord | undefined {
+    return Object.values(this.state.initiatives ?? {}).find(
+      (record) =>
+        record.project === project &&
         (record.initiative === ticket || record.steps.includes(ticket)),
     );
   }

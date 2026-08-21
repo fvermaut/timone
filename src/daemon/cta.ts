@@ -317,6 +317,24 @@ export function ctaFor(state: TicketState): Cta {
     //
     // The two ways on are carried where they can be acted on: this call to
     // action, on the ticket, which exists only while the ticket is open.
+    // **And only for a ticket the machine is actually holding.** A cancelled
+    // run is settled, so `loadedLiveRunForTicket` answers nothing for it and
+    // `register` opens a **fresh** run next cycle — which is still exactly
+    // what happens to an ordinary ticket whose chunk was cancelled. What
+    // changed is that a dropped *step* now carries the hold label, and that
+    // is the ticket the machine will not take up. Saying these words to an
+    // unheld ticket would name a gesture with no effect and promise a stop
+    // that is not coming.
+    if (!(state.labels ?? []).includes(HELD_LABEL)) {
+      return {
+        headline: "I stopped work on this one.",
+        needFromYou:
+          "nothing — while this ticket is open and marked for me I'll start it " +
+          "afresh on my next pass.",
+        waitingOnYou: false,
+      };
+    }
+
     return {
       headline: "I stopped work on this one, and I won't start it again by myself.",
       needFromYou:
