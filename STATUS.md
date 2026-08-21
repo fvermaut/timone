@@ -1,3 +1,15 @@
+# Timone — Status
+
+**Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
+
+**Last updated:** 2026-08-21, end of day.
+
+---
+
+## Waiting on you
+
+> **Read this first.** The one-step-one-ticket work is **done** — built, tested, and watched running on the to-do app, and you said the tickets made sense. **Nothing in this list is blocking anything today.** The container work is next: three of its twelve pieces are built and the other nine are ready to start.
+
 **The one-step-one-ticket work is done.** You read the four test tickets and said they made sense, so it is finished and written up. Nothing here needs you for it.
 
 **Two things about it are not proven, and I am saying so rather than leaving it.** Nobody has yet seen a piece close when its code is merged, or a job close after its last piece — you chose to stop the test at the tickets. Those parts are written and have tests, but have not been watched.
@@ -11,6 +23,8 @@ timone takeover scratch-app#4
 ```
 
 **The container work is next.** Nine of its twelve pieces are ready to start now that you have read R23.
+
+**One thing to remember if the daemon ever seems to do nothing.** It will not start any job while there are uncommitted changes in the Timone folder. It says which files, in its log. This is on purpose: every job has to follow one saved copy of the rules. So check the log first, and commit or undo your own edits.
 
 **1. The machine has its own identity now — and the reading you owed is done.** You read R23 on 21 August and said it was fine, so **the nine pieces of container work that were waiting on it are released.**
 
@@ -64,7 +78,7 @@ That throws away the job. **The ticket and everything it worked out stay** — o
 
 Once the app is free the test takes one word from you and about a minute of machine time.
 
-**5. Nothing here is waiting on a decision any more.** On 21 August you ruled on all four questions that were blocking the one-step-one-ticket work, and on a fifth that came out of them. What you decided is under "What changed recently"; the reasons are written down in `doc/adr/0044-...`. All that plan needs now is item 1.
+**5. Nothing here is waiting on a decision.** On 21 August you ruled on the four questions that were blocking the one-step-one-ticket work, and on a fifth that came out of them. That work is now built and finished. What you decided is under "What changed recently"; the reasons are in `doc/adr/0044-...`.
 
 **Three older rules also need a ruling.** None of them blocks anything today.
 
@@ -72,7 +86,7 @@ Once the app is free the test takes one word from you and about a minute of mach
 - On 14 August the machine was supposed to give up and hand a conversation back to your terminal. It worked the answer out instead, and you called that a pass. Should the rule change, or the behaviour?
 - **New, from yesterday's test:** a ticket whose requirements are already written and agreed was picked up as brand-new work. The sorting step read the branch, said *"the next open step is the build plan, not another round of requirements discovery"* — and was then sent into another round of requirements discovery, because it routes on the label and nothing else. Should it be allowed to route on what it finds? ([#32](https://github.com/fvermaut/timone/issues/32))
 
-**6. The slow-page report is unstuck, and now it needs you.** `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4) sat for seventeen days at a step that had never been built. That step exists now, and it has looked at the problem and written up what it thinks. Read what it says on the ticket and reply there — `approve` if you agree, or say what you want different.
+**6. The slow-page report is stopped, and it is waiting for you when you want it.** `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4) sat for seventeen days at a step that had never been built. That step exists now, and it looked at the problem and wrote up what it thinks. **You stopped this job on 21 August so the to-do app was free for the one-step-one-ticket test**, and I left its label off so it cannot restart by itself and spend money you have not asked for. Everything it worked out is still on the ticket. To pick it up: `timone takeover scratch-app#4`.
 
 It found a mistake it had made itself in August: it had told you the app already promises a tick shows up straight away, and it does not. So it wants to write that promise down first, and it has guessed the numbers. The numbers are the part worth arguing with.
 
