@@ -1,6 +1,6 @@
 # Phase 29: One step, one ticket — the daemon stops counting runs
 
-> **Status:** Planned.
+> **Status:** In progress — **29a and 29b built** on `phase-29-one-step-one-ticket` (2026-08-21). Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 > **Companion phases:** [phase-22](phase-22.md) — it built the ledger half of R22, `TERMINAL`, and the settledness predicate this phase removes. [phase-23](phase-23.md) — it built the breakdown artifact, its parser, the `breakdown` pipeline stage, the chunk-zero merge, and chunk succession; **this phase changes what 23f decided and leaves the rest standing**. [phase-27](phase-27.md) — the feedback path, retired by ADR-0036, whose routing this must not disturb.
 >
@@ -125,6 +125,12 @@ R22 is `draft` and has never been verified. Clauses **1, 3 and 5** were rewritte
 
 ### Sub-phase 29a: The frontier query — which step is next, from tickets
 
+> **✅ Built 2026-08-21.** `src/daemon/steps.ts`, nine cases, each seen red. Two things moved, both forced by 29b reading `gh`'s real output before a fixture was written, and both recorded in [phase-29-handoffs.md](reports/phase-29-handoffs.md):
+>
+> - **`Step` lives in `src/adapters/ticketing.ts`, not in `steps.ts`.** `src/adapters/` imports nothing from `src/daemon/` anywhere in the tree, and the type is the port's data model. `HELD_LABEL` stays in `steps.ts`, named once as this slice says.
+> - **A dependency carries its own `open`, not a number to resolve.** `blockedBy` returns bare numbers and admits other repositories, so `timone#8` and `scratch-app#8` are indistinguishable by number — resolving by number matches a foreign dependency against a local step and answers with the wrong state. Each node carries its own `state` in the same response. Case (7)'s cycle then needs no guard at all.
+> - **A ninth case the plan did not have: `dependenciesIncomplete`.** `blockedBy` is `{nodes, totalCount}`; when the count exceeds the nodes, the step waits on something nobody can name. Blocked, never free.
+
 **[NEW FILE]** `src/daemon/steps.ts` — `nextStep(steps): Step | undefined`, pure. Given the initiative's step tickets — number, title, state, assignee, declared dependencies — return the first that is **open, unblocked and unassigned**. A step depending on an open step is not eligible.
 
 **Seams under test (TDD):** `nextStep` is the seam — pure, no I/O. Red-green: (1) all open, none blocked → the first in order; (2) the first closed → the second; (3) a step whose dependency is open is skipped even when it sorts first; (4) a step whose dependency is **closed** is eligible; (5) an assigned open step is skipped; (6) every step closed → `undefined`, the close-the-initiative signal; (7) a dependency cycle does not hang — it returns `undefined` and says so, rather than looping.
@@ -176,6 +182,12 @@ npm run build && npx vitest run src/daemon/steps.test.ts
 ---
 
 ### Sub-phase 29b: Reading an initiative's step tickets
+
+> **✅ Built 2026-08-21.** `listSteps` on the port and the GitHub adapter; ten cases, all seen red. One `gh issue list --json` call and no GraphQL, exactly as the superseded block below predicts. Shapes were read off `fvermaut/scratch-app` #42/#43 (throwaway, closed, transcript on #42) rather than guessed: `parent` is `{id, number, state, title, url}` or `null`, `state` is `OPEN`/`CLOSED`, `assignees` elements carry `login`.
+>
+> **Two findings changed the design; both are folded into 29a above.** A dependency does not say which repository it is in, and a dependency list can be counted without being handed over. **`gh issue list` has no `--parent` filter** — verified — so the children are filtered here, and ordering is by number ascending, which is the breakdown's order because 29c opens them in it.
+>
+> **The cost the 2026-08-20 marker predicted was real:** widening the port broke eleven hand-rolled stub adapters across seven test files. `poll.test.ts`'s `noUnmarkedTickets` became `noOtherListings`, now that it stubs two listings.
 
 **[MODIFY]** `src/adapters/ticketing.ts` — list the child tickets of an initiative and their state, assignee and declared dependencies.
 
