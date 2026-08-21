@@ -1,6 +1,6 @@
 # Phase 29: One step, one ticket — the daemon stops counting runs
 
-> **Status:** In progress — **29a, 29b, 29c and 29d built** on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
+> **Status:** In progress — **29a, 29b, 29c, 29d and 29e built** on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 > **Companion phases:** [phase-22](phase-22.md) — it built the ledger half of R22, `TERMINAL`, and the settledness predicate this phase removes. [phase-23](phase-23.md) — it built the breakdown artifact, its parser, the `breakdown` pipeline stage, the chunk-zero merge, and chunk succession; **this phase changes what 23f decided and leaves the rest standing**. [phase-27](phase-27.md) — the feedback path, retired by ADR-0036, whose routing this must not disturb.
 >
@@ -361,6 +361,12 @@ npm run build && npm test -- poll
 ---
 
 ### Sub-phase 29e: Closing — the step, then the initiative
+
+> **✅ Built 2026-08-21.** `concludeStep` splits the merge path: the step's ticket closes with words about the step, and the initiative closes only when none of its steps is open. Five cases; mutating the split away turns three red and leaves the control green. **29d's deliberate gap is closed and the branch is coherent again.**
+>
+> **Case (1) as the plan words it does not discriminate, and had to be strengthened.** *"A merge closes the step ticket and not the initiative"* passed against the **old** code too — the old code closed `run.ticket`, which under 29d *is* the step. The close was identical; what differed was what got **said**: the old path posted the initiative's words, *"this ticket's journey ends here"*, on one piece of it. The case now asserts the comment, and that half is what does the work.
+>
+> **The tracker is asked again at close time, and it has to be.** The cached picture was taken by the same cycle's survey, before this step closed, so it cannot answer *is anything still open?*. Reusing it would close an initiative one step early. One call, on the merge path, never in front of a waiting human.
 
 **[MODIFY]** the merged-pull-request path — a merged PR closes **its step ticket**, linking it. When no step ticket remains open, close the **initiative** with a comment linking every pull request.
 

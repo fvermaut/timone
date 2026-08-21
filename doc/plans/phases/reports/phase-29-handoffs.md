@@ -219,3 +219,49 @@ Full suite: **1196 tests, 1191 green.** The five failures are the known timeout 
 **What this slice does not prove.** That a step's run ever *finishes* — closing is 29e, and `concludeInitiative` still closes `run.ticket`, which is now a step ticket rather than the initiative. **Between this slice and 29e the closing behaviour is wrong**, and deliberately so: a merged step's pull request will close the step and post the initiative's closing comment on the step ticket. It is one slice's gap on an unmerged branch, and 29e is the slice that owns it.
 
 And nothing here has run against real GitHub.
+
+## 29e — Closing: the step, then the initiative
+
+**Built.** `concludeStep` (`src/daemon/poll.ts`) splits the merge path in two: a merged pull request closes **its step ticket**, with words about that step, and the initiative closes only when no step of it is open — with a comment naming what was actually delivered. `concludeInitiative` keeps its old body whole for a ticket that is nobody's step.
+
+**Files touched.**
+
+- `src/daemon/poll.ts` — `stepMergedComment`, `initiativeClosedComment`, `concludeStep`, and the branch at the head of `concludeInitiative`.
+- `src/daemon/poll.test.ts` — a five-case `describe`.
+
+**Decisions taken inside the slice.**
+
+- **The tracker is asked again at close time.** The cached picture was taken by this cycle's own survey, *before* this step closed, so it cannot answer *is anything still open?*. That is one `listSteps` on the merge path — rare, and never in front of a waiting human, which is the only place ADR-0044 D5 forbids a call. Reusing the stale picture would close an initiative one step early on the cycle its last-but-one step merged.
+- **Built versus dropped is read off the ledger, in the form the plan names.** A step whose run is `done` *and* carries a pull request was built; a step closed without one was dropped. `concludeInitiative` is only ever reached from `pr.state === "merged"`, so a `done` run with a `pr` is a merged pull request. No label, no comment convention, nothing for the human to remember.
+- **The branch is on the picture, not on the ticket's labels.** A step ticket carries the plain mark and nothing that says *I am a step* — that is the map ticket's label, and the step does not have it. `store.initiativeFor` is the ledger's own answer and costs nothing.
+- **`concludeInitiative`'s old body is untouched.** It is not dead: a chore, anything run by hand, and any ledger written before this daemon started all still go through it.
+
+**Validation evidence.**
+
+`npm run build && npx vitest run src/daemon/poll.test.ts` — **166 passed**, five of them this slice's.
+
+**Case (1) needed strengthening, and the reason is worth recording.** As first written — *"closes the step and not the initiative"* — it passed against the **old** code too, because the old code closed `run.ticket`, which under 29d *is* the step. The close was the same; what differed was what got said. The old path posted `mergedComment` on it — *"this ticket's journey ends here"* — telling the human the whole initiative was over, on one piece of it. So the case now asserts the words as well as the number, and that half is what discriminates.
+
+Mutating the split away — restoring the pre-29e single close — gives:
+
+```
+× closes the step and not the initiative when another step is open
+× closes the initiative when its last step closes
+✓ does not close the initiative when an earlier step is still open
+× closes with the count delivered when a step was dropped
+✓ leaves an ordinary ticket's closing untouched
+```
+
+Three discriminate; the control stays green, which is what the control is for. Case (3) is a guard rather than a discriminator — the old code could not close an initiative at all, so nothing about it could get case (3) wrong — and it is kept because the *new* code can.
+
+Full suite: **1201 tests, 1196 green**, the five being the known flakes on [timone#8](https://github.com/fvermaut/timone/issues/8).
+
+**The plan's checks, answered.**
+
+- **All four red→green** — five, and each seen failing.
+- **Case (3) asserted with a step last in file order and still open** — yes: step 52 merges while 51 is open, and the initiative stays open.
+- **Case (4) asserts the closing comment's words** — yes: `"1 of 2"` and `"dropped"`, read out of the comment posted on the map ticket, not merely that it closed.
+- **A non-zero test count** — 166.
+- **No test closes a real issue on any repository** — every close goes to a recording fake.
+
+**What this slice does not prove.** That any of it has run against real GitHub. **29d's deliberate gap is now closed**, so the branch is coherent again: a step is opened, claimed, built, closed, and its initiative closes after the last one.
