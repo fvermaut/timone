@@ -252,43 +252,7 @@ export function renderBreakdown(breakdown: ParsedBreakdown): string {
   return lines.join("\n");
 }
 
-/** How far through its chunks an initiative is, and which one comes next. */
-export interface ChunkProgress {
-  /** How many chunks the approved list holds. */
-  total: number;
-  /** How many of them the ledger has settled. */
-  done: number;
-  /** The chunk to build next, or undefined when none remains. */
-  next?: { index: number; title: string };
-}
 
-/**
- * Where an initiative stands: the approved list, read against how many of its
- * chunks the ledger has settled.
- *
- * **This is the whole of derived doneness**
- * ([ADR-0030](../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)
- * D4). Nothing is ever written back into the file as chunks land — the file
- * the human approved is the file that stays on the branch — so *which piece is
- * next* is computed here, from the artifact and the count, every time it is
- * asked.
- *
- * `done` is clamped to the list. A ledger holding more settled chunks than the
- * breakdown lists is a real state — a re-proposal shrank the list, or a chunk
- * was opened by hand — and the honest answer to it is "there is nothing left
- * to build", not an exception on the poll loop's every cycle.
- */
-export function chunkProgress(
-  breakdown: ParsedBreakdown,
-  doneChunks: number,
-): ChunkProgress {
-  const total = breakdown.chunks.length;
-  const done = Math.min(Math.max(doneChunks, 0), total);
-  const next = breakdown.chunks[done];
-  return next === undefined
-    ? { total, done }
-    : { total, done, next: { index: done + 1, title: next.title } };
-}
 
 /**
  * Whether this breakdown has gained a chunk since the human read it

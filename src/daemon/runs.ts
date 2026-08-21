@@ -1129,10 +1129,17 @@ export class RunStore {
    * initiative, and neither has anything the daemon has not polled since it
    * started.
    */
-  initiativeFor(project: string, step: number): InitiativeRecord | undefined {
+  initiativeFor(project: string, ticket: number): InitiativeRecord | undefined {
     this.refresh();
     return Object.values(this.state.initiatives ?? {}).find(
-      (record) => record.project === project && record.steps.includes(step),
+      (record) =>
+        record.project === project &&
+        // The **map's own number** as well as its steps'. The map ticket is
+        // the thread the human reads, so it is the one whose standing note
+        // most needs to say how far the work has got — and it is not one of
+        // its own children, so matching only the steps left it the one ticket
+        // in the system with nothing to report.
+        (record.initiative === ticket || record.steps.includes(ticket)),
     );
   }
 

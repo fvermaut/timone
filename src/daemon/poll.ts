@@ -42,7 +42,6 @@ import {
   type PipelineStage,
 } from "./pipeline.js";
 import {
-  chunkProgress,
   fromDefaultBranch,
   isReproposal,
   readBreakdown,
@@ -1439,7 +1438,6 @@ async function reconcileCtas(
             : initiativeProgress(
                 checkoutOf(root, project.name),
                 ticket.number,
-                chunks,
                 deps.breakdownSource ?? fromDefaultBranch,
                 store.initiativeFor(project.name, ticket.number),
               ),
@@ -2026,59 +2024,6 @@ export function checkoutOf(root: string, project: string): string {
   return join(root, "projects", project);
 }
 
-/**
- * Where a ticket's initiative stands, for the two surfaces that have to say
- * so out loud ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
- * D4) — or undefined when the ticket has no readable list of pieces at all,
- * which is nearly every ticket and every chore (ADR-0030 D3).
- *
- * **This is the single function `timone status` and the ticket both resolve
- * the progress value through**, and that is what makes [R21 clause
- * 8](../../doc/specs/prd/prd-02-inversion-of-control.criteria.md) hold rather
- * than merely be intended. `ctaFor` decides what a ticket needs; this decides
- * the one input to it that neither renderer can see for itself. Two callers
- * computing it their own way would drift, and the drift would be invisible
- * until a human read the terminal and the thread in the same minute.
- *
- * `undefined` is answered rather than thrown for the reason `readBreakdown`
- * gives: this is on the path of every poll cycle and of every `timone status`,
- * and a project whose checkout is missing is an ordinary state of the world.
- */
-export function initiativeProgress(
-  repoDir: string,
-  ticket: number,
-  runs: readonly Run[],
-  // The approved list, never the proposal: the default is the default branch,
-  // which is where approving a breakdown puts it (ADR-0030 D2). A
-  // checkout-relative read made this depend on the branch the last session
-  // happened to leave behind.
-  source: BreakdownSource = fromDefaultBranch,
-  /**
-   * What the last cycle saw of this ticket's initiative, when it belongs to
-   * one. **Preferred over everything below it**, and that preference is the
-   * whole of 29d's change here: doneness is a fact about *step tickets* now,
-   * not a count of runs (ADR-0040).
-   */
-  picture?: InitiativeRecord,
-): InitiativeProgress | undefined {
-  if (picture !== undefined) return progressOfPicture(picture);
-
-  // Nothing on the tracker knows this ticket, so it is not part of an
-  // initiative that has been broken into steps: a chore, anything run by
-  // hand, or a ticket from before this daemon started. It keeps the answer it
-  // has always had — counted out of the ledger against the approved list.
-  const read = readBreakdown(repoDir, ticket, source);
-  if (read.kind !== "ok") return undefined;
-
-  // `done`, not settled — the same choice `successionOf` makes, and for the
-  // same reason: a cancelled chunk delivered nothing, so the piece it was
-  // opened for is still the piece to come.
-  const done = runs.filter((chunk) => chunk.status === "done").length;
-  const progress = chunkProgress(read.breakdown, done);
-  return isReproposal(read.breakdown)
-    ? { ...progress, reproposed: true }
-    : progress;
-}
 
 /**
  * How far an initiative has got, from the picture the last cycle wrote.
@@ -2089,6 +2034,56 @@ export function initiativeProgress(
  * step ticket open, so the step is still the step to come without anything
  * having to remember to exclude it.
  */
+/**
+ * Where a ticket's initiative stands, for the two surfaces that have to say so
+ * out loud ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D4) — or undefined when there is nothing to say.
+ *
+ * **✏ 29g: the count comes off the tracker and the re-proposal comes off the
+ * artifact, and they are two different facts from two different places.**
+ *
+ * - *How far it has got* is `done` step tickets out of the steps that exist,
+ *   read by the daemon's own survey and cached in the ledger. Counting `done`
+ *   runs against an approved list is gone with `chunkProgress`
+ *   ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)).
+ * - *Whether the list has grown since the human approved it* is still read
+ *   from the **file**, and must be: the committed artifact is the gate
+ *   ([ADR-0014](../../doc/adr/0014-artifact-first-gates.md),
+ *   [ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ *   D3), and no number of step tickets can tell you what a human agreed to.
+ *
+ * **Deleting the second along with the first is the mistake this docblock
+ * exists to stop**, and it was made once here before the tests caught it: a
+ * re-proposed initiative then reported *"this one is finished"* and the
+ * approval gate stopped existing.
+ */
+export function initiativeProgress(
+  repoDir: string,
+  ticket: number,
+  source: BreakdownSource,
+  picture: InitiativeRecord | undefined,
+): InitiativeProgress | undefined {
+  const progress = progressOf(picture);
+  const read = readBreakdown(repoDir, ticket, source);
+  const regrown = read.kind === "ok" && isReproposal(read.breakdown);
+
+  if (!regrown) return progress;
+  // No picture, and the list has regrown. `total` is the count the file lists
+  // and `done` is nought — both true statements about **step tickets**, of
+  // which this initiative has none yet. Neither is rendered: the re-proposal
+  // branch of the call to action answers before it reaches them, because what
+  // the human is being asked is a judgement rather than a number.
+  const listed = read.kind === "ok" ? read.breakdown.chunks.length : 0;
+  return { total: listed, done: 0, ...progress, reproposed: true };
+}
+
+/** {@link progressOfPicture}, tolerating a ticket no picture lists. */
+export function progressOf(
+  picture: InitiativeRecord | undefined,
+): InitiativeProgress | undefined {
+  return picture === undefined ? undefined : progressOfPicture(picture);
+}
+
 export function progressOfPicture(picture: InitiativeRecord): InitiativeProgress {
   const position =
     picture.next === undefined ? -1 : picture.steps.indexOf(picture.next);
@@ -2176,18 +2171,16 @@ function successionOf(
     };
   }
 
-  const done = store
-    .runsForTicket(project, ticket)
-    .filter((chunk) => chunk.status === "done").length;
-  const progress = chunkProgress(breakdown, done);
-  return progress.next === undefined
-    ? { kind: "finished" }
-    : {
-        kind: "continues",
-        done: progress.done,
-        total: progress.total,
-        next: progress.next.title,
-      };
+  // ✏ 29g: **it is finished, and there is no counting left to do.** A ticket
+  // that reaches here has a readable, approved, un-regrown breakdown and no
+  // step tickets — because a ticket that *has* them never reaches this
+  // function at all, `concludeInitiative` having handed it to `concludeStep`
+  // first. So there is no next chunk to open: chunks are gone, and what
+  // replaced them is a ticket per step (ADR-0040). Its run merged, and the
+  // conversation ends, exactly as it did before a ticket hosted more than one
+  // of them.
+  void store;
+  return { kind: "finished" };
 }
 
 /**

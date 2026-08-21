@@ -2139,3 +2139,25 @@ describe("the cached picture of an initiative", () => {
     expect(() => newStore(path).runsForTicket("scratch-app", 7)).not.toThrow();
   });
 });
+
+describe("an initiative's picture is found from the map as well", () => {
+  /**
+   * The map ticket is the thread the human reads, so its standing note is the
+   * one that most needs to say how far the work has got. It is not one of its
+   * own children, so a lookup that matched only the steps left the map the
+   * one ticket in the system with nothing to report.
+   */
+  it("is found from the initiative's own number", () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "scratch-app",
+      initiative: 7,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 51,
+    });
+
+    expect(store.initiativeFor("scratch-app", 7)?.initiative).toBe(7);
+  });
+});

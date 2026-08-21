@@ -9,7 +9,11 @@ import {
 } from "../daemon/breakdown.js";
 import { ctaFor, type Cta, type InitiativeProgress } from "../daemon/cta.js";
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
-import { checkoutOf, initiativeProgress } from "../daemon/poll.js";
+import {
+  checkoutOf,
+  initiativeProgress,
+  progressOf,
+} from "../daemon/poll.js";
 import {
   RunStore,
   defaultStatePath,
@@ -98,33 +102,29 @@ interface RenderContext {
  * with several waiting tickets reads each breakdown once.
  */
 function progressReader(
-  runs: readonly Run[],
   root: string | undefined,
   source: BreakdownSource | undefined,
-  // The picture the daemon wrote on its last cycle, looked up per run. This
-  // is what keeps `timone status` instant under one step, one ticket: the
-  // answer is already on disk, so the render stays synchronous and makes no
-  // forge call at all (ADR-0044 D5).
   picture: (project: string, ticket: number) => InitiativeRecord | undefined,
 ): (run: Run) => InitiativeProgress | undefined {
-  if (root === undefined) return () => undefined;
-
   const cache = new Map<string, InitiativeProgress | undefined>();
   return (run) => {
     const key = `${run.project}#${run.ticket}`;
     if (!cache.has(key)) {
-      const chunks = runs.filter(
-        (chunk) => chunk.project === run.project && chunk.ticket === run.ticket,
-      );
+      const seen = picture(run.project, run.ticket);
+      // Without a root there is no checkout to read the approved list from, so
+      // a re-proposal cannot be seen — but how far the work has got still can,
+      // because that comes off the ledger. Before 29g this answered nothing at
+      // all, since everything it knew came from the file.
       cache.set(
         key,
-        initiativeProgress(
-          checkoutOf(root, run.project),
-          run.ticket,
-          chunks,
-          source ?? fromDefaultBranch,
-          picture(run.project, run.ticket),
-        ),
+        root === undefined
+          ? progressOf(seen)
+          : initiativeProgress(
+              checkoutOf(root, run.project),
+              run.ticket,
+              source ?? fromDefaultBranch,
+              seen,
+            ),
       );
     }
     return cache.get(key);
@@ -325,12 +325,12 @@ export function renderStatus(
     now: options.now,
     initiativesOf: (project) => options.pictures?.(project) ?? [],
     progressOf: progressReader(
-      runs,
       options.root,
       options.breakdownSource,
       (project, ticket) =>
-        (options.pictures?.(project) ?? []).find((record) =>
-          record.steps.includes(ticket),
+        (options.pictures?.(project) ?? []).find(
+          (record) =>
+            record.initiative === ticket || record.steps.includes(ticket),
         ),
     ),
   };

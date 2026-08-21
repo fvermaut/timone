@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Manifest } from "../manifest.js";
 import { breakdownPath, fromWorkingTree } from "../daemon/breakdown.js";
 import { ctaComment, ctaFor } from "../daemon/cta.js";
-import { checkoutOf, initiativeProgress, reclaimedReason } from "../daemon/poll.js";
+import { checkoutOf, progressOf, reclaimedReason } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
   type InitiativeRecord, runId, type Run } from "../daemon/runs.js";
@@ -494,7 +494,7 @@ describe("renderStatus — a ticket built in pieces", () => {
     const runs = [
       run({
         project: "scratch-app",
-        ticket: 6,
+        ticket: 51,
         status: "parked",
         stage: "delivery",
         waitingKind: "review",
@@ -502,12 +502,27 @@ describe("renderStatus — a ticket built in pieces", () => {
         pr: 9,
       }),
     ];
+    // ✏ 29g: which piece this is comes off the **step tickets** now, cached in
+    // the ledger, rather than from counting done runs against a file. The
+    // sentence the reader sees is unchanged, which is the point of asserting
+    // it here rather than asserting the source.
     const output = renderStatus(manifest, runs, {
       stateExists: true,
-      // A plain fixture directory, not a clone: the production default reads
-      // the approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(6, breakdown(["The ledger learns chunks", "The next chunk opens"])),
+      pictures: (project) =>
+        project === "scratch-app"
+          ? [
+              {
+                project: "scratch-app",
+                initiative: 6,
+                title: "the lists could be smarter",
+                steps: [51, 52],
+                done: 0,
+                next: 51,
+                nextTitle: "The ledger learns chunks",
+                at: "2026-08-02T10:00:00Z",
+              },
+            ]
+          : [],
     });
 
     expect(lineFor(output, "scratch-app")).toContain(
@@ -598,21 +613,32 @@ describe("renderStatus — one computation, two renderers", () => {
 
   it("resolves an initiative's progress the same way for the ticket and the terminal", () => {
     // R21 clause 8, asserted rather than intended. **One** progress value,
-    // resolved the way `reconcileCtas` resolves it — through `checkoutOf` and
-    // `initiativeProgress` — fed to `ctaFor` once, and both renderings of that
-    // one call are then required to carry the same sentence. `renderStatus`
-    // resolves its own value internally, so if it reached a different
-    // directory, counted different chunks, or read a different file, its line
-    // would name a different piece and this fails.
-    const root = rootWith(
-      6,
-      breakdown(["The ledger learns chunks", "The next chunk opens", "The ticket closes"]),
-    );
+    // resolved the way `reconcileCtas` resolves it — through `progressOf`
+    // over the ledger's picture — fed to `ctaFor` once, and both renderings
+    // of that one call are then required to carry the same sentence.
+    // `renderStatus` resolves its own value internally, so if it read a
+    // different picture or counted differently, its line would name a
+    // different piece and this fails.
+    //
+    // ✏ 29g: the value used to be counted out of the ledger against a file in
+    // a checkout. The guarantee is unchanged and the source is not: doneness
+    // is a fact about step tickets now (ADR-0040).
+    const record: InitiativeRecord = {
+      project: "scratch-app",
+      initiative: 6,
+      title: "the lists could be smarter",
+      steps: [51, 52, 53],
+      done: 1,
+      next: 52,
+      nextTitle: "The next chunk opens",
+      at: "2026-08-02T10:00:00Z",
+    };
+    const pictures = (project: string): readonly InitiativeRecord[] =>
+      project === "scratch-app" ? [record] : [];
     const runs = [
-      run({ project: "scratch-app", ticket: 6, status: "done", stage: "delivery", pr: 9 }),
       run({
         project: "scratch-app",
-        ticket: 6,
+        ticket: 52,
         status: "parked",
         stage: "delivery",
         waitingKind: "review",
@@ -623,23 +649,18 @@ describe("renderStatus — one computation, two renderers", () => {
 
     const cta = ctaFor({
       project: "scratch-app",
-      ticket: 6,
+      ticket: 52,
       run: runs.at(-1),
-      progress: initiativeProgress(
-        checkoutOf(root, "scratch-app"),
-        6,
-        runs,
-        fromWorkingTree,
-      ),
+      progress: progressOf(record),
     });
 
     // Not agreement about nothing: the sentence they have to agree on is the
-    // one this slice added.
+    // one that names the piece.
     expect(cta.needFromYou).toContain("piece 2 of 3");
     expect(ctaComment(cta)).toContain(cta.needFromYou);
-    expect(
-      renderStatus(manifest, runs, { stateExists: true, root, breakdownSource: fromWorkingTree }),
-    ).toContain(cta.needFromYou);
+    expect(renderStatus(manifest, runs, { stateExists: true, pictures })).toContain(
+      cta.needFromYou,
+    );
   });
 
   it("names a ticket once in its closing line however many pieces it has had", () => {

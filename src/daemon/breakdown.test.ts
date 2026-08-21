@@ -5,7 +5,6 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  chunkProgress,
   isReproposal,
   parseBreakdown,
   fromDefaultBranch,
@@ -120,23 +119,6 @@ describe("the breakdown round-trips", () => {
   });
 });
 
-describe("which chunk is next", () => {
-  it("names the chunk after the ones the ledger has settled", () => {
-    expect(chunkProgress(approved, 1)).toEqual({
-      total: 3,
-      done: 1,
-      next: { index: 2, title: "The next chunk opens" },
-    });
-  });
-
-  it("answers no next chunk once the list is exhausted — the close-the-ticket signal", () => {
-    expect(chunkProgress(approved, 3)).toEqual({ total: 3, done: 3 });
-  });
-
-  it("clamps a settled count larger than the list rather than throwing", () => {
-    expect(chunkProgress(approved, 7)).toEqual({ total: 3, done: 3 });
-  });
-});
 
 describe("a re-proposal is visible from the artifact alone", () => {
   it("calls a list longer than its own stamp's count a re-proposal", () => {

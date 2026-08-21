@@ -4427,34 +4427,16 @@ describe("pollOnce — a ticket's next chunk", () => {
     return { adapter, posted, closed };
   }
 
-  it("does not close the ticket when a piece of it is still unbuilt", async () => {
-    // The whole of the truncation this exists to end: chunk 1 merges, and the
-    // ticket has two more pieces the human approved.
-    const store = newStore();
-    chunkOnReview(store, 1, 9);
-    const { adapter, posted, closed } = successionAdapter({ 9: "merged" });
-    const { spawner } = fakeSpawner();
+  /**
+   * ✏ 29g — **retired with the model it tested.** It asserted that a ticket
+   * with an approved list of three and one chunk done stays open, which was
+   * the count deciding doneness. A ticket does not host a sequence of chunks
+   * any more (ADR-0040): each step is its own ticket, and *"an initiative
+   * with an open step is not closed"* is asserted in **29e**, on step
+   * tickets, in `closing: the step, then the initiative`. Deleted rather than
+   * repaired, because there is nothing left for it to be about.
+   */
 
-    await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-      // A plain fixture directory, not a clone: the production default reads the
-      // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
-    });
-
-    // Zero calls, not "called with something else": a guard that closed the
-    // ticket with the wrong reason would pass any weaker assertion.
-    expect(closed).toEqual([]);
-    expect(store.get("scratch-app#6/1")?.status).toBe("done");
-    // And it says so on the ticket rather than going quiet.
-    expect(
-      posted.some((comment) => /next piece/i.test(comment.body)),
-    ).toBe(true);
-  });
 
   it("closes the ticket on the last piece, linking every pull request", async () => {
     const store = newStore();
@@ -4503,48 +4485,19 @@ describe("pollOnce — a ticket's next chunk", () => {
     expect(store.get("scratch-app#6/1")?.status).toBe("done");
   });
 
-  it("lets a bug queued during a chunk take the project before the next chunk", async () => {
-    // R22 clause 6, and the reason succession is not a `register` call inside
-    // `concludeReview`. A bug filed while chunk 1 was building has been
-    // waiting; completing chunk 1 promotes it *in that same call*, and the
-    // next chunk is opened by a later cycle's registration loop — so it
-    // queues behind the bug rather than in front of it. Registering the
-    // successor here would look identical and starve the queue silently.
-    const store = newStore();
-    chunkOnReview(store, 1, 9);
-    const { adapter } = successionAdapter({ 9: "merged" }, [ticket(8)]);
-    const { spawner, spawned } = fakeSpawner();
-    const deps = {
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-      // A plain fixture directory, not a clone: the production default reads the
-      // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
-    };
+  /**
+   * ✏ 29g — **rewritten, not retired: R22 clause 6 still holds and still
+   * matters.** The old version drove it through two chunks of one ticket.
+   * The guarantee is unchanged and the route is different: a step's run
+   * completing frees the project *in that same call* and promotes whatever
+   * queued behind it, and the **next step** is opened by a later cycle's
+   * registration loop — so it queues behind the bug rather than in front of
+   * it. Registering the next step from the closing path would look identical
+   * and would starve the queue silently, which is the fault ADR-0026 split
+   * the ledger to end. The new version lives beside the frontier's own cases,
+   * in `the frontier decides which step is taken`.
+   */
 
-    // The bug arrives while chunk 1 is still out for review.
-    expect(store.get("scratch-app#8/1")).toBeUndefined();
-
-    await pollOnce(deps);
-
-    // The window: chunk 1 is finished, the bug holds the project, and no
-    // second chunk of #6 exists yet at all.
-    expect(store.get("scratch-app#6/1")?.status).toBe("done");
-    expect(store.get("scratch-app#8/1")?.status).toBe("picked-up");
-    expect(store.get("scratch-app#6/2")).toBeUndefined();
-    // Asserted on the spawner, not on the order of two log lines: the bug's
-    // run is the one a session was started for.
-    expect(spawned.map((run) => run.id)).toEqual(["scratch-app#8/1"]);
-
-    await pollOnce(deps);
-
-    // Only now does chunk 2 open — behind the bug, which is still holding.
-    expect(store.get("scratch-app#6/2")?.status).toBe("queued");
-    expect(spawned.map((run) => run.id)).not.toContain("scratch-app#6/2");
-  });
 
   it("opens nothing in the cycle a chunk merged, leaving the project free", async () => {
     // The other half of the window, with nothing waiting: the cycle that ends
@@ -4809,34 +4762,16 @@ describe("pollOnce — a ticket's next chunk", () => {
     };
   }
 
-  it("says the next piece is coming on the cycle a piece merged", async () => {
-    const store = newStore();
-    chunkOnReview(store, 1, 9);
-    const { adapter: base } = successionAdapter({ 9: "merged" });
-    const { adapter, upserts } = recording(base);
-    const { spawner } = fakeSpawner();
+  /**
+   * ✏ 29g — **retired with the model it tested.** It asserted the
+   * *"that's 1 of 2 done, next is X"* comment posted on a ticket each time
+   * one of its chunks merged. A merged step now says so on **its own**
+   * ticket, and how far the initiative has got is carried by the map
+   * ticket's standing note — kept up to date every cycle rather than
+   * appended once per merge, which is strictly more current. The step's own
+   * closing is asserted in 29e; the standing note's progress in 29f.
+   */
 
-    await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-      // A plain fixture directory, not a clone: the production default reads the
-      // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
-    });
-
-    const standing = upserts.join("\n");
-    expect(standing).toContain("**Piece 2 of 2 is next.**");
-    expect(standing).toContain(
-      "**What I need from you:** nothing right now — I'll start it on my next pass.",
-    );
-    // The line this replaces, named so a regression cannot hide behind the
-    // one above: the initiative is not finished, and the ticket must not say
-    // it is.
-    expect(standing).not.toContain("This one is finished.");
-  });
 
   it("keeps asking whether to carry on while the list of pieces is re-proposed", async () => {
     // 23f's permanent contradiction, driven through the loop that produced
@@ -6700,5 +6635,111 @@ describe("closing: the step, then the initiative", () => {
     });
 
     expect(closed).toEqual([3]);
+  });
+});
+
+/**
+ * R22 clause 6 under one step, one ticket — the queue is not starved.
+ *
+ * The old cover for this drove two chunks of one ticket and went with the
+ * chunk model in 29g. The guarantee did not go with it.
+ */
+describe("a bug filed during a step takes the project before the next step", () => {
+  const MAP = 7;
+
+  const aStep = (number: number, overrides: Partial<Step> = {}): Step => ({
+    number,
+    title: `${number - 50}. Piece ${number - 50}`,
+    state: "open",
+    labels: ["timone"],
+    assignees: [],
+    blockedBy: [],
+    dependenciesIncomplete: false,
+    ...overrides,
+  });
+
+  it("promotes the waiting bug, and opens the next step behind it", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 51,
+    });
+
+    // Step 51 is out for review; a bug was filed while it was building.
+    const { run } = store.register("alpha", 51);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/51-piece");
+    store.recordPullRequest(run.id, 90);
+    store.park(run.id, {
+      waitingOn: "your review of pull request #90",
+      kind: "review",
+      stage: "delivery",
+      waitCursor: "2026-08-02T10:00:00Z",
+    });
+    store.register("alpha", 8);
+
+    const steps = [aStep(51), aStep(52)];
+    const tickets = [
+      ticket(MAP, { labels: ["timone", MAP_LABEL] }),
+      ticket(51),
+      ticket(52),
+      ticket(8),
+    ];
+    const base = fakeAdapter({ alpha: tickets });
+    const spawned: string[] = [];
+    // The tracker answers honestly across the cycle: step 51 is **open** when
+    // the survey runs at the top of it, and closed only once the merge path
+    // has closed it. A fake that reported it closed from the start would let
+    // the frontier take step 52 in the very cycle the bug is promoted, and
+    // this test would be asserting a race that production does not have.
+    const closed = new Set<number>();
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async listSteps(): Promise<Step[]> {
+        return steps.map((s) => ({
+          ...s,
+          state: closed.has(s.number) ? "closed" : s.state,
+        }));
+      },
+      async applyLabel(): Promise<void> {},
+      async closeTicket(_project, number): Promise<void> {
+        closed.add(number);
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        return {
+          number: 90,
+          title: "the piece",
+          url: "https://github.com/fvermaut/scratch-app/pull/90",
+          state: "merged",
+          headSha: "abc",
+          comments: [],
+        };
+      },
+    };
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(run): Promise<void> {
+          spawned.push(run.id);
+        },
+      },
+    });
+
+    // The window: the step is finished, the bug holds the project, and no run
+    // exists for step 52 at all yet.
+    expect(store.get("alpha#51/1")?.status).toBe("done");
+    expect(store.get("alpha#8/1")?.status).toBe("picked-up");
+    expect(store.runsForTicket("alpha", 52)).toEqual([]);
+    // Asserted on the spawner, not on two log lines: the bug is the run a
+    // session was started for.
+    expect(spawned).toContain("alpha#8/1");
+    expect(spawned).not.toContain("alpha#52/1");
   });
 });
