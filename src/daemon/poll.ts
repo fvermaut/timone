@@ -1008,6 +1008,12 @@ async function releasePreview(
 interface Frontier {
   isStep(ticket: number): boolean;
   isNext(ticket: number): boolean;
+  /**
+   * A step that waits on another step which is still open — one the frontier
+   * passes over every cycle, and which must not be told it will be picked up
+   * on the next pass.
+   */
+  isBlocked(ticket: number): boolean;
 }
 
 /**
@@ -1035,6 +1041,7 @@ async function surveyInitiatives(
   const { store, adapter } = deps;
   const steps = new Set<number>();
   const next = new Set<number>();
+  const blocked = new Set<number>();
 
   for (const map of tickets.filter((t) => t.labels.includes(MAP_LABEL))) {
     let children: Step[];
@@ -1048,7 +1055,15 @@ async function surveyInitiatives(
       continue;
     }
 
-    for (const child of children) steps.add(child.number);
+    for (const child of children) {
+      steps.add(child.number);
+      if (
+        child.state === "open" &&
+        (child.dependenciesIncomplete || child.blockedBy.some((d) => d.open))
+      ) {
+        blocked.add(child.number);
+      }
+    }
     const eligible = nextStep(children);
     if (eligible !== undefined) next.add(eligible.number);
 
@@ -1067,6 +1082,7 @@ async function surveyInitiatives(
   return {
     isStep: (ticket) => steps.has(ticket),
     isNext: (ticket) => next.has(ticket),
+    isBlocked: (ticket) => blocked.has(ticket),
   };
 }
 
@@ -1204,7 +1220,16 @@ async function pollProject(
   // where its run stands *now*, and everything above is what moves it. A run
   // that resumed, failed or finished during this cycle says so on the same
   // cycle rather than a minute later.
-  await reconcileCtas(project, tickets, acknowledged, threads, deps, result, log);
+  await reconcileCtas(
+    project,
+    tickets,
+    acknowledged,
+    frontier,
+    threads,
+    deps,
+    result,
+    log,
+  );
 
   // And after it, on the tickets nothing above could see — where this project
   // has asked for that. Nothing in this call reaches the ledger's pickup path,
@@ -1398,6 +1423,7 @@ async function reconcileCtas(
   project: TicketingProject,
   tickets: readonly Ticket[],
   acknowledged: ReadonlySet<number>,
+  frontier: Frontier,
   threads: (ticket: number) => RunThreads,
   deps: PollDeps,
   result: PollResult,
@@ -1431,6 +1457,7 @@ async function reconcileCtas(
         ticket: ticket.number,
         run: chunks.at(-1),
         labels: ticket.labels,
+        blocked: frontier.isBlocked(ticket.number),
         misreadStep: misreadStep(chunks.at(-1), thread),
         progress:
           root === undefined

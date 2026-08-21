@@ -99,6 +99,20 @@ export interface TicketState {
    * posted.
    */
   misreadStep?: { named: string; kind: "unknown" | "unbuilt" };
+  /**
+   * Whether this ticket is a **step waiting on another step**, and so one the
+   * frontier will pass over every cycle
+   * ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)).
+   *
+   * Absent means *not known to be waiting*, which is the honest default: a
+   * chore, a bug, and every ticket that is nobody's step all sit here, and
+   * they are all things the machine really will pick up on its next pass.
+   *
+   * ✏ Added by phase 29's live gate, which found a step that waited on
+   * another announcing *"I'll pick this up on my next pass."* on its own
+   * ticket. It never would have.
+   */
+  blocked?: boolean;
 }
 
 /** What one open ticket is asking of the human. */
@@ -187,7 +201,22 @@ function betweenChunks(progress: InitiativeProgress | undefined): Cta | undefine
     };
   }
 
-  if (progress.next === undefined) return undefined;
+  if (progress.next === undefined) {
+    // **No *eligible* step is not the same as no step left**, and reading the
+    // first as the second is how an initiative with nothing built announced
+    // *"This one is finished."* on its own ticket — found by phase 29's live
+    // gate, on the thread it was opened to read. A step can be ineligible
+    // because the machine is holding it or because it waits on another, and
+    // in both cases the initiative is very much alive.
+    if (progress.done >= progress.total) return undefined;
+    return {
+      headline: `${progress.done} of ${progress.total} pieces are done, and none of the rest can start yet.`,
+      needFromYou:
+        "have a look at the pieces below — one of them is either stopped or " +
+        "waiting for another.",
+      waitingOnYou: true,
+    };
+  }
 
   return {
     headline: `${capitalize(piece(progress.next.index, progress.total))} is next.`,
@@ -213,6 +242,14 @@ export function ctaFor(state: TicketState): Cta {
   const { run, progress } = state;
 
   if (run === undefined) {
+    if (state.blocked === true) {
+      return {
+        headline: "This one is waiting for the piece before it.",
+        needFromYou:
+          "nothing — I'll start it as soon as the piece it waits for is done.",
+        waitingOnYou: false,
+      };
+    }
     return (state.labels ?? []).includes(MARK_LABEL)
       ? {
           headline: "I'll pick this up on my next pass.",

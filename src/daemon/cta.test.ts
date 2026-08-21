@@ -952,3 +952,67 @@ describe("a cancelled run on a ticket the machine is not holding", () => {
     expect(cta.needFromYou).toContain("start it afresh on my next pass");
   });
 });
+
+/**
+ * ✏ Found by phase 29's live gate, on the real thread it was opened to read.
+ *
+ * Two sentences on `scratch-app#45`'s initiative were false the moment the
+ * step tickets existed, and both are the kind a reader acts on.
+ */
+describe("what an initiative and its waiting steps say", () => {
+  const between = (done: number, next?: { index: number; title: string }) =>
+    ctaFor({
+      project: "scratch-app",
+      ticket: 45,
+      labels: ["timone", "timone:map"],
+      progress: { total: 3, done, ...(next === undefined ? {} : { next }) },
+      run: run({ project: "scratch-app", ticket: 45, status: "done" }),
+    });
+
+  /**
+   * The map said **"This one is finished."** with nothing built. No step was
+   * *eligible* — the first was held and the other two waited on it — and
+   * having no next piece was read as having no pieces left.
+   */
+  it("does not call an initiative finished when nothing has been built", () => {
+    const cta = between(0);
+
+    expect(cta.headline).not.toMatch(/finished/i);
+    expect(cta.headline).toContain("0 of 3");
+  });
+
+  it("still calls it finished when every piece really is done", () => {
+    expect(between(3).headline).toMatch(/finished/i);
+  });
+
+  it("names the next piece when there is one", () => {
+    expect(between(1, { index: 2, title: "Drag a row" }).headline).toMatch(
+      /piece 2 of 3/i,
+    );
+  });
+
+  /**
+   * And the waiting step said **"I'll pick this up on my next pass."** It
+   * will not: it waits on a step that is open, so the frontier passes over it
+   * every cycle. A ticket promising a pass that never comes is the thing
+   * ADR-0040 set out to end.
+   */
+  it("does not promise a pass to a step that is waiting on another", () => {
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 47,
+      labels: ["timone"],
+      blocked: true,
+    });
+
+    expect(cta.needFromYou).not.toMatch(/next pass/i);
+    expect(cta.headline).toMatch(/waiting|before/i);
+  });
+
+  it("still promises a pass to an unblocked ticket with no run", () => {
+    const cta = ctaFor({ project: "scratch-app", ticket: 46, labels: ["timone"] });
+
+    expect(cta.needFromYou).toMatch(/nothing/i);
+    expect(cta.headline).toMatch(/next pass/i);
+  });
+});
