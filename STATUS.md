@@ -1,8 +1,38 @@
+**The one-step-one-ticket work is built, it has been watched running, and now it needs twenty minutes of your reading.**
+
+You told me to stop the slow-page job so the new work could be tested on the to-do app. It ran. **It found four faults and all four are fixed** — that is what the test was for, and it cost about five dollars.
+
+**What to look at.** On the to-do app: [#45](https://github.com/fvermaut/scratch-app/issues/45) and the three tickets under it, [#46](https://github.com/fvermaut/scratch-app/issues/46), [#47](https://github.com/fvermaut/scratch-app/issues/47) and [#48](https://github.com/fvermaut/scratch-app/issues/48). They are made up — a test job about sorting your list — but the machinery is real.
+
+**The only question is whether you can follow what is going on by reading them.** That is the whole point of this change, and it is the one thing no test of mine can answer.
+
+Right now they say:
+
+- **#45** — *"0 of 3 pieces are done, and none of the rest can start yet."*
+- **#46** — *"I stopped work on this one, and I won't start it again by myself."* with the two ways to restart it.
+- **#47** — *"This one is waiting for the piece before it."*
+
+I stopped piece 1 on purpose so you can see what a stopped piece says.
+
+**Reply here, or on the tickets, with whether that reads clearly to you.** Nothing moves on its own.
+
+**The four faults, in short.** Two of them were hiding each other: the label the machine uses to hold a stopped piece had a description eleven characters too long for GitHub, so **no piece tickets were created at all** — and the main ticket's own job carried on regardless, spending nine minutes planning the whole thing on a ticket that is only meant to be a list of links. The other two were things it *said*: the main ticket announced *"This one is finished"* when nothing had been built, and a piece waiting its turn announced *"I'll pick this up on my next pass"* when it never would.
+
+**Two of those four I only found by reading what it wrote.** No test was ever going to object to a sentence that is false.
+
+**What was not tested.** I did not let the three pieces build all the way to finished — you chose to stop at the tickets. So **nothing has yet watched a piece close on its merge, or the main ticket close after the last one.** That part is written and checked by tests, and unwatched.
+
+**The slow-page job is where you left it.** [#4](https://github.com/fvermaut/scratch-app/issues/4) is stopped and its label is off, so it will not start again by itself. Everything it worked out is still on the ticket. To pick it up:
+
+```
+timone takeover scratch-app#4
+```
+
 # Timone — Status
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-21, evening.
+**Last updated:** 2026-08-21, late evening.
 
 ---
 
@@ -127,7 +157,9 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 
 **One mistake I made and caught.** Deleting the counting nearly took the approval gate with it — the check that stops the machine building a longer list than the one you agreed to. How far the work has got comes off the tickets, but *what you agreed to* can only come off the file you approved. For a few minutes a job whose list had grown said "this one is finished" instead of asking you. The tests caught it and the code now explains why the two must stay separate.
 
-1210 tests pass, up from 1138.
+**It was then watched running on the to-do app, and that is where four faults turned up** — see the top of this file. The two that mattered were hiding each other, and two more were sentences that were simply untrue. All four are fixed.
+
+1224 tests pass, up from 1138.
 
 
 **21 August — you settled the five decisions that were holding up one step, one ticket.** Written down in `doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md`. In short:
