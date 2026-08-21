@@ -44,7 +44,27 @@ timone retry scratch-app#13
 timone cancel scratch-app#10
 ```
 
-**The one-step-one-ticket work has started.** Five of its ten pieces are built, on the branch `phase-29-one-step-one-ticket`. Nothing here needs you for it.
+**The one-step-one-ticket work is built — all of it — and it now needs one thing from you.**
+
+Every piece of code is written and tested, on the branch `phase-29-one-step-one-ticket`. What is left is watching it work on the to-do app, and **that is blocked by something you already owe**: the to-do app is held by [#4](https://github.com/fvermaut/scratch-app/issues/4), the slow-page report, which has been waiting for you since 19 August. One job holds one project at a time — that is the trade you accepted on 16 August — so nothing else can start on that app until #4 moves.
+
+This is the first time that cost has actually been paid rather than argued about. What it blocked was this work's own test.
+
+**Either of these frees it:**
+
+```
+timone takeover scratch-app#4
+```
+
+That opens #4 in your terminal and is the thing you owe anyway — it has written up why the page drags and wants your answer on the numbers. Or, if you would rather not deal with it now:
+
+```
+timone cancel scratch-app#4
+```
+
+That throws away the job. **The ticket and everything it worked out stay** — only the job goes, and you can start it again later.
+
+Once the app is free the test takes one word from you and about a minute of machine time.
 
 **5. Nothing here is waiting on a decision any more.** On 21 August you ruled on all four questions that were blocking the one-step-one-ticket work, and on a fifth that came out of them. What you decided is under "What changed recently"; the reasons are written down in `doc/adr/0044-...`. All that plan needs now is item 1.
 
@@ -81,7 +101,7 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 
 ## What changed recently
 
-**21 August, evening — the machine now runs a job as a row of tickets instead of a count.** Five pieces of the one-step-one-ticket work are built. Nothing behaves differently yet — nothing calls them — but they are the two halves everything after them stands on.
+**21 August, evening — the machine now runs a job as a row of tickets instead of a count.** All ten pieces of the one-step-one-ticket work are built. Nothing behaves differently yet — nothing calls them — but they are the two halves everything after them stands on.
 
 - **The rule.** Given a job's steps, it picks the first that is open, not waiting on another, not held by the machine and not taken by you. Four conditions, and any one of them read on its own would let a step you stopped be picked up again.
 - **The reading.** It asks GitHub for a job's steps in one call — open and finished alike — with their labels, who has taken them and what they wait for.
@@ -101,7 +121,13 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 
 **`timone status` still answers instantly.** It reads a picture the machine writes down each minute rather than asking GitHub while you wait. The worst that picture can be is one minute out of date, and it is only used for what it says on screen — never for deciding anything.
 
-1201 tests pass, up from 1138.
+- **The showing.** `timone status` now tells you which step is live — *"#52 (step 2 of 3 of #7)"* — and, between two steps, that a job is alive and what is next. Nothing has ever shown you which step the machine thinks is next; the only way to see it was to run the code by hand.
+- **The stopping.** Four places used to promise *"I'll start it afresh on my next pass"* about work you had told it to drop. That was untrue. All four now say the same true thing: **remove the `timone:held` label and it starts afresh, or close the ticket and it carries on without it.**
+- **The counting is gone.** How far a job has got is now read off its tickets rather than counted from the machine's own records.
+
+**One mistake I made and caught.** Deleting the counting nearly took the approval gate with it — the check that stops the machine building a longer list than the one you agreed to. How far the work has got comes off the tickets, but *what you agreed to* can only come off the file you approved. For a few minutes a job whose list had grown said "this one is finished" instead of asking you. The tests caught it and the code now explains why the two must stay separate.
+
+1210 tests pass, up from 1138.
 
 
 **21 August — you settled the five decisions that were holding up one step, one ticket.** Written down in `doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md`. In short:
