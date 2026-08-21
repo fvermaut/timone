@@ -27,6 +27,10 @@ import { type Step } from "../adapters/ticketing.js";
  */
 export const HELD_LABEL = "timone:held";
 
+/** What the hold label says on the tracker, for whoever reads it there. */
+export const HELD_LABEL_DESCRIPTION =
+  "Timone stopped this step and will not take it up again — remove this label to hand it back";
+
 /**
  * The first step that is **open, unblocked, unheld and unclaimed**, or
  * `undefined` when there is none — which is the signal to close the

@@ -732,3 +732,142 @@ describe("listSteps", () => {
     expect(calls.every((c) => c.command === "gh")).toBe(true);
   });
 });
+
+describe("the writes that open an initiative's steps", () => {
+  it("creates a step as a child of its initiative, in one call", async () => {
+    const { run, calls } = fakeRunner(
+      "https://github.com/fvermaut/scratch-app/issues/51\n",
+    );
+
+    const number = await new GitHubTicketingAdapter({ run }).createStep(
+      alpha,
+      INITIATIVE,
+      { title: "The ledger learns steps", body: "does the thing" },
+    );
+
+    expect(number).toBe(51);
+    expect(calls[0].args).toEqual([
+      "issue",
+      "create",
+      "--repo",
+      "fvermaut/scratch-app",
+      "--title",
+      "The ledger learns steps",
+      "--body",
+      "does the thing",
+      "--label",
+      MARK_LABEL,
+      "--parent",
+      String(INITIATIVE),
+    ]);
+  });
+
+  /**
+   * A step is born carrying neither half of a claim. A step born held, or
+   * born assigned, is one the frontier never returns — and fourteen of them
+   * is an initiative that never starts.
+   */
+  it("creates a step carrying neither the hold label nor an assignee", async () => {
+    const { run, calls } = fakeRunner(
+      "https://github.com/fvermaut/scratch-app/issues/51\n",
+    );
+
+    await new GitHubTicketingAdapter({ run }).createStep(alpha, INITIATIVE, {
+      title: "The ledger learns steps",
+      body: "does the thing",
+    });
+
+    expect(calls[0].args).not.toContain("timone:held");
+    expect(calls[0].args).not.toContain("--assignee");
+  });
+
+  it("refuses a create whose answer is not an issue url", async () => {
+    const { run } = fakeRunner("something went sideways\n");
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).createStep(alpha, INITIATIVE, {
+        title: "The ledger learns steps",
+        body: "does the thing",
+      }),
+    ).rejects.toThrow(/issue url/i);
+  });
+
+  it("declares a dependency as the native relation", async () => {
+    const { run, calls } = fakeRunner("");
+
+    await new GitHubTicketingAdapter({ run }).blockStep(alpha, 52, 51);
+
+    expect(calls[0].args).toEqual([
+      "issue",
+      "edit",
+      "52",
+      "--repo",
+      "fvermaut/scratch-app",
+      "--add-blocked-by",
+      "51",
+    ]);
+  });
+
+  it("rewrites an initiative's body into the map of its steps", async () => {
+    const { run, calls } = fakeRunner("");
+
+    await new GitHubTicketingAdapter({ run }).setTicketBody(
+      alpha,
+      INITIATIVE,
+      "1. #51\n2. #52",
+    );
+
+    expect(calls[0].args).toEqual([
+      "issue",
+      "edit",
+      String(INITIATIVE),
+      "--repo",
+      "fvermaut/scratch-app",
+      "--body",
+      "1. #51\n2. #52",
+    ]);
+  });
+
+  it("creates the hold label when it is missing", async () => {
+    const { run, calls } = fakeRunner("");
+
+    await new GitHubTicketingAdapter({ run }).ensureLabel(
+      alpha,
+      "timone:held",
+      "Timone stopped this step and will not take it up again",
+    );
+
+    expect(calls[0].args.slice(0, 4)).toEqual([
+      "label",
+      "create",
+      "timone:held",
+      "--repo",
+    ]);
+  });
+
+  /**
+   * `gh label create` fails on a duplicate, and a label that already exists is
+   * the ordinary case on every run after the first. Swallowing that one
+   * failure is the create-or-ignore this slice's idempotence needs; any other
+   * failure still travels.
+   */
+  it("treats a label that already exists as done, not as a failure", async () => {
+    const run: CommandRunner = async () => {
+      throw new Error("failed to create label: already exists");
+    };
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).ensureLabel(alpha, "timone:held"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("lets any other label failure travel", async () => {
+    const run: CommandRunner = async () => {
+      throw new Error("HTTP 403: Resource not accessible by integration");
+    };
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).ensureLabel(alpha, "timone:held"),
+    ).rejects.toThrow(/403/);
+  });
+});

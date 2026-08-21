@@ -396,6 +396,99 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
       );
   }
 
+  async createStep(
+    project: TicketingProject,
+    initiative: number,
+    step: { title: string; body: string },
+  ): Promise<number> {
+    const slug = repoSlug(project.repoUrl);
+    const raw = await this.run("gh", [
+      "issue",
+      "create",
+      "--repo",
+      slug,
+      "--title",
+      step.title,
+      "--body",
+      step.body,
+      "--label",
+      this.markLabel,
+      // The parent in the same call as the create, so a step can never exist
+      // as an orphan: an initiative's children are found *by* their parent,
+      // and one that failed to be linked is invisible to the frontier while
+      // being perfectly visible to a human reading the tracker.
+      "--parent",
+      String(initiative),
+    ]);
+
+    const created = /\/issues\/(\d+)\s*$/.exec(raw.trim());
+    if (created === null) {
+      throw new Error(
+        `${slug}: opened a step for #${initiative} but could not read its ` +
+          `number from an answer that is not an issue url: ${raw.trim()}`,
+      );
+    }
+    return Number(created[1]);
+  }
+
+  async blockStep(
+    project: TicketingProject,
+    step: number,
+    waitsFor: number,
+  ): Promise<void> {
+    await this.run("gh", [
+      "issue",
+      "edit",
+      String(step),
+      "--repo",
+      repoSlug(project.repoUrl),
+      "--add-blocked-by",
+      String(waitsFor),
+    ]);
+  }
+
+  async setTicketBody(
+    project: TicketingProject,
+    number: number,
+    body: string,
+  ): Promise<void> {
+    await this.run("gh", [
+      "issue",
+      "edit",
+      String(number),
+      "--repo",
+      repoSlug(project.repoUrl),
+      "--body",
+      body,
+    ]);
+  }
+
+  async ensureLabel(
+    project: TicketingProject,
+    label: string,
+    description = "",
+  ): Promise<void> {
+    try {
+      await this.run("gh", [
+        "label",
+        "create",
+        label,
+        "--repo",
+        repoSlug(project.repoUrl),
+        "--description",
+        description,
+      ]);
+    } catch (error) {
+      // The label already being there is the ordinary case on every run after
+      // the first, and this method's whole promise is that it is one. Any
+      // other failure — no permission, no repository — still travels, because
+      // swallowing those would turn a claim that is never applied into
+      // silence, which is the failure mode this phase watches for.
+      const said = error instanceof Error ? error.message : String(error);
+      if (!/already exists/i.test(said)) throw error;
+    }
+  }
+
   async getTicket(
     project: TicketingProject,
     number: number,

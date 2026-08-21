@@ -357,6 +357,54 @@ export interface TicketingAdapter {
    */
   listSteps(project: TicketingProject, initiative: number): Promise<Step[]>;
 
+  /**
+   * Open one step ticket as a child of its initiative, and answer with its
+   * number.
+   *
+   * It is born carrying the mark and its parent, and **neither half of a
+   * claim** — no hold label, no assignee. A step born claimed is one the
+   * frontier never returns, and a whole initiative of them never starts.
+   */
+  createStep(
+    project: TicketingProject,
+    initiative: number,
+    step: { title: string; body: string },
+  ): Promise<number>;
+
+  /**
+   * Declare that one step waits for another, as GitHub's **native** relation
+   * and not as a line in a body
+   * ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+   * D6). The relation is what the frontier reads, and it is a thing fvermaut
+   * can add or remove himself on any GitHub screen.
+   */
+  blockStep(
+    project: TicketingProject,
+    step: number,
+    waitsFor: number,
+  ): Promise<void>;
+
+  /** Replace a ticket's body — how an initiative becomes a map of its steps. */
+  setTicketBody(
+    project: TicketingProject,
+    number: number,
+    body: string,
+  ): Promise<void>;
+
+  /**
+   * Make sure a label exists, creating it if it does not.
+   *
+   * A state label nobody created is a state nobody can be in — the reason
+   * `timone-wayfind` creates its own `wayfinder:*` labels on first use, and
+   * the reason the hold label cannot simply be applied and hoped for.
+   * **Creating one that already exists is the ordinary case**, not an error.
+   */
+  ensureLabel(
+    project: TicketingProject,
+    label: string,
+    description?: string,
+  ): Promise<void>;
+
   /** One ticket with its comment thread. */
   getTicket(project: TicketingProject, number: number): Promise<TicketThread>;
 
