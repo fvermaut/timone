@@ -2,23 +2,23 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-21.
+**Last updated:** 2026-08-21, afternoon.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** I was asked to build the one-step-one-ticket work and the container work, one after the other. **The container work started and three of its twelve pieces are built.** The one-step-one-ticket work **did not start** — reading the code against the plan first turned up four things only you could settle, and two of them would have broken something that works today. **You settled all four on 21 August, and a fifth that came out of them.** Both jobs now wait on one thing: item 1.
+> **Read this first.** You made the machine its own GitHub identity today, and you settled the five decisions that were blocking the one-step-one-ticket work. **The one-step-one-ticket plan is now waiting on nothing at all** — say the word and it gets built. The container work has three of its twelve pieces built and is waiting on one small thing from you, in item 1.
 
 **0. One thing changed that you will notice.** From now on, **the daemon will not start any job while there are uncommitted changes in the Timone folder**. It says which files, in the daemon's log. This is on purpose — every job has to follow one saved copy of the rules, and running rules you cannot see on screen is the confusion this prevents. But it is live *now*, before the container work that it was built for. So if you start the daemon and nothing happens, check the log and commit or undo your own edits first.
 
-**1. Make a GitHub account for Timone. This is now the only thing standing in the way of both jobs.** Create an account — any name you like — and invite it to `ivtrends` and `scratch-app`. About an hour, once.
+**1. The machine has its own identity now — one small thing left.** You made it: **Timone Agent**, which signs its work as `timone-agent[bot]`. It can reach only the repositories you picked, and the key it uses expires after an hour and opens **one** repository at a time. Two things were checked straight away and both worked: a test ticket it opened is signed by it and not by you, and a key made for the to-do app **cannot see the trading app at all** — not "refused", invisible.
 
-It used to block only the container work. On 21 August you decided that a step which the machine has stopped is held by **who it is assigned to**. That only works if the machine has its own name: on your account, *the machine is building this*, *the machine stopped and is waiting for you* and *you are looking at this yourself* all look the same, and the machine cannot tell them apart. So you moved the account ahead of the one-step-one-ticket work, and it now gates that too.
+**What is left is five minutes of reading.** The promise the whole container plan is measured against is still marked "awaiting your confirmation". It is in `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, called R23 — six short paragraphs. Read them and say yes, or say what is wrong. **Nine pieces of work sit behind it.**
 
-Today the machine has no account of its own. It borrows yours. That is why every comment it writes looks like you wrote it, and it is also why an agent working on one project can currently reach every repository you can. Its own account fixes both.
+**One thing you decided this morning turned out not to be possible, and it cost nothing.** You chose to have the machine hold a stopped step by **assigning it to itself**. GitHub does not allow a machine identity to be assigned to a ticket — I tested every way once the identity existed, and all of them refused. So it holds a step with a **label** instead, which was the other option you were offered. Everything else you decided stands, and it is actually simpler: to make it do a dropped step after all, you **remove the label** rather than unassign it.
 
-**And confirm the wording of the container promise, which takes five minutes.** It was written from your seven rulings and marked "awaiting your confirmation", and it is what the whole container plan is measured against. It is in `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, called R23 — six short paragraphs. Read them and say yes, or say what is wrong. Twelve pieces of work sit behind it.
+The hour you set aside for this took twenty minutes, and the reason you moved it to the front — the assigning — turned out not to need doing. No harm: the identity was needed anyway, and it is done.
 
 **2. The trading app's latest piece stopped, and it was not its fault.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) has delivered four pieces. The fifth stopped on a server error at the other end. It needs one command:
 
@@ -79,15 +79,15 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 
 - **A job belongs to the step, not to the ticket you filed.** So you will type `timone retry ivtrends#57` for a step, not `timone retry ivtrends#1`. **This changes item 2 above once the work ships** — not before.
 - **`timone cancel` throws the work away, as it always has.** The step stays open and the machine does not start it again. It writes on that ticket what your two ways out are.
-- **The machine holds a stopped step by assigning it to itself.** That is why the account in item 1 moved to the front.
-- **To make it do a dropped step after all, you unassign the ticket** and it starts it afresh. This is the only thing in the whole system with no command to type — it is a click on GitHub. Say the word if that grates and I will add a command.
+- ~~**The machine holds a stopped step by assigning it to itself.**~~ **Changed the same afternoon: it uses a label.** GitHub does not let a machine identity be assigned to a ticket — tested every way once the identity existed, and every one refused. The label was the other option you were offered, so nothing new was decided. It also means the identity was never needed for this job at all, and the one-step-one-ticket work waits on nothing.
+- **To make it do a dropped step after all, you remove the label** and it starts it afresh. This is the only thing in the whole system with no command to type — it is two clicks on GitHub, and removing a label is something you can do on any GitHub screen. Say the word if that grates and I will add a command.
 - **A step you throw away does not stop the job finishing.** It closes saying "thirteen of fourteen, step 7 dropped" rather than pretending all fourteen were built. It works out which is which by whether a pull request ever merged, so you never have to remember to close it a particular way.
 - **`timone status` stays instant.** It reads a picture the machine writes down each minute, rather than asking GitHub while you wait.
 - **A step says it waits for another using GitHub's own "blocked by".** If you type `Blocked by: #60` in a ticket instead, the machine will tell you it saw it and that it does not act on it — rather than ignoring you and building the thing early.
 
 Two of these correct the decision you took on 20 August rather than adding to it. It said to delete a piece of bookkeeping that turns out to be what makes `timone retry` work at all ([#51](https://github.com/fvermaut/timone/issues/51), now closed), and it said a cancelled step would simply be picked up again — which would have made `timone cancel` undo itself a minute later, while the command has printed *"I won't pick this chunk up again"* since the day it was built.
 
-**Nothing was built on any of this.** The plan is updated and waits on the account.
+**The identity is built and the plan is updated.** No code was written against any of it — the checks came first, which is why the assigning turned out to be impossible *before* two pieces of work were written against it rather than after.
 
 **20 August, late — three pieces of the box are built, and the other work stopped before it started.** The branch is `phase-30-work-in-a-box`, nothing is merged, and there is no pull request yet.
 
