@@ -8,7 +8,8 @@ import { breakdownPath, fromWorkingTree } from "../daemon/breakdown.js";
 import { ctaComment, ctaFor } from "../daemon/cta.js";
 import { checkoutOf, initiativeProgress, reclaimedReason } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
-import { runId, type Run } from "../daemon/runs.js";
+import {
+  type InitiativeRecord, runId, type Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
 
 /** Temp roots created by the current test, removed in afterEach. */
@@ -695,5 +696,122 @@ describe("renderStatus — one computation, two renderers", () => {
     expect(lastLine).toBe(
       "**What I need from you:** answer on scratch-app #6 — each ticket says what it needs.",
     );
+  });
+});
+
+/**
+ * 29f — which step is live, and how many are left.
+ *
+ * Nothing has ever *displayed* the step the daemon thinks is next. That is
+ * the one thing [timone#41](https://github.com/fvermaut/timone/issues/41) was
+ * right about even though its defect was not real: the only way to see the
+ * pointer was to run the function by hand, so a wrong one would stay
+ * invisible after this whole phase.
+ *
+ * **The render stays synchronous and holds no adapter.** Everything below
+ * comes off the ledger — the run's own ticket *is* the live step, and the
+ * picture beside it was written by the daemon's last cycle (ADR-0044 D5).
+ */
+describe("which step of an initiative is live", () => {
+  const picture = (
+    overrides: Partial<InitiativeRecord> = {},
+  ): InitiativeRecord => ({
+    project: "scratch-app",
+    initiative: 7,
+    title: "the lists could be smarter",
+    steps: [51, 52, 53],
+    done: 1,
+    next: 52,
+    nextTitle: "2. The board",
+    at: "2026-08-02T10:00:00Z",
+    ...overrides,
+  });
+
+  const pictures =
+    (record: InitiativeRecord) =>
+    (project: string): readonly InitiativeRecord[] =>
+      record.project === project ? [record] : [];
+
+  /** (1) A live step names itself, its initiative, and how far along it is. */
+  it("names the live step, its initiative and how many there are", () => {
+    const runs = [
+      run({ project: "scratch-app", ticket: 52, status: "active", stage: "planning" }),
+    ];
+
+    const line = lineFor(
+      renderStatus(manifest, runs, {
+        stateExists: true,
+        pictures: pictures(picture()),
+      }),
+      "scratch-app",
+    );
+
+    expect(line).toContain("#52");
+    expect(line).toContain("step 2 of 3");
+    expect(line).toContain("#7");
+  });
+
+  /**
+   * (2) Between steps: nothing is running, and the reader still wants to know
+   * the initiative is alive and what comes next. Without this the line reads
+   * `idle`, which is true of the project and false of the work.
+   */
+  it("says what is next when an initiative is between steps", () => {
+    const line = lineFor(
+      renderStatus(manifest, [], {
+        stateExists: true,
+        pictures: pictures(picture()),
+      }),
+      "scratch-app",
+    );
+
+    expect(line).not.toMatch(/^scratch-app\s+idle/);
+    expect(line).toContain("#7");
+    expect(line).toContain("1 of 3");
+    expect(line).toContain("2. The board");
+  });
+
+  /** An initiative with no eligible step says so rather than inventing one. */
+  it("says an initiative is waiting when no step is eligible", () => {
+    const line = lineFor(
+      renderStatus(manifest, [], {
+        stateExists: true,
+        pictures: pictures(picture({ done: 1, next: undefined, nextTitle: undefined })),
+      }),
+      "scratch-app",
+    );
+
+    expect(line).toContain("#7");
+    expect(line).toContain("nothing to take");
+  });
+
+  /** An initiative whose steps are all closed is finished, and says nothing. */
+  it("says nothing about an initiative whose steps are all done", () => {
+    const line = lineFor(
+      renderStatus(manifest, [], {
+        stateExists: true,
+        pictures: pictures(
+          picture({ done: 3, next: undefined, nextTitle: undefined }),
+        ),
+      }),
+      "scratch-app",
+    );
+
+    expect(line).toMatch(/idle/i);
+  });
+
+  /** A project with no picture at all reads exactly as it always did. */
+  it("leaves a project with no initiative reading as before", () => {
+    const runs = [
+      run({ project: "scratch-app", ticket: 7, status: "active", stage: "triage" }),
+    ];
+
+    const line = lineFor(
+      renderStatus(manifest, runs, { stateExists: true }),
+      "scratch-app",
+    );
+
+    expect(line).toContain("#7");
+    expect(line).not.toContain("step");
   });
 });

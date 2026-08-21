@@ -44,7 +44,7 @@ export interface RenderStatusOptions {
    * **Absent means say what you said before**, which is what a fixture wants
    * and what a ledger written by an older daemon gives.
    */
-  pictures?: (project: string, ticket: number) => InitiativeRecord | undefined;
+  pictures?: (project: string) => readonly InitiativeRecord[];
   /** Now, for saying how long a running session has been going. */
   now?: Date;
   /**
@@ -84,6 +84,8 @@ interface RenderContext {
   now?: Date;
   /** Where this run's ticket's initiative stands, resolved once per ticket. */
   progressOf: (run: Run) => InitiativeProgress | undefined;
+  /** Every initiative of a project the daemon has a picture of. */
+  initiativesOf: (project: string) => readonly InitiativeRecord[];
 }
 
 /**
@@ -193,6 +195,7 @@ function describeWait(run: Run, context: RenderContext): string {
 /** One run's phrase: the ticket, how far it got, and what it is doing. */
 function describeRun(run: Run, context: RenderContext): string {
   const now = context.now;
+  const where = stepOf(run, context);
   const stage =
     run.stage === undefined ? "" : ` (${stageLabel(run.stage)})`;
   // The model is named for a working run only: it answers "what is this
@@ -214,7 +217,47 @@ function describeRun(run: Run, context: RenderContext): string {
       ? ""
       : ` ⚠ ${run.flags.length} automatic check(s) failed — see the ticket`;
 
-  return `#${run.ticket}${stage} — ${what}${flags}`;
+  return `#${run.ticket}${where}${stage} — ${what}${flags}`;
+}
+
+/**
+ * Where a run's ticket sits in its initiative — ` (step 2 of 3 of #7)` — or
+ * nothing at all for a ticket in no initiative.
+ *
+ * **This is the thing nothing has ever displayed.** The daemon has always had
+ * an opinion about which piece comes next and there has never been a way to
+ * see it, which is why a wrong one could go unnoticed for a day
+ * ([timone#41](https://github.com/fvermaut/timone/issues/41)).
+ */
+function stepOf(run: Run, context: RenderContext): string {
+  const picture = context
+    .initiativesOf(run.project)
+    .find((record) => record.steps.includes(run.ticket));
+  if (picture === undefined) return "";
+
+  const position = picture.steps.indexOf(run.ticket) + 1;
+  return ` (step ${position} of ${picture.steps.length} of #${picture.initiative})`;
+}
+
+/**
+ * What an initiative with no run of its own is doing — the gap between two
+ * steps, when the last one has merged and the next has not been taken up.
+ *
+ * Without it the project's line reads `idle`, which is true of the project and
+ * false of the work: a fourteen-step initiative is alive for the whole minute
+ * between every pair of pieces, and a reader told `idle` fourteen times would
+ * be right to conclude nothing was happening.
+ *
+ * **An initiative every one of whose steps is closed says nothing**, because
+ * it is finished rather than waiting.
+ */
+function describeInitiative(picture: InitiativeRecord): string | undefined {
+  if (picture.done >= picture.steps.length) return undefined;
+
+  const where = `#${picture.initiative} — ${picture.done} of ${picture.steps.length} done`;
+  return picture.next === undefined || picture.nextTitle === undefined
+    ? `${where}, nothing to take up yet`
+    : `${where}, next is ${picture.nextTitle}`;
 }
 
 /**
@@ -237,6 +280,17 @@ function describeProject(
   const queued = mine.filter((run) => run.status === "queued");
 
   const parts = [...running, ...parked].map((run) => describeRun(run, context));
+
+  // An initiative whose live step already has a run above is not named again:
+  // that run's own phrase says where it is. This is for the initiatives with
+  // no run at all — the gap between two steps.
+  const busy = new Set(mine.map((one) => one.ticket));
+  for (const picture of context.initiativesOf(project)) {
+    if (picture.steps.some((step) => busy.has(step))) continue;
+    const said = describeInitiative(picture);
+    if (said !== undefined) parts.push(said);
+  }
+
   if (parts.length === 0) parts.push("idle");
 
   if (queued.length > 0) {
@@ -269,11 +323,15 @@ export function renderStatus(
   // once however many of its runs and closing lines mention it.
   const context: RenderContext = {
     now: options.now,
+    initiativesOf: (project) => options.pictures?.(project) ?? [],
     progressOf: progressReader(
       runs,
       options.root,
       options.breakdownSource,
-      options.pictures ?? (() => undefined),
+      (project, ticket) =>
+        (options.pictures?.(project) ?? []).find((record) =>
+          record.steps.includes(ticket),
+        ),
     ),
   };
 
@@ -385,7 +443,7 @@ export function registerStatusCommand(program: Command): void {
           stateExists,
           now: new Date(),
           root: process.cwd(),
-          pictures: (project, ticket) => store.initiativeFor(project, ticket),
+          pictures: (project) => store.initiativesFor(project),
         }),
       );
     });

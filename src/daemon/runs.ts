@@ -1136,6 +1136,18 @@ export class RunStore {
     );
   }
 
+  /**
+   * Every initiative of `project` the daemon has a picture of, oldest ticket
+   * first — what `timone status` needs to say that an initiative is alive
+   * between two of its steps, when no run exists to hang the line on.
+   */
+  initiativesFor(project: string): InitiativeRecord[] {
+    this.refresh();
+    return Object.values(this.state.initiatives ?? {})
+      .filter((record) => record.project === project)
+      .sort((a, b) => a.initiative - b.initiative);
+  }
+
   introducedAt(project: string, ticket: number): string | undefined {
     this.refresh();
     return this.state.introductions?.[introductionKey(project, ticket)]?.at;
