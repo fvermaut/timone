@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { HELD_LABEL } from "./steps.js";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
@@ -923,8 +924,8 @@ export class RunStore {
           : `: ${run.cancellation}.`;
       throw new Error(
         `${run.project} #${run.ticket} was cancelled${because} Cancelled work ` +
-          "isn't retried — reopen the ticket and mark it for me, and I'll " +
-          "start it afresh on my next pass.",
+          `isn't retried — remove the \`${HELD_LABEL}\` label from the ticket ` +
+          "and I'll start it afresh, or close it and I'll carry on without it.",
       );
     }
     if (run.status !== "failed") {

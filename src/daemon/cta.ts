@@ -14,6 +14,7 @@
  * needs is a question about state, not about the tracker.
  */
 import { MARK_LABEL } from "../adapters/ticketing.js";
+import { HELD_LABEL } from "./steps.js";
 import { takeoverCommand } from "../channels/terminal.js";
 import { technicalFault } from "./faults.js";
 import { type Run } from "./runs.js";
@@ -112,7 +113,18 @@ export interface Cta {
    *
    * A run that stopped early needs the human too, and this is false for it:
    * what it needs is a command rather than an answer, and `timone status`
-   * reports that in its own sentence beside {@link Cta.command}. The two
+   * reports that in its own sentence beside {@link Cta.command}.
+   *
+   * **✏ 29j — a *dropped* step needs the human and is still false here**, and
+   * the reason is worth writing down because the opposite looks right. Its
+   * two ways on are gestures on the tracker rather than a command, so there
+   * is nothing to report beside {@link Cta.command} either — which reads like
+   * an argument for setting this true. It is not: `timone status` lists every
+   * cancelled run with its reason regardless, so the step is never invisible;
+   * and the daemon cancels a run when its ticket is **closed**, so true would
+   * ask the human to act on a ticket that is already shut.
+   *
+   * The two
    * fields are independent facts about one CTA — who is being waited on, and
    * whether anything they can type moves it.
    */
@@ -273,15 +285,43 @@ export function ctaFor(state: TicketState): Cta {
   }
 
   if (run.status === "cancelled") {
-    // Abandoned, not broken — so no retry command, which `RunStore.retry`
-    // would refuse anyway. What it says instead is the truth about what
-    // happens next: cancelling settles the chunk (ADR-0029), so a ticket that
-    // is still open and marked simply takes a fresh one on the next cycle.
+    // ✏ 29j: **the work is dropped, and it stays dropped.** This branch used
+    // to promise *"while this ticket is open and marked for me I'll start it
+    // afresh on my next pass"*, on the strength of ADR-0029: cancelling
+    // settled the chunk, and an open marked ticket simply took a fresh one.
+    // Both halves are false now. `timone cancel` **drops** the work
+    // ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+    // D2), and the `timone:held` label the machine leaves behind is exactly
+    // what keeps the frontier off the step (D3). A ticket told to wait for a
+    // pass that never comes sits open for ever, which is the failure ADR-0040
+    // set out to end.
+    //
+    // **Both ways on, and the label is named rather than described.** A
+    // reader who has to look up what "the hold" is cannot act on the sentence
+    // in front of them. **Neither way is a `timone` command** — one is
+    // removing a label, the other is closing the ticket, and both are two
+    // clicks in any GitHub view (D7) — so there is no `command` to print, and
+    // reaching for `timone retry` here would name a command the ledger
+    // refuses outright.
+    //
+    // **`waitingOnYou` stays false**, as {@link Cta.waitingOnYou}'s own
+    // docblock says it must, and the slice that wrote this branch tried true
+    // first on the argument that a dropped step would otherwise appear on no
+    // terminal surface. **That argument is false**: `timone status` lists
+    // every cancelled run with its reason, unconditionally
+    // (`status.ts`'s `cancelled` block), so the step is visible either way.
+    // And true is worse than merely unnecessary — the daemon cancels a run
+    // when its ticket is **closed** (`poll.ts`'s `no longer open and marked`),
+    // and the flag would then put *"answer on scratch-app #6"* in front of a
+    // human whose ticket is already shut.
+    //
+    // The two ways on are carried where they can be acted on: this call to
+    // action, on the ticket, which exists only while the ticket is open.
     return {
-      headline: "I stopped work on this one.",
+      headline: "I stopped work on this one, and I won't start it again by myself.",
       needFromYou:
-        "nothing — while this ticket is open and marked for me I'll start it " +
-        "afresh on my next pass.",
+        `either remove the \`${HELD_LABEL}\` label and I'll start it afresh, ` +
+        "or close this ticket and I'll carry on without it.",
       waitingOnYou: false,
     };
   }

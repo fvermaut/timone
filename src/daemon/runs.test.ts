@@ -1252,8 +1252,9 @@ describe("cancelling a run", () => {
 
     expect(() => store.retry(run.id)).toThrow(
       "scratch-app #7 was cancelled: its ticket is no longer open and marked. " +
-        "Cancelled work isn't retried — reopen the ticket and mark it for me, " +
-        "and I'll start it afresh on my next pass.",
+        "Cancelled work isn't retried — remove the `timone:held` label from " +
+        "the ticket and I'll start it afresh, or close it and I'll carry on " +
+        "without it.",
     );
   });
 
@@ -1263,8 +1264,9 @@ describe("cancelling a run", () => {
     store.cancel(run.id, "");
 
     expect(() => store.retry(run.id)).toThrow(
-      "scratch-app #7 was cancelled. Cancelled work isn't retried — reopen the " +
-        "ticket and mark it for me, and I'll start it afresh on my next pass.",
+      "scratch-app #7 was cancelled. Cancelled work isn't retried — remove " +
+        "the `timone:held` label from the ticket and I'll start it afresh, " +
+        "or close it and I'll carry on without it.",
     );
   });
 

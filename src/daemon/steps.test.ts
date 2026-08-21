@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { type Dependency, type Step } from "../adapters/ticketing.js";
-import { HELD_LABEL, nextStep } from "./steps.js";
+import { HELD_LABEL, HELD_LABEL_DESCRIPTION, nextStep } from "./steps.js";
 
 /**
  * A step ticket as the frontier sees it, with the free shape as its default:
@@ -104,5 +104,25 @@ describe("nextStep", () => {
     const steps = [step(11, { dependenciesIncomplete: true }), step(12)];
 
     expect(nextStep(steps)?.number).toBe(12);
+  });
+});
+
+/**
+ * 29j — the four sentences that tell a human how to hand a dropped step back
+ * all name the label, and all name it from **one** constant.
+ *
+ * 29a promises the label is "trivially renamed by one constant if he dislikes
+ * it". Four hand-typed copies of the string in four user-facing sentences is
+ * what quietly breaks that promise: the constant changes, the code compiles,
+ * and every surface goes on telling the human to remove a label that no
+ * longer exists.
+ */
+describe("the hold label is named from one place", () => {
+  it("is spelled out for the reader rather than described", () => {
+    expect(HELD_LABEL).toBe("timone:held");
+  });
+
+  it("says what removing it does, for whoever reads it on the tracker", () => {
+    expect(HELD_LABEL_DESCRIPTION).toContain("remove");
   });
 });

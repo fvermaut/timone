@@ -342,7 +342,10 @@ describe("resolveTakeover", () => {
       resolution.kind === "converse" || resolution.kind === "escalation"
         ? ""
         : resolution.message;
-    expect(said).toMatch(/mark it for me/);
+    // ✏ 29j: the way out is removing the hold label, not re-marking the
+    // ticket — the mark never came off, and the label is what holds the step.
+    expect(said).toMatch(/timone:held/);
+    expect(said).toMatch(/close it/);
     expect(said).not.toMatch(/parked|failed|stopped early|scratch-app#4/);
   });
 

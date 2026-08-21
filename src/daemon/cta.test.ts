@@ -108,10 +108,17 @@ describe("ctaFor", () => {
     );
   });
 
-  it("asks for nothing from a ticket whose chunk was abandoned", () => {
-    // A cancelled chunk was abandoned rather than broken, so this must not
-    // read like the failure above it: no retry command, because retry refuses
-    // a cancelled run outright.
+  /**
+   * ✏ 29j — **this test used to pin a promise the machine no longer keeps.**
+   * It asserted *"nothing — while this ticket is open and marked for me I'll
+   * start it afresh on my next pass."* Both halves are false under
+   * [ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md):
+   * `timone cancel` **drops** the work, and the `timone:held` label left on
+   * the ticket is exactly what keeps the frontier off it. A step told to wait
+   * for a pass that never comes is a ticket that sits open for ever, which is
+   * the failure ADR-0040 set out to end.
+   */
+  it("tells a dropped step both ways out of being dropped", () => {
     const cta = ctaFor({
       project: "scratch-app",
       ticket: 13,
@@ -124,12 +131,112 @@ describe("ctaFor", () => {
       }),
     });
 
-    expect(cta.headline).toBe("I stopped work on this one.");
+    expect(cta.headline).toBe("I stopped work on this one, and I won't start it again by myself.");
     expect(cta.needFromYou).toBe(
-      "nothing — while this ticket is open and marked for me I'll start it afresh on my next pass.",
+      "either remove the `timone:held` label and I'll start it afresh, or " +
+        "close this ticket and I'll carry on without it.",
     );
-    expect(cta.waitingOnYou).toBe(false);
+  });
+
+  /**
+   * Both ways on, asserted separately. A call to action that offers one of
+   * two is precisely the failure this slice exists to prevent — and the
+   * label is named rather than described, because a reader who has to look
+   * up what "the hold" is cannot act on the sentence they are reading.
+   */
+  it("names the label to remove, not the idea of releasing a hold", () => {
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 13,
+      run: run({ project: "scratch-app", ticket: 13, status: "cancelled" }),
+    });
+
+    expect(cta.needFromYou).toContain("timone:held");
+    expect(cta.needFromYou).toContain("close this ticket");
+    expect(cta.needFromYou).not.toContain("unassign");
+  });
+
+  /**
+   * Neither way on is a `timone` command, so there is none to print. A slice
+   * that reached for `timone retry <project>#<step>` here would be naming a
+   * command the ledger refuses outright — that is blocker G, and D7 is why
+   * this is the answer instead.
+   */
+  it("offers no command, because neither way out is one", () => {
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 13,
+      run: run({ project: "scratch-app", ticket: 13, status: "cancelled" }),
+    });
+
     expect(cta.command).toBeUndefined();
+  });
+
+  /**
+   * `waitingOnYou` is **false**, and this is the one small choice the slice
+   * owed — pinned here rather than left to whatever the branch returns.
+   *
+   * True looks right: both ways on are gestures rather than commands, so
+   * nothing prints beside `Cta.command` either. It is wrong twice over.
+   * `timone status` lists every cancelled run with its reason regardless, so
+   * a dropped step is never invisible; and the **daemon** cancels a run when
+   * its ticket is closed, so true would put "answer on scratch-app #6" in
+   * front of a human whose ticket is already shut.
+   */
+  it("does not count a dropped step as waiting for an answer", () => {
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 13,
+      run: run({ project: "scratch-app", ticket: 13, status: "cancelled" }),
+    });
+
+    expect(cta.waitingOnYou).toBe(false);
+  });
+
+  /**
+   * The neighbouring branches, one assertion each. Branch order in `ctaFor`
+   * is the only thing keeping them apart from the one above.
+   */
+  it("leaves a failed run saying it failed, with its own retry command", () => {
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 13,
+      run: run({
+        project: "scratch-app",
+        ticket: 13,
+        status: "failed",
+        failure: "the session died",
+      }),
+    });
+
+    expect(cta.needFromYou).not.toContain("timone:held");
+    expect(cta.command).toBe("timone retry scratch-app#13");
+  });
+
+  it("leaves a run under way saying it is under way", () => {
+    const cta = ctaFor({
+      project: "scratch-app",
+      ticket: 13,
+      run: run({ project: "scratch-app", ticket: 13, status: "active", stage: "planning" }),
+    });
+
+    expect(cta.needFromYou).not.toContain("timone:held");
+  });
+
+  /**
+   * Idempotence comes free and is asserted rather than rebuilt: the same
+   * state in gives a byte-identical body out, so `saysTheSame` skips the
+   * write and `upsertComment` edits rather than appends. No adapter is
+   * constructed here — the upsert itself is the adapter's own test.
+   */
+  it("renders byte for byte the same twice, so a cycle posts nothing new", () => {
+    const state = {
+      project: "scratch-app",
+      ticket: 13,
+      run: run({ project: "scratch-app", ticket: 13, status: "cancelled" }),
+    };
+
+    expect(ctaComment(ctaFor(state))).toBe(ctaComment(ctaFor(state)));
   });
 
   it("names the exact takeover command for a ticket waiting on a conversation", () => {

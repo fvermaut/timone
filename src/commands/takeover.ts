@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { HELD_LABEL } from "../daemon/steps.js";
 import { resolve } from "node:path";
 import type { Command } from "commander";
 
@@ -187,8 +188,9 @@ export async function resolveTakeover(
         kind: "nothing-to-do",
         message:
           `${target.project} #${target.ticket} was cancelled${because} ` +
-          "Cancelled work isn't picked up again — reopen the ticket and mark " +
-          "it for me, and I'll start it afresh on my next pass.",
+          `Cancelled work isn't picked up again — remove the \`${HELD_LABEL}\` ` +
+          "label from the ticket and I'll start it afresh, or close it and " +
+          "I'll carry on without it.",
       };
     }
     case "parked":
