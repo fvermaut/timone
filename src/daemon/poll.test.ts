@@ -6477,3 +6477,228 @@ describe("where a step's run enters the pipeline", () => {
     expect(seen[0]?.context).toBeUndefined();
   });
 });
+
+/**
+ * 29e — a merged pull request closes **its step**, and only the last one
+ * closes the initiative.
+ *
+ * Under one step, one ticket the run's ticket *is* the step, so the merge
+ * path's old act — close `run.ticket` and say the initiative is finished —
+ * would close the step while announcing the whole initiative on it.
+ */
+describe("closing: the step, then the initiative", () => {
+  const MAP = 7;
+
+  const step = (number: number, overrides: Partial<Step> = {}): Step => ({
+    number,
+    title: `${number - 50}. Piece ${number - 50}`,
+    state: "open",
+    labels: ["timone"],
+    assignees: [],
+    blockedBy: [],
+    dependenciesIncomplete: false,
+    ...overrides,
+  });
+
+  /**
+   * A cycle in which `live`'s pull request has merged. `steps` is what the
+   * tracker answers *after* that step is closed, which is what the closing
+   * path reads.
+   */
+  async function mergeCycle(
+    store: RunStore,
+    live: number,
+    pr: number,
+    steps: Step[],
+  ): Promise<{ closed: number[]; comments: PostedComment[] }> {
+    const closed: number[] = [];
+    const comments: PostedComment[] = [];
+    const tickets = [
+      ticket(MAP, { labels: ["timone", MAP_LABEL] }),
+      ...steps.map((s) => ticket(s.number, { title: s.title, labels: s.labels })),
+    ];
+    const base = fakeAdapter({ alpha: tickets });
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async listSteps(): Promise<Step[]> {
+        return steps.map((s) => ({
+          ...s,
+          state: s.number === live ? "closed" : s.state,
+        }));
+      },
+      async applyLabel(): Promise<void> {},
+      async postComment(project, number, body): Promise<void> {
+        comments.push({ project: project.name, number, body });
+      },
+      async closeTicket(_project, number): Promise<void> {
+        closed.push(number);
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        return {
+          number: pr,
+          title: "the piece",
+          url: `https://github.com/fvermaut/scratch-app/pull/${pr}`,
+          state: "merged",
+          headSha: "abc",
+          comments: [],
+        };
+      },
+    };
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: { async spawn(): Promise<void> {} },
+    });
+    return { closed, comments };
+  }
+
+  /** Puts `step` into the ledger as a delivered run whose PR is `pr`. */
+  function delivered(store: RunStore, step: number, pr: number): void {
+    const { run } = store.register("alpha", step);
+    store.activate(run.id, `session-${step}`);
+    store.claimBranch(run.id, `timone/${step}-piece`);
+    store.recordPullRequest(run.id, pr);
+    store.park(run.id, {
+      waitingOn: `your review of pull request #${pr}`,
+      kind: "review",
+      stage: "delivery",
+      waitCursor: "2026-08-02T10:00:00Z",
+    });
+  }
+
+  /** (1) A merge closes the step, and leaves the initiative open. */
+  it("closes the step and not the initiative when another step is open", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 51,
+    });
+    delivered(store, 51, 90);
+
+    const { closed, comments } = await mergeCycle(store, 51, 90, [
+      step(51),
+      step(52),
+    ]);
+
+    expect(closed).toContain(51);
+    expect(closed).not.toContain(MAP);
+    // And it says the right thing on the right ticket. The old closing put
+    // the *initiative's* words — "this ticket's journey ends here" — on the
+    // step, which closes the same ticket and tells the human the whole thing
+    // is over. That is the half of this case that discriminates.
+    const said = comments.find((comment) => comment.number === 51)?.body ?? "";
+    expect(said).toContain("this step is done");
+    expect(said).not.toContain("journey ends here");
+  });
+
+  /** (2) The last merge closes both. */
+  it("closes the initiative when its last step closes", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51],
+      done: 0,
+      next: 51,
+    });
+    delivered(store, 51, 90);
+
+    const { closed } = await mergeCycle(store, 51, 90, [step(51)]);
+
+    expect(closed).toContain(51);
+    expect(closed).toContain(MAP);
+  });
+
+  /**
+   * (3) File order is not doneness. The merged step is last in the list and
+   * an earlier one is still open, so the initiative stays open.
+   */
+  it("does not close the initiative when an earlier step is still open", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 52,
+    });
+    delivered(store, 52, 91);
+
+    const { closed } = await mergeCycle(store, 52, 91, [step(51), step(52)]);
+
+    expect(closed).toContain(52);
+    expect(closed).not.toContain(MAP);
+  });
+
+  /**
+   * (4) A dropped step does not stop the initiative closing, and the closing
+   * comment says what was actually delivered. An initiative that refuses to
+   * close because one step was abandoned is a thread that never ends.
+   */
+  it("closes with the count delivered when a step was dropped", async () => {
+    const store = newStore();
+    store.rememberInitiative({
+      project: "alpha",
+      initiative: MAP,
+      title: "the lists could be smarter",
+      steps: [51, 52],
+      done: 0,
+      next: 52,
+    });
+    // 51 was dropped: a run that was cancelled, and no pull request.
+    const dropped = store.register("alpha", 51).run;
+    store.cancel(dropped.id, "not worth doing after all");
+    delivered(store, 52, 91);
+
+    const { closed, comments } = await mergeCycle(store, 52, 91, [
+      step(51, { state: "closed" }),
+      step(52),
+    ]);
+
+    expect(closed).toContain(MAP);
+    const closing = comments.find((comment) => comment.number === MAP)?.body ?? "";
+    expect(closing).toContain("1 of 2");
+    expect(closing.toLowerCase()).toContain("dropped");
+  });
+
+  /** A ticket in no initiative closes exactly as it always did. */
+  it("leaves an ordinary ticket's closing untouched", async () => {
+    const store = newStore();
+    delivered(store, 3, 92);
+    const closed: number[] = [];
+    const base = fakeAdapter({ alpha: [ticket(3)] });
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async closeTicket(_project, number): Promise<void> {
+        closed.push(number);
+      },
+      async getPullRequestThread(): Promise<PullRequestThread> {
+        return {
+          number: 92,
+          title: "the work",
+          url: "https://github.com/fvermaut/scratch-app/pull/92",
+          state: "merged",
+          headSha: "abc",
+          comments: [],
+        };
+      },
+    };
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: { async spawn(): Promise<void> {} },
+    });
+
+    expect(closed).toEqual([3]);
+  });
+});

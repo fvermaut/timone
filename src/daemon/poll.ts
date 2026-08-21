@@ -246,6 +246,66 @@ export function mergedComment(prs: readonly number[]): string {
 }
 
 /**
+ * The comment posted on a **step** when its pull request merged.
+ *
+ * Short, because the step's ticket is not where the initiative is discussed:
+ * the map ticket carries that, and this one carries a single piece of work
+ * that is now finished.
+ */
+export function stepMergedComment(pr: number): string {
+  return [
+    "**Merged — this step is done.**",
+    "",
+    `Pull request #${pr} went in. This step's ticket ends here; the rest of`,
+    "the work carries on under the main ticket.",
+    "",
+    "**What I need from you:** nothing.",
+  ].join("\n");
+}
+
+/**
+ * The comment that closes an **initiative**, once no step of it is open.
+ *
+ * **It states what was actually delivered, never what was planned.** A step
+ * can be closed because it was *dropped* — cancelled, then closed by a human
+ * who moved on — and an initiative that refused to close over one abandoned
+ * step would be a thread that never ends, which is the failure ADR-0040
+ * exists to fix
+ * ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
+ * D4).
+ *
+ * **Built versus dropped is inferred and never asked.** One fact decides it:
+ * a step whose run delivered a merged pull request was built, and a step
+ * closed without one was dropped. No label, no comment convention, and
+ * nothing the human has to remember to do — the tempting alternatives all put
+ * a gesture between them and a thread that should simply finish.
+ */
+export function initiativeClosedComment(
+  built: readonly number[],
+  dropped: readonly number[],
+  prs: readonly number[],
+): string {
+  const total = built.length + dropped.length;
+  const opening =
+    dropped.length === 0
+      ? `All ${total} pieces were built.`
+      : `${built.length} of ${total} pieces were built — ` +
+        `${dropped.length === 1 ? "one was" : `${dropped.length} were`} ` +
+        `dropped: ${listOf(dropped.map((step) => step))}.`;
+
+  return [
+    "**Done — this ticket is finished.**",
+    "",
+    opening,
+    prs.length === 0
+      ? "Nothing was merged for it."
+      : `The work went in with pull ${prs.length === 1 ? "request" : "requests"} ${listOf(prs)}.`,
+    "",
+    "**What I need from you:** nothing — file a new ticket for anything else.",
+  ].join("\n");
+}
+
+/**
  * The comment posted when a piece merged and the initiative carries on.
  *
  * It says three things a human would otherwise have to infer: that this piece
@@ -1831,6 +1891,18 @@ async function concludeInitiative(
   log: (message: string) => void,
 ): Promise<void> {
   const { store, adapter } = deps;
+
+  // Under one step, one ticket `run.ticket` is a **step**, so the closing
+  // splits in two: this step's ticket ends here, and the initiative ends only
+  // when no step of it is open (ADR-0040). Everything below this block is the
+  // path for a ticket that is nobody's step — a chore, anything run by hand,
+  // anything from before this daemon started — and is unchanged.
+  const picture = store.initiativeFor(project.name, run.ticket);
+  if (picture !== undefined) {
+    await concludeStep(run, project, pr, picture.initiative, deps, log);
+    return;
+  }
+
   const succession = successionOf(project.name, run.ticket, deps);
 
   if (succession.kind === "unreadable") {
@@ -1875,6 +1947,69 @@ async function concludeInitiative(
     .filter((number): number is number => number !== undefined);
   await adapter.postComment(project, run.ticket, mergedComment(prs));
   await adapter.closeTicket(project, run.ticket, "completed");
+}
+
+/**
+ * Close a merged **step**, and then the initiative if that was the last one
+ * open.
+ *
+ * **The tracker is asked again, deliberately.** The cached picture is from the
+ * cycle's own survey, taken before this step closed, so it cannot answer
+ * *is anything still open?*. This is one call on a path that runs when a pull
+ * request merges — rare, and never in front of a waiting human, which is the
+ * only place ADR-0044 D5 forbids one.
+ */
+async function concludeStep(
+  run: Run,
+  project: TicketingProject,
+  pr: number,
+  initiative: number,
+  deps: PollDeps,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
+
+  await adapter.postComment(project, run.ticket, stepMergedComment(pr));
+  await adapter.closeTicket(project, run.ticket, "completed");
+  log(`closed ${run.id} — step #${run.ticket} of #${initiative}`);
+
+  const steps = await adapter.listSteps(project, initiative);
+  if (steps.some((step) => step.state === "open")) {
+    log(
+      `open   ${project.name}#${initiative} — ` +
+        `${steps.filter((step) => step.state === "open").length} steps left`,
+    );
+    return;
+  }
+
+  // Built versus dropped, inferred from one fact and nothing else: a step
+  // whose run delivered a merged pull request was built. A dropped step's run
+  // was cancelled and carries none, so it needs no label and no question.
+  const built: number[] = [];
+  const dropped: number[] = [];
+  const prs: number[] = [];
+  for (const step of steps) {
+    const merged = store
+      .runsForTicket(project.name, step.number)
+      .find((candidate) => candidate.status === "done" && candidate.pr !== undefined);
+    if (merged?.pr === undefined) {
+      dropped.push(step.number);
+      continue;
+    }
+    built.push(step.number);
+    prs.push(merged.pr);
+  }
+
+  await adapter.postComment(
+    project,
+    initiative,
+    initiativeClosedComment(built, dropped, prs),
+  );
+  await adapter.closeTicket(project, initiative, "completed");
+  log(
+    `closed ${project.name}#${initiative} — ${built.length} of ${steps.length}` +
+      (dropped.length === 0 ? "" : `, ${dropped.length} dropped`),
+  );
 }
 
 /**
