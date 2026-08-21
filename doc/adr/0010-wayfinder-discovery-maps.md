@@ -26,6 +26,6 @@ Deliberate deviations from upstream:
 
 - The frontier — open, unblocked, unclaimed tickets — renders in the tracker's own UI, exactly the surface PRD-02's inverted loop needs a daemon to watch; AFK `research` tickets are natural autonomous-session work.
 - Discipline is required: decisions must be promoted out of tickets promptly, or the map silently becomes a second source of truth — the failure ADR-0006 exists to prevent.
-- `gh` support for native sub-issues and dependencies is partial; the skill degrades to a loud body convention (`Blocked by: #N`) where native relationships are unavailable.
+- ~~`gh` support for native sub-issues and dependencies is partial; the skill degrades to a loud body convention (`Blocked by: #N`) where native relationships are unavailable.~~ **✏ Superseded 2026-08-21 by [ADR-0044](0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D6.** `gh` support turned out to be complete — `gh issue edit --add-blocked-by` and `gh issue list --json blockedBy` both work — so there is no fallback and the body line is not a second format. The machine now **reads such a line and refuses it**, saying on the ticket that the native field is what it respects.
 - The markdown fallback is a second mechanics path to maintain.
 - `timone-wayfind` is a fork with attribution; upstream wayfinder may evolve, and syncing is a choice, not an obligation.
