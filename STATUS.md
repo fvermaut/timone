@@ -12,7 +12,11 @@
 
 **0. One thing changed that you will notice.** From now on, **the daemon will not start any job while there are uncommitted changes in the Timone folder**. It says which files, in the daemon's log. This is on purpose — every job has to follow one saved copy of the rules, and running rules you cannot see on screen is the confusion this prevents. But it is live *now*, before the container work that it was built for. So if you start the daemon and nothing happens, check the log and commit or undo your own edits first.
 
-**1. The machine has its own identity now — one small thing left.** You made it: **Timone Agent**, which signs its work as `timone-agent[bot]`. It can reach only the repositories you picked, and the key it uses expires after an hour and opens **one** repository at a time. Two things were checked straight away and both worked: a test ticket it opened is signed by it and not by you, and a key made for the to-do app **cannot see the trading app at all** — not "refused", invisible.
+**1. The machine has its own identity now — and the reading you owed is done.** You read R23 on 21 August and said it was fine, so **the nine pieces of container work that were waiting on it are released.**
+
+~~**What is left is five minutes of reading.**~~ Done. The promise the container plan is measured against is now yours rather than a guess at what you meant. It is still marked "not checked" — that means nobody has watched it work, which is a different thing from nobody having read it. Nothing is built against it yet.
+
+**The identity itself, for the record.** You made it: **Timone Agent**, which signs its work as `timone-agent[bot]`. It can reach only the repositories you picked, and the key it uses expires after an hour and opens **one** repository at a time. Two things were checked straight away and both worked: a test ticket it opened is signed by it and not by you, and a key made for the to-do app **cannot see the trading app at all** — not "refused", invisible.
 
 **What is left is five minutes of reading.** The promise the whole container plan is measured against is still marked "awaiting your confirmation". It is in `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, called R23 — six short paragraphs. Read them and say yes, or say what is wrong. **Nine pieces of work sit behind it.**
 
@@ -40,7 +44,7 @@ timone retry scratch-app#13
 timone cancel scratch-app#10
 ```
 
-**The one-step-one-ticket work has started.** Two of its ten pieces are built, on the branch `phase-29-one-step-one-ticket`. Nothing here needs you for it.
+**The one-step-one-ticket work has started.** Three of its ten pieces are built, on the branch `phase-29-one-step-one-ticket`. Nothing here needs you for it.
 
 **5. Nothing here is waiting on a decision any more.** On 21 August you ruled on all four questions that were blocking the one-step-one-ticket work, and on a fifth that came out of them. What you decided is under "What changed recently"; the reasons are written down in `doc/adr/0044-...`. All that plan needs now is item 1.
 
@@ -77,14 +81,20 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 
 ## What changed recently
 
-**21 August, evening — the machine can now work out which step is next, and read the steps off GitHub.** Two pieces of the one-step-one-ticket work are built. Nothing behaves differently yet — nothing calls them — but they are the two halves everything after them stands on.
+**21 August, evening — the machine can work out which step is next, read the steps off GitHub, and open them.** Three pieces of the one-step-one-ticket work are built. Nothing behaves differently yet — nothing calls them — but they are the two halves everything after them stands on.
 
 - **The rule.** Given a job's steps, it picks the first that is open, not waiting on another, not held by the machine and not taken by you. Four conditions, and any one of them read on its own would let a step you stopped be picked up again.
 - **The reading.** It asks GitHub for a job's steps in one call — open and finished alike — with their labels, who has taken them and what they wait for.
 
 **Two mistakes were avoided by checking GitHub rather than guessing.** A step can say it waits for a ticket in a *different* repository, and GitHub gives back only the number — so waiting for `timone #8` and waiting for the to-do app's own `#8` look identical. Reading the number alone would have checked the wrong ticket and been confident about it. And GitHub can tell you a step waits for five things and then hand over only three; that now reads as *"still waiting"*, never as *"free to start"*. Both were found by making two throwaway tickets and reading the real answers, before a line of the code was written.
 
-1157 tests pass, up from 1138.
+- **The opening.** When you approve a list of pieces, it now opens **one ticket per piece** on GitHub, each hanging under the main ticket, and rewrites the main ticket into a map linking them all. Each piece waits for the one before it, said in GitHub's own way — so you can see the order on screen, and **you can remove one of those links yourself to let two pieces run side by side.** Nothing could say that before.
+
+**Opening tickets is the first thing this machine does that cannot be undone by running it again**, so the care went there: running the approval twice opens nothing the second time, and if it stops half way through fourteen it opens exactly the seven that are missing when it comes back. That was proved by breaking the guard on purpose and watching the right two tests fail.
+
+**One thing I decided and you may want to overrule.** The list of pieces you approve has no way to say "piece 9 needs piece 4 first" — the file format simply has no room for it. So I chained them in order, which is what the machine already did. If you want a list where pieces can say what they really depend on, that is a change to the file format and it is yours to ask for.
+
+1173 tests pass, up from 1138.
 
 
 **21 August — you settled the five decisions that were holding up one step, one ticket.** Written down in `doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md`. In short:
