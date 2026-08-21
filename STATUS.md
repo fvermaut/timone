@@ -44,7 +44,7 @@ timone retry scratch-app#13
 timone cancel scratch-app#10
 ```
 
-**The one-step-one-ticket work has started.** Three of its ten pieces are built, on the branch `phase-29-one-step-one-ticket`. Nothing here needs you for it.
+**The one-step-one-ticket work has started.** Five of its ten pieces are built, on the branch `phase-29-one-step-one-ticket`. Nothing here needs you for it.
 
 **5. Nothing here is waiting on a decision any more.** On 21 August you ruled on all four questions that were blocking the one-step-one-ticket work, and on a fifth that came out of them. What you decided is under "What changed recently"; the reasons are written down in `doc/adr/0044-...`. All that plan needs now is item 1.
 
@@ -81,7 +81,7 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 
 ## What changed recently
 
-**21 August, evening — the machine can work out which step is next, read the steps off GitHub, and open them.** Three pieces of the one-step-one-ticket work are built. Nothing behaves differently yet — nothing calls them — but they are the two halves everything after them stands on.
+**21 August, evening — the machine now runs a job as a row of tickets instead of a count.** Five pieces of the one-step-one-ticket work are built. Nothing behaves differently yet — nothing calls them — but they are the two halves everything after them stands on.
 
 - **The rule.** Given a job's steps, it picks the first that is open, not waiting on another, not held by the machine and not taken by you. Four conditions, and any one of them read on its own would let a step you stopped be picked up again.
 - **The reading.** It asks GitHub for a job's steps in one call — open and finished alike — with their labels, who has taken them and what they wait for.
@@ -94,7 +94,14 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 
 **One thing I decided and you may want to overrule.** The list of pieces you approve has no way to say "piece 9 needs piece 4 first" — the file format simply has no room for it. So I chained them in order, which is what the machine already did. If you want a list where pieces can say what they really depend on, that is a change to the file format and it is yours to ask for.
 
-1173 tests pass, up from 1138.
+- **The picking up.** Each cycle it looks at your list of tickets and takes **one** — the first that is open, not waiting on another, not already taken by it, and not taken by you. It puts a label on the one it takes, and that label is what stops it starting the same piece twice. A fourteen-piece job does not become fourteen jobs at once.
+- **The finishing.** When a piece is merged, **its own ticket** closes, saying so. The main ticket closes only when none of its pieces is left open, and it says what was really delivered — *"1 of 2 pieces were built — one was dropped"*. A job you abandoned one piece of still finishes instead of hanging for ever.
+
+**One fault was found and fixed before it could bite.** Every piece would have been sent back to the very first step — *"tell me what you want"* — and asked you again about a list you had already approved. The old code recognised "a later piece" by a number that is now always 1. All fourteen pieces of a job would have done it, including the first.
+
+**`timone status` still answers instantly.** It reads a picture the machine writes down each minute rather than asking GitHub while you wait. The worst that picture can be is one minute out of date, and it is only used for what it says on screen — never for deciding anything.
+
+1201 tests pass, up from 1138.
 
 
 **21 August — you settled the five decisions that were holding up one step, one ticket.** Written down in `doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md`. In short:
