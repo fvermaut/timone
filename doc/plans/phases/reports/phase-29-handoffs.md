@@ -374,3 +374,37 @@ Full suite: **1210 tests, 1205 green** — the five known flakes on [timone#8](h
 - **No ticketing adapter in this slice's tests** — `grep -c "TicketingAdapter" src/daemon/cta.test.ts` returns **0**, and idempotence is asserted as pure equality of two renders rather than by faking a poster.
 
 **What this slice does not prove.** That any human has read the new sentence. **That is 29h**, and this slice is the reason the gate has something to read: the plan makes 29h depend on it precisely so the words are judged on a real ticket by the person they are written for.
+
+## 29h — The live gate: attempted, blocked, and the blocker is the system working
+
+**Not run. It could not be, and the reason is not a fault.**
+
+**What was set up.** A fixture initiative on `scratch-app`: ticket [#44](https://github.com/fvermaut/scratch-app/issues/44) — *"Let me sort the list the way I want"* — with a three-piece breakdown written and pushed on `timone/44-sort-the-list-the-way-i-want`. Machine-typed, and said so on the ticket. A driver script builds the real `AgentSessionSpawner` over the real `GitHubTicketingAdapter` and the real ledger, and calls `spawn` with a breakdown approval — the exact path 29c hangs off.
+
+**What stopped it.** The ledger refused, at the transition guard:
+
+```
+Error: Project scratch-app is held by run scratch-app#4/1
+  (parked, branch timone/4-the-page-feels-slow) — one work branch at a time
+    at RunStore.claim → AgentSessionSpawner.startClaimed → recordApproval → spawn
+```
+
+`scratch-app#4` has held the project since 19 August, parked on an **escalation** — it is waiting for `timone takeover scratch-app#4`, which is item 6 of `STATUS.md`. One run holds one project at a time, and that is the cost fvermaut accepted on 16 August, written down at the time as *"a job waiting on you holds its project until you answer, and `timone cancel` is the way out."*
+
+**This is the first time that cost has been paid in practice rather than argued**, and `STATUS.md`'s *"Not proven yet"* list carries the line *"a stopped job that is holding a project has not been watched blocking one"*. It has now — it blocked this phase's own gate.
+
+**The guard was not worked around, and that was a decision.** The fixture run had been hand-parked at a breakdown gate, which is ordinary fixture setup — no different from writing the breakdown file by hand. The occupancy refusal is **not** setup: it is the behaviour under warranty, and defeating it to make a gate pass would be the gate certifying a system that does not exist. The attempt stopped there.
+
+**Everything was returned to where it was found.** The ledger was restored from the copy taken before the hand-park, the fixture run cancelled with a reason, the `timone` label taken off #44 so nothing picks it up by accident, and — the one that matters — **the `projects/scratch-app` checkout was put back on `timone/4-the-page-feels-slow`**, which this exercise had moved. That last is exactly the hazard phase 30 exists to remove, caused here by a human-driven session rather than by the daemon, which is the second machine user ADR-0043 names.
+
+**Two things the exercise did prove, live, against the real ledger and the real terminal.**
+
+- **29j's four sentences read correctly.** `timone retry scratch-app#44` answers: *"Cancelled work isn't retried — remove the `timone:held` label from the ticket and I'll start it afresh, or close it and I'll carry on without it."* That is the surface that used to promise a pass that never comes.
+- **29j's `waitingOnYou: false` is right, and the terminal says so plainly.** `timone status` lists **five** cancelled runs with their reasons, four of them long dead. With the flag true — the answer I tried first — every one of them would have been named on the closing *"what I need from you"* line. It names `scratch-app #4` alone, which is the one ticket that actually wants something.
+
+**What is still owed, exactly.** The gate's own question — *fvermaut reads the three tickets and the map and says whether the thread is followable* — is unanswered, and nothing in this phase substitutes for it. It needs `scratch-app` free, which needs one of:
+
+- `timone takeover scratch-app#4` — resolve the real ticket, which he owes anyway; or
+- `timone cancel scratch-app#4` — drop that run. The ticket and its analysis stay; only the run goes.
+
+Then the fixture is two steps from running: put the `timone` label back on #44, and re-park its run at the breakdown gate. Both are recorded here so the next session does not re-derive them.

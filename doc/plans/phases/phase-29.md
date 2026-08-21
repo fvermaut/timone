@@ -1,6 +1,6 @@
 # Phase 29: One step, one ticket — the daemon stops counting runs
 
-> **Status:** In progress — **29a–29g and 29j built**; only the live gate (29h) and the close (29i) remain on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
+> **Status:** In progress — **29a–29g and 29j built; every code slice is done.** The live gate (29h) was **attempted and is blocked on `scratch-app` being free** — see its own section. 29i waits on the gate. on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 > **Companion phases:** [phase-22](phase-22.md) — it built the ledger half of R22, `TERMINAL`, and the settledness predicate this phase removes. [phase-23](phase-23.md) — it built the breakdown artifact, its parser, the `breakdown` pipeline stage, the chunk-zero merge, and chunk succession; **this phase changes what 23f decided and leaves the rest standing**. [phase-27](phase-27.md) — the feedback path, retired by ADR-0036, whose routing this must not disturb.
 >
@@ -560,6 +560,14 @@ npm run build && npx vitest run src/daemon/cta.test.ts src/commands/cancel.test.
 ---
 
 ### Sub-phase 29h: The live gate, on `scratch-app`
+
+> **⛔ Attempted 2026-08-21 and blocked — by the system working, not by a fault.** The fixture is built and pushed ([scratch-app#44](https://github.com/fvermaut/scratch-app/issues/44), branch `timone/44-sort-the-list-the-way-i-want`, three pieces). The approval path refused at the ledger: *"Project scratch-app is held by run scratch-app#4/1 — one work branch at a time"*. `#4` has held the project since 19 August, parked on an escalation awaiting `timone takeover`.
+>
+> **That is the cost fvermaut accepted on 16 August, paid in practice for the first time** — `STATUS.md`'s "Not proven yet" carried *"a stopped job that is holding a project has not been watched blocking one"*. It has now, and what it blocked was this phase's own gate.
+>
+> **The guard was not worked around.** Hand-parking a fixture run at a gate is setup; defeating the occupancy refusal is not — it is the behaviour under warranty, and a gate that passed by disabling it would certify a system that does not exist.
+>
+> **To run it:** free `scratch-app` (`timone takeover scratch-app#4`, or `timone cancel scratch-app#4` — the ticket and its analysis survive either way), then put the `timone` label back on #44 and re-park its run at the breakdown gate. Full account, including what was restored afterwards, in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 Break a fixture specification into three steps, approve the breakdown once, and read it end to end: three child tickets opened, the map ticket carrying links and nothing else, each step building on its own branch with its own pull request, each closing on its merge, the initiative closing on the last.
 
