@@ -1,6 +1,6 @@
 # Phase 29: One step, one ticket — the daemon stops counting runs
 
-> **Status:** In progress — **29a, 29b, 29c, 29d and 29e built** on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
+> **Status:** In progress — **29a–29g built** on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 > **Companion phases:** [phase-22](phase-22.md) — it built the ledger half of R22, `TERMINAL`, and the settledness predicate this phase removes. [phase-23](phase-23.md) — it built the breakdown artifact, its parser, the `breakdown` pipeline stage, the chunk-zero merge, and chunk succession; **this phase changes what 23f decided and leaves the rest standing**. [phase-27](phase-27.md) — the feedback path, retired by ADR-0036, whose routing this must not disturb.
 >
@@ -398,6 +398,12 @@ npm run build && npx vitest run src/daemon/poll.test.ts
 
 ### Sub-phase 29f: `timone status` shows which step is live
 
+> **✅ Built 2026-08-21.** `#52 (step 2 of 3 of #7)` on a live run, and a *"1 of 3 done, next is …"* line for an initiative between steps — without which the project reads `idle`, which is true of the project and false of the work. Six cases.
+>
+> **The signature check passes:** `grep -n "async function renderStatus\|async function progressReader\|TicketingAdapter" src/commands/status.ts` returns nothing. Both stay synchronous, neither takes an adapter.
+>
+> **`pictures` is a per-project list, not a per-ticket lookup** — the between-steps line has no ticket to look up by, which is the point of it.
+
 **[MODIFY]** the status renderer — name the live step ticket and how many remain.
 
 **Seams under test (TDD):** the renderer, red-green on the two states: a live step, and an initiative between steps.
@@ -427,6 +433,18 @@ npm run build && npx vitest run src/commands/status.test.ts
 ---
 
 ### Sub-phase 29g: ~~Delete settledness~~ — ✏ Refined 2026-08-21: delete the *counting*; settledness stays
+
+> **✅ Built 2026-08-21.** `chunkProgress` and `ChunkProgress` are gone; `SETTLED`, `isSettled`, its use in `loadedLiveRunForTicket`, `TERMINAL` and the four `{@link isSettled}` cross-references are all untouched, as this slice insists.
+>
+> **The blast radius above is right about what it measured and misses two things — it was measured on 2026-08-20, before 29d existed.**
+>
+> **One: `initiativeProgress` carried two facts, and only one of them is counting.** *How far it has got* comes off the tracker; *whether the list grew since the human approved it* comes off the **file**, and must — the committed artifact is the gate (ADR-0014, ADR-0028 D3), and no number of step tickets can say what a human agreed to. Collapsing the function to the picture alone made a re-proposed initiative report *"this one is finished"* and **the approval gate stopped existing.** Caught by the tests, and the docblock now says so at length.
+>
+> **Two: `initiativeFor` could not find a map from its own number**, so the one ticket the human reads was the one ticket with no progress to report.
+>
+> **Six tests the list does not name had to be judged.** Three retired with the model, each leaving a note saying where the surviving guarantee is asserted; three **rewritten**, because what they protect still holds — R22 clause 6's queue, R21 clause 8's one computation, and `daemon.test.ts`'s proof that the root reaches the loop, re-pointed at the re-proposal path and shown to still discriminate by stubbing the root out.
+>
+> **`grep` returns two lines, both prose** — the docblocks saying what was deleted. The gate expects nothing; a comment naming a removed symbol is what should survive a deletion.
 
 ~~**[MODIFY]** `src/daemon/runs.ts` — remove `SETTLED`, `isSettled` and its use in `register`.~~ **[MODIFY]** `src/daemon/breakdown.ts` — remove `chunkProgress` and `ChunkProgress`.
 

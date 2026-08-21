@@ -265,3 +265,72 @@ Full suite: **1201 tests, 1196 green**, the five being the known flakes on [timo
 - **No test closes a real issue on any repository** — every close goes to a recording fake.
 
 **What this slice does not prove.** That any of it has run against real GitHub. **29d's deliberate gap is now closed**, so the branch is coherent again: a step is opened, claimed, built, closed, and its initiative closes after the last one.
+
+## 29f — `timone status` shows which step is live
+
+**Built.** A live run's line names where it sits — `#52 (step 2 of 3 of #7)` — and an initiative with no run of its own says what is next instead of letting the project read `idle`.
+
+**Files touched.** `src/commands/status.ts` (`stepOf`, `describeInitiative`, `initiativesOf` on the context, `pictures` reshaped), `src/daemon/runs.ts` (`initiativesFor`), `src/commands/status.test.ts` (+6).
+
+**Decisions taken inside the slice.**
+
+- **`pictures` is a per-project list, not a per-ticket lookup.** The between-steps line has no ticket to look up *by* — that is the whole point of it. `initiativesFor` joins the store beside `initiativeFor`.
+- **An initiative whose live step already has a run is not named twice.** That run's own phrase says where it is; a second line would repeat it.
+- **An initiative whose steps are all closed says nothing.** It is finished rather than waiting, and a finished thing on a status line is noise.
+- **Between steps is not `idle`.** A fourteen-step initiative is alive for the whole minute between every pair of pieces, and a reader told `idle` fourteen times would be right to conclude nothing was happening.
+
+**Validation evidence.** `npx vitest run src/commands/status.test.ts` — **36 passed**, six this slice's; three red first and three guarding silences (the finished initiative, the project with no picture).
+
+**The plan's checks, answered.** Both states red→green; 36 tests, count read not colour; no network and no `.timone/state.json` — every picture is a literal. **And the signature check, which is the one the plan flags hardest:** `grep -n "async function renderStatus\|async function progressReader\|TicketingAdapter" src/commands/status.ts` returns **nothing**. Both stay synchronous and neither takes an adapter.
+
+**What this slice does not prove.** That the numbers are right — they are whatever 29d wrote. It renders the picture faithfully; nothing here checks the picture against GitHub.
+
+## 29g — Delete the counting; settledness stays
+
+**Built.** `chunkProgress` and `ChunkProgress` are gone, and with them the model in which one ticket hosts a sequence of chunks counted out of the ledger.
+
+**The gate the plan puts hardest is met: `SETTLED` and `isSettled` are untouched.** `runs.ts:73`, `:76` and the use inside `loadedLiveRunForTicket` all stand, `register` still refuses a second live run on one ticket, and R22 clause 2 does not move. `TERMINAL` and the four `{@link isSettled}` cross-references are untouched, as instructed.
+
+`grep -rn "chunkProgress\|ChunkProgress" src --include="*.ts"` returns **two lines, both prose** — the docblocks in `cta.ts` and `poll.ts` that say what was deleted and why. The plan's grep expects nothing; a comment naming a removed symbol is what should survive a deletion, and it is recorded here rather than silently left.
+
+**Two things the plan's blast radius misses, and it could not have had them: it was measured on 2026-08-20, before 29d existed.**
+
+**One — deleting the breakdown read takes the re-proposal gate with it, and I made that mistake before the tests caught it.** `initiativeProgress` carried **two different facts from two different places**, and only one of them is counting:
+
+- *How far it has got* — `done` step tickets out of the steps that exist. Off the tracker. This is what 29g deletes the old source of.
+- *Whether the list has grown since the human approved it* — off the **file**, and it must be. The committed artifact is the gate ([ADR-0014](../../adr/0014-artifact-first-gates.md), [ADR-0028](../../adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md) D3), and no number of step tickets can tell you what a human agreed to.
+
+Collapsing the function to the picture alone made a re-proposed initiative report *"this one is finished"* — **the approval gate stopped existing**. The docblock on `initiativeProgress` now says this at length, because the next reader will see a function that reads a file to produce a number and reach for the same simplification.
+
+**Two — `initiativeFor` could not find a map from its own number.** It matched `steps.includes(ticket)`, and the map is not one of its own children. So the one ticket the human actually reads was the one ticket in the system whose standing note had no progress to report. Fixed, with its own case.
+
+**Six tests the plan did not list, each judged rather than swept.** The plan names `breakdown.test.ts`, `cta.test.ts` and `status.test.ts`; it does not mention `poll.test.ts` or `daemon.test.ts`, which is where the chunk model's cover actually lives.
+
+*Retired with the model, each leaving a comment saying where the surviving guarantee is asserted instead:*
+
+- `poll.test.ts` — *"does not close the ticket when a piece of it is still unbuilt"*. Replaced by **29e**'s *"does not close the initiative when an earlier step is still open"*, on step tickets.
+- `poll.test.ts` — *"says the next piece is coming on the cycle a piece merged"*. A merged step now says so on **its own** ticket, and how far the initiative has got is carried by the map's standing note — kept current every cycle rather than appended once per merge, which is strictly better.
+- `breakdown.test.ts` — the three `chunkProgress` cases, deleted with the function as the plan instructs.
+
+*Rewritten, because what they protect still holds:*
+
+- **R22 clause 6, the queue.** A step's run completing frees the project *in that same call* and promotes what queued behind it; the next step is opened by a **later** cycle's registration loop, so it queues behind the bug rather than in front of it. Rewritten against step tickets. Writing it exposed a fixture fault worth recording: a tracker fake that reported the merged step closed *from the start of the cycle* let the frontier take the next step in the very cycle the bug was promoted — asserting a race production does not have, because the survey runs before the merge path closes anything. The fake now closes it when `closeTicket` is called.
+- **R21 clause 8, one computation and two renderers.** Re-pointed at the picture. The guarantee is unchanged; the source is not.
+- **`daemon.test.ts` — the root reaching the loop.** It observed that through a mid-initiative merge not closing a ticket, which stopped discriminating. Re-pointed at the **re-proposal** path, which also needs the file and therefore also needs the root. **Proved it still discriminates** by stubbing `root: undefined` into `runDaemon` and watching it fail.
+
+**And `timone status` keeps its artifact read.** Collapsing `progressReader` to the picture alone would have left the terminal blind to re-proposals while the ticket still saw them — an R21 clause 8 divergence, which is the exact fault that clause exists to forbid.
+
+**Validation evidence.** Full suite: **1202 tests, 1197 green.** The five failures are the known flakes on [timone#8](https://github.com/fvermaut/timone/issues/8) and each passes alone — `git.test.ts` 6/6, `workspace.test.ts` 6/6, `daemon.test.ts` 6/6, `guardrails.test.ts` 23/23, `breakdown.test.ts` 15/15.
+
+**The plan's checks, answered.**
+
+- **The full suite is green with the named flake excepted** — five flakes rather than one, all in the same family, all reported on #8 with counts from three runs.
+- **`chunkProgress` gone** — no code; two prose mentions, recorded above.
+- **`isSettled` still returns its declaration *and* its use** — `runs.ts:76` and `runs.ts:634`, the one inside `loadedLiveRunForTicket`.
+- **`SETTLED` still at `runs.ts:73`** — yes.
+- **`TERMINAL` still returns its call sites** — yes, `runs.ts:45` and its use.
+- **`{@link isSettled}` remains** — `runs.ts:42` and `:554`, not repaired, not deleted.
+
+**No new seams.** The plan asks this to be said: 29g adds no behaviour, and the seam is the existing suite staying green.
+
+**What this slice does not prove.** Nothing here has run against real GitHub, and the multi-chunk model is now unreachable rather than proven absent — the code that could reach it is gone, but no live ticket has been through the new path.
