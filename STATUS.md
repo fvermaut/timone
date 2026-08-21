@@ -16,11 +16,16 @@ I stopped piece 1 on purpose so you can see what a stopped piece says.
 
 **Reply here, or on the tickets, with whether that reads clearly to you.** Nothing moves on its own.
 
-**The four faults, in short.** Two of them were hiding each other: the label the machine uses to hold a stopped piece had a description eleven characters too long for GitHub, so **no piece tickets were created at all** — and the main ticket's own job carried on regardless, spending nine minutes planning the whole thing on a ticket that is only meant to be a list of links. The other two were things it *said*: the main ticket announced *"This one is finished"* when nothing had been built, and a piece waiting its turn announced *"I'll pick this up on my next pass"* when it never would.
+**The four faults.**
 
-**Two of those four I only found by reading what it wrote.** No test was ever going to object to a sentence that is false.
+1. The label the machine puts on a stopped piece had a description that was too long. GitHub refused it. Because of that, **no piece tickets were made at all.**
+2. The main ticket kept working after it should have stopped. It spent nine minutes planning the whole job on a ticket that should only hold a list of links. This is why fault 1 was hard to see.
+3. The main ticket said *"This one is finished"* when nothing had been built.
+4. A piece waiting its turn said *"I'll pick this up on my next pass"*. It was not going to.
 
-**What was not tested.** I did not let the three pieces build all the way to finished — you chose to stop at the tickets. So **nothing has yet watched a piece close on its merge, or the main ticket close after the last one.** That part is written and checked by tests, and unwatched.
+**I found faults 3 and 4 by reading what the machine wrote.** No test checks whether a sentence is true.
+
+**What was not tested.** You chose to stop at the tickets, so I did not let the three pieces build all the way. **Nobody has yet seen a piece close when its code is merged, or the main ticket close after the last piece.** That part is written and has tests, but has not been watched.
 
 **The slow-page job is where you left it.** [#4](https://github.com/fvermaut/scratch-app/issues/4) is stopped and its label is off, so it will not start again by itself. Everything it worked out is still on the ticket. To pick it up:
 
@@ -157,7 +162,7 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 
 **One mistake I made and caught.** Deleting the counting nearly took the approval gate with it — the check that stops the machine building a longer list than the one you agreed to. How far the work has got comes off the tickets, but *what you agreed to* can only come off the file you approved. For a few minutes a job whose list had grown said "this one is finished" instead of asking you. The tests caught it and the code now explains why the two must stay separate.
 
-**It was then watched running on the to-do app, and that is where four faults turned up** — see the top of this file. The two that mattered were hiding each other, and two more were sentences that were simply untrue. All four are fixed.
+**It was then run on the to-do app, and four faults turned up** — see the top of this file. All four are fixed.
 
 1224 tests pass, up from 1138.
 
