@@ -10,7 +10,12 @@ import {
 import { ctaFor, type Cta, type InitiativeProgress } from "../daemon/cta.js";
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
 import { checkoutOf, initiativeProgress } from "../daemon/poll.js";
-import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
+import {
+  RunStore,
+  defaultStatePath,
+  type InitiativeRecord,
+  type Run,
+} from "../daemon/runs.js";
 
 /** Statuses that mean a session is running, or about to. */
 const RUNNING = ["picked-up", "active"];
@@ -24,6 +29,22 @@ const RUNNING = ["picked-up", "active"];
 export interface RenderStatusOptions {
   /** False when the daemon has never written a state file. */
   stateExists: boolean;
+  /**
+   * The picture the daemon's last cycle wrote of the initiative a ticket
+   * belongs to, or undefined for a ticket in no initiative it has seen.
+   *
+   * **This is why `timone status` is still instant and still synchronous.**
+   * Under one step, one ticket the honest answer to *which step is live* lives
+   * on the tracker — and asking for it would put a `gh` call in front of a
+   * waiting human, which is the thing ADR-0044 D5 refused. So the daemon
+   * writes what it saw each cycle and this reads it off disk. The picture is
+   * at most one poll interval stale, which costs a wrong line and never a
+   * wrong decision.
+   *
+   * **Absent means say what you said before**, which is what a fixture wants
+   * and what a ledger written by an older daemon gives.
+   */
+  pictures?: (project: string, ticket: number) => InitiativeRecord | undefined;
   /** Now, for saying how long a running session has been going. */
   now?: Date;
   /**
@@ -78,6 +99,11 @@ function progressReader(
   runs: readonly Run[],
   root: string | undefined,
   source: BreakdownSource | undefined,
+  // The picture the daemon wrote on its last cycle, looked up per run. This
+  // is what keeps `timone status` instant under one step, one ticket: the
+  // answer is already on disk, so the render stays synchronous and makes no
+  // forge call at all (ADR-0044 D5).
+  picture: (project: string, ticket: number) => InitiativeRecord | undefined,
 ): (run: Run) => InitiativeProgress | undefined {
   if (root === undefined) return () => undefined;
 
@@ -95,6 +121,7 @@ function progressReader(
           run.ticket,
           chunks,
           source ?? fromDefaultBranch,
+          picture(run.project, run.ticket),
         ),
       );
     }
@@ -242,7 +269,12 @@ export function renderStatus(
   // once however many of its runs and closing lines mention it.
   const context: RenderContext = {
     now: options.now,
-    progressOf: progressReader(runs, options.root, options.breakdownSource),
+    progressOf: progressReader(
+      runs,
+      options.root,
+      options.breakdownSource,
+      options.pictures ?? (() => undefined),
+    ),
   };
 
   const width = Math.max(...names.map((name) => name.length), 0);
@@ -334,8 +366,10 @@ export function registerStatusCommand(program: Command): void {
       const stateExists = existsSync(statePath);
 
       let runs: Run[];
+      let store: RunStore;
       try {
-        runs = RunStore.open(statePath).all();
+        store = RunStore.open(statePath);
+        runs = store.all();
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
@@ -351,6 +385,7 @@ export function registerStatusCommand(program: Command): void {
           stateExists,
           now: new Date(),
           root: process.cwd(),
+          pictures: (project, ticket) => store.initiativeFor(project, ticket),
         }),
       );
     });

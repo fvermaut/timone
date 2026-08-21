@@ -15,7 +15,6 @@
  */
 import { MARK_LABEL } from "../adapters/ticketing.js";
 import { takeoverCommand } from "../channels/terminal.js";
-import { type ChunkProgress } from "./breakdown.js";
 import { technicalFault } from "./faults.js";
 import { type Run } from "./runs.js";
 
@@ -30,17 +29,29 @@ import { type Run } from "./runs.js";
  * *this one is finished* into that gap, on every ticket, between every pair of
  * pieces.
  *
- * It is {@link ChunkProgress} plus the one fact about the *artifact* a reader
- * of the ticket has to be told: that the list has grown since they approved
- * it. The two are orthogonal — a re-proposed initiative is still some number
- * of pieces through — so this is not a state wearing flags, it is two facts
- * about one initiative.
+ * It carries how far the initiative has got, plus the one fact about the
+ * *artifact* a reader of the ticket has to be told: that the list has grown
+ * since they approved it. The two are orthogonal — a re-proposed initiative is
+ * still some number of pieces through — so this is not a state wearing flags,
+ * it is two facts about one initiative.
+ *
+ * **✏ 29d: it no longer extends `ChunkProgress`.** It carried the same three
+ * fields by inheritance while those fields meant *chunks counted out of the
+ * ledger*. They now mean *step tickets read off the tracker*, which is the
+ * same shape and a different fact, and inheriting from the counting model
+ * would tie this to a type 29g deletes.
  *
  * **Computed by the caller**, never here: it comes from a file in a project's
  * checkout, and this module reads nothing. See `initiativeProgress` in
  * `poll.ts`, which is the one function both surfaces resolve it through.
  */
-export interface InitiativeProgress extends ChunkProgress {
+export interface InitiativeProgress {
+  /** How many steps the initiative has. */
+  total: number;
+  /** How many of them are done. */
+  done: number;
+  /** The step to take next, or absent when none is. `index` counts from 1. */
+  next?: { index: number; title: string };
   /** Whether the list of pieces has grown since the human approved it. */
   reproposed?: boolean;
 }

@@ -4133,3 +4133,108 @@ describe("approval opens one ticket per step", () => {
     expect(tracker.steps).toEqual([]);
   });
 });
+
+/**
+ * 29d's half of the approval: the initiative's own ticket stops being work.
+ * Its own block rather than a case inside 29c's, because it is the change
+ * that keeps the daemon from running the initiative and its children at once.
+ */
+describe("approval turns the initiative into a map", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  function atBreakdownGate(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "gate",
+      stage: "breakdown",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  async function approve(adapter: TicketingAdapter, chunks: number): Promise<void> {
+    const store = newStore();
+    const { runtime } = fakeRuntime();
+    const text = [
+      "# Breakdown",
+      "",
+      `**Status:** Approved by fvermaut 2026-08-03 — ${chunks} pieces`,
+      "",
+      ...Array.from(
+        { length: chunks },
+        (_u, i) => `${i + 1}. **Piece ${i + 1}** — it delivers ${i + 1}`,
+      ),
+      "",
+    ].join("\n");
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      mergeProbe: async () => ({ merged: true as const, into: "main" }),
+      breakdownSource: () => text,
+    }).spawn(atBreakdownGate(store), project, {
+      stage: "planning",
+      approval: {
+        stage: "breakdown",
+        by: "fvermaut",
+        at: "2026-08-03T12:00:00Z",
+      },
+    });
+  }
+
+  it("marks the initiative as a map, so no run is ever opened on it", async () => {
+    const tracker = trackerWithSteps(settled);
+    const applied: { number: number; label: string }[] = [];
+    const adapter: TicketingAdapter = {
+      ...tracker.adapter,
+      async applyLabel(_project, number, label): Promise<void> {
+        applied.push({ number, label });
+      },
+    };
+
+    await approve(adapter, 3);
+
+    expect(applied).toContainEqual({ number: 7, label: "timone:map" });
+  });
+
+  /**
+   * A map with no children is a ticket nothing will ever pick up: the daemon
+   * skips it as a map, and there is nothing else to take. So the label goes on
+   * last, after every step exists.
+   */
+  it("does not mark it a map when opening the steps failed", async () => {
+    const tracker = trackerWithSteps(settled);
+    const applied: { number: number; label: string }[] = [];
+    const adapter: TicketingAdapter = {
+      ...tracker.adapter,
+      async createStep(): Promise<number> {
+        throw new Error("gh fell over on the first");
+      },
+      async applyLabel(_project, number, label): Promise<void> {
+        applied.push({ number, label });
+      },
+    };
+
+    await approve(adapter, 3);
+
+    expect(applied).not.toContainEqual({ number: 7, label: "timone:map" });
+  });
+
+  it("makes sure the map label exists before applying it", async () => {
+    const tracker = trackerWithSteps(settled);
+
+    await approve(tracker.adapter, 3);
+
+    expect(tracker.labels).toContain("timone:map");
+  });
+});

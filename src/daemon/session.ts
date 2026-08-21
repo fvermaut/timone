@@ -31,7 +31,12 @@ import {
   type BreakdownSource,
   type Chunk,
 } from "./breakdown.js";
-import { HELD_LABEL, HELD_LABEL_DESCRIPTION } from "./steps.js";
+import {
+  HELD_LABEL,
+  HELD_LABEL_DESCRIPTION,
+  MAP_LABEL,
+  MAP_LABEL_DESCRIPTION,
+} from "./steps.js";
 import { STAGE_TRAILER } from "./hooks.js";
 import { instant, readConversationRecord, waitCursorFrom } from "./gates.js";
 import { outcomeCursorFrom, readStageOutcome, type StageOutcome } from "./outcomes.js";
@@ -1754,6 +1759,7 @@ export class AgentSessionSpawner implements SessionSpawner {
       // creates its own on first use. **29c owns this, not 29d**; both slices
       // assuming the other did it shows up as a claim silently not applied.
       await adapter.ensureLabel(project, HELD_LABEL, HELD_LABEL_DESCRIPTION);
+      await adapter.ensureLabel(project, MAP_LABEL, MAP_LABEL_DESCRIPTION);
 
       // The existing children are what makes a re-run free. They are matched
       // by title, and the title carries the chunk's number — so two chunks
@@ -1789,6 +1795,11 @@ export class AgentSessionSpawner implements SessionSpawner {
         run.ticket,
         initiativeMap(opened, read.path),
       );
+      // Last, and only once the children exist: from here the daemon reads
+      // this ticket as a map and never opens a run on it. Marking it before
+      // its steps were opened would strand the initiative — a map with no
+      // children is a ticket nothing will ever pick up.
+      await adapter.applyLabel(project, run.ticket, MAP_LABEL);
       this.log(`steps ${run.id} — ${read.breakdown.chunks.length} steps stand`);
     } catch (error) {
       // Loud in the log, and nothing else: the tickets already opened are

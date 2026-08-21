@@ -2051,3 +2051,91 @@ describe("a failed run stops waiting", () => {
     expect(store.get(run.id)?.consumedAnswerAt).toBe("2026-08-19T09:30:00Z");
   });
 });
+
+/**
+ * 29d — the picture `timone status` renders from.
+ *
+ * `timone status` answers instantly, and it does that by reading a picture the
+ * daemon wrote rather than asking GitHub while the human waits (ADR-0044 D5).
+ * The daemon takes it as a side effect of the eligibility query it already
+ * makes, so no extra call is added anywhere.
+ */
+describe("the cached picture of an initiative", () => {
+  const picture = {
+    project: "scratch-app",
+    initiative: 7,
+    title: "the lists could be smarter",
+    steps: [51, 52, 53],
+    done: 1,
+    next: 52,
+  };
+
+  it("remembers what the last cycle saw", () => {
+    const store = newStore();
+
+    store.rememberInitiative(picture);
+
+    expect(store.initiativeFor("scratch-app", 52)).toMatchObject({
+      initiative: 7,
+      steps: [51, 52, 53],
+      done: 1,
+      next: 52,
+    });
+  });
+
+  /** Any of its steps finds it, not only the live one. */
+  it("is found from any of its steps", () => {
+    const store = newStore();
+
+    store.rememberInitiative(picture);
+
+    for (const step of [51, 52, 53]) {
+      expect(store.initiativeFor("scratch-app", step)?.initiative).toBe(7);
+    }
+  });
+
+  it("knows nothing about a step of no initiative it has seen", () => {
+    const store = newStore();
+
+    store.rememberInitiative(picture);
+
+    expect(store.initiativeFor("scratch-app", 99)).toBeUndefined();
+    expect(store.initiativeFor("ivtrends", 52)).toBeUndefined();
+  });
+
+  /**
+   * The picture is a *snapshot*, so a later cycle replaces it whole. A merge
+   * that closed a step must not leave the old count sitting beside the new
+   * one, which is what merging the records rather than replacing them would
+   * do.
+   */
+  it("is replaced whole by the next cycle, never merged", () => {
+    const store = newStore();
+    store.rememberInitiative(picture);
+
+    store.rememberInitiative({ ...picture, steps: [51, 52], done: 2, next: undefined });
+
+    expect(store.initiativeFor("scratch-app", 51)).toMatchObject({
+      steps: [51, 52],
+      done: 2,
+    });
+    expect(store.initiativeFor("scratch-app", 51)?.next).toBeUndefined();
+    expect(store.initiativeFor("scratch-app", 53)).toBeUndefined();
+  });
+
+  it("survives a reload, because another process is what reads it", () => {
+    const path = statePath();
+    newStore(path).rememberInitiative(picture);
+
+    expect(newStore(path).initiativeFor("scratch-app", 52)?.initiative).toBe(7);
+  });
+
+  /** Every field added since the ledger was written leaves `version` at 1. */
+  it("leaves a ledger written before it existed loading unchanged", () => {
+    const path = statePath();
+    const store = newStore(path);
+    store.register("scratch-app", 7);
+
+    expect(() => newStore(path).runsForTicket("scratch-app", 7)).not.toThrow();
+  });
+});

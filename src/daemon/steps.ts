@@ -29,7 +29,25 @@ export const HELD_LABEL = "timone:held";
 
 /** What the hold label says on the tracker, for whoever reads it there. */
 export const HELD_LABEL_DESCRIPTION =
-  "Timone stopped this step and will not take it up again — remove this label to hand it back";
+  "Timone has taken this step — while this label is on it will not start it again; remove it to hand the step back";
+
+/**
+ * The label that says a ticket is an initiative's **map** rather than work.
+ *
+ * Applied when its breakdown is approved and its body is rewritten into the
+ * list of its children (29c). It is what keeps the daemon from opening a run
+ * on the initiative itself alongside the runs on its steps — the map is a
+ * conversation, and the work belongs to the tickets it points at.
+ *
+ * A label rather than "has children" because the loop already holds every
+ * marked ticket's labels, so reading it costs nothing, and because it is
+ * **visible**: a human looking at the tracker can see which ticket is the map.
+ */
+export const MAP_LABEL = "timone:map";
+
+/** What the map label says on the tracker, for whoever reads it there. */
+export const MAP_LABEL_DESCRIPTION =
+  "This ticket is the map of an initiative — the work happens on the tickets listed in it";
 
 /**
  * The first step that is **open, unblocked, unheld and unclaimed**, or

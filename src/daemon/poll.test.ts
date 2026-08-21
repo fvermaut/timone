@@ -28,6 +28,7 @@ import {
   type TicketThread,
 } from "../adapters/ticketing.js";
 import { noStepWrites } from "../adapters/ticketing.stubs.js";
+import { HELD_LABEL, MAP_LABEL } from "./steps.js";
 import { breakdownPath, fromWorkingTree } from "./breakdown.js";
 import { enqueue, pending, requestsDir } from "./requests.js";
 import { RunStore, type Run } from "./runs.js";
@@ -6091,5 +6092,388 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
 
     expect(spawned).toEqual([]);
     expect(store.get("scratch-app#41/1")?.waitingKind).toBe("escalation");
+  });
+});
+
+/**
+ * 29d — the daemon takes the *next step ticket*, not the next chunk of a
+ * count.
+ *
+ * The trap this block exists to catch is the one the plan names: a change that
+ * rewrites the wording and leaves the loop still deciding what to build from
+ * the ledger. Every case here asserts on **which run was opened**, never on a
+ * comment.
+ */
+describe("the frontier decides which step is taken", () => {
+  const MAP = 7;
+
+  /** An initiative's map ticket, and the step tickets hanging under it. */
+  function initiative(
+    steps: Partial<Step>[],
+  ): { tickets: Ticket[]; steps: Step[] } {
+    const built = steps.map((overrides, index) => ({
+      number: 51 + index,
+      title: `${index + 1}. Piece ${index + 1}`,
+      state: "open" as const,
+      labels: ["timone"],
+      assignees: [] as string[],
+      blockedBy: [] as Step["blockedBy"],
+      dependenciesIncomplete: false,
+      ...overrides,
+    }));
+    return {
+      tickets: [
+        ticket(MAP, { labels: ["timone", MAP_LABEL] }),
+        ...built.map((step) =>
+          ticket(step.number, { title: step.title, labels: step.labels }),
+        ),
+      ],
+      steps: built,
+    };
+  }
+
+  function trackerFor(
+    marked: Ticket[],
+    steps: Step[],
+  ): { adapter: TicketingAdapter; labelled: { number: number; label: string }[] } {
+    const base = fakeAdapter({ alpha: marked });
+    const labelled: { number: number; label: string }[] = [];
+    return {
+      adapter: {
+        ...base.adapter,
+        async listSteps(): Promise<Step[]> {
+          return steps.map((step) => ({ ...step }));
+        },
+        async applyLabel(_project, number, label): Promise<void> {
+          labelled.push({ number, label });
+        },
+      },
+      labelled,
+    };
+  }
+
+  const idleSpawner: SessionSpawner = { async spawn(): Promise<void> {} };
+
+  /** (1) Steps 1–2 closed → step 3 is the one that gets a run. */
+  it("opens a run on the first step that is not done", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { state: "closed" },
+      {},
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 53)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+    expect(store.runsForTicket("alpha", 52)).toEqual([]);
+  });
+
+  /**
+   * The map ticket is marked — it is the ticket the human filed — and it must
+   * never get a run of its own, or the daemon works the initiative and its
+   * steps at the same time.
+   */
+  it("never opens a run on the map ticket", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{}, {}]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", MAP)).toEqual([]);
+  });
+
+  /** Fourteen marked steps must not become fourteen runs at once. */
+  it("opens one run, not one per step", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative(Array.from({ length: 14 }, () => ({})));
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    const opened = steps.filter(
+      (step) => store.runsForTicket("alpha", step.number).length > 0,
+    );
+    expect(opened.map((step) => step.number)).toEqual([51]);
+  });
+
+  /**
+   * (2) A step the machine dropped stays dropped. The hold label is the only
+   * thing keeping it out of the frontier, so this is the case that proves the
+   * whole of `timone cancel` still means something a cycle later.
+   */
+  it("leaves a held step alone and takes the next one instead", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([
+      { labels: ["timone", HELD_LABEL] },
+      {},
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+  });
+
+  /** A step a person took is theirs; the machine does not start it underneath them. */
+  it("leaves a step a person has taken alone", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{ assignees: ["fvermaut"] }, {}]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+  });
+
+  /** A step waiting on an open one is not eligible, whatever its position. */
+  it("skips a blocked step even when it sorts first", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([
+      {
+        blockedBy: [
+          {
+            number: 52,
+            url: "https://github.com/fvermaut/scratch-app/issues/52",
+            open: true,
+          },
+        ],
+      },
+      {},
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+  });
+
+  /**
+   * The claim. Without it the next cycle sees the same step open, unheld and
+   * unclaimed, and every ruling about dropping work is decoration.
+   */
+  it("holds the step it claims, so the next cycle leaves it alone", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{}, {}]);
+    const { adapter, labelled } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(labelled).toContainEqual({ number: 51, label: HELD_LABEL });
+  });
+
+  /** The machine never writes an assignee: that field is the human's half. */
+  it("never assigns anybody to anything", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{}, {}]);
+    const { adapter, labelled } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    for (const step of steps) expect(step.assignees).toEqual([]);
+    expect(labelled.every((entry) => entry.label !== "assignee")).toBe(true);
+  });
+
+  /** (4) Every step closed → nothing is taken up. */
+  it("opens nothing when every step is closed", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { state: "closed" },
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    for (const step of steps) {
+      expect(store.runsForTicket("alpha", step.number)).toEqual([]);
+    }
+  });
+
+  /**
+   * The cached picture — 29f renders from it and makes no forge call of its
+   * own, so a cycle that does not write it leaves `timone status` with
+   * nothing to say.
+   */
+  it("writes down what it saw, so status need not ask GitHub", async () => {
+    const store = newStore();
+    const { tickets, steps } = initiative([{ state: "closed" }, {}, {}]);
+    const { adapter } = trackerFor(tickets, steps);
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.initiativeFor("alpha", 52)).toMatchObject({
+      initiative: MAP,
+      steps: [51, 52, 53],
+      done: 1,
+      next: 52,
+    });
+  });
+
+  /** A ticket that is nobody's step is untouched by any of this. */
+  it("leaves an ordinary marked ticket exactly as it was", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter({ alpha: [ticket(3)] });
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner,
+    });
+
+    expect(store.runsForTicket("alpha", 3)).toHaveLength(1);
+  });
+});
+
+/**
+ * 29d — a step's run enters at `planning`, not at triage.
+ *
+ * Under the old model this was `run.seq > 1`: chunk 1 came from the
+ * initiative's own run, and every chunk after it entered at planning because
+ * the human had already approved the list. A step's run is always `seq` 1, so
+ * that test now answers no for every step there is — which would send all
+ * fourteen back through triage to re-interview a human who has approved the
+ * list already.
+ */
+describe("where a step's run enters the pipeline", () => {
+  const MAP = 7;
+  const idleSpawner = (
+    seen: { run: Run; context?: { stage?: string } }[],
+  ): SessionSpawner => ({
+    async spawn(run, _project, context): Promise<void> {
+      seen.push({ run, context: context as { stage?: string } | undefined });
+    },
+  });
+
+  function tracker(steps: Step[]): TicketingAdapter {
+    const tickets = [
+      ticket(MAP, { labels: ["timone", MAP_LABEL] }),
+      ...steps.map((step) =>
+        ticket(step.number, { title: step.title, labels: step.labels }),
+      ),
+    ];
+    const base = fakeAdapter({ alpha: tickets });
+    return {
+      ...base.adapter,
+      async listSteps(): Promise<Step[]> {
+        return steps.map((step) => ({ ...step }));
+      },
+      async applyLabel(): Promise<void> {},
+    };
+  }
+
+  const step = (number: number, overrides: Partial<Step> = {}): Step => ({
+    number,
+    title: `${number - 50}. Piece ${number - 50}`,
+    state: "open",
+    labels: ["timone"],
+    assignees: [],
+    blockedBy: [],
+    dependenciesIncomplete: false,
+    ...overrides,
+  });
+
+  it("enters at planning, because the human approved the list already", async () => {
+    const store = newStore();
+    const seen: { run: Run; context?: { stage?: string } }[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter: tracker([step(51), step(52)]),
+      spawner: idleSpawner(seen),
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].run.ticket).toBe(51);
+    expect(seen[0].context?.stage).toBe("planning");
+  });
+
+  /** The very first step is a successor too: the list was approved before it. */
+  it("enters the first step at planning as well, not only the later ones", async () => {
+    const store = newStore();
+    const seen: { run: Run; context?: { stage?: string } }[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter: tracker([step(51)]),
+      spawner: idleSpawner(seen),
+    });
+
+    expect(seen[0]?.context?.stage).toBe("planning");
+  });
+
+  /** A ticket that is nobody's step still enters where it always did. */
+  it("leaves an ordinary ticket entering at triage", async () => {
+    const store = newStore();
+    const seen: { run: Run; context?: { stage?: string } }[] = [];
+    const { adapter } = fakeAdapter({ alpha: [ticket(3)] });
+
+    await pollOnce({
+      manifest: manifestWith("alpha"),
+      store,
+      adapter,
+      spawner: idleSpawner(seen),
+    });
+
+    expect(seen[0]?.context).toBeUndefined();
   });
 });
