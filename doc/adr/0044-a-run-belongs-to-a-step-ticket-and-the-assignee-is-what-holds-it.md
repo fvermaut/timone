@@ -72,6 +72,22 @@ A `Blocked by: #N` line in a ticket body is **read, not acted on, and answered**
 
 `.claude/skills/timone-wayfind/SKILL.md:143` currently instructs agents to fall back to that body line where the tracker has no native relation. **The fallback stays correct for such a tracker, and its wording now needs revising for GitHub-hosted projects**, where there is no "unavailable" case to fall back from.
 
+### D7 — The way back out of a dropped step is letting go of the claim, not reviving the run
+
+> Added 2026-08-21, in the same session, once D2 and D3 were found to have closed the only door the ledger leaves open. It completes D2's call to action, whose "retry" half had no mechanism behind it.
+
+D2 says a cancelled step's ticket carries a call to action with two ways on. The *close* half needs nothing. The *retry* half collides with a decision already in the code: **a cancelled run is a dead end by construction.** `runs.ts:108` gives `cancelled` an empty transition list, under fvermaut's ruling of 2026-08-15 — *"a run that should never have existed must not be one keystroke from restarting"* — and `RunStore.retry` refuses one in a sentence written to be read by a person (`runs.ts:878-886`).
+
+That ruling always named a way back, and it is not reviving the run: *"a ticket that deserves another go gets a fresh chunk from `register`, because cancellation settles this one."* It worked because settledness freed the ticket. **D2 and D3 close exactly that door** — the step stays open, stays assigned, and an assigned step is never taken up.
+
+**So the claim is what is released, and the step is taken afresh.** The human unassigns the step ticket. The frontier then sees it open, unblocked and unassigned, and `register` opens a **new** run for it. The cancelled run stays dead and stays in the ledger as the record that the work was dropped once; nothing revives it.
+
+Both rulings survive intact, and this is the same instruction the refusal message already gives — *"reopen the ticket and mark it for me, and I'll start it afresh on my next pass"* — with *mark it* replaced by *unassign it*, because under D3 the claim now does the job the mark used to do.
+
+**The cost, and it is a real one:** this is the only act in the system with no `timone` command behind it. Everything else done to a run is typed. Releasing a claim is a click on the tracker. Accepted on the ground that the human is already on that ticket reading why the step stopped, which is where the call to action put them — but a `timone` verb for it is the obvious first thing to add if it grates.
+
+**What this forbids:** `timone retry` must **not** gain a `cancelled → picked-up` edge. A slice that finds the CTA naming a command the ledger refuses must fix the CTA's wording, never the transition table.
+
 ## Consequences
 
 - **The machine account moves to the front of the queue.** [ADR-0042](0042-timone-acts-under-its-own-identity.md)'s account was already blocker (a) on phase 30 — it blocks 30a and, through it, 30b, 30c and 30d, plus the live checks in 30k and 30l. D3 adds phase 29 to that list. It is an hour of fvermaut's time and it now gates both phases; nothing in code substitutes for it.
