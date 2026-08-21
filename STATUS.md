@@ -2,17 +2,19 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-20, late evening.
+**Last updated:** 2026-08-21.
 
 ---
 
 ## Waiting on you
 
-> **Read this first, it is new.** I was asked to build the one-step-one-ticket work and the container work, one after the other. **The container work started and three of its twelve pieces are built.** The one-step-one-ticket work **did not start at all** — reading the code against the plan first turned up four things only you can settle, and two of them would have broken something that works today. Nothing was built on a guess. Details in item 5.
+> **Read this first.** I was asked to build the one-step-one-ticket work and the container work, one after the other. **The container work started and three of its twelve pieces are built.** The one-step-one-ticket work **did not start** — reading the code against the plan first turned up four things only you could settle, and two of them would have broken something that works today. **You settled all four on 21 August, and a fifth that came out of them.** Both jobs now wait on one thing: item 1.
 
 **0. One thing changed that you will notice.** From now on, **the daemon will not start any job while there are uncommitted changes in the Timone folder**. It says which files, in the daemon's log. This is on purpose — every job has to follow one saved copy of the rules, and running rules you cannot see on screen is the confusion this prevents. But it is live *now*, before the container work that it was built for. So if you start the daemon and nothing happens, check the log and commit or undo your own edits first.
 
-**1. Make a GitHub account for Timone.** This is new, and nothing about running agents in containers can start until it exists. Create an account — any name you like — and invite it to `ivtrends` and `scratch-app`. About an hour, once.
+**1. Make a GitHub account for Timone. This is now the only thing standing in the way of both jobs.** Create an account — any name you like — and invite it to `ivtrends` and `scratch-app`. About an hour, once.
+
+It used to block only the container work. On 21 August you decided that a step which the machine has stopped is held by **who it is assigned to**. That only works if the machine has its own name: on your account, *the machine is building this*, *the machine stopped and is waiting for you* and *you are looking at this yourself* all look the same, and the machine cannot tell them apart. So you moved the account ahead of the one-step-one-ticket work, and it now gates that too.
 
 Today the machine has no account of its own. It borrows yours. That is why every comment it writes looks like you wrote it, and it is also why an agent working on one project can currently reach every repository you can. Its own account fixes both.
 
@@ -38,14 +40,7 @@ timone retry scratch-app#13
 timone cancel scratch-app#10
 ```
 
-**5. Four decisions block the one-step-one-ticket work. It cannot start without them.**
-
-This is the work that splits a big job into one ticket per step, so a thread stops reaching 73 comments. The plan for it is written. Reading it against the code before building found four things the plan cannot decide for itself. They are written up in full at the top of `doc/plans/phases/phase-29.md`; here they are in short.
-
-- **A deletion in the plan would stop `timone retry` from working.** The decision you approved says to delete a piece of bookkeeping because the only thing using it is going away. That is not right — it is also what keeps a **failed** job sitting still so `timone retry` can restart it where it broke. Delete it as written and either failed work stops being restartable, or the machine opens a new job beside the failure and then refuses your retry. **Keep the piece and delete only the counting, or change the behaviour on purpose?** My advice is keep it. It is yours to settle because the written decision is the thing that is wrong, and only you can change that. ([#51](https://github.com/fvermaut/timone/issues/51))
-- **Which number does `timone retry` take after the change?** Today a job belongs to the ticket you filed. After the change, each step is its own ticket. So does a job belong to the step's number or to the original one? If the step's, then the command you are told to type becomes `timone retry scratch-app#27` for a step you never filed. If the original, nothing records which step a merged pull request finished. **It changes what you type, so it is yours.**
-- **Should `timone status` be allowed to get slower?** To say which step is live it has to ask GitHub, and today it answers instantly from a local file. Three ways out: remember the answer locally, show less, or accept the wait. **Which?**
-- **How does one step say it is waiting for another?** GitHub can now record this itself, and there is also a plain "Blocked by: #12" line written into the ticket. Nothing in the code reads either yet. **Native, the written line, or both?** Two pieces of the work need the same answer, so nothing starts until this one is settled.
+**5. Nothing here is waiting on a decision any more.** On 21 August you ruled on all four questions that were blocking the one-step-one-ticket work, and on a fifth that came out of them. What you decided is under "What changed recently"; the reasons are written down in `doc/adr/0044-...`. All that plan needs now is item 1.
 
 **Three older rules also need a ruling.** None of them blocks anything today.
 
@@ -74,11 +69,25 @@ The second half of the idea is that a background program — the daemon — driv
 
 Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below). **Nothing on that list moved on 19 August**, deliberately — four of the promises gained notes about what happened, and a promise only gets its tick back when somebody who did not build the thing checks it.
 
-1134 automatic tests pass. Tests are not the same as somebody watching it work.
+1138 automatic tests pass. Tests are not the same as somebody watching it work.
 
 ---
 
 ## What changed recently
+
+**21 August — you settled the five decisions that were holding up one step, one ticket.** Written down in `doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md`. In short:
+
+- **A job belongs to the step, not to the ticket you filed.** So you will type `timone retry ivtrends#57` for a step, not `timone retry ivtrends#1`. **This changes item 2 above once the work ships** — not before.
+- **`timone cancel` throws the work away, as it always has.** The step stays open and the machine does not start it again. It writes on that ticket what your two ways out are.
+- **The machine holds a stopped step by assigning it to itself.** That is why the account in item 1 moved to the front.
+- **To make it do a dropped step after all, you unassign the ticket** and it starts it afresh. This is the only thing in the whole system with no command to type — it is a click on GitHub. Say the word if that grates and I will add a command.
+- **A step you throw away does not stop the job finishing.** It closes saying "thirteen of fourteen, step 7 dropped" rather than pretending all fourteen were built. It works out which is which by whether a pull request ever merged, so you never have to remember to close it a particular way.
+- **`timone status` stays instant.** It reads a picture the machine writes down each minute, rather than asking GitHub while you wait.
+- **A step says it waits for another using GitHub's own "blocked by".** If you type `Blocked by: #60` in a ticket instead, the machine will tell you it saw it and that it does not act on it — rather than ignoring you and building the thing early.
+
+Two of these correct the decision you took on 20 August rather than adding to it. It said to delete a piece of bookkeeping that turns out to be what makes `timone retry` work at all ([#51](https://github.com/fvermaut/timone/issues/51), now closed), and it said a cancelled step would simply be picked up again — which would have made `timone cancel` undo itself a minute later, while the command has printed *"I won't pick this chunk up again"* since the day it was built.
+
+**Nothing was built on any of this.** The plan is updated and waits on the account.
 
 **20 August, late — three pieces of the box are built, and the other work stopped before it started.** The branch is `phase-30-work-in-a-box`, nothing is merged, and there is no pull request yet.
 
