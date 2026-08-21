@@ -9,6 +9,15 @@
 
 ## ✏ Refined 2026-08-21 — the identity is a GitHub App, and it is installed rather than invited
 
+> **✏ Built and observed the same day.** The App exists: **Timone Agent**, slug `timone-agent`, App ID **4670926**, installation **155426497** on `fvermaut`, on selected repositories, granting exactly `contents:write`, `issues:write`, `metadata:read`, `pull_requests:write` — Actions, Workflows, Administration and Members all withheld. Two of [PRD-02.R23](../specs/prd/prd-02-inversion-of-control.criteria.md)'s clause-5 promises were **observed rather than argued** while testing something else:
+>
+> - **It acts as itself.** A throwaway issue opened with an installation token was authored by `timone-agent[bot]`, not by fvermaut ([scratch-app#41](https://github.com/fvermaut/scratch-app/issues/41)). This is the whole of D1, seen working.
+> - **A credential opens one repository alone.** A token minted with `{"repositories":["scratch-app"]}` returns **HTTP 200** on `scratch-app` and **HTTP 404** on `ivtrends` — the second repository is *invisible* to it, not merely forbidden, which is a stronger result than the ADR asked for.
+>
+> **This is evidence for a verifier, not a verdict.** R23 stays `draft`: stage 7 writes verdicts, and nothing here was checked by a context that did not do the work. It is recorded so the next reader finds it instead of re-deriving it.
+>
+> **What the same test disproved** is in [ADR-0044](0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D3: a bot **cannot be an issue assignee**, by any route, so the mechanism that ADR chose for holding a stopped step fell back to a label. Identity and scoping work; assignment does not.
+
 **The decision below stands. Its shape changes.** Timone still acts as itself rather than borrowing fvermaut's login, and a run's credential still opens one repository and expires. What was assumed everywhere — *a second account on the forge, invited to each repository* — is superseded by a **GitHub App, installed on the repositories it works on**. fvermaut ruled this on 2026-08-21.
 
 **Why the shape moved.** The account was going to be a second personal account holding a fine-grained token: long-lived, scoped by hand, and needing a mailbox of its own before it could exist at all. A GitHub App needs neither. It is created once, it is **installed** per repository rather than invited, and it mints **installation access tokens that expire after an hour and can be scoped to named repositories**. That is not an approximation of D2 — it is D2, handed over by the platform. Phase 30's slice 30a asks for "a short-lived credential for **one** repository"; an installation token is exactly that object, and the scope is a **parameter of the request** rather than a property of an account's memberships.
@@ -17,11 +26,13 @@ What changes, item by item:
 
 - **No second account, and no email alias.** The one-time human prerequisite in the Consequences below is superseded: nothing is created that needs a mailbox.
 - **Installation replaces invitation.** Access is granted by installing the App and selecting repositories — the same list `timone.yaml` declares. Adding a project later changes the installation's repository selection; it is not a collaborator invite.
-- **The identity on the forge is `timone[bot]`.** That is what comments, what pushes, what opens pull requests and what authors machine-authored commits. Everything D1 says about the identity being *not a human* holds under that name, and it still does **not** replace the provenance trailer of [ADR-0019](0019-timone-authored-commits-carry-a-provenance-trailer.md).
+- **The identity on the forge is `timone-agent[bot]`.** ✏ *2026-08-21: the slug `timone` was unavailable, so the App is `Timone Agent` / `timone-agent`.* That is what comments, what pushes, what opens pull requests and what authors machine-authored commits. Everything D1 says about the identity being *not a human* holds under that name, and it still does **not** replace the provenance trailer of [ADR-0019](0019-timone-authored-commits-carry-a-provenance-trailer.md).
 - **The secret is a private key, and it lives outside version control.** The App's private key, and the installation tokens minted from it, belong under `.timone/` — already gitignored as daemon machine state (`.gitignore`, *"Daemon machine state … local state, never a process artifact"*). Two things follow and both matter: the key can never ride into a client repository, and it does not make timone's own checkout dirty, so it does not trip the refusal-to-spawn-on-a-dirty-checkout that phase 30's slice **30f** builds.
 - **D2 is strengthened, not weakened.** A credential that expires in an hour and names one repository is a tighter bound than a hand-scoped token on a standing account — and it is *minted per run* rather than stored.
 
-**One thing is unproven and must be tested before any code is built on it.** That an App's bot can actually be **assigned to an issue** end to end. Only the schema was inspected, against `fvermaut/scratch-app` on 2026-08-21: `Issue.assignedActors` exists, its `Assignee` union admits `Bot`, and the mutation `replaceActorsForAssignable` exists. **Nothing was assigned**, because proving it needs an installed App. [ADR-0044](0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D3 makes the assignee the thing that holds a stopped step out of the frontier, so if a bot cannot hold a claim, that decision needs another mechanism and two phases move. **Install the App, assign it to one issue, and read it back — before a slice depends on it.**
+**✏ Superseded 2026-08-21, later the same day — it was tested, and it failed.** The paragraph below called the bot-assignment unproven and asked for exactly the test that was then run. **A GitHub App's bot cannot be assigned to an issue by any route** — installation token, user token, or the REST endpoint — and `suggestedActors(capabilities: [CAN_BE_ASSIGNED])` lists no bot. The schema admits it because that path belongs to GitHub's own registered coding agents. [ADR-0044](0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D3 therefore falls back to a **label**, which is what it now records, and no phase moves — phase 29 stops needing this App at all, since a label needs no identity. **Nothing here was built on the assumption**, because the test came first; that was the point of writing the paragraph below rather than proceeding.
+
+~~**One thing is unproven and must be tested before any code is built on it.** That an App's bot can actually be **assigned to an issue** end to end. Only the schema was inspected, against `fvermaut/scratch-app` on 2026-08-21: `Issue.assignedActors` exists, its `Assignee` union admits `Bot`, and the mutation `replaceActorsForAssignable` exists. **Nothing was assigned**, because proving it needs an installed App. [ADR-0044](0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D3 makes the assignee the thing that holds a stopped step out of the frontier, so if a bot cannot hold a claim, that decision needs another mechanism and two phases move. **Install the App, assign it to one issue, and read it back — before a slice depends on it.**~~
 
 ## Context
 
@@ -41,7 +52,7 @@ Alternatives considered:
 
 ### D1 — Timone has its own account on the forge
 
-> **✏ Refined 2026-08-21:** ~~account~~ — the identity is a **GitHub App**, installed on the repositories rather than invited to them, and it appears as **`timone[bot]`**. Everything else in D1 stands unchanged. See the amendment above.
+> **✏ Refined 2026-08-21:** ~~account~~ — the identity is a **GitHub App**, installed on the repositories rather than invited to them, and it appears as **`timone-agent[bot]`**. Everything else in D1 stands unchanged. See the amendment above.
 
 A separate identity, ~~added only to~~ **installed only on** the repositories declared in `timone.yaml`. It is what comments, what pushes, what opens pull requests, and what appears as the author of machine-authored commits.
 

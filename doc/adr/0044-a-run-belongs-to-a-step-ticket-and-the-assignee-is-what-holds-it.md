@@ -1,5 +1,7 @@
 # ADR-0044: A run belongs to a step ticket, and the assignee is what holds it
 
+> **✏ 2026-08-21 — the second half of this title is wrong, and is kept.** A **label** holds a step, not the assignee: a GitHub App's bot cannot be assigned to an issue, tested every way once the App existed (see **D3**). The filename and title are left alone because they are linked from ADR-0040, ADR-0042, phase 29 and phase 30, and a link that rots is a worse defect than a title that needs one line of correction. **Read D3 before acting on anything here.**
+
 - **Status:** accepted
 - **Date:** 2026-08-21
 - **Source:** fvermaut's rulings in a grilling session of 2026-08-21, taken against the four blockers pre-flight raised on phase 29
@@ -42,13 +44,38 @@ This **reverses** ADR-0040 D3's statement that a cancelled step "is simply the n
 
 ### D3 — The assignee is what holds a step ineligible
 
+> # ✏ SUPERSEDED 2026-08-21 — the mechanism does not exist. A **label** holds the step.
+>
+> **A GitHub App's bot cannot be assigned to an issue.** Not through the new path, not through the old one, not by anybody's token. Tested end to end against `fvermaut/scratch-app` once the App existed ([scratch-app#41](https://github.com/fvermaut/scratch-app/issues/41), which carries the transcript):
+>
+> | Attempt | Result |
+> | --- | --- |
+> | `replaceActorsForAssignable`, installation token | *"Assigning agents is not supported with GitHub App installation tokens. Use a user token instead."* |
+> | `replaceActorsForAssignable`, fvermaut's user token | *"Bot does not have access to the repository."* |
+> | REST `POST /issues/41/assignees` with `timone-agent[bot]` | **403 Forbidden** |
+> | `suggestedActors(capabilities: [CAN_BE_ASSIGNED])` | `fvermaut` alone, from either token |
+>
+> `assignedActors`, `replaceActorsForAssignable` and `Bot` in the `Assignee` union all exist — which is why the schema read that preceded this looked encouraging — but that path is **reserved for GitHub's own registered coding agents**. It is not open to an ordinary App. The schema being satisfiable is not the same as the operation being permitted, and this is the case that taught it.
+>
+> **So the fallback wins: a label holds a stopped step**, exactly the alternative this ADR's own Context recorded and fvermaut passed over on 2026-08-21. He chose the assignee over it knowing the trade, and the trade turned out not to be available; no fresh ruling was sought because there is only one option left standing.
+>
+> **What the label changes, and what it does not.** The frontier becomes *open, unblocked, not held* — where **held** means carrying the hold label. Everything else in this ADR stands: D1, D2, D4, D5 and D6 never depended on the mechanism, only on there being one.
+>
+> **One property is kept deliberately, and it is worth the extra clause.** The assignee's nicest side-effect was that a human assigning themselves took a step off the machine's list. A label does not do that on its own — so the rule reads the **assignees as well**: a step assigned to a person is claimed by that person and the machine leaves it alone. Humans can be assignees; only bots cannot. So the machine holds by label, a person holds by assignment, and both are visible on the ticket.
+>
+> **D7 gets easier, not harder.** Releasing a claim was a `replaceActorsForAssignable` with an empty list, and the open question was whether the GitHub interface would even offer a human that control for a bot. It does not arise: removing a label is an ordinary thing a person can do in two clicks, on every GitHub view, and there is nothing to verify.
+>
+> **And fvermaut's reordering of 2026-08-21 loses its stated reason.** He moved the account ahead of phase 29 *because* the assignee needed a distinct identity to be legible. A label needs no identity at all, so phase 29 no longer depends on the App. The reordering is moot rather than wrong — the App was created the same day, in about twenty minutes — and what phase 29 waits on is now nothing.
+>
+> The paragraphs below stand as the record of the decision that was taken and the reasoning behind it.
+
 The frontier is the first child that is **open, unblocked and unassigned** — wayfinding's rule, unchanged (`.claude/skills/timone-wayfind/SKILL.md:143`, where the assignee already *is* the claim). The machine **assigns itself when it claims a step**, and **stays assigned after a cancel**. The assignment is what stops the step being retaken while it waits for the human; retrying it, or closing it, is what clears the wait.
 
 The cost is not small and is not deferrable. This needs Timone to have its own forge account ([ADR-0042](0042-timone-acts-under-its-own-identity.md)). On a borrowed account there is one name on the tracker, and *the machine is building this*, *the machine stopped and is waiting for you* and *the human is looking at this* all render identically — so the field this decision loads cannot carry the load.
 
 **fvermaut ruled on 2026-08-21 that the account is therefore made before phase 29 is built**, reordering the work he had set on 2026-08-20. Phase 30 already recorded the account as its own first blocker; this decision makes phase 29 wait on it too.
 
-> **✏ Refined 2026-08-21 — the decision is unchanged; what "assigned" means on the wire is not what this ADR assumed.** Later the same day fvermaut ruled that Timone's identity is a **GitHub App**, not a second account ([ADR-0042](0042-timone-acts-under-its-own-identity.md), as amended), so the thing that claims a step is a **bot**, `timone[bot]`. A bot can be an assignee — but only through GitHub's newer field, and the older one is blind to it. Verified against `fvermaut/scratch-app` on 2026-08-21:
+> **✏ Refined 2026-08-21 — the decision is unchanged; what "assigned" means on the wire is not what this ADR assumed.** Later the same day fvermaut ruled that Timone's identity is a **GitHub App**, not a second account ([ADR-0042](0042-timone-acts-under-its-own-identity.md), as amended), so the thing that claims a step is a **bot**, `timone-agent[bot]`. A bot can be an assignee — but only through GitHub's newer field, and the older one is blind to it. Verified against `fvermaut/scratch-app` on 2026-08-21:
 >
 > - **`Issue.assignees` is typed `UserConnection`** — users only. **A bot assignee does not appear in it at all.**
 > - **`Issue.assignedActors` is typed `AssigneeConnection`**, and its `Assignee` union has possible types `Bot`, `Mannequin`, `Organization`, `User`. That is the field that can see the claim.
@@ -98,6 +125,12 @@ Both rulings survive intact, and this is the same instruction the refusal messag
 **The cost, and it is a real one:** this is the only act in the system with no `timone` command behind it. Everything else done to a run is typed. Releasing a claim is a click on the tracker. Accepted on the ground that the human is already on that ticket reading why the step stopped, which is where the call to action put them — but a `timone` verb for it is the obvious first thing to add if it grates.
 
 **What this forbids:** `timone retry` must **not** gain a `cancelled → picked-up` edge. A slice that finds the CTA naming a command the ledger refuses must fix the CTA's wording, never the transition table.
+
+> # ✏ SUPERSEDED 2026-08-21 — removing a label, and there is no open question left
+>
+> D3's amendment above records that a bot cannot be assigned at all, so there is no assignment to release. **Releasing the claim is removing the hold label**, which a person does in two clicks in any GitHub view. The worry recorded below — whether GitHub's interface would offer a human the control to unassign a bot — **does not arise**, and the `timone` verb this decision called optional stays optional.
+>
+> The block below is kept as the record of the mechanism that was designed before the bot-assignment test was run.
 
 > **✏ Refined 2026-08-21 — releasing the claim is the same GraphQL path D3 now takes, and one half of it is an open question.** Under [ADR-0042](0042-timone-acts-under-its-own-identity.md) as amended the claim is held by a bot, so it lives in `assignedActors` and not in `assignees`. Releasing it is therefore **`replaceActorsForAssignable` with an empty actor list**, not `removeAssigneesFromAssignable` — the older mutation is user-only and has no bot to remove. The input schema admits it: `actorIds` and `actorLogins` are both plain lists, so "replace with nothing" is expressible. Verified on the schema, 2026-08-21.
 >
