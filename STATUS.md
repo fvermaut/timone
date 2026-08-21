@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-21, afternoon.
+**Last updated:** 2026-08-21, evening.
 
 ---
 
@@ -40,6 +40,8 @@ timone retry scratch-app#13
 timone cancel scratch-app#10
 ```
 
+**The one-step-one-ticket work has started.** Two of its ten pieces are built, on the branch `phase-29-one-step-one-ticket`. Nothing here needs you for it.
+
 **5. Nothing here is waiting on a decision any more.** On 21 August you ruled on all four questions that were blocking the one-step-one-ticket work, and on a fifth that came out of them. What you decided is under "What changed recently"; the reasons are written down in `doc/adr/0044-...`. All that plan needs now is item 1.
 
 **Three older rules also need a ruling.** None of them blocks anything today.
@@ -74,6 +76,16 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 ---
 
 ## What changed recently
+
+**21 August, evening — the machine can now work out which step is next, and read the steps off GitHub.** Two pieces of the one-step-one-ticket work are built. Nothing behaves differently yet — nothing calls them — but they are the two halves everything after them stands on.
+
+- **The rule.** Given a job's steps, it picks the first that is open, not waiting on another, not held by the machine and not taken by you. Four conditions, and any one of them read on its own would let a step you stopped be picked up again.
+- **The reading.** It asks GitHub for a job's steps in one call — open and finished alike — with their labels, who has taken them and what they wait for.
+
+**Two mistakes were avoided by checking GitHub rather than guessing.** A step can say it waits for a ticket in a *different* repository, and GitHub gives back only the number — so waiting for `timone #8` and waiting for the to-do app's own `#8` look identical. Reading the number alone would have checked the wrong ticket and been confident about it. And GitHub can tell you a step waits for five things and then hand over only three; that now reads as *"still waiting"*, never as *"free to start"*. Both were found by making two throwaway tickets and reading the real answers, before a line of the code was written.
+
+1157 tests pass, up from 1138.
+
 
 **21 August — you settled the five decisions that were holding up one step, one ticket.** Written down in `doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md`. In short:
 
