@@ -9,6 +9,7 @@ import {
   MACHINE_MARKER,
   type PullRequest,
   type PullRequestThread,
+  type Step,
   type Ticket,
   type TicketingAdapter,
   type TicketThread,
@@ -324,6 +325,10 @@ describe("timone retry — the answer a killed session had already read", async 
     const thread: TicketThread["comments"] = [];
     const posted: string[] = [];
     const adapter: TicketingAdapter = {
+      // No initiative in this test is broken into step tickets.
+      async listSteps(): Promise<Step[]> {
+        return [];
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -601,6 +606,10 @@ describe("timone retry — the way back from a consumed answer", async () => {
       createdAt: "2026-08-06T08:00:00Z",
     };
     return {
+      // No initiative in this test is broken into step tickets.
+      async listSteps(): Promise<Step[]> {
+        return [];
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },

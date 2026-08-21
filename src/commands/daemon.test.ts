@@ -14,6 +14,7 @@ import type { Manifest } from "../manifest.js";
 import type {
   PullRequest,
   PullRequestThread,
+  Step,
   Ticket,
   TicketingAdapter,
 } from "../adapters/ticketing.js";
@@ -64,6 +65,10 @@ const manifest: Manifest = {
 /** An adapter that answers an empty ticket list and swallows comments. */
 function quietAdapter(): TicketingAdapter {
   return {
+    // No initiative in this test is broken into step tickets.
+    async listSteps(): Promise<Step[]> {
+      return [];
+    },
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
     },

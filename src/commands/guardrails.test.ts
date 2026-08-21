@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type {
   PullRequest,
   PullRequestThread,
+  Step,
   Ticket,
   TicketingAdapter,
   TicketThread,
@@ -235,6 +236,10 @@ describe("finding the run that drove a session", () => {
       comments: [],
     };
     const adapter: TicketingAdapter = {
+      // No initiative in this test is broken into step tickets.
+      async listSteps(): Promise<Step[]> {
+        return [];
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         return [];
       },

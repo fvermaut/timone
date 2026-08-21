@@ -474,3 +474,261 @@ describe("upsertComment", () => {
     ).rejects.toThrow(/no url/);
   });
 });
+
+/**
+ * A `gh issue list --json …` element carrying the step fields, in gh's real
+ * shape — verified against `fvermaut/scratch-app` on 2026-08-21, including the
+ * fields the adapter ignores.
+ */
+function ghStep(overrides: Record<string, unknown> = {}): unknown {
+  return {
+    ...(ghIssue() as Record<string, unknown>),
+    number: 51,
+    title: "The ledger learns steps",
+    state: "OPEN",
+    closed: false,
+    assignees: [],
+    blockedBy: { nodes: [], totalCount: 0 },
+    parent: {
+      id: "I_kwDOTmd-IM8AAAABNssLJA",
+      number: 50,
+      state: "OPEN",
+      title: "the lists could be smarter",
+      url: "https://github.com/fvermaut/scratch-app/issues/50",
+    },
+    ...overrides,
+  };
+}
+
+/** One `blockedBy` node, as gh returns it — its own state, and its own repo. */
+function ghDependency(
+  number: number,
+  state: "OPEN" | "CLOSED",
+  repo = "fvermaut/scratch-app",
+): unknown {
+  return {
+    id: `I_${number}`,
+    number,
+    state,
+    title: `whatever #${number} is`,
+    url: `https://github.com/${repo}/issues/${number}`,
+  };
+}
+
+/** The parent every step in these tests hangs from. */
+const INITIATIVE = 50;
+
+describe("listSteps", () => {
+  it("asks gh for both states and for every field a step needs", async () => {
+    const { run, calls } = fakeRunner(JSON.stringify([]));
+
+    await new GitHubTicketingAdapter({ run }).listSteps(alpha, INITIATIVE);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toContain("all");
+    const fields = calls[0].args[calls[0].args.indexOf("--json") + 1];
+    for (const field of [
+      "state",
+      "labels",
+      "assignees",
+      "blockedBy",
+      "parent",
+    ]) {
+      expect(fields).toContain(field);
+    }
+  });
+
+  /**
+   * (1) The breakdown's order, not the tracker's. 29c opens the step tickets
+   * in the order the human approved, so ascending number *is* that order —
+   * whereas gh answers newest first, which would run the initiative backwards.
+   */
+  it("returns the children in the breakdown's order, not the tracker's", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify([
+        ghStep({ number: 53 }),
+        ghStep({ number: 51 }),
+        ghStep({ number: 52 }),
+        ghStep({ number: 60, parent: null }),
+      ]),
+    );
+
+    const steps = await new GitHubTicketingAdapter({ run }).listSteps(
+      alpha,
+      INITIATIVE,
+    );
+
+    expect(steps.map((s) => s.number)).toEqual([51, 52, 53]);
+  });
+
+  /** (2) No dependency at all is unblocked — not malformed, not incomplete. */
+  it("reads a child with no dependencies as free", async () => {
+    const { run } = fakeRunner(JSON.stringify([ghStep()]));
+
+    const [step] = await new GitHubTicketingAdapter({ run }).listSteps(
+      alpha,
+      INITIATIVE,
+    );
+
+    expect(step.blockedBy).toEqual([]);
+    expect(step.dependenciesIncomplete).toBe(false);
+    expect(step.bodyDependencyLine).toBeUndefined();
+  });
+
+  /**
+   * (3) A dependency list the tracker counted but did not hand over. The step
+   * waits on something nobody can name, and saying so is the whole point: a
+   * step that should have been held back and was not is the failure mode
+   * ADR-0040 names as the one to watch.
+   */
+  it("reports an incomplete dependency list rather than reading it as free", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify([
+        ghStep({
+          blockedBy: { nodes: [ghDependency(49, "CLOSED")], totalCount: 2 },
+        }),
+      ]),
+    );
+
+    const [step] = await new GitHubTicketingAdapter({ run }).listSteps(
+      alpha,
+      INITIATIVE,
+    );
+
+    expect(step.dependenciesIncomplete).toBe(true);
+  });
+
+  /**
+   * (4) The body line is read and refused, never parsed. A human following
+   * the wayfinding skill's prose writes one in good faith; the machine says
+   * it saw it and does not respect it, rather than walking straight past a
+   * dependency they thought they had declared.
+   */
+  it("reports a `Blocked by:` line in the body without acting on it", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify([
+        ghStep({ body: "does the thing\n\nBlocked by: #49, #48\n" }),
+      ]),
+    );
+
+    const [step] = await new GitHubTicketingAdapter({ run }).listSteps(
+      alpha,
+      INITIATIVE,
+    );
+
+    expect(step.bodyDependencyLine).toBe("Blocked by: #49, #48");
+    expect(step.blockedBy).toEqual([]);
+  });
+
+  /**
+   * (5) The machine's hold, on the label. An implementation that reads the
+   * assignees alone sees nothing here and reports the step as free — and then
+   * the daemon rebuilds work that was deliberately stopped, with every call
+   * succeeding.
+   */
+  it("reads a child carrying the hold label as held", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify([
+        ghStep({
+          labels: [
+            { id: "L1", name: MARK_LABEL, description: "", color: "ededed" },
+            { id: "L2", name: "timone:held", description: "", color: "ededed" },
+          ],
+        }),
+      ]),
+    );
+
+    const [step] = await new GitHubTicketingAdapter({ run }).listSteps(
+      alpha,
+      INITIATIVE,
+    );
+
+    expect(step.labels).toEqual([MARK_LABEL, "timone:held"]);
+  });
+
+  /** (6) A human's takeover, on the other field. Both halves or neither. */
+  it("reads a child assigned to a person as claimed by that person", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify([
+        ghStep({
+          assignees: [
+            {
+              id: "MDQ6VXNlcjQzMDA3Mjcw",
+              login: "fvermaut",
+              name: "François Vermaut",
+              databaseId: 43007270,
+            },
+          ],
+        }),
+      ]),
+    );
+
+    const [step] = await new GitHubTicketingAdapter({ run }).listSteps(
+      alpha,
+      INITIATIVE,
+    );
+
+    expect(step.assignees).toEqual(["fvermaut"]);
+  });
+
+  it("carries a closed child, and its state, rather than hiding it", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify([ghStep({ state: "CLOSED", closed: true })]),
+    );
+
+    const [step] = await new GitHubTicketingAdapter({ run }).listSteps(
+      alpha,
+      INITIATIVE,
+    );
+
+    expect(step.state).toBe("closed");
+  });
+
+  /**
+   * A dependency's number says nothing about which repository it lives in —
+   * `timone#8` and `scratch-app#8` are the same number — so its own state
+   * travels with it and no number is ever looked up.
+   */
+  it("keeps a dependency's own state, including one in another repository", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify([
+        ghStep({
+          blockedBy: {
+            nodes: [
+              ghDependency(8, "OPEN", "fvermaut/timone"),
+              ghDependency(49, "CLOSED"),
+            ],
+            totalCount: 2,
+          },
+        }),
+      ]),
+    );
+
+    const [step] = await new GitHubTicketingAdapter({ run }).listSteps(
+      alpha,
+      INITIATIVE,
+    );
+
+    expect(step.blockedBy).toEqual([
+      {
+        number: 8,
+        url: "https://github.com/fvermaut/timone/issues/8",
+        open: true,
+      },
+      {
+        number: 49,
+        url: "https://github.com/fvermaut/scratch-app/issues/49",
+        open: false,
+      },
+    ]);
+    expect(step.dependenciesIncomplete).toBe(false);
+  });
+
+  it("reaches no network", async () => {
+    const { run, calls } = fakeRunner(JSON.stringify([ghStep()]));
+
+    await new GitHubTicketingAdapter({ run }).listSteps(alpha, INITIATIVE);
+
+    expect(calls.every((c) => c.command === "gh")).toBe(true);
+  });
+});

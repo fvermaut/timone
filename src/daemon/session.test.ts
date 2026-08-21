@@ -15,6 +15,7 @@ import {
   stampMachineComment,
   type PullRequest,
   type PullRequestThread,
+  type Step,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
@@ -165,6 +166,10 @@ function fakeAdapter(initial: TicketThread = thread): {
   let clock = 0;
 
   const adapter: TicketingAdapter = {
+    // No initiative in this test is broken into step tickets.
+    async listSteps(): Promise<Step[]> {
+      return [];
+    },
     async listMarkedTickets(): Promise<Ticket[]> {
       return [ticket];
     },

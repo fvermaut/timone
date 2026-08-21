@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type {
   PullRequest,
   PullRequestThread,
+  Step,
   Ticket,
   TicketingAdapter,
   TicketingProject,
@@ -175,6 +176,10 @@ function fakeAdapter(open: readonly Ticket[] = []): {
   const asked: number[] = [];
   const listings: string[] = [];
   const adapter: TicketingAdapter = {
+    // No initiative in this test is broken into step tickets.
+    async listSteps(): Promise<Step[]> {
+      return [];
+    },
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
     },

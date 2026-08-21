@@ -187,6 +187,71 @@ export type Ticket = z.infer<typeof ticketSchema>;
 export type TicketThread = z.infer<typeof ticketThreadSchema>;
 
 /**
+ * One dependency a step declares, as GitHub's native `blockedBy` gives it.
+ *
+ * It carries its **own** state rather than a number to look up, and that is
+ * deliberate: `blockedBy` admits issues in other repositories, and the numbers
+ * of the two collide freely — a step blocked by `timone#8` and one blocked by
+ * `scratch-app#8` are indistinguishable by number alone. Verified against
+ * `fvermaut/scratch-app` on 2026-08-21. Resolving by number would have matched
+ * a foreign dependency against a local step of the same number and answered
+ * confidently with the wrong one.
+ */
+export const dependencySchema = z.strictObject({
+  number: z.number().int().positive(),
+  /** The only field that says which repository the dependency lives in. */
+  url: z.string(),
+  /** Whether it is still open, and so still holding its dependent back. */
+  open: z.boolean(),
+});
+
+/**
+ * One step ticket of an initiative
+ * ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)):
+ * a child of the initiative's ticket, and one run's worth of work.
+ *
+ * Wider than a {@link Ticket} because the frontier rule asks questions a
+ * ticket has never had to answer — whether it is closed, whether anyone has
+ * claimed it, and what it waits for.
+ */
+export const stepSchema = z.strictObject({
+  number: z.number().int().positive(),
+  title: z.string(),
+  state: z.enum(["open", "closed"]),
+  /** Every label it carries; the hold is one of them, and named in `steps.ts`. */
+  labels: z.array(z.string()),
+  /**
+   * The people who have taken it. Users only, and that is the field's exact
+   * capability rather than a shortcoming: **a GitHub App's bot cannot be an
+   * issue assignee at all**, so the machine's own hold is a label and this
+   * field carries only the humans it can carry.
+   */
+  assignees: z.array(z.string()),
+  blockedBy: z.array(dependencySchema),
+  /**
+   * True when the tracker counted more dependencies than it handed over, so
+   * what this step waits for is **not fully known**. Read as blocked, never as
+   * free: a step that should have been held back and was not is the failure
+   * mode ADR-0040 names as the one to watch.
+   */
+  dependenciesIncomplete: z.boolean(),
+  /**
+   * A `Blocked by:` line found in the body, verbatim, or absent.
+   *
+   * The machine does **not** act on it — a dependency is the native relation
+   * and nothing else — but it does not ignore it either. It is carried here so
+   * that the machine can say on the ticket that it saw the line and does not
+   * respect it, rather than walking silently past a dependency a human
+   * believed they had declared. `.claude/skills/timone-wayfind/SKILL.md` still
+   * offers the line, which is how one gets written in good faith.
+   */
+  bodyDependencyLine: z.string().optional(),
+});
+
+export type Dependency = z.infer<typeof dependencySchema>;
+export type Step = z.infer<typeof stepSchema>;
+
+/**
  * Where a pull request stands, as the process reads it: `merged` is the
  * terminal state that completes a run, `closed` (without merging) the one
  * that declines it, and `open` is a run still waiting on its review.
@@ -281,6 +346,16 @@ export interface TicketingAdapter {
    * from silently.
    */
   listOpenTickets(project: TicketingProject): Promise<Ticket[]>;
+
+  /**
+   * The step tickets of one initiative — its children — **open and closed
+   * alike**, in the order its approved breakdown put them.
+   *
+   * Closed ones are part of the answer rather than noise: the frontier chooses
+   * the first step that is not done, so it has to be able to see that the ones
+   * before it are.
+   */
+  listSteps(project: TicketingProject, initiative: number): Promise<Step[]>;
 
   /** One ticket with its comment thread. */
   getTicket(project: TicketingProject, number: number): Promise<TicketThread>;

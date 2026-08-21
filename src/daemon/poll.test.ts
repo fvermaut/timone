@@ -21,6 +21,7 @@ import {
   STAGE_ESCALATED_MARKER,
   type PullRequest,
   type PullRequestThread,
+  type Step,
   type Ticket,
   type TicketingAdapter,
   type TicketingProject,
@@ -132,16 +133,20 @@ const noPullRequests = {
 };
 
 /**
- * The open-ticket listing for fakes whose test is not about it: this project
- * has nothing open beyond the marked tickets it declares, so nothing here is
- * ever introduced to.
+ * The two ticket listings no fake here is *about*: the open one, and the step
+ * children of an initiative. This project has nothing open beyond the marked
+ * tickets it declares, and no initiative in these tests has been broken into
+ * step tickets, so nothing here is ever introduced to either.
  *
  * Its own spread rather than a member of `noPullRequests`, because it is the
- * ticket surface: a fake answering the open listing out of a constant named
- * for pull requests would be saying something it does not mean.
+ * ticket surface: a fake answering these out of a constant named for pull
+ * requests would be saying something it does not mean.
  */
-const noUnmarkedTickets = {
+const noOtherListings = {
   async listOpenTickets(): Promise<Ticket[]> {
+    return [];
+  },
+  async listSteps(): Promise<Step[]> {
     return [];
   },
 };
@@ -152,6 +157,10 @@ function fakeAdapter(
 ): { adapter: TicketingAdapter; comments: PostedComment[] } {
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
+    // No initiative in this test is broken into step tickets.
+    async listSteps(): Promise<Step[]> {
+      return [];
+    },
     async listMarkedTickets(project: TicketingProject): Promise<Ticket[]> {
       if (failing.includes(project.name)) {
         throw new Error(`gh exploded on ${project.name}`);
@@ -462,7 +471,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments };
       },
@@ -962,7 +971,7 @@ describe("pollOnce — runs parked before the machinery existed", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -1059,7 +1068,7 @@ describe("pollOnce — a run parked at an unbuilt stage resumes at that stage", 
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -1110,7 +1119,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -1331,7 +1340,7 @@ describe("reclaiming a run its daemon left behind", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -1866,7 +1875,7 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
     },
-    ...noUnmarkedTickets,
+    ...noOtherListings,
     async getTicket(): Promise<TicketThread> {
       throw new Error("no ticket is read in this test");
     },
@@ -2442,7 +2451,7 @@ describe("pollOnce — a written answer reaches a session that ingests it", () =
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [invitation, answer] };
       },
@@ -2506,7 +2515,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [...thread] };
       },
@@ -2647,6 +2656,10 @@ describe("pollOnce — reading a written answer consumes it", () => {
       calls.push({ call, args });
     };
     const adapter: TicketingAdapter = {
+      // No initiative in this test is broken into step tickets.
+      async listSteps(): Promise<Step[]> {
+        return [];
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         record("listMarkedTickets");
         return [base];
@@ -2805,7 +2818,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         fetches += 1;
         return { ...base, comments: [invitation, answer] };
@@ -2856,7 +2869,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -2990,6 +3003,10 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
     };
 
     const adapter: TicketingAdapter = {
+      // No initiative in this test is broken into step tickets.
+      async listSteps(): Promise<Step[]> {
+        return [];
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         return [...listed];
       },
@@ -3378,6 +3395,10 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       `${MACHINE_MARKER}\n\n---\n\n${body}`;
 
     const adapter: TicketingAdapter = {
+      // No initiative in this test is broken into step tickets.
+      async listSteps(): Promise<Step[]> {
+        return [];
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         return open.filter((candidate) => candidate.labels.includes("timone"));
       },
@@ -3872,7 +3893,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(_project, number): Promise<TicketThread> {
         reads.push(number);
         if (number === MAP) return { ...map(), comments };
@@ -4150,7 +4171,7 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(_project, number): Promise<TicketThread> {
         if (number === MAP) {
           return { ...map(), comments: [closingSummary, goAhead] };
@@ -4361,7 +4382,7 @@ describe("pollOnce — a ticket's next chunk", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return tickets;
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(_project, number): Promise<TicketThread> {
         const found = tickets.find((candidate) => candidate.number === number);
         if (found === undefined) throw new Error(`no ticket ${number}`);
@@ -5130,7 +5151,7 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments };
       },
@@ -5312,7 +5333,7 @@ describe("pollOnce — a park nothing written can end", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments };
       },
@@ -5445,7 +5466,7 @@ describe("pollOnce — a park nothing written can end", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [] };
       },
@@ -5528,7 +5549,7 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments: [...thread] };
       },
@@ -5811,7 +5832,7 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
-      ...noUnmarkedTickets,
+      ...noOtherListings,
       async getTicket(): Promise<TicketThread> {
         return { ...base, comments };
       },

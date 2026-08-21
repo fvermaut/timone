@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { HELD_LABEL, nextStep, type Step } from "./steps.js";
+import { type Dependency, type Step } from "../adapters/ticketing.js";
+import { HELD_LABEL, nextStep } from "./steps.js";
 
 /**
  * A step ticket as the frontier sees it, with the free shape as its default:
@@ -14,7 +15,15 @@ const step = (number: number, overrides: Partial<Step> = {}): Step => ({
   labels: ["timone"],
   assignees: [],
   blockedBy: [],
+  dependenciesIncomplete: false,
   ...overrides,
+});
+
+/** A dependency on another step, carrying its own state rather than a number. */
+const on = (number: number, open: boolean): Dependency => ({
+  number,
+  url: `https://github.com/fvermaut/scratch-app/issues/${number}`,
+  open,
 });
 
 describe("nextStep", () => {
@@ -31,13 +40,16 @@ describe("nextStep", () => {
   });
 
   it("skips a step whose dependency is still open, even when it sorts first", () => {
-    const steps = [step(11, { blockedBy: [12] }), step(12)];
+    const steps = [step(11, { blockedBy: [on(12, true)] }), step(12)];
 
     expect(nextStep(steps)?.number).toBe(12);
   });
 
   it("takes a step whose dependency is closed", () => {
-    const steps = [step(11, { blockedBy: [12] }), step(12, { state: "closed" })];
+    const steps = [
+      step(11, { blockedBy: [on(12, false)] }),
+      step(12, { state: "closed" }),
+    ];
 
     expect(nextStep(steps)?.number).toBe(11);
   });
@@ -74,8 +86,23 @@ describe("nextStep", () => {
   });
 
   it("returns undefined on a dependency cycle rather than looping", () => {
-    const steps = [step(11, { blockedBy: [12] }), step(12, { blockedBy: [11] })];
+    const steps = [
+      step(11, { blockedBy: [on(12, true)] }),
+      step(12, { blockedBy: [on(11, true)] }),
+    ];
 
     expect(nextStep(steps)).toBeUndefined();
+  });
+
+  /**
+   * Not one of the plan's seven: found while verifying `gh`'s real output for
+   * 29b. A dependency list the tracker counted but did not hand over in full
+   * leaves the step waiting on something nobody can name, and the safe answer
+   * is the one that holds it back.
+   */
+  it("skips a step whose dependency list came back incomplete", () => {
+    const steps = [step(11, { dependenciesIncomplete: true }), step(12)];
+
+    expect(nextStep(steps)?.number).toBe(12);
   });
 });
