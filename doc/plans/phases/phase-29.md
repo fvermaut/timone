@@ -1,6 +1,6 @@
 # Phase 29: One step, one ticket — the daemon stops counting runs
 
-> **Status:** In progress — **29a–29g and 29j built; every code slice is done.** The live gate (29h) was **attempted and is blocked on `scratch-app` being free** — see its own section. 29i waits on the gate. on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
+> **Status:** In progress — **every code slice built, and the live gate (29h) has run.** It found four defects, all fixed. **The one thing outstanding is fvermaut's judgement** that the thread is followable, plus the end-to-end half he chose not to run. 29i waits on that. on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 > **Companion phases:** [phase-22](phase-22.md) — it built the ledger half of R22, `TERMINAL`, and the settledness predicate this phase removes. [phase-23](phase-23.md) — it built the breakdown artifact, its parser, the `breakdown` pipeline stage, the chunk-zero merge, and chunk succession; **this phase changes what 23f decided and leaves the rest standing**. [phase-27](phase-27.md) — the feedback path, retired by ADR-0036, whose routing this must not disturb.
 >
@@ -561,7 +561,17 @@ npm run build && npx vitest run src/daemon/cta.test.ts src/commands/cancel.test.
 
 ### Sub-phase 29h: The live gate, on `scratch-app`
 
-> **⛔ Attempted 2026-08-21 and blocked — by the system working, not by a fault.** The fixture is built and pushed ([scratch-app#44](https://github.com/fvermaut/scratch-app/issues/44), branch `timone/44-sort-the-list-the-way-i-want`, three pieces). The approval path refused at the ledger: *"Project scratch-app is held by run scratch-app#4/1 — one work branch at a time"*. `#4` has held the project since 19 August, parked on an escalation awaiting `timone takeover`.
+> **✅ Ran 2026-08-21, on the second attempt, and found four defects — all fixed.** [#45](https://github.com/fvermaut/scratch-app/issues/45) is the map, [#46](https://github.com/fvermaut/scratch-app/issues/46)/[#47](https://github.com/fvermaut/scratch-app/issues/47)/[#48](https://github.com/fvermaut/scratch-app/issues/48) its steps, chained natively, and the frontier took #46 and nothing else. About $5, of which $4.86 was a session that should never have started — defect 1.
+>
+> **Two of the four hid each other, which is the argument for a live gate in one sentence.** The hold label's description was 111 characters against GitHub's cap of 100, so it was refused with a bare `HTTP 422` and **no step ticket was opened at all**; and the initiative's own run carried on into planning regardless, so the first visible sign of anything wrong was a plan appearing on a ticket that is meant to be a list of links.
+>
+> **Two more were found by *reading* what the gate wrote**, not by any assertion: the map announced *"This one is finished."* with nothing built, and a step waiting on another announced *"I'll pick this up on my next pass."* Both are sentences a reader acts on, and no unit test was ever going to object to them.
+>
+> **The human half is still owed** and nothing substitutes for it. So is the end-to-end half — no step was built to a merged pull request, so **29e's closing has never fired live**. Full account in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
+>
+> ~~**⛔ First attempt, 2026-08-21 — blocked by the system working, not by a fault.**~~ Kept below as the record of why the gate did not run at the first try.
+>
+> **⛔ First attempt — blocked.** The fixture is built and pushed ([scratch-app#44](https://github.com/fvermaut/scratch-app/issues/44), branch `timone/44-sort-the-list-the-way-i-want`, three pieces). The approval path refused at the ledger: *"Project scratch-app is held by run scratch-app#4/1 — one work branch at a time"*. `#4` has held the project since 19 August, parked on an escalation awaiting `timone takeover`.
 >
 > **That is the cost fvermaut accepted on 16 August, paid in practice for the first time** — `STATUS.md`'s "Not proven yet" carried *"a stopped job that is holding a project has not been watched blocking one"*. It has now, and what it blocked was this phase's own gate.
 >
