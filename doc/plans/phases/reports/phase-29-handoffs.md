@@ -97,3 +97,71 @@ Full suite: **1157 tests, 1156 green.** The one failure is `guardrails.test.ts >
 - **A non-zero test count** — 39, read from the run, not inferred from the colour.
 
 **What this slice does not prove.** That anything calls `listSteps`; that an initiative's children exist to be listed (29c opens them); and that the `Blocked by:` line, once reported, is actually said on the ticket — this slice carries the line, and a later slice must speak it.
+
+## 29c — Approval opens one ticket per step, idempotently
+
+**Built.** `openStepTickets` runs inside `recordApproval` (`src/daemon/session.ts`), immediately after `mergeChunkZero` returns true — the point the code's own comment calls *"one gesture with two effects"*. It reads the approved breakdown off the project's default branch, opens one ticket per chunk as a child of the initiative, chains each to the one before it as GitHub's native relation, and rewrites the initiative's ticket into a map of its children.
+
+**It is TypeScript and it is not in the prompt.** The plan is emphatic and it was right to be: idempotence is this slice's whole deliverable, and idempotence cannot be *asserted* about a spawned model told "create only what is missing". `approvalRecordPrompt` is untouched.
+
+**Files touched.**
+
+- `src/adapters/ticketing.ts` — four writes join the port: `createStep`, `blockStep`, `setTicketBody`, `ensureLabel`.
+- `src/adapters/github-tickets.ts` — their implementations.
+- `src/adapters/github-tickets.test.ts` — eight cases for them.
+- `src/adapters/ticketing.stubs.ts` — **new.** `noStepWrites` and `noSteps`.
+- `src/daemon/steps.ts` — `HELD_LABEL_DESCRIPTION`, beside the label it describes.
+- `src/daemon/session.ts` — `breakdownSource` option; `openStepTickets`; the `stepTitle`, `stepBody` and `initiativeMap` helpers; the `recordApproval` wiring.
+- `src/daemon/session.test.ts` — `trackerWithSteps`, `approvedBreakdown`, and an eight-case `describe`.
+- Twenty-nine stub sites across seven files gained `...noStepWrites`.
+
+**The finding that changed the slice: the breakdown artifact has no dependency field.**
+
+The plan says each created ticket carries "its declared dependencies", and blocker D's ruling makes a dependency the native relation. But `Chunk` is `{title, delivers}` and `CHUNK_LINE` (`breakdown.ts:61`) parses `N. **title** — delivers`. **There is nowhere in the format for a chunk to declare anything.** Two honest readings, and the slice took the conservative one:
+
+- **The approved order *is* the dependency.** Step N waits for step N−1. That reproduces exactly what the system does today — ADR-0029's *a chunk advances only on success*, one at a time, in order — with no notation invented and no artifact format changed, which would be stage 3 or stage 5 work done inside a slice.
+- **It is better than the status quo in one specific way**, which is why it does not merely preserve behaviour: the chain is now a **visible, editable relation on the tracker**. fvermaut can delete one `blockedBy` edge on any GitHub screen and the two steps run in parallel. Nothing before this could express that at all.
+
+**The alternative — widening the breakdown format to carry dependencies — is not taken here and is worth someone's ruling.** It is the difference between a fourteen-step initiative that is always a chain and one whose shape the breakdown can describe. Nothing in phase 29 needs it.
+
+**Decisions taken inside the slice.**
+
+- **A step ticket is titled `N. <chunk title>`, and that is what a re-run matches on.** The plan hedges at "the initiative and the step's position". Position breaks the moment a human opens a child by hand; a bare title breaks on two chunks named the same. The number makes it exact, and it reads correctly on the tracker beside the breakdown's own numbering.
+- **The chain is written only for a ticket this run opened.** A step that already existed already carries its relation, and writing it again is the second `blockedBy` edge case (2) forbids.
+- **29c owns the hold label's creation, and says so in the code.** The plan allows either 29c or 29d and warns that both assuming the other is a defect that shows up as a claim silently not applied. It is here, at the first moment anything touches the tracker for this initiative.
+- **`openStepTickets` answers rather than throws.** A tracker that fell over on the seventh create leaves six real tickets; taking the run down would turn a partial success into a failed initiative. The failure is loud in the log and the next cycle opens the rest — which is exactly case (3).
+- **`createStep` sets the parent in the same call as the create.** An initiative's children are found *by* their parent, so a step that failed to be linked is invisible to the frontier while perfectly visible to a human — the worst of both.
+- **`ensureLabel` swallows "already exists" and nothing else.** Any other failure travels: swallowing a 403 would turn a claim that is never applied into silence, which is the failure mode this phase watches for.
+- **`ticketing.stubs.ts` is new, and its members throw.** The port grew twice in one session and eleven hand-rolled stubs paid for it each time. A silent no-op stub would let a test that *should* have opened a step pass having opened none, which is the one thing this slice cannot afford.
+- **The map links its children by number.** `1. #51 — …` renders on GitHub as a live link carrying the step's title and whether it is closed, so the map shows progress without anything keeping a tally up to date.
+
+**Validation evidence.**
+
+`npm run build && npx vitest run src/daemon/session.test.ts` — **128 passed**, eight of them this slice's. `npx vitest run src/adapters/github-tickets.test.ts` — **47 passed**, eight of them this slice's. Both red first.
+
+**Case (2) demonstrated red against a version without the guard**, as the plan requires — by mutation rather than by assertion. Replacing `byTitle.get(title)` with `undefined` and re-running the block:
+
+```
+✓ opens one ticket per chunk, in the breakdown's order
+× opens nothing at all when it runs again
+× opens exactly the missing ones after a partial failure
+✓ chains each step to the one before it, as the native relation
+✓ rewrites the initiative's body into a map of its steps
+✓ opens every step unheld and unassigned
+✓ makes sure the hold label exists before anything can apply it
+✓ opens nothing when the breakdown cannot be read
+```
+
+Two red, six green — so those two are the cases carrying the idempotence, and the other six would pass against an implementation that opens fourteen more tickets every cycle.
+
+Full suite: **1173 tests, 1169 green.**
+
+**The plan's checks, answered.**
+
+- **Red→green for all five, case (2) red against a version without the guard** — yes, and eight rather than five: the two claim halves and the unreadable breakdown are extra.
+- **No test creates a real issue on any repository** — every adapter in these tests is a fake; the GitHub adapter's own tests go through `fakeRunner`, which throws on an unexpected call.
+- **A non-zero test count** — 128 and 47, read from the runs.
+
+**What this slice does not prove.** That anything reads the tickets it opens — 29d is the frontier's first consumer. That the hold label is ever *applied* — 29d's act. And it has never run against real GitHub: `createStep`'s argument vector is asserted, and `gh issue create --parent` was verified by hand on `scratch-app` #42/#43, but no live approval has opened a real set of step tickets. **That is 29h's job and it is the one that matters**, because this is the slice whose mistakes cannot be undone by re-running.
+
+**A note on the suite, filed rather than carried.** Five tests now fail intermittently on a full run — all 20s timeouts, all shelling out to git, all passing alone, and all failing identically with this branch's changes stashed. Reported on [timone#8](https://github.com/fvermaut/timone/issues/8) with the counts from three runs. It is not this phase's doing and this phase cannot avoid tripping over it.

@@ -1,6 +1,6 @@
 # Phase 29: One step, one ticket — the daemon stops counting runs
 
-> **Status:** In progress — **29a and 29b built** on `phase-29-one-step-one-ticket` (2026-08-21). Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
+> **Status:** In progress — **29a, 29b and 29c built** on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 > **Companion phases:** [phase-22](phase-22.md) — it built the ledger half of R22, `TERMINAL`, and the settledness predicate this phase removes. [phase-23](phase-23.md) — it built the breakdown artifact, its parser, the `breakdown` pipeline stage, the chunk-zero merge, and chunk succession; **this phase changes what 23f decided and leaves the rest standing**. [phase-27](phase-27.md) — the feedback path, retired by ADR-0036, whose routing this must not disturb.
 >
@@ -259,6 +259,13 @@ npm run build && npx vitest run src/adapters/github-tickets.test.ts
 ---
 
 ### Sub-phase 29c: Approval opens one ticket per step — idempotently
+
+> **✅ Built 2026-08-21.** `openStepTickets` in `src/daemon/session.ts`, wired into `recordApproval` after `mergeChunkZero`. Eight cases; case (2) proved red **by mutation** — deleting the guard turns (2) and (3) red and leaves the other six green. `approvalRecordPrompt` is untouched, as this slice insists.
+>
+> **One finding, and it is the plan's own assumption: the breakdown artifact has no dependency field.** `Chunk` is `{title, delivers}` and `CHUNK_LINE` (`breakdown.ts:61`) parses `N. **title** — delivers`; there is nowhere for a chunk to declare anything. **So the approved order is the dependency** — step N waits for step N−1, written as the native relation. That is exactly what ADR-0029's *a chunk advances only on success* did, with nothing invented and no artifact format changed, and it is strictly better in one way: the chain is now visible and editable on the tracker, so fvermaut can cut an edge and let two steps run in parallel. **Widening the breakdown format to carry real dependencies is the alternative, is not taken, and is nobody's call inside a slice** — see the handoff record.
+>
+> **29c takes the hold label's creation**, as this slice's own marker allows and 29d's does too. Said in the code, so neither slice can assume the other did it.
+> **Matching for a re-run is the numbered title** — `7. The board` — not the position, which breaks when a human opens a child by hand.
 
 **[MODIFY]** the breakdown approval path — on the reply that stamps `Approved` and merges chunk zero, open one ticket per step as a child of the initiative's ticket, each carrying its line, a link to the breakdown, and its declared dependencies. Rewrite the initiative's ticket body to be a map of its children.
 
