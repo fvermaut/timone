@@ -1,59 +1,22 @@
-**The one-step-one-ticket work is built, it has been watched running, and now it needs twenty minutes of your reading.**
+**The one-step-one-ticket work is done.** You read the four test tickets and said they made sense, so it is finished and written up. Nothing here needs you for it.
 
-You told me to stop the slow-page job so the new work could be tested on the to-do app. It ran. **It found four faults and all four are fixed** — that is what the test was for, and it cost about five dollars.
+**Two things about it are not proven, and I am saying so rather than leaving it.** Nobody has yet seen a piece close when its code is merged, or a job close after its last piece — you chose to stop the test at the tickets. Those parts are written and have tests, but have not been watched.
 
-**What to look at.** On the to-do app: [#45](https://github.com/fvermaut/scratch-app/issues/45) and the three tickets under it, [#46](https://github.com/fvermaut/scratch-app/issues/46), [#47](https://github.com/fvermaut/scratch-app/issues/47) and [#48](https://github.com/fvermaut/scratch-app/issues/48). They are made up — a test job about sorting your list — but the machinery is real.
+**The test tickets can be closed whenever you like.** They are [#45](https://github.com/fvermaut/scratch-app/issues/45), [#46](https://github.com/fvermaut/scratch-app/issues/46), [#47](https://github.com/fvermaut/scratch-app/issues/47) and [#48](https://github.com/fvermaut/scratch-app/issues/48). They are made up and nothing depends on them.
 
-**The only question is whether you can follow what is going on by reading them.** That is the whole point of this change, and it is the one thing no test of mine can answer.
-
-Right now they say:
-
-- **#45** — *"0 of 3 pieces are done, and none of the rest can start yet."*
-- **#46** — *"I stopped work on this one, and I won't start it again by myself."* with the two ways to restart it.
-- **#47** — *"This one is waiting for the piece before it."*
-
-I stopped piece 1 on purpose so you can see what a stopped piece says.
-
-**Reply here, or on the tickets, with whether that reads clearly to you.** Nothing moves on its own.
-
-**The four faults.**
-
-1. The label the machine puts on a stopped piece had a description that was too long. GitHub refused it. Because of that, **no piece tickets were made at all.**
-2. The main ticket kept working after it should have stopped. It spent nine minutes planning the whole job on a ticket that should only hold a list of links. This is why fault 1 was hard to see.
-3. The main ticket said *"This one is finished"* when nothing had been built.
-4. A piece waiting its turn said *"I'll pick this up on my next pass"*. It was not going to.
-
-**I found faults 3 and 4 by reading what the machine wrote.** No test checks whether a sentence is true.
-
-**What was not tested.** You chose to stop at the tickets, so I did not let the three pieces build all the way. **Nobody has yet seen a piece close when its code is merged, or the main ticket close after the last piece.** That part is written and has tests, but has not been watched.
-
-**The slow-page job is where you left it.** [#4](https://github.com/fvermaut/scratch-app/issues/4) is stopped and its label is off, so it will not start again by itself. Everything it worked out is still on the ticket. To pick it up:
+**The slow-page job is where you left it.** [#4](https://github.com/fvermaut/scratch-app/issues/4) is stopped and its label is off, so it will not start by itself. Everything it worked out is still on the ticket. To pick it up:
 
 ```
 timone takeover scratch-app#4
 ```
 
-# Timone — Status
-
-**Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
-
-**Last updated:** 2026-08-21, late evening.
-
----
-
-## Waiting on you
-
-> **Read this first.** You made the machine its own GitHub identity today, and you settled the five decisions that were blocking the one-step-one-ticket work. **The one-step-one-ticket plan is now waiting on nothing at all** — say the word and it gets built. The container work has three of its twelve pieces built and is waiting on one small thing from you, in item 1.
-
-**0. One thing changed that you will notice.** From now on, **the daemon will not start any job while there are uncommitted changes in the Timone folder**. It says which files, in the daemon's log. This is on purpose — every job has to follow one saved copy of the rules, and running rules you cannot see on screen is the confusion this prevents. But it is live *now*, before the container work that it was built for. So if you start the daemon and nothing happens, check the log and commit or undo your own edits first.
+**The container work is next.** Nine of its twelve pieces are ready to start now that you have read R23.
 
 **1. The machine has its own identity now — and the reading you owed is done.** You read R23 on 21 August and said it was fine, so **the nine pieces of container work that were waiting on it are released.**
 
 ~~**What is left is five minutes of reading.**~~ Done. The promise the container plan is measured against is now yours rather than a guess at what you meant. It is still marked "not checked" — that means nobody has watched it work, which is a different thing from nobody having read it. Nothing is built against it yet.
 
 **The identity itself, for the record.** You made it: **Timone Agent**, which signs its work as `timone-agent[bot]`. It can reach only the repositories you picked, and the key it uses expires after an hour and opens **one** repository at a time. Two things were checked straight away and both worked: a test ticket it opened is signed by it and not by you, and a key made for the to-do app **cannot see the trading app at all** — not "refused", invisible.
-
-**What is left is five minutes of reading.** The promise the whole container plan is measured against is still marked "awaiting your confirmation". It is in `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, called R23 — six short paragraphs. Read them and say yes, or say what is wrong. **Nine pieces of work sit behind it.**
 
 **One thing you decided this morning turned out not to be possible, and it cost nothing.** You chose to have the machine hold a stopped step by **assigning it to itself**. GitHub does not allow a machine identity to be assigned to a ticket — I tested every way once the identity existed, and all of them refused. So it holds a step with a **label** instead, which was the other option you were offered. Everything else you decided stands, and it is actually simpler: to make it do a dropped step after all, you **remove the label** rather than unassign it.
 
