@@ -334,3 +334,43 @@ Collapsing the function to the picture alone made a re-proposed initiative repor
 **No new seams.** The plan asks this to be said: 29g adds no behaviour, and the seam is the existing suite staying green.
 
 **What this slice does not prove.** Nothing here has run against real GitHub, and the multi-chunk model is now unreachable rather than proven absent — the code that could reach it is gone, but no live ticket has been through the new path.
+
+## 29j — A dropped step says how to get out of being dropped
+
+**Built.** Four surfaces promised *"I'll start it afresh on my next pass"* for work that was deliberately dropped. All four now say the same true thing: **remove the `timone:held` label and it starts afresh, or close the ticket and it carries on without it.**
+
+**Files touched.** `src/daemon/cta.ts` and `cta.test.ts`; `src/commands/cancel.ts`; `src/commands/takeover.ts` and `takeover.test.ts`; `src/daemon/runs.ts` and `runs.test.ts`; `src/daemon/steps.test.ts` (+2).
+
+**The choice the slice owed, and I got it wrong first.**
+
+The plan asks for `Cta.waitingOnYou` to be read, decided and pinned. I set it **true** on this argument: both ways out are gestures rather than commands, so nothing prints beside `Cta.command` either — leaving a dropped step on no terminal surface at all.
+
+**The argument is false, and a failing test in `status.test.ts` is what exposed it.** `timone status` lists **every** cancelled run with its reason, unconditionally — so a dropped step was never invisible. And true is worse than merely unnecessary: the **daemon** cancels a run when its ticket is closed (`poll.ts`'s *"no longer open and marked for me"*), so the flag would have put *"answer on scratch-app #6"* in front of a human whose ticket was already shut.
+
+It is **false**, matching its own docblock. Both the docblock and the test now carry the reasoning at length, because the wrong answer is the one that looks right, and the next reader will make the same move.
+
+**A second thing the plan did not ask for, and it matters more than it looks.** 29a promises the hold label is *"trivially renamed by one constant if he dislikes it"*. Writing the name into four user-facing sentences quietly breaks that promise: rename `HELD_LABEL`, everything compiles, and all four surfaces go on telling the human to remove a label that no longer exists. All four now interpolate the constant, and only `steps.ts` holds the literal. Two cases in `steps.test.ts` pin it.
+
+**Decisions taken inside the slice.**
+
+- **`runs.ts`'s refusal was rewritten and its transition table was not.** `cancelled: []` at `runs.ts:108` stands, `timone retry` gains no edge, and the slice changes what the refusal *says* rather than that it refuses — which is D7 exactly.
+- **The label is named, not described.** *"Remove the `timone:held` label"* names what the reader is looking at; *"release the hold"* would need a second lookup, and a call to action the reader cannot act on is the defect this slice exists to fix.
+- **No `timone` command on this branch.** `Cta.command` is undefined and that is asserted. Reaching for `timone retry <project>#<step>` here would name a command the ledger refuses outright — that is blocker G, and D7 is why this is the answer instead.
+
+**Validation evidence.**
+
+`npm run build && npx vitest run src/daemon/cta.test.ts src/commands/cancel.test.ts src/commands/takeover.test.ts` — green, and `cta.test.ts` alone is **54 passed**. Case (1) began exactly as the plan says it should: the existing test pinning the old words failed first, and that failure is the proof the branch was reached.
+
+Full suite: **1210 tests, 1205 green** — the five known flakes on [timone#8](https://github.com/fvermaut/timone/issues/8).
+
+**The plan's checks, answered.**
+
+- **All four red→green, case (1) starting from the old strings failing** — yes; three of the new cases were red before the branch was rewritten, and the old test's assertions were the first thing to go.
+- **Non-zero test count** — 54 in `cta.test.ts`, 231 across the three named files.
+- **No `"mark it for me"` from any of the four files** — the only hit is inside a comment in `cta.ts` **quoting the promise that was removed**, which is what should survive a deletion.
+- **`timone:held` in all four files** — `cta.ts`, `cancel.ts`, `takeover.ts`, `runs.ts`. All four reach it through `HELD_LABEL` rather than a literal, which is stronger than the check asks for.
+- **No `"unassign"` on those four files** — none.
+- **`cancelled: []` still at `runs.ts:108`** — yes.
+- **No ticketing adapter in this slice's tests** — `grep -c "TicketingAdapter" src/daemon/cta.test.ts` returns **0**, and idempotence is asserted as pure equality of two renders rather than by faking a poster.
+
+**What this slice does not prove.** That any human has read the new sentence. **That is 29h**, and this slice is the reason the gate has something to read: the plan makes 29h depend on it precisely so the words are judged on a real ticket by the person they are written for.

@@ -1,6 +1,6 @@
 # Phase 29: One step, one ticket — the daemon stops counting runs
 
-> **Status:** In progress — **29a–29g built** on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
+> **Status:** In progress — **29a–29g and 29j built**; only the live gate (29h) and the close (29i) remain on `phase-29-one-step-one-ticket` (2026-08-21). **R23's wording was confirmed by fvermaut on 2026-08-21**, which releases phase 30's nine held slices — it gates nothing here. Handoffs in [phase-29-handoffs.md](reports/phase-29-handoffs.md).
 
 > **Companion phases:** [phase-22](phase-22.md) — it built the ledger half of R22, `TERMINAL`, and the settledness predicate this phase removes. [phase-23](phase-23.md) — it built the breakdown artifact, its parser, the `breakdown` pipeline stage, the chunk-zero merge, and chunk succession; **this phase changes what 23f decided and leaves the rest standing**. [phase-27](phase-27.md) — the feedback path, retired by ADR-0036, whose routing this must not disturb.
 >
@@ -506,6 +506,12 @@ npm run build && npm test
 ---
 
 ### ✏ Refined 2026-08-21 — Sub-phase 29j: a dropped step says how to get out of being dropped
+
+> **✅ Built 2026-08-21.** All four surfaces say one sentence: remove the `timone:held` label and it starts afresh, or close the ticket and it carries on without it. The transition table is untouched.
+>
+> **`waitingOnYou` is `false`, and true was tried first and was wrong.** The argument for true — both ways out are gestures, so nothing prints beside `Cta.command` either, so the step appears nowhere — **is false**: `timone status` lists every cancelled run with its reason regardless. And true is actively wrong, because the **daemon** cancels a run when its ticket is *closed*, which would put *"answer on #6"* in front of a human whose ticket is shut. A failing `status.test.ts` case is what exposed it. Pinned, with the reasoning in both the docblock and the test.
+>
+> **One thing this slice owed that the plan did not name.** 29a promises the label is *"trivially renamed by one constant"*. Four hand-typed copies in four user-facing sentences breaks that silently — rename the constant, everything compiles, and every surface names a label that no longer exists. All four now interpolate `HELD_LABEL`; only `steps.ts` holds the literal.
 
 **This sub-phase is new, added 2026-08-21, and takes the next free letter rather than a place in the alphabet** — it sits here, after 29g and before the live gate, because it is code the gate reads on a real ticket. Blocker B's ruling 2 says a `timone cancel` **drops the work**: the step ticket stays open, the machine does not take it up again, and **the machine writes a call to action on that ticket offering exactly two ways on — retry it, or close it and move on.** Nothing in this plan built that. Without it a dropped step is a ticket that sits open for ever with no instructions on it, which is the failure ADR-0040 set out to end.
 
