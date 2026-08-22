@@ -634,7 +634,9 @@ docker network ls --format '{{.Name}}' | grep '^timone-'    # expect nothing
 
 ### Sub-phase 30k: Flip the default, and the live gate on `scratch-app`
 
-> **◐ Half done, 2026-08-22. The default is flipped and four of the six checks are watched. The two that remain need fvermaut at the keyboard.**
+> **◐ Nearly done, 2026-08-22. The default is flipped, the human gate is discharged, and one check is still open: a run that reaches the end.**
+>
+> **✏ A change in how the work is experienced, found by fvermaut's own reflog and worth writing down.** His branch sat at `52d6cd0` while the machine's work sat at `0669213` on the forge. **The work no longer appears in his folder** — to see what was built he must `git fetch` first. That is not a side effect to be tidied away: it *is* the promise. Before today the work turning up on his disk was the same fact as the machine being able to fight him for the folder. He will meet this every time, so it belongs in `STATUS.md` rather than only here.
 >
 > **The default is `container`.** `DEFAULT_RUNTIME` moved only after 30h built the box, 30i gave it services, and 30j watched a real session and a real browser pass inside one. **`--runtime in-process` puts a daemon back the old way in one word** — that has to stay one word, because it is what an operator reaches for when a box misbehaves at two in the morning. Sessions fvermaut opens himself never come through here at all (ADR-0041 D5).
 >
@@ -658,12 +660,12 @@ Then drive one real marked ticket on `scratch-app` end to end, and while it buil
 
 > Depends on every preceding sub-phase.
 
-- [ ] The run completes and the checkout is exactly where fvermaut left it — `git status` and the reflog both clean. **Needs the real run.** A weaker form was seen at 30j: clean after three boxed sessions and two stacks
+- [◐] The checkout half is **done**: after a real boxed build, `projects/scratch-app` was on the branch he switched to, working tree clean, and the reflog held one entry — his own `git switch`. *(One further entry, `merge @{u}` on `main`, was `timone workspace sync` run by hand hours earlier: his own command, a named exemption, and named to him rather than left to look like nothing had happened.)* The **run completing** is still open — see the note below
 - [x] The container is inspected while running: no mounts from the host, no docker socket, no docker CLI — and no `/Users`, no `Binds`, not privileged, and **not root**
 - [x] A push attempted from inside the box to a **second** managed repository is refused — **`Repository not found`**, not "permission denied": it is invisible
 - [x] The daemon is stopped with an uncommitted timone change and refuses to spawn, readably — demonstrated against this session's own uncommitted work
 - [ ] Comments and commits from the run are authored by the machine account; R15's provenance check is watched across the whole run. **Needs the real run.** Authorship itself is watched: a comment on [scratch-app#45](https://github.com/fvermaut/scratch-app/issues/45) and a merge commit both signed `timone-agent`, the merge still carrying `Timone-Stage:`
-- [ ] **Human gate:** fvermaut switches branches during a build, without warning anybody, and says whether he still has to think about it — which is the entire point of this phase and the one thing no test can assert
+- [x] **Human gate — discharged 2026-08-22.** He switched branch in `projects/scratch-app` during a build, left it there, and answered: *"of course not, that's the whole point of what we're building"*. The reflog carried one entry from the whole run and it was **his own `git switch`**; nothing from the daemon and nothing from a session. This is the criterion the phase exists for and the only one no test could have given.
 
 ---
 
