@@ -72,6 +72,24 @@ const identitySchema = z.strictObject({
    * credential is obtained; it is how the credential's work is read back.
    */
   login: z.string().min(1, "must not be empty"),
+  /**
+   * The email machine-authored commits carry.
+   *
+   * ✏ Added 2026-08-22, after the first real boxed run pushed two commits
+   * authored `Francois Vermaut <fvermaut@gmail.com>`. A fresh clone inside
+   * the box has no `user.email`, and what filled the gap was the host's.
+   * [R23](../doc/specs/prd/prd-02-inversion-of-control.criteria.md) clause 5
+   * says a commit the machine produces is **Timone's own and not
+   * fvermaut's**.
+   *
+   * GitHub links a commit to the App's bot only for
+   * `<numeric-id>+<login>@users.noreply.github.com` — the same address
+   * GitHub's own merge API stamps — and the numeric id is not derivable from
+   * the login, so it is declared rather than guessed. Optional: without it
+   * the commits are still not fvermaut's, they simply do not link to a
+   * profile.
+   */
+  commit_email: z.string().min(1, "must not be empty").optional(),
 });
 
 /** Schema for the whole timone.yaml manifest. Unknown keys are rejected. */

@@ -3,6 +3,7 @@ identity:
   installation_id: 155426497
   private_key_path: .timone/timone-agent.2026-08-21.private-key.pem
   login: timone-agent[bot]
+  commit_email: 319428833+timone-agent[bot]@users.noreply.github.com
 projects:
   scratch-app:
     repo_url: https://github.com/fvermaut/scratch-app.git

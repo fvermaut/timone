@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
+import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
@@ -151,6 +152,8 @@ export interface RuntimeChoice {
   root?: string;
   /** How a boxed session reaches the model. Injected for tests. */
   modelToken?: ModelTokenSource;
+  /** Who the box commits as, from the manifest's identity. */
+  commitIdentity?: { name: string; email: string };
 }
 
 /**
@@ -167,6 +170,30 @@ export interface RuntimeChoice {
  * runtime because a flag was misspelled would run every session on
  * fvermaut's machine while its operator believed otherwise.
  */
+/**
+ * Where a boxed session's transcript is kept, and how.
+ *
+ * One file per day under `.timone/sessions/`, appended to. The daemon's own
+ * state directory, beside the ledger — never `projects/`, which is fvermaut's
+ * (ADR-0043).
+ *
+ * **It exists because a boxed run could not be diagnosed.** The CLI writes its
+ * transcript inside the container and the container is destroyed, so when the
+ * first real run stopped halfway through a phase after an hour and $22, there
+ * was no evidence left to read.
+ */
+function transcriptWriter(root: string): (line: string) => void {
+  const dir = join(root, ".timone", "sessions");
+  let stream: WriteStream | undefined;
+  return (line) => {
+    if (stream === undefined) {
+      mkdirSync(dir, { recursive: true });
+      stream = createWriteStream(join(dir, "boxed.jsonl"), { flags: "a" });
+    }
+    stream.write(`${line}\n`);
+  };
+}
+
 export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
   const name = choice.runtime ?? DEFAULT_RUNTIME;
   if (name === "in-process") return agentSdkRuntime;
@@ -179,6 +206,9 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
       // nowhere (blocker (e), answered 2026-08-22).
       modelToken: choice.modelToken ?? claudeSubscriptionToken(),
       ...(credentials === undefined ? {} : { credentials }),
+      ...(choice.commitIdentity === undefined
+        ? {}
+        : { commitIdentity: choice.commitIdentity }),
       // Only when there is a root to materialize a stack's source under. A
       // runtime built without one still runs a session; it just has no
       // services beside it, which is 30h's behaviour before 30i.
@@ -188,6 +218,9 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
             // Offline, and asked before anything is created: a commit nobody
             // has pushed is not in the clone the box makes (30k).
             commitIsPushed: (commit: string) => isCommitOnRemote(root, commit),
+            // Kept on the host, because the container that wrote it is
+            // destroyed and a failed run has to be readable afterwards.
+            transcript: transcriptWriter(root),
             services: async (request) => {
               const workspace = request.workspace!;
               return bringUpServices({
@@ -433,6 +466,19 @@ export function registerDaemonCommand(program: Command): void {
             : { runtime: options.runtime as RuntimeName }),
           image: options.image ?? DEFAULT_IMAGE,
           root: process.cwd(),
+          // R23 clause 5: a commit the machine produces is Timone's own.
+          ...(manifest.identity === undefined
+            ? {}
+            : {
+                commitIdentity: {
+                  name: manifest.identity.login,
+                  // Without a declared address the commits are still not
+                  // fvermaut's; they simply do not link to a profile.
+                  email:
+                    manifest.identity.commit_email ??
+                    `${manifest.identity.login}@users.noreply.github.com`,
+                },
+              }),
           // The box acts under the same identity the daemon does, scoped to
           // the one repository the run is for (ADR-0042).
           credentials: daemonCredentials(manifest, process.cwd()),

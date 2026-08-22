@@ -41,6 +41,13 @@
 #   login            (required)  The login the App acts under, e.g.
 #                                "your-app[bot]". Used to recognise Timone's
 #                                own comments by their author.
+#   commit_email     (optional)  The address machine-authored commits carry.
+#                                GitHub links a commit to the App's bot only
+#                                for "<numeric-id>+<login>@users.noreply.
+#                                github.com", and the id is not derivable from
+#                                the login, so it is declared rather than
+#                                guessed. Without it commits are still not
+#                                yours — they just do not link to a profile.
 #
 # No token is declared here and none may be. Every credential is minted from
 # the key, names exactly one repository, and dies within the hour.
@@ -50,6 +57,7 @@ identity:
   installation_id: 89012345
   private_key_path: .timone/timone-agent.private-key.pem
   login: timone-agent[bot]
+  commit_email: 1234567+timone-agent[bot]@users.noreply.github.com
 
 projects:
   # Fully-populated project: ticketing, Docker-based previews, and a

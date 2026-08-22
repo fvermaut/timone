@@ -122,6 +122,32 @@ export interface ContainerRuntimeOptions {
    * Absent means the question is not asked, which is what a test wants.
    */
   commitIsPushed?: (commit: string) => Promise<boolean>;
+  /**
+   * Keeps every line the session printed, on the **host**.
+   *
+   * ✏ 2026-08-22. The first real boxed run cost an hour and $22, stopped
+   * halfway through a phase, and could not be diagnosed: the CLI writes its
+   * own transcript inside the container, and the container is destroyed. On
+   * the host a failed session can be read back afterwards; in a box it could
+   * not, so the one question worth answering — *why did it stop?* — had no
+   * evidence at all.
+   *
+   * Every line already passes through this runtime on its way to
+   * {@link SessionProgress}. Keeping them costs one file handle, and a line
+   * that could not be parsed is kept too, because that is the interesting one.
+   */
+  transcript?: (line: string) => void;
+  /**
+   * Who the box commits as.
+   *
+   * ✏ 2026-08-22. The first real boxed run pushed two commits carrying all
+   * three provenance trailers correctly — and authored `Francois Vermaut
+   * <fvermaut@gmail.com>`, because a fresh clone has no `user.email` and
+   * something supplied the host's. [R23](../../doc/specs/prd/prd-02-inversion-of-control.criteria.md)
+   * clause 5 says a commit the machine produces is **Timone's own and not
+   * fvermaut's**; the comments were, the commits were not.
+   */
+  commitIdentity?: { name: string; email: string };
 }
 
 /**
@@ -259,7 +285,22 @@ function boxScript(request: SessionRequest): string {
     // is allowed to fail and the clone's default branch stands.
     `git clone --quiet "$PROJECT_REMOTE" ${project}`,
     `git -C ${project} checkout --quiet "$PROJECT_BRANCH" 2>/dev/null || true`,
+    // Timone's own dependencies and build. `dist/` and `node_modules/` are
+    // gitignored, so the clone has neither — and **both** hooks in
+    // `.claude/settings.json` run `node "$CLAUDE_PROJECT_DIR/dist/cli.js"`.
+    // Without this the R15 guardrail bracket is silently absent from every
+    // boxed session, which is the opposite of what this phase promised.
     `cd ${WORKSPACE}/timone`,
+    "npm ci --no-audit --no-fund --silent || {",
+    '  echo "could not install Timone\'s dependencies in the box, so its' +
+      ' guardrail hooks would not run. Refusing to work without them." >&2',
+    "  exit 79",
+    "}",
+    "npm run build --silent || {",
+    '  echo "could not build Timone in the box, so its guardrail hooks would' +
+      ' not run. Refusing to work without them." >&2',
+    "  exit 79",
+    "}",
     // The prompt on stdin, so it is never a shell word.
     'printf "%s" "$TIMONE_PROMPT" | exec claude -p' +
       " --output-format stream-json --verbose --include-partial-messages" +
@@ -394,6 +435,14 @@ export function containerRuntime(
         ...(modelToken === undefined
           ? {}
           : { CLAUDE_CODE_OAUTH_TOKEN: modelToken }),
+        ...(options.commitIdentity === undefined
+          ? {}
+          : {
+              GIT_AUTHOR_NAME: options.commitIdentity.name,
+              GIT_AUTHOR_EMAIL: options.commitIdentity.email,
+              GIT_COMMITTER_NAME: options.commitIdentity.name,
+              GIT_COMMITTER_EMAIL: options.commitIdentity.email,
+            }),
       };
 
       const container = spawn(
@@ -422,6 +471,17 @@ export function containerRuntime(
 
         try {
           for await (const text of container.lines) {
+            // Before parsing, and whatever parsing makes of it: a line nobody
+            // could read is the one somebody will want afterwards. A
+            // transcript that cannot be written never costs the run.
+            if (options.transcript !== undefined) {
+              try {
+                options.transcript(text);
+              } catch {
+                // Losing the record is bad; losing the run is worse.
+              }
+            }
+
             const message = parseSessionMessage(text);
             if (message === undefined) continue;
 

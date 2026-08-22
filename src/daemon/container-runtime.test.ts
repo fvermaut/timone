@@ -768,3 +768,113 @@ describe("cloning a remote the box can actually reach", () => {
     expect(minted).toEqual(["fvermaut/scratch-app"]);
   });
 });
+
+describe("what a boxed run leaves behind for a human to read", () => {
+  it("writes every line the session printed to a transcript on the host", async () => {
+    // ✏ 2026-08-22. The first real boxed run cost an hour and $22, stopped
+    // halfway through a phase, and **could not be diagnosed** — the CLI's own
+    // transcript lives inside the container and dies with it. On the host a
+    // failed session can be read back afterwards; in a box it could not.
+    // Every line already passes through this runtime, so keeping them costs
+    // one file handle.
+    const written: string[] = [];
+    const { spawn } = fakeContainer([started, messageDelta(10), result()]);
+
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      transcript: (line) => written.push(line),
+    }).start(request());
+    await session.completed;
+
+    expect(written).toHaveLength(3);
+    expect(written[0]).toBe(started);
+    expect(JSON.parse(written[2]).type).toBe("result");
+  });
+
+  it("keeps a line it could not parse, because that is the interesting one", async () => {
+    const { spawn } = fakeContainer(["not json at all", started, result()]);
+
+    const written: string[] = [];
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      transcript: (line) => written.push(line),
+    }).start(request());
+    await session.completed;
+
+    expect(written).toContain("not json at all");
+  });
+
+  it("does not take the run down when the transcript cannot be written", async () => {
+    const { spawn } = fakeContainer([started, result()]);
+
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      transcript: () => {
+        throw new Error("the disk is full");
+      },
+    }).start(request());
+
+    expect((await session.completed).ok).toBe(true);
+  });
+});
+
+describe("who the box commits as", () => {
+  it("commits as Timone, not as whoever the host belongs to", async () => {
+    // ✏ 2026-08-22. The first real boxed run pushed two commits carrying all
+    // three provenance trailers correctly — and authored `Francois Vermaut
+    // <fvermaut@gmail.com>`. R23 clause 5 says a commit the machine produces
+    // is Timone's own and not fvermaut's; comments were, commits were not.
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      commitIdentity: {
+        name: "timone-agent[bot]",
+        email: "319428833+timone-agent[bot]@users.noreply.github.com",
+      },
+    }).start(request());
+
+    const env = calls.find((entry) => entry.args[0] === "run")!.env!;
+    expect(env.GIT_AUTHOR_NAME).toBe("timone-agent[bot]");
+    expect(env.GIT_COMMITTER_NAME).toBe("timone-agent[bot]");
+    expect(env.GIT_AUTHOR_EMAIL).toBe(
+      "319428833+timone-agent[bot]@users.noreply.github.com",
+    );
+    expect(env.GIT_COMMITTER_EMAIL).toBe(env.GIT_AUTHOR_EMAIL);
+  });
+
+  it("sets nothing when no identity is configured", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await runtimeWith(spawn).start(request());
+
+    expect(
+      calls.find((entry) => entry.args[0] === "run")!.env!.GIT_AUTHOR_NAME,
+    ).toBeUndefined();
+  });
+});
+
+describe("the box can run Timone's own tooling", () => {
+  it("builds Timone in the box, so the R15 hooks are not silently absent", async () => {
+    // ✏ 2026-08-22. `dist/` and `node_modules/` are gitignored, so the clone
+    // the box makes has neither — and **both** `.claude/settings.json` hooks
+    // run `node "$CLAUDE_PROJECT_DIR/dist/cli.js"`. They could not run at
+    // all. This phase's own plan says of the R15 bracket: *"Inside a
+    // container the hooks still run and still matter… Nothing here is
+    // removed."* They were removed, silently, by a `.gitignore` line.
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await runtimeWith(spawn).start(request());
+
+    const script = calls.find((entry) => entry.args[0] === "run")!.args.at(-1)!;
+    expect(script).toContain("npm ci");
+    expect(script).toContain("npm run build");
+    // And it must fail loudly: a run without its guardrails is a run that
+    // should not happen quietly.
+    expect(script).toMatch(/guardrails|exit 79/);
+  });
+});
