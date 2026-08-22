@@ -1,6 +1,6 @@
 # Phase 30: The work happens in a box — a run stops touching fvermaut's machine
 
-> **Status:** Planned. **Runs after [phase 29](phase-29.md) and before `ivtrends` restarts** — fvermaut's ordering of 2026-08-20, chosen over restarting `ivtrends` earlier on an unboxed pipeline.
+> **Status:** Complete except 30k's human gate — 2026-08-22. Eleven of twelve slices built; see the [completion report](reports/phase-30-complete.md). What is left is one real marked ticket driven end to end and fvermaut's own judgement, both recorded under 30k. **Runs after [phase 29](phase-29.md) and before `ivtrends` restarts** — fvermaut's ordering of 2026-08-20, chosen over restarting `ivtrends` earlier on an unboxed pipeline.
 
 > **Companion phases:** [phase-29](phase-29.md) — one step, one ticket; it changes the daemon's scheduling and this phase changes the daemon's *runtime*, so 29 lands first and this rebases onto it. [phase-14](phase-14.md) — provenance trailers and the R15 hooks, both of which change meaning here. Nothing in the preview machinery ([ADR-0021](../../adr/0021-previews-are-reconciled-behind-an-adapter-seam.md)) is touched: previews are driven from `poll.ts` on the host and never from inside a session.
 >
@@ -671,10 +671,16 @@ Then drive one real marked ticket on `scratch-app` end to end, and while it buil
 
 **[MODIFY]** `STATUS.md`; the R23 marker with what was actually built and what was actually watched; the R15 and R19 markers if either moved. Delete `mergeIntoDefault` and whatever else in `src/git.ts` no longer has a caller — **last**, after the new path has carried real traffic.
 
+> **✅ Done 2026-08-22.** `mergeIntoDefault` and `mergeInProgress` deleted, and **nothing else** — the refinement below was right, and `timone projects list` and `timone workspace sync` were both run afterwards to prove the command 30d protected still works. `MergeOutcome` had already moved to the ticketing seam at 30c.
+>
+> **R23 carries what was built and what was watched, clause by clause, and its status stays `draft`** — this register's `draft` means *no independent agent has watched it*, never *nobody has read it*, and the wording gate was passed on 2026-08-21 while the evidence gate is 30k's remaining half.
+>
+> **R19 did not move and did not regress**, which was worth checking rather than assuming: the forge merge takes one `commit_message`, and the whole multi-line body survives it — the merge commit on `scratch-app` carries `Timone-Stage: breakdown` and is authored by `timone-agent`. **R15 did not move either**; its hooks are untouched and `daemon/hooks.ts` is a named exemption in 30d's guard, exactly as this phase promised.
+
 > **✏ Refined 2026-08-20: "whatever else no longer has a caller" is nothing else — delete less than that.** Only `mergeIntoDefault` loses its caller in this phase; its importers are `src/commands/workspace.ts:6-14` and `src/daemon/session.ts:8`, and 30c removes the second. The other seven exports of `src/git.ts` — `clone`, `isGitRepo`, `isClean`, `currentBranch`, `defaultBranch`, `fetch`, and the `MergeOutcome` type — **all keep `workspace sync` as their caller**, and 30d deliberately preserves `workspace sync` as fvermaut's own command. An agent reading the instruction as written, grepping for callers and finding only `workspace.ts`, could reasonably delete the file and break the command 30d just went out of its way to protect. **The instruction narrows to: delete `mergeIntoDefault`, and nothing else in `src/git.ts`.**
 
-- [ ] The completion report says plainly which R23 clauses were observed live and which were only tested
-- [ ] [timone#19](https://github.com/fvermaut/timone/issues/19) closed against observed evidence, not against the code having been written
+- [x] The completion report says plainly which R23 clauses were observed live and which were only tested — [phase-30-complete.md](reports/phase-30-complete.md), and it names four things that are tested but unwatched rather than rounding them up
+- [x] [timone#19](https://github.com/fvermaut/timone/issues/19) closed against observed evidence — a comment on `scratch-app#45` and a merge commit, both authored by `timone-agent`. It was **reopened at 30a** first, per the refinement below, because its 2026-08-20 close recorded intent rather than a fix
 - [ ] ✏ **Refined 2026-08-20 — the item above cannot be done as written: [timone#19](https://github.com/fvermaut/timone/issues/19) was already closed** on `2026-08-20T19:12:04Z` as `COMPLETED`, the same day this plan was written, with no machine account existing and no code written. It must be **reopened** (see 30a) or this item rewritten to record the observed evidence without depending on the closing being this phase's act.
 
 ## Dependency graph

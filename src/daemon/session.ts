@@ -5,10 +5,10 @@ import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 import {
   checkoutVersion,
   uncommittedFiles,
-  type MergeOutcome,
 } from "../git.js";
 import type { Manifest } from "../manifest.js";
 import type {
+  MergeOutcome,
   TicketComment,
   TicketingAdapter,
   TicketingProject,

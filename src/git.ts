@@ -194,85 +194,24 @@ export async function fastForward(dir: string): Promise<{ updated: boolean }> {
   return { updated: before !== after };
 }
 
-/**
- * What {@link mergeIntoDefault} answers.
- *
- * The type moved to `src/adapters/ticketing.ts` in phase 30's 30c, where the
- * forge merge that replaced this one lives, and is re-exported here so this
- * module's own signature is unchanged. `mergeIntoDefault` below has had no
- * machine caller since 30c; 30l deletes it.
- */
-export type { MergeOutcome } from "./adapters/ticketing.js";
-import type { MergeOutcome } from "./adapters/ticketing.js";
-
-/**
- * True when a merge is half-done in `dir` — the tree carries `MERGE_HEAD`.
- * Asked rather than assumed, so unwinding a refused merge never has to
- * swallow the "there is no merge to abort" error of the case where the
- * merge never started.
- */
-async function mergeInProgress(dir: string): Promise<boolean> {
-  try {
-    await runGit(["rev-parse", "--verify", "MERGE_HEAD"], dir);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Merge `branch` into the repository's default branch and push it — the one
- * place this system writes to a default branch without a pull request, and
- * the only merge it performs other than {@link fastForward}'s pull onto an
- * upstream. It exists for one caller: the breakdown gate's approval merging
- * chunk zero (ADR-0030 D2, amending ADR-0015). It is not a general commit or
- * push primitive — it authors no content, takes no message, and can move
- * nothing but the default branch, and nothing but `branch`'s own commits onto
- * it.
- *
- * A refusal comes back as a result rather than an exception, because the
- * caller has to put the reason on a ticket: a dirty tree (which would be
- * carried into the merge and pushed), and a merge git will not make. Anything
- * else — a checkout or a push git rejects — throws with git's stderr, as
- * every other function in this module does.
- */
-export async function mergeIntoDefault(
-  dir: string,
-  branch: string,
-  message: string,
-): Promise<MergeOutcome> {
-  if (!(await isClean(dir))) {
-    return {
-      merged: false,
-      reason: `the working tree at ${dir} has uncommitted changes`,
-    };
-  }
-
-  await fetch(dir);
-  const into = await defaultBranch(dir);
-  await runGit(["checkout", into], dir);
-  // The checkout's default branch is as old as the last time anything pulled
-  // it, and every chunk's pull request merges on the remote. Merging into a
-  // stale branch would produce a push the remote rejects.
-  await fastForward(dir);
-
-  try {
-    // `-m` rather than `--no-edit`, because a merge git records as a commit
-    // is a commit this system authored, and ADR-0019 says every one of those
-    // names the stage that made it. The caller supplies the whole message,
-    // trailers included; git uses it only when it actually creates a commit,
-    // so a fast-forward still carries no message of its own and needs none —
-    // the commits it moves are sessions' own, already trailed.
-    //
-    // Found by the guardrail check on 2026-08-15, after the first live merge
-    // landed an untrailed `Merge branch …` on a client's default branch.
-    await runGit(["merge", "--no-edit", "-m", message, "--", branch], dir);
-  } catch (error) {
-    if (await mergeInProgress(dir)) await runGit(["merge", "--abort"], dir);
-    const reason = error instanceof Error ? error.message : String(error);
-    return { merged: false, reason };
-  }
-
-  await runGit(["push", "origin", into], dir);
-  return { merged: true, into };
-}
+// ---------------------------------------------------------------------------
+// `mergeIntoDefault` lived here, with `mergeInProgress` beside it. It was the
+// one place this system wrote to a default branch without a pull request, and
+// it did it by checking out and merging **inside `projects/<name>`** — the
+// folder fvermaut has open in an editor.
+//
+// Phase 30's 30c moved that merge to the forge and 30l deleted this one, last,
+// after the new path had carried real traffic: a real two-parent merge commit
+// on `fvermaut/scratch-app`, authored by `timone-agent`, watched on
+// 2026-08-22.
+//
+// **Nothing else in this file went with it, deliberately.** `clone`,
+// `isGitRepo`, `isClean`, `currentBranch`, `defaultBranch`, `fetch` and
+// `fastForward` all keep `workspace sync` as their caller — fvermaut's own
+// command, which 30d went out of its way to preserve — and `isCommitOnRemote`
+// is 30k's. An agent grepping for callers, finding only `workspace.ts` and
+// deleting the file, would break the command the phase protected.
+//
+// The `MergeOutcome` type moved to `src/adapters/ticketing.ts` at 30c, where
+// the forge merge that replaced this one lives.
+// ---------------------------------------------------------------------------

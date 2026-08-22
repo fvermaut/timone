@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { MergeOutcome } from "../git.js";
 import type { Manifest } from "../manifest.js";
 import {
   CONVERSATION_RECORD_MARKER,
@@ -13,6 +12,7 @@ import {
   STAGE_HANDED_MARKER,
   isMachineComment,
   stampMachineComment,
+  type MergeOutcome,
   type PullRequest,
   type PullRequestThread,
   type Step,
