@@ -2,93 +2,51 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-21, end of day.
+**Last updated:** 2026-08-22, midday.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** The one-step-one-ticket work is **done** — built, tested, and watched running on the to-do app, and you said the tickets made sense. **Nothing in this list is blocking anything today.** The container work is next: three of its twelve pieces are built and the other nine are ready to start.
+> **Read this first.** Six of the twelve pieces of the container work are built today, including all four that fix the problem you reported. **Two of the last three cannot start until you answer one question**, and it is about a bill rather than about code.
 
-**The one-step-one-ticket work is done.** You read the four test tickets and said they made sense, so it is finished and written up. Nothing here needs you for it.
+**1. The machine can no longer touch your project folders, and that is the piece you asked for.**
 
-**Two things about it are not proven, and I am saying so rather than leaving it.** Nobody has yet seen a piece close when its code is merged, or a job close after its last piece — you chose to stop the test at the tickets. Those parts are written and have tests, but have not been watched.
+Before today, when the machine was working on a project it did that work inside `projects/<name>/` — the same folder you have open in your editor. It read branches there, it read files there, and it merged there. So your `git switch` and its build could fight over one folder, and nothing would say so.
 
-**The test tickets can be closed whenever you like.** They are [#45](https://github.com/fvermaut/scratch-app/issues/45), [#46](https://github.com/fvermaut/scratch-app/issues/46), [#47](https://github.com/fvermaut/scratch-app/issues/47) and [#48](https://github.com/fvermaut/scratch-app/issues/48). They are made up and nothing depends on them.
+That is over. The machine now reads everything from GitHub and merges on GitHub. **Your project folders are yours.** There is a check that fails the tests if anyone puts it back: it lists the five files still allowed to touch those folders and says, for each one, why. Four of the five are things we chose to keep — your own `timone status` and `workspace sync` commands, the safety checks after a session, and the preview machinery. Adding a sixth means editing that list, where the next reader sees it.
 
-**The slow-page job is where you left it.** [#4](https://github.com/fvermaut/scratch-app/issues/4) is stopped and its label is off, so it will not start by itself. Everything it worked out is still on the ticket. To pick it up:
+**2. One question, and it decides whether the last three pieces can be built.**
 
-```
-timone takeover scratch-app#4
-```
+A run in a box has nothing of your machine in it. That is the point. But it also means it has no way to log in to Claude — your login is in the macOS keychain, and a box cannot reach a keychain. So a run in a box would start, download both repositories, start its database, and then fail because it cannot talk to the model.
 
-**The container work is next.** Nine of its twelve pieces are ready to start now that you have read R23.
+**There are two ways to fix it and the difference is money, not code:**
 
-**One thing to remember if the daemon ever seems to do nothing.** It will not start any job while there are uncommitted changes in the Timone folder. It says which files, in its log. This is on purpose: every job has to follow one saved copy of the rules. So check the log first, and commit or undo your own edits.
+- **An API key.** You make one, I keep it beside the GitHub key, and the box uses it. Clean. **It is billed separately from your Claude subscription.**
+- **Your own subscription login.** I read the token out of your keychain and hand it to the box. **No extra bill.** The cost is that a long-lived login of yours sits inside the box while it runs.
 
-**1. The machine has its own identity now — and the reading you owed is done.** You read R23 on 21 August and said it was fine, so **the nine pieces of container work that were waiting on it are released.**
+**What I need from you:** say which one, in one word — `api key` or `my login`.
 
-~~**What is left is five minutes of reading.**~~ Done. The promise the container plan is measured against is now yours rather than a guess at what you meant. It is still marked "not checked" — that means nobody has watched it work, which is a different thing from nobody having read it. Nothing is built against it yet.
+**3. A second, smaller question you can leave for later.**
 
-**The identity itself, for the record.** You made it: **Timone Agent**, which signs its work as `timone-agent[bot]`. It can reach only the repositories you picked, and the key it uses expires after an hour and opens **one** repository at a time. Two things were checked straight away and both worked: a test ticket it opened is signed by it and not by you, and a key made for the to-do app **cannot see the trading app at all** — not "refused", invisible.
+There is still no automatic test run when code is pushed. The check in point 1 runs whenever a session finishes, which is often, but not on GitHub. Setting that up means **you** committing one file by hand, once — the machine deliberately cannot write it, because a machine that can rewrite its own test setup can switch its own safety checks off. Say the word and I will write the file for you to commit.
 
-**One thing you decided this morning turned out not to be possible, and it cost nothing.** You chose to have the machine hold a stopped step by **assigning it to itself**. GitHub does not allow a machine identity to be assigned to a ticket — I tested every way once the identity existed, and all of them refused. So it holds a step with a **label** instead, which was the other option you were offered. Everything else you decided stands, and it is actually simpler: to make it do a dropped step after all, you **remove the label** rather than unassign it.
-
-The hour you set aside for this took twenty minutes, and the reason you moved it to the front — the assigning — turned out not to need doing. No harm: the identity was needed anyway, and it is done.
-
-**2. The trading app's latest piece stopped, and it was not its fault.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) has delivered four pieces. The fifth stopped on a server error at the other end. It needs one command:
+**4. The trading app still needs one command.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) stopped on a server error at the other end:
 
 ```
 timone retry ivtrends#1
 ```
 
-The ticket has both labels it needs now, so once it is running again it carries on by itself.
-
-**3. One job on the to-do app needs restarting.** `scratch-app` [#13](https://github.com/fvermaut/scratch-app/issues/13) stopped on a server error too:
+**5. Two old jobs on the to-do app.** [#13](https://github.com/fvermaut/scratch-app/issues/13) stopped the same way, and #10 was a throwaway:
 
 ```
 timone retry scratch-app#13
-```
-
-**4. One old job should be thrown away.** `scratch-app` #10 was a throwaway test ticket. It is closed, but its job is still recorded as stopped:
-
-```
 timone cancel scratch-app#10
 ```
 
-**The one-step-one-ticket work is built — all of it — and it now needs one thing from you.**
+**6. The slow-page job is where you left it.** [#4](https://github.com/fvermaut/scratch-app/issues/4) is stopped and its label is off, so it will not start by itself. `timone takeover scratch-app#4` picks it up.
 
-Every piece of code is written and tested, on the branch `phase-29-one-step-one-ticket`. What is left is watching it work on the to-do app, and **that is blocked by something you already owe**: the to-do app is held by [#4](https://github.com/fvermaut/scratch-app/issues/4), the slow-page report, which has been waiting for you since 19 August. One job holds one project at a time — that is the trade you accepted on 16 August — so nothing else can start on that app until #4 moves.
-
-This is the first time that cost has actually been paid rather than argued about. What it blocked was this work's own test.
-
-**Either of these frees it:**
-
-```
-timone takeover scratch-app#4
-```
-
-That opens #4 in your terminal and is the thing you owe anyway — it has written up why the page drags and wants your answer on the numbers. Or, if you would rather not deal with it now:
-
-```
-timone cancel scratch-app#4
-```
-
-That throws away the job. **The ticket and everything it worked out stay** — only the job goes, and you can start it again later.
-
-Once the app is free the test takes one word from you and about a minute of machine time.
-
-**5. Nothing here is waiting on a decision.** On 21 August you ruled on the four questions that were blocking the one-step-one-ticket work, and on a fifth that came out of them. That work is now built and finished. What you decided is under "What changed recently"; the reasons are in `doc/adr/0044-...`.
-
-**Three older rules also need a ruling.** None of them blocks anything today.
-
-- You asked for two things that cannot both be true: every open ticket must say what happens next, **and** a repository joined with a big backlog stays silent. On such a repository, an unlabelled ticket would say nothing. Which rule wins?
-- On 14 August the machine was supposed to give up and hand a conversation back to your terminal. It worked the answer out instead, and you called that a pass. Should the rule change, or the behaviour?
-- **New, from yesterday's test:** a ticket whose requirements are already written and agreed was picked up as brand-new work. The sorting step read the branch, said *"the next open step is the build plan, not another round of requirements discovery"* — and was then sent into another round of requirements discovery, because it routes on the label and nothing else. Should it be allowed to route on what it finds? ([#32](https://github.com/fvermaut/timone/issues/32))
-
-**6. The slow-page report is stopped, and it is waiting for you when you want it.** `scratch-app` [#4](https://github.com/fvermaut/scratch-app/issues/4) sat for seventeen days at a step that had never been built. That step exists now, and it looked at the problem and wrote up what it thinks. **You stopped this job on 21 August so the to-do app was free for the one-step-one-ticket test**, and I left its label off so it cannot restart by itself and spend money you have not asked for. Everything it worked out is still on the ticket. To pick it up: `timone takeover scratch-app#4`.
-
-It found a mistake it had made itself in August: it had told you the app already promises a tick shows up straight away, and it does not. So it wants to write that promise down first, and it has guessed the numbers. The numbers are the part worth arguing with.
+**Nothing else needs you.** The three test tickets from last week ([#45](https://github.com/fvermaut/scratch-app/issues/45)–[#48](https://github.com/fvermaut/scratch-app/issues/48)) can be closed whenever you like.
 
 ---
 
@@ -107,11 +65,37 @@ The second half of the idea is that a background program — the daemon — driv
 
 Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below). **Nothing on that list moved on 19 August**, deliberately — four of the promises gained notes about what happened, and a promise only gets its tick back when somebody who did not build the thing checks it.
 
-1138 automatic tests pass. Tests are not the same as somebody watching it work.
+1359 automatic tests pass. Tests are not the same as somebody watching it work.
 
 ---
 
 ## What changed recently
+
+**22 August — six pieces of the container work were built, and the four that fix your problem are all in.** The branch is `phase-30-work-in-a-box`. In order:
+
+**The machine has its own identity, and it uses one key per repository.** Every message it posts and every merge it makes now goes out as `timone-agent`, not as you. The key it uses is made fresh for **one** repository and dies within the hour — a key for the to-do app cannot see the trading app at all. A test proves it asks for one repository and no more, because the thing you watched happen by hand last week does not stop somebody widening it next month.
+
+One surprise, and it would have made three later checks pass while testing nothing. GitHub writes the same identity **two different ways** — `timone-agent` on one of its interfaces and `timone-agent[bot]` on the other — and this code reads both. Comparing against one spelling meant half the machine's own comments were read as yours. Found by posting a real comment and reading it back on each.
+
+**It stopped reading your project folders.** Which branch exists, what a file says on a branch, how far a job's list has got — all of it comes from GitHub now. Two of these were not on the plan and would have broken silently: they read your folder with git, nothing ever refreshed that folder, and they only worked because the session happened to be running in it. In a box they would have answered "nothing was built" for work that was built.
+
+**It stopped merging in your folder.** The one merge the machine makes without you reading a diff now happens on GitHub. It was watched doing it for real: a proper merge commit, signed by `timone-agent`, still carrying the line that says which stage made it.
+
+**A check now says your folders are yours, and fails the tests if anyone puts it back.** It was tested by putting one back on purpose and watching it caught.
+
+**The box can run a session.** A container starts from the image, downloads both repositories at exact versions, runs, reports what it is doing back to you live, and is destroyed on every way out — including the ones that go wrong. It is **off by default**; turning it on is the last piece. Watched for real: the download worked, the versions were exact, and nothing of your disk was inside.
+
+**Its database and anything else it needs start beside it.** They are on a private network with **nothing opened on your machine** — the box reaches them by name. Watched for real, with a real database.
+
+**Three bugs were found by running things rather than by reading them.** All three have the same shape, which is worth saying: **a missing answer and a wrong question look identical.**
+
+- A dropped connection was reported as "that branch does not exist", which reads as "the stage did nothing". Fixed, and now a dropped connection stops the job and says so.
+- `docker compose down` **succeeds and deletes nothing** when one setting is missing. A cleanup that reports success and leaves everything running is how a machine fills up quietly.
+- A check I wrote to answer a question about the to-do app said it had no `compose.yaml`. It has one. The reading was wrong, not the app, and the reason was a bug in the new code that could not read the top level of a repository.
+
+**Two things the machine cannot do, found the same way.** A run in a box downloads Timone from GitHub, so it cannot run a version you have not pushed — it now says that in a sentence instead of quoting git. And it cannot log in to Claude at all, which is item 2 at the top of this file.
+
+1359 tests pass, up from 1224.
 
 **21 August, evening — the machine now runs a job as a row of tickets instead of a count.** All ten pieces of the one-step-one-ticket work are built. Nothing behaves differently yet — nothing calls them — but they are the two halves everything after them stands on.
 
@@ -274,6 +258,7 @@ The rest, in short: [#1](https://github.com/fvermaut/timone/issues/1) a stopped 
 
 ## What is left to build
 
+0. **The last three pieces of the container work.** Turning the box on, proving the browser checks work inside it, and closing the phase. **Two of the three are stopped until you answer item 2 at the top of this file** — a run in a box has no way to log in to Claude.
 1. **A chat channel** (Slack or Teams), so the machine can ask you a short question at the moment it needs to, instead of settling for a fixed rule.
 2. **The bug-report path.** `scratch-app` #4 is parked waiting for exactly this.
 3. **Releasing to a live environment**, and **routine maintenance**. Both are described in `process.md` and neither has a skill yet.
