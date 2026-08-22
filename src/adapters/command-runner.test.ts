@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   credentialCommandRunner,
+  execRunner,
   type CommandOptions,
   type CommandRunner,
+  type Spawn,
 } from "./command-runner.js";
 import type { CredentialProvider } from "./credentials.js";
 
@@ -179,5 +181,134 @@ describe("keeping the credential out of everything that is written down", () => 
     ]).catch((thrown: unknown) => thrown);
 
     expect(String(error)).not.toContain("ghs_");
+  });
+});
+
+describe("a forge call that never comes back, and one that comes back wrong", () => {
+  /** A spawner that answers from a script, recording how often it was asked. */
+  function spawner(...outcomes: (string | Error)[]): {
+    spawn: Spawn;
+    attempts: () => number;
+  } {
+    const queue = [...outcomes];
+    let attempts = 0;
+    const spawn: Spawn = async () => {
+      attempts += 1;
+      const next = queue.shift();
+      if (next === undefined) throw new Error("spawner: nothing left to answer");
+      if (next instanceof Error) throw next;
+      return next;
+    };
+    return { spawn, attempts: () => attempts };
+  }
+
+  /** The error node reports when it kills a child for running too long. */
+  function timedOut(): Error {
+    return Object.assign(new Error("Command failed"), { killed: true });
+  }
+
+  function transport(message: string): Error {
+    return Object.assign(new Error("Command failed"), { stderr: message });
+  }
+
+  it("retries a transport failure and reports the answer it finally got", async () => {
+    const { spawn, attempts } = spawner(
+      transport("dial tcp: lookup api.github.com: EAI_AGAIN"),
+      "[]",
+    );
+    const run = execRunner({ spawn, retryWaitsMs: [0, 0] });
+
+    await expect(run("gh", ["issue", "list"])).resolves.toBe("[]");
+    expect(attempts()).toBe(2);
+  });
+
+  it("reports a transport failure that never clears, and says how often it tried", async () => {
+    const { spawn, attempts } = spawner(
+      transport("ECONNRESET"),
+      transport("ECONNRESET"),
+      transport("ECONNRESET"),
+    );
+    const run = execRunner({ spawn, retryWaitsMs: [0, 0] });
+
+    await expect(run("gh", ["issue", "list"])).rejects.toThrow(/3 attempts/);
+    expect(attempts()).toBe(3);
+  });
+
+  it("does not retry an answer the forge meant — a 404 is not a bad connection", async () => {
+    const { spawn, attempts } = spawner(
+      transport("GraphQL: Could not resolve to an Issue (HTTP 404)"),
+    );
+    const run = execRunner({ spawn, retryWaitsMs: [0, 0] });
+
+    await expect(run("gh", ["issue", "view", "9999"])).rejects.toThrow(/404/);
+    expect(attempts()).toBe(1);
+  });
+
+  it("retries a gateway error, which is the forge being unwell rather than answering", async () => {
+    const { spawn, attempts } = spawner(
+      transport("HTTP 502: Bad gateway"),
+      "[]",
+    );
+    const run = execRunner({ spawn, retryWaitsMs: [0, 0] });
+
+    await expect(run("gh", ["issue", "list"])).resolves.toBe("[]");
+    expect(attempts()).toBe(2);
+  });
+
+  it("treats a killed child as a transport failure and retries it", async () => {
+    const { spawn, attempts } = spawner(timedOut(), "[]");
+    const run = execRunner({ spawn, retryWaitsMs: [0, 0] });
+
+    await expect(run("gh", ["issue", "list"])).resolves.toBe("[]");
+    expect(attempts()).toBe(2);
+  });
+
+  it("says plainly that a hung command was killed, rather than that it failed", async () => {
+    const { spawn } = spawner(timedOut(), timedOut(), timedOut());
+    const run = execRunner({ spawn, retryWaitsMs: [0, 0] });
+
+    await expect(run("gh", ["issue", "list"])).rejects.toThrow(
+      /gave no answer within/,
+    );
+  });
+
+  it("gives every command a deadline, so a hung forge cannot hang the cycle", async () => {
+    const seen: (number | undefined)[] = [];
+    const spawn: Spawn = async (_command, _args, options) => {
+      seen.push(options.timeout);
+      return "";
+    };
+
+    await execRunner({ spawn, timeoutMs: 45_000 })("gh", ["issue", "list"]);
+
+    expect(seen).toEqual([45_000]);
+  });
+
+  it("has a deadline even when nobody sets one", async () => {
+    const seen: (number | undefined)[] = [];
+    const spawn: Spawn = async (_command, _args, options) => {
+      seen.push(options.timeout);
+      return "";
+    };
+
+    await execRunner({ spawn })("gh", ["issue", "list"]);
+
+    expect(seen[0]).toBeGreaterThan(0);
+  });
+
+  it("waits between attempts rather than hammering a forge that is struggling", async () => {
+    const waits: number[] = [];
+    const { spawn } = spawner(transport("ECONNRESET"), transport("ECONNRESET"), "[]");
+    const run = execRunner({
+      spawn,
+      retryWaitsMs: [2_000, 8_000],
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    });
+
+    await run("gh", ["issue", "list"]);
+
+    expect(waits).toEqual([2_000, 8_000]);
   });
 });

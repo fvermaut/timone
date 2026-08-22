@@ -357,6 +357,25 @@ export type PullRequestComment = z.infer<typeof pullRequestCommentSchema>;
 export type PullRequestThread = z.infer<typeof pullRequestThreadSchema>;
 
 /**
+ * A repository's branch state as the forge has it.
+ *
+ * `defaultHead` is undefined for a repository with no commits — a fresh
+ * remote before its first push, which is a real state a newly onboarded
+ * project passes through. `head` is undefined when the named branch does not
+ * exist there, which is the ordinary case before the stage that cuts it.
+ */
+export const repositoryBranchesSchema = z.strictObject({
+  /** The default branch's name, e.g. `main`. */
+  defaultBranch: z.string(),
+  /** The default branch's tip, or undefined in a repository with no commits. */
+  defaultHead: z.string().optional(),
+  /** The named branch's tip, or undefined when it does not exist. */
+  head: z.string().optional(),
+});
+
+export type RepositoryBranches = z.infer<typeof repositoryBranchesSchema>;
+
+/**
  * The subset of a managed project an adapter needs: its manifest name (for
  * error messages and run keys) and its clone URL (which the implementation
  * resolves to whatever the tracker addresses repositories by).
@@ -378,6 +397,35 @@ export interface TicketingProject {
  * on the calls themselves.
  */
 export interface TicketingAdapter {
+  /**
+   * The repository's branch state, **as the forge has it** — its default
+   * branch and, when one is named, the tip of that branch.
+   *
+   * Phase 30's widening, and the first capability on this seam that is not
+   * about issues, pull requests or labels
+   * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)).
+   * Until it existed the daemon answered "did that stage produce anything?"
+   * by running `git rev-parse` inside `projects/<name>` — the folder the human
+   * has open in an editor, and whose state is his business rather than a fact
+   * about the work.
+   *
+   * **An absent branch is `head: undefined`, and that is an answer rather than
+   * a failure.** Before the stage that cuts one, there is no branch, and that
+   * is how "this stage produced nothing" is detected. A transport failure is
+   * the opposite: it **throws**, and implementations must never let one arrive
+   * here as an absent branch — a stage that did its work would then be
+   * reported as having done none.
+   *
+   * One call rather than two because a poll cycle asks per stage per project,
+   * and this seam's traffic is what
+   * [timone#49](https://github.com/fvermaut/timone/issues/49) turns into a
+   * false report of a stopped daemon.
+   */
+  readBranches(
+    project: TicketingProject,
+    branch?: string,
+  ): Promise<RepositoryBranches>;
+
   /** Open tickets carrying the mark label, oldest first. */
   listMarkedTickets(project: TicketingProject): Promise<Ticket[]>;
 

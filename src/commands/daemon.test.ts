@@ -19,7 +19,7 @@ import type {
   Ticket,
   TicketingAdapter,
 } from "../adapters/ticketing.js";
-import { noStepWrites } from "../adapters/ticketing.stubs.js";
+import { noBranches, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { stateLockPath } from "../daemon/lock.js";
@@ -67,6 +67,7 @@ const manifest: Manifest = {
 /** An adapter that answers an empty ticket list and swallows comments. */
 function quietAdapter(): TicketingAdapter {
   return {
+    ...noBranches,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {

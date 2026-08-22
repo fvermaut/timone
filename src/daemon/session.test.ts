@@ -21,7 +21,7 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
-import { noStepWrites } from "../adapters/ticketing.stubs.js";
+import { noBranches, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { BreakdownSource } from "./breakdown.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
@@ -168,6 +168,7 @@ function fakeAdapter(initial: TicketThread = thread): {
   let clock = 0;
 
   const adapter: TicketingAdapter = {
+    ...noBranches,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {
@@ -4372,5 +4373,172 @@ describe("approval ends the initiative's own run", () => {
     expect(requests).toHaveLength(1);
     expect(store.get("scratch-app#7/1")?.status).toBe("failed");
     expect(store.get("scratch-app#7/1")?.failure).toMatch(/422|steps/i);
+  });
+});
+
+describe("a forge that cannot be reached is not a stage that did nothing", () => {
+  /** A ticket already through triage and clarification. */
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\n${CONVERSATION_RECORD_MARKER}\n\nwe agreed the list should page`,
+        createdAt: "2026-08-03T09:30:00Z",
+        fromTimone: true,
+      },
+    ],
+  };
+
+  /** A run resumed straight into the requirements stage. */
+  function atRequirements(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  /** A probe that fails the way a dropped connection fails. */
+  function unreachable(): () => Promise<string | undefined> {
+    return async () => {
+      throw new Error(
+        "gh api graphql failed after 3 attempts: ECONNRESET",
+      );
+    };
+  }
+
+  it("stops the run before starting a session it could not judge", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: unreachable(),
+      headProbe: unreachable(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    // Nothing was started: a run whose baseline is unknown cannot be judged
+    // afterwards, and starting it would burn a session to learn nothing.
+    expect(requests).toHaveLength(0);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(comments.at(-1)!.body).toMatch(/ECONNRESET/);
+  });
+
+  it("stops the run after a session rather than reporting work it could not see", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    let calls = 0;
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      // The baseline reads fine; the read after the session does not.
+      repoProbe: async () => {
+        if (calls++ === 0) return "sha-before";
+        throw new Error("gh api graphql failed after 3 attempts: ECONNRESET");
+      },
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    const body = comments.at(-1)!.body;
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(body).toMatch(/ECONNRESET/);
+    // The dangerous wrong answer: telling the reader nothing was produced.
+    expect(body).not.toMatch(/still stands/i);
+    expect(body).not.toMatch(/nothing has moved/i);
+  });
+
+  it("keeps an absent branch meaning the stage produced nothing", async () => {
+    // The distinction the two cases above exist to protect: this one must go
+    // on reading as "no work", because that is what it is.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: async () => undefined,
+      headProbe: async () => "sha-base",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(comments.at(-1)!.body).toMatch(/still stands/i);
+  });
+});
+
+describe("branch state, by default, comes from the forge", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\n${CONVERSATION_RECORD_MARKER}\n\nwe agreed the list should page`,
+        createdAt: "2026-08-03T09:30:00Z",
+        fromTimone: true,
+      },
+    ],
+  };
+
+  function atRequirements(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  it("asks the ticketing adapter and never a checkout on disk", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    const asked: (string | undefined)[] = [];
+    let calls = 0;
+
+    const forgeAdapter: TicketingAdapter = {
+      ...adapter,
+      readBranches: async (_project, branch) => {
+        asked.push(branch);
+        return {
+          defaultBranch: "main",
+          defaultHead: "sha-base",
+          ...(calls++ === 0 ? {} : { head: "sha-after" }),
+        };
+      },
+    };
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter: forgeAdapter,
+      runtime,
+      // A path that is no checkout at all: if anything reached for disk it
+      // would answer undefined and this test would read as "no work".
+      root: "/root",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(asked.filter((branch) => branch !== undefined).length).toBeGreaterThan(0);
+    expect(comments.at(-1)!.body).toContain("`approve`");
   });
 });

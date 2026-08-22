@@ -197,6 +197,22 @@ npm run build && npx vitest run src/adapters/credentials.test.ts src/adapters/co
 > Depends on 30a for the credential. Parallel with nothing — 30c wants it done.
 > **✏ Refined 2026-08-20:** and therefore on blocker (a). The `[FIX FIRST]` line is blocker (c): none of the three defects is filed.
 
+> **✅ Built 2026-08-22 — 30b is done, and it found a bigger version of its own case (3).**
+>
+> **The `[FIX FIRST]` defects are fixed, both of them, at the one seam every `gh` call passes through.** `execRunner` in `src/adapters/command-runner.ts` now gives every command a **90-second deadline** ([#47](https://github.com/fvermaut/timone/issues/47)) and **retries a transport failure twice, waiting 2s then 8s** ([#48](https://github.com/fvermaut/timone/issues/48)). The distinction that makes retrying safe is asserted: **a 404 is an answer and is never retried**; a reset connection, a DNS failure, a killed child and a 5xx are the forge not having spoken, and those are. [#49](https://github.com/fvermaut/timone/issues/49) is not fixed here — it is a different mechanism in `runs.ts`, and 30c owns it.
+>
+> **The widening is one method, not two.** `TicketingAdapter.readBranches(project, branch?)` answers the default branch, its tip, and the named branch's tip in **one round trip**. Two methods would have doubled a per-stage per-project call, which is exactly the traffic #49 turns into a false report of a stopped daemon.
+>
+> **GraphQL rather than REST, and that choice *is* the answer to case (2).** A missing ref comes back as `ref: null` — a value in a successful response. REST's `/git/ref/heads/…` answers 404, which arrives as a failed process, and telling that apart from a dropped connection by matching an error string is the confusion this slice exists to forbid. Verified live against `fvermaut/scratch-app`: an absent branch answers `{defaultBranch, defaultHead}` with no `head` and no error; `main` answers with its tip.
+>
+> **The fake count was seven, not nine.** `poll.test.ts`, `session.test.ts`, `hooks.test.ts`, `commands/daemon.test.ts`, `takeover.test.ts`, `retry.test.ts`, `guardrails.test.ts`. `github-tickets.test.ts` and `github-pulls.test.ts` drive the real adapter through a fake *runner*, so they never needed the method. All seven took **one line each** — `...noBranches`, a new stub beside `noStepWrites` in `ticketing.stubs.ts`. It answers rather than throwing, deliberately: "there is no such branch" is what those tests used to get from a `git rev-parse` in a directory that was no repository, and keeping that silence is what lets a test about something else stay about something else.
+>
+> **`gitBranchHead` and `gitCurrentHead` are deleted**, not left unused, so 30d's guard has nothing to make an exception for.
+>
+> **✏ A finding this slice did not fix, and 30d must settle. Three more probes read a branch out of `projects/<name>`, and they will answer wrongly the moment 30h lands.** `planStatusProbe` (`gitPlanStatus`), `verificationReportProbe` (`gitVerificationReport`) and `BreakdownSource` (`fromDefaultBranch`) all read file *content* off a branch with `git ls-tree` / `git show` in the human's checkout. Nothing fetches that checkout. Today they work only because the session runs in that same folder and leaves the branch there. **Once a session runs in a box, the branch exists only on the forge, these three answer `undefined`, and `undefined` here means "the stage produced nothing"** — the same wrong answer case (3) was written to forbid, one level up and silent. They were left alone because converting them is not what this slice was scoped to, and because `BreakdownSource` is **synchronous** and read for every marked ticket on every cycle, so making it a forge call is both an API change through `poll.ts` and a traffic multiplier. **Recorded, not worked around.** 30d names them; they are either its fifth, sixth and seventh exemptions or a slice of their own before 30h.
+>
+> **41 tests added**, all seen failing first. Suite: **1279 tests, all green** — including the [#8](https://github.com/fvermaut/timone/issues/8) flakes, which passed this run.
+
 #### Agent Validation Steps
 
 ```bash
@@ -210,9 +226,9 @@ npm run build && npx vitest run src/adapters/credentials.test.ts src/adapters/co
 npm run build && npx vitest run src/adapters/github-tickets.test.ts
 ```
 
-- [ ] Red→green trace for all three cases
-- [ ] Case (3) asserted with a simulated transport failure, not a comment claiming it cannot happen
-- [ ] No test in this slice reaches the network
+- [x] Red→green trace for all three cases — 9 in `github-tickets.test.ts` for the adapter, 4 in `session.test.ts` for the caller, 9 in `command-runner.test.ts` for the timeout and the retry, 19 more carried from 30a
+- [x] Case (3) asserted with a simulated transport failure, not a comment claiming it cannot happen — and asserted **twice**, once at the adapter and once at the caller, because the caller used to erase the distinction on its way out
+- [x] No test in this slice reaches the network. The live read against `fvermaut/scratch-app` was run by hand, outside the suite, and is recorded above
 - [ ] ✏ **Refined 2026-08-20 — the command reports a non-zero test count.** Exit code 0 from vitest means nothing on its own here; read the number of tests it says it ran.
 - [ ] ✏ **Refined 2026-08-20 — the full suite passes**, and the only assertions that changed are the nine fakes gaining the new method. This is 30b's counterpart to 30e's "passes unchanged": the widening is expected to touch fakes and nothing else, so a changed assertion anywhere but those nine files means the change leaked past the seam.
 

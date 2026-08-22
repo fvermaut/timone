@@ -8,6 +8,7 @@ import {
   type PullRequest,
   type PullRequestComment,
   type PullRequestThread,
+  type RepositoryBranches,
   type Step,
   type Ticket,
   type TicketingAdapter,
@@ -267,6 +268,37 @@ function toStep(issue: z.infer<typeof ghStepSchema>): Step {
   };
 }
 
+/** A ref as GraphQL answers it: an object with a target, or null. */
+const ghRefSchema = z
+  .looseObject({
+    name: z.string().optional(),
+    target: z.looseObject({ oid: z.string() }).nullish(),
+  })
+  .nullish();
+
+/** GraphQL's answer to {@link BRANCH_QUERY} and {@link DEFAULT_BRANCH_QUERY}. */
+const ghBranchesSchema = z.looseObject({
+  data: z.looseObject({
+    repository: z.looseObject({
+      defaultBranchRef: ghRefSchema,
+      ref: ghRefSchema,
+    }),
+  }),
+});
+
+/** The default branch and its tip, for a call that named no branch. */
+const DEFAULT_BRANCH_QUERY =
+  "query($owner:String!,$name:String!){" +
+  "repository(owner:$owner,name:$name){" +
+  "defaultBranchRef{name target{oid}}}}";
+
+/** The same, plus one named branch's tip — null when it does not exist. */
+const BRANCH_QUERY =
+  "query($owner:String!,$name:String!,$ref:String!){" +
+  "repository(owner:$owner,name:$name){" +
+  "defaultBranchRef{name target{oid}} " +
+  "ref(qualifiedName:$ref){target{oid}}}}";
+
 export interface GitHubTicketingOptions {
   /** Injected subprocess runner; defaults to running `gh` for real. */
   run?: CommandRunner;
@@ -302,6 +334,63 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     this.markLabel = options.markLabel ?? MARK_LABEL;
     this.machineLogin = options.machineLogin;
     this.pageLimit = options.pageLimit ?? 200;
+  }
+
+  /**
+   * The repository's branch state, read from GitHub's GraphQL API.
+   *
+   * **GraphQL rather than REST, and that choice is the answer to case (2).** A
+   * missing ref comes back as `ref: null` — a *value* in a successful
+   * response. REST's `/git/ref/heads/...` answers 404, which arrives here as a
+   * failed process indistinguishable at a glance from a connection that
+   * dropped, and telling the two apart by matching an error string is exactly
+   * the confusion this seam exists to forbid.
+   *
+   * Both facts come back in one round trip. A poll cycle asks this per stage
+   * per project, and every extra call is one more chance to hit
+   * [timone#49](https://github.com/fvermaut/timone/issues/49).
+   */
+  async readBranches(
+    project: TicketingProject,
+    branch?: string,
+  ): Promise<RepositoryBranches> {
+    const slug = repoSlug(project.repoUrl);
+    const [owner, name] = slug.split("/");
+
+    const query = branch === undefined ? DEFAULT_BRANCH_QUERY : BRANCH_QUERY;
+    const args = [
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `name=${name}`,
+      ...(branch === undefined ? [] : ["-F", `ref=refs/heads/${branch}`]),
+    ];
+
+    // `gh api` takes no `--repo`, so the scope of the credential this runs
+    // under is declared rather than read out of the argument vector.
+    const raw = await this.run("gh", args, { repository: slug });
+
+    const answer = parseGhJson(
+      ghBranchesSchema,
+      raw,
+      `reading the branches of ${slug}`,
+    );
+
+    const repository = answer.data.repository;
+    const defaultRef = repository.defaultBranchRef;
+    return {
+      defaultBranch: defaultRef?.name ?? "main",
+      ...(defaultRef?.target?.oid === undefined
+        ? {}
+        : { defaultHead: defaultRef.target.oid }),
+      ...(repository.ref?.target?.oid === undefined
+        ? {}
+        : { head: repository.ref.target.oid }),
+    };
   }
 
   async listMarkedTickets(project: TicketingProject): Promise<Ticket[]> {

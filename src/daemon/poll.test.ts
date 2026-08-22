@@ -27,7 +27,7 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
-import { noStepWrites } from "../adapters/ticketing.stubs.js";
+import { noBranches, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { HELD_LABEL, MAP_LABEL } from "./steps.js";
 import { breakdownPath, fromWorkingTree } from "./breakdown.js";
 import { enqueue, pending, requestsDir } from "./requests.js";
@@ -159,6 +159,7 @@ function fakeAdapter(
 ): { adapter: TicketingAdapter; comments: PostedComment[] } {
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
+    ...noBranches,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {
@@ -471,7 +472,8 @@ describe("pollOnce — resuming a run whose human answered", () => {
     const posted: PostedComment[] = [];
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -972,7 +974,8 @@ describe("pollOnce — runs parked before the machinery existed", () => {
   function labelledAdapter(labels: string[]): TicketingAdapter {
     const base = ticket(4, { labels });
     return {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -1070,7 +1073,8 @@ describe("pollOnce — a run parked at an unbuilt stage resumes at that stage", 
     parkedAtExecution(store);
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -1122,7 +1126,8 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     const closed: string[] = [];
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -1344,7 +1349,8 @@ describe("reclaiming a run its daemon left behind", () => {
       comments: [],
     };
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -1880,6 +1886,7 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
 } {
   const upserts: Upsert[] = [];
   const adapter: TicketingAdapter = {
+    ...noBranches,
     ...noStepWrites,
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
@@ -2457,7 +2464,8 @@ describe("pollOnce — a written answer reaches a session that ingests it", () =
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const posted: PostedComment[] = [];
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -2522,7 +2530,8 @@ describe("pollOnce — reading a written answer consumes it", () => {
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const thread = [...comments];
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -2667,7 +2676,8 @@ describe("pollOnce — reading a written answer consumes it", () => {
       calls.push({ call, args });
     };
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
         return [];
@@ -2827,7 +2837,8 @@ describe("pollOnce — one read of one thread per parked run", () => {
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     let fetches = 0;
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -2879,7 +2890,8 @@ describe("pollOnce — one read of one thread per parked run", () => {
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     let fetches = 0;
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -3017,7 +3029,8 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
     };
 
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
         return [];
@@ -3410,7 +3423,8 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       `${MACHINE_MARKER}\n\n---\n\n${body}`;
 
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
         return [];
@@ -3906,7 +3920,8 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     const map = (): Ticket =>
       ticket(MAP, { title: "chart the trends redesign", labels });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
       },
@@ -4185,7 +4200,8 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
     const map = (): Ticket =>
       ticket(MAP, { title: "chart the trends redesign", labels });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
       },
@@ -4397,7 +4413,8 @@ describe("pollOnce — a ticket's next chunk", () => {
       };
     };
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return tickets;
       },
@@ -5102,7 +5119,8 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
     const posted: PostedComment[] = [];
     const base = ticket(31, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -5285,7 +5303,8 @@ describe("pollOnce — a park nothing written can end", () => {
     const posted: PostedComment[] = [];
     const base = ticket(number, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -5419,7 +5438,8 @@ describe("pollOnce — a park nothing written can end", () => {
     });
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -5503,7 +5523,8 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     const base = ticket(number, { labels: ["timone", "triage:feature"] });
     const thread = [...comments];
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -5787,7 +5808,8 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     const standing: string[] = [];
     const base = ticket(41, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },

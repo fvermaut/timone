@@ -1,4 +1,8 @@
-import type { Step, TicketingProject } from "./ticketing.js";
+import type {
+  RepositoryBranches,
+  Step,
+  TicketingProject,
+} from "./ticketing.js";
 
 /**
  * The ticketing writes that open an initiative's step tickets, stubbed for
@@ -35,5 +39,26 @@ export const noStepWrites = {
 export const noSteps = {
   async listSteps(_project: TicketingProject, _initiative: number): Promise<Step[]> {
     return [];
+  },
+};
+
+/**
+ * Branch state for fakes whose test is not about it: a repository whose
+ * default branch carries no commits and whose work branch does not exist.
+ *
+ * **It answers rather than throwing, unlike {@link noStepWrites}, and the
+ * difference is not laziness.** "There is no such branch" is a legitimate
+ * answer and the one every test here used to get: before phase 30 the default
+ * probe ran `git rev-parse` in a directory that was no repository, found
+ * nothing, and said so. Keeping that silence is what lets a test about
+ * something else stay about something else.
+ *
+ * A test whose subject *is* branch state overrides this — see the
+ * `repoProbe` and `headProbe` seams, and the fakes that implement
+ * `readBranches` themselves.
+ */
+export const noBranches = {
+  async readBranches(): Promise<RepositoryBranches> {
+    return { defaultBranch: "main" };
   },
 };

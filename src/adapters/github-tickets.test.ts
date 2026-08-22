@@ -8,6 +8,7 @@ import {
 import {
   GitHubTicketingAdapter,
   repoSlug,
+  type CommandOptions,
   type CommandRunner,
 } from "./github-tickets.js";
 
@@ -35,6 +36,27 @@ function fakeRunner(...responses: string[]): {
   const queue = [...responses];
   const run: CommandRunner = async (command, args) => {
     calls.push({ command, args });
+    const next = queue.shift();
+    if (next === undefined) {
+      throw new Error(
+        `fake runner: unexpected call ${command} ${args.join(" ")}`,
+      );
+    }
+    return next;
+  };
+  return { run, calls };
+}
+
+/** As {@link fakeRunner}, but recording the options each call carried too. */
+function fakeRunnerWithOptions(...responses: string[]): {
+  run: CommandRunner;
+  calls: { command: string; args: string[]; options?: CommandOptions }[];
+} {
+  const calls: { command: string; args: string[]; options?: CommandOptions }[] =
+    [];
+  const queue = [...responses];
+  const run: CommandRunner = async (command, args, options) => {
+    calls.push({ command, args, options });
     const next = queue.shift();
     if (next === undefined) {
       throw new Error(
@@ -978,5 +1000,124 @@ describe("the writes that open an initiative's steps", () => {
     await expect(
       new GitHubTicketingAdapter({ run }).ensureLabel(alpha, "timone:held"),
     ).rejects.toThrow(/403/);
+  });
+});
+
+describe("readBranches — branch state comes from the forge, not from a checkout", () => {
+  /** GraphQL's answer shape for a repository with the named branch present. */
+  function ghBranches(
+    overrides: {
+      defaultBranchRef?: unknown;
+      ref?: unknown;
+    } = {},
+  ): string {
+    return JSON.stringify({
+      data: {
+        repository: {
+          defaultBranchRef:
+            "defaultBranchRef" in overrides
+              ? overrides.defaultBranchRef
+              : { name: "main", target: { oid: "aaaa111" } },
+          ref: "ref" in overrides ? overrides.ref : { target: { oid: "bbbb222" } },
+        },
+      },
+    });
+  }
+
+  it("answers a known branch with its tip", async () => {
+    const { run } = fakeRunner(ghBranches());
+
+    const state = await new GitHubTicketingAdapter({ run }).readBranches(
+      alpha,
+      "timone/7-execute",
+    );
+
+    expect(state.head).toBe("bbbb222");
+  });
+
+  it("answers the default branch and its tip", async () => {
+    const { run } = fakeRunner(ghBranches());
+
+    const state = await new GitHubTicketingAdapter({ run }).readBranches(alpha);
+
+    expect(state.defaultBranch).toBe("main");
+    expect(state.defaultHead).toBe("aaaa111");
+  });
+
+  it("answers an absent branch with no tip, and does not call that an error", async () => {
+    // The distinction this preserves: "no branch yet" is how the daemon
+    // detects that a stage produced nothing. A thrown error here would take
+    // the run down instead.
+    const { run } = fakeRunner(ghBranches({ ref: null }));
+
+    const state = await new GitHubTicketingAdapter({ run }).readBranches(
+      alpha,
+      "timone/7-execute",
+    );
+
+    expect(state.head).toBeUndefined();
+    expect(state.defaultBranch).toBe("main");
+  });
+
+  it("answers a repository with no commits at all without inventing a tip", async () => {
+    const { run } = fakeRunner(ghBranches({ defaultBranchRef: null, ref: null }));
+
+    const state = await new GitHubTicketingAdapter({ run }).readBranches(alpha);
+
+    expect(state.defaultHead).toBeUndefined();
+    expect(state.head).toBeUndefined();
+  });
+
+  it("reports a transport failure, and never renders one as an absent branch", async () => {
+    // This is the case the whole seam exists to keep honest. A stage that did
+    // its work, reported as having done none, is a run that stops silently and
+    // a human told nothing happened.
+    const run: CommandRunner = async () => {
+      throw new Error("gh api graphql failed after 3 attempts: ECONNRESET");
+    };
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).readBranches(alpha, "timone/7-execute"),
+    ).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it("reports an answer it cannot read, rather than treating it as no branch", async () => {
+    const { run } = fakeRunner("not json at all");
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).readBranches(alpha, "timone/7-execute"),
+    ).rejects.toThrow(/unparseable/);
+  });
+
+  it("names the repository, so the credential it runs under is scoped to it", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBranches());
+
+    await new GitHubTicketingAdapter({ run }).readBranches(
+      alpha,
+      "timone/7-execute",
+    );
+
+    expect(calls[0].options?.repository).toBe("fvermaut/scratch-app");
+  });
+
+  it("asks for the branch as a fully qualified ref", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBranches());
+
+    await new GitHubTicketingAdapter({ run }).readBranches(
+      alpha,
+      "timone/7-execute",
+    );
+
+    expect(calls[0].args).toContain("ref=refs/heads/timone/7-execute");
+  });
+
+  it("does not ask for a branch when none was named", async () => {
+    const { run, calls } = fakeRunnerWithOptions(
+      ghBranches({ ref: null }),
+    );
+
+    await new GitHubTicketingAdapter({ run }).readBranches(alpha);
+
+    expect(calls[0].args.join(" ")).not.toContain("refs/heads/undefined");
   });
 });

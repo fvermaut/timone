@@ -428,17 +428,35 @@ export interface AgentSessionSpawnerOptions {
   /** Where multi-turn conversations happen. Defaults to the terminal. */
   channel?: ConversationChannel;
   /**
-   * Reads a branch's tip in a project checkout. Behind a seam so the
+   * Reads a branch's tip. Behind a seam so the
    * did-this-stage-produce-anything check is testable without a real repo.
+   *
+   * **Its default reads the forge, not `projects/<name>`**
+   * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)).
+   * The seam is unchanged in shape and in meaning — `undefined` still means
+   * "there is no such branch" — but the argument is now the project rather
+   * than a directory, because a directory is the thing this phase stops
+   * having an opinion about.
+   *
+   * **A failure to read must throw**, not answer `undefined`. The two are
+   * opposite facts: no branch means the stage produced nothing, and an
+   * unreachable forge means nobody knows what the stage produced.
    */
-  repoProbe?: (repoDir: string, branch: string) => Promise<string | undefined>;
+  repoProbe?: (
+    project: TicketingProject,
+    branch: string,
+  ) => Promise<string | undefined>;
   /**
-   * Reads the checkout's current `HEAD`. It is the baseline for a stage that
-   * has no work branch yet: the commit a new branch would be cut from, and
-   * therefore the thing a branch must have moved *past* to have produced
-   * anything.
+   * Reads the baseline a stage with no work branch would start from: the
+   * default branch's tip, and therefore the thing a branch must have moved
+   * *past* to have produced anything.
+   *
+   * Read from the forge by default, for the same reason as {@link repoProbe}
+   * — and the change of source matters here more than anywhere: the human's
+   * checkout can sit on any commit he likes, and it was never a fact about
+   * the work that its `HEAD` happened to be the baseline.
    */
-  headProbe?: (repoDir: string) => Promise<string | undefined>;
+  headProbe?: (project: TicketingProject) => Promise<string | undefined>;
   /**
    * Reads the `Status:` line of the newest phase file on a branch. The
    * artifact half of execution's outcome check — the stage's own closing act
@@ -678,41 +696,11 @@ async function gitVerificationReport(
   }
 }
 
-/**
- * A branch's tip sha in `repoDir`, or undefined when the branch does not
- * exist. Missing is a legitimate answer, not an error: before the first stage
- * that owns one, there is no branch.
- */
-async function gitBranchHead(
-  repoDir: string,
-  branch: string,
-): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["rev-parse", "--verify", `refs/heads/${branch}`],
-      { cwd: repoDir },
-    );
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * The checkout's current HEAD sha. Undefined is a legitimate answer — an
- * unborn branch in a fresh clone has no HEAD commit.
- */
-async function gitCurrentHead(repoDir: string): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
-      cwd: repoDir,
-    });
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
+// `gitBranchHead` and `gitCurrentHead` lived here, reading a branch's tip and
+// the checkout's HEAD out of `projects/<name>` with `git rev-parse`. 30b
+// deleted them: branch state comes from the forge now, and the folder they
+// read is the human's (ADR-0043). They are gone rather than kept unused so
+// that 30d's guard has nothing to make an exception for.
 
 /** Reduce an error to one readable line. */
 /**
@@ -1055,8 +1043,23 @@ export class AgentSessionSpawner implements SessionSpawner {
     // read as "different from whatever tip appears" — cutting a branch is not
     // doing work. The checkout's current HEAD is what the stage would cut
     // from, so it is the honest baseline.
-    const headBefore =
-      (await this.branchHead(project, branch)) ?? (await this.currentHead(project));
+    let headBefore: string | undefined;
+    try {
+      headBefore =
+        (await this.branchHead(project, branch)) ??
+        (await this.currentHead(project));
+    } catch (error) {
+      // Nothing has been started yet, so the cheapest honest thing is to stop
+      // here: a session whose baseline is unknown cannot be judged when it
+      // finishes, and running it would spend a stage to learn nothing.
+      const reason =
+        `could not read the project's branches before starting ${stage}: ` +
+        oneLine(error);
+      store.fail(run.id, reason);
+      await adapter.postComment(project, run.ticket, failedComment(reason));
+      this.log(`failed ${run.id} — ${reason}`);
+      return { ok: false };
+    }
 
     const { outcome, attempts } = await this.runSession(
       run,
@@ -1083,7 +1086,23 @@ export class AgentSessionSpawner implements SessionSpawner {
       return { ok: false };
     }
 
-    const headAfter = await this.branchHead(project, branch);
+    let headAfter: string | undefined;
+    try {
+      headAfter = await this.branchHead(project, branch);
+    } catch (error) {
+      // The session has already run, and its work may well have landed. The
+      // one answer that must not be given is "nothing was produced" — which
+      // is what returning `undefined` here would have meant, and what the
+      // swallowed error used to say.
+      const reason =
+        `${stage} finished, but the forge could not be reached to see what it ` +
+        `left behind, so this run is stopped rather than reported wrongly: ` +
+        oneLine(error);
+      store.fail(run.id, reason);
+      await adapter.postComment(project, run.ticket, failedComment(reason));
+      this.log(`failed ${run.id} — ${reason}`);
+      return { ok: false };
+    }
 
     const cursor = outcomeCursorFrom(before);
     const after = await adapter.getTicket(project, run.ticket);
@@ -1417,16 +1436,26 @@ export class AgentSessionSpawner implements SessionSpawner {
     }
   }
 
-  /** The checkout's current HEAD, or undefined when it cannot be read. */
+  /**
+   * The default branch's tip — the baseline a stage with no work branch of
+   * its own starts from.
+   *
+   * **Nothing is caught here.** It used to be: a `try/catch` turned every
+   * failure into `undefined`, which is this seam's word for "there is no such
+   * commit". A dropped connection and a repository with no commits became the
+   * same answer, and the caller went on to report a stage as having produced
+   * nothing. Letting it throw is the whole of
+   * [30b's case (3)](../../doc/plans/phases/phase-30.md); the callers below
+   * decide what to say about it.
+   */
   private async currentHead(
     project: TicketingProject,
   ): Promise<string | undefined> {
-    const probe = this.options.headProbe ?? gitCurrentHead;
-    try {
-      return await probe(join(this.options.root, "projects", project.name));
-    } catch {
-      return undefined;
-    }
+    const probe =
+      this.options.headProbe ??
+      (async (target: TicketingProject) =>
+        (await this.options.adapter.readBranches(target)).defaultHead);
+    return probe(project);
   }
 
   /** The work branch's tip, or undefined when there is no branch yet. */
@@ -1435,12 +1464,11 @@ export class AgentSessionSpawner implements SessionSpawner {
     branch: string | undefined,
   ): Promise<string | undefined> {
     if (branch === undefined) return undefined;
-    const probe = this.options.repoProbe ?? gitBranchHead;
-    try {
-      return await probe(join(this.options.root, "projects", project.name), branch);
-    } catch {
-      return undefined;
-    }
+    const probe =
+      this.options.repoProbe ??
+      (async (target: TicketingProject, name: string) =>
+        (await this.options.adapter.readBranches(target, name)).head);
+    return probe(project, branch);
   }
 
   /**
