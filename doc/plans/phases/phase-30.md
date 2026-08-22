@@ -55,6 +55,22 @@ A pre-flight run of this plan against the tree found four things that stop work 
 >
 > **Still not resolved, and now with a clearer shape:** (i) fvermaut commits a workflow once and the guard runs in it; (ii) the guard is a vitest file and the slice's wording drops the CI claim. **Recorded, not chosen.**
 
+**✏ Blocker (e) — the box cannot talk to the model, and nothing in this phase says how it should. Found 2026-08-22, at 30j. NOT RESOLVED, and it is fvermaut's to answer.**
+
+An in-process session inherits whatever the host is logged in as. A boxed one inherits nothing — that is the point of the box. Checked rather than assumed:
+
+- `ANTHROPIC_API_KEY` is **not set** on the host, and nothing in `src/`, the `Dockerfile` or `docker/` passes any model credential to a session. Grepped; there are no hits at all.
+- The host's Claude credentials are in the **macOS keychain**, which no container can reach. There is no file to read and nothing to hand over.
+
+So **every boxed session would start, clone both repositories, and then fail to authenticate** — and it would fail *after* a container and a compose stack had been stood up, which is the expensive way to discover it. 30h and 30i are unaffected: neither needs the model, and both were watched working. **30j and 30k cannot run at all until this is answered**, because both are defined by a session that actually calls the model from inside the box.
+
+Two answers, and the difference between them is billing rather than engineering:
+
+- **(i) An API key.** `ANTHROPIC_API_KEY`, kept in `.timone/` beside the App key and passed into the box as an environment variable. Clean, no host state involved, and it is a **separate bill** from a Claude subscription.
+- **(ii) The subscription's own token.** Read the OAuth token out of the keychain and pass it in as `CLAUDE_CODE_OAUTH_TOKEN`. Uses the plan already paid for, and puts a **long-lived host secret inside the box** — which is not what ADR-0041 forbids (it forbids the host's *filesystem*), but is a real widening of what a stray agent could take with it.
+
+**Recorded, not chosen.** It is a credential and a bill, so it is not the machine's call.
+
 **What is actually startable.** **30e and 30g are blocked only by (b)**, and depend on nothing in code. 30e's anchor `session.ts:64` is exact and its gate `npm run build && npm test` is a real, non-vacuous, currently-green command. 30g needs only the `.dockerignore` correction recorded under it. **30f, 30h, 30i and 30j unblock behind those two and never need (a) at all.** ~~30a, 30b, 30c, 30d, 30k and 30l are every one of them blocked by (a).~~ **✏ Refined 2026-08-21: none of them is blocked by (a) any more** — the App is installed, and the six slices that waited on it now wait only on each other and on **(b)**, R23's wording, which is still fvermaut's five-minute confirmation and now the **only** human gate on this phase. **This inverts the closing paragraph of this file**, which says "if the phase has to stop somewhere, it stops after 30d": 30a–30d is the *most* blocked branch of the graph, and the security half the plan calls the optional one is the half that can actually begin.
 
 ## Requirements
@@ -549,9 +565,51 @@ This is a named slice because fvermaut asked the question directly and because a
 
 > **✏ Refined 2026-08-20: this slice has no `Agent Validation Steps` command block, and every other slice in this phase has one.** process.md stage 5 requires copy-pasteable validation commands per sub-phase. The comparison this slice is built around — two real verification reports, produced and diffed — is not a gate until a named command produces both and diffs them; as written, "the two reports diffed" is an instruction to a human, and an executing agent has nothing to run. **The gap is recorded, not filled**: the command depends on how 30h and 30i end up invoking the verify stage inside the box, which is not settled. Write it when 30i closes, before this slice starts.
 
+> **✏ Written 2026-08-22, now that 30i is closed — the command this slice was owed, and the blocker that stops it running.**
+>
+> **It is blocked by (e)**, and completely: both halves of the comparison are a real verification session, one of them inside the box, and a boxed session cannot reach the model until fvermaut answers how it authenticates. **Do not start this slice before (e) is answered.** Everything below is what to run once it is.
+>
+> The shape settled by 30h and 30i: a boxed run is `timone daemon --runtime container`, the stack comes up from the project's own `compose.yaml` under an `app` profile with no published ports, and the box joins `<compose-project>_default`. So the two passes differ only in `--runtime`, and the commit is held still by driving the same ticket twice.
+
+#### Agent Validation Steps
+
+```bash
+# Both passes on the same commit of scratch-app. The only difference between
+# them is where the session ran, which is the whole assertion.
+#
+# 1. On the host, as every verification has run until now.
+node dist/cli.js daemon --once --runtime in-process
+cp projects/scratch-app/doc/plans/phases/reports/phase-NN-verification.md /tmp/host.md
+
+# 2. In the box, same ticket, same commit.
+node dist/cli.js daemon --once --runtime container --image timone-agent:latest
+
+# 3. The comparison this slice exists for. Differences are explained or
+#    fixed, never noted and moved past — a scan that finds nothing because
+#    the page never rendered reads exactly like a clean pass.
+gh api "repos/fvermaut/scratch-app/contents/doc/plans/phases/reports/phase-NN-verification.md?ref=<branch>" \
+  --jq '.content' | base64 -d > /tmp/box.md
+diff -u /tmp/host.md /tmp/box.md
+
+# 4. Non-vacuity: the same pass against a deliberately broken page must FAIL
+#    in the box. A browser leg that cannot fail is not a browser leg.
+docker run --rm --shm-size=1g --network <compose-project>_default timone-agent:latest \
+  node /opt/timone/image-check.mjs
+
+# 5. Nothing left behind, on every path.
+docker ps -a --filter name=timone- --format '{{.Names}}'   # expect nothing
+docker network ls --format '{{.Name}}' | grep '^timone-'    # expect nothing
+```
+
 ---
 
 ### Sub-phase 30k: Flip the default, and the live gate on `scratch-app`
+
+> **⛔ Blocked 2026-08-22 by [blocker (e)](#-refined-2026-08-20--blockers-found-at-pre-flight).** Every item below is an observation of a session running in the box, and a boxed session cannot reach the model until fvermaut says how it authenticates. Nothing here can be started, and nothing below it faked. The **human gate** at the end of this slice is unaffected in kind — it is still the one thing no test can assert — but it cannot be reached first.
+>
+> **Two things arrive here from earlier slices and must not be lost:**
+> - **30h's finding:** a boxed run cannot follow a Timone commit nobody has pushed. The box says so readably now; **the better fix is a pre-flight refusal beside 30f's dirty-checkout refusal**, and this slice is where that is decided, because this is where the default flips and it stops being hypothetical.
+> - **30d's two live items:** with the daemon running a real `scratch-app` ticket, `git status` and the reflog in `projects/scratch-app` show no movement, and a branch switched mid-run is where it was left. Both are this gate's run.
 
 The container runtime becomes the default for daemon-spawned sessions. Sessions fvermaut opens himself are untouched ([ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) D5).
 
