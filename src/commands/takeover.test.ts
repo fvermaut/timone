@@ -14,6 +14,7 @@ import type {
 } from "../adapters/ticketing.js";
 import {
   noBranches,
+  noFiles,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import { RunStore } from "../daemon/runs.js";
@@ -180,6 +181,7 @@ function fakeAdapter(open: readonly Ticket[] = []): {
   const listings: string[] = [];
   const adapter: TicketingAdapter = {
     ...noBranches,
+    ...noFiles,
     ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.

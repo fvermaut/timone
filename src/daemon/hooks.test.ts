@@ -14,6 +14,7 @@ import type {
 } from "../adapters/ticketing.js";
 import {
   noBranches,
+  noFiles,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "./runs.js";
 import {
@@ -353,6 +354,7 @@ function fakeAdapter(): {
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
     ...noBranches,
+    ...noFiles,
     ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.

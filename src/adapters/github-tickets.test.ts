@@ -1286,3 +1286,101 @@ describe("mergeIntoDefault — the one merge with no pull request, done on the f
     expect(calls[1].options?.repository).toBe("fvermaut/scratch-app");
   });
 });
+
+describe("reading a branch's files from the forge", () => {
+  function ghBlob(text: string | null): string {
+    return JSON.stringify({
+      data: { repository: { object: text === null ? null : { text } } },
+    });
+  }
+
+  function ghTree(entries: { name: string; type: string }[] | null): string {
+    return JSON.stringify({
+      data: { repository: { object: entries === null ? null : { entries } } },
+    });
+  }
+
+  it("answers a file's content on the branch that carries it", async () => {
+    const { run } = fakeRunner(ghBlob("> **Status:** Complete\n"));
+
+    const text = await new GitHubTicketingAdapter({ run }).readFile(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases/phase-03.md",
+    );
+
+    expect(text).toBe("> **Status:** Complete\n");
+  });
+
+  it("answers undefined for a file the branch does not carry", async () => {
+    const { run } = fakeRunner(ghBlob(null));
+
+    const text = await new GitHubTicketingAdapter({ run }).readFile(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases/phase-03.md",
+    );
+
+    expect(text).toBeUndefined();
+  });
+
+  it("reports a dropped connection instead of calling the file absent", async () => {
+    const run: CommandRunner = async () => {
+      throw new Error("gh api graphql failed after 3 attempts: ECONNRESET");
+    };
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).readFile(alpha, "b", "some/path.md"),
+    ).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it("lists the files directly under a directory, as repository paths", async () => {
+    const { run } = fakeRunner(
+      ghTree([
+        { name: "phase-03.md", type: "blob" },
+        { name: "phase-04.md", type: "blob" },
+        { name: "reports", type: "tree" },
+      ]),
+    );
+
+    const files = await new GitHubTicketingAdapter({ run }).listFiles(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases",
+    );
+
+    // Directories are not files, and the paths are the ones that identify a
+    // file whichever branch it was read from.
+    expect(files).toEqual([
+      "doc/plans/phases/phase-03.md",
+      "doc/plans/phases/phase-04.md",
+    ]);
+  });
+
+  it("answers undefined for a directory the branch does not carry", async () => {
+    const { run } = fakeRunner(ghTree(null));
+
+    const files = await new GitHubTicketingAdapter({ run }).listFiles(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases",
+    );
+
+    expect(files).toBeUndefined();
+  });
+
+  it("asks for the path as a branch-qualified expression", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBlob("x"));
+
+    await new GitHubTicketingAdapter({ run }).readFile(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases/phase-03.md",
+    );
+
+    expect(calls[0].args).toContain(
+      "expression=timone/7-execute:doc/plans/phases/phase-03.md",
+    );
+    expect(calls[0].options?.repository).toBe("fvermaut/scratch-app");
+  });
+});

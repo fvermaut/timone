@@ -300,6 +300,34 @@ const BRANCH_QUERY =
   "defaultBranchRef{name target{oid}} " +
   "ref(qualifiedName:$ref){target{oid}}}}";
 
+/** GraphQL's answer to {@link BLOB_QUERY} and {@link TREE_QUERY}. */
+const ghObjectSchema = z.looseObject({
+  data: z.looseObject({
+    repository: z.looseObject({
+      object: z
+        .looseObject({
+          text: z.string().nullish(),
+          entries: z
+            .array(z.looseObject({ name: z.string(), type: z.string() }))
+            .nullish(),
+        })
+        .nullish(),
+    }),
+  }),
+});
+
+/** One file's text at `branch:path`; null when the branch has no such file. */
+const BLOB_QUERY =
+  "query($owner:String!,$name:String!,$expression:String!){" +
+  "repository(owner:$owner,name:$name){" +
+  "object(expression:$expression){... on Blob{text}}}}";
+
+/** One directory's entries at `branch:dir`; null when there is no such tree. */
+const TREE_QUERY =
+  "query($owner:String!,$name:String!,$expression:String!){" +
+  "repository(owner:$owner,name:$name){" +
+  "object(expression:$expression){... on Tree{entries{name type}}}}}";
+
 export interface GitHubTicketingOptions {
   /** Injected subprocess runner; defaults to running `gh` for real. */
   run?: CommandRunner;
@@ -461,6 +489,77 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
       }
       throw error;
     }
+  }
+
+  /**
+   * One file's content on a branch, through GraphQL's `object(expression:)`.
+   *
+   * GraphQL again, and for the reason `readBranches` gives: an absent path
+   * comes back as `object: null` in a **successful** response, so "not there"
+   * is a value rather than a status code to be told apart from a dropped
+   * connection.
+   */
+  async readFile(
+    project: TicketingProject,
+    branch: string,
+    path: string,
+  ): Promise<string | undefined> {
+    const answer = await this.readObject(project, `${branch}:${path}`, BLOB_QUERY);
+    return answer?.text ?? undefined;
+  }
+
+  async listFiles(
+    project: TicketingProject,
+    branch: string,
+    directory: string,
+  ): Promise<string[] | undefined> {
+    const answer = await this.readObject(
+      project,
+      `${branch}:${directory}`,
+      TREE_QUERY,
+    );
+    if (answer?.entries === undefined || answer.entries === null) {
+      return undefined;
+    }
+    return answer.entries
+      .filter((entry) => entry.type === "blob")
+      .map((entry) => `${directory}/${entry.name}`);
+  }
+
+  /** One `object(expression:)` read, shared by the blob and tree queries. */
+  private async readObject(
+    project: TicketingProject,
+    expression: string,
+    query: string,
+  ): Promise<
+    { text?: string | null; entries?: { name: string; type: string }[] | null } | undefined
+  > {
+    const slug = repoSlug(project.repoUrl);
+    const [owner, name] = slug.split("/");
+
+    const raw = await this.run(
+      "gh",
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${query}`,
+        "-F",
+        `owner=${owner}`,
+        "-F",
+        `name=${name}`,
+        "-F",
+        `expression=${expression}`,
+      ],
+      { repository: slug },
+    );
+
+    const answer = parseGhJson(
+      ghObjectSchema,
+      raw,
+      `reading ${expression} on ${slug}`,
+    );
+    return answer.data.repository.object ?? undefined;
   }
 
   async listMarkedTickets(project: TicketingProject): Promise<Ticket[]> {

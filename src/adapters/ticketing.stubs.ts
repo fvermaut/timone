@@ -79,3 +79,20 @@ export const noMerges = {
     throw new Error("no test here merges chunk zero");
   },
 };
+
+/**
+ * The branch file reads, for tests whose subject is not them: a branch
+ * carrying nothing.
+ *
+ * It answers rather than throwing, for {@link noBranches}' reason — "no such
+ * file on that branch" is what these tests used to get from a `git show` in a
+ * directory that was no repository.
+ */
+export const noFiles = {
+  async readFile(): Promise<string | undefined> {
+    return undefined;
+  },
+  async listFiles(): Promise<string[] | undefined> {
+    return undefined;
+  },
+};

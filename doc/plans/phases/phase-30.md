@@ -301,15 +301,39 @@ This slice is where R23's second clause becomes true, and it is the one that fix
 > Depends on 30b and 30c — they are what remove the calls this guard then forbids.
 > **✏ Refined 2026-08-20:** and therefore on blocker (a), through 30b.
 
+> **✅ Built 2026-08-22 — 30d is done, and it was bigger than the slice as written.**
+>
+> **✏ The `[MODIFY]` line — "wherever a project path is resolved for machine use" — turned out to name six places, not one.** 30b converted the branch-tip probes and recorded the rest as a finding; this slice discharges it. Converted here: `planStatusProbe` and `verificationReportProbe`, which read the newest phase file's `Status:` line and the verification report beside it with `git ls-tree` and `git show`; and the **breakdown source**, which read a ticket's approved list with `git show` off the default branch. All three now read the forge, through a third widening of the seam: `readFile(project, branch, path)` and `listFiles(project, branch, directory)`, both GraphQL, both answering `null` for an absent path in a **successful** response so "not there" stays a value rather than a status code to be told apart from a dropped connection. Verified live on `fvermaut/scratch-app`: a real listing, a real file, and undefined for both absences.
+>
+> **They were not deferrable. Left alone they would have answered "the stage produced nothing" the moment 30h landed** — the branch would exist only on the forge, `git ls-tree` in the human's checkout would find nothing, and the caller reads nothing as *no work*. Silent, at the heart of the pipeline.
+>
+> **The breakdown source stopped taking a directory.** It is `(path) => …` now, built by whoever knows where to look, and it may answer asynchronously. `fromWorkingTree(dir)` and `fromDefaultBranch(dir)` became factories and are **fvermaut's**; `fromForgeDefaultBranch(adapter, project)` is the machine's. `readBreakdown` is async; `readBreakdownSync` exists for `timone status`, which renders without waiting and reads his own folder.
+>
+> **`PollDeps.root` is gone.** The whole reason the poll loop was told a root was to reach `projects/<name>/` for a breakdown. It reads the forge now, so the field said something false and would have been the obvious thing to reach for again. `checkoutOf` moved out of `poll.ts` to `commands/status.ts`, its only remaining caller. `src/daemon/session.ts` resolves no path under `projects/` at all any more, and its `execFileAsync` import is deleted with the last probe that used it.
+>
+> **The guard is `src/guards/checkouts.test.ts`, and it is two lists rather than one.** Separating them is what makes it say something true: git against the *timone* checkout is an ordinary thing this system does — the version pin, the dirty-tree refusal — and git against a *project's* checkout is what this phase ended. One list would have had to ban the first or excuse the second.
+> - **`EXEMPT`** — five files that may resolve a path under `projects/`: `commands/workspace.ts` and `commands/status.ts` (fvermaut's own commands), `daemon/hooks.ts` (the R15 bracket, local read-only git, never the forge), `adapters/docker-preview.ts` (worktrees, ADR-0021, untouched by this phase), and `daemon/prompts.ts` (it writes the sentence into a *prompt*; it resolves nothing).
+> - **`GIT_USERS`** — six files that may perform git at all, each saying what on.
+>
+> **Two holes were found in the guard by the guard, while writing it.** It missed git reached **through `src/git.ts`** — so `commands/workspace.ts`, which clones and fast-forwards every checkout there is, read as innocent — and it missed paths built from a manifest entry's `path` field, which is required to start with `projects/`. Both are closed. It also had to learn that `commands/projects.ts` registers a CLI subcommand called `projects` and reaches into nothing: a guard that flags that is a guard somebody switches off.
+>
+> **The exemption list cannot rot.** One test asserts every name still does the thing it was excused for, so an exemption that outlives its reason fails rather than accumulating. That is case (3)'s narrowness, against five exemptions rather than the one the slice was written around.
+>
+> **✏ Blocker (d) is answered as option (ii), and the CI question is still fvermaut's.** The guard is a vitest file. It fails `npm test`, and `npm test` runs at every session's `Stop` hook, so it is enforced on every session — but **not** in CI, because `.github/` does not exist and the Timone App is installed **without** the Workflows permission, deliberately. Option (i) is a workflow **fvermaut commits by hand**, once, after which the machine can never alter it. **Recorded as open. It is the one thing on this phase that still needs him.**
+>
+> **The rewritten test worth naming.** `commands/daemon.test.ts` had a test that built a real clone under `projects/scratch-app`, committed a breakdown to its default branch, and asserted `runDaemon` passed its root down far enough for the loop to read the file. That plumbing is gone. It is rewritten to assert the same observable end — a list that regrew leaves the ticket open — with **no checkout on disk at all**, plus that the forge was asked for that path on that branch. The real-git fixture is deleted with it, and that test file went from 11 seconds to instant.
+>
+> **13 tests added** (7 guard, 6 adapter), and case (1) was demonstrated rather than asserted: a `join(root, "projects", project)` was genuinely reintroduced into `poll.ts`, the guard named `daemon/poll.ts`, and it passed again on revert. Suite: **1308 tests, all green.**
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npm test
 ```
 
-- [ ] Red→green trace, with case (1) demonstrated by an actual reintroduced call
-- [ ] With the daemon running a real `scratch-app` ticket, `git status` and the reflog in `projects/scratch-app` show **no movement** across the whole run
-- [ ] Branch switched in `projects/scratch-app` mid-run; the run finishes and the branch is where it was left
+- [x] Red→green trace, with case (1) demonstrated by an actual reintroduced call — reintroduced into `src/daemon/poll.ts`, caught by name, reverted
+- [ ] With the daemon running a real `scratch-app` ticket, `git status` and the reflog in `projects/scratch-app` show **no movement** across the whole run — **live, and deferred to 30k's gate**, which runs a real marked ticket end to end
+- [ ] Branch switched in `projects/scratch-app` mid-run; the run finishes and the branch is where it was left — **the same live run**, and it is 30k's human gate
 
 ---
 

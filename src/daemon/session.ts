@@ -1,9 +1,6 @@
-import { execFile } from "node:child_process";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 
-const execFileAsync = promisify(execFile);
 
 import {
   checkoutVersion,
@@ -25,7 +22,7 @@ import { TerminalChannel } from "../channels/terminal.js";
 import { technicalFault, type TechnicalFault } from "./faults.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
-  fromDefaultBranch,
+  fromForgeDefaultBranch,
   readBreakdown,
   type BreakdownSource,
   type Chunk,
@@ -463,7 +460,7 @@ export interface AgentSessionSpawnerOptions {
    * as {@link repoProbe}.
    */
   planStatusProbe?: (
-    repoDir: string,
+    project: TicketingProject,
     branch: string,
   ) => Promise<string | undefined>;
   /**
@@ -471,7 +468,7 @@ export interface AgentSessionSpawnerOptions {
    * path or undefined. The artifact half of verification's outcome check.
    */
   verificationReportProbe?: (
-    repoDir: string,
+    project: TicketingProject,
     branch: string,
   ) => Promise<string | undefined>;
   /**
@@ -628,71 +625,66 @@ export function unclassifiedComment(): string {
 }
 
 /**
- * The `Status:` line of the newest phase file on `branch`, or undefined when
- * the branch carries none. Newest by number, because that is the file the
- * planning stage just committed and the one execution was told to build.
+ * The newest phase file on `branch`, by number — the one the planning stage
+ * just committed and the one execution was told to build.
+ *
+ * ✏ **Phase 30's 30d: read from the forge, not from `projects/<name>`.** This
+ * used to be `git ls-tree` in the human's checkout, and nothing fetched that
+ * checkout. It worked only because the session that wrote the branch ran in
+ * the same folder — so it was already a fact about a laptop rather than about
+ * the work, and once a session runs in a box it would answer "no phase file",
+ * which the caller reads as *execution produced nothing*.
  */
-async function gitPlanStatus(
-  repoDir: string,
+async function newestPhaseFile(
+  adapter: TicketingAdapter,
+  project: TicketingProject,
   branch: string,
 ): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["ls-tree", "-r", "--name-only", branch, "--", "doc/plans/phases"],
-      { cwd: repoDir },
-    );
-    const newest = stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => /^doc\/plans\/phases\/phase-\d+\.md$/.test(line))
-      .sort()
-      .at(-1);
-    if (newest === undefined) return undefined;
-
-    const { stdout: content } = await execFileAsync(
-      "git",
-      ["show", `${branch}:${newest}`],
-      { cwd: repoDir },
-    );
-    const line = content
-      .split("\n")
-      .find((candidate) => candidate.includes("Status:"));
-    return line?.replace(/^.*Status:\*{0,2}\s*/, "").trim();
-  } catch {
-    return undefined;
-  }
+  const files = await adapter.listFiles(project, branch, "doc/plans/phases");
+  return files
+    ?.filter((path) => /^doc\/plans\/phases\/phase-\d+\.md$/.test(path))
+    .sort()
+    .at(-1);
 }
 
 /**
- * The newest phase's verification report on `branch` — its path when the
- * file exists there, undefined otherwise. "Newest phase" is resolved the
- * same way {@link gitPlanStatus} resolves it, so the two witnesses of the
- * back half always talk about the same phase.
+ * The `Status:` line of the newest phase file on `branch`, or undefined when
+ * the branch carries none.
  */
-async function gitVerificationReport(
-  repoDir: string,
+async function forgePlanStatus(
+  adapter: TicketingAdapter,
+  project: TicketingProject,
   branch: string,
 ): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["ls-tree", "-r", "--name-only", branch, "--", "doc/plans/phases"],
-      { cwd: repoDir },
-    );
-    const files = stdout.split("\n").map((line) => line.trim());
-    const newest = files
-      .filter((line) => /^doc\/plans\/phases\/phase-\d+\.md$/.test(line))
-      .sort()
-      .at(-1);
-    if (newest === undefined) return undefined;
+  const newest = await newestPhaseFile(adapter, project, branch);
+  if (newest === undefined) return undefined;
 
-    const phase = /phase-(\d+)\.md$/.exec(newest)?.[1];
-    const report = `doc/plans/phases/reports/phase-${phase}-verification.md`;
-    return files.includes(report) ? report : undefined;
-  } catch {
-    return undefined;
-  }
+  const content = await adapter.readFile(project, branch, newest);
+  const line = content
+    ?.split("\n")
+    .find((candidate) => candidate.includes("Status:"));
+  return line?.replace(/^.*Status:\*{0,2}\s*/, "").trim();
+}
+
+/**
+ * The newest phase's verification report on `branch` — its path when the file
+ * exists there, undefined otherwise. "Newest phase" is resolved the same way
+ * {@link forgePlanStatus} resolves it, so the two witnesses of the back half
+ * always talk about the same phase.
+ */
+async function forgeVerificationReport(
+  adapter: TicketingAdapter,
+  project: TicketingProject,
+  branch: string,
+): Promise<string | undefined> {
+  const newest = await newestPhaseFile(adapter, project, branch);
+  if (newest === undefined) return undefined;
+
+  const phase = /phase-(\d+)\.md$/.exec(newest)?.[1];
+  const report = `doc/plans/phases/reports/phase-${phase}-verification.md`;
+  return (await adapter.readFile(project, branch, report)) === undefined
+    ? undefined
+    : report;
 }
 
 // `gitBranchHead` and `gitCurrentHead` lived here, reading a branch's tip and
@@ -1407,12 +1399,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     branch: string | undefined,
   ): Promise<string | undefined> {
     if (branch === undefined) return undefined;
-    const probe = this.options.planStatusProbe ?? gitPlanStatus;
+    const probe =
+      this.options.planStatusProbe ??
+      ((target: TicketingProject, name: string) =>
+        forgePlanStatus(this.options.adapter, target, name));
     try {
-      return await probe(
-        join(this.options.root, "projects", project.name),
-        branch,
-      );
+      return await probe(project, branch);
     } catch {
       return undefined;
     }
@@ -1424,12 +1416,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     branch: string | undefined,
   ): Promise<string | undefined> {
     if (branch === undefined) return undefined;
-    const probe = this.options.verificationReportProbe ?? gitVerificationReport;
+    const probe =
+      this.options.verificationReportProbe ??
+      ((target: TicketingProject, name: string) =>
+        forgeVerificationReport(this.options.adapter, target, name));
     try {
-      return await probe(
-        join(this.options.root, "projects", project.name),
-        branch,
-      );
+      return await probe(project, branch);
     } catch {
       return undefined;
     }
@@ -1787,10 +1779,10 @@ export class AgentSessionSpawner implements SessionSpawner {
     project: TicketingProject,
   ): Promise<string | undefined> {
     const { adapter, root } = this.options;
-    const read = readBreakdown(
-      join(root, "projects", project.name),
+    const read = await readBreakdown(
       run.ticket,
-      this.options.breakdownSource ?? fromDefaultBranch,
+      this.options.breakdownSource ??
+        fromForgeDefaultBranch(adapter, project),
     );
     if (read.kind !== "ok") {
       return (

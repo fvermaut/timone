@@ -4,9 +4,35 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
-import { breakdownPath, fromWorkingTree } from "../daemon/breakdown.js";
+import {
+  breakdownPath, fromWorkingTree,
+  type SyncBreakdownSource,
+} from "../daemon/breakdown.js";
+
+/**
+ * A fixture root and the breakdown source that reads it, together.
+ *
+ * The two must agree, and since 30d they are two separate values — a source
+ * is built by whoever knows where to look, and the poll loop's production
+ * default no longer knows about a directory at all. Spreading one helper is
+ * what stops a test setting `root` here and reading a breakdown from
+ * somewhere else.
+ */
+function breakdownIn(
+  root: string,
+  project = "scratch-app",
+): { root: string; breakdownSource: SyncBreakdownSource } {
+  // `join(root, "projects", project)` is what `checkoutOf` used to supply on
+  // the caller's behalf. It is spelled here because the production default no
+  // longer resolves a directory at all: it reads the forge.
+  return {
+    root,
+    breakdownSource: fromWorkingTree(join(root, "projects", project)),
+  };
+}
+
 import { ctaComment, ctaFor } from "../daemon/cta.js";
-import { checkoutOf, progressOf, reclaimedReason } from "../daemon/poll.js";
+import { progressOf, reclaimedReason } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
   type InitiativeRecord, runId, type Run } from "../daemon/runs.js";
@@ -548,8 +574,7 @@ describe("renderStatus — a ticket built in pieces", () => {
       stateExists: true,
       // A plain fixture directory, not a clone: the production default reads
       // the approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(6),
+            ...breakdownIn(rootWith(6)),
     });
 
     expect(lineFor(output, "scratch-app")).toBe(
@@ -678,7 +703,7 @@ describe("renderStatus — one computation, two renderers", () => {
     ];
 
     const lastLine =
-      renderStatus(manifest, runs, { stateExists: true, root, breakdownSource: fromWorkingTree })
+      renderStatus(manifest, runs, { stateExists: true, ...breakdownIn(root) })
         .trimEnd()
         .split("\n")
         .at(-1) ?? "";

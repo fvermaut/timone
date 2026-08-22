@@ -471,6 +471,40 @@ export interface TicketingAdapter {
     message: string,
   ): Promise<MergeOutcome>;
 
+  /**
+   * One file's content on `branch`, or undefined when the branch does not
+   * carry it.
+   *
+   * Phase 30's third widening, and it exists for the same reason as
+   * {@link readBranches}: three of the daemon's checks read a *file* off a
+   * branch — the newest phase file's `Status:` line, the verification report
+   * beside it, and a ticket's approved breakdown — and every one of them did
+   * it with `git show` inside `projects/<name>`. Nothing fetched that
+   * checkout, so they worked only because the session that wrote the branch
+   * ran in the same folder. The moment a session runs anywhere else, the
+   * branch is on the forge and those reads answer "no such file" — which the
+   * callers read as *the stage produced nothing*.
+   *
+   * **Absent is `undefined` and is an answer. A failure to read throws**, for
+   * the same reason as `readBranches`.
+   */
+  readFile(
+    project: TicketingProject,
+    branch: string,
+    path: string,
+  ): Promise<string | undefined>;
+
+  /**
+   * The repository-relative paths of the files **directly under**
+   * `directory` on `branch` — not recursive, and directories are not
+   * included. Undefined when the branch does not carry the directory at all.
+   */
+  listFiles(
+    project: TicketingProject,
+    branch: string,
+    directory: string,
+  ): Promise<string[] | undefined>;
+
   /** Open tickets carrying the mark label, oldest first. */
   listMarkedTickets(project: TicketingProject): Promise<Ticket[]>;
 

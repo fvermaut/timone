@@ -23,6 +23,7 @@ import {
 } from "../adapters/ticketing.js";
 import {
   noBranches,
+  noFiles,
   noMerges,
   noSteps,
   noStepWrites,
@@ -174,6 +175,7 @@ function fakeAdapter(initial: TicketThread = thread): {
 
   const adapter: TicketingAdapter = {
     ...noBranches,
+    ...noFiles,
     ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
@@ -4577,6 +4579,7 @@ describe("chunk zero reaches the default branch through the forge", () => {
     const merges: { branch: string; message: string }[] = [];
     const adapter: TicketingAdapter = {
       ...noBranches,
+    ...noFiles,
     ...noMerges,
       ...noStepWrites,
       ...noSteps,

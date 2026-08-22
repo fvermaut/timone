@@ -16,6 +16,7 @@ import {
 } from "../adapters/ticketing.js";
 import {
   noBranches,
+  noFiles,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { acquireStateLock } from "../daemon/lock.js";
@@ -329,6 +330,7 @@ describe("timone retry — the answer a killed session had already read", async 
     const posted: string[] = [];
     const adapter: TicketingAdapter = {
       ...noBranches,
+    ...noFiles,
     ...noMerges,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
@@ -613,6 +615,7 @@ describe("timone retry — the way back from a consumed answer", async () => {
     };
     return {
       ...noBranches,
+    ...noFiles,
     ...noMerges,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.

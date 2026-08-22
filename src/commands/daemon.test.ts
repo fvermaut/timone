@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import {
   existsSync,
@@ -21,6 +20,7 @@ import type {
 } from "../adapters/ticketing.js";
 import {
   noBranches,
+  noFiles,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
@@ -70,6 +70,7 @@ const manifest: Manifest = {
 function quietAdapter(): TicketingAdapter {
   return {
     ...noBranches,
+    ...noFiles,
     ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
@@ -254,82 +255,25 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
   });
 });
 
-/**
- * Turn a fixture directory into something shaped like a clone: one commit on
- * `main`, and an `origin/HEAD` symref pointing at it. That pair is what
- * `fromDefaultBranch` resolves, so a fixture without it reads as a project
- * with no breakdown at all.
- */
-function commitOnDefaultBranch(repoDir: string): void {
-  const git = (...args: string[]): void => {
-    execFileSync("git", args, {
-      cwd: repoDir,
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: "t",
-        GIT_AUTHOR_EMAIL: "t@example.com",
-        GIT_COMMITTER_NAME: "t",
-        GIT_COMMITTER_EMAIL: "t@example.com",
-      },
-    });
-  };
-  git("init", "-b", "main");
-  git("add", ".");
-  git("commit", "-m", "fixture");
-  git("update-ref", "refs/remotes/origin/main", "HEAD");
-  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
-}
-
-describe("runDaemon — the loop is told where the project checkouts are", () => {
-  it("reaches a ticket's breakdown, so a list that has regrown is not closed over", async () => {
-    // The poll loop cannot answer "is there another piece of this to build?"
-    // without a path to `projects/<name>/`, and this command is the only place
-    // a real daemon's root is known. Wired wrongly, every multi-piece
-    // initiative would be truncated at its first merge and nothing would say
-    // so — so the assertion is on the observable end of the thread, not on the
-    // field being passed.
+describe("runDaemon — the loop reads a ticket's breakdown from the forge", () => {
+  it("does not close over a list that has regrown, without any checkout on disk", async () => {
+    // ✏ Rewritten by phase 30's 30d. This test used to build a real clone
+    // under `projects/scratch-app`, commit the breakdown to its default
+    // branch, and assert that `runDaemon` passed its root down far enough for
+    // the poll loop to read the file — the plumbing being the subject.
+    //
+    // **That plumbing is gone.** The loop reads the approved list off the
+    // project's default branch *on the forge*
+    // ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)),
+    // so there is no root to pass and no checkout to build. The observable
+    // end of the thread is unchanged and is still what is asserted: a list
+    // that grew after it was approved must leave the ticket open, because the
+    // human is asked rather than the ticket being finished on their behalf.
+    //
+    // The root handed to `runDaemon` below is a directory holding no
+    // checkouts at all. A loop that had gone on reading disk would find
+    // nothing, read that as "no breakdown", and close the ticket.
     const { store, statePath } = clockedStore();
-    const root = mkdtempSync(join(tmpdir(), "timone-daemon-root-"));
-    tempDirs.push(root);
-    const file = join(
-      root,
-      "projects",
-      "scratch-app",
-      "doc",
-      "plans",
-      "breakdowns",
-      "ticket-07.md",
-    );
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(
-      file,
-      [
-        "# Breakdown",
-        "",
-        // ✏ 29g: the stamp names **two** and the list holds three, so this is
-        // a re-proposal — a list that grew after it was approved (ADR-0028
-        // D3). That is what the loop must notice, and noticing it means
-        // reading the file, which means having been told the root. Before
-        // 29g this fixture proved the same thing through a mid-initiative
-        // merge not closing the ticket; a ticket does not host a sequence of
-        // chunks any more, so that observation stopped discriminating while
-        // the thing it was observing — the root reaching the loop — did not.
-        "**Status:** Approved by fvermaut 2026-08-15 — 2 pieces",
-        "",
-        "1. **The ledger learns chunks** — a run carries its sequence number.",
-        "2. **The next chunk opens** — a merged pull request opens the next one.",
-        "3. **The ticket closes** — the last merge ends the conversation.",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-    // ✏ A real clone since phase 27, because the loop reads the approved list
-    // off the default branch rather than off whatever is checked out. Writing
-    // the file alone used to be enough and is exactly what stopped being
-    // enough — a session leaves this checkout on its own work branch, and the
-    // list of pieces must not depend on that.
-    commitOnDefaultBranch(join(root, "projects", "scratch-app"));
 
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "s1");
@@ -351,9 +295,30 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
       author: "fvermaut",
       createdAt: "2026-08-06T09:00:00Z",
     };
+
+    // The stamp names two pieces and the list holds three: a re-proposal.
+    const breakdown = [
+      "# Breakdown",
+      "",
+      "**Status:** Approved by fvermaut 2026-08-15 — 2 pieces",
+      "",
+      "1. **The ledger learns chunks** — a run carries its sequence number.",
+      "2. **The next chunk opens** — a merged pull request opens the next one.",
+      "3. **The ticket closes** — the last merge ends the conversation.",
+      "",
+    ].join("\n");
+
+    const asked: { branch: string; path: string }[] = [];
     const closed: string[] = [];
     const merged: TicketingAdapter = {
       ...quietAdapter(),
+      async readBranches() {
+        return { defaultBranch: "main", defaultHead: "aaaaaaa" };
+      },
+      async readFile(_project, branch, path) {
+        asked.push({ branch, path });
+        return path.endsWith("ticket-07.md") ? breakdown : undefined;
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         return [marked];
       },
@@ -379,7 +344,7 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
       manifest,
       store,
       statePath,
-      root,
+      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter: merged,
@@ -388,11 +353,13 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
     });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("done");
-    // Not closed: the list grew after it was approved, so the human is asked
-    // rather than the ticket being finished on their behalf. A loop that
-    // never got the root could not have read the file and would have closed
-    // it, which is what makes this assertion about the plumbing.
     expect(closed).toEqual([]);
+    // And it asked the forge, on the default branch, for the path the
+    // breakdown lives at — rather than looking anywhere on disk.
+    expect(asked).toContainEqual({
+      branch: "main",
+      path: "doc/plans/breakdowns/ticket-07.md",
+    });
   });
 });
 

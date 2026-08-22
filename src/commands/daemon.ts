@@ -105,17 +105,14 @@ export interface RunDaemonOptions {
    */
   statePath?: string;
   /**
-   * The timone root, so the cycle can reach a project's checkout at
-   * `projects/<name>/` — which is where a ticket's breakdown lives and
-   * therefore how the loop knows whether a merged pull request ended a piece
-   * of an initiative or the whole of it ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
-   * D1).
+   * The timone root.
    *
-   * **Required, unlike the cycle's own `root`.** This is the only place a real
-   * daemon's root is known, and the cost of forgetting it is silent: every
-   * multi-piece initiative truncated at its first merge, with the ticket
-   * closed and nothing anywhere saying a piece was skipped. So the compiler
-   * asks rather than a default answering.
+   * ✏ **Narrowed by phase 30's 30d.** It used to be here so the poll cycle
+   * could reach `projects/<name>/` and read a ticket's breakdown; the cycle
+   * reads the forge now and takes no root at all
+   * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)).
+   * What it is still for is the **timone** checkout — the spawner's version
+   * pin and its refusal to start on a dirty tree (ADR-0041 D2).
    */
   root: string;
   intervalMs: number;
@@ -186,7 +183,6 @@ async function poll(
       store: options.store,
       adapter: options.adapter,
       spawner: options.spawner,
-      root: options.root,
       // The same path the lock was taken on, so the cycle serves the requests
       // waiting beside the ledger it is holding (ADR-0032).
       statePath: options.statePath,
@@ -312,8 +308,8 @@ export function registerDaemonCommand(program: Command): void {
         manifest,
         store,
         statePath,
-        // The same root the spawner is given, from the same place: sessions
-        // run here (ADR-0007) and the checkouts sit under it.
+        // The timone root — the spawner's, for the version pin and the
+        // dirty-checkout refusal (ADR-0041 D2). The cycle no longer takes one.
         root: process.cwd(),
         // One adapter for every bound project: which projects get previews is
         // the manifest's answer, not this command's (ADR-0021).
