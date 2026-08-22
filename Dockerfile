@@ -49,3 +49,22 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN npm install --prefix /opt/timone --no-save "playwright@${PLAYWRIGHT_VERSION}"
 
 COPY docker/image-check.mjs /opt/timone/image-check.mjs
+
+# ---------------------------------------------------------------------------
+# The box does not run as root.
+#
+# ✏ Added 2026-08-22, at 30j's first live run. It is not hardening for its own
+# sake: the Claude CLI **refuses** `--permission-mode bypassPermissions` under
+# root, and every daemon-spawned session uses it. So an image that runs as
+# root is an image no session can run in, and the failure says nothing about
+# containers — it says "cannot be used with root/sudo privileges".
+#
+# `pwuser` comes from Playwright's own base image and is what it intends
+# browsers to run as. `/workspace` is where a run clones both repositories, so
+# it has to exist and be his before he arrives.
+# ---------------------------------------------------------------------------
+RUN mkdir -p /workspace \
+    && chown -R pwuser:pwuser /workspace /opt/timone
+
+USER pwuser
+WORKDIR /workspace

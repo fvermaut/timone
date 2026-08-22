@@ -37,6 +37,10 @@ import {
 } from "../daemon/session.js";
 import { containerRuntime } from "../daemon/container-runtime.js";
 import { bringUpServices } from "../daemon/services.js";
+import {
+  claudeSubscriptionToken,
+  type ModelTokenSource,
+} from "../adapters/model-token.js";
 
 export interface MachineAdapterOptions {
   /** Injected process spawner; the real one when absent. */
@@ -136,6 +140,8 @@ export interface RuntimeChoice {
   credentials?: CredentialProvider;
   /** The timone root, beneath which a stack's source is materialized. */
   root?: string;
+  /** How a boxed session reaches the model. Injected for tests. */
+  modelToken?: ModelTokenSource;
 }
 
 /**
@@ -160,6 +166,9 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
     const credentials = choice.credentials;
     return containerRuntime({
       image: choice.image,
+      // fvermaut's own subscription, read fresh at every spawn and stored
+      // nowhere (blocker (e), answered 2026-08-22).
+      modelToken: choice.modelToken ?? claudeSubscriptionToken(),
       ...(credentials === undefined ? {} : { credentials }),
       // Only when there is a root to materialize a stack's source under. A
       // runtime built without one still runs a session; it just has no

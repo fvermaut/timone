@@ -13,7 +13,7 @@
 //     is 64 MiB, which kills Chromium on real pages.
 
 import { createServer } from 'node:http';
-import { existsSync, statfsSync } from 'node:fs';
+import { accessSync, constants, existsSync, statfsSync } from 'node:fs';
 import { chromium, firefox, webkit } from 'playwright';
 
 // Docker's default /dev/shm is 64 MiB. Playwright's own guidance is 1 GiB,
@@ -33,6 +33,31 @@ function report(name, ok, detail) {
 
 function mib(bytes) {
   return `${Math.round(bytes / (1024 * 1024))} MiB`;
+}
+
+/**
+ * The box must not be root.
+ *
+ * ✏ Added 2026-08-22. The Claude CLI refuses `--permission-mode
+ * bypassPermissions` under root, and every daemon-spawned session uses it —
+ * so an image running as root is an image no session can run in, and it says
+ * so in words that mention sudo rather than containers. Checked here because
+ * it is a property of the image, and because it is invisible until a real
+ * session tries to start.
+ */
+function checkNotRoot() {
+  const uid = process.getuid();
+  report('not running as root', uid !== 0, `uid ${uid}`);
+}
+
+/** The workspace a run clones into has to be writable by whoever we are. */
+function checkWorkspaceWritable() {
+  try {
+    accessSync('/workspace', constants.W_OK);
+    report('workspace is writable', true, '/workspace');
+  } catch (error) {
+    report('workspace is writable', false, error.message);
+  }
 }
 
 function checkSharedMemory() {
@@ -90,6 +115,8 @@ async function checkBrowser(name, engine, url) {
 
 const server = await startPageServer();
 try {
+  checkNotRoot();
+  checkWorkspaceWritable();
   checkSharedMemory();
   checkNoDocker();
   for (const [name, engine] of [

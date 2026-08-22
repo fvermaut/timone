@@ -568,3 +568,22 @@ describe("choosing which runtime a daemon spawns sessions in", () => {
     expect(DEFAULT_RUNTIME).toBe("in-process");
   });
 });
+
+describe("a boxed daemon reaches the model with the host's own subscription", () => {
+  it("hands the container runtime a token source rather than a token", async () => {
+    // A source, not a value: the host's CLI refreshes this every few hours
+    // and a daemon runs for days, so the runtime asks at each spawn.
+    let asked = 0;
+    const runtime = runtimeFor({
+      runtime: "container",
+      image: "timone-agent:test",
+      modelToken: async () => {
+        asked += 1;
+        return "sk-ant-oat-live";
+      },
+    });
+
+    expect(runtime).not.toBe(agentSdkRuntime);
+    expect(asked).toBe(0);
+  });
+});

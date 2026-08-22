@@ -4,6 +4,7 @@ import { createInterface } from "node:readline";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import type { CredentialProvider } from "../adapters/credentials.js";
+import type { ModelTokenSource } from "../adapters/model-token.js";
 import { repoSlug } from "../adapters/github-tickets.js";
 import { SessionProgress } from "./progress.js";
 import type { ServiceStack } from "./services.js";
@@ -95,6 +96,20 @@ export interface ContainerRuntimeOptions {
    * that are not there fails in a way that reads as the agent's fault.
    */
   services?: (request: SessionRequest) => Promise<ServiceStack>;
+  /**
+   * How the box talks to the model
+   * ([blocker (e)](../../doc/plans/phases/phase-30.md), answered by fvermaut
+   * on 2026-08-22: his own subscription rather than a separate API key).
+   *
+   * **Read per spawn and never cached.** The host's own CLI refreshes this
+   * token about every six hours and a daemon runs for days, so a copy taken
+   * at start-up is stale before lunch. See `src/adapters/model-token.ts`.
+   *
+   * Absent means the box is given no login, which is what a test wants and
+   * what a production run must never have — a session that cannot reach the
+   * model fails after cloning two repositories and standing up a database.
+   */
+  modelToken?: ModelTokenSource;
 }
 
 /**
@@ -191,6 +206,13 @@ function boxScript(request: SessionRequest): string {
     // Timone, at the exact commit the daemon is running (ADR-0041 D2). Cloned
     // whole rather than shallow: a commit is not reachable from a depth-1
     // clone of a branch tip.
+    // The token reaches git through a credential helper rather than through
+    // the URL: a URL carrying a secret lands in a log line, a `ps` listing and
+    // git's own error messages.
+    'if [ -n "${GH_TOKEN:-}" ]; then',
+    '  git config --global credential.helper ' +
+      "'!f() { echo \"username=x-access-token\"; echo \"password=$GH_TOKEN\"; }; f'",
+    "fi",
     `git clone --quiet "$TIMONE_REMOTE" ${WORKSPACE}/timone`,
     // A commit the daemon is standing on but nobody has pushed is not in the
     // clone, and git's own words for that are "reference is not a tree",
@@ -218,12 +240,27 @@ function boxScript(request: SessionRequest): string {
   ].join("\n");
 }
 
-/** The `docker run` argument vector. Nothing of the host is in it. */
+/**
+ * The `docker run` argument vector. Nothing of the host is in it.
+ *
+ * **Every variable the box needs is declared here as a bare `-e NAME`.** That
+ * was missing until 2026-08-22 and no unit test could see it: setting a
+ * variable in the options handed to `spawn` sets it on the **docker CLI's own
+ * process**, and docker does not forward its environment into the container.
+ * The box therefore got an empty `TIMONE_REMOTE` and died on `fatal:
+ * repository '' does not exist` — found by the first real session, not by the
+ * eleven tests that assert the environment is set, all of which were right.
+ *
+ * The bare form (`-e NAME`, no `=value`) is deliberate: docker reads the value
+ * from its own environment, so **no secret ever enters the argument vector**,
+ * which is the property the credential tests assert.
+ */
 function runArgs(
   name: string,
   image: string,
   script: string,
   network: string | undefined,
+  env: readonly string[],
 ): string[] {
   return [
     "run",
@@ -239,6 +276,8 @@ function runArgs(
     // its compose file gives it. **Nothing is published to the host** — that
     // is the difference between this and a preview (30i).
     ...(network === undefined ? [] : ["--network", network]),
+    // Forwarded by name, never by value. See the note above.
+    ...env.flatMap((name) => ["-e", name]),
     // No `-v`, no `--mount`, no docker socket, no `--privileged`. The absence
     // is the point of the whole phase and is asserted on this vector.
     image,
@@ -285,19 +324,45 @@ export function containerRuntime(
           ? undefined
           : await options.services(request);
 
+      // Also before the container, and for the same reason: a box that starts,
+      // clones both repositories and stands up a database before failing to
+      // authenticate has spent minutes to learn nothing. The stack is taken
+      // back down if this refuses, since it is already up by now.
+      let modelToken: string | undefined;
+      try {
+        modelToken =
+          options.modelToken === undefined ? undefined : await options.modelToken();
+      } catch (error) {
+        if (stack !== undefined) await stack.down().catch(() => undefined);
+        throw error;
+      }
+
       const name = nameFor(request);
-      const container = spawn("docker", runArgs(name, options.image, boxScript(request), stack?.network), {
-        env: {
-          TIMONE_REMOTE: workspace.timone.remote,
-          TIMONE_COMMIT: workspace.timone.commit,
-          PROJECT_REMOTE: workspace.project.remote,
-          PROJECT_BRANCH: workspace.project.branch,
-          TIMONE_PROMPT: request.prompt,
-          TIMONE_MODEL: request.model,
-          ...(request.effort === undefined ? {} : { TIMONE_EFFORT: request.effort }),
-          ...(token === undefined ? {} : { GH_TOKEN: token, GITHUB_TOKEN: token }),
-        },
-      });
+      const env: Record<string, string> = {
+        TIMONE_REMOTE: workspace.timone.remote,
+        TIMONE_COMMIT: workspace.timone.commit,
+        PROJECT_REMOTE: workspace.project.remote,
+        PROJECT_BRANCH: workspace.project.branch,
+        TIMONE_PROMPT: request.prompt,
+        TIMONE_MODEL: request.model,
+        ...(request.effort === undefined ? {} : { TIMONE_EFFORT: request.effort }),
+        ...(token === undefined ? {} : { GH_TOKEN: token, GITHUB_TOKEN: token }),
+        ...(modelToken === undefined
+          ? {}
+          : { CLAUDE_CODE_OAUTH_TOKEN: modelToken }),
+      };
+
+      const container = spawn(
+        "docker",
+        runArgs(
+          name,
+          options.image,
+          boxScript(request),
+          stack?.network,
+          Object.keys(env),
+        ),
+        { env },
+      );
 
       let resolveId!: (id: string) => void;
       const sessionId = new Promise<string>((resolve) => {

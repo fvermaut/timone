@@ -299,6 +299,44 @@ describe("what the box is given, and what it is not", () => {
     expect(runCall().env?.PROJECT_BRANCH).toBe("timone/7-the-page-feels-slow");
   });
 
+  it("forwards every variable it sets into the container, by name", async () => {
+    // Found by the first real session on 2026-08-22, and invisible to every
+    // test above it: setting a variable in the options handed to `spawn` sets
+    // it on the **docker CLI's own process**, and docker does not forward its
+    // environment into the container. The box got an empty `TIMONE_REMOTE`
+    // and died on `fatal: repository '' does not exist`.
+    const call = runCall();
+
+    for (const name of Object.keys(call.env ?? {})) {
+      const at = call.args.indexOf("-e");
+      expect(at, `no -e flags at all, so ${name} never reaches the box`).toBeGreaterThan(-1);
+      expect(call.args).toContain(name);
+    }
+  });
+
+  it("forwards them by name and never by value, so no secret is in the vector", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      modelToken: async () => "sk-ant-oat-live",
+      credentials: { async tokenFor() { return "ghs_boxed"; } },
+    }).start(request());
+
+    const call = calls.find((entry) => entry.args[0] === "run")!;
+    expect(call.args).toContain("CLAUDE_CODE_OAUTH_TOKEN");
+    expect(call.args.join(" ")).not.toContain("sk-ant-oat-live");
+    expect(call.args.join(" ")).not.toContain("ghs_boxed");
+    // `-e NAME=value` would put it in the vector; `-e NAME` does not. Only
+    // the arguments that follow an `-e` are checked — `--shm-size=1g` carries
+    // an `=` and is nobody's secret.
+    const forwarded = call.args.filter(
+      (_arg, index) => call.args[index - 1] === "-e",
+    );
+    expect(forwarded.length).toBeGreaterThan(0);
+    expect(forwarded.every((arg) => !arg.includes("="))).toBe(true);
+  });
+
   it("keeps the prompt out of the command line entirely", async () => {
     const call = runCall();
 
@@ -510,5 +548,85 @@ describe("the services beside the box", () => {
     expect(calls.find((call) => call.args[0] === "run")!.args).not.toContain(
       "--network",
     );
+  });
+});
+
+describe("how the box talks to the model", () => {
+  it("carries the model token in the environment, never in an argument", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      modelToken: async () => "sk-ant-oat-live",
+    }).start(request());
+
+    const call = calls.find((entry) => entry.args[0] === "run")!;
+    expect(call.env?.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-ant-oat-live");
+    expect(call.args.join(" ")).not.toContain("sk-ant-oat-live");
+  });
+
+  it("reads the token per spawn, so a refreshed login is the one used", async () => {
+    // The host's CLI refreshes it about every six hours and a daemon runs for
+    // days. A token read once at start-up would be stale before lunch.
+    const reads: number[] = [];
+    const { spawn } = fakeContainer([started, result()]);
+    const runtime = containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      modelToken: async () => {
+        reads.push(reads.length);
+        return "sk-ant-oat-live";
+      },
+    });
+
+    await runtime.start(request());
+    await runtime.start(request());
+
+    expect(reads).toHaveLength(2);
+  });
+
+  it("starts no container when there is no login to give it", async () => {
+    // Nothing has been created yet, so the cheapest honest thing is to stop:
+    // a box that starts, clones both repositories and stands up a database
+    // before failing to authenticate has spent minutes to learn nothing.
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await expect(
+      containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        modelToken: async () => {
+          throw new Error("This machine is not logged in to Claude");
+        },
+      }).start(request()),
+    ).rejects.toThrow(/not logged in/);
+
+    expect(calls.filter((entry) => entry.args[0] === "run")).toHaveLength(0);
+  });
+
+  it("takes the stack down again when there is no login", async () => {
+    // The stack comes up first, so a refusal here must not leave it running.
+    let downs = 0;
+    const { spawn } = fakeContainer([started, result()]);
+
+    await expect(
+      containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        services: async () => ({
+          network: "n",
+          project: "p",
+          down: async () => {
+            downs += 1;
+          },
+        }),
+        modelToken: async () => {
+          throw new Error("This machine is not logged in to Claude");
+        },
+      }).start(request()),
+    ).rejects.toThrow(/not logged in/);
+
+    expect(downs).toBe(1);
   });
 });

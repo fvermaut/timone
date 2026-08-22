@@ -55,7 +55,7 @@ A pre-flight run of this plan against the tree found four things that stop work 
 >
 > **Still not resolved, and now with a clearer shape:** (i) fvermaut commits a workflow once and the guard runs in it; (ii) the guard is a vitest file and the slice's wording drops the CI claim. **Recorded, not chosen.**
 
-**✏ Blocker (e) — the box cannot talk to the model, and nothing in this phase says how it should. Found 2026-08-22, at 30j. NOT RESOLVED, and it is fvermaut's to answer.**
+**✏ Blocker (e) — the box cannot talk to the model. Found 2026-08-22 at 30j. ✅ RESOLVED the same day — fvermaut chose his own subscription. Read the block at the end of this blocker first.**
 
 An in-process session inherits whatever the host is logged in as. A boxed one inherits nothing — that is the point of the box. Checked rather than assumed:
 
@@ -69,7 +69,20 @@ Two answers, and the difference between them is billing rather than engineering:
 - **(i) An API key.** `ANTHROPIC_API_KEY`, kept in `.timone/` beside the App key and passed into the box as an environment variable. Clean, no host state involved, and it is a **separate bill** from a Claude subscription.
 - **(ii) The subscription's own token.** Read the OAuth token out of the keychain and pass it in as `CLAUDE_CODE_OAUTH_TOKEN`. Uses the plan already paid for, and puts a **long-lived host secret inside the box** — which is not what ADR-0041 forbids (it forbids the host's *filesystem*), but is a real widening of what a stray agent could take with it.
 
-**Recorded, not chosen.** It is a credential and a bill, so it is not the machine's call.
+~~**Recorded, not chosen.** It is a credential and a bill, so it is not the machine's call.~~
+
+> **✅ Resolved 2026-08-22 — fvermaut chose (ii), his own subscription, and it is built and watched working.**
+>
+> **The box borrows a live login; it is never given a lasting one.** `src/adapters/model-token.ts` reads the access token **fresh at every spawn** and caches it nowhere — not on disk, not in memory. The host's own CLI refreshes it about every six hours and a daemon runs for days, so a copy taken at start-up is stale before lunch; reading late is reading current. Nothing about it is written down, and it travels in the container's environment like the forge credential. It is read from the macOS keychain, with the credentials file preferred where a host has one, so the box is not macOS-only for no reason.
+>
+> **What the choice costs, said plainly:** while a box runs, a token that can spend fvermaut's subscription is inside it. That is the trade he took over a separate bill, and it is **not** what [ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) forbids — the ADR keeps the host's *filesystem* out of the box, which is still true.
+>
+> **A refusal stops the spawn rather than the session.** No login means no container is started at all, and a stack already up is taken back down — a box that clones two repositories and stands up a database before failing to authenticate has spent minutes to learn nothing. The message names the one step that fixes it: run `claude` once.
+>
+> **Two things the live run found, both invisible to every unit test:**
+>
+> - **The box ran as root, and the CLI refuses `bypassPermissions` under root.** Every daemon-spawned session uses it, so the image could not have run a single session — and the failure says *"cannot be used with root/sudo privileges"*, which mentions sudo rather than containers and names nothing about the image. The `Dockerfile` now creates `/workspace` owned by `pwuser` and ends `USER pwuser`; `docker/image-check.mjs` grew **two more checks** — not root, and the workspace is writable — because the property is invisible until a real session tries to start. Rebuilt; **all eight assertions pass.**
+> - **The environment never reached the container.** Setting a variable in the options handed to `spawn` sets it on the **docker CLI's own process**, and docker does not forward its environment into a container. The box got an empty `TIMONE_REMOTE` and died on `fatal: repository '' does not exist`. Every variable is now declared as a bare `-e NAME` — **by name, never by value**, so no secret enters the argument vector, which is the property the credential tests assert. Eleven tests asserted the environment was set and every one of them was right; none of them could see this.
 
 **What is actually startable.** **30e and 30g are blocked only by (b)**, and depend on nothing in code. 30e's anchor `session.ts:64` is exact and its gate `npm run build && npm test` is a real, non-vacuous, currently-green command. 30g needs only the `.dockerignore` correction recorded under it. **30f, 30h, 30i and 30j unblock behind those two and never need (a) at all.** ~~30a, 30b, 30c, 30d, 30k and 30l are every one of them blocked by (a).~~ **✏ Refined 2026-08-21: none of them is blocked by (a) any more** — the App is installed, and the six slices that waited on it now wait only on each other and on **(b)**, R23's wording, which is still fvermaut's five-minute confirmation and now the **only** human gate on this phase. **This inverts the closing paragraph of this file**, which says "if the phase has to stop somewhere, it stops after 30d": 30a–30d is the *most* blocked branch of the graph, and the security half the plan calls the optional one is the half that can actually begin.
 
