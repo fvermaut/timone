@@ -10,6 +10,7 @@ import { registerGuardrailsCommand } from "./commands/guardrails.js";
 import { registerProjectsCommand } from "./commands/projects.js";
 import { registerRetryCommand } from "./commands/retry.js";
 import { registerStatusCommand } from "./commands/status.js";
+import { registerTranscriptCommand } from "./commands/transcript.js";
 import { registerTakeoverCommand } from "./commands/takeover.js";
 import { registerWorkspaceCommand } from "./commands/workspace.js";
 
@@ -43,6 +44,7 @@ export function buildProgram(): Command {
   registerDaemonCommand(program);
   registerGuardrailsCommand(program);
   registerStatusCommand(program);
+  registerTranscriptCommand(program);
   registerTakeoverCommand(program);
   registerRetryCommand(program);
   registerCancelCommand(program);

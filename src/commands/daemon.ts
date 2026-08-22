@@ -39,6 +39,7 @@ import {
 } from "../daemon/session.js";
 import { containerRuntime } from "../daemon/container-runtime.js";
 import { bringUpServices } from "../daemon/services.js";
+import { renderMessage } from "../daemon/transcript.js";
 import {
   claudeSubscriptionToken,
   type ModelTokenSource,
@@ -173,25 +174,56 @@ export interface RuntimeChoice {
 /**
  * Where a boxed session's transcript is kept, and how.
  *
- * One file per day under `.timone/sessions/`, appended to. The daemon's own
- * state directory, beside the ledger — never `projects/`, which is fvermaut's
- * (ADR-0043).
+ * **One pair of files per session**, under `.timone/sessions/` — the daemon's
+ * own state directory, beside the ledger and never under `projects/`, which
+ * is fvermaut's (ADR-0043):
  *
- * **It exists because a boxed run could not be diagnosed.** The CLI writes its
- * transcript inside the container and the container is destroyed, so when the
- * first real run stopped halfway through a phase after an hour and $22, there
- * was no evidence left to read.
+ * - `<session>.jsonl` — every line the box printed, verbatim. The record.
+ * - `<session>.log` — the same thing rendered for a person. The reading.
+ *
+ * **Per session rather than one shared file, and the first version got that
+ * wrong.** Everything appended to one `boxed.jsonl`, so forensics on a
+ * particular run meant grepping a pile of them — which is most of the way
+ * back to having no transcript at all.
+ *
+ * Both are written as the run goes rather than at the end, so a session that
+ * is killed still leaves everything it had said. `node dist/cli.js transcript
+ * <file>` re-renders a `.jsonl` at any time.
  */
-function transcriptWriter(root: string): (line: string) => void {
+function transcriptWriter(
+  root: string,
+): (line: string, sessionId: string | undefined) => void {
   const dir = join(root, ".timone", "sessions");
-  let stream: WriteStream | undefined;
-  return (line) => {
-    if (stream === undefined) {
+  const streams = new Map<string, { raw: WriteStream; read: WriteStream }>();
+
+  return (line, sessionId) => {
+    // Before the first message names the session there is nothing to key on.
+    // It arrives on the very first line, so this holds for one line at most.
+    const key = sessionId ?? "starting";
+
+    let pair = streams.get(key);
+    if (pair === undefined) {
       mkdirSync(dir, { recursive: true });
-      stream = createWriteStream(join(dir, "boxed.jsonl"), { flags: "a" });
+      pair = {
+        raw: createWriteStream(join(dir, `${key}.jsonl`), { flags: "a" }),
+        read: createWriteStream(join(dir, `${key}.log`), { flags: "a" }),
+      };
+      streams.set(key, pair);
     }
-    stream.write(`${line}\n`);
+
+    pair.raw.write(`${line}\n`);
+    const rendered = renderMessage(parseTranscriptLine(line));
+    if (rendered.length > 0) pair.read.write(`${rendered.join("\n")}\n`);
   };
+}
+
+/** One line of a transcript, parsed — or the raw text when it is not JSON. */
+function parseTranscriptLine(line: string): unknown {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
 }
 
 export function runtimeFor(choice: RuntimeChoice): SessionRuntime {

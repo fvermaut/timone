@@ -136,7 +136,7 @@ export interface ContainerRuntimeOptions {
    * {@link SessionProgress}. Keeping them costs one file handle, and a line
    * that could not be parsed is kept too, because that is the interesting one.
    */
-  transcript?: (line: string) => void;
+  transcript?: (line: string, sessionId: string | undefined) => void;
   /**
    * Who the box commits as.
    *
@@ -253,11 +253,18 @@ const dockerSpawn: ContainerSpawn = (command, args, options) => {
  */
 function boxScript(request: SessionRequest): string {
   const workspace = request.workspace!;
-  const project = `${WORKSPACE}/projects/${workspace.project.name}`;
+  // **Beneath the timone root, not beside it.** ADR-0007 fixes the layout as
+  // `<timone root>/projects/<name>`, and every skill and prompt says
+  // `projects/<name>/…` relative to where the session runs. The box put them
+  // side by side at first, and the first real run showed exactly what that
+  // costs: the agent found no `projects/` where it expected one, ran
+  // `workspace sync` to make it, and cloned the whole project a second time —
+  // throwing away the branch the box had already checked out for it.
+  const project = `${WORKSPACE}/timone/projects/${workspace.project.name}`;
 
   return [
     "set -e",
-    `mkdir -p ${WORKSPACE}/projects`,
+
     // Timone, at the exact commit the daemon is running (ADR-0041 D2). Cloned
     // whole rather than shallow: a commit is not reachable from a depth-1
     // clone of a branch tip.
@@ -283,6 +290,7 @@ function boxScript(request: SessionRequest): string {
     // The project, on the branch this run works. A branch that does not exist
     // yet is the ordinary case before the stage that cuts one, so the checkout
     // is allowed to fail and the clone's default branch stands.
+    `mkdir -p ${WORKSPACE}/timone/projects`,
     `git clone --quiet "$PROJECT_REMOTE" ${project}`,
     `git -C ${project} checkout --quiet "$PROJECT_BRANCH" 2>/dev/null || true`,
     // Timone's own dependencies and build. `dist/` and `node_modules/` are
@@ -471,26 +479,34 @@ export function containerRuntime(
 
         try {
           for await (const text of container.lines) {
-            // Before parsing, and whatever parsing makes of it: a line nobody
-            // could read is the one somebody will want afterwards. A
-            // transcript that cannot be written never costs the run.
+            const message = parseSessionMessage(text);
+
+            // The session id comes off the first message, so it is known
+            // before the second line is written — which is what lets each run
+            // have its own file instead of everything landing in one pile.
+            if (
+              message !== undefined &&
+              "session_id" in message &&
+              typeof message.session_id === "string"
+            ) {
+              id = message.session_id;
+              resolveId(id);
+            }
+
+            // Written whatever parsing made of it: a line nobody could read
+            // is the one somebody will want afterwards. A transcript that
+            // cannot be written never costs the run.
             if (options.transcript !== undefined) {
               try {
-                options.transcript(text);
+                options.transcript(text, id === "unknown" ? undefined : id);
               } catch {
                 // Losing the record is bad; losing the run is worse.
               }
             }
 
-            const message = parseSessionMessage(text);
             if (message === undefined) continue;
-
             progress.observe(message);
 
-            if ("session_id" in message && typeof message.session_id === "string") {
-              id = message.session_id;
-              resolveId(id);
-            }
             if (message.type === "assistant" && message.parent_tool_use_id === null) {
               lastApiError = message.error;
             }
