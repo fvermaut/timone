@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  isFromTimone,
   isMachineComment,
   MARK_LABEL,
   stampMachineComment,
@@ -272,6 +273,13 @@ export interface GitHubTicketingOptions {
   /** The permission-boundary label. Defaults to {@link MARK_LABEL}. */
   markLabel?: string;
   /**
+   * The login Timone acts under on the forge — `timone-agent[bot]`, from the
+   * manifest's `identity` block. Undefined where no identity is configured,
+   * which leaves comment attribution reading the marker alone, exactly as it
+   * did before Timone had one.
+   */
+  machineLogin?: string;
+  /**
    * How many issues one `gh issue list` may return. Reaching it is treated
    * as an error rather than a truncation, so a backlog larger than the page
    * is never silently invisible to the daemon.
@@ -286,11 +294,13 @@ export interface GitHubTicketingOptions {
 export class GitHubTicketingAdapter implements TicketingAdapter {
   private readonly run: CommandRunner;
   private readonly markLabel: string;
+  private readonly machineLogin: string | undefined;
   private readonly pageLimit: number;
 
   constructor(options: GitHubTicketingOptions = {}) {
     this.run = options.run ?? execCommandRunner;
     this.markLabel = options.markLabel ?? MARK_LABEL;
+    this.machineLogin = options.machineLogin;
     this.pageLimit = options.pageLimit ?? 200;
   }
 
@@ -516,7 +526,10 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
         author: comment.author.login,
         body: comment.body,
         createdAt: comment.createdAt,
-        fromTimone: isMachineComment(comment.body),
+        fromTimone: isFromTimone(
+          { author: comment.author.login, body: comment.body },
+          this.machineLogin,
+        ),
       })),
     };
   }
@@ -700,7 +713,10 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
         author: comment.author.login,
         body: comment.body,
         createdAt: comment.createdAt,
-        fromTimone: isMachineComment(comment.body),
+        fromTimone: isFromTimone(
+          { author: comment.author.login, body: comment.body },
+          this.machineLogin,
+        ),
       })),
       // A review's summary text is a comment; a review that carried none
       // (inline remarks only, or a bare verdict) contributes nothing here.
@@ -712,7 +728,10 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
           author: review.author.login,
           body: review.body,
           createdAt: review.submittedAt as string,
-          fromTimone: isMachineComment(review.body),
+          fromTimone: isFromTimone(
+            { author: review.author.login, body: review.body },
+            this.machineLogin,
+          ),
         })),
       // Replying threads under the *root* of an inline thread, so a reply
       // to a reply names the same root its sibling does.
@@ -720,7 +739,10 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
         author: comment.user.login,
         body: comment.body,
         createdAt: comment.created_at,
-        fromTimone: isMachineComment(comment.body),
+        fromTimone: isFromTimone(
+          { author: comment.user.login, body: comment.body },
+          this.machineLogin,
+        ),
         replyTo: String(comment.in_reply_to_id ?? comment.id),
       })),
     ];

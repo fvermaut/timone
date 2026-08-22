@@ -3,6 +3,14 @@ import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
 import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
+import {
+  credentialCommandRunner,
+  type CommandRunner,
+} from "../adapters/command-runner.js";
+import {
+  githubAppCredentials,
+  type MintCall,
+} from "../adapters/credentials.js";
 import { DockerPreviewAdapter } from "../adapters/docker-preview.js";
 import type { PreviewAdapter } from "../adapters/preview.js";
 import type { TicketingAdapter } from "../adapters/ticketing.js";
@@ -19,6 +27,60 @@ import {
 } from "../daemon/poll.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { AgentSessionSpawner, agentSdkRuntime } from "../daemon/session.js";
+
+export interface MachineAdapterOptions {
+  /** Injected process spawner; the real one when absent. */
+  run?: CommandRunner;
+  /** Injected mint call; the real endpoint when absent. */
+  mint?: MintCall;
+}
+
+/**
+ * The ticketing adapter the **daemon** uses: every call it makes runs as
+ * Timone, under a credential minted for the one repository that call names
+ * ([ADR-0042](../../doc/adr/0042-timone-acts-under-its-own-identity.md)).
+ *
+ * **This is where "fails loudly at spawn time, never falls back to ambient
+ * login" is enforced.** A manifest with no `identity` block does not yield a
+ * degraded adapter that borrows whoever is logged in — it yields nothing, and
+ * the daemon does not start. The manifest schema leaves the block optional on
+ * purpose: `workspace sync` and `projects list` are fvermaut's own commands,
+ * run from his terminal under his own login, and they are entitled to it. The
+ * daemon is not.
+ *
+ * `root` is the timone root the key path is resolved against, so a daemon
+ * started from anywhere reads the same key.
+ */
+export function machineAdapter(
+  manifest: Manifest,
+  root: string,
+  options: MachineAdapterOptions = {},
+): GitHubTicketingAdapter {
+  const identity = manifest.identity;
+  if (identity === undefined) {
+    throw new Error(
+      "The manifest declares no `identity`, so the daemon has no forge " +
+        "credential of its own. It never runs under an ambient `gh` login " +
+        "(ADR-0042). Add an `identity` block naming the Timone App's " +
+        "`app_id`, `installation_id`, `private_key_path` and `login`.",
+    );
+  }
+
+  const credentials = githubAppCredentials({
+    appId: identity.app_id,
+    installationId: identity.installation_id,
+    privateKeyPath: resolve(root, identity.private_key_path),
+    ...(options.mint === undefined ? {} : { mint: options.mint }),
+  });
+
+  return new GitHubTicketingAdapter({
+    run: credentialCommandRunner({
+      credentials,
+      ...(options.run === undefined ? {} : { run: options.run }),
+    }),
+    machineLogin: identity.login,
+  });
+}
 
 /** Options accepted by `timone daemon`, as commander parses them. */
 interface DaemonOptions {
@@ -212,7 +274,15 @@ export function registerDaemonCommand(program: Command): void {
         return;
       }
 
-      const adapter = new GitHubTicketingAdapter();
+      let adapter: GitHubTicketingAdapter;
+      try {
+        adapter = machineAdapter(manifest, process.cwd());
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+        return;
+      }
+
       const log = (message: string): void => console.log(message);
       // No guardrail bracket here any more (ADR-0018): the checks live in
       // `.claude/settings.json`'s SessionStart/Stop hooks, which every session

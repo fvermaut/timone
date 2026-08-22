@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -22,7 +23,7 @@ import { noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { stateLockPath } from "../daemon/lock.js";
-import { runDaemon } from "./daemon.js";
+import { machineAdapter, runDaemon } from "./daemon.js";
 import { enqueue } from "../daemon/requests.js";
 
 const tempDirs: string[] = [];
@@ -421,5 +422,138 @@ describe("runDaemon — the requests waiting beside the ledger it holds", () => 
     expect(code).toBe(0);
     expect(store.get(run.id)?.status).toBe("cancelled");
     expect(said.join("\n")).toContain("apply  cancel scratch-app#31");
+  });
+});
+
+describe("the daemon acts under Timone's own identity, never a borrowed one", () => {
+  const { privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    publicKeyEncoding: { type: "spki", format: "pem" },
+  });
+
+  /** A timone root with the App key on disk, and a manifest naming it. */
+  function rootWithIdentity(): { root: string; manifest: Manifest } {
+    const root = mkdtempSync(join(tmpdir(), "timone-identity-"));
+    tempDirs.push(root);
+    mkdirSync(join(root, ".timone"), { recursive: true });
+    writeFileSync(join(root, ".timone", "app.pem"), privateKey, { mode: 0o600 });
+
+    return {
+      root,
+      manifest: {
+        identity: {
+          app_id: 4670926,
+          installation_id: 155426497,
+          private_key_path: ".timone/app.pem",
+          login: "timone-agent[bot]",
+        },
+        projects: {
+          "scratch-app": {
+            repo_url: "https://github.com/fvermaut/scratch-app.git",
+            path: "projects/scratch-app",
+            stack: ["typescript"],
+            bindings: { ticketing: "github" },
+          },
+        },
+      },
+    };
+  }
+
+  it("refuses to build a ticketing adapter when no identity is declared", () => {
+    const { root, manifest } = rootWithIdentity();
+    const { identity: _dropped, ...withoutIdentity } = manifest;
+
+    expect(() => machineAdapter(withoutIdentity, root)).toThrow(/identity/);
+  });
+
+  it("names the manifest and says what it will not do instead", () => {
+    const { root, manifest } = rootWithIdentity();
+    const { identity: _dropped, ...withoutIdentity } = manifest;
+
+    expect(() => machineAdapter(withoutIdentity, root)).toThrow(
+      /never runs under (?:a|an) .*login/i,
+    );
+  });
+
+  it("reaches the forge under a token scoped to the one repository", async () => {
+    const { root, manifest } = rootWithIdentity();
+    const calls: { args: string[]; env?: Record<string, string> }[] = [];
+    const minted: string[][] = [];
+
+    const adapter = machineAdapter(manifest, root, {
+      run: async (_command, args, options) => {
+        calls.push({ args, env: options?.env });
+        return "[]";
+      },
+      mint: async (request) => {
+        minted.push(request.repositories);
+        return { token: "ghs_minted", expiresAt: "2099-01-01T00:00:00Z" };
+      },
+    });
+
+    await adapter.listMarkedTickets({
+      name: "scratch-app",
+      repoUrl: "https://github.com/fvermaut/scratch-app.git",
+    });
+
+    expect(minted).toEqual([["scratch-app"]]);
+    expect(calls[0].env?.GH_TOKEN).toBe("ghs_minted");
+    expect(calls[0].args).not.toContain("ghs_minted");
+  });
+
+  it("resolves the key path against the timone root, not the process's cwd", async () => {
+    const { root, manifest } = rootWithIdentity();
+
+    const adapter = machineAdapter(manifest, root, {
+      run: async () => "[]",
+      mint: async () => ({
+        token: "ghs_minted",
+        expiresAt: "2099-01-01T00:00:00Z",
+      }),
+    });
+
+    // The key exists only under `root`; a provider reading it relative to the
+    // process's own directory would throw here.
+    await expect(
+      adapter.listMarkedTickets({
+        name: "scratch-app",
+        repoUrl: "https://github.com/fvermaut/scratch-app.git",
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("tells its own comments by the login the manifest declares", async () => {
+    const { root, manifest } = rootWithIdentity();
+    const adapter = machineAdapter(manifest, root, {
+      run: async () =>
+        JSON.stringify({
+          number: 7,
+          title: "the page feels slow",
+          body: "it drags",
+          labels: [],
+          url: "https://github.com/fvermaut/scratch-app/issues/7",
+          author: { login: "fvermaut" },
+          createdAt: "2026-08-02T10:00:00Z",
+          comments: [
+            {
+              author: { login: "timone-agent[bot]" },
+              body: "Picked this up.",
+              createdAt: "2026-08-02T10:05:00Z",
+            },
+          ],
+        }),
+      mint: async () => ({
+        token: "ghs_minted",
+        expiresAt: "2099-01-01T00:00:00Z",
+      }),
+    });
+
+    const thread = await adapter.getTicket(
+      { name: "scratch-app", repoUrl: "https://github.com/fvermaut/scratch-app.git" },
+      7,
+    );
+
+    expect(thread.comments[0].fromTimone).toBe(true);
   });
 });

@@ -41,11 +41,56 @@ const projectConfigSchema = z.strictObject({
   bindings: bindingsSchema,
 });
 
+/**
+ * Timone's own identity on the forge
+ * ([ADR-0042](../doc/adr/0042-timone-acts-under-its-own-identity.md), as
+ * amended): a **GitHub App installed on the managed repositories**, not a
+ * second account invited to them.
+ *
+ * There is nothing here to record per project. The installation is the grant
+ * and its repository selection is the scoping, so adding a project later edits
+ * that selection on GitHub rather than this file.
+ *
+ * **No token is declared and none may be.** What is on disk is a private key,
+ * under `.timone/`, which `.gitignore` already excludes as daemon machine
+ * state — so it cannot ride into a client repository and it does not make
+ * timone's own checkout dirty. Every credential is minted from it, scoped to
+ * one repository, and dies within the hour (`src/adapters/credentials.ts`).
+ */
+const identitySchema = z.strictObject({
+  /** The App's numeric id. */
+  app_id: z.number().int().positive(),
+  /** The installation covering the repositories declared below. */
+  installation_id: z.number().int().positive(),
+  /** Path to the App's private key, relative to the timone root. */
+  private_key_path: z.string().min(1, "must not be empty"),
+  /**
+   * The login the App acts under on the forge — `timone-agent[bot]`.
+   *
+   * Declared because a comment has to be recognisable as Timone's by its
+   * author and not only by the marker in its body. It is **not** how the
+   * credential is obtained; it is how the credential's work is read back.
+   */
+  login: z.string().min(1, "must not be empty"),
+});
+
 /** Schema for the whole timone.yaml manifest. Unknown keys are rejected. */
 const manifestSchema = z.strictObject({
+  /**
+   * Optional here, and refused at the daemon.
+   *
+   * `workspace sync` and `projects list` are fvermaut's own commands, run from
+   * his terminal under his own login, and a manifest that never spawns a run
+   * needs no identity. What may never borrow his login is the daemon — so
+   * `src/commands/daemon.ts` refuses to start without this block, which is
+   * where "fails loudly at spawn time, never falls back to ambient login"
+   * actually lives.
+   */
+  identity: identitySchema.optional(),
   projects: z.record(z.string(), projectConfigSchema),
 });
 
+export type Identity = z.infer<typeof identitySchema>;
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 export type Manifest = z.infer<typeof manifestSchema>;
 
@@ -162,6 +207,7 @@ export function addProject(
   }
 
   const candidate = {
+    ...manifest,
     projects: { ...manifest.projects, [name]: entry },
   };
   return parseManifest(candidate);
@@ -207,6 +253,7 @@ export function updateProject(
   };
 
   const candidate = {
+    ...manifest,
     projects: { ...manifest.projects, [name]: merged },
   };
   return parseManifest(candidate);

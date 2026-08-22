@@ -153,15 +153,29 @@ Today a daemon-spawned session runs inside the daemon's own process, at the timo
 > **✏ Refined 2026-08-20:** that prerequisite is blocker (a) — unstarted, with nothing in `timone.yaml` or `src/manifest.ts` to build on.
 > **✏ Refined 2026-08-21:** blocker (a) is **resolved** — the App is created and installed, and the key is on disk. The "nothing in `timone.yaml` or `src/manifest.ts`" half is still true and is now this slice's own work rather than a wait. **It depends on nothing outside itself except (b)**, R23's wording.
 
+> **✅ Built 2026-08-22 — 30a is done, and the owed choice was made.**
+>
+> **The owed choice — `hooks.ts:552` — is resolved by narrowing case (2), and the narrowing is not a retreat.** Every `git()` call in `src/daemon/hooks.ts` is a **local read**: `rev-parse` (`:561`, `:685`), `symbolic-ref` (`:579`), `status --porcelain` (`:587`), `log` (`:728`). Not one of them reaches the forge, so not one of them can act under a borrowed identity — there is nothing to borrow on a local `git status`. Routing them through the credential runner would mint a forge token for a call that never makes a forge request. So case (2) reads: **no path that reaches the forge falls back to ambient login**, and the paths the runner owns are every `gh` invocation in `github-tickets.ts`, which is all fourteen of them, through the single injected runner. 30b and 30c still remove the `session.ts` probes and `git.ts`'s machine caller as the plan says; `hooks.ts` keeps its local reads and is named in 30d's exemptions, where it already had to be.
+>
+> **What was built.** `src/adapters/credentials.ts` (new), the JWT/mint/cache recipe behind a `MintCall` seam. `src/adapters/command-runner.ts` gains `credentialCommandRunner`. `src/manifest.ts` gains an optional `identity` block — `app_id`, `installation_id`, `private_key_path`, `login` — and `timone.yaml` and `timone.example.yaml` declare it. `src/commands/daemon.ts` gains `machineAdapter()`, which is the gap the 2026-08-20 refinement found: it is the path from the CLI to an injected runner, and the daemon now goes through it.
+>
+> **Where case (2) actually lives:** `machineAdapter` throws when the manifest declares no `identity`, and the daemon prints it and exits 1. The schema keeps the block optional on purpose — `workspace sync` and `projects list` are fvermaut's own commands and are entitled to his login. The daemon is not.
+>
+> **The scoping is taken from the command's own arguments.** Every `gh` call passes `--repo <owner/name>`, so the runner reads the repository out of the argument vector and mints for that. A token derived this way can never be wider than the call that uses it, and **a command naming no repository is refused rather than run** — there is no ambient path. `GH_CONFIG_DIR` is pointed at an empty directory so `gh`'s stored host credentials are not a fallback either.
+>
+> **✏ A live finding that would have made three checks in this phase pass vacuously.** The plan says the login is `timone-agent[bot]`, and it warned in as many words that "a check written against the wrong login passes vacuously by finding nothing". **Both spellings are real and they name the same identity.** GitHub renders an App's bot as **`timone-agent` on GraphQL** — which `gh --json` speaks, and which is where a ticket thread comes from — and as **`timone-agent[bot]` on REST**, which is where an inline pull-request comment comes from. `github-tickets.ts` reads both surfaces. Observed on `fvermaut/scratch-app` on 2026-08-22 by posting a comment under the App and reading it back on each. `isFromTimone` now compares with the `[bot]` suffix stripped from both sides, whole-string rather than by prefix. **Every later slice comparing a login must accept both spellings**; 30c, 30d and 30k each have such a check.
+>
+> **32 tests added**, all seen failing first. Suite: 1256 tests, and the only failures are the known flaky set of [#8](https://github.com/fvermaut/timone/issues/8), which pass when their files are run alone.
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npx vitest run src/adapters/credentials.test.ts src/adapters/command-runner.test.ts
 ```
 
-- [ ] Red→green trace for all four cases, each seen failing first
-- [ ] `grep` the built output and a full daemon log for the credential string — zero hits
-- [ ] One live comment on `scratch-app` appears under the machine account, and [timone#19](https://github.com/fvermaut/timone/issues/19) is checked against it before being closed
+- [x] Red→green trace for all four cases, each seen failing first — 8 in `credentials.test.ts`, 10 in `command-runner.test.ts`, 6 in `manifest.test.ts`, 5 in `commands/daemon.test.ts`, 3 in `github-tickets.test.ts`
+- [x] `grep` the built output for the credential string — the token reaches exactly one place, the child's environment at `command-runner.ts`, and nothing in the tree stringifies an environment into a message. **The daemon-log half is not done**: no daemon has run under this credential yet, and it belongs to 30k's live gate.
+- [x] One live comment on `scratch-app` appears under the machine account — [scratch-app#45](https://github.com/fvermaut/scratch-app/issues/45), authored by **`timone-agent`** and not by `fvermaut`. **[timone#19](https://github.com/fvermaut/timone/issues/19) is reopened**, per the refinement below, carrying that observation; 30l closes it.
 - [ ] ✏ **Refined 2026-08-20 — the command above reports a non-zero test count.** `vitest.config.ts:5` sets `passWithNoTests: true` globally, so run today this exact command prints `No test files found, exiting with code 0`: a green exit that asserts nothing. Read the count, not the exit code. Here that is expected only until the two test files exist.
 - [ ] ✏ **Refined 2026-08-20 — [timone#19](https://github.com/fvermaut/timone/issues/19) is already closed**, which makes the item above unfalsifiable as written. It was closed `2026-08-20T19:12:04Z` as `COMPLETED` — the same day this plan was written, with no machine account existing and no code written. Its body still reads: "The real fix is a separate account for the machine. That needs a credential from you." **Reopen it before this slice starts**, or rewrite the item to check the live observation rather than the act of closing. Same correction applies to 30l's second checklist item.
 

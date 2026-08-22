@@ -153,6 +153,62 @@ export function isMachineComment(body: string): boolean {
   return body.trimStart().startsWith(MACHINE_MARKER);
 }
 
+/**
+ * True when a comment is Timone's — by its **author** where Timone has an
+ * identity, and by {@link MACHINE_MARKER} either way.
+ *
+ * Two readers, not one replacing the other, and the second is not a
+ * transitional courtesy:
+ *
+ * - **The author** is the honest test now that Timone acts as its own App
+ *   ([ADR-0042](../../doc/adr/0042-timone-acts-under-its-own-identity.md)). It
+ *   catches a comment the machine wrote through a surface that never went
+ *   through {@link stampMachineComment} — a review summary, a merge note —
+ *   which the marker alone reads as a human's.
+ * - **The marker** stays because every comment Timone wrote before it had an
+ *   identity is authored by `fvermaut`. Dropping the fallback would make a
+ *   whole backlog of the machine's own questions read as the human's answers,
+ *   and the gates that wait for a human reply would fire on them.
+ *
+ * `machineLogin` is undefined wherever no identity is configured, which
+ * leaves exactly the behaviour that shipped before this existed.
+ *
+ * **The two spellings are one identity.** GitHub renders an App's bot as
+ * `timone-agent` on the GraphQL surface — which `gh --json` speaks — and as
+ * `timone-agent[bot]` on REST, and this adapter reads both: a ticket thread
+ * comes from GraphQL, an inline pull-request comment from REST. Watched on
+ * `fvermaut/scratch-app` on 2026-08-22, after a live comment posted under the
+ * App's own identity came back as `timone-agent` against a manifest declaring
+ * `timone-agent[bot]`. A comparison against one spelling recognises half of
+ * Timone's own comments and reads the other half as the human's.
+ */
+export function isFromTimone(
+  comment: { author: string; body: string },
+  machineLogin: string | undefined,
+): boolean {
+  if (
+    machineLogin !== undefined &&
+    sameLogin(comment.author, machineLogin)
+  ) {
+    return true;
+  }
+  return isMachineComment(comment.body);
+}
+
+/** Drop the `[bot]` GitHub's REST surface appends and its GraphQL one does not. */
+function bareLogin(login: string): string {
+  return login.endsWith("[bot]") ? login.slice(0, -"[bot]".length) : login;
+}
+
+/**
+ * Whether two logins name the same forge identity, across the two spellings
+ * GitHub uses for an App. Compared whole rather than by prefix: an account
+ * called `timone-agent-helper` is somebody else.
+ */
+function sameLogin(one: string, other: string): boolean {
+  return bareLogin(one) === bareLogin(other);
+}
+
 /** One comment in a ticket's thread. */
 export const ticketCommentSchema = z.strictObject({
   author: z.string(),

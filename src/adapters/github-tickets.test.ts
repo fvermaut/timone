@@ -300,6 +300,115 @@ describe("getTicket", () => {
       false,
     ]);
   });
+
+  it("knows its own comment by its author once it has an identity", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify(
+        ghIssue({
+          comments: [
+            {
+              // No marker: written by a stage that posted through the forge
+              // rather than through `postComment`.
+              author: { login: "timone-agent[bot]" },
+              body: "Picked this up.",
+              createdAt: "2026-08-02T10:05:00Z",
+            },
+            {
+              author: { login: "fvermaut" },
+              body: "it's worse on the archive page",
+              createdAt: "2026-08-02T10:10:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const thread = await new GitHubTicketingAdapter({
+      run,
+      machineLogin: "timone-agent[bot]",
+    }).getTicket(alpha, 7);
+
+    expect(thread.comments.map((comment) => comment.fromTimone)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("knows the same bot under either spelling the forge uses for it", async () => {
+    // GitHub renders one identity two ways, and this adapter reads both
+    // surfaces: GraphQL — which `gh --json` speaks — answers `timone-agent`,
+    // while REST answers `timone-agent[bot]`. Watched on `fvermaut/scratch-app`
+    // on 2026-08-22. A comparison against one spelling silently fails to
+    // recognise half of Timone's own comments.
+    const { run } = fakeRunner(
+      JSON.stringify(
+        ghIssue({
+          comments: [
+            {
+              author: { login: "timone-agent" },
+              body: "Read on the GraphQL surface.",
+              createdAt: "2026-08-02T10:05:00Z",
+            },
+            {
+              author: { login: "timone-agent[bot]" },
+              body: "Read on the REST surface.",
+              createdAt: "2026-08-02T10:06:00Z",
+            },
+            {
+              author: { login: "timone-agent-helper" },
+              body: "A different account whose name merely starts the same.",
+              createdAt: "2026-08-02T10:07:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const thread = await new GitHubTicketingAdapter({
+      run,
+      machineLogin: "timone-agent[bot]",
+    }).getTicket(alpha, 7);
+
+    expect(thread.comments.map((comment) => comment.fromTimone)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+  });
+
+  it("keeps the marker fallback, so history written under a borrowed login still reads right", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify(
+        ghIssue({
+          comments: [
+            {
+              // Every comment Timone wrote before it had an identity is
+              // authored by fvermaut. Losing them would make a whole backlog
+              // of the machine's own questions read as the human's answers.
+              author: { login: "fvermaut" },
+              body: `${MACHINE_MARKER}\n\n---\n\nPicked this up.`,
+              createdAt: "2026-08-02T10:05:00Z",
+            },
+            {
+              author: { login: "fvermaut" },
+              body: "it's worse on the archive page",
+              createdAt: "2026-08-02T10:10:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const thread = await new GitHubTicketingAdapter({
+      run,
+      machineLogin: "timone-agent[bot]",
+    }).getTicket(alpha, 7);
+
+    expect(thread.comments.map((comment) => comment.fromTimone)).toEqual([
+      true,
+      false,
+    ]);
+  });
 });
 
 describe("postComment", () => {
