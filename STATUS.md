@@ -26,6 +26,18 @@ Everything runs in a container now by default. If anything misbehaves, one word 
 node dist/cli.js daemon --runtime in-process
 ```
 
+**One thing that changes for you, permanently.**
+
+**The work will not appear in your folder any more.** It happens in a container and is pushed to GitHub from there. After a job runs, your `projects/scratch-app` is exactly where you left it — and to see what was built you have to fetch first:
+
+```
+cd ~/dev/timone/projects/scratch-app
+git fetch
+git log --oneline origin/<the branch> -5
+```
+
+This is not a rough edge to file off. It is the same fact as the machine no longer being able to fight you for that folder: before today, the work turning up on your disk and the machine writing in your folder were one and the same thing.
+
 **Two things to know before you run it.**
 
 - **It will not run a version of Timone you have not pushed.** The container downloads Timone from GitHub, so it cannot follow a commit that only exists on your laptop. It says so plainly rather than failing with a git error. So merge or push first.
