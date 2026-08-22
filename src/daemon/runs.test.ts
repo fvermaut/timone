@@ -1871,6 +1871,68 @@ describe("the witness — the time a daemon can vouch for having watched", () =>
     expect(observe(store).mayJudge).toBe(true);
   });
 
+  it("does not read its own slow cycle as time it was not running", () => {
+    // timone#49. The gap between two cycle *starts* includes the first
+    // cycle's own work, so a cycle whose body took longer than the
+    // unwitnessed window used to be arithmetically identical to a daemon
+    // that was switched off — and the log said, about itself, "the daemon
+    // was not running for 3m". Phase 30 makes that more likely, not less:
+    // 30b and 30c put more forge calls in every cycle.
+    const { store, set } = clockedStore();
+
+    observe(store);
+    // The cycle runs for three minutes — longer than the two-minute
+    // unwitnessed window — and then says so.
+    set("2026-08-06T10:03:00Z");
+    store.cycleEnded();
+    // The next cycle starts a normal interval later.
+    set("2026-08-06T10:04:00Z");
+
+    const witness = observe(store);
+    expect(witness.unwitnessedGap).toBe(false);
+    expect(witness.observingSince).toBe("2026-08-06T10:00:00Z");
+  });
+
+  it("still sees a daemon that was actually switched off", () => {
+    // The other half, and the one that must not be broken by the fix above:
+    // an idle gap between the end of one cycle and the start of the next is
+    // real absence, and reclaiming on it would be reclaiming a run nobody
+    // watched.
+    const { store, set } = clockedStore();
+
+    observe(store);
+    set("2026-08-06T10:00:05Z");
+    store.cycleEnded();
+    // Nothing for five minutes: the process was not there.
+    set("2026-08-06T10:05:00Z");
+
+    expect(observe(store).unwitnessedGap).toBe(true);
+  });
+
+  it("measures the idle gap, not the whole time since the last cycle began", () => {
+    const { store, set } = clockedStore();
+
+    observe(store);
+    set("2026-08-06T10:03:00Z");
+    store.cycleEnded();
+    set("2026-08-06T10:04:00Z");
+
+    // One minute idle, not four.
+    expect(observe(store).gapMs).toBe(60 * 1000);
+  });
+
+  it("falls back to the cycle's start when no cycle has said it ended", () => {
+    // A state file written by a daemon predating `cycleEnded` — and the first
+    // cycle of every daemon, which has not ended yet. Conservative in the
+    // only safe direction: it grants the window rather than reclaiming.
+    const { store, set } = clockedStore();
+
+    observe(store);
+    set("2026-08-06T10:05:00Z");
+
+    expect(observe(store).unwitnessedGap).toBe(true);
+  });
+
   it("refuses judgement on the first cycle a daemon has ever run", () => {
     // No `observedAt` is not "nothing happened" — it is "nobody was
     // listening", which is exactly the case for granting the window.

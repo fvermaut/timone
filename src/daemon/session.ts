@@ -7,7 +7,6 @@ const execFileAsync = promisify(execFile);
 
 import {
   checkoutVersion,
-  mergeIntoDefault,
   uncommittedFiles,
   type MergeOutcome,
 } from "../git.js";
@@ -483,7 +482,7 @@ export interface AgentSessionSpawnerOptions {
    * implementation.
    */
   mergeProbe?: (
-    repoDir: string,
+    project: TicketingProject,
     branch: string,
     message: string,
   ) => Promise<MergeOutcome>;
@@ -1875,11 +1874,23 @@ export class AgentSessionSpawner implements SessionSpawner {
     const outcome = await this.attemptMerge(project, branch);
 
     if (outcome.merged) {
-      this.log(`merged ${run.id} — ${branch} into ${outcome.into}`);
+      // `alreadyThere` is a success and is logged as the different thing it
+      // is: a cycle retried after a merge that landed reaches here, and
+      // reporting it as a fresh merge would hide a retry nobody knew about.
+      this.log(
+        outcome.alreadyThere === true
+          ? `merged ${run.id} — ${branch} was already on ${outcome.into}`
+          : `merged ${run.id} — ${branch} into ${outcome.into}`,
+      );
       return true;
     }
 
-    const reason = `could not merge the approved breakdown into the default branch: ${outcome.reason}`;
+    const reason =
+      outcome.conflict === true
+        ? "the approved breakdown and the default branch have changes that clash — " +
+          `a merge conflict, and nothing was merged (${outcome.reason}). ` +
+          "Somebody has to decide which side wins; trying again changes nothing."
+        : `could not merge the approved breakdown into the default branch: ${outcome.reason}`;
     store.fail(run.id, reason);
     await adapter.postComment(project, run.ticket, failedComment(reason));
     return false;
@@ -1893,13 +1904,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     if (branch === undefined) {
       return { merged: false, reason: "the run holds no work branch" };
     }
-    const merge = this.options.mergeProbe ?? mergeIntoDefault;
+    const merge =
+      this.options.mergeProbe ??
+      ((target: TicketingProject, name: string, message: string) =>
+        this.options.adapter.mergeIntoDefault(target, name, message));
     try {
-      return await merge(
-        join(this.options.root, "projects", project.name),
-        branch,
-        mergeMessage(branch),
-      );
+      return await merge(project, branch, mergeMessage(branch));
     } catch (error) {
       return { merged: false, reason: oneLine(error) };
     }

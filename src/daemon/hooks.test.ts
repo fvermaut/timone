@@ -12,7 +12,9 @@ import type {
   TicketingProject,
   TicketThread,
 } from "../adapters/ticketing.js";
-import { noBranches, noStepWrites } from "../adapters/ticketing.stubs.js";
+import {
+  noBranches,
+  noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "./runs.js";
 import {
   checkAll,
@@ -351,6 +353,7 @@ function fakeAdapter(): {
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
     ...noBranches,
+    ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {

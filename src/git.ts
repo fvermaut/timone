@@ -158,10 +158,16 @@ export async function fastForward(dir: string): Promise<{ updated: boolean }> {
   return { updated: before !== after };
 }
 
-/** What {@link mergeIntoDefault} answers: it merged, or it did not and why. */
-export type MergeOutcome =
-  | { merged: true; into: string }
-  | { merged: false; reason: string };
+/**
+ * What {@link mergeIntoDefault} answers.
+ *
+ * The type moved to `src/adapters/ticketing.ts` in phase 30's 30c, where the
+ * forge merge that replaced this one lives, and is re-exported here so this
+ * module's own signature is unchanged. `mergeIntoDefault` below has had no
+ * machine caller since 30c; 30l deletes it.
+ */
+export type { MergeOutcome } from "./adapters/ticketing.js";
+import type { MergeOutcome } from "./adapters/ticketing.js";
 
 /**
  * True when a merge is half-done in `dir` — the tree carries `MERGE_HEAD`.

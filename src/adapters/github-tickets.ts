@@ -7,6 +7,7 @@ import {
   stampMachineComment,
   type PullRequest,
   type PullRequestComment,
+  type MergeOutcome,
   type PullRequestThread,
   type RepositoryBranches,
   type Step,
@@ -391,6 +392,75 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
         ? {}
         : { head: repository.ref.target.oid }),
     };
+  }
+
+  /**
+   * Merge a branch into the default branch through GitHub's own merge
+   * endpoint — `POST /repos/{owner}/{repo}/merges`.
+   *
+   * **The four outcomes are HTTP status codes, not prose**, which is what
+   * makes them safe to branch on: `201` with a commit is a merge, `204` with
+   * an empty body is "there was nothing to merge", `409` is a conflict, and
+   * anything else is a refusal carrying whatever GitHub said. The status is
+   * read out of `gh`'s error line, which always renders `(HTTP nnn)`.
+   *
+   * A transport failure is **rethrown**, never turned into a refusal. The
+   * retry layer in `command-runner.ts` has already tried three times by the
+   * time one arrives here, and calling it a declined merge would put a
+   * sentence on a ticket that nobody on the other end ever said.
+   */
+  async mergeIntoDefault(
+    project: TicketingProject,
+    branch: string,
+    message: string,
+  ): Promise<MergeOutcome> {
+    const slug = repoSlug(project.repoUrl);
+    // The forge names its own default branch; guessing `main` would merge
+    // into a branch that does not exist on a repository that calls it
+    // something else, and answer 404 for a reason nobody could read.
+    const { defaultBranch } = await this.readBranches(project);
+
+    try {
+      const raw = await this.run(
+        "gh",
+        [
+          "api",
+          `repos/${slug}/merges`,
+          "--method",
+          "POST",
+          "-f",
+          `base=${defaultBranch}`,
+          "-f",
+          `head=${branch}`,
+          "-f",
+          `commit_message=${message}`,
+        ],
+        { repository: slug },
+      );
+
+      // 204 No Content: the head is already contained in the base. An empty
+      // body is the whole signal, and it is a success.
+      return raw.trim() === ""
+        ? { merged: true, into: defaultBranch, alreadyThere: true }
+        : { merged: true, into: defaultBranch };
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+
+      if (/\(HTTP 409\)/.test(text) || /Merge conflict/i.test(text)) {
+        return {
+          merged: false,
+          conflict: true,
+          reason: `${branch} and ${defaultBranch} disagree, and the forge will not merge them`,
+        };
+      }
+
+      // Only a status the forge actually returned is a refusal. Everything
+      // else — a dropped connection, a killed command — is a failure to ask.
+      if (/\(HTTP \d{3}\)/.test(text)) {
+        return { merged: false, reason: text };
+      }
+      throw error;
+    }
   }
 
   async listMarkedTickets(project: TicketingProject): Promise<Ticket[]> {

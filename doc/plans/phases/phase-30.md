@@ -245,15 +245,37 @@ Two paths, and both must land: **a step ticket's pull request**, and **chunk zer
 
 > Depends on 30b.
 
+> **✅ Built 2026-08-22 — 30c is done, and "both paths" turned out to be one.**
+>
+> **✏ There is no machine merge of a pull request, and there never was.** This slice was written around two merge paths. Grepping the tree for one finds nothing: the only merges anywhere are `git.ts`'s `fastForward` (which is `workspace sync`, fvermaut's own command) and `mergeIntoDefault` (chunk zero). A step ticket's pull request is merged **by fvermaut, on github.com**, and the daemon only ever *reads* `state === "merged"` (`poll.ts:840`, `poll.ts:1890`). So the first path was already on the forge, by a human's hand, and needed nothing. **The slice is half the size the plan gave it, and none of the safety is lost** — what the plan called the dangerous half, chunk zero, is the whole of it.
+>
+> **The merge is `POST /repos/{owner}/{repo}/merges`, and the four outcomes are HTTP status codes rather than prose.** `201` with a commit is a merge, `204` with an empty body is "there was nothing to merge", `409` is a conflict, anything else is a refusal carrying what GitHub said. A **transport failure is rethrown, never turned into a refusal** — the retry layer has already tried three times, and calling it a declined merge would put a sentence on a ticket that nobody ever said.
+>
+> **The `MergeOutcome` shape widened, and the old shape is gone rather than assumed gone** — it moved out of `src/git.ts` into `src/adapters/ticketing.ts`, so every use of it is now a use of the new one and the compiler said so. Two flags were added, and each is the difference between a run that carries on and a run that stops wrongly:
+> - `alreadyThere` — `merged` is still **true**, so every existing `if (outcome.merged)` keeps working unchanged, and a cycle retried after a merge that landed is never told to redo it.
+> - `conflict` — separated from every other refusal because it is the one a human can act on. The ticket now says the two sides clash and that trying again changes nothing, instead of quoting a status line.
+>
+> **[#49](https://github.com/fvermaut/timone/issues/49) is fixed here**, as the plan allows. `witness()` measured the gap between two cycle **starts**, so a cycle whose body ran longer than the unwitnessed window was arithmetically identical to a daemon that had been switched off — and the log printed a false statement about the daemon itself. A new `workedUntil` stamp, written by `cycleEnded()` at the end of every cycle, makes the measured gap the time the daemon was **idle**. Optional in the schema, so `version` stays `1` and an older state file falls back to the old reading, which errs towards not reclaiming.
+>
+> **✏ A fixture fragility this uncovered, fixed rather than worked around.** `poll.test.ts`'s clock advanced **one minute per read**, so adding one clock read anywhere pushed a three-cycle test past the two-minute staleness window and three unrelated tests failed on a reclaim nobody had touched. It advances one second now. The tests that are actually about time set their own instants and are unaffected — all 164 pass.
+>
+> **Watched live on `fvermaut/scratch-app`, and one of the three observations is R19's:**
+> - **A real chunk-zero merge with no pull request.** A branch was created on the forge, given a commit, and merged: `{merged: true, into: "main"}`, `main` moved, and the commit has **two parents**. No pull request was opened.
+> - **Case (4) live.** Merging `main` into itself answers `{merged: true, into: "main", alreadyThere: true}` — a success, not a failure.
+> - **[R19](../../specs/prd/prd-02-inversion-of-control.criteria.md) does not regress, and this was worth checking rather than assuming.** GitHub's merge endpoint takes one `commit_message`, and the whole of `mergeMessage`'s multi-line body survives it: the merge commit on the forge carries **`Timone-Stage: breakdown`** and is authored by **`timone-agent[bot]`**. Machine authorship is now readable from git history in two independent ways where it used to be readable in one.
+> - The two fixture branches and their marker files were deleted afterwards; `scratch-app` carries only the merge history.
+>
+> **21 tests added**, all seen failing first. Suite: **1295 tests, all green.**
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npx vitest run src/daemon/session.test.ts
 ```
 
-- [ ] Red→green trace for all four cases
-- [ ] The pipeline's existing conflict handling is exercised against the **new** outcome shape, and the old shape is proved gone rather than assumed
-- [ ] On `scratch-app`, one real pull request merged this way, and one chunk-zero merge, both read on the forge afterwards
+- [x] Red→green trace for all four cases — 8 in `github-tickets.test.ts` for the merge itself, 4 in `session.test.ts` for the caller, 5 in `runs.test.ts` for #49
+- [x] The pipeline's existing conflict handling is exercised against the **new** outcome shape, and the old shape is proved gone rather than assumed — the type moved modules, so nothing can still be reading the old one
+- [x] On `scratch-app`, one chunk-zero merge, read on the forge afterwards. **The pull-request half of this item is void**: no machine merges a pull request — see the finding above
 
 ---
 

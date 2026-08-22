@@ -68,6 +68,38 @@ function fakeRunnerWithOptions(...responses: string[]): {
   return { run, calls };
 }
 
+/** As {@link fakeRunnerWithOptions}, but the last scripted call throws. */
+function fakeRunnerFailing(
+  ...responses: (string | Error)[]
+): { run: CommandRunner; calls: { command: string; args: string[] }[] } {
+  const calls: { command: string; args: string[] }[] = [];
+  const queue = [...responses];
+  const run: CommandRunner = async (command, args) => {
+    calls.push({ command, args });
+    const next = queue.shift();
+    if (next === undefined) {
+      throw new Error(
+        `fake runner: unexpected call ${command} ${args.join(" ")}`,
+      );
+    }
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  return { run, calls };
+}
+
+/** The branch read a merge makes first, to learn the default branch's name. */
+function ghBranchesForMerge(): string {
+  return JSON.stringify({
+    data: {
+      repository: {
+        defaultBranchRef: { name: "main", target: { oid: "aaaa111" } },
+        ref: null,
+      },
+    },
+  });
+}
+
 /** A `gh issue list --json …` element as GitHub actually returns it. */
 function ghIssue(overrides: Record<string, unknown> = {}): unknown {
   return {
@@ -1119,5 +1151,138 @@ describe("readBranches — branch state comes from the forge, not from a checkou
     await new GitHubTicketingAdapter({ run }).readBranches(alpha);
 
     expect(calls[0].args.join(" ")).not.toContain("refs/heads/undefined");
+  });
+});
+
+describe("mergeIntoDefault — the one merge with no pull request, done on the forge", () => {
+  /** What GitHub answers for a merge it made. */
+  const created = JSON.stringify({
+    sha: "cccc333",
+    commit: { message: "Merge branch 'timone/7-slow'" },
+  });
+
+  it("reports a clean merge, and says what it merged into", async () => {
+    const { run } = fakeRunner(ghBranchesForMerge(), created);
+
+    const outcome = await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(outcome).toEqual({ merged: true, into: "main" });
+  });
+
+  it("reports a merge that had already happened as done, not as a failure", async () => {
+    // GitHub answers 204 with an empty body when there is nothing to merge.
+    // Failing the run here would stop a chunk whose work is already on the
+    // default branch — the run would be told to redo what it had done.
+    const { run } = fakeRunner(ghBranchesForMerge(), "");
+
+    const outcome = await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(outcome).toEqual({ merged: true, into: "main", alreadyThere: true });
+  });
+
+  it("reports a conflict as a conflict, and names it as one", async () => {
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error("gh api repos/... failed: gh: Merge conflict (HTTP 409)"),
+    );
+
+    const outcome = await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(outcome.merged).toBe(false);
+    expect(outcome).toMatchObject({ conflict: true });
+  });
+
+  it("reports any other refusal as a refusal, carrying what the forge said", async () => {
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error("gh api repos/... failed: gh: Not Found (HTTP 404)"),
+    );
+
+    const outcome = await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(outcome.merged).toBe(false);
+    expect(outcome).not.toMatchObject({ conflict: true });
+    if (!outcome.merged) expect(outcome.reason).toContain("404");
+  });
+
+  it("lets a dropped connection through as an error, never as a refusal to merge", async () => {
+    // A refusal goes on a ticket and stops the run for a reason the human can
+    // act on. A connection that dropped is not that, and dressing it up as one
+    // would tell the reader the merge was declined when nobody ever asked.
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error("gh api repos/... failed after 3 attempts: ECONNRESET"),
+    );
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+        alpha,
+        "timone/7-slow",
+        "the approved breakdown",
+      ),
+    ).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it("merges into the default branch the forge names, not a guessed one", async () => {
+    const { run, calls } = fakeRunnerWithOptions(
+      JSON.stringify({
+        data: {
+          repository: {
+            defaultBranchRef: { name: "trunk", target: { oid: "aaaa111" } },
+            ref: null,
+          },
+        },
+      }),
+      created,
+    );
+
+    await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(calls[1].args).toContain("base=trunk");
+    expect(calls[1].args).toContain("head=timone/7-slow");
+  });
+
+  it("opens no pull request — that is the whole point of this path", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBranchesForMerge(), created);
+
+    await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(calls.some((call) => call.args.includes("pr"))).toBe(false);
+  });
+
+  it("names the repository, so the credential it runs under is scoped to it", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBranchesForMerge(), created);
+
+    await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(calls[1].options?.repository).toBe("fvermaut/scratch-app");
   });
 });

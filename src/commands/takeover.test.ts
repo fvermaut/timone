@@ -12,7 +12,9 @@ import type {
   TicketingProject,
   TicketThread,
 } from "../adapters/ticketing.js";
-import { noBranches, noStepWrites } from "../adapters/ticketing.stubs.js";
+import {
+  noBranches,
+  noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import { RunStore } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
@@ -178,6 +180,7 @@ function fakeAdapter(open: readonly Ticket[] = []): {
   const listings: string[] = [];
   const adapter: TicketingAdapter = {
     ...noBranches,
+    ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {

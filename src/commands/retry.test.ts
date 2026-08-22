@@ -14,7 +14,9 @@ import {
   type TicketingAdapter,
   type TicketThread,
 } from "../adapters/ticketing.js";
-import { noBranches, noStepWrites } from "../adapters/ticketing.stubs.js";
+import {
+  noBranches,
+  noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { acquireStateLock } from "../daemon/lock.js";
 import { pending, settle } from "../daemon/requests.js";
@@ -327,6 +329,7 @@ describe("timone retry — the answer a killed session had already read", async 
     const posted: string[] = [];
     const adapter: TicketingAdapter = {
       ...noBranches,
+    ...noMerges,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
@@ -610,6 +613,7 @@ describe("timone retry — the way back from a consumed answer", async () => {
     };
     return {
       ...noBranches,
+    ...noMerges,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {

@@ -19,7 +19,9 @@ import type {
   Ticket,
   TicketingAdapter,
 } from "../adapters/ticketing.js";
-import { noBranches, noStepWrites } from "../adapters/ticketing.stubs.js";
+import {
+  noBranches,
+  noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { stateLockPath } from "../daemon/lock.js";
@@ -68,6 +70,7 @@ const manifest: Manifest = {
 function quietAdapter(): TicketingAdapter {
   return {
     ...noBranches,
+    ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {

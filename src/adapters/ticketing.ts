@@ -376,6 +376,29 @@ export const repositoryBranchesSchema = z.strictObject({
 export type RepositoryBranches = z.infer<typeof repositoryBranchesSchema>;
 
 /**
+ * What a merge answers: it merged, or it did not and why.
+ *
+ * **Widened by phase 30, and the two new flags are the difference between a
+ * run that carries on and a run that stops wrongly.**
+ *
+ * - `alreadyThere` — the branch's commits were on the default branch
+ *   already. On the forge this is an ordinary `204 No Content`, and it
+ *   happens whenever a cycle is retried after a merge that landed. It is a
+ *   **success**: `merged` is true, so every existing `if (outcome.merged)`
+ *   keeps working, and a run is never told to redo work it has done.
+ * - `conflict` — the forge refused because the two sides disagree. Separated
+ *   from every other refusal because it is the one a human can act on, and
+ *   the ticket should say so rather than quoting a status line.
+ *
+ * A dropped connection is **not** a `MergeOutcome`. It throws, for the same
+ * reason an unreachable forge is not an absent branch: a refusal is something
+ * the forge said, and nobody has said anything when the call never arrived.
+ */
+export type MergeOutcome =
+  | { merged: true; into: string; alreadyThere?: boolean }
+  | { merged: false; reason: string; conflict?: boolean };
+
+/**
  * The subset of a managed project an adapter needs: its manifest name (for
  * error messages and run keys) and its clone URL (which the implementation
  * resolves to whatever the tracker addresses repositories by).
@@ -425,6 +448,28 @@ export interface TicketingAdapter {
     project: TicketingProject,
     branch?: string,
   ): Promise<RepositoryBranches>;
+
+  /**
+   * Merge `branch` into the repository's default branch **with no pull
+   * request**, and answer whether it happened.
+   *
+   * Phase 30's second widening of this seam, and the load-bearing one. It has
+   * one caller — the breakdown gate's approval merging chunk zero
+   * ([ADR-0030](../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)
+   * D2) — and it is the only path in the system that reaches a default branch
+   * without a human having read a diff. It stays that way; only the hand
+   * changes, from `git merge` in the human's checkout to the forge's own
+   * merge ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)
+   * D3).
+   *
+   * It authors no content and can move nothing but the default branch, and
+   * nothing onto it but `branch`'s own commits.
+   */
+  mergeIntoDefault(
+    project: TicketingProject,
+    branch: string,
+    message: string,
+  ): Promise<MergeOutcome>;
 
   /** Open tickets carrying the mark label, oldest first. */
   listMarkedTickets(project: TicketingProject): Promise<Ticket[]>;

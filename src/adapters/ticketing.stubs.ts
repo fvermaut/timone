@@ -1,4 +1,5 @@
 import type {
+  MergeOutcome,
   RepositoryBranches,
   Step,
   TicketingProject,
@@ -60,5 +61,21 @@ export const noSteps = {
 export const noBranches = {
   async readBranches(): Promise<RepositoryBranches> {
     return { defaultBranch: "main" };
+  },
+};
+
+/**
+ * The merge that puts chunk zero on the default branch, stubbed for tests
+ * whose subject is not it.
+ *
+ * **It throws**, like {@link noStepWrites} and unlike {@link noBranches}. A
+ * silent no-op would let a test that should have merged pass while merging
+ * nothing, and this is the one path in the system that reaches a default
+ * branch with no human having read a diff — the last place to be quiet about
+ * a call nobody meant to make.
+ */
+export const noMerges = {
+  async mergeIntoDefault(): Promise<MergeOutcome> {
+    throw new Error("no test here merges chunk zero");
   },
 };

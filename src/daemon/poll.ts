@@ -615,6 +615,12 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
     }
   }
 
+  // Last of all, and after the per-project catch so a project that threw does
+  // not cost the daemon its own alibi: this cycle has stopped working, so the
+  // next one measures the gap it was idle rather than the gap since this one
+  // began (timone#49).
+  deps.store.cycleEnded();
+
   return result;
 }
 

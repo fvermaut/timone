@@ -13,7 +13,9 @@ import type {
   TicketingAdapter,
   TicketThread,
 } from "../adapters/ticketing.js";
-import { noBranches, noStepWrites } from "../adapters/ticketing.stubs.js";
+import {
+  noBranches,
+  noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import type { Violation } from "../daemon/hooks.js";
 import { RunStore } from "../daemon/runs.js";
@@ -238,6 +240,7 @@ describe("finding the run that drove a session", () => {
     };
     const adapter: TicketingAdapter = {
       ...noBranches,
+    ...noMerges,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {

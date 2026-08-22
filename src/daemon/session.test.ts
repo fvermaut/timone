@@ -21,7 +21,12 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
-import { noBranches, noStepWrites } from "../adapters/ticketing.stubs.js";
+import {
+  noBranches,
+  noMerges,
+  noSteps,
+  noStepWrites,
+} from "../adapters/ticketing.stubs.js";
 import type { BreakdownSource } from "./breakdown.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
@@ -169,6 +174,7 @@ function fakeAdapter(initial: TicketThread = thread): {
 
   const adapter: TicketingAdapter = {
     ...noBranches,
+    ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {
@@ -2124,17 +2130,26 @@ describe("merging chunk zero when the breakdown is approved", () => {
     return store.get(run.id)!;
   }
 
-  /** A merge seam that records its calls and reports the given outcome. */
+  /**
+   * A merge seam that records its calls and reports the given outcome.
+   *
+   * It records the **project** rather than a directory: since 30c the merge
+   * happens on the forge, and there is no checkout for it to name.
+   */
   function recordingMerge(
     outcome: MergeOutcome = { merged: true, into: "main" },
   ): {
-    merge: (repoDir: string, branch: string) => Promise<MergeOutcome>;
-    calls: { repoDir: string; branch: string }[];
+    merge: (
+      target: TicketingProject,
+      branch: string,
+      message: string,
+    ) => Promise<MergeOutcome>;
+    calls: { project: string; branch: string }[];
   } {
-    const calls: { repoDir: string; branch: string }[] = [];
+    const calls: { project: string; branch: string }[] = [];
     return {
-      merge: async (repoDir, branch) => {
-        calls.push({ repoDir, branch });
+      merge: async (target, branch) => {
+        calls.push({ project: target.name, branch });
         return outcome;
       },
       calls,
@@ -2165,7 +2180,7 @@ describe("merging chunk zero when the breakdown is approved", () => {
 
     expect(calls).toEqual([
       {
-        repoDir: join("/root", "projects", "scratch-app"),
+        project: "scratch-app",
         branch: "timone/7-the-page-feels-slow",
       },
     ]);
@@ -4540,5 +4555,155 @@ describe("branch state, by default, comes from the forge", () => {
 
     expect(asked.filter((branch) => branch !== undefined).length).toBeGreaterThan(0);
     expect(comments.at(-1)!.body).toContain("`approve`");
+  });
+});
+
+describe("chunk zero reaches the default branch through the forge", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  /** A run parked on the breakdown gate, holding chunk zero's branch. */
+  function atBreakdownGate(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    return store.get(run.id)!;
+  }
+
+  it("asks the ticketing adapter to merge, and never a checkout on disk", async () => {
+    const merges: { branch: string; message: string }[] = [];
+    const adapter: TicketingAdapter = {
+      ...noBranches,
+    ...noMerges,
+      ...noStepWrites,
+      ...noSteps,
+      async mergeIntoDefault(
+        _project: TicketingProject,
+        branch: string,
+        message: string,
+      ): Promise<MergeOutcome> {
+        merges.push({ branch, message });
+        return { merged: true, into: "main" };
+      },
+    } as unknown as TicketingAdapter;
+
+    const spawner = new AgentSessionSpawner({
+      manifest,
+      store: newStore(),
+      adapter,
+      runtime: fakeRuntime().runtime,
+      root: "/root",
+    });
+
+    const outcome = await (
+      spawner as unknown as {
+        attemptMerge: (
+          project: TicketingProject,
+          branch: string | undefined,
+        ) => Promise<MergeOutcome>;
+      }
+    ).attemptMerge(project, "timone/7-the-page-feels-slow");
+
+    expect(outcome).toEqual({ merged: true, into: "main" });
+    expect(merges).toHaveLength(1);
+    expect(merges[0].branch).toBe("timone/7-the-page-feels-slow");
+  });
+
+  it("does not fail a run whose merge had already happened", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const run = atBreakdownGate(store);
+
+    const spawner = new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: fakeRuntime().runtime,
+      root: "/root",
+      mergeProbe: async () => ({
+        merged: true,
+        into: "main",
+        alreadyThere: true,
+      }),
+    });
+
+    const merged = await (
+      spawner as unknown as {
+        mergeChunkZero: (
+          run: Run,
+          project: TicketingProject,
+        ) => Promise<boolean>;
+      }
+    ).mergeChunkZero(run, project);
+
+    expect(merged).toBe(true);
+    expect(store.get(run.id)?.status).not.toBe("failed");
+    expect(comments).toHaveLength(0);
+  });
+
+  it("says a conflict is a conflict, in words the human can act on", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const run = atBreakdownGate(store);
+
+    const spawner = new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: fakeRuntime().runtime,
+      root: "/root",
+      mergeProbe: async () => ({
+        merged: false,
+        conflict: true,
+        reason: "the two sides disagree",
+      }),
+    });
+
+    const merged = await (
+      spawner as unknown as {
+        mergeChunkZero: (
+          run: Run,
+          project: TicketingProject,
+        ) => Promise<boolean>;
+      }
+    ).mergeChunkZero(run, project);
+
+    expect(merged).toBe(false);
+    expect(store.get(run.id)?.status).toBe("failed");
+    expect(comments.at(-1)!.body).toMatch(/conflict/i);
+  });
+
+  it("stops the run when the merge was refused for any other reason", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const run = atBreakdownGate(store);
+
+    const spawner = new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: fakeRuntime().runtime,
+      root: "/root",
+      mergeProbe: async () => ({
+        merged: false,
+        reason: "gh: Not Found (HTTP 404)",
+      }),
+    });
+
+    const merged = await (
+      spawner as unknown as {
+        mergeChunkZero: (
+          run: Run,
+          project: TicketingProject,
+        ) => Promise<boolean>;
+      }
+    ).mergeChunkZero(run, project);
+
+    expect(merged).toBe(false);
+    expect(store.get(run.id)?.status).toBe("failed");
+    expect(comments.at(-1)!.body).toContain("404");
   });
 });
