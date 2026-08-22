@@ -2,34 +2,38 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-22, midday.
+**Last updated:** 2026-08-22, afternoon.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** Six of the twelve pieces of the container work are built today, including all four that fix the problem you reported. **Two of the last three cannot start until you answer one question**, and it is about a bill rather than about code.
+> **Read this first.** The container work is **built** — eleven of its twelve pieces, including all four that fix the problem you reported. **One thing is left and only you can do it**, and it takes about five minutes.
 
-**1. The machine can no longer touch your project folders, and that is the piece you asked for.**
+**1. The five-minute thing, and it is the whole point of this work.**
 
-Before today, when the machine was working on a project it did that work inside `projects/<name>/` — the same folder you have open in your editor. It read branches there, it read files there, and it merged there. So your `git switch` and its build could fight over one folder, and nothing would say so.
+The machine now does its building inside a container. Nothing of your machine is in there: no folders, no login of yours except the one that talks to Claude, and no way for it to reach your other projects. Your `projects/` folders are its business no longer.
 
-That is over. The machine now reads everything from GitHub and merges on GitHub. **Your project folders are yours.** There is a check that fails the tests if anyone puts it back: it lists the five files still allowed to touch those folders and says, for each one, why. Four of the five are things we chose to keep — your own `timone status` and `workspace sync` commands, the safety checks after a session, and the preview machinery. Adding a sixth means editing that list, where the next reader sees it.
+**What is left is you proving it, because no test can.** Start the daemon on the to-do app, and while it is building, **switch branch in `projects/scratch-app` and leave it there.** Then tell me whether you still had to think about it. If you did, the work has not landed, whatever the tests say.
 
-**2. One question, and it decides whether the last three pieces can be built.**
+```
+node dist/cli.js daemon
+```
 
-A run in a box has nothing of your machine in it. That is the point. But it also means it has no way to log in to Claude — your login is in the macOS keychain, and a box cannot reach a keychain. So a run in a box would start, download both repositories, start its database, and then fail because it cannot talk to the model.
+Everything runs in a container now by default. If anything misbehaves, one word puts it back the old way:
 
-**There are two ways to fix it and the difference is money, not code:**
+```
+node dist/cli.js daemon --runtime in-process
+```
 
-- **An API key.** You make one, I keep it beside the GitHub key, and the box uses it. Clean. **It is billed separately from your Claude subscription.**
-- **Your own subscription login.** I read the token out of your keychain and hand it to the box. **No extra bill.** The cost is that a long-lived login of yours sits inside the box while it runs.
+**Two things to know before you run it.**
 
-**What I need from you:** say which one, in one word — `api key` or `my login`.
+- **It will not run a version of Timone you have not pushed.** The container downloads Timone from GitHub, so it cannot follow a commit that only exists on your laptop. It says so plainly rather than failing with a git error. So merge or push first.
+- **It borrows your Claude login** — the choice you made this morning. It reads it fresh each time and keeps no copy. While a container is running, a token that can spend your subscription is inside it. That is the trade you took over a separate bill.
 
-**3. A second, smaller question you can leave for later.**
+**2. The trading app cannot be built in a container yet.** `ivtrends` has no `compose.yaml`, so the machine has nothing to start beside it — no database, nothing. It refuses rather than guessing. The to-do app has one and is fine. When you want `ivtrends` built again, it needs that file; say the word and I will write one for you to review.
 
-There is still no automatic test run when code is pushed. The check in point 1 runs whenever a session finishes, which is often, but not on GitHub. Setting that up means **you** committing one file by hand, once — the machine deliberately cannot write it, because a machine that can rewrite its own test setup can switch its own safety checks off. Say the word and I will write the file for you to commit.
+**3. A second, smaller question you can leave for later.** There is still no automatic test run when code is pushed. The check that keeps the machine out of your folders runs whenever a session finishes, which is often, but not on GitHub. Setting that up means **you** committing one file by hand, once — the machine deliberately cannot write it, because a machine that can rewrite its own test setup can switch its own safety checks off. Say the word and I will write the file for you to commit.
 
 **4. The trading app still needs one command.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) stopped on a server error at the other end:
 
@@ -46,7 +50,7 @@ timone cancel scratch-app#10
 
 **6. The slow-page job is where you left it.** [#4](https://github.com/fvermaut/scratch-app/issues/4) is stopped and its label is off, so it will not start by itself. `timone takeover scratch-app#4` picks it up.
 
-**Nothing else needs you.** The three test tickets from last week ([#45](https://github.com/fvermaut/scratch-app/issues/45)–[#48](https://github.com/fvermaut/scratch-app/issues/48)) can be closed whenever you like.
+**Nothing else needs you.** The test tickets from last week ([#45](https://github.com/fvermaut/scratch-app/issues/45)–[#48](https://github.com/fvermaut/scratch-app/issues/48)) can be closed whenever you like.
 
 ---
 
@@ -65,11 +69,27 @@ The second half of the idea is that a background program — the daemon — driv
 
 Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below). **Nothing on that list moved on 19 August**, deliberately — four of the promises gained notes about what happened, and a promise only gets its tick back when somebody who did not build the thing checks it.
 
-1359 automatic tests pass. Tests are not the same as somebody watching it work.
+1384 automatic tests pass. Tests are not the same as somebody watching it work.
 
 ---
 
 ## What changed recently
+
+**22 August, afternoon — the container work is built.** Eleven of twelve pieces. The last one is your five minutes at the top of this file.
+
+**Running in a container is now the default.** A job downloads Timone and the project from GitHub at exact versions, does its work inside, and the container is destroyed afterwards — including when things go wrong. It has no way to make containers of its own and no way to see your disk. Checked from inside a running one: no folders of yours, no `/Users`, and it does not run as the root user.
+
+**Its database starts beside it, not inside it.** On a private network, with **nothing opened on your machine**. While this was being tested your own to-do app database was running on the same laptop, and the two never met.
+
+**The browser checks work in the container exactly as they do outside it.** This was the one worth proving, because a browser check that quietly finds nothing — because the page never loaded — looks the same as a clean pass. The to-do app's own accessibility tests were run twice on the same version of the code: **22 passed inside the container, 22 passed outside it, the same 22 tests.** Then a page was broken on purpose and the run inside the container **failed, on exactly the three tests about that kind of fault.** So the check can fail, which is the thing worth knowing.
+
+**It can log in to Claude, using your subscription.** Read fresh each time, kept nowhere.
+
+**Two more things it cannot do, and both now say so plainly.** It will not run a version of Timone you have not pushed — the container downloads it, so it cannot follow a commit that is only on your laptop. And it will not build a project with no `compose.yaml`, which is why the trading app is on hold.
+
+**Five faults were found by running things rather than reading them.** Three share a shape worth remembering: **a missing answer and a wrong question look identical.** A dropped connection read as "that branch does not exist". `docker compose down` succeeding while deleting nothing. A check of mine that said the to-do app had no `compose.yaml` when it has one. The other two: the container ran as the root user, which Claude refuses to work under — so it could not have run a single job — and the settings it was given never reached inside it. Eleven tests said those settings were correct and all eleven were right; none of them could see it.
+
+1384 tests pass, up from 1224 yesterday.
 
 **22 August — six pieces of the container work were built, and the four that fix your problem are all in.** The branch is `phase-30-work-in-a-box`. In order:
 
@@ -258,7 +278,7 @@ The rest, in short: [#1](https://github.com/fvermaut/timone/issues/1) a stopped 
 
 ## What is left to build
 
-0. **The last three pieces of the container work.** Turning the box on, proving the browser checks work inside it, and closing the phase. **Two of the three are stopped until you answer item 2 at the top of this file** — a run in a box has no way to log in to Claude.
+0. **Five minutes of yours to finish the container work** — item 1 at the top of this file. Everything else in it is built.
 1. **A chat channel** (Slack or Teams), so the machine can ask you a short question at the moment it needs to, instead of settling for a fixed rule.
 2. **The bug-report path.** `scratch-app` #4 is parked waiting for exactly this.
 3. **Releasing to a live environment**, and **routine maintenance**. Both are described in `process.md` and neither has a skill yet.
