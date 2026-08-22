@@ -7,6 +7,7 @@ import {
   type ContainerProcess,
   type ContainerSpawn,
 } from "./container-runtime.js";
+import type { ServiceStack } from "./services.js";
 import { SessionProgress } from "./progress.js";
 import { sessionRequest, type SessionRequest } from "./session.js";
 
@@ -399,5 +400,115 @@ describe("the box is built from the remotes, and says so when it cannot be", () 
     // With nothing on stderr there is nothing to say but the number, and the
     // number is still better than silence.
     expect(outcome.error).toContain("78");
+  });
+});
+
+describe("the services beside the box", () => {
+  /** A stack that records whether it was taken down. */
+  function fakeStack(): { stack: ServiceStack; downs: () => number } {
+    let downs = 0;
+    return {
+      stack: {
+        network: "timone-scratch-app-7-1_default",
+        project: "timone-scratch-app-7-1",
+        down: async () => {
+          downs += 1;
+        },
+      },
+      downs: () => downs,
+    };
+  }
+
+  it("joins the network the stack is on, so services answer by name", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    const { stack } = fakeStack();
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      services: async () => stack,
+    }).start(request());
+
+    const args = calls.find((call) => call.args[0] === "run")!.args;
+    expect(args).toContain("--network");
+    expect(args).toContain("timone-scratch-app-7-1_default");
+  });
+
+  it("brings the stack up before the container starts, not after", async () => {
+    const order: string[] = [];
+    const { spawn } = fakeContainer([started, result()]);
+    const recording: ContainerSpawn = (command, args, options) => {
+      if (args[0] === "run") order.push("container");
+      return spawn(command, args, options);
+    };
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn: recording,
+      services: async () => {
+        order.push("stack");
+        return fakeStack().stack;
+      },
+    }).start(request());
+
+    expect(order).toEqual(["stack", "container"]);
+  });
+
+  it("takes the stack down when the session succeeded", async () => {
+    const { spawn } = fakeContainer([started, result()]);
+    const { stack, downs } = fakeStack();
+
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      services: async () => stack,
+    }).start(request());
+    await session.completed;
+
+    expect(downs()).toBe(1);
+  });
+
+  it("takes the stack down when the box failed", async () => {
+    const { spawn } = fakeContainer([started], { code: 1 });
+    const { stack, downs } = fakeStack();
+
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      services: async () => stack,
+    }).start(request());
+    await session.completed;
+
+    expect(downs()).toBe(1);
+  });
+
+  it("starts no container at all when the stack refused to come up", async () => {
+    // A session run against services that are not there fails in a way that
+    // reads as the agent's fault. Better to have started nothing.
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await expect(
+      containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        services: async () => {
+          throw new Error("scratch-app commits no compose file");
+        },
+      }).start(request()),
+    ).rejects.toThrow(/compose file/);
+
+    expect(calls.filter((call) => call.args[0] === "run")).toHaveLength(0);
+  });
+
+  it("runs without a stack when nothing configures one", async () => {
+    // The in-between state this phase passes through: 30h's runtime works
+    // before 30i exists, and a project with no services is not an error.
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await runtimeWith(spawn).start(request());
+
+    expect(calls.find((call) => call.args[0] === "run")!.args).not.toContain(
+      "--network",
+    );
   });
 });

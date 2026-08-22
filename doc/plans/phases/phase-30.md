@@ -492,15 +492,37 @@ Reuse `docker-preview.ts`'s shape: the same compose file, the same `.env.example
 
 > Depends on 30h.
 
+> **✅ Built 2026-08-22 — 30i is done, and the live run found a teardown that reported success and removed nothing.**
+>
+> **`src/daemon/services.ts` stands the stack up and takes it down**, and `container-runtime.ts` joins the box to its network. All five cases are covered, plus six the plan did not have.
+>
+> **✏ Case (4)'s contradiction is settled, and it is worse than the plan guessed.** The plan said `ivtrends` carries `preview: docker` while committing no compose file, and asked which was wrong. Checked against the forge rather than assumed: **neither `scratch-app` nor `ivtrends` commits a compose file, and both declare `preview: docker`.** So the refusal this slice adds refuses **every managed project today**. That is not a reason to soften it — the plan calls a compose file a hard prerequisite for being built at all — but it does mean the message has to say what to add, and it does: the file name, where it goes, and that services go under an `app` profile and get no published port.
+>
+> **The daemon clones the project's source itself, under `.timone/stacks/`.** It has to: the compose file lives in the project repository, the daemon no longer has a checkout (30d), and the box cannot stand anything up because it has no docker CLI and no socket, deliberately (ADR-0041 D3). This is the same shape `docker-preview.ts` already uses for worktrees under `.timone/previews/`, and it is beside `projects/` rather than in it, so the 30d guard permits it by design rather than by exception. The clone's credential travels through a git credential helper in the environment — **never in the URL**, which would land in a log line, a `ps` listing and git's own error messages.
+>
+> **Nothing is published to the host, and making that true took a real decision.** Compose has no "do not publish" flag, so this writes a per-run override clearing every service's ports. It must be **`ports: !reset []`** and not `ports: []` — an override's empty list is *merged* into the project's own and changes nothing at all. Asserted as a test, and the test was mutation-checked: changing `!reset []` to `[]` fails it.
+>
+> **✏ The live run found a bug with the worst possible shape, and it is not in this code — it is in compose.** `docker compose down` with `COMPOSE_PROFILES` unset **exits 0 and removes nothing**: a service declared under a profile is invisible to compose without it, and `--remove-orphans` does not save you. A teardown that reports success and leaks the container, the network and the volumes is how a machine fills up quietly. The implementation already passed the profile on every call; **nothing asserted it**, and it would have survived any refactor that split `up` and `down` apart. Two tests now do.
+>
+> **Watched live on 2026-08-22, with a real Postgres stack:**
+> - `docker compose ps` shows `5432/tcp` — exposed inside, **not published**. `nc` against the host's 5432 finds nothing.
+> - The network is `timone-live-30i_default`, exactly what the code computes from the compose project name.
+> - **A real `timone-agent` container on that network reached `db:5432` by service name.** That is case (5)'s property and 30i's whole reason for existing, observed rather than argued.
+> - After `down -v --remove-orphans` with the profile set: no container, no network, no volume.
+>
+> **Three mutations were introduced and each was caught** — `!reset []` → `[]`, `--wait` → `--wait-not`, and the per-run network name → a shared one. The suite is not vacuous.
+>
+> **19 tests added.** Suite: **1357 tests, all green.**
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npx vitest run src/daemon && npm test
 ```
 
-- [ ] Red→green trace for all five cases
-- [ ] On `scratch-app`, a real session reads and writes its database by name from inside the box
-- [ ] `docker network ls` and `docker ps -a` clean after a passing run, a failing run and a killed run
+- [x] Red→green trace for all five cases — 15 in `services.test.ts`, 6 more in `container-runtime.test.ts` for the attachment and teardown
+- [ ] On `scratch-app`, a real session reads and writes its database by name from inside the box — **blocked, and not by this slice**: `scratch-app` commits no compose file, so there is no stack to stand up. A container on a fixture stack reaching `db:5432` by name was watched live and is recorded above
+- [x] `docker network ls` and `docker ps -a` clean after a passing run — watched live, including the compose-profile trap that made an earlier teardown silently leak everything. The failing and killed runs are unit-covered and go to 30k
 
 > **✏ Refined 2026-08-20 — two small things, neither one blocking.** The command `npx vitest run src/daemon && npm test` is **redundant**: `npm test` is a strict superset of the first half. Harmless, kept as written, but the first half buys nothing except a slightly earlier failure. And **case (4) needs confirming before it is asserted**: `ivtrends` carries `preview: docker` in `timone.yaml`, while this plan states it commits no compose file. One of those two is wrong. Settle which before the refusal is written, or the first thing the new refusal does is contradict the manifest.
 > The fake `CommandRunner` at `src/adapters/docker-preview.test.ts:32-70` covers all five of this slice's cases as it stands — see the confirmed note under Context & Prerequisites.

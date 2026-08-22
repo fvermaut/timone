@@ -6,6 +6,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { CredentialProvider } from "../adapters/credentials.js";
 import { repoSlug } from "../adapters/github-tickets.js";
 import { SessionProgress } from "./progress.js";
+import type { ServiceStack } from "./services.js";
 import {
   sessionOutcomeFrom,
   type SessionOutcome,
@@ -82,6 +83,18 @@ export interface ContainerRuntimeOptions {
   credentials?: CredentialProvider;
   /** Names the container. Behind a seam so a test is not clock-dependent. */
   nameFor?: (request: SessionRequest) => string;
+  /**
+   * Stands the project's services up beside the box, and answers the network
+   * the box joins ([ADR-0041](../../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md)
+   * D3, and 30i).
+   *
+   * Absent means no stack, which is not an error: 30h's runtime worked before
+   * 30i existed, and a project with nothing to stand up is an ordinary case.
+   * A stack that **refuses** — no compose file, or never healthy — stops the
+   * spawn before a container exists, because a session run against services
+   * that are not there fails in a way that reads as the agent's fault.
+   */
+  services?: (request: SessionRequest) => Promise<ServiceStack>;
 }
 
 /**
@@ -206,7 +219,12 @@ function boxScript(request: SessionRequest): string {
 }
 
 /** The `docker run` argument vector. Nothing of the host is in it. */
-function runArgs(name: string, image: string, script: string): string[] {
+function runArgs(
+  name: string,
+  image: string,
+  script: string,
+  network: string | undefined,
+): string[] {
   return [
     "run",
     // Named rather than `--rm`: a container docker removed on exit cannot be
@@ -217,6 +235,10 @@ function runArgs(name: string, image: string, script: string): string[] {
     "--init",
     // Chromium dies on a real page with docker's 64 MiB default.
     `--shm-size=${SHM_SIZE}`,
+    // The stack's own network, so the agent reaches a database by the name
+    // its compose file gives it. **Nothing is published to the host** — that
+    // is the difference between this and a preview (30i).
+    ...(network === undefined ? [] : ["--network", network]),
     // No `-v`, no `--mount`, no docker socket, no `--privileged`. The absence
     // is the point of the whole phase and is asserted on this vector.
     image,
@@ -256,8 +278,15 @@ export function containerRuntime(
               repoSlug(workspace.project.remote),
             );
 
+      // Before the container, deliberately. A stack that refuses stops the
+      // spawn here, with nothing started to clean up.
+      const stack =
+        options.services === undefined
+          ? undefined
+          : await options.services(request);
+
       const name = nameFor(request);
-      const container = spawn("docker", runArgs(name, options.image, boxScript(request)), {
+      const container = spawn("docker", runArgs(name, options.image, boxScript(request), stack?.network), {
         env: {
           TIMONE_REMOTE: workspace.timone.remote,
           TIMONE_COMMIT: workspace.timone.commit,
@@ -310,8 +339,10 @@ export function containerRuntime(
         const exit = await container.exit;
         // Destroyed on **every** path, including this one — a leaked container
         // holds a name, a network and a gigabyte of shared memory, and the
-        // next run on the same project cannot take the name back.
+        // next run on the same project cannot take the name back. The stack
+        // goes with it, for the same reason and on the same paths.
         destroy(spawn, name);
+        if (stack !== undefined) await stack.down().catch(() => undefined);
         resolveId(id);
 
         if (outcome !== undefined) return outcome;

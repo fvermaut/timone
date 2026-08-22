@@ -2,7 +2,10 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
-import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
+import {
+  GitHubTicketingAdapter,
+  repoSlug,
+} from "../adapters/github-tickets.js";
 import {
   credentialCommandRunner,
   type CommandRunner,
@@ -33,6 +36,7 @@ import {
   type SessionRuntime,
 } from "../daemon/session.js";
 import { containerRuntime } from "../daemon/container-runtime.js";
+import { bringUpServices } from "../daemon/services.js";
 
 export interface MachineAdapterOptions {
   /** Injected process spawner; the real one when absent. */
@@ -130,6 +134,8 @@ export interface RuntimeChoice {
   image: string;
   /** Where a boxed session's forge credential comes from. */
   credentials?: CredentialProvider;
+  /** The timone root, beneath which a stack's source is materialized. */
+  root?: string;
 }
 
 /**
@@ -150,11 +156,37 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
   const name = choice.runtime ?? DEFAULT_RUNTIME;
   if (name === "in-process") return agentSdkRuntime;
   if (name === "container") {
+    const root = choice.root;
+    const credentials = choice.credentials;
     return containerRuntime({
       image: choice.image,
-      ...(choice.credentials === undefined
+      ...(credentials === undefined ? {} : { credentials }),
+      // Only when there is a root to materialize a stack's source under. A
+      // runtime built without one still runs a session; it just has no
+      // services beside it, which is 30h's behaviour before 30i.
+      ...(root === undefined
         ? {}
-        : { credentials: choice.credentials }),
+        : {
+            services: async (request) => {
+              const workspace = request.workspace!;
+              return bringUpServices({
+                project: {
+                  name: workspace.project.name,
+                  repoUrl: workspace.project.remote,
+                },
+                branch: workspace.project.branch,
+                runId: `${workspace.project.name}-${workspace.project.branch}`,
+                root,
+                ...(credentials === undefined
+                  ? {}
+                  : {
+                      token: await credentials.tokenFor(
+                        repoSlug(workspace.project.remote),
+                      ),
+                    }),
+              });
+            },
+          }),
     });
   }
   throw new Error(
@@ -379,6 +411,7 @@ export function registerDaemonCommand(program: Command): void {
             ? {}
             : { runtime: options.runtime as RuntimeName }),
           image: options.image ?? DEFAULT_IMAGE,
+          root: process.cwd(),
           // The box acts under the same identity the daemon does, scoped to
           // the one repository the run is for (ADR-0042).
           credentials: daemonCredentials(manifest, process.cwd()),
