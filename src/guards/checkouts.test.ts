@@ -59,6 +59,13 @@ const EXEMPT: Record<string, string> = {
     "The preview adapter drives worktrees out of `projects/<name>/.git` " +
     "(ADR-0021). Phase 30 does not touch the preview machinery: previews are " +
     "driven from the host and never from inside a session.",
+  "daemon/container-runtime.ts":
+    "It builds `/workspace/projects/<name>` — a path **inside the box**, on " +
+    "the container's own filesystem, which is the layout ADR-0007 fixed and " +
+    "which a session expects to find. It is not a host path and cannot " +
+    "become one: this file mounts nothing (asserted in its own tests) and " +
+    "spawns docker, never git. The guard flagging it is the guard working — " +
+    "the string is identical and only the filesystem differs.",
   "daemon/prompts.ts":
     "It writes the sentence `touch only `projects/<name>/…`` into a session " +
     "prompt. That is the R15 instruction to the agent, not a path this " +

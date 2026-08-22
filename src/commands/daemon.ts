@@ -9,6 +9,7 @@ import {
 } from "../adapters/command-runner.js";
 import {
   githubAppCredentials,
+  type CredentialProvider,
   type MintCall,
 } from "../adapters/credentials.js";
 import { DockerPreviewAdapter } from "../adapters/docker-preview.js";
@@ -26,7 +27,12 @@ import {
   type SessionSpawner,
 } from "../daemon/poll.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
-import { AgentSessionSpawner, agentSdkRuntime } from "../daemon/session.js";
+import {
+  AgentSessionSpawner,
+  agentSdkRuntime,
+  type SessionRuntime,
+} from "../daemon/session.js";
+import { containerRuntime } from "../daemon/container-runtime.js";
 
 export interface MachineAdapterOptions {
   /** Injected process spawner; the real one when absent. */
@@ -51,11 +57,11 @@ export interface MachineAdapterOptions {
  * `root` is the timone root the key path is resolved against, so a daemon
  * started from anywhere reads the same key.
  */
-export function machineAdapter(
+export function daemonCredentials(
   manifest: Manifest,
   root: string,
-  options: MachineAdapterOptions = {},
-): GitHubTicketingAdapter {
+  mint?: MintCall,
+): CredentialProvider {
   const identity = manifest.identity;
   if (identity === undefined) {
     throw new Error(
@@ -66,12 +72,23 @@ export function machineAdapter(
     );
   }
 
-  const credentials = githubAppCredentials({
+  return githubAppCredentials({
     appId: identity.app_id,
     installationId: identity.installation_id,
     privateKeyPath: resolve(root, identity.private_key_path),
-    ...(options.mint === undefined ? {} : { mint: options.mint }),
+    ...(mint === undefined ? {} : { mint }),
   });
+}
+
+export function machineAdapter(
+  manifest: Manifest,
+  root: string,
+  options: MachineAdapterOptions = {},
+): GitHubTicketingAdapter {
+  // Order matters: this throws when no identity is declared, which is where
+  // "fails loudly at spawn time, never falls back to ambient login" lives.
+  const credentials = daemonCredentials(manifest, root, options.mint);
+  const identity = manifest.identity as NonNullable<Manifest["identity"]>;
 
   return new GitHubTicketingAdapter({
     run: credentialCommandRunner({
@@ -82,6 +99,69 @@ export function machineAdapter(
   });
 }
 
+/** The runtimes a daemon can spawn sessions in. */
+export const RUNTIMES = ["in-process", "container"] as const;
+export type RuntimeName = (typeof RUNTIMES)[number];
+
+/**
+ * Which runtime a daemon uses when nobody says.
+ *
+ * **In-process, and it stays that way until 30k flips it deliberately, behind
+ * a live gate.** A phase that changed where every run happens as a side effect
+ * of building the option would be exactly the "two runtimes and neither
+ * trusted" state phase 30's own stopping rule warns about.
+ */
+export const DEFAULT_RUNTIME: RuntimeName = "in-process";
+
+/**
+ * The image a boxed run is started from, unless a flag names another.
+ *
+ * `timone-agent` is what 30g's `Dockerfile` builds and what its own
+ * validation commands name. The two must agree: a default naming an image
+ * nobody builds fails at the first boxed spawn, with a message about a
+ * missing image rather than about a wrong name.
+ */
+export const DEFAULT_IMAGE = "timone-agent:latest";
+
+export interface RuntimeChoice {
+  /** Absent means {@link DEFAULT_RUNTIME}. */
+  runtime?: RuntimeName;
+  /** The image the container runtime starts from. */
+  image: string;
+  /** Where a boxed session's forge credential comes from. */
+  credentials?: CredentialProvider;
+}
+
+/**
+ * The runtime a daemon spawns sessions in
+ * ([ADR-0041](../../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md)).
+ *
+ * This function is the switch the plan found missing: `runtime` is a
+ * non-optional constructor argument on the spawner, hard-coded at the single
+ * production wiring site below, so "chosen by configuration and off by
+ * default" was a thing that had to be built rather than set. Sessions
+ * fvermaut opens himself are untouched by any of it (ADR-0041 D5).
+ *
+ * An unknown name **throws**. A daemon that fell back to the in-process
+ * runtime because a flag was misspelled would run every session on
+ * fvermaut's machine while its operator believed otherwise.
+ */
+export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
+  const name = choice.runtime ?? DEFAULT_RUNTIME;
+  if (name === "in-process") return agentSdkRuntime;
+  if (name === "container") {
+    return containerRuntime({
+      image: choice.image,
+      ...(choice.credentials === undefined
+        ? {}
+        : { credentials: choice.credentials }),
+    });
+  }
+  throw new Error(
+    `Unknown runtime "${String(name)}". Known runtimes: ${RUNTIMES.join(", ")}.`,
+  );
+}
+
 /** Options accepted by `timone daemon`, as commander parses them. */
 interface DaemonOptions {
   manifest: string;
@@ -89,6 +169,8 @@ interface DaemonOptions {
   progressInterval: string;
   once?: boolean;
   state?: string;
+  runtime?: string;
+  image?: string;
 }
 
 export interface RunDaemonOptions {
@@ -232,6 +314,17 @@ export function registerDaemonCommand(program: Command): void {
     )
     .option("--once", "run a single poll cycle and exit")
     .option("--state <path>", "path to the daemon state file")
+    .option(
+      "--runtime <name>",
+      `where a spawned session runs: ${RUNTIMES.join(" or ")} — ` +
+        "a boxed run touches nothing of this machine (ADR-0041)",
+      DEFAULT_RUNTIME,
+    )
+    .option(
+      "--image <ref>",
+      "the image a boxed run is started from",
+      DEFAULT_IMAGE,
+    )
     .action(async (options: DaemonOptions) => {
       let manifest: Manifest;
       try {
@@ -279,6 +372,23 @@ export function registerDaemonCommand(program: Command): void {
         return;
       }
 
+      let runtime: SessionRuntime;
+      try {
+        runtime = runtimeFor({
+          ...(options.runtime === undefined
+            ? {}
+            : { runtime: options.runtime as RuntimeName }),
+          image: options.image ?? DEFAULT_IMAGE,
+          // The box acts under the same identity the daemon does, scoped to
+          // the one repository the run is for (ADR-0042).
+          credentials: daemonCredentials(manifest, process.cwd()),
+        });
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+        return;
+      }
+
       const log = (message: string): void => console.log(message);
       // No guardrail bracket here any more (ADR-0018): the checks live in
       // `.claude/settings.json`'s SessionStart/Stop hooks, which every session
@@ -287,7 +397,7 @@ export function registerDaemonCommand(program: Command): void {
         manifest,
         store,
         adapter,
-        runtime: agentSdkRuntime,
+        runtime,
         root: process.cwd(),
         progressIntervalMs: progressInterval * 1000,
         log,

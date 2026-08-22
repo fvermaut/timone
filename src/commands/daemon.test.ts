@@ -25,7 +25,14 @@ import {
 import { RunStore } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { stateLockPath } from "../daemon/lock.js";
-import { machineAdapter, runDaemon } from "./daemon.js";
+import {
+  DEFAULT_IMAGE,
+  DEFAULT_RUNTIME,
+  machineAdapter,
+  runDaemon,
+  runtimeFor,
+} from "./daemon.js";
+import { agentSdkRuntime } from "../daemon/session.js";
 import { enqueue } from "../daemon/requests.js";
 
 const tempDirs: string[] = [];
@@ -526,5 +533,38 @@ describe("the daemon acts under Timone's own identity, never a borrowed one", ()
     );
 
     expect(thread.comments[0].fromTimone).toBe(true);
+  });
+});
+
+describe("choosing which runtime a daemon spawns sessions in", () => {
+  it("uses the in-process runtime when nothing asks for a box", () => {
+    expect(runtimeFor({ image: "timone-box:test" })).toBe(agentSdkRuntime);
+  });
+
+  it("uses the container runtime when asked for one", () => {
+    // The switch the plan found missing: `runtime` is a non-optional
+    // constructor argument hard-coded at one wiring site, so "chosen by
+    // configuration and off by default" was a thing that had to be built.
+    expect(runtimeFor({ runtime: "container", image: "timone-box:test" })).not.toBe(
+      agentSdkRuntime,
+    );
+  });
+
+  it("refuses a runtime nobody has built, rather than falling back quietly", () => {
+    expect(() =>
+      runtimeFor({ runtime: "vm" as "container", image: "timone-box:test" }),
+    ).toThrow(/vm/);
+  });
+
+  it("defaults to the image 30g's Dockerfile actually builds", () => {
+    // A default naming an image nobody builds fails at the first boxed spawn,
+    // with a message about a missing image rather than about a wrong name.
+    expect(DEFAULT_IMAGE.split(":")[0]).toBe("timone-agent");
+  });
+
+  it("is off by default, so this phase does not flip anything by accident", () => {
+    // 30k flips it, deliberately and with a live gate. Until then a daemon
+    // started with no flag behaves exactly as it did before this slice.
+    expect(DEFAULT_RUNTIME).toBe("in-process");
   });
 });

@@ -421,7 +421,8 @@ docker run --rm timone-agent /bin/sh -c '
 docker run --rm timone-agent node /opt/timone/image-check.mjs
 ```
 
-- [ ] All five assertions run against the built image and recorded
+- [x] ✏ **2026-08-22 — all six assertions run against the built image and recorded here.** `docker run --rm --shm-size=1g timone-agent:latest node /opt/timone/image-check.mjs`:
+      `/dev/shm size — 1024 MiB against a floor of 256 MiB`; `no docker CLI — not on PATH`; `no docker socket — /var/run/docker.sock absent`; `chromium loads a page — 151.0.7922.34`; `firefox loads a page — 153.0`; `webkit loads a page — 26.5`. Separately: `node v24.18.1`, `gh 2.97.0`, `claude 2.1.238`.
 - [ ] Image build time and size recorded — the startup cost of every future run starts here
 - [ ] ✏ **Refined 2026-08-20 — `.dockerignore` exists before the first build is run**, and the build context size is recorded next to the image size. A context in the hundreds of megabytes means it did not take effect and `projects/` went into the build.
 - [ ] ✏ **Refined 2026-08-20 — assertion (5) is a number compared against a floor, not a `df` line pasted into a report.** Chromium dying on a real page is what this assertion exists to prevent, and the failure looks like an unrelated crash, so the browser leg has to load a page rather than just launch.
@@ -447,17 +448,37 @@ Progress is the part that is easy to get wrong: `SessionProgress.observe` is fed
 
 > Depends on 30e, 30f, 30g.
 
+> **✅ Built 2026-08-22 — 30h is done as far as it can be without a live session, and the box was watched cloning for real.**
+>
+> **`src/daemon/container-runtime.ts` is the second runtime.** It starts a container from 30g's image, clones both repositories at the versions 30e's request names, streams the CLI's messages back, returns the outcome, and destroys the container. All five red-green cases are covered, plus four the plan did not have.
+>
+> **The switch the plan found missing is built.** `runtimeFor()` in `src/commands/daemon.ts`, behind `--runtime in-process|container` and `--image <ref>`, plumbed to the single production wiring site. **Default is `in-process` and 30k flips it** — asserted as a test, so this phase cannot change where every run happens as a side effect. An **unknown name throws**: a daemon that fell back to the in-process runtime because a flag was misspelled would run every session on fvermaut's machine while its operator believed otherwise.
+>
+> **Progress was the hazard and it is covered at the seam the plan named.** `parseSessionMessage` is exported and separately tested because it is a **new, untyped boundary**: in the in-process runtime the messages are values the SDK handed over; here they are text, printed by a program in a container, on a stream anything else in that container may also print to. A line that is not JSON, is JSON but not an object, or carries no `type` is **ignored** — a banner on stdout is not a reason to fail a run. Case (1)'s fixture carries **partial-message events**, per the plan's warning, and asserts the boxed path's snapshot equals a fresh accumulator fed the same lines: 900 output tokens both ways. The CLI is launched with `--include-partial-messages`, without which [timone#10](https://github.com/fvermaut/timone/issues/10) reproduces silently and R17 still looks satisfied.
+>
+> **Two decisions worth naming.**
+> - **The container is named, not `--rm`.** A container docker removes on exit cannot be inspected after a failure, which is exactly when somebody wants to look. This runtime removes it itself, on every exit path — success, non-zero exit, kill, and a stream that throws. Four tests, one per path.
+> - **The prompt, the commit, the branch and the token travel in the environment, never in the argument vector.** The prompt is arbitrary human and machine text; building a shell command out of a ticket body is how a ticket body ends up executed. Asserted: the prompt does not appear in the command line, and neither does the token.
+>
+> **Watched live on 2026-08-22, against the real remotes and the real image.** The box script cloned Timone, checked out an exact pinned commit, cloned `scratch-app`, landed on the right branch, and reported the prompt arriving **byte-exact through quotes, dollars and newlines** — and `/proc/mounts` showed **zero mounts under `/workspace`**, which is case (5) observed rather than asserted.
+>
+> **✏ A finding the live run produced, and the plan did not have it: a boxed run cannot follow a Timone commit nobody has pushed.** The box is built from the remotes, so `git checkout <sha>` in a fresh clone fails with `fatal: reference is not a tree` — a true sentence naming no cause and suggesting no action. It happened on the first live attempt, because the daemon's own branch was unpushed, and **it will happen to fvermaut the first time he runs a boxed daemon on unmerged work**. The box now says so in words he can act on, and the reason reaches the ticket. **The better fix is a pre-flight refusal**, beside 30f's dirty-checkout refusal — the run should not start rather than start and fail — but that needs the spawner to know which runtime it has, which is an interface change nothing else in this phase wants. **Recorded, not taken. 30k decides**, since 30k is where the default flips and where this stops being hypothetical.
+>
+> **What is still owed and is not a unit test's to give:** one real session run in a box with the ticker watched, and `docker ps -a` clean after a failed and a killed run. Both need a session that actually calls the model from inside the container, which is 30k's gate.
+>
+> **23 tests added**, all seen failing first. Suite: **1336 tests, all green.**
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npx vitest run src/daemon/container-runtime.test.ts
 ```
 
-- [ ] Red→green trace for all five cases
-- [ ] One real session run in a box on `scratch-app` with the ticker watched live — the tick must move, and its numbers must be comparable to an in-process run of the same stage
-- [ ] `docker ps -a` after a failed run and after a killed run: no container left behind either time
+- [x] Red→green trace for all five cases — 23 tests in `container-runtime.test.ts`, plus 5 in `commands/daemon.test.ts` for the switch
+- [ ] One real session run in a box on `scratch-app` with the ticker watched live — **deferred to 30k**, which is where a session actually calls the model from inside the box. The clone half was watched live and is recorded above
+- [ ] `docker ps -a` after a failed run and after a killed run: no container left behind either time — **deferred to 30k** for the same reason. Removal on all four exit paths is unit-covered
 - [ ] ✏ **Refined 2026-08-20 — the command above reports a non-zero test count.** With `passWithNoTests: true` at `vitest.config.ts:5` it prints `No test files found, exiting with code 0` until `container-runtime.test.ts` exists; a green exit before that point says nothing at all. Read the count, not the exit code.
-- [ ] ✏ **Refined 2026-08-20 — the runtime switch is exercised both ways**: default off reaches the in-process runtime, the flag or key on reaches the container runtime, asserted at `src/commands/daemon.ts`'s wiring and not only in a unit test of the runtime itself.
+- [x] ✏ **Refined 2026-08-20 — the runtime switch is exercised both ways**: `runtimeFor({})` returns `agentSdkRuntime` and `runtimeFor({runtime: "container"})` does not, asserted at `src/commands/daemon.ts`'s wiring. A third test asserts the default *is* `in-process`, and a fourth that an unknown name throws rather than falling back.
 
 ---
 
