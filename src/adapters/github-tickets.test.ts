@@ -1357,6 +1357,45 @@ describe("reading a branch's files from the forge", () => {
     ]);
   });
 
+  it("lists the repository root without putting a slash in front of every path", async () => {
+    // Found on 2026-08-22 by asking for the root and getting `/compose.yaml`
+    // back — a path that matches nothing and made `scratch-app` look as
+    // though it committed no compose file. The root is a real thing to ask
+    // for: a compose file lives there.
+    const { run } = fakeRunner(
+      ghTree([
+        { name: "compose.yaml", type: "blob" },
+        { name: "doc", type: "tree" },
+      ]),
+    );
+
+    const files = await new GitHubTicketingAdapter({ run }).listFiles(
+      alpha,
+      "main",
+      "",
+    );
+
+    expect(files).toEqual(["compose.yaml"]);
+  });
+
+  it("treats \".\" as the root too, since that is what a caller writes", async () => {
+    const { run, calls } = fakeRunnerWithOptions(
+      ghTree([{ name: "compose.yaml", type: "blob" }]),
+    );
+
+    const files = await new GitHubTicketingAdapter({ run }).listFiles(
+      alpha,
+      "main",
+      ".",
+    );
+
+    expect(files).toEqual(["compose.yaml"]);
+    // And it asks for the root the way the forge spells it, which is with
+    // nothing after the colon. `main:.` matches nothing and answers null,
+    // which reads as "the branch has no such directory".
+    expect(calls[0].args).toContain("expression=main:");
+  });
+
   it("answers undefined for a directory the branch does not carry", async () => {
     const { run } = fakeRunner(ghTree(null));
 

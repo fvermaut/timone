@@ -513,9 +513,17 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     branch: string,
     directory: string,
   ): Promise<string[] | undefined> {
+    // The repository root is a real thing to ask for — a compose file lives
+    // there — and the forge spells it with **nothing** after the colon.
+    // `main:.` matches nothing and answers null, which reads as "the branch
+    // has no such directory"; and joining onto an empty prefix produced
+    // `/compose.yaml`, a path that matches nothing either. Both were found on
+    // 2026-08-22, together, by a check that concluded a project committed no
+    // compose file when it does.
+    const root = directory === "" || directory === ".";
     const answer = await this.readObject(
       project,
-      `${branch}:${directory}`,
+      `${branch}:${root ? "" : directory}`,
       TREE_QUERY,
     );
     if (answer?.entries === undefined || answer.entries === null) {
@@ -523,7 +531,7 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     }
     return answer.entries
       .filter((entry) => entry.type === "blob")
-      .map((entry) => `${directory}/${entry.name}`);
+      .map((entry) => (root ? entry.name : `${directory}/${entry.name}`));
   }
 
   /** One `object(expression:)` read, shared by the blob and tree queries. */
