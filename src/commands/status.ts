@@ -1,19 +1,28 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
 import {
   fromDefaultBranch,
-  type BreakdownSource,
+  type SyncBreakdownSource,
 } from "../daemon/breakdown.js";
 import { ctaFor, type Cta, type InitiativeProgress } from "../daemon/cta.js";
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
-import {
-  checkoutOf,
-  initiativeProgress,
-  progressOf,
-} from "../daemon/poll.js";
+import { initiativeProgressSync, progressOf } from "../daemon/poll.js";
+
+/**
+ * Where a project's checkout is, under the timone root.
+ *
+ * ✏ Moved here from `poll.ts` by phase 30's 30d, because this command is now
+ * its only caller. `timone status` is **fvermaut's own command**, run in his
+ * terminal against his own folder, and reading it is exactly what it is for —
+ * one of the guard's named exemptions in `src/guards/checkouts.test.ts`. The
+ * daemon resolves no such path any more.
+ */
+export function checkoutOf(root: string, project: string): string {
+  return join(root, "projects", project);
+}
 import {
   RunStore,
   defaultStatePath,
@@ -72,7 +81,7 @@ export interface RenderStatusOptions {
    * keeps R21 clause 8 true — the terminal and the ticket read the same file
    * from the same ref.
    */
-  breakdownSource?: BreakdownSource;
+  breakdownSource?: SyncBreakdownSource;
 }
 
 /**
@@ -103,7 +112,7 @@ interface RenderContext {
  */
 function progressReader(
   root: string | undefined,
-  source: BreakdownSource | undefined,
+  source: SyncBreakdownSource | undefined,
   picture: (project: string, ticket: number) => InitiativeRecord | undefined,
 ): (run: Run) => InitiativeProgress | undefined {
   const cache = new Map<string, InitiativeProgress | undefined>();
@@ -119,10 +128,9 @@ function progressReader(
         key,
         root === undefined
           ? progressOf(seen)
-          : initiativeProgress(
-              checkoutOf(root, run.project),
+          : initiativeProgressSync(
+              source ?? fromDefaultBranch(checkoutOf(root, run.project)),
               run.ticket,
-              source ?? fromDefaultBranch,
               seen,
             ),
       );

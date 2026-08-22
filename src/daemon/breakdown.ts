@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { TicketingProject } from "../adapters/ticketing.js";
 
 /**
  * One piece an initiative will be built in: a chunk, in the domain's word
@@ -137,20 +138,39 @@ export type BreakdownRead =
  * world. Throwing is reserved for a source that could not look.
  */
 export type BreakdownSource = (
-  repoDir: string,
   path: string,
-) => string | undefined;
+) => string | undefined | Promise<string | undefined>;
 
 /**
- * The file as it sits in the working tree. **Correct only when the caller
- * owns the checkout** — a test fixture, or a session working on its own
- * branch. Never right for the poll loop.
+ * ✏ **Phase 30's 30d: a source is now built by whoever knows where to look,
+ * and takes only the path.**
+ *
+ * It used to take `(repoDir, path)`, which forced every caller to resolve a
+ * directory under `projects/` before it could ask a question — including the
+ * poll loop, whose whole point since 30d is that it does not have one
+ * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)). A
+ * source that reads the forge has no directory to be given, and one that
+ * reads a checkout can close over its own.
+ *
+ * It may answer asynchronously, because reading the forge is a network call.
+ * A synchronous source still satisfies the type unchanged.
  */
-export const fromWorkingTree: BreakdownSource = (repoDir, path) => {
-  const full = join(repoDir, path);
-  if (!existsSync(full)) return undefined;
-  return readFileSync(full, "utf8");
-};
+
+/** A {@link BreakdownSource} that answers without waiting. */
+export type SyncBreakdownSource = (path: string) => string | undefined;
+
+/**
+ * The file as it sits in a working tree. **Correct only when the caller owns
+ * the checkout** — a test fixture, or a session working on its own branch.
+ * Never right for the poll loop.
+ */
+export function fromWorkingTree(repoDir: string): SyncBreakdownSource {
+  return (path) => {
+    const full = join(repoDir, path);
+    if (!existsSync(full)) return undefined;
+    return readFileSync(full, "utf8");
+  };
+}
 
 /**
  * The file as it stands on the project's **default branch** — the one place an
@@ -174,19 +194,54 @@ export const fromWorkingTree: BreakdownSource = (repoDir, path) => {
  * Synchronous, matching what it replaced. These are two short `git` calls on a
  * local repository, on a loop that runs once a minute.
  */
-export const fromDefaultBranch: BreakdownSource = (repoDir, path) => {
-  const ref = defaultBranchOf(repoDir);
-  if (ref === undefined) return undefined;
-  try {
-    return execFileSync("git", ["show", `${ref}:${path}`], {
-      cwd: repoDir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-  } catch {
-    return undefined;
-  }
-};
+export function fromDefaultBranch(repoDir: string): SyncBreakdownSource {
+  return (path) => {
+    const ref = defaultBranchOf(repoDir);
+    if (ref === undefined) return undefined;
+    try {
+      return execFileSync("git", ["show", `${ref}:${path}`], {
+        cwd: repoDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    } catch {
+      return undefined;
+    }
+  };
+}
+
+/**
+ * The file as it stands on the project's default branch **on the forge**.
+ *
+ * The machine's source since 30d, and the reason the one above is now
+ * fvermaut's alone. Nothing fetched the checkout the git version read, so it
+ * answered from whatever that folder last happened to hold; and once a
+ * session runs in a box, the branch is not in that folder at all.
+ *
+ * A file that is not there answers undefined. A forge that cannot be reached
+ * **throws**, and `readBreakdown` turns that into `malformed` with the reason
+ * on it, which is a state the poll loop already reports rather than one it
+ * mistakes for an absent breakdown.
+ */
+export function fromForgeDefaultBranch(
+  adapter: {
+    readBranches: (
+      project: TicketingProject,
+      branch?: string,
+    ) => Promise<{ defaultBranch: string }>;
+    readFile: (
+      project: TicketingProject,
+      branch: string,
+      path: string,
+    ) => Promise<string | undefined>;
+  },
+  project: TicketingProject,
+): BreakdownSource {
+  return async (path) => {
+    const { defaultBranch } = await adapter.readBranches(project);
+    return adapter.readFile(project, defaultBranch, path);
+  };
+}
 
 /** The default branch's ref, or undefined when the repository cannot say. */
 function defaultBranchOf(repoDir: string): string | undefined {
@@ -215,20 +270,47 @@ function defaultBranchOf(repoDir: string): string | undefined {
  * the repository-relative one, because that is what identifies the file
  * whichever branch it was read from.
  */
-export function readBreakdown(
-  repoDir: string,
+export async function readBreakdown(
   ticket: number,
   source: BreakdownSource,
+): Promise<BreakdownRead> {
+  const path = breakdownPath(ticket);
+
+  let text: string | undefined;
+  try {
+    text = await source(path);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { kind: "malformed", path, reason };
+  }
+  return breakdownFrom(path, text);
+}
+
+/**
+ * {@link readBreakdown} for a source that answers without waiting.
+ *
+ * It exists for `timone status`, which renders synchronously and reads
+ * fvermaut's own checkout — his command, his folder, and one of 30d's named
+ * exemptions. The machine's readers are all async because they ask the forge.
+ */
+export function readBreakdownSync(
+  ticket: number,
+  source: SyncBreakdownSource,
 ): BreakdownRead {
   const path = breakdownPath(ticket);
 
   let text: string | undefined;
   try {
-    text = source(repoDir, path);
+    text = source(path);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { kind: "malformed", path, reason };
   }
+  return breakdownFrom(path, text);
+}
+
+/** Turn whatever a source answered into a {@link BreakdownRead}. */
+function breakdownFrom(path: string, text: string | undefined): BreakdownRead {
   if (text === undefined) return { kind: "absent", path };
 
   const parsed = parseBreakdown(text);

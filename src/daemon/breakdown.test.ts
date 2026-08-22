@@ -9,6 +9,7 @@ import {
   parseBreakdown,
   fromDefaultBranch,
   fromWorkingTree,
+  readBreakdownSync,
   readBreakdown,
   renderBreakdown,
   type ParsedBreakdown,
@@ -142,8 +143,8 @@ describe("reading a breakdown out of a checkout", () => {
   it("answers rather than throwing when the project has no doc/ at all", () => {
     const dir = checkout();
 
-    expect(() => readBreakdown(dir, TICKET, fromWorkingTree)).not.toThrow();
-    expect(readBreakdown(dir, TICKET, fromWorkingTree)).toEqual({
+    expect(() => readBreakdownSync(TICKET, fromWorkingTree(dir))).not.toThrow();
+    expect(readBreakdownSync(TICKET, fromWorkingTree(dir))).toEqual({
       kind: "absent",
       path: RELATIVE_PATH,
     });
@@ -153,7 +154,7 @@ describe("reading a breakdown out of a checkout", () => {
     const dir = checkout();
     const path = withBreakdown(dir, renderBreakdown(approved));
 
-    expect(readBreakdown(dir, TICKET, fromWorkingTree)).toEqual({
+    expect(readBreakdownSync(TICKET, fromWorkingTree(dir))).toEqual({
       kind: "ok",
       path,
       breakdown: approved,
@@ -167,7 +168,7 @@ describe("reading a breakdown out of a checkout", () => {
       "# Breakdown\n\n**Status:** Awaiting approval\n",
     );
 
-    const answer = readBreakdown(dir, TICKET, fromWorkingTree);
+    const answer = readBreakdownSync(TICKET, fromWorkingTree(dir));
     expect(answer.kind).toBe("malformed");
     expect(answer).toMatchObject({ path });
     expect("reason" in answer && answer.reason).toContain("no chunks");
@@ -180,7 +181,7 @@ describe("reading a breakdown out of a checkout", () => {
       "# Breakdown\n\n1. **One** — the only piece.\n",
     );
 
-    const answer = readBreakdown(dir, TICKET, fromWorkingTree);
+    const answer = readBreakdownSync(TICKET, fromWorkingTree(dir));
     expect(answer.kind).toBe("malformed");
     expect(answer).toMatchObject({ path });
     expect("reason" in answer && answer.reason).toContain("`Status:`");
@@ -220,7 +221,7 @@ describe("where a breakdown is read from", () => {
     withBreakdown(dir, renderBreakdown(approved));
     clone(dir);
 
-    expect(readBreakdown(dir, TICKET, fromDefaultBranch)).toEqual({
+    expect(readBreakdownSync(TICKET, fromDefaultBranch(dir))).toEqual({
       kind: "ok",
       path: RELATIVE_PATH,
       breakdown: approved,
@@ -238,8 +239,8 @@ describe("where a breakdown is read from", () => {
     clone(dir);
     withBreakdown(dir, renderBreakdown(approved));
 
-    expect(readBreakdown(dir, TICKET, fromDefaultBranch).kind).toBe("absent");
-    expect(readBreakdown(dir, TICKET, fromWorkingTree).kind).toBe("ok");
+    expect(readBreakdownSync(TICKET, fromDefaultBranch(dir)).kind).toBe("absent");
+    expect(readBreakdownSync(TICKET, fromWorkingTree(dir)).kind).toBe("ok");
   });
 
   it("answers absent rather than throwing when the directory is no repository", () => {
@@ -248,8 +249,8 @@ describe("where a breakdown is read from", () => {
     const dir = checkout();
     withBreakdown(dir, renderBreakdown(approved));
 
-    expect(() => readBreakdown(dir, TICKET, fromDefaultBranch)).not.toThrow();
-    expect(readBreakdown(dir, TICKET, fromDefaultBranch).kind).toBe("absent");
+    expect(() => readBreakdownSync(TICKET, fromDefaultBranch(dir))).not.toThrow();
+    expect(readBreakdownSync(TICKET, fromDefaultBranch(dir)).kind).toBe("absent");
   });
 
   it("still says why a file on the default branch cannot be read", () => {
@@ -260,7 +261,7 @@ describe("where a breakdown is read from", () => {
     withBreakdown(dir, "# Breakdown\n\nsomebody deleted the status line\n");
     clone(dir);
 
-    const answer = readBreakdown(dir, TICKET, fromDefaultBranch);
+    const answer = readBreakdownSync(TICKET, fromDefaultBranch(dir));
     expect(answer.kind).toBe("malformed");
     expect("reason" in answer && answer.reason).toContain("`Status:`");
   });

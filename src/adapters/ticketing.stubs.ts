@@ -1,4 +1,9 @@
-import type { Step, TicketingProject } from "./ticketing.js";
+import type {
+  MergeOutcome,
+  RepositoryBranches,
+  Step,
+  TicketingProject,
+} from "./ticketing.js";
 
 /**
  * The ticketing writes that open an initiative's step tickets, stubbed for
@@ -35,5 +40,59 @@ export const noStepWrites = {
 export const noSteps = {
   async listSteps(_project: TicketingProject, _initiative: number): Promise<Step[]> {
     return [];
+  },
+};
+
+/**
+ * Branch state for fakes whose test is not about it: a repository whose
+ * default branch carries no commits and whose work branch does not exist.
+ *
+ * **It answers rather than throwing, unlike {@link noStepWrites}, and the
+ * difference is not laziness.** "There is no such branch" is a legitimate
+ * answer and the one every test here used to get: before phase 30 the default
+ * probe ran `git rev-parse` in a directory that was no repository, found
+ * nothing, and said so. Keeping that silence is what lets a test about
+ * something else stay about something else.
+ *
+ * A test whose subject *is* branch state overrides this — see the
+ * `repoProbe` and `headProbe` seams, and the fakes that implement
+ * `readBranches` themselves.
+ */
+export const noBranches = {
+  async readBranches(): Promise<RepositoryBranches> {
+    return { defaultBranch: "main" };
+  },
+};
+
+/**
+ * The merge that puts chunk zero on the default branch, stubbed for tests
+ * whose subject is not it.
+ *
+ * **It throws**, like {@link noStepWrites} and unlike {@link noBranches}. A
+ * silent no-op would let a test that should have merged pass while merging
+ * nothing, and this is the one path in the system that reaches a default
+ * branch with no human having read a diff — the last place to be quiet about
+ * a call nobody meant to make.
+ */
+export const noMerges = {
+  async mergeIntoDefault(): Promise<MergeOutcome> {
+    throw new Error("no test here merges chunk zero");
+  },
+};
+
+/**
+ * The branch file reads, for tests whose subject is not them: a branch
+ * carrying nothing.
+ *
+ * It answers rather than throwing, for {@link noBranches}' reason — "no such
+ * file on that branch" is what these tests used to get from a `git show` in a
+ * directory that was no repository.
+ */
+export const noFiles = {
+  async readFile(): Promise<string | undefined> {
+    return undefined;
+  },
+  async listFiles(): Promise<string[] | undefined> {
+    return undefined;
   },
 };

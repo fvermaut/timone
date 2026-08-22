@@ -27,9 +27,36 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
-import { noStepWrites } from "../adapters/ticketing.stubs.js";
+import {
+  noBranches,
+  noFiles,
+  noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { HELD_LABEL, MAP_LABEL } from "./steps.js";
-import { breakdownPath, fromWorkingTree } from "./breakdown.js";
+import {
+  breakdownPath, fromWorkingTree,
+  type SyncBreakdownSource,
+} from "./breakdown.js";
+
+/**
+ * A fixture root and the breakdown source that reads it, together.
+ *
+ * The two must agree, and since 30d they are two separate values — a source
+ * is built by whoever knows where to look, and the poll loop's production
+ * default no longer knows about a directory at all. Spreading one helper is
+ * what stops a test setting `root` here and reading a breakdown from
+ * somewhere else.
+ */
+function breakdownIn(
+  root: string,
+  project = "scratch-app",
+): { breakdownSource: SyncBreakdownSource } {
+  // `join(root, "projects", project)` is what `checkoutOf` used to supply on
+  // the caller's behalf, back when the loop was told a root. It is spelled
+  // here because the production default resolves no directory at all now: it
+  // reads the forge.
+  return { breakdownSource: fromWorkingTree(join(root, "projects", project)) };
+}
+
 import { enqueue, pending, requestsDir } from "./requests.js";
 import { RunStore, type Run } from "./runs.js";
 import { pollOnce, type SessionSpawner, type SpawnContext } from "./poll.js";
@@ -49,9 +76,18 @@ afterEach(() => {
 function newStore(): RunStore {
   const dir = mkdtempSync(join(tmpdir(), "timone-poll-"));
   tempDirs.push(dir);
+  // One **second** per clock read, not one minute.
+  //
+  // It was minutes until phase 30's 30c, and that made every test in this
+  // file quietly sensitive to how many times a cycle happens to ask the time:
+  // adding one read anywhere pushed a three-cycle test past the two-minute
+  // staleness window, and three tests failed on a reclaim nobody had changed.
+  // The tests that are actually about time set their own instants, so
+  // shortening the tick costs them nothing and stops an unrelated change from
+  // looking like a regression.
   let tick = 0;
   return RunStore.open(join(dir, ".timone", "state.json"), {
-    now: () => `2026-08-02T10:${String(tick++).padStart(2, "0")}:00Z`,
+    now: () => `2026-08-02T10:00:${String(tick++).padStart(2, "0")}Z`,
   });
 }
 
@@ -159,6 +195,9 @@ function fakeAdapter(
 ): { adapter: TicketingAdapter; comments: PostedComment[] } {
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
+    ...noBranches,
+    ...noFiles,
+    ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {
@@ -471,7 +510,10 @@ describe("pollOnce — resuming a run whose human answered", () => {
     const posted: PostedComment[] = [];
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -972,7 +1014,10 @@ describe("pollOnce — runs parked before the machinery existed", () => {
   function labelledAdapter(labels: string[]): TicketingAdapter {
     const base = ticket(4, { labels });
     return {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -1070,7 +1115,10 @@ describe("pollOnce — a run parked at an unbuilt stage resumes at that stage", 
     parkedAtExecution(store);
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -1122,7 +1170,10 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     const closed: string[] = [];
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -1344,7 +1395,10 @@ describe("reclaiming a run its daemon left behind", () => {
       comments: [],
     };
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -1880,6 +1934,9 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
 } {
   const upserts: Upsert[] = [];
   const adapter: TicketingAdapter = {
+    ...noBranches,
+    ...noFiles,
+    ...noMerges,
     ...noStepWrites,
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
@@ -2265,12 +2322,12 @@ describe("pollOnce — a wayfinder decision ticket", () => {
       manifest: manifestWith("scratch-app"),
       store,
       adapter,
+      root: "/root",
       runtime: {
         async start() {
           throw new Error("no unattended session may start for a conversation");
         },
       },
-      root: "/nowhere",
     });
   }
 
@@ -2427,6 +2484,7 @@ describe("pollOnce — a written answer reaches a session that ingests it", () =
       manifest: manifestWith("scratch-app"),
       store,
       adapter,
+      root: "/root",
       runtime: {
         async start(request) {
           prompts.push(request.prompt);
@@ -2436,7 +2494,6 @@ describe("pollOnce — a written answer reaches a session that ingests it", () =
           };
         },
       },
-      root: "/nowhere",
     });
   }
 
@@ -2457,7 +2514,10 @@ describe("pollOnce — a written answer reaches a session that ingests it", () =
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const posted: PostedComment[] = [];
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -2522,7 +2582,10 @@ describe("pollOnce — reading a written answer consumes it", () => {
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const thread = [...comments];
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -2667,7 +2730,10 @@ describe("pollOnce — reading a written answer consumes it", () => {
       calls.push({ call, args });
     };
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
         return [];
@@ -2740,6 +2806,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
       manifest: manifestWith("scratch-app"),
       store,
       adapter,
+      root: "/root",
       runtime: {
         async start() {
           return {
@@ -2755,7 +2822,6 @@ describe("pollOnce — reading a written answer consumes it", () => {
           };
         },
       },
-      root: "/nowhere",
     });
 
     await pollOnce({
@@ -2827,7 +2893,10 @@ describe("pollOnce — one read of one thread per parked run", () => {
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     let fetches = 0;
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -2879,7 +2948,10 @@ describe("pollOnce — one read of one thread per parked run", () => {
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     let fetches = 0;
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -3017,7 +3089,10 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
     };
 
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
         return [];
@@ -3410,7 +3485,10 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       `${MACHINE_MARKER}\n\n---\n\n${body}`;
 
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
         return [];
@@ -3906,7 +3984,10 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     const map = (): Ticket =>
       ticket(MAP, { title: "chart the trends redesign", labels });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
       },
@@ -3943,12 +4024,12 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
       manifest: manifestWith("ivtrends"),
       store,
       adapter,
+      root: "/root",
       runtime: {
         async start() {
           throw new Error("no session may start for a map");
         },
       },
-      root: "/nowhere",
     });
   }
 
@@ -4123,6 +4204,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
         manifest: manifestWith("ivtrends"),
         store,
         adapter,
+        root: "/root",
         runtime: {
           async start(request) {
             prompts.push(request.prompt);
@@ -4132,7 +4214,6 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
             };
           },
         },
-        root: "/nowhere",
       }),
     };
 
@@ -4185,7 +4266,10 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
     const map = (): Ticket =>
       ticket(MAP, { title: "chart the trends redesign", labels });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
       },
@@ -4223,6 +4307,7 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
       manifest: manifestWith("ivtrends"),
       store,
       adapter,
+      root: "/root",
       runtime: {
         async start(request) {
           prompts.push(request.prompt);
@@ -4232,7 +4317,6 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
           };
         },
       },
-      root: "/nowhere",
       repoProbe: async () => `sha-${commits++}`,
       headProbe: async () => "sha-root",
     });
@@ -4397,7 +4481,10 @@ describe("pollOnce — a ticket's next chunk", () => {
       };
     };
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return tickets;
       },
@@ -4452,8 +4539,7 @@ describe("pollOnce — a ticket's next chunk", () => {
       spawner,
       // A plain fixture directory, not a clone: the production default reads the
       // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
+            ...breakdownIn(rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"]))),
     });
 
     expect(closed).toEqual(["6:completed"]);
@@ -4477,8 +4563,7 @@ describe("pollOnce — a ticket's next chunk", () => {
       spawner,
       // A plain fixture directory, not a clone: the production default reads the
       // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
+            ...breakdownIn(rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"]))),
     });
 
     expect(closed).toEqual(["6:not-planned"]);
@@ -4517,8 +4602,7 @@ describe("pollOnce — a ticket's next chunk", () => {
       spawner,
       // A plain fixture directory, not a clone: the production default reads the
       // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"])),
+            ...breakdownIn(rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"]))),
     });
 
     expect(spawned).toEqual([]);
@@ -4543,13 +4627,12 @@ describe("pollOnce — a ticket's next chunk", () => {
       spawner,
       // A plain fixture directory, not a clone: the production default reads the
       // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(
+            ...breakdownIn(rootWith(
         breakdown(
           ["The ledger learns chunks", "The next chunk opens", "The ticket closes"],
           2,
         ),
-      ),
+      )),
     };
 
     await pollOnce(deps);
@@ -4585,8 +4668,7 @@ describe("pollOnce — a ticket's next chunk", () => {
       spawner,
       // A plain fixture directory, not a clone: the production default reads the
       // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(),
+            ...breakdownIn(rootWith()),
     });
 
     expect(closed).toEqual(["6:completed"]);
@@ -4613,8 +4695,7 @@ describe("pollOnce — a ticket's next chunk", () => {
       spawner,
       // A plain fixture directory, not a clone: the production default reads the
       // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith("# Breakdown\n\nsomebody deleted the status line\n"),
+            ...breakdownIn(rootWith("# Breakdown\n\nsomebody deleted the status line\n")),
     });
 
     expect(result.errors).toHaveLength(1);
@@ -4790,10 +4871,9 @@ describe("pollOnce — a ticket's next chunk", () => {
       spawner,
       // A plain fixture directory, not a clone: the production default reads the
       // approved list off the default branch (ADR-0030 D2).
-      breakdownSource: fromWorkingTree,
-      root: rootWith(
+            ...breakdownIn(rootWith(
         breakdown(["The ledger learns chunks", "The next chunk opens", "A piece nobody read"], 2),
-      ),
+      )),
     };
 
     await pollOnce(deps);
@@ -5102,7 +5182,10 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
     const posted: PostedComment[] = [];
     const base = ticket(31, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -5137,7 +5220,6 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
       store,
       adapter,
       spawner: watching,
-      root: "/nowhere",
     });
 
     expect(result.resumed).toEqual(["scratch-app#31/1"]);
@@ -5158,7 +5240,6 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     };
 
     await pollOnce(deps);
@@ -5186,7 +5267,6 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     expect(result.resumed).toEqual([]);
@@ -5213,7 +5293,6 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     expect(result.resumed).toEqual([]);
@@ -5248,7 +5327,6 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     // Not concluded: marking a half-built run `done` would close its ticket.
@@ -5285,7 +5363,10 @@ describe("pollOnce — a park nothing written can end", () => {
     const posted: PostedComment[] = [];
     const base = ticket(number, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -5326,7 +5407,6 @@ describe("pollOnce — a park nothing written can end", () => {
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     expect(result.resumed).toEqual([]);
@@ -5364,7 +5444,6 @@ describe("pollOnce — a park nothing written can end", () => {
           contexts.push(context);
         },
       },
-      root: "/nowhere",
     });
 
     expect(result.resumed).toEqual(["scratch-app#31/1"]);
@@ -5398,7 +5477,6 @@ describe("pollOnce — a park nothing written can end", () => {
           contexts.push(context);
         },
       },
-      root: "/nowhere",
     });
 
     expect(result.resumed).toEqual(["scratch-app#6/1"]);
@@ -5419,7 +5497,10 @@ describe("pollOnce — a park nothing written can end", () => {
     });
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -5469,7 +5550,6 @@ describe("pollOnce — a park nothing written can end", () => {
           contexts.push(context);
         },
       },
-      root: "/nowhere",
     });
 
     expect(result.resumed).toEqual(["scratch-app#6/1"]);
@@ -5503,7 +5583,10 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     const base = ticket(number, { labels: ["timone", "triage:feature"] });
     const thread = [...comments];
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -5548,7 +5631,6 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     };
 
     for (let cycle = 0; cycle < 10; cycle += 1) {
@@ -5588,7 +5670,6 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     const run = store.get("scratch-app#31/1");
@@ -5620,7 +5701,6 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     expect(store.get("scratch-app#31/1")?.status).toBe("parked");
@@ -5639,7 +5719,6 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     expect(standing.at(-1)).toMatch(/won't move it/i);
@@ -5693,7 +5772,6 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
       store,
       adapter,
       spawner: asking,
-      root: "/nowhere",
     };
 
     for (let cycle = 0; cycle < 3; cycle += 1) {
@@ -5749,7 +5827,6 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
           contexts.push(context);
         },
       },
-      root: "/nowhere",
     });
 
     expect(result.resumed).toEqual(["scratch-app#33/1"]);
@@ -5787,7 +5864,10 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     const standing: string[] = [];
     const base = ticket(41, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
-      ...noStepWrites,
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+    ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
       },
@@ -5837,7 +5917,6 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
           store.activate(run.id, "session-2");
         },
       },
-      root: "/nowhere",
     };
 
     const first = await pollOnce(deps);
@@ -5864,7 +5943,6 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
           contexts.push(context);
         },
       },
-      root: "/nowhere",
     });
 
     expect(contexts[0]?.stage).toBe("clarification");
@@ -5887,7 +5965,6 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     expect(store.get("scratch-app#41/1")?.branch).toBeUndefined();
@@ -5904,7 +5981,6 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     expect(spawned).toEqual([]);
@@ -5941,7 +6017,6 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     expect(spawned).toEqual([]);
@@ -5967,7 +6042,6 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     const said = standing.at(-1) ?? "";
@@ -5991,7 +6065,6 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     });
 
     expect(spawned).toEqual([]);
@@ -6012,7 +6085,6 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
       store,
       adapter,
       spawner,
-      root: "/nowhere",
     };
 
     for (let cycle = 0; cycle < 10; cycle += 1) {

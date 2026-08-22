@@ -5,9 +5,11 @@ import {
   MARK_LABEL,
   type TicketingProject,
 } from "./ticketing.js";
+import { credentialCommandRunner } from "./command-runner.js";
 import {
   GitHubTicketingAdapter,
   repoSlug,
+  type CommandOptions,
   type CommandRunner,
 } from "./github-tickets.js";
 
@@ -44,6 +46,59 @@ function fakeRunner(...responses: string[]): {
     return next;
   };
   return { run, calls };
+}
+
+/** As {@link fakeRunner}, but recording the options each call carried too. */
+function fakeRunnerWithOptions(...responses: string[]): {
+  run: CommandRunner;
+  calls: { command: string; args: string[]; options?: CommandOptions }[];
+} {
+  const calls: { command: string; args: string[]; options?: CommandOptions }[] =
+    [];
+  const queue = [...responses];
+  const run: CommandRunner = async (command, args, options) => {
+    calls.push({ command, args, options });
+    const next = queue.shift();
+    if (next === undefined) {
+      throw new Error(
+        `fake runner: unexpected call ${command} ${args.join(" ")}`,
+      );
+    }
+    return next;
+  };
+  return { run, calls };
+}
+
+/** As {@link fakeRunnerWithOptions}, but the last scripted call throws. */
+function fakeRunnerFailing(
+  ...responses: (string | Error)[]
+): { run: CommandRunner; calls: { command: string; args: string[] }[] } {
+  const calls: { command: string; args: string[] }[] = [];
+  const queue = [...responses];
+  const run: CommandRunner = async (command, args) => {
+    calls.push({ command, args });
+    const next = queue.shift();
+    if (next === undefined) {
+      throw new Error(
+        `fake runner: unexpected call ${command} ${args.join(" ")}`,
+      );
+    }
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  return { run, calls };
+}
+
+/** The branch read a merge makes first, to learn the default branch's name. */
+function ghBranchesForMerge(): string {
+  return JSON.stringify({
+    data: {
+      repository: {
+        defaultBranchRef: { name: "main", target: { oid: "aaaa111" } },
+        ref: null,
+      },
+    },
+  });
 }
 
 /** A `gh issue list --json …` element as GitHub actually returns it. */
@@ -295,6 +350,115 @@ describe("getTicket", () => {
       "fvermaut",
       "fvermaut",
     ]);
+    expect(thread.comments.map((comment) => comment.fromTimone)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("knows its own comment by its author once it has an identity", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify(
+        ghIssue({
+          comments: [
+            {
+              // No marker: written by a stage that posted through the forge
+              // rather than through `postComment`.
+              author: { login: "timone-agent[bot]" },
+              body: "Picked this up.",
+              createdAt: "2026-08-02T10:05:00Z",
+            },
+            {
+              author: { login: "fvermaut" },
+              body: "it's worse on the archive page",
+              createdAt: "2026-08-02T10:10:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const thread = await new GitHubTicketingAdapter({
+      run,
+      machineLogin: "timone-agent[bot]",
+    }).getTicket(alpha, 7);
+
+    expect(thread.comments.map((comment) => comment.fromTimone)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  it("knows the same bot under either spelling the forge uses for it", async () => {
+    // GitHub renders one identity two ways, and this adapter reads both
+    // surfaces: GraphQL — which `gh --json` speaks — answers `timone-agent`,
+    // while REST answers `timone-agent[bot]`. Watched on `fvermaut/scratch-app`
+    // on 2026-08-22. A comparison against one spelling silently fails to
+    // recognise half of Timone's own comments.
+    const { run } = fakeRunner(
+      JSON.stringify(
+        ghIssue({
+          comments: [
+            {
+              author: { login: "timone-agent" },
+              body: "Read on the GraphQL surface.",
+              createdAt: "2026-08-02T10:05:00Z",
+            },
+            {
+              author: { login: "timone-agent[bot]" },
+              body: "Read on the REST surface.",
+              createdAt: "2026-08-02T10:06:00Z",
+            },
+            {
+              author: { login: "timone-agent-helper" },
+              body: "A different account whose name merely starts the same.",
+              createdAt: "2026-08-02T10:07:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const thread = await new GitHubTicketingAdapter({
+      run,
+      machineLogin: "timone-agent[bot]",
+    }).getTicket(alpha, 7);
+
+    expect(thread.comments.map((comment) => comment.fromTimone)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+  });
+
+  it("keeps the marker fallback, so history written under a borrowed login still reads right", async () => {
+    const { run } = fakeRunner(
+      JSON.stringify(
+        ghIssue({
+          comments: [
+            {
+              // Every comment Timone wrote before it had an identity is
+              // authored by fvermaut. Losing them would make a whole backlog
+              // of the machine's own questions read as the human's answers.
+              author: { login: "fvermaut" },
+              body: `${MACHINE_MARKER}\n\n---\n\nPicked this up.`,
+              createdAt: "2026-08-02T10:05:00Z",
+            },
+            {
+              author: { login: "fvermaut" },
+              body: "it's worse on the archive page",
+              createdAt: "2026-08-02T10:10:00Z",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const thread = await new GitHubTicketingAdapter({
+      run,
+      machineLogin: "timone-agent[bot]",
+    }).getTicket(alpha, 7);
+
     expect(thread.comments.map((comment) => comment.fromTimone)).toEqual([
       true,
       false,
@@ -869,5 +1033,504 @@ describe("the writes that open an initiative's steps", () => {
     await expect(
       new GitHubTicketingAdapter({ run }).ensureLabel(alpha, "timone:held"),
     ).rejects.toThrow(/403/);
+  });
+});
+
+describe("readBranches — branch state comes from the forge, not from a checkout", () => {
+  /** GraphQL's answer shape for a repository with the named branch present. */
+  function ghBranches(
+    overrides: {
+      defaultBranchRef?: unknown;
+      ref?: unknown;
+    } = {},
+  ): string {
+    return JSON.stringify({
+      data: {
+        repository: {
+          defaultBranchRef:
+            "defaultBranchRef" in overrides
+              ? overrides.defaultBranchRef
+              : { name: "main", target: { oid: "aaaa111" } },
+          ref: "ref" in overrides ? overrides.ref : { target: { oid: "bbbb222" } },
+        },
+      },
+    });
+  }
+
+  it("answers a known branch with its tip", async () => {
+    const { run } = fakeRunner(ghBranches());
+
+    const state = await new GitHubTicketingAdapter({ run }).readBranches(
+      alpha,
+      "timone/7-execute",
+    );
+
+    expect(state.head).toBe("bbbb222");
+  });
+
+  it("answers the default branch and its tip", async () => {
+    const { run } = fakeRunner(ghBranches());
+
+    const state = await new GitHubTicketingAdapter({ run }).readBranches(alpha);
+
+    expect(state.defaultBranch).toBe("main");
+    expect(state.defaultHead).toBe("aaaa111");
+  });
+
+  it("answers an absent branch with no tip, and does not call that an error", async () => {
+    // The distinction this preserves: "no branch yet" is how the daemon
+    // detects that a stage produced nothing. A thrown error here would take
+    // the run down instead.
+    const { run } = fakeRunner(ghBranches({ ref: null }));
+
+    const state = await new GitHubTicketingAdapter({ run }).readBranches(
+      alpha,
+      "timone/7-execute",
+    );
+
+    expect(state.head).toBeUndefined();
+    expect(state.defaultBranch).toBe("main");
+  });
+
+  it("answers a repository with no commits at all without inventing a tip", async () => {
+    const { run } = fakeRunner(ghBranches({ defaultBranchRef: null, ref: null }));
+
+    const state = await new GitHubTicketingAdapter({ run }).readBranches(alpha);
+
+    expect(state.defaultHead).toBeUndefined();
+    expect(state.head).toBeUndefined();
+  });
+
+  it("reports a transport failure, and never renders one as an absent branch", async () => {
+    // This is the case the whole seam exists to keep honest. A stage that did
+    // its work, reported as having done none, is a run that stops silently and
+    // a human told nothing happened.
+    const run: CommandRunner = async () => {
+      throw new Error("gh api graphql failed after 3 attempts: ECONNRESET");
+    };
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).readBranches(alpha, "timone/7-execute"),
+    ).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it("reports an answer it cannot read, rather than treating it as no branch", async () => {
+    const { run } = fakeRunner("not json at all");
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).readBranches(alpha, "timone/7-execute"),
+    ).rejects.toThrow(/unparseable/);
+  });
+
+  it("names the repository, so the credential it runs under is scoped to it", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBranches());
+
+    await new GitHubTicketingAdapter({ run }).readBranches(
+      alpha,
+      "timone/7-execute",
+    );
+
+    expect(calls[0].options?.repository).toBe("fvermaut/scratch-app");
+  });
+
+  it("asks for the branch as a fully qualified ref", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBranches());
+
+    await new GitHubTicketingAdapter({ run }).readBranches(
+      alpha,
+      "timone/7-execute",
+    );
+
+    expect(calls[0].args).toContain("ref=refs/heads/timone/7-execute");
+  });
+
+  it("does not ask for a branch when none was named", async () => {
+    const { run, calls } = fakeRunnerWithOptions(
+      ghBranches({ ref: null }),
+    );
+
+    await new GitHubTicketingAdapter({ run }).readBranches(alpha);
+
+    expect(calls[0].args.join(" ")).not.toContain("refs/heads/undefined");
+  });
+});
+
+describe("mergeIntoDefault — the one merge with no pull request, done on the forge", () => {
+  /** What GitHub answers for a merge it made. */
+  const created = JSON.stringify({
+    sha: "cccc333",
+    commit: { message: "Merge branch 'timone/7-slow'" },
+  });
+
+  it("reports a clean merge, and says what it merged into", async () => {
+    const { run } = fakeRunner(ghBranchesForMerge(), created);
+
+    const outcome = await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(outcome).toEqual({ merged: true, into: "main" });
+  });
+
+  it("reports a merge that had already happened as done, not as a failure", async () => {
+    // GitHub answers 204 with an empty body when there is nothing to merge.
+    // Failing the run here would stop a chunk whose work is already on the
+    // default branch — the run would be told to redo what it had done.
+    const { run } = fakeRunner(ghBranchesForMerge(), "");
+
+    const outcome = await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(outcome).toEqual({ merged: true, into: "main", alreadyThere: true });
+  });
+
+  it("reports a conflict as a conflict, and names it as one", async () => {
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error("gh api repos/... failed: gh: Merge conflict (HTTP 409)"),
+    );
+
+    const outcome = await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(outcome.merged).toBe(false);
+    expect(outcome).toMatchObject({ conflict: true });
+  });
+
+  it("reports any other refusal as a refusal, carrying what the forge said", async () => {
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error("gh api repos/... failed: gh: Not Found (HTTP 404)"),
+    );
+
+    const outcome = await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(outcome.merged).toBe(false);
+    expect(outcome).not.toMatchObject({ conflict: true });
+    if (!outcome.merged) expect(outcome.reason).toContain("404");
+  });
+
+  it("lets a dropped connection through as an error, never as a refusal to merge", async () => {
+    // A refusal goes on a ticket and stops the run for a reason the human can
+    // act on. A connection that dropped is not that, and dressing it up as one
+    // would tell the reader the merge was declined when nobody ever asked.
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error("gh api repos/... failed after 3 attempts: ECONNRESET"),
+    );
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+        alpha,
+        "timone/7-slow",
+        "the approved breakdown",
+      ),
+    ).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it("merges into the default branch the forge names, not a guessed one", async () => {
+    const { run, calls } = fakeRunnerWithOptions(
+      JSON.stringify({
+        data: {
+          repository: {
+            defaultBranchRef: { name: "trunk", target: { oid: "aaaa111" } },
+            ref: null,
+          },
+        },
+      }),
+      created,
+    );
+
+    await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(calls[1].args).toContain("base=trunk");
+    expect(calls[1].args).toContain("head=timone/7-slow");
+  });
+
+  it("opens no pull request — that is the whole point of this path", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBranchesForMerge(), created);
+
+    await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(calls.some((call) => call.args.includes("pr"))).toBe(false);
+  });
+
+  it("names the repository, so the credential it runs under is scoped to it", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBranchesForMerge(), created);
+
+    await new GitHubTicketingAdapter({ run }).mergeIntoDefault(
+      alpha,
+      "timone/7-slow",
+      "the approved breakdown",
+    );
+
+    expect(calls[1].options?.repository).toBe("fvermaut/scratch-app");
+  });
+});
+
+describe("reading a branch's files from the forge", () => {
+  function ghBlob(text: string | null): string {
+    return JSON.stringify({
+      data: { repository: { object: text === null ? null : { text } } },
+    });
+  }
+
+  function ghTree(entries: { name: string; type: string }[] | null): string {
+    return JSON.stringify({
+      data: { repository: { object: entries === null ? null : { entries } } },
+    });
+  }
+
+  it("answers a file's content on the branch that carries it", async () => {
+    const { run } = fakeRunner(ghBlob("> **Status:** Complete\n"));
+
+    const text = await new GitHubTicketingAdapter({ run }).readFile(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases/phase-03.md",
+    );
+
+    expect(text).toBe("> **Status:** Complete\n");
+  });
+
+  it("answers undefined for a file the branch does not carry", async () => {
+    const { run } = fakeRunner(ghBlob(null));
+
+    const text = await new GitHubTicketingAdapter({ run }).readFile(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases/phase-03.md",
+    );
+
+    expect(text).toBeUndefined();
+  });
+
+  it("reports a dropped connection instead of calling the file absent", async () => {
+    const run: CommandRunner = async () => {
+      throw new Error("gh api graphql failed after 3 attempts: ECONNRESET");
+    };
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).readFile(alpha, "b", "some/path.md"),
+    ).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it("lists the files directly under a directory, as repository paths", async () => {
+    const { run } = fakeRunner(
+      ghTree([
+        { name: "phase-03.md", type: "blob" },
+        { name: "phase-04.md", type: "blob" },
+        { name: "reports", type: "tree" },
+      ]),
+    );
+
+    const files = await new GitHubTicketingAdapter({ run }).listFiles(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases",
+    );
+
+    // Directories are not files, and the paths are the ones that identify a
+    // file whichever branch it was read from.
+    expect(files).toEqual([
+      "doc/plans/phases/phase-03.md",
+      "doc/plans/phases/phase-04.md",
+    ]);
+  });
+
+  it("lists the repository root without putting a slash in front of every path", async () => {
+    // Found on 2026-08-22 by asking for the root and getting `/compose.yaml`
+    // back — a path that matches nothing and made `scratch-app` look as
+    // though it committed no compose file. The root is a real thing to ask
+    // for: a compose file lives there.
+    const { run } = fakeRunner(
+      ghTree([
+        { name: "compose.yaml", type: "blob" },
+        { name: "doc", type: "tree" },
+      ]),
+    );
+
+    const files = await new GitHubTicketingAdapter({ run }).listFiles(
+      alpha,
+      "main",
+      "",
+    );
+
+    expect(files).toEqual(["compose.yaml"]);
+  });
+
+  it("treats \".\" as the root too, since that is what a caller writes", async () => {
+    const { run, calls } = fakeRunnerWithOptions(
+      ghTree([{ name: "compose.yaml", type: "blob" }]),
+    );
+
+    const files = await new GitHubTicketingAdapter({ run }).listFiles(
+      alpha,
+      "main",
+      ".",
+    );
+
+    expect(files).toEqual(["compose.yaml"]);
+    // And it asks for the root the way the forge spells it, which is with
+    // nothing after the colon. `main:.` matches nothing and answers null,
+    // which reads as "the branch has no such directory".
+    expect(calls[0].args).toContain("expression=main:");
+  });
+
+  it("answers undefined for a directory the branch does not carry", async () => {
+    const { run } = fakeRunner(ghTree(null));
+
+    const files = await new GitHubTicketingAdapter({ run }).listFiles(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases",
+    );
+
+    expect(files).toBeUndefined();
+  });
+
+  it("asks for the path as a branch-qualified expression", async () => {
+    const { run, calls } = fakeRunnerWithOptions(ghBlob("x"));
+
+    await new GitHubTicketingAdapter({ run }).readFile(
+      alpha,
+      "timone/7-execute",
+      "doc/plans/phases/phase-03.md",
+    );
+
+    expect(calls[0].args).toContain(
+      "expression=timone/7-execute:doc/plans/phases/phase-03.md",
+    );
+    expect(calls[0].options?.repository).toBe("fvermaut/scratch-app");
+  });
+});
+
+describe("every call this adapter makes can be scoped to a repository", () => {
+  /**
+   * ✏ Written 2026-08-22, after the first real daemon run refused its own
+   * comment update.
+   *
+   * The claim that "every `gh` invocation passes `--repo`" came from grepping
+   * for `--repo` and finding what it looked for. Four `gh api` call sites name
+   * their repository in the **path** instead, and the credential runner could
+   * not see them — so the daemon could not say where a ticket stood.
+   *
+   * This drives **every method on the port**, collects the argument vector
+   * each one actually builds, and pushes every vector back through the real
+   * credential runner. A call the runner cannot scope fails here, by name,
+   * instead of in a daemon log at the worst moment.
+   */
+  const project: TicketingProject = alpha;
+
+  /** Enough of a canned answer for each method to reach its `gh` call. */
+  function answers(): string {
+    return JSON.stringify({
+      data: {
+        repository: {
+          defaultBranchRef: { name: "main", target: { oid: "aaa" } },
+          ref: null,
+          object: null,
+        },
+      },
+      number: 7,
+      title: "t",
+      body: "b",
+      labels: [],
+      url: "https://github.com/fvermaut/scratch-app/issues/7",
+      author: { login: "fvermaut" },
+      createdAt: "2026-08-02T10:00:00Z",
+      comments: [],
+      reviews: [],
+      state: "OPEN",
+      headRefOid: "aaa",
+      assignees: [],
+      blockedBy: { nodes: [], totalCount: 0 },
+    });
+  }
+
+  async function vectorsFromEveryMethod(): Promise<
+    { args: string[]; options?: CommandOptions }[]
+  > {
+    const vectors: { args: string[]; options?: CommandOptions }[] = [];
+    const run: CommandRunner = async (_command, args, options) => {
+      vectors.push({ args, options });
+      return answers();
+    };
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    // Every method on the port. A new one that forgets its scope shows up
+    // here as a compile error first, and as a failure second.
+    const calls: (() => Promise<unknown>)[] = [
+      () => adapter.readBranches(project, "b"),
+      () => adapter.readFile(project, "b", "p.md"),
+      () => adapter.listFiles(project, "b", "doc"),
+      () => adapter.mergeIntoDefault(project, "b", "m"),
+      () => adapter.listMarkedTickets(project),
+      () => adapter.listOpenTickets(project),
+      () => adapter.listSteps(project, 7),
+      () => adapter.createStep(project, 7, { title: "t", body: "b" }),
+      () => adapter.blockStep(project, 8, 7),
+      () => adapter.setTicketBody(project, 7, "b"),
+      () => adapter.ensureLabel(project, "timone:held", "d"),
+      () => adapter.getTicket(project, 7),
+      () => adapter.postComment(project, 7, "hello"),
+      () => adapter.upsertComment(project, 7, "📌", "hello"),
+      () => adapter.closeTicket(project, 7, "completed"),
+      () => adapter.findPullRequest(project, "b"),
+      () => adapter.getPullRequestThread(project, 9),
+      () => adapter.applyLabel(project, 7, "timone:held"),
+      () => adapter.postPullRequestComment(project, 9, "hi"),
+      () => adapter.upsertPullRequestComment(project, 9, "📌", "hi"),
+    ];
+
+    for (const call of calls) {
+      // A method that throws on the canned answer still recorded its vector,
+      // which is all this test reads.
+      await call().catch(() => undefined);
+    }
+    return vectors;
+  }
+
+  it("names a repository in every argument vector it builds", async () => {
+    const vectors = await vectorsFromEveryMethod();
+    expect(vectors.length).toBeGreaterThan(15);
+
+    // Both routes count, because both are how the adapter scopes a call: the
+    // repository in the arguments, or declared in the options for a `gh api
+    // graphql` call whose vector cannot carry one.
+    const unscoped: string[] = [];
+    for (const { args, options } of vectors) {
+      const run = credentialCommandRunner({
+        credentials: { async tokenFor() { return "ghs_x"; } },
+        run: async () => "",
+      });
+      await run("gh", args, options).catch((error: unknown) => {
+        if (/names no repository/.test(String(error))) {
+          unscoped.push(args.join(" ").slice(0, 90));
+        }
+      });
+    }
+
+    expect(unscoped, `unscoped:\n${unscoped.join("\n")}`).toEqual([]);
   });
 });

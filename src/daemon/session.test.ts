@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { MergeOutcome } from "../git.js";
 import type { Manifest } from "../manifest.js";
 import {
   CONVERSATION_RECORD_MARKER,
@@ -13,6 +12,7 @@ import {
   STAGE_HANDED_MARKER,
   isMachineComment,
   stampMachineComment,
+  type MergeOutcome,
   type PullRequest,
   type PullRequestThread,
   type Step,
@@ -21,7 +21,13 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
-import { noStepWrites } from "../adapters/ticketing.stubs.js";
+import {
+  noBranches,
+  noFiles,
+  noMerges,
+  noSteps,
+  noStepWrites,
+} from "../adapters/ticketing.stubs.js";
 import type { BreakdownSource } from "./breakdown.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
@@ -168,6 +174,9 @@ function fakeAdapter(initial: TicketThread = thread): {
   let clock = 0;
 
   const adapter: TicketingAdapter = {
+    ...noBranches,
+    ...noFiles,
+    ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {
@@ -2123,17 +2132,26 @@ describe("merging chunk zero when the breakdown is approved", () => {
     return store.get(run.id)!;
   }
 
-  /** A merge seam that records its calls and reports the given outcome. */
+  /**
+   * A merge seam that records its calls and reports the given outcome.
+   *
+   * It records the **project** rather than a directory: since 30c the merge
+   * happens on the forge, and there is no checkout for it to name.
+   */
   function recordingMerge(
     outcome: MergeOutcome = { merged: true, into: "main" },
   ): {
-    merge: (repoDir: string, branch: string) => Promise<MergeOutcome>;
-    calls: { repoDir: string; branch: string }[];
+    merge: (
+      target: TicketingProject,
+      branch: string,
+      message: string,
+    ) => Promise<MergeOutcome>;
+    calls: { project: string; branch: string }[];
   } {
-    const calls: { repoDir: string; branch: string }[] = [];
+    const calls: { project: string; branch: string }[] = [];
     return {
-      merge: async (repoDir, branch) => {
-        calls.push({ repoDir, branch });
+      merge: async (target, branch) => {
+        calls.push({ project: target.name, branch });
         return outcome;
       },
       calls,
@@ -2164,7 +2182,7 @@ describe("merging chunk zero when the breakdown is approved", () => {
 
     expect(calls).toEqual([
       {
-        repoDir: join("/root", "projects", "scratch-app"),
+        project: "scratch-app",
         branch: "timone/7-the-page-feels-slow",
       },
     ]);
@@ -4372,5 +4390,420 @@ describe("approval ends the initiative's own run", () => {
     expect(requests).toHaveLength(1);
     expect(store.get("scratch-app#7/1")?.status).toBe("failed");
     expect(store.get("scratch-app#7/1")?.failure).toMatch(/422|steps/i);
+  });
+});
+
+describe("a forge that cannot be reached is not a stage that did nothing", () => {
+  /** A ticket already through triage and clarification. */
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\n${CONVERSATION_RECORD_MARKER}\n\nwe agreed the list should page`,
+        createdAt: "2026-08-03T09:30:00Z",
+        fromTimone: true,
+      },
+    ],
+  };
+
+  /** A run resumed straight into the requirements stage. */
+  function atRequirements(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  /** A probe that fails the way a dropped connection fails. */
+  function unreachable(): () => Promise<string | undefined> {
+    return async () => {
+      throw new Error(
+        "gh api graphql failed after 3 attempts: ECONNRESET",
+      );
+    };
+  }
+
+  it("stops the run before starting a session it could not judge", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: unreachable(),
+      headProbe: unreachable(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    // Nothing was started: a run whose baseline is unknown cannot be judged
+    // afterwards, and starting it would burn a session to learn nothing.
+    expect(requests).toHaveLength(0);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(comments.at(-1)!.body).toMatch(/ECONNRESET/);
+  });
+
+  it("stops the run after a session rather than reporting work it could not see", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    let calls = 0;
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      // The baseline reads fine; the read after the session does not.
+      repoProbe: async () => {
+        if (calls++ === 0) return "sha-before";
+        throw new Error("gh api graphql failed after 3 attempts: ECONNRESET");
+      },
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    const body = comments.at(-1)!.body;
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    expect(body).toMatch(/ECONNRESET/);
+    // The dangerous wrong answer: telling the reader nothing was produced.
+    expect(body).not.toMatch(/still stands/i);
+    expect(body).not.toMatch(/nothing has moved/i);
+  });
+
+  it("keeps an absent branch meaning the stage produced nothing", async () => {
+    // The distinction the two cases above exist to protect: this one must go
+    // on reading as "no work", because that is what it is.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: async () => undefined,
+      headProbe: async () => "sha-base",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(comments.at(-1)!.body).toMatch(/still stands/i);
+  });
+});
+
+describe("branch state, by default, comes from the forge", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\n${CONVERSATION_RECORD_MARKER}\n\nwe agreed the list should page`,
+        createdAt: "2026-08-03T09:30:00Z",
+        fromTimone: true,
+      },
+    ],
+  };
+
+  function atRequirements(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  it("asks the ticketing adapter and never a checkout on disk", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const { runtime } = fakeRuntime();
+    const asked: (string | undefined)[] = [];
+    let calls = 0;
+
+    const forgeAdapter: TicketingAdapter = {
+      ...adapter,
+      readBranches: async (_project, branch) => {
+        asked.push(branch);
+        return {
+          defaultBranch: "main",
+          defaultHead: "sha-base",
+          ...(calls++ === 0 ? {} : { head: "sha-after" }),
+        };
+      },
+    };
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter: forgeAdapter,
+      runtime,
+      // A path that is no checkout at all: if anything reached for disk it
+      // would answer undefined and this test would read as "no work".
+      root: "/root",
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(asked.filter((branch) => branch !== undefined).length).toBeGreaterThan(0);
+    expect(comments.at(-1)!.body).toContain("`approve`");
+  });
+});
+
+describe("chunk zero reaches the default branch through the forge", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  /** A run parked on the breakdown gate, holding chunk zero's branch. */
+  function atBreakdownGate(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s0");
+    store.claimBranch(run.id, "timone/7-the-page-feels-slow");
+    return store.get(run.id)!;
+  }
+
+  it("asks the ticketing adapter to merge, and never a checkout on disk", async () => {
+    const merges: { branch: string; message: string }[] = [];
+    const adapter: TicketingAdapter = {
+      ...noBranches,
+    ...noFiles,
+    ...noMerges,
+      ...noStepWrites,
+      ...noSteps,
+      async mergeIntoDefault(
+        _project: TicketingProject,
+        branch: string,
+        message: string,
+      ): Promise<MergeOutcome> {
+        merges.push({ branch, message });
+        return { merged: true, into: "main" };
+      },
+    } as unknown as TicketingAdapter;
+
+    const spawner = new AgentSessionSpawner({
+      manifest,
+      store: newStore(),
+      adapter,
+      runtime: fakeRuntime().runtime,
+      root: "/root",
+    });
+
+    const outcome = await (
+      spawner as unknown as {
+        attemptMerge: (
+          project: TicketingProject,
+          branch: string | undefined,
+        ) => Promise<MergeOutcome>;
+      }
+    ).attemptMerge(project, "timone/7-the-page-feels-slow");
+
+    expect(outcome).toEqual({ merged: true, into: "main" });
+    expect(merges).toHaveLength(1);
+    expect(merges[0].branch).toBe("timone/7-the-page-feels-slow");
+  });
+
+  it("does not fail a run whose merge had already happened", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const run = atBreakdownGate(store);
+
+    const spawner = new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: fakeRuntime().runtime,
+      root: "/root",
+      mergeProbe: async () => ({
+        merged: true,
+        into: "main",
+        alreadyThere: true,
+      }),
+    });
+
+    const merged = await (
+      spawner as unknown as {
+        mergeChunkZero: (
+          run: Run,
+          project: TicketingProject,
+        ) => Promise<boolean>;
+      }
+    ).mergeChunkZero(run, project);
+
+    expect(merged).toBe(true);
+    expect(store.get(run.id)?.status).not.toBe("failed");
+    expect(comments).toHaveLength(0);
+  });
+
+  it("says a conflict is a conflict, in words the human can act on", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const run = atBreakdownGate(store);
+
+    const spawner = new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: fakeRuntime().runtime,
+      root: "/root",
+      mergeProbe: async () => ({
+        merged: false,
+        conflict: true,
+        reason: "the two sides disagree",
+      }),
+    });
+
+    const merged = await (
+      spawner as unknown as {
+        mergeChunkZero: (
+          run: Run,
+          project: TicketingProject,
+        ) => Promise<boolean>;
+      }
+    ).mergeChunkZero(run, project);
+
+    expect(merged).toBe(false);
+    expect(store.get(run.id)?.status).toBe("failed");
+    expect(comments.at(-1)!.body).toMatch(/conflict/i);
+  });
+
+  it("stops the run when the merge was refused for any other reason", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter(settled);
+    const run = atBreakdownGate(store);
+
+    const spawner = new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime: fakeRuntime().runtime,
+      root: "/root",
+      mergeProbe: async () => ({
+        merged: false,
+        reason: "gh: Not Found (HTTP 404)",
+      }),
+    });
+
+    const merged = await (
+      spawner as unknown as {
+        mergeChunkZero: (
+          run: Run,
+          project: TicketingProject,
+        ) => Promise<boolean>;
+      }
+    ).mergeChunkZero(run, project);
+
+    expect(merged).toBe(false);
+    expect(store.get(run.id)?.status).toBe("failed");
+    expect(comments.at(-1)!.body).toContain("404");
+  });
+});
+
+describe("a request carries the workspace a boxed session clones from", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  function atRequirements(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  const PIN = { commit: "c".repeat(40), remote: "https://github.com/fvermaut/timone.git" };
+
+  it("names the timone commit, the project's remote and its branch", async () => {
+    // Found the first time a real daemon spawned a boxed run, on 2026-08-22:
+    // *"a boxed session needs a workspace to clone: this request describes
+    // none"*. 30e added the field and 30f read the pin, and **nothing joined
+    // them** — so every boxed run failed at the first spawn, and no unit test
+    // could see it because each half was correct on its own.
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      timoneProbe: async () => ({ uncommitted: [], pin: PIN }),
+      repoProbe: movingProbe(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(requests.length).toBeGreaterThan(0);
+    const workspace = requests[0].workspace;
+    expect(workspace?.timone).toEqual(PIN);
+    expect(workspace?.project.name).toBe("scratch-app");
+    expect(workspace?.project.remote).toBe(project.repoUrl);
+    expect(workspace?.project.branch).toBe("timone/7-the-page-feels-slow");
+  });
+
+  it("carries the same pin on every stage of one run, never a re-read", async () => {
+    // A pin re-read at every stage is not a pin, it is a branch with extra
+    // steps (ADR-0041 D2).
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+    let reads = 0;
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      timoneProbe: async () => {
+        reads += 1;
+        return { uncommitted: [], pin: PIN };
+      },
+      repoProbe: movingProbe(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(reads).toBe(1);
+    for (const request of requests) {
+      expect(request.workspace?.timone).toEqual(PIN);
+    }
+  });
+
+  it("omits the workspace when the checkout can name no version", async () => {
+    // A fixture root that is no repository. The in-process runtime ignores
+    // the field entirely, so such a run still works exactly as it did.
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      timoneProbe: async () => ({ uncommitted: [] }),
+      repoProbe: movingProbe(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(requests[0].workspace).toBeUndefined();
   });
 });

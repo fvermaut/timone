@@ -1,6 +1,6 @@
 # Phase 30: The work happens in a box — a run stops touching fvermaut's machine
 
-> **Status:** Planned. **Runs after [phase 29](phase-29.md) and before `ivtrends` restarts** — fvermaut's ordering of 2026-08-20, chosen over restarting `ivtrends` earlier on an unboxed pipeline.
+> **Status:** Complete except 30k's human gate — 2026-08-22. Eleven of twelve slices built; see the [completion report](reports/phase-30-complete.md). What is left is one real marked ticket driven end to end and fvermaut's own judgement, both recorded under 30k. **Runs after [phase 29](phase-29.md) and before `ivtrends` restarts** — fvermaut's ordering of 2026-08-20, chosen over restarting `ivtrends` earlier on an unboxed pipeline.
 
 > **Companion phases:** [phase-29](phase-29.md) — one step, one ticket; it changes the daemon's scheduling and this phase changes the daemon's *runtime*, so 29 lands first and this rebases onto it. [phase-14](phase-14.md) — provenance trailers and the R15 hooks, both of which change meaning here. Nothing in the preview machinery ([ADR-0021](../../adr/0021-previews-are-reconciled-behind-an-adapter-seam.md)) is touched: previews are driven from `poll.ts` on the host and never from inside a session.
 >
@@ -54,6 +54,35 @@ A pre-flight run of this plan against the tree found four things that stop work 
 > That is not an argument against CI. It is an argument that **the workflow is a human artifact**, committed once by fvermaut, after which the machine can never alter it. Option (ii) — the guard as a vitest file only — remains available and needs nothing from anybody.
 >
 > **Still not resolved, and now with a clearer shape:** (i) fvermaut commits a workflow once and the guard runs in it; (ii) the guard is a vitest file and the slice's wording drops the CI claim. **Recorded, not chosen.**
+
+**✏ Blocker (e) — the box cannot talk to the model. Found 2026-08-22 at 30j. ✅ RESOLVED the same day — fvermaut chose his own subscription. Read the block at the end of this blocker first.**
+
+An in-process session inherits whatever the host is logged in as. A boxed one inherits nothing — that is the point of the box. Checked rather than assumed:
+
+- `ANTHROPIC_API_KEY` is **not set** on the host, and nothing in `src/`, the `Dockerfile` or `docker/` passes any model credential to a session. Grepped; there are no hits at all.
+- The host's Claude credentials are in the **macOS keychain**, which no container can reach. There is no file to read and nothing to hand over.
+
+So **every boxed session would start, clone both repositories, and then fail to authenticate** — and it would fail *after* a container and a compose stack had been stood up, which is the expensive way to discover it. 30h and 30i are unaffected: neither needs the model, and both were watched working. **30j and 30k cannot run at all until this is answered**, because both are defined by a session that actually calls the model from inside the box.
+
+Two answers, and the difference between them is billing rather than engineering:
+
+- **(i) An API key.** `ANTHROPIC_API_KEY`, kept in `.timone/` beside the App key and passed into the box as an environment variable. Clean, no host state involved, and it is a **separate bill** from a Claude subscription.
+- **(ii) The subscription's own token.** Read the OAuth token out of the keychain and pass it in as `CLAUDE_CODE_OAUTH_TOKEN`. Uses the plan already paid for, and puts a **long-lived host secret inside the box** — which is not what ADR-0041 forbids (it forbids the host's *filesystem*), but is a real widening of what a stray agent could take with it.
+
+~~**Recorded, not chosen.** It is a credential and a bill, so it is not the machine's call.~~
+
+> **✅ Resolved 2026-08-22 — fvermaut chose (ii), his own subscription, and it is built and watched working.**
+>
+> **The box borrows a live login; it is never given a lasting one.** `src/adapters/model-token.ts` reads the access token **fresh at every spawn** and caches it nowhere — not on disk, not in memory. The host's own CLI refreshes it about every six hours and a daemon runs for days, so a copy taken at start-up is stale before lunch; reading late is reading current. Nothing about it is written down, and it travels in the container's environment like the forge credential. It is read from the macOS keychain, with the credentials file preferred where a host has one, so the box is not macOS-only for no reason.
+>
+> **What the choice costs, said plainly:** while a box runs, a token that can spend fvermaut's subscription is inside it. That is the trade he took over a separate bill, and it is **not** what [ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) forbids — the ADR keeps the host's *filesystem* out of the box, which is still true.
+>
+> **A refusal stops the spawn rather than the session.** No login means no container is started at all, and a stack already up is taken back down — a box that clones two repositories and stands up a database before failing to authenticate has spent minutes to learn nothing. The message names the one step that fixes it: run `claude` once.
+>
+> **Two things the live run found, both invisible to every unit test:**
+>
+> - **The box ran as root, and the CLI refuses `bypassPermissions` under root.** Every daemon-spawned session uses it, so the image could not have run a single session — and the failure says *"cannot be used with root/sudo privileges"*, which mentions sudo rather than containers and names nothing about the image. The `Dockerfile` now creates `/workspace` owned by `pwuser` and ends `USER pwuser`; `docker/image-check.mjs` grew **two more checks** — not root, and the workspace is writable — because the property is invisible until a real session tries to start. Rebuilt; **all eight assertions pass.**
+> - **The environment never reached the container.** Setting a variable in the options handed to `spawn` sets it on the **docker CLI's own process**, and docker does not forward its environment into a container. The box got an empty `TIMONE_REMOTE` and died on `fatal: repository '' does not exist`. Every variable is now declared as a bare `-e NAME` — **by name, never by value**, so no secret enters the argument vector, which is the property the credential tests assert. Eleven tests asserted the environment was set and every one of them was right; none of them could see this.
 
 **What is actually startable.** **30e and 30g are blocked only by (b)**, and depend on nothing in code. 30e's anchor `session.ts:64` is exact and its gate `npm run build && npm test` is a real, non-vacuous, currently-green command. 30g needs only the `.dockerignore` correction recorded under it. **30f, 30h, 30i and 30j unblock behind those two and never need (a) at all.** ~~30a, 30b, 30c, 30d, 30k and 30l are every one of them blocked by (a).~~ **✏ Refined 2026-08-21: none of them is blocked by (a) any more** — the App is installed, and the six slices that waited on it now wait only on each other and on **(b)**, R23's wording, which is still fvermaut's five-minute confirmation and now the **only** human gate on this phase. **This inverts the closing paragraph of this file**, which says "if the phase has to stop somewhere, it stops after 30d": 30a–30d is the *most* blocked branch of the graph, and the security half the plan calls the optional one is the half that can actually begin.
 
@@ -153,15 +182,29 @@ Today a daemon-spawned session runs inside the daemon's own process, at the timo
 > **✏ Refined 2026-08-20:** that prerequisite is blocker (a) — unstarted, with nothing in `timone.yaml` or `src/manifest.ts` to build on.
 > **✏ Refined 2026-08-21:** blocker (a) is **resolved** — the App is created and installed, and the key is on disk. The "nothing in `timone.yaml` or `src/manifest.ts`" half is still true and is now this slice's own work rather than a wait. **It depends on nothing outside itself except (b)**, R23's wording.
 
+> **✅ Built 2026-08-22 — 30a is done, and the owed choice was made.**
+>
+> **The owed choice — `hooks.ts:552` — is resolved by narrowing case (2), and the narrowing is not a retreat.** Every `git()` call in `src/daemon/hooks.ts` is a **local read**: `rev-parse` (`:561`, `:685`), `symbolic-ref` (`:579`), `status --porcelain` (`:587`), `log` (`:728`). Not one of them reaches the forge, so not one of them can act under a borrowed identity — there is nothing to borrow on a local `git status`. Routing them through the credential runner would mint a forge token for a call that never makes a forge request. So case (2) reads: **no path that reaches the forge falls back to ambient login**, and the paths the runner owns are every `gh` invocation in `github-tickets.ts`, which is all fourteen of them, through the single injected runner. 30b and 30c still remove the `session.ts` probes and `git.ts`'s machine caller as the plan says; `hooks.ts` keeps its local reads and is named in 30d's exemptions, where it already had to be.
+>
+> **What was built.** `src/adapters/credentials.ts` (new), the JWT/mint/cache recipe behind a `MintCall` seam. `src/adapters/command-runner.ts` gains `credentialCommandRunner`. `src/manifest.ts` gains an optional `identity` block — `app_id`, `installation_id`, `private_key_path`, `login` — and `timone.yaml` and `timone.example.yaml` declare it. `src/commands/daemon.ts` gains `machineAdapter()`, which is the gap the 2026-08-20 refinement found: it is the path from the CLI to an injected runner, and the daemon now goes through it.
+>
+> **Where case (2) actually lives:** `machineAdapter` throws when the manifest declares no `identity`, and the daemon prints it and exits 1. The schema keeps the block optional on purpose — `workspace sync` and `projects list` are fvermaut's own commands and are entitled to his login. The daemon is not.
+>
+> **The scoping is taken from the command's own arguments.** Every `gh` call passes `--repo <owner/name>`, so the runner reads the repository out of the argument vector and mints for that. A token derived this way can never be wider than the call that uses it, and **a command naming no repository is refused rather than run** — there is no ambient path. `GH_CONFIG_DIR` is pointed at an empty directory so `gh`'s stored host credentials are not a fallback either.
+>
+> **✏ A live finding that would have made three checks in this phase pass vacuously.** The plan says the login is `timone-agent[bot]`, and it warned in as many words that "a check written against the wrong login passes vacuously by finding nothing". **Both spellings are real and they name the same identity.** GitHub renders an App's bot as **`timone-agent` on GraphQL** — which `gh --json` speaks, and which is where a ticket thread comes from — and as **`timone-agent[bot]` on REST**, which is where an inline pull-request comment comes from. `github-tickets.ts` reads both surfaces. Observed on `fvermaut/scratch-app` on 2026-08-22 by posting a comment under the App and reading it back on each. `isFromTimone` now compares with the `[bot]` suffix stripped from both sides, whole-string rather than by prefix. **Every later slice comparing a login must accept both spellings**; 30c, 30d and 30k each have such a check.
+>
+> **32 tests added**, all seen failing first. Suite: 1256 tests, and the only failures are the known flaky set of [#8](https://github.com/fvermaut/timone/issues/8), which pass when their files are run alone.
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npx vitest run src/adapters/credentials.test.ts src/adapters/command-runner.test.ts
 ```
 
-- [ ] Red→green trace for all four cases, each seen failing first
-- [ ] `grep` the built output and a full daemon log for the credential string — zero hits
-- [ ] One live comment on `scratch-app` appears under the machine account, and [timone#19](https://github.com/fvermaut/timone/issues/19) is checked against it before being closed
+- [x] Red→green trace for all four cases, each seen failing first — 8 in `credentials.test.ts`, 10 in `command-runner.test.ts`, 6 in `manifest.test.ts`, 5 in `commands/daemon.test.ts`, 3 in `github-tickets.test.ts`
+- [x] `grep` the built output for the credential string — the token reaches exactly one place, the child's environment at `command-runner.ts`, and nothing in the tree stringifies an environment into a message. **The daemon-log half is not done**: no daemon has run under this credential yet, and it belongs to 30k's live gate.
+- [x] One live comment on `scratch-app` appears under the machine account — [scratch-app#45](https://github.com/fvermaut/scratch-app/issues/45), authored by **`timone-agent`** and not by `fvermaut`. **[timone#19](https://github.com/fvermaut/timone/issues/19) is reopened**, per the refinement below, carrying that observation; 30l closes it.
 - [ ] ✏ **Refined 2026-08-20 — the command above reports a non-zero test count.** `vitest.config.ts:5` sets `passWithNoTests: true` globally, so run today this exact command prints `No test files found, exiting with code 0`: a green exit that asserts nothing. Read the count, not the exit code. Here that is expected only until the two test files exist.
 - [ ] ✏ **Refined 2026-08-20 — [timone#19](https://github.com/fvermaut/timone/issues/19) is already closed**, which makes the item above unfalsifiable as written. It was closed `2026-08-20T19:12:04Z` as `COMPLETED` — the same day this plan was written, with no machine account existing and no code written. Its body still reads: "The real fix is a separate account for the machine. That needs a credential from you." **Reopen it before this slice starts**, or rewrite the item to check the live observation rather than the act of closing. Same correction applies to 30l's second checklist item.
 
@@ -183,6 +226,22 @@ npm run build && npx vitest run src/adapters/credentials.test.ts src/adapters/co
 > Depends on 30a for the credential. Parallel with nothing — 30c wants it done.
 > **✏ Refined 2026-08-20:** and therefore on blocker (a). The `[FIX FIRST]` line is blocker (c): none of the three defects is filed.
 
+> **✅ Built 2026-08-22 — 30b is done, and it found a bigger version of its own case (3).**
+>
+> **The `[FIX FIRST]` defects are fixed, both of them, at the one seam every `gh` call passes through.** `execRunner` in `src/adapters/command-runner.ts` now gives every command a **90-second deadline** ([#47](https://github.com/fvermaut/timone/issues/47)) and **retries a transport failure twice, waiting 2s then 8s** ([#48](https://github.com/fvermaut/timone/issues/48)). The distinction that makes retrying safe is asserted: **a 404 is an answer and is never retried**; a reset connection, a DNS failure, a killed child and a 5xx are the forge not having spoken, and those are. [#49](https://github.com/fvermaut/timone/issues/49) is not fixed here — it is a different mechanism in `runs.ts`, and 30c owns it.
+>
+> **The widening is one method, not two.** `TicketingAdapter.readBranches(project, branch?)` answers the default branch, its tip, and the named branch's tip in **one round trip**. Two methods would have doubled a per-stage per-project call, which is exactly the traffic #49 turns into a false report of a stopped daemon.
+>
+> **GraphQL rather than REST, and that choice *is* the answer to case (2).** A missing ref comes back as `ref: null` — a value in a successful response. REST's `/git/ref/heads/…` answers 404, which arrives as a failed process, and telling that apart from a dropped connection by matching an error string is the confusion this slice exists to forbid. Verified live against `fvermaut/scratch-app`: an absent branch answers `{defaultBranch, defaultHead}` with no `head` and no error; `main` answers with its tip.
+>
+> **The fake count was seven, not nine.** `poll.test.ts`, `session.test.ts`, `hooks.test.ts`, `commands/daemon.test.ts`, `takeover.test.ts`, `retry.test.ts`, `guardrails.test.ts`. `github-tickets.test.ts` and `github-pulls.test.ts` drive the real adapter through a fake *runner*, so they never needed the method. All seven took **one line each** — `...noBranches`, a new stub beside `noStepWrites` in `ticketing.stubs.ts`. It answers rather than throwing, deliberately: "there is no such branch" is what those tests used to get from a `git rev-parse` in a directory that was no repository, and keeping that silence is what lets a test about something else stay about something else.
+>
+> **`gitBranchHead` and `gitCurrentHead` are deleted**, not left unused, so 30d's guard has nothing to make an exception for.
+>
+> **✏ A finding this slice did not fix, and 30d must settle. Three more probes read a branch out of `projects/<name>`, and they will answer wrongly the moment 30h lands.** `planStatusProbe` (`gitPlanStatus`), `verificationReportProbe` (`gitVerificationReport`) and `BreakdownSource` (`fromDefaultBranch`) all read file *content* off a branch with `git ls-tree` / `git show` in the human's checkout. Nothing fetches that checkout. Today they work only because the session runs in that same folder and leaves the branch there. **Once a session runs in a box, the branch exists only on the forge, these three answer `undefined`, and `undefined` here means "the stage produced nothing"** — the same wrong answer case (3) was written to forbid, one level up and silent. They were left alone because converting them is not what this slice was scoped to, and because `BreakdownSource` is **synchronous** and read for every marked ticket on every cycle, so making it a forge call is both an API change through `poll.ts` and a traffic multiplier. **Recorded, not worked around.** 30d names them; they are either its fifth, sixth and seventh exemptions or a slice of their own before 30h.
+>
+> **41 tests added**, all seen failing first. Suite: **1279 tests, all green** — including the [#8](https://github.com/fvermaut/timone/issues/8) flakes, which passed this run.
+
 #### Agent Validation Steps
 
 ```bash
@@ -196,9 +255,9 @@ npm run build && npx vitest run src/adapters/credentials.test.ts src/adapters/co
 npm run build && npx vitest run src/adapters/github-tickets.test.ts
 ```
 
-- [ ] Red→green trace for all three cases
-- [ ] Case (3) asserted with a simulated transport failure, not a comment claiming it cannot happen
-- [ ] No test in this slice reaches the network
+- [x] Red→green trace for all three cases — 9 in `github-tickets.test.ts` for the adapter, 4 in `session.test.ts` for the caller, 9 in `command-runner.test.ts` for the timeout and the retry, 19 more carried from 30a
+- [x] Case (3) asserted with a simulated transport failure, not a comment claiming it cannot happen — and asserted **twice**, once at the adapter and once at the caller, because the caller used to erase the distinction on its way out
+- [x] No test in this slice reaches the network. The live read against `fvermaut/scratch-app` was run by hand, outside the suite, and is recorded above
 - [ ] ✏ **Refined 2026-08-20 — the command reports a non-zero test count.** Exit code 0 from vitest means nothing on its own here; read the number of tests it says it ran.
 - [ ] ✏ **Refined 2026-08-20 — the full suite passes**, and the only assertions that changed are the nine fakes gaining the new method. This is 30b's counterpart to 30e's "passes unchanged": the widening is expected to touch fakes and nothing else, so a changed assertion anywhere but those nine files means the change leaked past the seam.
 
@@ -215,15 +274,37 @@ Two paths, and both must land: **a step ticket's pull request**, and **chunk zer
 
 > Depends on 30b.
 
+> **✅ Built 2026-08-22 — 30c is done, and "both paths" turned out to be one.**
+>
+> **✏ There is no machine merge of a pull request, and there never was.** This slice was written around two merge paths. Grepping the tree for one finds nothing: the only merges anywhere are `git.ts`'s `fastForward` (which is `workspace sync`, fvermaut's own command) and `mergeIntoDefault` (chunk zero). A step ticket's pull request is merged **by fvermaut, on github.com**, and the daemon only ever *reads* `state === "merged"` (`poll.ts:840`, `poll.ts:1890`). So the first path was already on the forge, by a human's hand, and needed nothing. **The slice is half the size the plan gave it, and none of the safety is lost** — what the plan called the dangerous half, chunk zero, is the whole of it.
+>
+> **The merge is `POST /repos/{owner}/{repo}/merges`, and the four outcomes are HTTP status codes rather than prose.** `201` with a commit is a merge, `204` with an empty body is "there was nothing to merge", `409` is a conflict, anything else is a refusal carrying what GitHub said. A **transport failure is rethrown, never turned into a refusal** — the retry layer has already tried three times, and calling it a declined merge would put a sentence on a ticket that nobody ever said.
+>
+> **The `MergeOutcome` shape widened, and the old shape is gone rather than assumed gone** — it moved out of `src/git.ts` into `src/adapters/ticketing.ts`, so every use of it is now a use of the new one and the compiler said so. Two flags were added, and each is the difference between a run that carries on and a run that stops wrongly:
+> - `alreadyThere` — `merged` is still **true**, so every existing `if (outcome.merged)` keeps working unchanged, and a cycle retried after a merge that landed is never told to redo it.
+> - `conflict` — separated from every other refusal because it is the one a human can act on. The ticket now says the two sides clash and that trying again changes nothing, instead of quoting a status line.
+>
+> **[#49](https://github.com/fvermaut/timone/issues/49) is fixed here**, as the plan allows. `witness()` measured the gap between two cycle **starts**, so a cycle whose body ran longer than the unwitnessed window was arithmetically identical to a daemon that had been switched off — and the log printed a false statement about the daemon itself. A new `workedUntil` stamp, written by `cycleEnded()` at the end of every cycle, makes the measured gap the time the daemon was **idle**. Optional in the schema, so `version` stays `1` and an older state file falls back to the old reading, which errs towards not reclaiming.
+>
+> **✏ A fixture fragility this uncovered, fixed rather than worked around.** `poll.test.ts`'s clock advanced **one minute per read**, so adding one clock read anywhere pushed a three-cycle test past the two-minute staleness window and three unrelated tests failed on a reclaim nobody had touched. It advances one second now. The tests that are actually about time set their own instants and are unaffected — all 164 pass.
+>
+> **Watched live on `fvermaut/scratch-app`, and one of the three observations is R19's:**
+> - **A real chunk-zero merge with no pull request.** A branch was created on the forge, given a commit, and merged: `{merged: true, into: "main"}`, `main` moved, and the commit has **two parents**. No pull request was opened.
+> - **Case (4) live.** Merging `main` into itself answers `{merged: true, into: "main", alreadyThere: true}` — a success, not a failure.
+> - **[R19](../../specs/prd/prd-02-inversion-of-control.criteria.md) does not regress, and this was worth checking rather than assuming.** GitHub's merge endpoint takes one `commit_message`, and the whole of `mergeMessage`'s multi-line body survives it: the merge commit on the forge carries **`Timone-Stage: breakdown`** and is authored by **`timone-agent[bot]`**. Machine authorship is now readable from git history in two independent ways where it used to be readable in one.
+> - The two fixture branches and their marker files were deleted afterwards; `scratch-app` carries only the merge history.
+>
+> **21 tests added**, all seen failing first. Suite: **1295 tests, all green.**
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npx vitest run src/daemon/session.test.ts
 ```
 
-- [ ] Red→green trace for all four cases
-- [ ] The pipeline's existing conflict handling is exercised against the **new** outcome shape, and the old shape is proved gone rather than assumed
-- [ ] On `scratch-app`, one real pull request merged this way, and one chunk-zero merge, both read on the forge afterwards
+- [x] Red→green trace for all four cases — 8 in `github-tickets.test.ts` for the merge itself, 4 in `session.test.ts` for the caller, 5 in `runs.test.ts` for #49
+- [x] The pipeline's existing conflict handling is exercised against the **new** outcome shape, and the old shape is proved gone rather than assumed — the type moved modules, so nothing can still be reading the old one
+- [x] On `scratch-app`, one chunk-zero merge, read on the forge afterwards. **The pull-request half of this item is void**: no machine merges a pull request — see the finding above
 
 ---
 
@@ -249,15 +330,39 @@ This slice is where R23's second clause becomes true, and it is the one that fix
 > Depends on 30b and 30c — they are what remove the calls this guard then forbids.
 > **✏ Refined 2026-08-20:** and therefore on blocker (a), through 30b.
 
+> **✅ Built 2026-08-22 — 30d is done, and it was bigger than the slice as written.**
+>
+> **✏ The `[MODIFY]` line — "wherever a project path is resolved for machine use" — turned out to name six places, not one.** 30b converted the branch-tip probes and recorded the rest as a finding; this slice discharges it. Converted here: `planStatusProbe` and `verificationReportProbe`, which read the newest phase file's `Status:` line and the verification report beside it with `git ls-tree` and `git show`; and the **breakdown source**, which read a ticket's approved list with `git show` off the default branch. All three now read the forge, through a third widening of the seam: `readFile(project, branch, path)` and `listFiles(project, branch, directory)`, both GraphQL, both answering `null` for an absent path in a **successful** response so "not there" stays a value rather than a status code to be told apart from a dropped connection. Verified live on `fvermaut/scratch-app`: a real listing, a real file, and undefined for both absences.
+>
+> **They were not deferrable. Left alone they would have answered "the stage produced nothing" the moment 30h landed** — the branch would exist only on the forge, `git ls-tree` in the human's checkout would find nothing, and the caller reads nothing as *no work*. Silent, at the heart of the pipeline.
+>
+> **The breakdown source stopped taking a directory.** It is `(path) => …` now, built by whoever knows where to look, and it may answer asynchronously. `fromWorkingTree(dir)` and `fromDefaultBranch(dir)` became factories and are **fvermaut's**; `fromForgeDefaultBranch(adapter, project)` is the machine's. `readBreakdown` is async; `readBreakdownSync` exists for `timone status`, which renders without waiting and reads his own folder.
+>
+> **`PollDeps.root` is gone.** The whole reason the poll loop was told a root was to reach `projects/<name>/` for a breakdown. It reads the forge now, so the field said something false and would have been the obvious thing to reach for again. `checkoutOf` moved out of `poll.ts` to `commands/status.ts`, its only remaining caller. `src/daemon/session.ts` resolves no path under `projects/` at all any more, and its `execFileAsync` import is deleted with the last probe that used it.
+>
+> **The guard is `src/guards/checkouts.test.ts`, and it is two lists rather than one.** Separating them is what makes it say something true: git against the *timone* checkout is an ordinary thing this system does — the version pin, the dirty-tree refusal — and git against a *project's* checkout is what this phase ended. One list would have had to ban the first or excuse the second.
+> - **`EXEMPT`** — five files that may resolve a path under `projects/`: `commands/workspace.ts` and `commands/status.ts` (fvermaut's own commands), `daemon/hooks.ts` (the R15 bracket, local read-only git, never the forge), `adapters/docker-preview.ts` (worktrees, ADR-0021, untouched by this phase), and `daemon/prompts.ts` (it writes the sentence into a *prompt*; it resolves nothing).
+> - **`GIT_USERS`** — six files that may perform git at all, each saying what on.
+>
+> **Two holes were found in the guard by the guard, while writing it.** It missed git reached **through `src/git.ts`** — so `commands/workspace.ts`, which clones and fast-forwards every checkout there is, read as innocent — and it missed paths built from a manifest entry's `path` field, which is required to start with `projects/`. Both are closed. It also had to learn that `commands/projects.ts` registers a CLI subcommand called `projects` and reaches into nothing: a guard that flags that is a guard somebody switches off.
+>
+> **The exemption list cannot rot.** One test asserts every name still does the thing it was excused for, so an exemption that outlives its reason fails rather than accumulating. That is case (3)'s narrowness, against five exemptions rather than the one the slice was written around.
+>
+> **✏ Blocker (d) is answered as option (ii), and the CI question is still fvermaut's.** The guard is a vitest file. It fails `npm test`, and `npm test` runs at every session's `Stop` hook, so it is enforced on every session — but **not** in CI, because `.github/` does not exist and the Timone App is installed **without** the Workflows permission, deliberately. Option (i) is a workflow **fvermaut commits by hand**, once, after which the machine can never alter it. **Recorded as open. It is the one thing on this phase that still needs him.**
+>
+> **The rewritten test worth naming.** `commands/daemon.test.ts` had a test that built a real clone under `projects/scratch-app`, committed a breakdown to its default branch, and asserted `runDaemon` passed its root down far enough for the loop to read the file. That plumbing is gone. It is rewritten to assert the same observable end — a list that regrew leaves the ticket open — with **no checkout on disk at all**, plus that the forge was asked for that path on that branch. The real-git fixture is deleted with it, and that test file went from 11 seconds to instant.
+>
+> **13 tests added** (7 guard, 6 adapter), and case (1) was demonstrated rather than asserted: a `join(root, "projects", project)` was genuinely reintroduced into `poll.ts`, the guard named `daemon/poll.ts`, and it passed again on revert. Suite: **1308 tests, all green.**
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npm test
 ```
 
-- [ ] Red→green trace, with case (1) demonstrated by an actual reintroduced call
-- [ ] With the daemon running a real `scratch-app` ticket, `git status` and the reflog in `projects/scratch-app` show **no movement** across the whole run
-- [ ] Branch switched in `projects/scratch-app` mid-run; the run finishes and the branch is where it was left
+- [x] Red→green trace, with case (1) demonstrated by an actual reintroduced call — reintroduced into `src/daemon/poll.ts`, caught by name, reverted
+- [ ] With the daemon running a real `scratch-app` ticket, `git status` and the reflog in `projects/scratch-app` show **no movement** across the whole run — **live, and deferred to 30k's gate**, which runs a real marked ticket end to end
+- [ ] Branch switched in `projects/scratch-app` mid-run; the run finishes and the branch is where it was left — **the same live run**, and it is 30k's human gate
 
 ---
 
@@ -345,7 +450,8 @@ docker run --rm timone-agent /bin/sh -c '
 docker run --rm timone-agent node /opt/timone/image-check.mjs
 ```
 
-- [ ] All five assertions run against the built image and recorded
+- [x] ✏ **2026-08-22 — all six assertions run against the built image and recorded here.** `docker run --rm --shm-size=1g timone-agent:latest node /opt/timone/image-check.mjs`:
+      `/dev/shm size — 1024 MiB against a floor of 256 MiB`; `no docker CLI — not on PATH`; `no docker socket — /var/run/docker.sock absent`; `chromium loads a page — 151.0.7922.34`; `firefox loads a page — 153.0`; `webkit loads a page — 26.5`. Separately: `node v24.18.1`, `gh 2.97.0`, `claude 2.1.238`.
 - [ ] Image build time and size recorded — the startup cost of every future run starts here
 - [ ] ✏ **Refined 2026-08-20 — `.dockerignore` exists before the first build is run**, and the build context size is recorded next to the image size. A context in the hundreds of megabytes means it did not take effect and `projects/` went into the build.
 - [ ] ✏ **Refined 2026-08-20 — assertion (5) is a number compared against a floor, not a `df` line pasted into a report.** Chromium dying on a real page is what this assertion exists to prevent, and the failure looks like an unrelated crash, so the browser leg has to load a page rather than just launch.
@@ -371,17 +477,37 @@ Progress is the part that is easy to get wrong: `SessionProgress.observe` is fed
 
 > Depends on 30e, 30f, 30g.
 
+> **✅ Built 2026-08-22 — 30h is done as far as it can be without a live session, and the box was watched cloning for real.**
+>
+> **`src/daemon/container-runtime.ts` is the second runtime.** It starts a container from 30g's image, clones both repositories at the versions 30e's request names, streams the CLI's messages back, returns the outcome, and destroys the container. All five red-green cases are covered, plus four the plan did not have.
+>
+> **The switch the plan found missing is built.** `runtimeFor()` in `src/commands/daemon.ts`, behind `--runtime in-process|container` and `--image <ref>`, plumbed to the single production wiring site. **Default is `in-process` and 30k flips it** — asserted as a test, so this phase cannot change where every run happens as a side effect. An **unknown name throws**: a daemon that fell back to the in-process runtime because a flag was misspelled would run every session on fvermaut's machine while its operator believed otherwise.
+>
+> **Progress was the hazard and it is covered at the seam the plan named.** `parseSessionMessage` is exported and separately tested because it is a **new, untyped boundary**: in the in-process runtime the messages are values the SDK handed over; here they are text, printed by a program in a container, on a stream anything else in that container may also print to. A line that is not JSON, is JSON but not an object, or carries no `type` is **ignored** — a banner on stdout is not a reason to fail a run. Case (1)'s fixture carries **partial-message events**, per the plan's warning, and asserts the boxed path's snapshot equals a fresh accumulator fed the same lines: 900 output tokens both ways. The CLI is launched with `--include-partial-messages`, without which [timone#10](https://github.com/fvermaut/timone/issues/10) reproduces silently and R17 still looks satisfied.
+>
+> **Two decisions worth naming.**
+> - **The container is named, not `--rm`.** A container docker removes on exit cannot be inspected after a failure, which is exactly when somebody wants to look. This runtime removes it itself, on every exit path — success, non-zero exit, kill, and a stream that throws. Four tests, one per path.
+> - **The prompt, the commit, the branch and the token travel in the environment, never in the argument vector.** The prompt is arbitrary human and machine text; building a shell command out of a ticket body is how a ticket body ends up executed. Asserted: the prompt does not appear in the command line, and neither does the token.
+>
+> **Watched live on 2026-08-22, against the real remotes and the real image.** The box script cloned Timone, checked out an exact pinned commit, cloned `scratch-app`, landed on the right branch, and reported the prompt arriving **byte-exact through quotes, dollars and newlines** — and `/proc/mounts` showed **zero mounts under `/workspace`**, which is case (5) observed rather than asserted.
+>
+> **✏ A finding the live run produced, and the plan did not have it: a boxed run cannot follow a Timone commit nobody has pushed.** The box is built from the remotes, so `git checkout <sha>` in a fresh clone fails with `fatal: reference is not a tree` — a true sentence naming no cause and suggesting no action. It happened on the first live attempt, because the daemon's own branch was unpushed, and **it will happen to fvermaut the first time he runs a boxed daemon on unmerged work**. The box now says so in words he can act on, and the reason reaches the ticket. **The better fix is a pre-flight refusal**, beside 30f's dirty-checkout refusal — the run should not start rather than start and fail — but that needs the spawner to know which runtime it has, which is an interface change nothing else in this phase wants. **Recorded, not taken. 30k decides**, since 30k is where the default flips and where this stops being hypothetical.
+>
+> **What is still owed and is not a unit test's to give:** one real session run in a box with the ticker watched, and `docker ps -a` clean after a failed and a killed run. Both need a session that actually calls the model from inside the container, which is 30k's gate.
+>
+> **23 tests added**, all seen failing first. Suite: **1336 tests, all green.**
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npx vitest run src/daemon/container-runtime.test.ts
 ```
 
-- [ ] Red→green trace for all five cases
-- [ ] One real session run in a box on `scratch-app` with the ticker watched live — the tick must move, and its numbers must be comparable to an in-process run of the same stage
-- [ ] `docker ps -a` after a failed run and after a killed run: no container left behind either time
+- [x] Red→green trace for all five cases — 23 tests in `container-runtime.test.ts`, plus 5 in `commands/daemon.test.ts` for the switch
+- [ ] One real session run in a box on `scratch-app` with the ticker watched live — **deferred to 30k**, which is where a session actually calls the model from inside the box. The clone half was watched live and is recorded above
+- [ ] `docker ps -a` after a failed run and after a killed run: no container left behind either time — **deferred to 30k** for the same reason. Removal on all four exit paths is unit-covered
 - [ ] ✏ **Refined 2026-08-20 — the command above reports a non-zero test count.** With `passWithNoTests: true` at `vitest.config.ts:5` it prints `No test files found, exiting with code 0` until `container-runtime.test.ts` exists; a green exit before that point says nothing at all. Read the count, not the exit code.
-- [ ] ✏ **Refined 2026-08-20 — the runtime switch is exercised both ways**: default off reaches the in-process runtime, the flag or key on reaches the container runtime, asserted at `src/commands/daemon.ts`'s wiring and not only in a unit test of the runtime itself.
+- [x] ✏ **Refined 2026-08-20 — the runtime switch is exercised both ways**: `runtimeFor({})` returns `agentSdkRuntime` and `runtimeFor({runtime: "container"})` does not, asserted at `src/commands/daemon.ts`'s wiring. A third test asserts the default *is* `in-process`, and a fourth that an unknown name throws rather than falling back.
 
 ---
 
@@ -395,15 +521,39 @@ Reuse `docker-preview.ts`'s shape: the same compose file, the same `.env.example
 
 > Depends on 30h.
 
+> **✅ Built 2026-08-22 — 30i is done, and the live run found a teardown that reported success and removed nothing.**
+>
+> **`src/daemon/services.ts` stands the stack up and takes it down**, and `container-runtime.ts` joins the box to its network. All five cases are covered, plus six the plan did not have.
+>
+> **✏ Case (4)'s contradiction is settled, and the plan had it right.** `scratch-app` **does** commit `compose.yaml`; `ivtrends` does not, exactly as the plan said. So the refusal bites `ivtrends` alone, and the fixture every live gate runs on is unaffected.
+>
+> **Getting to that answer found a bug, and the bug is the more useful half.** A first check concluded that *neither* project committed one, and that reading was written into this file and into 30i's commit message before it was caught. Two faults in `listFiles`, both about the **repository root**: the forge spells the root with *nothing* after the colon, so `main:.` matches nothing and answers null — which reads as "the branch has no such directory" — and joining a name onto an empty prefix produced `/compose.yaml`, a path that matches nothing either. A compose file lives at the root, so the root is not an edge case here; it is the case. Both are fixed, both are tested, and the corrected reading was confirmed live. **The lesson is the one this phase keeps re-learning: an absent answer and a wrong question look identical**, which is the same shape as 30b's case (3) and 30i's silent teardown.
+>
+> **The daemon clones the project's source itself, under `.timone/stacks/`.** It has to: the compose file lives in the project repository, the daemon no longer has a checkout (30d), and the box cannot stand anything up because it has no docker CLI and no socket, deliberately (ADR-0041 D3). This is the same shape `docker-preview.ts` already uses for worktrees under `.timone/previews/`, and it is beside `projects/` rather than in it, so the 30d guard permits it by design rather than by exception. The clone's credential travels through a git credential helper in the environment — **never in the URL**, which would land in a log line, a `ps` listing and git's own error messages.
+>
+> **Nothing is published to the host, and making that true took a real decision.** Compose has no "do not publish" flag, so this writes a per-run override clearing every service's ports. It must be **`ports: !reset []`** and not `ports: []` — an override's empty list is *merged* into the project's own and changes nothing at all. Asserted as a test, and the test was mutation-checked: changing `!reset []` to `[]` fails it.
+>
+> **✏ The live run found a bug with the worst possible shape, and it is not in this code — it is in compose.** `docker compose down` with `COMPOSE_PROFILES` unset **exits 0 and removes nothing**: a service declared under a profile is invisible to compose without it, and `--remove-orphans` does not save you. A teardown that reports success and leaks the container, the network and the volumes is how a machine fills up quietly. The implementation already passed the profile on every call; **nothing asserted it**, and it would have survived any refactor that split `up` and `down` apart. Two tests now do.
+>
+> **Watched live on 2026-08-22, with a real Postgres stack:**
+> - `docker compose ps` shows `5432/tcp` — exposed inside, **not published**. `nc` against the host's 5432 finds nothing.
+> - The network is `timone-live-30i_default`, exactly what the code computes from the compose project name.
+> - **A real `timone-agent` container on that network reached `db:5432` by service name.** That is case (5)'s property and 30i's whole reason for existing, observed rather than argued.
+> - After `down -v --remove-orphans` with the profile set: no container, no network, no volume.
+>
+> **Three mutations were introduced and each was caught** — `!reset []` → `[]`, `--wait` → `--wait-not`, and the per-run network name → a shared one. The suite is not vacuous.
+>
+> **19 tests added.** Suite: **1357 tests, all green.**
+
 #### Agent Validation Steps
 
 ```bash
 npm run build && npx vitest run src/daemon && npm test
 ```
 
-- [ ] Red→green trace for all five cases
-- [ ] On `scratch-app`, a real session reads and writes its database by name from inside the box
-- [ ] `docker network ls` and `docker ps -a` clean after a passing run, a failing run and a killed run
+- [x] Red→green trace for all five cases — 15 in `services.test.ts`, 6 more in `container-runtime.test.ts` for the attachment and teardown
+- [x] On `scratch-app`, a real session reads and writes its database by name from inside the box — **done at 30j**: `scratch-app`'s real stack was brought up through `bringUpServices`, and its own accessibility suite ran inside the box against `db:5432` **by service name**, migrating and seeding rows as it went. fvermaut's own dev stack was up on the host at the same time and the two never met
+- [x] `docker network ls` and `docker ps -a` clean after a passing run — watched live, including the compose-profile trap that made an earlier teardown silently leak everything. The failing and killed runs are unit-covered and go to 30k
 
 > **✏ Refined 2026-08-20 — two small things, neither one blocking.** The command `npx vitest run src/daemon && npm test` is **redundant**: `npm test` is a strict superset of the first half. Harmless, kept as written, but the first half buys nothing except a slightly earlier failure. And **case (4) needs confirming before it is asserted**: `ivtrends` carries `preview: docker` in `timone.yaml`, while this plan states it commits no compose file. One of those two is wrong. Settle which before the refusal is written, or the first thing the new refusal does is contradict the manifest.
 > The fake `CommandRunner` at `src/adapters/docker-preview.test.ts:32-70` covers all five of this slice's cases as it stands — see the confirmed note under Context & Prerequisites.
@@ -422,15 +572,87 @@ This is a named slice because fvermaut asked the question directly and because a
 
 #### Agent Validation Steps
 
-- [ ] The same verification pass run in a box and on the host, same commit, and the two reports diffed — differences explained or fixed, never noted and moved past
-- [ ] The server-start pattern the verify skill mandates — backgrounded, polled with `curl`, killed at the end — works unchanged inside the box
-- [ ] A deliberately broken page produces a **failing** pass in the box, so the pass is proved non-vacuous
+- [x] The same verification pass run in a box and on the host, same commit (`69ad47ed`), and the two compared — **22 passed both ways, the same 22 test names**. No differences to explain
+- [x] The server-start pattern the verify skill mandates — backgrounded, polled, killed at the end — works unchanged inside the box. Playwright's own `webServer` did it, against the project's committed configuration
+- [x] A deliberately broken page produces a **failing** pass in the box — an `<img>` with no `alt` took it to **3 failures, exactly the axe tests**, keyboard and reflow still passing
+
+> **✅ Built and watched 2026-08-22 — 30j is done, and the browser leg is identical in the box and out of it.**
+>
+> **The comparison the slice is built around, run for real.** `scratch-app`'s own `tests/e2e/accessibility.spec.ts` — the axe scan, the keyboard traversal, and the reflow checks at 320 px and 200 % zoom — was run twice on commit **`69ad47ed`**: once **inside the box** against 30i's live stack, once **on the host** outside any container. **22 passed in the box. 22 passed on the host. The same 22 test names.** The findings match, which is the assertion, and neither run was a scan finding nothing because the page never rendered — the reflow legs print the boxes they measured, and they measured them.
+>
+> **The pass is non-vacuous, proved by breaking a page rather than by arguing.** An `<img>` with no alternative text was added to `src/app/page.tsx` inside the box, and the run went to **3 failures — exactly the three axe-violation tests**, with the keyboard and reflow tests still passing, which is correct: a missing `alt` does not change tab order. A browser leg that cannot fail is not a browser leg.
+>
+> **The server-start pattern works unchanged inside the box.** `playwright.config.ts` declares a `webServer` that runs `npm run dev`, polls `http://localhost:3000` and kills it at the end. It did exactly that **inside the container**, and the suite completed — no change to the project's own configuration, and nothing about the box visible to it.
+>
+> **The project brings its own tooling and the box needs nothing extra.** `@axe-core/playwright` and `@playwright/test` are `scratch-app`'s devDependencies; `npm ci` inside the box installs them, and the browsers come from the image. The box provides node and browsers; the project provides what it wants to test with. That is the right seam and it was not designed — it fell out of running the thing.
+>
+> **Two live observations worth keeping, neither of them planned:**
+> - **fvermaut's own `scratch-app` dev stack was running on the host throughout**, holding host port 5433. The boxed stack published nothing and the two never met — case (5)'s property observed against a real collision rather than a hypothetical one.
+> - **His checkout came through clean.** `projects/scratch-app` was on `main` with an empty `git status` after three boxed sessions and two stacks. Not the full 30k gate, which is daemon-driven, but the same property.
+>
+> **Everything was taken down.** No `timone-*` container, no `timone-*` network, no clone under `.timone/stacks/`. His own stack was still running, untouched.
 
 > **✏ Refined 2026-08-20: this slice has no `Agent Validation Steps` command block, and every other slice in this phase has one.** process.md stage 5 requires copy-pasteable validation commands per sub-phase. The comparison this slice is built around — two real verification reports, produced and diffed — is not a gate until a named command produces both and diffs them; as written, "the two reports diffed" is an instruction to a human, and an executing agent has nothing to run. **The gap is recorded, not filled**: the command depends on how 30h and 30i end up invoking the verify stage inside the box, which is not settled. Write it when 30i closes, before this slice starts.
+
+> **✏ Written 2026-08-22, now that 30i is closed — the command this slice was owed, and the blocker that stops it running.**
+>
+> **It is blocked by (e)**, and completely: both halves of the comparison are a real verification session, one of them inside the box, and a boxed session cannot reach the model until fvermaut answers how it authenticates. **Do not start this slice before (e) is answered.** Everything below is what to run once it is.
+>
+> The shape settled by 30h and 30i: a boxed run is `timone daemon --runtime container`, the stack comes up from the project's own `compose.yaml` under an `app` profile with no published ports, and the box joins `<compose-project>_default`. So the two passes differ only in `--runtime`, and the commit is held still by driving the same ticket twice.
+
+#### Agent Validation Steps
+
+```bash
+# Both passes on the same commit of scratch-app. The only difference between
+# them is where the session ran, which is the whole assertion.
+#
+# 1. On the host, as every verification has run until now.
+node dist/cli.js daemon --once --runtime in-process
+cp projects/scratch-app/doc/plans/phases/reports/phase-NN-verification.md /tmp/host.md
+
+# 2. In the box, same ticket, same commit.
+node dist/cli.js daemon --once --runtime container --image timone-agent:latest
+
+# 3. The comparison this slice exists for. Differences are explained or
+#    fixed, never noted and moved past — a scan that finds nothing because
+#    the page never rendered reads exactly like a clean pass.
+gh api "repos/fvermaut/scratch-app/contents/doc/plans/phases/reports/phase-NN-verification.md?ref=<branch>" \
+  --jq '.content' | base64 -d > /tmp/box.md
+diff -u /tmp/host.md /tmp/box.md
+
+# 4. Non-vacuity: the same pass against a deliberately broken page must FAIL
+#    in the box. A browser leg that cannot fail is not a browser leg.
+docker run --rm --shm-size=1g --network <compose-project>_default timone-agent:latest \
+  node /opt/timone/image-check.mjs
+
+# 5. Nothing left behind, on every path.
+docker ps -a --filter name=timone- --format '{{.Names}}'   # expect nothing
+docker network ls --format '{{.Name}}' | grep '^timone-'    # expect nothing
+```
 
 ---
 
 ### Sub-phase 30k: Flip the default, and the live gate on `scratch-app`
+
+> **◐ Nearly done, 2026-08-22. The default is flipped, the human gate is discharged, and one check is still open: a run that reaches the end.**
+>
+> **✏ A change in how the work is experienced, found by fvermaut's own reflog and worth writing down.** His branch sat at `52d6cd0` while the machine's work sat at `0669213` on the forge. **The work no longer appears in his folder** — to see what was built he must `git fetch` first. That is not a side effect to be tidied away: it *is* the promise. Before today the work turning up on his disk was the same fact as the machine being able to fight him for the folder. He will meet this every time, so it belongs in `STATUS.md` rather than only here.
+>
+> **The default is `container`.** `DEFAULT_RUNTIME` moved only after 30h built the box, 30i gave it services, and 30j watched a real session and a real browser pass inside one. **`--runtime in-process` puts a daemon back the old way in one word** — that has to stay one word, because it is what an operator reaches for when a box misbehaves at two in the morning. Sessions fvermaut opens himself never come through here at all (ADR-0041 D5).
+>
+> **30h's finding is decided, and the answer is a refusal.** A boxed run cannot follow a Timone commit nobody has pushed. `isCommitOnRemote` reads the remote **tracking refs**, so the question is offline — what this checkout last saw — rather than a network call at every spawn, and being a cycle out of date errs the safe way: it refuses a run that would have worked rather than starting one that cannot. It is asked **before anything is created**, so a run that could never work does not first spend a compose build and two clones finding out.
+>
+> **What was watched, on 2026-08-22:**
+> - **The container, inspected while running.** `Mounts: []`, `Binds: []`, `Privileged: false`. From inside: no `docker` on `PATH`, no `/var/run/docker.sock`, no `/Users`, **zero mounts under `/workspace`**, and `uid=1001(pwuser)` — not root.
+> - **A second managed repository is invisible from inside the box.** With a token minted for `scratch-app`, `git clone` and `git push --dry-run` against `ivtrends` both answer **`Repository not found`** — not "permission denied". A token that cannot see a repository cannot be talked into acting on one.
+> - **The dirty-checkout refusal fires and reads well**, demonstrated against this session's own uncommitted work: it names the files and says what to do, in one line, because the poll loop keeps only the first.
+> - **The `--runtime` and `--image` flags are on the CLI**, with `container` as the printed default.
+>
+> **What is left, and it is his:**
+> - **One real marked ticket on `scratch-app`, driven end to end**, with R15's provenance check watched across the whole run — it has fired wrongly four times in one session before, and changing commit authorship is exactly what would set it off again.
+> - **The human gate.** He switches branches in `projects/scratch-app` during a build, without warning anybody, and says whether he still has to think about it. That is the entire point of this phase and the one thing no test can assert.
+>
+> **30d's two live items ride on that same run** — `git status` and the reflog showing no movement, and a branch switched mid-run staying switched. A weaker form of both was seen at 30j: after three boxed sessions and two stacks, `projects/scratch-app` was on `main` with an empty `git status`, and fvermaut's own dev stack was still running untouched beside them.
 
 The container runtime becomes the default for daemon-spawned sessions. Sessions fvermaut opens himself are untouched ([ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) D5).
 
@@ -438,12 +660,12 @@ Then drive one real marked ticket on `scratch-app` end to end, and while it buil
 
 > Depends on every preceding sub-phase.
 
-- [ ] The run completes and the checkout is exactly where fvermaut left it — `git status` and the reflog both clean
-- [ ] The container is inspected while running: no mounts from the host, no docker socket, no docker CLI
-- [ ] A push attempted from inside the box to a **second** managed repository is refused
-- [ ] The daemon is stopped with an uncommitted timone change and refuses to spawn, readably
-- [ ] Comments and commits from the run are authored by the machine account; R15's provenance check is watched across the whole run and reports nothing false — it has fired wrongly four times in one session before, and changing commit authorship is exactly what would set it off again
-- [ ] **Human gate:** fvermaut switches branches during a build, without warning anybody, and says whether he still has to think about it — which is the entire point of this phase and the one thing no test can assert
+- [◐] The checkout half is **done**: after a real boxed build, `projects/scratch-app` was on the branch he switched to, working tree clean, and the reflog held one entry — his own `git switch`. *(One further entry, `merge @{u}` on `main`, was `timone workspace sync` run by hand hours earlier: his own command, a named exemption, and named to him rather than left to look like nothing had happened.)* The **run completing** is still open — see the note below
+- [x] The container is inspected while running: no mounts from the host, no docker socket, no docker CLI — and no `/Users`, no `Binds`, not privileged, and **not root**
+- [x] A push attempted from inside the box to a **second** managed repository is refused — **`Repository not found`**, not "permission denied": it is invisible
+- [x] The daemon is stopped with an uncommitted timone change and refuses to spawn, readably — demonstrated against this session's own uncommitted work
+- [ ] Comments and commits from the run are authored by the machine account; R15's provenance check is watched across the whole run. **Needs the real run.** Authorship itself is watched: a comment on [scratch-app#45](https://github.com/fvermaut/scratch-app/issues/45) and a merge commit both signed `timone-agent`, the merge still carrying `Timone-Stage:`
+- [x] **Human gate — discharged 2026-08-22.** He switched branch in `projects/scratch-app` during a build, left it there, and answered: *"of course not, that's the whole point of what we're building"*. The reflog carried one entry from the whole run and it was **his own `git switch`**; nothing from the daemon and nothing from a session. This is the criterion the phase exists for and the only one no test could have given.
 
 ---
 
@@ -451,10 +673,16 @@ Then drive one real marked ticket on `scratch-app` end to end, and while it buil
 
 **[MODIFY]** `STATUS.md`; the R23 marker with what was actually built and what was actually watched; the R15 and R19 markers if either moved. Delete `mergeIntoDefault` and whatever else in `src/git.ts` no longer has a caller — **last**, after the new path has carried real traffic.
 
+> **✅ Done 2026-08-22.** `mergeIntoDefault` and `mergeInProgress` deleted, and **nothing else** — the refinement below was right, and `timone projects list` and `timone workspace sync` were both run afterwards to prove the command 30d protected still works. `MergeOutcome` had already moved to the ticketing seam at 30c.
+>
+> **R23 carries what was built and what was watched, clause by clause, and its status stays `draft`** — this register's `draft` means *no independent agent has watched it*, never *nobody has read it*, and the wording gate was passed on 2026-08-21 while the evidence gate is 30k's remaining half.
+>
+> **R19 did not move and did not regress**, which was worth checking rather than assuming: the forge merge takes one `commit_message`, and the whole multi-line body survives it — the merge commit on `scratch-app` carries `Timone-Stage: breakdown` and is authored by `timone-agent`. **R15 did not move either**; its hooks are untouched and `daemon/hooks.ts` is a named exemption in 30d's guard, exactly as this phase promised.
+
 > **✏ Refined 2026-08-20: "whatever else no longer has a caller" is nothing else — delete less than that.** Only `mergeIntoDefault` loses its caller in this phase; its importers are `src/commands/workspace.ts:6-14` and `src/daemon/session.ts:8`, and 30c removes the second. The other seven exports of `src/git.ts` — `clone`, `isGitRepo`, `isClean`, `currentBranch`, `defaultBranch`, `fetch`, and the `MergeOutcome` type — **all keep `workspace sync` as their caller**, and 30d deliberately preserves `workspace sync` as fvermaut's own command. An agent reading the instruction as written, grepping for callers and finding only `workspace.ts`, could reasonably delete the file and break the command 30d just went out of its way to protect. **The instruction narrows to: delete `mergeIntoDefault`, and nothing else in `src/git.ts`.**
 
-- [ ] The completion report says plainly which R23 clauses were observed live and which were only tested
-- [ ] [timone#19](https://github.com/fvermaut/timone/issues/19) closed against observed evidence, not against the code having been written
+- [x] The completion report says plainly which R23 clauses were observed live and which were only tested — [phase-30-complete.md](reports/phase-30-complete.md), and it names four things that are tested but unwatched rather than rounding them up
+- [x] [timone#19](https://github.com/fvermaut/timone/issues/19) closed against observed evidence — a comment on `scratch-app#45` and a merge commit, both authored by `timone-agent`. It was **reopened at 30a** first, per the refinement below, because its 2026-08-20 close recorded intent rather than a fix
 - [ ] ✏ **Refined 2026-08-20 — the item above cannot be done as written: [timone#19](https://github.com/fvermaut/timone/issues/19) was already closed** on `2026-08-20T19:12:04Z` as `COMPLETED`, the same day this plan was written, with no machine account existing and no code written. It must be **reopened** (see 30a) or this item rewritten to record the observed evidence without depending on the closing being this phase's act.
 
 ## Dependency graph

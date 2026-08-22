@@ -153,6 +153,62 @@ export function isMachineComment(body: string): boolean {
   return body.trimStart().startsWith(MACHINE_MARKER);
 }
 
+/**
+ * True when a comment is Timone's — by its **author** where Timone has an
+ * identity, and by {@link MACHINE_MARKER} either way.
+ *
+ * Two readers, not one replacing the other, and the second is not a
+ * transitional courtesy:
+ *
+ * - **The author** is the honest test now that Timone acts as its own App
+ *   ([ADR-0042](../../doc/adr/0042-timone-acts-under-its-own-identity.md)). It
+ *   catches a comment the machine wrote through a surface that never went
+ *   through {@link stampMachineComment} — a review summary, a merge note —
+ *   which the marker alone reads as a human's.
+ * - **The marker** stays because every comment Timone wrote before it had an
+ *   identity is authored by `fvermaut`. Dropping the fallback would make a
+ *   whole backlog of the machine's own questions read as the human's answers,
+ *   and the gates that wait for a human reply would fire on them.
+ *
+ * `machineLogin` is undefined wherever no identity is configured, which
+ * leaves exactly the behaviour that shipped before this existed.
+ *
+ * **The two spellings are one identity.** GitHub renders an App's bot as
+ * `timone-agent` on the GraphQL surface — which `gh --json` speaks — and as
+ * `timone-agent[bot]` on REST, and this adapter reads both: a ticket thread
+ * comes from GraphQL, an inline pull-request comment from REST. Watched on
+ * `fvermaut/scratch-app` on 2026-08-22, after a live comment posted under the
+ * App's own identity came back as `timone-agent` against a manifest declaring
+ * `timone-agent[bot]`. A comparison against one spelling recognises half of
+ * Timone's own comments and reads the other half as the human's.
+ */
+export function isFromTimone(
+  comment: { author: string; body: string },
+  machineLogin: string | undefined,
+): boolean {
+  if (
+    machineLogin !== undefined &&
+    sameLogin(comment.author, machineLogin)
+  ) {
+    return true;
+  }
+  return isMachineComment(comment.body);
+}
+
+/** Drop the `[bot]` GitHub's REST surface appends and its GraphQL one does not. */
+function bareLogin(login: string): string {
+  return login.endsWith("[bot]") ? login.slice(0, -"[bot]".length) : login;
+}
+
+/**
+ * Whether two logins name the same forge identity, across the two spellings
+ * GitHub uses for an App. Compared whole rather than by prefix: an account
+ * called `timone-agent-helper` is somebody else.
+ */
+function sameLogin(one: string, other: string): boolean {
+  return bareLogin(one) === bareLogin(other);
+}
+
 /** One comment in a ticket's thread. */
 export const ticketCommentSchema = z.strictObject({
   author: z.string(),
@@ -301,6 +357,48 @@ export type PullRequestComment = z.infer<typeof pullRequestCommentSchema>;
 export type PullRequestThread = z.infer<typeof pullRequestThreadSchema>;
 
 /**
+ * A repository's branch state as the forge has it.
+ *
+ * `defaultHead` is undefined for a repository with no commits — a fresh
+ * remote before its first push, which is a real state a newly onboarded
+ * project passes through. `head` is undefined when the named branch does not
+ * exist there, which is the ordinary case before the stage that cuts it.
+ */
+export const repositoryBranchesSchema = z.strictObject({
+  /** The default branch's name, e.g. `main`. */
+  defaultBranch: z.string(),
+  /** The default branch's tip, or undefined in a repository with no commits. */
+  defaultHead: z.string().optional(),
+  /** The named branch's tip, or undefined when it does not exist. */
+  head: z.string().optional(),
+});
+
+export type RepositoryBranches = z.infer<typeof repositoryBranchesSchema>;
+
+/**
+ * What a merge answers: it merged, or it did not and why.
+ *
+ * **Widened by phase 30, and the two new flags are the difference between a
+ * run that carries on and a run that stops wrongly.**
+ *
+ * - `alreadyThere` — the branch's commits were on the default branch
+ *   already. On the forge this is an ordinary `204 No Content`, and it
+ *   happens whenever a cycle is retried after a merge that landed. It is a
+ *   **success**: `merged` is true, so every existing `if (outcome.merged)`
+ *   keeps working, and a run is never told to redo work it has done.
+ * - `conflict` — the forge refused because the two sides disagree. Separated
+ *   from every other refusal because it is the one a human can act on, and
+ *   the ticket should say so rather than quoting a status line.
+ *
+ * A dropped connection is **not** a `MergeOutcome`. It throws, for the same
+ * reason an unreachable forge is not an absent branch: a refusal is something
+ * the forge said, and nobody has said anything when the call never arrived.
+ */
+export type MergeOutcome =
+  | { merged: true; into: string; alreadyThere?: boolean }
+  | { merged: false; reason: string; conflict?: boolean };
+
+/**
  * The subset of a managed project an adapter needs: its manifest name (for
  * error messages and run keys) and its clone URL (which the implementation
  * resolves to whatever the tracker addresses repositories by).
@@ -322,6 +420,91 @@ export interface TicketingProject {
  * on the calls themselves.
  */
 export interface TicketingAdapter {
+  /**
+   * The repository's branch state, **as the forge has it** — its default
+   * branch and, when one is named, the tip of that branch.
+   *
+   * Phase 30's widening, and the first capability on this seam that is not
+   * about issues, pull requests or labels
+   * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)).
+   * Until it existed the daemon answered "did that stage produce anything?"
+   * by running `git rev-parse` inside `projects/<name>` — the folder the human
+   * has open in an editor, and whose state is his business rather than a fact
+   * about the work.
+   *
+   * **An absent branch is `head: undefined`, and that is an answer rather than
+   * a failure.** Before the stage that cuts one, there is no branch, and that
+   * is how "this stage produced nothing" is detected. A transport failure is
+   * the opposite: it **throws**, and implementations must never let one arrive
+   * here as an absent branch — a stage that did its work would then be
+   * reported as having done none.
+   *
+   * One call rather than two because a poll cycle asks per stage per project,
+   * and this seam's traffic is what
+   * [timone#49](https://github.com/fvermaut/timone/issues/49) turns into a
+   * false report of a stopped daemon.
+   */
+  readBranches(
+    project: TicketingProject,
+    branch?: string,
+  ): Promise<RepositoryBranches>;
+
+  /**
+   * Merge `branch` into the repository's default branch **with no pull
+   * request**, and answer whether it happened.
+   *
+   * Phase 30's second widening of this seam, and the load-bearing one. It has
+   * one caller — the breakdown gate's approval merging chunk zero
+   * ([ADR-0030](../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)
+   * D2) — and it is the only path in the system that reaches a default branch
+   * without a human having read a diff. It stays that way; only the hand
+   * changes, from `git merge` in the human's checkout to the forge's own
+   * merge ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)
+   * D3).
+   *
+   * It authors no content and can move nothing but the default branch, and
+   * nothing onto it but `branch`'s own commits.
+   */
+  mergeIntoDefault(
+    project: TicketingProject,
+    branch: string,
+    message: string,
+  ): Promise<MergeOutcome>;
+
+  /**
+   * One file's content on `branch`, or undefined when the branch does not
+   * carry it.
+   *
+   * Phase 30's third widening, and it exists for the same reason as
+   * {@link readBranches}: three of the daemon's checks read a *file* off a
+   * branch — the newest phase file's `Status:` line, the verification report
+   * beside it, and a ticket's approved breakdown — and every one of them did
+   * it with `git show` inside `projects/<name>`. Nothing fetched that
+   * checkout, so they worked only because the session that wrote the branch
+   * ran in the same folder. The moment a session runs anywhere else, the
+   * branch is on the forge and those reads answer "no such file" — which the
+   * callers read as *the stage produced nothing*.
+   *
+   * **Absent is `undefined` and is an answer. A failure to read throws**, for
+   * the same reason as `readBranches`.
+   */
+  readFile(
+    project: TicketingProject,
+    branch: string,
+    path: string,
+  ): Promise<string | undefined>;
+
+  /**
+   * The repository-relative paths of the files **directly under**
+   * `directory` on `branch` — not recursive, and directories are not
+   * included. Undefined when the branch does not carry the directory at all.
+   */
+  listFiles(
+    project: TicketingProject,
+    branch: string,
+    directory: string,
+  ): Promise<string[] | undefined>;
+
   /** Open tickets carrying the mark label, oldest first. */
   listMarkedTickets(project: TicketingProject): Promise<Ticket[]>;
 

@@ -1,18 +1,14 @@
-import { execFile } from "node:child_process";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
 
-const execFileAsync = promisify(execFile);
 
 import {
   checkoutVersion,
-  mergeIntoDefault,
   uncommittedFiles,
-  type MergeOutcome,
 } from "../git.js";
 import type { Manifest } from "../manifest.js";
 import type {
+  MergeOutcome,
   TicketComment,
   TicketingAdapter,
   TicketingProject,
@@ -26,7 +22,7 @@ import { TerminalChannel } from "../channels/terminal.js";
 import { technicalFault, type TechnicalFault } from "./faults.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
-  fromDefaultBranch,
+  fromForgeDefaultBranch,
   readBreakdown,
   type BreakdownSource,
   type Chunk,
@@ -428,17 +424,35 @@ export interface AgentSessionSpawnerOptions {
   /** Where multi-turn conversations happen. Defaults to the terminal. */
   channel?: ConversationChannel;
   /**
-   * Reads a branch's tip in a project checkout. Behind a seam so the
+   * Reads a branch's tip. Behind a seam so the
    * did-this-stage-produce-anything check is testable without a real repo.
+   *
+   * **Its default reads the forge, not `projects/<name>`**
+   * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)).
+   * The seam is unchanged in shape and in meaning — `undefined` still means
+   * "there is no such branch" — but the argument is now the project rather
+   * than a directory, because a directory is the thing this phase stops
+   * having an opinion about.
+   *
+   * **A failure to read must throw**, not answer `undefined`. The two are
+   * opposite facts: no branch means the stage produced nothing, and an
+   * unreachable forge means nobody knows what the stage produced.
    */
-  repoProbe?: (repoDir: string, branch: string) => Promise<string | undefined>;
+  repoProbe?: (
+    project: TicketingProject,
+    branch: string,
+  ) => Promise<string | undefined>;
   /**
-   * Reads the checkout's current `HEAD`. It is the baseline for a stage that
-   * has no work branch yet: the commit a new branch would be cut from, and
-   * therefore the thing a branch must have moved *past* to have produced
-   * anything.
+   * Reads the baseline a stage with no work branch would start from: the
+   * default branch's tip, and therefore the thing a branch must have moved
+   * *past* to have produced anything.
+   *
+   * Read from the forge by default, for the same reason as {@link repoProbe}
+   * — and the change of source matters here more than anywhere: the human's
+   * checkout can sit on any commit he likes, and it was never a fact about
+   * the work that its `HEAD` happened to be the baseline.
    */
-  headProbe?: (repoDir: string) => Promise<string | undefined>;
+  headProbe?: (project: TicketingProject) => Promise<string | undefined>;
   /**
    * Reads the `Status:` line of the newest phase file on a branch. The
    * artifact half of execution's outcome check — the stage's own closing act
@@ -446,7 +460,7 @@ export interface AgentSessionSpawnerOptions {
    * as {@link repoProbe}.
    */
   planStatusProbe?: (
-    repoDir: string,
+    project: TicketingProject,
     branch: string,
   ) => Promise<string | undefined>;
   /**
@@ -454,7 +468,7 @@ export interface AgentSessionSpawnerOptions {
    * path or undefined. The artifact half of verification's outcome check.
    */
   verificationReportProbe?: (
-    repoDir: string,
+    project: TicketingProject,
     branch: string,
   ) => Promise<string | undefined>;
   /**
@@ -465,7 +479,7 @@ export interface AgentSessionSpawnerOptions {
    * implementation.
    */
   mergeProbe?: (
-    repoDir: string,
+    project: TicketingProject,
     branch: string,
     message: string,
   ) => Promise<MergeOutcome>;
@@ -611,107 +625,96 @@ export function unclassifiedComment(): string {
 }
 
 /**
+ * The newest phase file on `branch`, by number — the one the planning stage
+ * just committed and the one execution was told to build.
+ *
+ * ✏ **Phase 30's 30d: read from the forge, not from `projects/<name>`.** This
+ * used to be `git ls-tree` in the human's checkout, and nothing fetched that
+ * checkout. It worked only because the session that wrote the branch ran in
+ * the same folder — so it was already a fact about a laptop rather than about
+ * the work, and once a session runs in a box it would answer "no phase file",
+ * which the caller reads as *execution produced nothing*.
+ */
+async function newestPhaseFile(
+  adapter: TicketingAdapter,
+  project: TicketingProject,
+  branch: string,
+): Promise<string | undefined> {
+  const files = await adapter.listFiles(project, branch, "doc/plans/phases");
+  return files
+    ?.filter((path) => /^doc\/plans\/phases\/phase-\d+\.md$/.test(path))
+    .sort()
+    .at(-1);
+}
+
+/**
  * The `Status:` line of the newest phase file on `branch`, or undefined when
- * the branch carries none. Newest by number, because that is the file the
- * planning stage just committed and the one execution was told to build.
+ * the branch carries none.
  */
-async function gitPlanStatus(
-  repoDir: string,
+async function forgePlanStatus(
+  adapter: TicketingAdapter,
+  project: TicketingProject,
   branch: string,
 ): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["ls-tree", "-r", "--name-only", branch, "--", "doc/plans/phases"],
-      { cwd: repoDir },
-    );
-    const newest = stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => /^doc\/plans\/phases\/phase-\d+\.md$/.test(line))
-      .sort()
-      .at(-1);
-    if (newest === undefined) return undefined;
+  const newest = await newestPhaseFile(adapter, project, branch);
+  if (newest === undefined) return undefined;
 
-    const { stdout: content } = await execFileAsync(
-      "git",
-      ["show", `${branch}:${newest}`],
-      { cwd: repoDir },
-    );
-    const line = content
-      .split("\n")
-      .find((candidate) => candidate.includes("Status:"));
-    return line?.replace(/^.*Status:\*{0,2}\s*/, "").trim();
-  } catch {
-    return undefined;
-  }
+  const content = await adapter.readFile(project, branch, newest);
+  const line = content
+    ?.split("\n")
+    .find((candidate) => candidate.includes("Status:"));
+  return line?.replace(/^.*Status:\*{0,2}\s*/, "").trim();
 }
 
 /**
- * The newest phase's verification report on `branch` — its path when the
- * file exists there, undefined otherwise. "Newest phase" is resolved the
- * same way {@link gitPlanStatus} resolves it, so the two witnesses of the
- * back half always talk about the same phase.
+ * The newest phase's verification report on `branch` — its path when the file
+ * exists there, undefined otherwise. "Newest phase" is resolved the same way
+ * {@link forgePlanStatus} resolves it, so the two witnesses of the back half
+ * always talk about the same phase.
  */
-async function gitVerificationReport(
-  repoDir: string,
+async function forgeVerificationReport(
+  adapter: TicketingAdapter,
+  project: TicketingProject,
   branch: string,
 ): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["ls-tree", "-r", "--name-only", branch, "--", "doc/plans/phases"],
-      { cwd: repoDir },
-    );
-    const files = stdout.split("\n").map((line) => line.trim());
-    const newest = files
-      .filter((line) => /^doc\/plans\/phases\/phase-\d+\.md$/.test(line))
-      .sort()
-      .at(-1);
-    if (newest === undefined) return undefined;
+  const newest = await newestPhaseFile(adapter, project, branch);
+  if (newest === undefined) return undefined;
 
-    const phase = /phase-(\d+)\.md$/.exec(newest)?.[1];
-    const report = `doc/plans/phases/reports/phase-${phase}-verification.md`;
-    return files.includes(report) ? report : undefined;
-  } catch {
-    return undefined;
-  }
+  const phase = /phase-(\d+)\.md$/.exec(newest)?.[1];
+  const report = `doc/plans/phases/reports/phase-${phase}-verification.md`;
+  return (await adapter.readFile(project, branch, report)) === undefined
+    ? undefined
+    : report;
 }
 
-/**
- * A branch's tip sha in `repoDir`, or undefined when the branch does not
- * exist. Missing is a legitimate answer, not an error: before the first stage
- * that owns one, there is no branch.
- */
-async function gitBranchHead(
-  repoDir: string,
-  branch: string,
-): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["rev-parse", "--verify", `refs/heads/${branch}`],
-      { cwd: repoDir },
-    );
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
+// `gitBranchHead` and `gitCurrentHead` lived here, reading a branch's tip and
+// the checkout's HEAD out of `projects/<name>` with `git rev-parse`. 30b
+// deleted them: branch state comes from the forge now, and the folder they
+// read is the human's (ADR-0043). They are gone rather than kept unused so
+// that 30d's guard has nothing to make an exception for.
 
 /**
- * The checkout's current HEAD sha. Undefined is a legitimate answer — an
- * unborn branch in a fresh clone has no HEAD commit.
+ * The workspace half of a request, or nothing at all.
+ *
+ * **This function is what was missing on 2026-08-22**, when the first real
+ * daemon-spawned boxed run answered *"a boxed session needs a workspace to
+ * clone: this request describes none"*. 30e added the field to the request
+ * and 30f read the pin off the checkout, and **nothing joined them** — each
+ * half correct on its own, and no unit test able to see the gap between them,
+ * because until the box became the default no runtime read the field.
+ *
+ * Absent when the checkout can name no version, or the run holds no branch
+ * yet. Both are legitimate: the in-process runtime ignores the field, and a
+ * stage that has not cut a branch has none to name. The container runtime
+ * refuses such a request, which is the right answer for it.
  */
-async function gitCurrentHead(repoDir: string): Promise<string | undefined> {
-  try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
-      cwd: repoDir,
-    });
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
+function workspaceFor(
+  pin: TimonePin | undefined,
+  project: TicketingProject,
+  branch: string | undefined,
+): { workspace?: WorkspaceInput } {
+  if (pin === undefined || branch === undefined) return {};
+  return { workspace: { timone: pin, project, branch } };
 }
 
 /** Reduce an error to one readable line. */
@@ -934,7 +937,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     let feedback = context.feedback;
 
     if (context.approval !== undefined) {
-      const recorded = await this.recordApproval(run, project, context.approval);
+      const recorded = await this.recordApproval(
+        run,
+        project,
+        context.approval,
+        checkout.pin,
+      );
       if (!recorded) return;
     }
 
@@ -974,7 +982,13 @@ export class AgentSessionSpawner implements SessionSpawner {
 
       await this.claimBranch(run, project, stage);
 
-      const outcome = await this.runStage(run, project, stage, feedback);
+      const outcome = await this.runStage(
+        run,
+        project,
+        stage,
+        feedback,
+        checkout.pin,
+      );
       if (!outcome.ok) return;
       feedback = undefined;
 
@@ -1011,6 +1025,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     project: TicketingProject,
     stage: PipelineStage,
     feedback: string | undefined,
+    pin: TimonePin | undefined,
   ): Promise<
     | {
         ok: true;
@@ -1055,13 +1070,36 @@ export class AgentSessionSpawner implements SessionSpawner {
     // read as "different from whatever tip appears" — cutting a branch is not
     // doing work. The checkout's current HEAD is what the stage would cut
     // from, so it is the honest baseline.
-    const headBefore =
-      (await this.branchHead(project, branch)) ?? (await this.currentHead(project));
+    let headBefore: string | undefined;
+    try {
+      headBefore =
+        (await this.branchHead(project, branch)) ??
+        (await this.currentHead(project));
+    } catch (error) {
+      // Nothing has been started yet, so the cheapest honest thing is to stop
+      // here: a session whose baseline is unknown cannot be judged when it
+      // finishes, and running it would spend a stage to learn nothing.
+      const reason =
+        `could not read the project's branches before starting ${stage}: ` +
+        oneLine(error);
+      store.fail(run.id, reason);
+      await adapter.postComment(project, run.ticket, failedComment(reason));
+      this.log(`failed ${run.id} — ${reason}`);
+      return { ok: false };
+    }
 
     const { outcome, attempts } = await this.runSession(
       run,
       stage,
-      sessionRequest({ cwd: root, prompt, model, effort: effortFor(stage) }),
+      sessionRequest({
+        cwd: root,
+        prompt,
+        model,
+        effort: effortFor(stage),
+        // What a boxed run clones, and at which versions (ADR-0041 D1). The
+        // in-process runtime ignores it entirely.
+        ...workspaceFor(pin, project, branch),
+      }),
     );
 
     if (!outcome.ok) {
@@ -1083,7 +1121,23 @@ export class AgentSessionSpawner implements SessionSpawner {
       return { ok: false };
     }
 
-    const headAfter = await this.branchHead(project, branch);
+    let headAfter: string | undefined;
+    try {
+      headAfter = await this.branchHead(project, branch);
+    } catch (error) {
+      // The session has already run, and its work may well have landed. The
+      // one answer that must not be given is "nothing was produced" — which
+      // is what returning `undefined` here would have meant, and what the
+      // swallowed error used to say.
+      const reason =
+        `${stage} finished, but the forge could not be reached to see what it ` +
+        `left behind, so this run is stopped rather than reported wrongly: ` +
+        oneLine(error);
+      store.fail(run.id, reason);
+      await adapter.postComment(project, run.ticket, failedComment(reason));
+      this.log(`failed ${run.id} — ${reason}`);
+      return { ok: false };
+    }
 
     const cursor = outcomeCursorFrom(before);
     const after = await adapter.getTicket(project, run.ticket);
@@ -1389,12 +1443,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     branch: string | undefined,
   ): Promise<string | undefined> {
     if (branch === undefined) return undefined;
-    const probe = this.options.planStatusProbe ?? gitPlanStatus;
+    const probe =
+      this.options.planStatusProbe ??
+      ((target: TicketingProject, name: string) =>
+        forgePlanStatus(this.options.adapter, target, name));
     try {
-      return await probe(
-        join(this.options.root, "projects", project.name),
-        branch,
-      );
+      return await probe(project, branch);
     } catch {
       return undefined;
     }
@@ -1406,27 +1460,37 @@ export class AgentSessionSpawner implements SessionSpawner {
     branch: string | undefined,
   ): Promise<string | undefined> {
     if (branch === undefined) return undefined;
-    const probe = this.options.verificationReportProbe ?? gitVerificationReport;
+    const probe =
+      this.options.verificationReportProbe ??
+      ((target: TicketingProject, name: string) =>
+        forgeVerificationReport(this.options.adapter, target, name));
     try {
-      return await probe(
-        join(this.options.root, "projects", project.name),
-        branch,
-      );
+      return await probe(project, branch);
     } catch {
       return undefined;
     }
   }
 
-  /** The checkout's current HEAD, or undefined when it cannot be read. */
+  /**
+   * The default branch's tip — the baseline a stage with no work branch of
+   * its own starts from.
+   *
+   * **Nothing is caught here.** It used to be: a `try/catch` turned every
+   * failure into `undefined`, which is this seam's word for "there is no such
+   * commit". A dropped connection and a repository with no commits became the
+   * same answer, and the caller went on to report a stage as having produced
+   * nothing. Letting it throw is the whole of
+   * [30b's case (3)](../../doc/plans/phases/phase-30.md); the callers below
+   * decide what to say about it.
+   */
   private async currentHead(
     project: TicketingProject,
   ): Promise<string | undefined> {
-    const probe = this.options.headProbe ?? gitCurrentHead;
-    try {
-      return await probe(join(this.options.root, "projects", project.name));
-    } catch {
-      return undefined;
-    }
+    const probe =
+      this.options.headProbe ??
+      (async (target: TicketingProject) =>
+        (await this.options.adapter.readBranches(target)).defaultHead);
+    return probe(project);
   }
 
   /** The work branch's tip, or undefined when there is no branch yet. */
@@ -1435,12 +1499,11 @@ export class AgentSessionSpawner implements SessionSpawner {
     branch: string | undefined,
   ): Promise<string | undefined> {
     if (branch === undefined) return undefined;
-    const probe = this.options.repoProbe ?? gitBranchHead;
-    try {
-      return await probe(join(this.options.root, "projects", project.name), branch);
-    } catch {
-      return undefined;
-    }
+    const probe =
+      this.options.repoProbe ??
+      (async (target: TicketingProject, name: string) =>
+        (await this.options.adapter.readBranches(target, name)).head);
+    return probe(project, branch);
   }
 
   /**
@@ -1679,6 +1742,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     run: Run,
     project: TicketingProject,
     approval: NonNullable<SpawnContext["approval"]>,
+    pin: TimonePin | undefined,
   ): Promise<boolean> {
     const { store, adapter, root } = this.options;
     if (!isPrompted(approval.stage)) return true;
@@ -1694,7 +1758,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     // speaks for it. Haiku carries no effort at all.
     const started = await this.startClaimed(
       run,
-      sessionRequest({ cwd: root, prompt, model: APPROVAL_RECORD_MODEL }),
+      sessionRequest({
+        cwd: root,
+        prompt,
+        model: APPROVAL_RECORD_MODEL,
+        ...workspaceFor(pin, project, store.get(run.id)?.branch),
+      }),
     );
     this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
 
@@ -1760,10 +1829,10 @@ export class AgentSessionSpawner implements SessionSpawner {
     project: TicketingProject,
   ): Promise<string | undefined> {
     const { adapter, root } = this.options;
-    const read = readBreakdown(
-      join(root, "projects", project.name),
+    const read = await readBreakdown(
       run.ticket,
-      this.options.breakdownSource ?? fromDefaultBranch,
+      this.options.breakdownSource ??
+        fromForgeDefaultBranch(adapter, project),
     );
     if (read.kind !== "ok") {
       return (
@@ -1847,11 +1916,23 @@ export class AgentSessionSpawner implements SessionSpawner {
     const outcome = await this.attemptMerge(project, branch);
 
     if (outcome.merged) {
-      this.log(`merged ${run.id} — ${branch} into ${outcome.into}`);
+      // `alreadyThere` is a success and is logged as the different thing it
+      // is: a cycle retried after a merge that landed reaches here, and
+      // reporting it as a fresh merge would hide a retry nobody knew about.
+      this.log(
+        outcome.alreadyThere === true
+          ? `merged ${run.id} — ${branch} was already on ${outcome.into}`
+          : `merged ${run.id} — ${branch} into ${outcome.into}`,
+      );
       return true;
     }
 
-    const reason = `could not merge the approved breakdown into the default branch: ${outcome.reason}`;
+    const reason =
+      outcome.conflict === true
+        ? "the approved breakdown and the default branch have changes that clash — " +
+          `a merge conflict, and nothing was merged (${outcome.reason}). ` +
+          "Somebody has to decide which side wins; trying again changes nothing."
+        : `could not merge the approved breakdown into the default branch: ${outcome.reason}`;
     store.fail(run.id, reason);
     await adapter.postComment(project, run.ticket, failedComment(reason));
     return false;
@@ -1865,13 +1946,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     if (branch === undefined) {
       return { merged: false, reason: "the run holds no work branch" };
     }
-    const merge = this.options.mergeProbe ?? mergeIntoDefault;
+    const merge =
+      this.options.mergeProbe ??
+      ((target: TicketingProject, name: string, message: string) =>
+        this.options.adapter.mergeIntoDefault(target, name, message));
     try {
-      return await merge(
-        join(this.options.root, "projects", project.name),
-        branch,
-        mergeMessage(branch),
-      );
+      return await merge(project, branch, mergeMessage(branch));
     } catch (error) {
       return { merged: false, reason: oneLine(error) };
     }

@@ -1,8 +1,22 @@
-import { resolve } from "node:path";
+import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
+import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
-import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
+import { isCommitOnRemote } from "../git.js";
+import {
+  GitHubTicketingAdapter,
+  repoSlug,
+} from "../adapters/github-tickets.js";
+import {
+  credentialCommandRunner,
+  type CommandRunner,
+} from "../adapters/command-runner.js";
+import {
+  githubAppCredentials,
+  type CredentialProvider,
+  type MintCall,
+} from "../adapters/credentials.js";
 import { DockerPreviewAdapter } from "../adapters/docker-preview.js";
 import type { PreviewAdapter } from "../adapters/preview.js";
 import type { TicketingAdapter } from "../adapters/ticketing.js";
@@ -18,7 +32,253 @@ import {
   type SessionSpawner,
 } from "../daemon/poll.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
-import { AgentSessionSpawner, agentSdkRuntime } from "../daemon/session.js";
+import {
+  AgentSessionSpawner,
+  agentSdkRuntime,
+  type SessionRuntime,
+} from "../daemon/session.js";
+import { containerRuntime } from "../daemon/container-runtime.js";
+import { bringUpServices } from "../daemon/services.js";
+import { renderMessage } from "../daemon/transcript.js";
+import {
+  claudeSubscriptionToken,
+  type ModelTokenSource,
+} from "../adapters/model-token.js";
+
+export interface MachineAdapterOptions {
+  /** Injected process spawner; the real one when absent. */
+  run?: CommandRunner;
+  /** Injected mint call; the real endpoint when absent. */
+  mint?: MintCall;
+}
+
+/**
+ * The ticketing adapter the **daemon** uses: every call it makes runs as
+ * Timone, under a credential minted for the one repository that call names
+ * ([ADR-0042](../../doc/adr/0042-timone-acts-under-its-own-identity.md)).
+ *
+ * **This is where "fails loudly at spawn time, never falls back to ambient
+ * login" is enforced.** A manifest with no `identity` block does not yield a
+ * degraded adapter that borrows whoever is logged in — it yields nothing, and
+ * the daemon does not start. The manifest schema leaves the block optional on
+ * purpose: `workspace sync` and `projects list` are fvermaut's own commands,
+ * run from his terminal under his own login, and they are entitled to it. The
+ * daemon is not.
+ *
+ * `root` is the timone root the key path is resolved against, so a daemon
+ * started from anywhere reads the same key.
+ */
+export function daemonCredentials(
+  manifest: Manifest,
+  root: string,
+  mint?: MintCall,
+): CredentialProvider {
+  const identity = manifest.identity;
+  if (identity === undefined) {
+    throw new Error(
+      "The manifest declares no `identity`, so the daemon has no forge " +
+        "credential of its own. It never runs under an ambient `gh` login " +
+        "(ADR-0042). Add an `identity` block naming the Timone App's " +
+        "`app_id`, `installation_id`, `private_key_path` and `login`.",
+    );
+  }
+
+  return githubAppCredentials({
+    appId: identity.app_id,
+    installationId: identity.installation_id,
+    privateKeyPath: resolve(root, identity.private_key_path),
+    ...(mint === undefined ? {} : { mint }),
+  });
+}
+
+export function machineAdapter(
+  manifest: Manifest,
+  root: string,
+  options: MachineAdapterOptions = {},
+): GitHubTicketingAdapter {
+  // Order matters: this throws when no identity is declared, which is where
+  // "fails loudly at spawn time, never falls back to ambient login" lives.
+  const credentials = daemonCredentials(manifest, root, options.mint);
+  const identity = manifest.identity as NonNullable<Manifest["identity"]>;
+
+  return new GitHubTicketingAdapter({
+    run: credentialCommandRunner({
+      credentials,
+      ...(options.run === undefined ? {} : { run: options.run }),
+    }),
+    machineLogin: identity.login,
+  });
+}
+
+/** The runtimes a daemon can spawn sessions in. */
+export const RUNTIMES = ["in-process", "container"] as const;
+export type RuntimeName = (typeof RUNTIMES)[number];
+
+/**
+ * Which runtime a daemon uses when nobody says.
+ *
+ * ✏ **Flipped to `container` by phase 30's 30k, on 2026-08-22.** Until then it
+ * was `in-process` deliberately: a phase that changed where every run happens
+ * as a side effect of building the option would be exactly the "two runtimes
+ * and neither trusted" state phase 30's own stopping rule warns about. The
+ * box was built at 30h, given its services at 30i, and watched running a real
+ * session and a real browser pass at 30j before this line moved.
+ *
+ * **This is the daemon's default, and only the daemon's.** Sessions fvermaut
+ * opens himself are untouched by it
+ * ([ADR-0041](../../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md)
+ * D5) — they do not come through here at all. `--runtime in-process` puts a
+ * daemon back the old way in one word.
+ */
+export const DEFAULT_RUNTIME: RuntimeName = "container";
+
+/**
+ * The image a boxed run is started from, unless a flag names another.
+ *
+ * `timone-agent` is what 30g's `Dockerfile` builds and what its own
+ * validation commands name. The two must agree: a default naming an image
+ * nobody builds fails at the first boxed spawn, with a message about a
+ * missing image rather than about a wrong name.
+ */
+export const DEFAULT_IMAGE = "timone-agent:latest";
+
+export interface RuntimeChoice {
+  /** Absent means {@link DEFAULT_RUNTIME}. */
+  runtime?: RuntimeName;
+  /** The image the container runtime starts from. */
+  image: string;
+  /** Where a boxed session's forge credential comes from. */
+  credentials?: CredentialProvider;
+  /** The timone root, beneath which a stack's source is materialized. */
+  root?: string;
+  /** How a boxed session reaches the model. Injected for tests. */
+  modelToken?: ModelTokenSource;
+  /** Who the box commits as, from the manifest's identity. */
+  commitIdentity?: { name: string; email: string };
+}
+
+/**
+ * The runtime a daemon spawns sessions in
+ * ([ADR-0041](../../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md)).
+ *
+ * This function is the switch the plan found missing: `runtime` is a
+ * non-optional constructor argument on the spawner, hard-coded at the single
+ * production wiring site below, so "chosen by configuration and off by
+ * default" was a thing that had to be built rather than set. Sessions
+ * fvermaut opens himself are untouched by any of it (ADR-0041 D5).
+ *
+ * An unknown name **throws**. A daemon that fell back to the in-process
+ * runtime because a flag was misspelled would run every session on
+ * fvermaut's machine while its operator believed otherwise.
+ */
+/**
+ * Where a boxed session's transcript is kept, and how.
+ *
+ * **One pair of files per session**, under `.timone/sessions/` — the daemon's
+ * own state directory, beside the ledger and never under `projects/`, which
+ * is fvermaut's (ADR-0043):
+ *
+ * - `<session>.jsonl` — every line the box printed, verbatim. The record.
+ * - `<session>.log` — the same thing rendered for a person. The reading.
+ *
+ * **Per session rather than one shared file, and the first version got that
+ * wrong.** Everything appended to one `boxed.jsonl`, so forensics on a
+ * particular run meant grepping a pile of them — which is most of the way
+ * back to having no transcript at all.
+ *
+ * Both are written as the run goes rather than at the end, so a session that
+ * is killed still leaves everything it had said. `node dist/cli.js transcript
+ * <file>` re-renders a `.jsonl` at any time.
+ */
+function transcriptWriter(
+  root: string,
+): (line: string, sessionId: string | undefined) => void {
+  const dir = join(root, ".timone", "sessions");
+  const streams = new Map<string, { raw: WriteStream; read: WriteStream }>();
+
+  return (line, sessionId) => {
+    // Before the first message names the session there is nothing to key on.
+    // It arrives on the very first line, so this holds for one line at most.
+    const key = sessionId ?? "starting";
+
+    let pair = streams.get(key);
+    if (pair === undefined) {
+      mkdirSync(dir, { recursive: true });
+      pair = {
+        raw: createWriteStream(join(dir, `${key}.jsonl`), { flags: "a" }),
+        read: createWriteStream(join(dir, `${key}.log`), { flags: "a" }),
+      };
+      streams.set(key, pair);
+    }
+
+    pair.raw.write(`${line}\n`);
+    const rendered = renderMessage(parseTranscriptLine(line));
+    if (rendered.length > 0) pair.read.write(`${rendered.join("\n")}\n`);
+  };
+}
+
+/** One line of a transcript, parsed — or the raw text when it is not JSON. */
+function parseTranscriptLine(line: string): unknown {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+}
+
+export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
+  const name = choice.runtime ?? DEFAULT_RUNTIME;
+  if (name === "in-process") return agentSdkRuntime;
+  if (name === "container") {
+    const root = choice.root;
+    const credentials = choice.credentials;
+    return containerRuntime({
+      image: choice.image,
+      // fvermaut's own subscription, read fresh at every spawn and stored
+      // nowhere (blocker (e), answered 2026-08-22).
+      modelToken: choice.modelToken ?? claudeSubscriptionToken(),
+      ...(credentials === undefined ? {} : { credentials }),
+      ...(choice.commitIdentity === undefined
+        ? {}
+        : { commitIdentity: choice.commitIdentity }),
+      // Only when there is a root to materialize a stack's source under. A
+      // runtime built without one still runs a session; it just has no
+      // services beside it, which is 30h's behaviour before 30i.
+      ...(root === undefined
+        ? {}
+        : {
+            // Offline, and asked before anything is created: a commit nobody
+            // has pushed is not in the clone the box makes (30k).
+            commitIsPushed: (commit: string) => isCommitOnRemote(root, commit),
+            // Kept on the host, because the container that wrote it is
+            // destroyed and a failed run has to be readable afterwards.
+            transcript: transcriptWriter(root),
+            services: async (request) => {
+              const workspace = request.workspace!;
+              return bringUpServices({
+                project: {
+                  name: workspace.project.name,
+                  repoUrl: workspace.project.remote,
+                },
+                branch: workspace.project.branch,
+                runId: `${workspace.project.name}-${workspace.project.branch}`,
+                root,
+                ...(credentials === undefined
+                  ? {}
+                  : {
+                      token: await credentials.tokenFor(
+                        repoSlug(workspace.project.remote),
+                      ),
+                    }),
+              });
+            },
+          }),
+    });
+  }
+  throw new Error(
+    `Unknown runtime "${String(name)}". Known runtimes: ${RUNTIMES.join(", ")}.`,
+  );
+}
 
 /** Options accepted by `timone daemon`, as commander parses them. */
 interface DaemonOptions {
@@ -27,6 +287,8 @@ interface DaemonOptions {
   progressInterval: string;
   once?: boolean;
   state?: string;
+  runtime?: string;
+  image?: string;
 }
 
 export interface RunDaemonOptions {
@@ -43,17 +305,14 @@ export interface RunDaemonOptions {
    */
   statePath?: string;
   /**
-   * The timone root, so the cycle can reach a project's checkout at
-   * `projects/<name>/` — which is where a ticket's breakdown lives and
-   * therefore how the loop knows whether a merged pull request ended a piece
-   * of an initiative or the whole of it ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
-   * D1).
+   * The timone root.
    *
-   * **Required, unlike the cycle's own `root`.** This is the only place a real
-   * daemon's root is known, and the cost of forgetting it is silent: every
-   * multi-piece initiative truncated at its first merge, with the ticket
-   * closed and nothing anywhere saying a piece was skipped. So the compiler
-   * asks rather than a default answering.
+   * ✏ **Narrowed by phase 30's 30d.** It used to be here so the poll cycle
+   * could reach `projects/<name>/` and read a ticket's breakdown; the cycle
+   * reads the forge now and takes no root at all
+   * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)).
+   * What it is still for is the **timone** checkout — the spawner's version
+   * pin and its refusal to start on a dirty tree (ADR-0041 D2).
    */
   root: string;
   intervalMs: number;
@@ -124,7 +383,6 @@ async function poll(
       store: options.store,
       adapter: options.adapter,
       spawner: options.spawner,
-      root: options.root,
       // The same path the lock was taken on, so the cycle serves the requests
       // waiting beside the ledger it is holding (ADR-0032).
       statePath: options.statePath,
@@ -174,6 +432,17 @@ export function registerDaemonCommand(program: Command): void {
     )
     .option("--once", "run a single poll cycle and exit")
     .option("--state <path>", "path to the daemon state file")
+    .option(
+      "--runtime <name>",
+      `where a spawned session runs: ${RUNTIMES.join(" or ")} — ` +
+        "a boxed run touches nothing of this machine (ADR-0041)",
+      DEFAULT_RUNTIME,
+    )
+    .option(
+      "--image <ref>",
+      "the image a boxed run is started from",
+      DEFAULT_IMAGE,
+    )
     .action(async (options: DaemonOptions) => {
       let manifest: Manifest;
       try {
@@ -212,7 +481,46 @@ export function registerDaemonCommand(program: Command): void {
         return;
       }
 
-      const adapter = new GitHubTicketingAdapter();
+      let adapter: GitHubTicketingAdapter;
+      try {
+        adapter = machineAdapter(manifest, process.cwd());
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+        return;
+      }
+
+      let runtime: SessionRuntime;
+      try {
+        runtime = runtimeFor({
+          ...(options.runtime === undefined
+            ? {}
+            : { runtime: options.runtime as RuntimeName }),
+          image: options.image ?? DEFAULT_IMAGE,
+          root: process.cwd(),
+          // R23 clause 5: a commit the machine produces is Timone's own.
+          ...(manifest.identity === undefined
+            ? {}
+            : {
+                commitIdentity: {
+                  name: manifest.identity.login,
+                  // Without a declared address the commits are still not
+                  // fvermaut's; they simply do not link to a profile.
+                  email:
+                    manifest.identity.commit_email ??
+                    `${manifest.identity.login}@users.noreply.github.com`,
+                },
+              }),
+          // The box acts under the same identity the daemon does, scoped to
+          // the one repository the run is for (ADR-0042).
+          credentials: daemonCredentials(manifest, process.cwd()),
+        });
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exitCode = 1;
+        return;
+      }
+
       const log = (message: string): void => console.log(message);
       // No guardrail bracket here any more (ADR-0018): the checks live in
       // `.claude/settings.json`'s SessionStart/Stop hooks, which every session
@@ -221,7 +529,7 @@ export function registerDaemonCommand(program: Command): void {
         manifest,
         store,
         adapter,
-        runtime: agentSdkRuntime,
+        runtime,
         root: process.cwd(),
         progressIntervalMs: progressInterval * 1000,
         log,
@@ -242,8 +550,8 @@ export function registerDaemonCommand(program: Command): void {
         manifest,
         store,
         statePath,
-        // The same root the spawner is given, from the same place: sessions
-        // run here (ADR-0007) and the checkouts sit under it.
+        // The timone root — the spawner's, for the version pin and the
+        // dirty-checkout refusal (ADR-0041 D2). The cycle no longer takes one.
         root: process.cwd(),
         // One adapter for every bound project: which projects get previews is
         // the manifest's answer, not this command's (ADR-0021).

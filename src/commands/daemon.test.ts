@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { generateKeyPairSync } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -18,11 +18,21 @@ import type {
   Ticket,
   TicketingAdapter,
 } from "../adapters/ticketing.js";
-import { noStepWrites } from "../adapters/ticketing.stubs.js";
+import {
+  noBranches,
+  noFiles,
+  noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
 import { stateLockPath } from "../daemon/lock.js";
-import { runDaemon } from "./daemon.js";
+import {
+  DEFAULT_IMAGE,
+  DEFAULT_RUNTIME,
+  machineAdapter,
+  runDaemon,
+  runtimeFor,
+} from "./daemon.js";
+import { agentSdkRuntime } from "../daemon/session.js";
 import { enqueue } from "../daemon/requests.js";
 
 const tempDirs: string[] = [];
@@ -66,6 +76,9 @@ const manifest: Manifest = {
 /** An adapter that answers an empty ticket list and swallows comments. */
 function quietAdapter(): TicketingAdapter {
   return {
+    ...noBranches,
+    ...noFiles,
+    ...noMerges,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {
@@ -249,82 +262,25 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
   });
 });
 
-/**
- * Turn a fixture directory into something shaped like a clone: one commit on
- * `main`, and an `origin/HEAD` symref pointing at it. That pair is what
- * `fromDefaultBranch` resolves, so a fixture without it reads as a project
- * with no breakdown at all.
- */
-function commitOnDefaultBranch(repoDir: string): void {
-  const git = (...args: string[]): void => {
-    execFileSync("git", args, {
-      cwd: repoDir,
-      stdio: "ignore",
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: "t",
-        GIT_AUTHOR_EMAIL: "t@example.com",
-        GIT_COMMITTER_NAME: "t",
-        GIT_COMMITTER_EMAIL: "t@example.com",
-      },
-    });
-  };
-  git("init", "-b", "main");
-  git("add", ".");
-  git("commit", "-m", "fixture");
-  git("update-ref", "refs/remotes/origin/main", "HEAD");
-  git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
-}
-
-describe("runDaemon — the loop is told where the project checkouts are", () => {
-  it("reaches a ticket's breakdown, so a list that has regrown is not closed over", async () => {
-    // The poll loop cannot answer "is there another piece of this to build?"
-    // without a path to `projects/<name>/`, and this command is the only place
-    // a real daemon's root is known. Wired wrongly, every multi-piece
-    // initiative would be truncated at its first merge and nothing would say
-    // so — so the assertion is on the observable end of the thread, not on the
-    // field being passed.
+describe("runDaemon — the loop reads a ticket's breakdown from the forge", () => {
+  it("does not close over a list that has regrown, without any checkout on disk", async () => {
+    // ✏ Rewritten by phase 30's 30d. This test used to build a real clone
+    // under `projects/scratch-app`, commit the breakdown to its default
+    // branch, and assert that `runDaemon` passed its root down far enough for
+    // the poll loop to read the file — the plumbing being the subject.
+    //
+    // **That plumbing is gone.** The loop reads the approved list off the
+    // project's default branch *on the forge*
+    // ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)),
+    // so there is no root to pass and no checkout to build. The observable
+    // end of the thread is unchanged and is still what is asserted: a list
+    // that grew after it was approved must leave the ticket open, because the
+    // human is asked rather than the ticket being finished on their behalf.
+    //
+    // The root handed to `runDaemon` below is a directory holding no
+    // checkouts at all. A loop that had gone on reading disk would find
+    // nothing, read that as "no breakdown", and close the ticket.
     const { store, statePath } = clockedStore();
-    const root = mkdtempSync(join(tmpdir(), "timone-daemon-root-"));
-    tempDirs.push(root);
-    const file = join(
-      root,
-      "projects",
-      "scratch-app",
-      "doc",
-      "plans",
-      "breakdowns",
-      "ticket-07.md",
-    );
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(
-      file,
-      [
-        "# Breakdown",
-        "",
-        // ✏ 29g: the stamp names **two** and the list holds three, so this is
-        // a re-proposal — a list that grew after it was approved (ADR-0028
-        // D3). That is what the loop must notice, and noticing it means
-        // reading the file, which means having been told the root. Before
-        // 29g this fixture proved the same thing through a mid-initiative
-        // merge not closing the ticket; a ticket does not host a sequence of
-        // chunks any more, so that observation stopped discriminating while
-        // the thing it was observing — the root reaching the loop — did not.
-        "**Status:** Approved by fvermaut 2026-08-15 — 2 pieces",
-        "",
-        "1. **The ledger learns chunks** — a run carries its sequence number.",
-        "2. **The next chunk opens** — a merged pull request opens the next one.",
-        "3. **The ticket closes** — the last merge ends the conversation.",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-    // ✏ A real clone since phase 27, because the loop reads the approved list
-    // off the default branch rather than off whatever is checked out. Writing
-    // the file alone used to be enough and is exactly what stopped being
-    // enough — a session leaves this checkout on its own work branch, and the
-    // list of pieces must not depend on that.
-    commitOnDefaultBranch(join(root, "projects", "scratch-app"));
 
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "s1");
@@ -346,9 +302,30 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
       author: "fvermaut",
       createdAt: "2026-08-06T09:00:00Z",
     };
+
+    // The stamp names two pieces and the list holds three: a re-proposal.
+    const breakdown = [
+      "# Breakdown",
+      "",
+      "**Status:** Approved by fvermaut 2026-08-15 — 2 pieces",
+      "",
+      "1. **The ledger learns chunks** — a run carries its sequence number.",
+      "2. **The next chunk opens** — a merged pull request opens the next one.",
+      "3. **The ticket closes** — the last merge ends the conversation.",
+      "",
+    ].join("\n");
+
+    const asked: { branch: string; path: string }[] = [];
     const closed: string[] = [];
     const merged: TicketingAdapter = {
       ...quietAdapter(),
+      async readBranches() {
+        return { defaultBranch: "main", defaultHead: "aaaaaaa" };
+      },
+      async readFile(_project, branch, path) {
+        asked.push({ branch, path });
+        return path.endsWith("ticket-07.md") ? breakdown : undefined;
+      },
       async listMarkedTickets(): Promise<Ticket[]> {
         return [marked];
       },
@@ -374,7 +351,7 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
       manifest,
       store,
       statePath,
-      root,
+      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter: merged,
@@ -383,11 +360,13 @@ describe("runDaemon — the loop is told where the project checkouts are", () =>
     });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("done");
-    // Not closed: the list grew after it was approved, so the human is asked
-    // rather than the ticket being finished on their behalf. A loop that
-    // never got the root could not have read the file and would have closed
-    // it, which is what makes this assertion about the plumbing.
     expect(closed).toEqual([]);
+    // And it asked the forge, on the default branch, for the path the
+    // breakdown lives at — rather than looking anywhere on disk.
+    expect(asked).toContainEqual({
+      branch: "main",
+      path: "doc/plans/breakdowns/ticket-07.md",
+    });
   });
 });
 
@@ -421,5 +400,199 @@ describe("runDaemon — the requests waiting beside the ledger it holds", () => 
     expect(code).toBe(0);
     expect(store.get(run.id)?.status).toBe("cancelled");
     expect(said.join("\n")).toContain("apply  cancel scratch-app#31");
+  });
+});
+
+describe("the daemon acts under Timone's own identity, never a borrowed one", () => {
+  const { privateKey } = generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: "pkcs8", format: "pem" },
+    publicKeyEncoding: { type: "spki", format: "pem" },
+  });
+
+  /** A timone root with the App key on disk, and a manifest naming it. */
+  function rootWithIdentity(): { root: string; manifest: Manifest } {
+    const root = mkdtempSync(join(tmpdir(), "timone-identity-"));
+    tempDirs.push(root);
+    mkdirSync(join(root, ".timone"), { recursive: true });
+    writeFileSync(join(root, ".timone", "app.pem"), privateKey, { mode: 0o600 });
+
+    return {
+      root,
+      manifest: {
+        identity: {
+          app_id: 4670926,
+          installation_id: 155426497,
+          private_key_path: ".timone/app.pem",
+          login: "timone-agent[bot]",
+        },
+        projects: {
+          "scratch-app": {
+            repo_url: "https://github.com/fvermaut/scratch-app.git",
+            path: "projects/scratch-app",
+            stack: ["typescript"],
+            bindings: { ticketing: "github" },
+          },
+        },
+      },
+    };
+  }
+
+  it("refuses to build a ticketing adapter when no identity is declared", () => {
+    const { root, manifest } = rootWithIdentity();
+    const { identity: _dropped, ...withoutIdentity } = manifest;
+
+    expect(() => machineAdapter(withoutIdentity, root)).toThrow(/identity/);
+  });
+
+  it("names the manifest and says what it will not do instead", () => {
+    const { root, manifest } = rootWithIdentity();
+    const { identity: _dropped, ...withoutIdentity } = manifest;
+
+    expect(() => machineAdapter(withoutIdentity, root)).toThrow(
+      /never runs under (?:a|an) .*login/i,
+    );
+  });
+
+  it("reaches the forge under a token scoped to the one repository", async () => {
+    const { root, manifest } = rootWithIdentity();
+    const calls: { args: string[]; env?: Record<string, string> }[] = [];
+    const minted: string[][] = [];
+
+    const adapter = machineAdapter(manifest, root, {
+      run: async (_command, args, options) => {
+        calls.push({ args, env: options?.env });
+        return "[]";
+      },
+      mint: async (request) => {
+        minted.push(request.repositories);
+        return { token: "ghs_minted", expiresAt: "2099-01-01T00:00:00Z" };
+      },
+    });
+
+    await adapter.listMarkedTickets({
+      name: "scratch-app",
+      repoUrl: "https://github.com/fvermaut/scratch-app.git",
+    });
+
+    expect(minted).toEqual([["scratch-app"]]);
+    expect(calls[0].env?.GH_TOKEN).toBe("ghs_minted");
+    expect(calls[0].args).not.toContain("ghs_minted");
+  });
+
+  it("resolves the key path against the timone root, not the process's cwd", async () => {
+    const { root, manifest } = rootWithIdentity();
+
+    const adapter = machineAdapter(manifest, root, {
+      run: async () => "[]",
+      mint: async () => ({
+        token: "ghs_minted",
+        expiresAt: "2099-01-01T00:00:00Z",
+      }),
+    });
+
+    // The key exists only under `root`; a provider reading it relative to the
+    // process's own directory would throw here.
+    await expect(
+      adapter.listMarkedTickets({
+        name: "scratch-app",
+        repoUrl: "https://github.com/fvermaut/scratch-app.git",
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("tells its own comments by the login the manifest declares", async () => {
+    const { root, manifest } = rootWithIdentity();
+    const adapter = machineAdapter(manifest, root, {
+      run: async () =>
+        JSON.stringify({
+          number: 7,
+          title: "the page feels slow",
+          body: "it drags",
+          labels: [],
+          url: "https://github.com/fvermaut/scratch-app/issues/7",
+          author: { login: "fvermaut" },
+          createdAt: "2026-08-02T10:00:00Z",
+          comments: [
+            {
+              author: { login: "timone-agent[bot]" },
+              body: "Picked this up.",
+              createdAt: "2026-08-02T10:05:00Z",
+            },
+          ],
+        }),
+      mint: async () => ({
+        token: "ghs_minted",
+        expiresAt: "2099-01-01T00:00:00Z",
+      }),
+    });
+
+    const thread = await adapter.getTicket(
+      { name: "scratch-app", repoUrl: "https://github.com/fvermaut/scratch-app.git" },
+      7,
+    );
+
+    expect(thread.comments[0].fromTimone).toBe(true);
+  });
+});
+
+describe("choosing which runtime a daemon spawns sessions in", () => {
+  it("uses the container runtime when nothing asks for anything", () => {
+    // ✏ 30k flipped this on 2026-08-22. It was `in-process` for as long as
+    // the box was unproven, and moved only after a real session and a real
+    // browser pass had been watched inside one.
+    expect(runtimeFor({ image: "timone-box:test" })).not.toBe(agentSdkRuntime);
+  });
+
+  it("goes back to the in-process runtime in one word", () => {
+    // The way out, and it has to stay one word: this is what an operator
+    // reaches for when a box misbehaves at two in the morning.
+    expect(runtimeFor({ runtime: "in-process", image: "timone-box:test" })).toBe(
+      agentSdkRuntime,
+    );
+  });
+
+  it("uses the container runtime when asked for one", () => {
+    // The switch the plan found missing: `runtime` is a non-optional
+    // constructor argument hard-coded at one wiring site, so "chosen by
+    // configuration and off by default" was a thing that had to be built.
+    expect(runtimeFor({ runtime: "container", image: "timone-box:test" })).not.toBe(
+      agentSdkRuntime,
+    );
+  });
+
+  it("refuses a runtime nobody has built, rather than falling back quietly", () => {
+    expect(() =>
+      runtimeFor({ runtime: "vm" as "container", image: "timone-box:test" }),
+    ).toThrow(/vm/);
+  });
+
+  it("defaults to the image 30g's Dockerfile actually builds", () => {
+    // A default naming an image nobody builds fails at the first boxed spawn,
+    // with a message about a missing image rather than about a wrong name.
+    expect(DEFAULT_IMAGE.split(":")[0]).toBe("timone-agent");
+  });
+
+  it("is the box by default, which is what 30k set out to make true", () => {
+    expect(DEFAULT_RUNTIME).toBe("container");
+  });
+});
+
+describe("a boxed daemon reaches the model with the host's own subscription", () => {
+  it("hands the container runtime a token source rather than a token", async () => {
+    // A source, not a value: the host's CLI refreshes this every few hours
+    // and a daemon runs for days, so the runtime asks at each spawn.
+    let asked = 0;
+    const runtime = runtimeFor({
+      runtime: "container",
+      image: "timone-agent:test",
+      modelToken: async () => {
+        asked += 1;
+        return "sk-ant-oat-live";
+      },
+    });
+
+    expect(runtime).not.toBe(agentSdkRuntime);
+    expect(asked).toBe(0);
   });
 });

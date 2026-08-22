@@ -42,9 +42,12 @@ import {
   type PipelineStage,
 } from "./pipeline.js";
 import {
-  fromDefaultBranch,
+  fromForgeDefaultBranch,
   isReproposal,
   readBreakdown,
+  readBreakdownSync,
+  type BreakdownRead,
+  type SyncBreakdownSource,
   type BreakdownSource,
 } from "./breakdown.js";
 import {
@@ -113,20 +116,19 @@ export interface PollDeps {
   adapter: TicketingAdapter;
   spawner: SessionSpawner;
   /**
-   * The timone root, so the loop can reach a project's checkout at
-   * `projects/<name>/` — which is where a ticket's breakdown lives
-   * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
-   * D1) and therefore where "is there another piece of this to build?" is
-   * answered.
+   * ~~The timone root, so the loop can reach a project's checkout.~~
    *
-   * **Optional, and absent means the loop cannot read a breakdown at all**: a
-   * merged pull request then ends its ticket exactly as it did before a ticket
-   * hosted more than one chunk. That is the old behaviour rather than a new
-   * one, and it is a fixture's answer, not a daemon's: `runDaemon`'s own
-   * options require a root, so the compiler makes every real daemon state one
-   * and only a test can construct a loop without.
+   * ✏ **Removed by phase 30's 30d.** The loop reached `projects/<name>/` to
+   * read a ticket's breakdown, and it does not any more: the breakdown comes
+   * off the project's default branch **on the forge**
+   * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)).
+   * There is nothing left here for a root to be for, and leaving the field in
+   * place would be an invitation to reach for it again.
+   *
+   * Kept as a comment rather than deleted silently because "the loop is told
+   * where the checkouts are" was a thing three tests asserted, one ADR
+   * explained, and a whole refinement of phase 27 existed to fix.
    */
-  root?: string;
   /**
    * Where the ledger lives, so the cycle can find the requests waiting beside
    * it ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
@@ -614,6 +616,12 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
       log(`error  ${line}`);
     }
   }
+
+  // Last of all, and after the per-project catch so a project that threw does
+  // not cost the daemon its own alibi: this cycle has stopped working, so the
+  // next one measures the gap it was idle rather than the gap since this one
+  // began (timone#49).
+  deps.store.cycleEnded();
 
   return result;
 }
@@ -1122,7 +1130,7 @@ async function pollProject(
     // opened, so it is where one the human has not approved is refused. See
     // {@link successorHeldBack} — it says nothing about a ticket's first
     // chunk, or one it is already working.
-    const heldBack = successorHeldBack(project.name, ticket.number, deps);
+    const heldBack = await successorHeldBack(project.name, ticket.number, deps);
     if (heldBack !== undefined) {
       log(`hold   ${project.name}#${ticket.number} — ${heldBack}`);
       continue;
@@ -1429,7 +1437,7 @@ async function reconcileCtas(
   result: PollResult,
   log: (message: string) => void,
 ): Promise<void> {
-  const { store, adapter, root } = deps;
+  const { store, adapter } = deps;
 
   for (const ticket of tickets) {
     // A ticket acknowledged moments ago has just been told this, in these
@@ -1459,15 +1467,11 @@ async function reconcileCtas(
         labels: ticket.labels,
         blocked: frontier.isBlocked(ticket.number),
         misreadStep: misreadStep(chunks.at(-1), thread),
-        progress:
-          root === undefined
-            ? undefined
-            : initiativeProgress(
-                checkoutOf(root, project.name),
-                ticket.number,
-                deps.breakdownSource ?? fromDefaultBranch,
-                store.initiativeFor(project.name, ticket.number),
-              ),
+        progress: await initiativeProgress(
+          deps.breakdownSource ?? fromForgeDefaultBranch(adapter, project),
+          ticket.number,
+          store.initiativeFor(project.name, ticket.number),
+        ),
       });
       if (saysTheSame(standingCta(thread), stampMachineComment(body))) continue;
 
@@ -1928,7 +1932,7 @@ async function concludeInitiative(
     return;
   }
 
-  const succession = successionOf(project.name, run.ticket, deps);
+  const succession = await successionOf(project.name, run.ticket, deps);
 
   if (succession.kind === "unreadable") {
     // The file is there and says something nobody can act on. That is a fault
@@ -2037,19 +2041,11 @@ async function concludeStep(
   );
 }
 
-/**
- * Where a managed project's checkout is, from the timone root
- * ([ADR-0007](../../doc/adr/0007-sessions-at-timone-root.md): everything runs
- * at the root and projects are materialized beneath it).
- *
- * **The only place the poll loop and `timone status` spell this**, so the two
- * cannot look for a ticket's breakdown in two different directories and
- * conclude two different things about the same initiative — which is R21's
- * original defect in a new costume.
- */
-export function checkoutOf(root: string, project: string): string {
-  return join(root, "projects", project);
-}
+// `checkoutOf` lived here until phase 30's 30d. It has one caller now —
+// `timone status`, fvermaut's own command reading his own folder — so it
+// moved there. The poll loop resolves no path under `projects/` at all any
+// more (ADR-0043), and a helper for doing so left sitting in this file would
+// be the obvious thing for the next reader to reach for.
 
 
 /**
@@ -2084,14 +2080,33 @@ export function checkoutOf(root: string, project: string): string {
  * re-proposed initiative then reported *"this one is finished"* and the
  * approval gate stopped existing.
  */
-export function initiativeProgress(
-  repoDir: string,
-  ticket: number,
+export async function initiativeProgress(
   source: BreakdownSource,
+  ticket: number,
+  picture: InitiativeRecord | undefined,
+): Promise<InitiativeProgress | undefined> {
+  return progressFrom(await readBreakdown(ticket, source), picture);
+}
+
+/**
+ * {@link initiativeProgress} for `timone status`, which renders without
+ * waiting and reads fvermaut's own checkout. Same arithmetic, same file,
+ * different source — see {@link readBreakdownSync}.
+ */
+export function initiativeProgressSync(
+  source: SyncBreakdownSource,
+  ticket: number,
+  picture: InitiativeRecord | undefined,
+): InitiativeProgress | undefined {
+  return progressFrom(readBreakdownSync(ticket, source), picture);
+}
+
+/** The arithmetic both of the two above share, over a breakdown already read. */
+function progressFrom(
+  read: BreakdownRead,
   picture: InitiativeRecord | undefined,
 ): InitiativeProgress | undefined {
   const progress = progressOf(picture);
-  const read = readBreakdown(repoDir, ticket, source);
   const regrown = read.kind === "ok" && isReproposal(read.breakdown);
 
   if (!regrown) return progress;
@@ -2170,18 +2185,20 @@ type Succession =
  * path of every cycle, and an exception here takes a whole project's turn with
  * it.
  */
-function successionOf(
+async function successionOf(
   project: string,
   ticket: number,
   deps: PollDeps,
-): Succession {
-  const { store, root } = deps;
-  if (root === undefined) return { kind: "unlisted" };
+): Promise<Succession> {
+  const { store } = deps;
 
-  const read = readBreakdown(
-    checkoutOf(root, project),
+  const read = await readBreakdown(
     ticket,
-    deps.breakdownSource ?? fromDefaultBranch,
+    deps.breakdownSource ??
+      fromForgeDefaultBranch(deps.adapter, {
+        name: project,
+        repoUrl: deps.manifest.projects[project]?.repo_url ?? "",
+      }),
   );
   if (read.kind === "absent") return { kind: "unlisted" };
   if (read.kind === "malformed") {
@@ -2231,16 +2248,16 @@ function successionOf(
  * guard that refused what it could not find would freeze every chore on the
  * fleet the moment it opened its second chunk.
  */
-function successorHeldBack(
+async function successorHeldBack(
   project: string,
   ticket: number,
   deps: PollDeps,
-): string | undefined {
+): Promise<string | undefined> {
   const { store } = deps;
   if (store.liveRunForTicket(project, ticket) !== undefined) return undefined;
   if (store.runsForTicket(project, ticket).length === 0) return undefined;
 
-  const succession = successionOf(project, ticket, deps);
+  const succession = await successionOf(project, ticket, deps);
   if (succession.kind === "reproposed") {
     return (
       `the list of pieces has grown to ${succession.listed} since ` +

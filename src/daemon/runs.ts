@@ -387,6 +387,28 @@ const stateSchema = z.strictObject({
    * happened across that gap happened unobserved.
    */
   observingSince: z.string().optional(),
+  /**
+   * When the last poll cycle **finished its work**
+   * ([timone#49](https://github.com/fvermaut/timone/issues/49)).
+   *
+   * {@link observedAt} is stamped when a cycle *starts*, so the gap between
+   * two of them is the previous cycle's own duration plus the interval. A
+   * cycle whose body ran longer than the unwitnessed window was therefore
+   * arithmetically identical to a daemon that had been switched off, and the
+   * log printed a false statement about the daemon itself: "the daemon was
+   * not running for 3m", written while it had been running the whole time and
+   * working hard. Phase 30 makes that more likely rather than less, because
+   * 30b and 30c put more forge calls into every cycle.
+   *
+   * With this, the gap measured is the time the daemon was **idle** — from
+   * the end of one cycle to the start of the next — which is the only span in
+   * which it could have missed anything.
+   *
+   * Optional, so `version` stays `1`: a state file written before this
+   * existed, and the first cycle of every daemon, both fall back to
+   * {@link observedAt} and grant the window rather than reclaiming.
+   */
+  workedUntil: z.string().optional(),
 });
 
 export type Run = z.infer<typeof runSchema>;
@@ -1027,9 +1049,13 @@ export class RunStore {
     const at = options.now ?? this.now();
     const nowMs = Date.parse(at);
 
-    const previous = this.state.observedAt;
+    // The end of the previous cycle where one said so, its start otherwise.
+    // The distinction is timone#49: a slow cycle is work, not absence.
+    const previous = this.state.workedUntil ?? this.state.observedAt;
     const gapMs =
-      previous === undefined ? undefined : nowMs - Date.parse(previous);
+      this.state.observedAt === undefined || previous === undefined
+        ? undefined
+        : nowMs - Date.parse(previous);
     const continuous =
       gapMs !== undefined &&
       gapMs <= options.unwitnessedAfterMs &&
@@ -1050,6 +1076,21 @@ export class RunStore {
       watchedMs,
       unwitnessedGap: !continuous,
     };
+  }
+
+  /**
+   * Record that this cycle has finished its work.
+   *
+   * Called once at the end of every poll cycle, so the next {@link witness}
+   * measures the gap it was **idle** rather than the gap since it last
+   * started ([timone#49](https://github.com/fvermaut/timone/issues/49)). A
+   * cycle that dies before reaching this leaves the previous stamp in place,
+   * which reads as a longer absence — conservative in the safe direction.
+   */
+  cycleEnded(now?: string): void {
+    this.refresh();
+    this.state.workedUntil = now ?? this.now();
+    this.persist();
   }
 
   /** What the daemon last knew about a pull request's preview, if anything. */

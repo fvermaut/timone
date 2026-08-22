@@ -1,12 +1,15 @@
 import { z } from "zod";
 
 import {
+  isFromTimone,
   isMachineComment,
   MARK_LABEL,
   stampMachineComment,
   type PullRequest,
   type PullRequestComment,
+  type MergeOutcome,
   type PullRequestThread,
+  type RepositoryBranches,
   type Step,
   type Ticket,
   type TicketingAdapter,
@@ -266,11 +269,77 @@ function toStep(issue: z.infer<typeof ghStepSchema>): Step {
   };
 }
 
+/** A ref as GraphQL answers it: an object with a target, or null. */
+const ghRefSchema = z
+  .looseObject({
+    name: z.string().optional(),
+    target: z.looseObject({ oid: z.string() }).nullish(),
+  })
+  .nullish();
+
+/** GraphQL's answer to {@link BRANCH_QUERY} and {@link DEFAULT_BRANCH_QUERY}. */
+const ghBranchesSchema = z.looseObject({
+  data: z.looseObject({
+    repository: z.looseObject({
+      defaultBranchRef: ghRefSchema,
+      ref: ghRefSchema,
+    }),
+  }),
+});
+
+/** The default branch and its tip, for a call that named no branch. */
+const DEFAULT_BRANCH_QUERY =
+  "query($owner:String!,$name:String!){" +
+  "repository(owner:$owner,name:$name){" +
+  "defaultBranchRef{name target{oid}}}}";
+
+/** The same, plus one named branch's tip — null when it does not exist. */
+const BRANCH_QUERY =
+  "query($owner:String!,$name:String!,$ref:String!){" +
+  "repository(owner:$owner,name:$name){" +
+  "defaultBranchRef{name target{oid}} " +
+  "ref(qualifiedName:$ref){target{oid}}}}";
+
+/** GraphQL's answer to {@link BLOB_QUERY} and {@link TREE_QUERY}. */
+const ghObjectSchema = z.looseObject({
+  data: z.looseObject({
+    repository: z.looseObject({
+      object: z
+        .looseObject({
+          text: z.string().nullish(),
+          entries: z
+            .array(z.looseObject({ name: z.string(), type: z.string() }))
+            .nullish(),
+        })
+        .nullish(),
+    }),
+  }),
+});
+
+/** One file's text at `branch:path`; null when the branch has no such file. */
+const BLOB_QUERY =
+  "query($owner:String!,$name:String!,$expression:String!){" +
+  "repository(owner:$owner,name:$name){" +
+  "object(expression:$expression){... on Blob{text}}}}";
+
+/** One directory's entries at `branch:dir`; null when there is no such tree. */
+const TREE_QUERY =
+  "query($owner:String!,$name:String!,$expression:String!){" +
+  "repository(owner:$owner,name:$name){" +
+  "object(expression:$expression){... on Tree{entries{name type}}}}}";
+
 export interface GitHubTicketingOptions {
   /** Injected subprocess runner; defaults to running `gh` for real. */
   run?: CommandRunner;
   /** The permission-boundary label. Defaults to {@link MARK_LABEL}. */
   markLabel?: string;
+  /**
+   * The login Timone acts under on the forge — `timone-agent[bot]`, from the
+   * manifest's `identity` block. Undefined where no identity is configured,
+   * which leaves comment attribution reading the marker alone, exactly as it
+   * did before Timone had one.
+   */
+  machineLogin?: string;
   /**
    * How many issues one `gh issue list` may return. Reaching it is treated
    * as an error rather than a truncation, so a backlog larger than the page
@@ -286,12 +355,219 @@ export interface GitHubTicketingOptions {
 export class GitHubTicketingAdapter implements TicketingAdapter {
   private readonly run: CommandRunner;
   private readonly markLabel: string;
+  private readonly machineLogin: string | undefined;
   private readonly pageLimit: number;
 
   constructor(options: GitHubTicketingOptions = {}) {
     this.run = options.run ?? execCommandRunner;
     this.markLabel = options.markLabel ?? MARK_LABEL;
+    this.machineLogin = options.machineLogin;
     this.pageLimit = options.pageLimit ?? 200;
+  }
+
+  /**
+   * The repository's branch state, read from GitHub's GraphQL API.
+   *
+   * **GraphQL rather than REST, and that choice is the answer to case (2).** A
+   * missing ref comes back as `ref: null` — a *value* in a successful
+   * response. REST's `/git/ref/heads/...` answers 404, which arrives here as a
+   * failed process indistinguishable at a glance from a connection that
+   * dropped, and telling the two apart by matching an error string is exactly
+   * the confusion this seam exists to forbid.
+   *
+   * Both facts come back in one round trip. A poll cycle asks this per stage
+   * per project, and every extra call is one more chance to hit
+   * [timone#49](https://github.com/fvermaut/timone/issues/49).
+   */
+  async readBranches(
+    project: TicketingProject,
+    branch?: string,
+  ): Promise<RepositoryBranches> {
+    const slug = repoSlug(project.repoUrl);
+    const [owner, name] = slug.split("/");
+
+    const query = branch === undefined ? DEFAULT_BRANCH_QUERY : BRANCH_QUERY;
+    const args = [
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `name=${name}`,
+      ...(branch === undefined ? [] : ["-F", `ref=refs/heads/${branch}`]),
+    ];
+
+    // `gh api` takes no `--repo`, so the scope of the credential this runs
+    // under is declared rather than read out of the argument vector.
+    const raw = await this.run("gh", args, { repository: slug });
+
+    const answer = parseGhJson(
+      ghBranchesSchema,
+      raw,
+      `reading the branches of ${slug}`,
+    );
+
+    const repository = answer.data.repository;
+    const defaultRef = repository.defaultBranchRef;
+    return {
+      defaultBranch: defaultRef?.name ?? "main",
+      ...(defaultRef?.target?.oid === undefined
+        ? {}
+        : { defaultHead: defaultRef.target.oid }),
+      ...(repository.ref?.target?.oid === undefined
+        ? {}
+        : { head: repository.ref.target.oid }),
+    };
+  }
+
+  /**
+   * Merge a branch into the default branch through GitHub's own merge
+   * endpoint — `POST /repos/{owner}/{repo}/merges`.
+   *
+   * **The four outcomes are HTTP status codes, not prose**, which is what
+   * makes them safe to branch on: `201` with a commit is a merge, `204` with
+   * an empty body is "there was nothing to merge", `409` is a conflict, and
+   * anything else is a refusal carrying whatever GitHub said. The status is
+   * read out of `gh`'s error line, which always renders `(HTTP nnn)`.
+   *
+   * A transport failure is **rethrown**, never turned into a refusal. The
+   * retry layer in `command-runner.ts` has already tried three times by the
+   * time one arrives here, and calling it a declined merge would put a
+   * sentence on a ticket that nobody on the other end ever said.
+   */
+  async mergeIntoDefault(
+    project: TicketingProject,
+    branch: string,
+    message: string,
+  ): Promise<MergeOutcome> {
+    const slug = repoSlug(project.repoUrl);
+    // The forge names its own default branch; guessing `main` would merge
+    // into a branch that does not exist on a repository that calls it
+    // something else, and answer 404 for a reason nobody could read.
+    const { defaultBranch } = await this.readBranches(project);
+
+    try {
+      const raw = await this.run(
+        "gh",
+        [
+          "api",
+          `repos/${slug}/merges`,
+          "--method",
+          "POST",
+          "-f",
+          `base=${defaultBranch}`,
+          "-f",
+          `head=${branch}`,
+          "-f",
+          `commit_message=${message}`,
+        ],
+        { repository: slug },
+      );
+
+      // 204 No Content: the head is already contained in the base. An empty
+      // body is the whole signal, and it is a success.
+      return raw.trim() === ""
+        ? { merged: true, into: defaultBranch, alreadyThere: true }
+        : { merged: true, into: defaultBranch };
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+
+      if (/\(HTTP 409\)/.test(text) || /Merge conflict/i.test(text)) {
+        return {
+          merged: false,
+          conflict: true,
+          reason: `${branch} and ${defaultBranch} disagree, and the forge will not merge them`,
+        };
+      }
+
+      // Only a status the forge actually returned is a refusal. Everything
+      // else — a dropped connection, a killed command — is a failure to ask.
+      if (/\(HTTP \d{3}\)/.test(text)) {
+        return { merged: false, reason: text };
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * One file's content on a branch, through GraphQL's `object(expression:)`.
+   *
+   * GraphQL again, and for the reason `readBranches` gives: an absent path
+   * comes back as `object: null` in a **successful** response, so "not there"
+   * is a value rather than a status code to be told apart from a dropped
+   * connection.
+   */
+  async readFile(
+    project: TicketingProject,
+    branch: string,
+    path: string,
+  ): Promise<string | undefined> {
+    const answer = await this.readObject(project, `${branch}:${path}`, BLOB_QUERY);
+    return answer?.text ?? undefined;
+  }
+
+  async listFiles(
+    project: TicketingProject,
+    branch: string,
+    directory: string,
+  ): Promise<string[] | undefined> {
+    // The repository root is a real thing to ask for — a compose file lives
+    // there — and the forge spells it with **nothing** after the colon.
+    // `main:.` matches nothing and answers null, which reads as "the branch
+    // has no such directory"; and joining onto an empty prefix produced
+    // `/compose.yaml`, a path that matches nothing either. Both were found on
+    // 2026-08-22, together, by a check that concluded a project committed no
+    // compose file when it does.
+    const root = directory === "" || directory === ".";
+    const answer = await this.readObject(
+      project,
+      `${branch}:${root ? "" : directory}`,
+      TREE_QUERY,
+    );
+    if (answer?.entries === undefined || answer.entries === null) {
+      return undefined;
+    }
+    return answer.entries
+      .filter((entry) => entry.type === "blob")
+      .map((entry) => (root ? entry.name : `${directory}/${entry.name}`));
+  }
+
+  /** One `object(expression:)` read, shared by the blob and tree queries. */
+  private async readObject(
+    project: TicketingProject,
+    expression: string,
+    query: string,
+  ): Promise<
+    { text?: string | null; entries?: { name: string; type: string }[] | null } | undefined
+  > {
+    const slug = repoSlug(project.repoUrl);
+    const [owner, name] = slug.split("/");
+
+    const raw = await this.run(
+      "gh",
+      [
+        "api",
+        "graphql",
+        "-f",
+        `query=${query}`,
+        "-F",
+        `owner=${owner}`,
+        "-F",
+        `name=${name}`,
+        "-F",
+        `expression=${expression}`,
+      ],
+      { repository: slug },
+    );
+
+    const answer = parseGhJson(
+      ghObjectSchema,
+      raw,
+      `reading ${expression} on ${slug}`,
+    );
+    return answer.data.repository.object ?? undefined;
   }
 
   async listMarkedTickets(project: TicketingProject): Promise<Ticket[]> {
@@ -516,7 +792,10 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
         author: comment.author.login,
         body: comment.body,
         createdAt: comment.createdAt,
-        fromTimone: isMachineComment(comment.body),
+        fromTimone: isFromTimone(
+          { author: comment.author.login, body: comment.body },
+          this.machineLogin,
+        ),
       })),
     };
   }
@@ -700,7 +979,10 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
         author: comment.author.login,
         body: comment.body,
         createdAt: comment.createdAt,
-        fromTimone: isMachineComment(comment.body),
+        fromTimone: isFromTimone(
+          { author: comment.author.login, body: comment.body },
+          this.machineLogin,
+        ),
       })),
       // A review's summary text is a comment; a review that carried none
       // (inline remarks only, or a bare verdict) contributes nothing here.
@@ -712,7 +994,10 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
           author: review.author.login,
           body: review.body,
           createdAt: review.submittedAt as string,
-          fromTimone: isMachineComment(review.body),
+          fromTimone: isFromTimone(
+            { author: review.author.login, body: review.body },
+            this.machineLogin,
+          ),
         })),
       // Replying threads under the *root* of an inline thread, so a reply
       // to a reply names the same root its sibling does.
@@ -720,7 +1005,10 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
         author: comment.user.login,
         body: comment.body,
         createdAt: comment.created_at,
-        fromTimone: isMachineComment(comment.body),
+        fromTimone: isFromTimone(
+          { author: comment.user.login, body: comment.body },
+          this.machineLogin,
+        ),
         replyTo: String(comment.in_reply_to_id ?? comment.id),
       })),
     ];

@@ -20,6 +20,44 @@
 # Unknown keys are rejected, so typos fail fast at load time — which matters
 # most for `introduce_unmarked`, whose every misspelling would otherwise read
 # as the default and leave a project silently mute.
+#
+# `identity` describes who Timone is on the forge: a GitHub App installed on
+# the repositories listed below (ADR-0042). It is optional here and required
+# by the daemon — `workspace sync` and `projects list` are your own commands
+# and run under your own login, but the daemon never borrows it and refuses to
+# start without this block.
+#
+#   app_id           (required)  The App's numeric id.
+#   installation_id  (required)  The installation on the account that owns the
+#                                repositories. One installation covers all of
+#                                them; adding a project later edits the
+#                                installation's repository selection on GitHub
+#                                rather than this file.
+#   private_key_path (required)  The App's private key, in PEM, relative to
+#                                the timone root. Keep it under `.timone/`,
+#                                which is gitignored — so it cannot ride into
+#                                a client repository, and it does not make the
+#                                timone checkout dirty.
+#   login            (required)  The login the App acts under, e.g.
+#                                "your-app[bot]". Used to recognise Timone's
+#                                own comments by their author.
+#   commit_email     (optional)  The address machine-authored commits carry.
+#                                GitHub links a commit to the App's bot only
+#                                for "<numeric-id>+<login>@users.noreply.
+#                                github.com", and the id is not derivable from
+#                                the login, so it is declared rather than
+#                                guessed. Without it commits are still not
+#                                yours — they just do not link to a profile.
+#
+# No token is declared here and none may be. Every credential is minted from
+# the key, names exactly one repository, and dies within the hour.
+
+identity:
+  app_id: 1234567
+  installation_id: 89012345
+  private_key_path: .timone/timone-agent.private-key.pem
+  login: timone-agent[bot]
+  commit_email: 1234567+timone-agent[bot]@users.noreply.github.com
 
 projects:
   # Fully-populated project: ticketing, Docker-based previews, and a

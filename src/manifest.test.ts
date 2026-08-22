@@ -475,3 +475,107 @@ describe("serializeManifest", () => {
     expect(loadManifest(file)).toEqual(manifest);
   });
 });
+
+describe("Timone's own identity", () => {
+  const withIdentity = `
+identity:
+  app_id: 4670926
+  installation_id: 155426497
+  private_key_path: .timone/timone-agent.2026-08-21.private-key.pem
+  login: timone-agent[bot]
+projects:
+  client-alpha:
+    repo_url: git@github.com:fvermaut/pilot-app.git
+    path: projects/client-alpha
+    stack:
+      - typescript
+    bindings:
+      ticketing: github
+`;
+
+  it("is read from the manifest when it is declared", () => {
+    const manifest = loadManifest(writeManifest(withIdentity));
+
+    expect(manifest.identity).toEqual({
+      app_id: 4670926,
+      installation_id: 155426497,
+      private_key_path: ".timone/timone-agent.2026-08-21.private-key.pem",
+      login: "timone-agent[bot]",
+    });
+  });
+
+  it("is absent rather than invented when the manifest does not declare it", () => {
+    // `workspace sync` and `projects list` are fvermaut's own commands and act
+    // under his own login legitimately. The refusal belongs at the daemon,
+    // which is the thing that must never borrow it — not here.
+    const manifest = loadManifest(writeManifest(validYaml));
+
+    expect(manifest.identity).toBeUndefined();
+  });
+
+  it("refuses a half-declared identity rather than acting on part of one", () => {
+    const partial = withIdentity.replace(
+      "  installation_id: 155426497\n",
+      "",
+    );
+
+    expect(() => loadManifest(writeManifest(partial))).toThrow(
+      /installation_id/,
+    );
+  });
+
+  it("rejects an unknown key inside it", () => {
+    const stray = withIdentity.replace(
+      "  login: timone-agent[bot]\n",
+      "  login: timone-agent[bot]\n  token: ghs_pasted_by_hand\n",
+    );
+
+    expect(() => loadManifest(writeManifest(stray))).toThrow(/"token"/);
+  });
+
+  it("round-trips through serializeManifest", () => {
+    const manifest = loadManifest(writeManifest(withIdentity));
+
+    expect(parseManifest(parseYamlText(serializeManifest(manifest)))).toEqual(
+      manifest,
+    );
+  });
+});
+
+describe("editing a manifest that declares an identity", () => {
+  const withIdentity: Manifest = {
+    identity: {
+      app_id: 4670926,
+      installation_id: 155426497,
+      private_key_path: ".timone/timone-agent.2026-08-21.private-key.pem",
+      login: "timone-agent[bot]",
+    },
+    projects: {
+      "client-alpha": {
+        repo_url: "git@github.com:fvermaut/pilot-app.git",
+        path: "projects/client-alpha",
+        stack: ["typescript"],
+        bindings: { ticketing: "github" },
+      },
+    },
+  };
+
+  const entry: ProjectConfig = {
+    repo_url: "git@github.com:fvermaut/client-beta.git",
+    path: "projects/client-beta",
+    stack: ["typescript"],
+    bindings: { ticketing: "github" },
+  };
+
+  it("keeps the identity when a project is added", () => {
+    expect(addProject(withIdentity, "client-beta", entry).identity).toEqual(
+      withIdentity.identity,
+    );
+  });
+
+  it("keeps the identity when a project is patched", () => {
+    expect(
+      updateProject(withIdentity, "client-alpha", { stack: ["go"] }).identity,
+    ).toEqual(withIdentity.identity);
+  });
+});
