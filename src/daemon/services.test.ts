@@ -61,6 +61,12 @@ function bringUp(
     exists: (path) =>
       (overrides.present ?? [`compose.yaml`]).some((name) => path.endsWith(name)),
     write: (path, body) => overrides.written?.push({ path, body }),
+    // Injected like the other two, and it has to be. Without it the real
+    // `rmSync` runs against the fixture root — `/root` — which on macOS does
+    // not exist and is a silent no-op, and in a container exists and is not
+    // writable. Fourteen of these tests passed here and failed in CI on its
+    // first run, which is exactly the difference CI is for.
+    remove: () => {},
   });
 }
 
@@ -196,6 +202,7 @@ describe("the services a boxed run reaches", () => {
       run: first.run,
       exists: () => true,
       write: () => {},
+      remove: () => {},
     });
     await bringUpServices({
       project: { name: "ivtrends", repoUrl: "https://github.com/fvermaut/ivtrends.git" },
@@ -205,6 +212,7 @@ describe("the services a boxed run reaches", () => {
       run: second.run,
       exists: () => true,
       write: () => {},
+      remove: () => {},
     });
 
     const nameOf = (args: string[]): string => args[args.indexOf("-p") + 1];
