@@ -94,6 +94,45 @@ describe("running as Timone rather than as whoever is logged in", () => {
     expect(calls[0].options?.env?.GH_PAGER).toBe("cat");
   });
 
+  it("reads the repository out of a `gh api` path, not only out of `--repo`", async () => {
+    // Found the first time a real daemon ran against the forge, on
+    // 2026-08-22: `upsertComment` calls `gh api repos/<owner>/<name>/issues/
+    // comments/<id>`, which names its repository in the **path**. The runner
+    // read `--repo` alone, refused the call, and the daemon could not say
+    // where a ticket stood. Four such call sites existed; the claim that
+    // "every gh call passes --repo" came from grepping for `--repo` and
+    // finding what it looked for.
+    const { run, minted } = harness();
+
+    await run("gh", [
+      "api",
+      "repos/fvermaut/scratch-app/issues/comments/5293510719",
+      "--method",
+      "PATCH",
+    ]);
+
+    expect(minted).toEqual(["fvermaut/scratch-app"]);
+  });
+
+  it("reads it from a path that begins with a slash too", async () => {
+    const { run, minted } = harness();
+
+    await run("gh", ["api", "/repos/fvermaut/scratch-app/pulls/9/comments"]);
+
+    expect(minted).toEqual(["fvermaut/scratch-app"]);
+  });
+
+  it("still refuses a `gh api` call that names no repository at all", async () => {
+    // The refusal has to survive the widening: `gh api /user` is scoped to
+    // nothing, and there is no credential this runner may give it.
+    const { run, calls } = harness();
+
+    await expect(run("gh", ["api", "/user"])).rejects.toThrow(
+      /names no repository/,
+    );
+    expect(calls).toHaveLength(0);
+  });
+
   it("prefers an explicitly declared repository over the one in the arguments", async () => {
     const { run, minted } = harness();
 

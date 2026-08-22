@@ -4710,3 +4710,100 @@ describe("chunk zero reaches the default branch through the forge", () => {
     expect(comments.at(-1)!.body).toContain("404");
   });
 });
+
+describe("a request carries the workspace a boxed session clones from", () => {
+  const settled: TicketThread = {
+    ...thread,
+    labels: ["timone", "triage:feature"],
+    comments: [],
+  };
+
+  function atRequirements(store: RunStore): Run {
+    const run = pickedUpRun(store);
+    store.activate(run.id, "session-earlier");
+    store.park(run.id, {
+      waitingOn: "a conversation",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:00:00Z",
+    });
+    return store.get(run.id)!;
+  }
+
+  const PIN = { commit: "c".repeat(40), remote: "https://github.com/fvermaut/timone.git" };
+
+  it("names the timone commit, the project's remote and its branch", async () => {
+    // Found the first time a real daemon spawned a boxed run, on 2026-08-22:
+    // *"a boxed session needs a workspace to clone: this request describes
+    // none"*. 30e added the field and 30f read the pin, and **nothing joined
+    // them** — so every boxed run failed at the first spawn, and no unit test
+    // could see it because each half was correct on its own.
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      timoneProbe: async () => ({ uncommitted: [], pin: PIN }),
+      repoProbe: movingProbe(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(requests.length).toBeGreaterThan(0);
+    const workspace = requests[0].workspace;
+    expect(workspace?.timone).toEqual(PIN);
+    expect(workspace?.project.name).toBe("scratch-app");
+    expect(workspace?.project.remote).toBe(project.repoUrl);
+    expect(workspace?.project.branch).toBe("timone/7-the-page-feels-slow");
+  });
+
+  it("carries the same pin on every stage of one run, never a re-read", async () => {
+    // A pin re-read at every stage is not a pin, it is a branch with extra
+    // steps (ADR-0041 D2).
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+    let reads = 0;
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      timoneProbe: async () => {
+        reads += 1;
+        return { uncommitted: [], pin: PIN };
+      },
+      repoProbe: movingProbe(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(reads).toBe(1);
+    for (const request of requests) {
+      expect(request.workspace?.timone).toEqual(PIN);
+    }
+  });
+
+  it("omits the workspace when the checkout can name no version", async () => {
+    // A fixture root that is no repository. The in-process runtime ignores
+    // the field entirely, so such a run still works exactly as it did.
+    const store = newStore();
+    const { adapter } = fakeAdapter(settled);
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      timoneProbe: async () => ({ uncommitted: [] }),
+      repoProbe: movingProbe(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    expect(requests[0].workspace).toBeUndefined();
+  });
+});

@@ -693,6 +693,30 @@ async function forgeVerificationReport(
 // read is the human's (ADR-0043). They are gone rather than kept unused so
 // that 30d's guard has nothing to make an exception for.
 
+/**
+ * The workspace half of a request, or nothing at all.
+ *
+ * **This function is what was missing on 2026-08-22**, when the first real
+ * daemon-spawned boxed run answered *"a boxed session needs a workspace to
+ * clone: this request describes none"*. 30e added the field to the request
+ * and 30f read the pin off the checkout, and **nothing joined them** — each
+ * half correct on its own, and no unit test able to see the gap between them,
+ * because until the box became the default no runtime read the field.
+ *
+ * Absent when the checkout can name no version, or the run holds no branch
+ * yet. Both are legitimate: the in-process runtime ignores the field, and a
+ * stage that has not cut a branch has none to name. The container runtime
+ * refuses such a request, which is the right answer for it.
+ */
+function workspaceFor(
+  pin: TimonePin | undefined,
+  project: TicketingProject,
+  branch: string | undefined,
+): { workspace?: WorkspaceInput } {
+  if (pin === undefined || branch === undefined) return {};
+  return { workspace: { timone: pin, project, branch } };
+}
+
 /** Reduce an error to one readable line. */
 /**
  * The message the chunk-zero merge commit carries.
@@ -913,7 +937,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     let feedback = context.feedback;
 
     if (context.approval !== undefined) {
-      const recorded = await this.recordApproval(run, project, context.approval);
+      const recorded = await this.recordApproval(
+        run,
+        project,
+        context.approval,
+        checkout.pin,
+      );
       if (!recorded) return;
     }
 
@@ -953,7 +982,13 @@ export class AgentSessionSpawner implements SessionSpawner {
 
       await this.claimBranch(run, project, stage);
 
-      const outcome = await this.runStage(run, project, stage, feedback);
+      const outcome = await this.runStage(
+        run,
+        project,
+        stage,
+        feedback,
+        checkout.pin,
+      );
       if (!outcome.ok) return;
       feedback = undefined;
 
@@ -990,6 +1025,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     project: TicketingProject,
     stage: PipelineStage,
     feedback: string | undefined,
+    pin: TimonePin | undefined,
   ): Promise<
     | {
         ok: true;
@@ -1055,7 +1091,15 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { outcome, attempts } = await this.runSession(
       run,
       stage,
-      sessionRequest({ cwd: root, prompt, model, effort: effortFor(stage) }),
+      sessionRequest({
+        cwd: root,
+        prompt,
+        model,
+        effort: effortFor(stage),
+        // What a boxed run clones, and at which versions (ADR-0041 D1). The
+        // in-process runtime ignores it entirely.
+        ...workspaceFor(pin, project, branch),
+      }),
     );
 
     if (!outcome.ok) {
@@ -1698,6 +1742,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     run: Run,
     project: TicketingProject,
     approval: NonNullable<SpawnContext["approval"]>,
+    pin: TimonePin | undefined,
   ): Promise<boolean> {
     const { store, adapter, root } = this.options;
     if (!isPrompted(approval.stage)) return true;
@@ -1713,7 +1758,12 @@ export class AgentSessionSpawner implements SessionSpawner {
     // speaks for it. Haiku carries no effort at all.
     const started = await this.startClaimed(
       run,
-      sessionRequest({ cwd: root, prompt, model: APPROVAL_RECORD_MODEL }),
+      sessionRequest({
+        cwd: root,
+        prompt,
+        model: APPROVAL_RECORD_MODEL,
+        ...workspaceFor(pin, project, store.get(run.id)?.branch),
+      }),
     );
     this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
 

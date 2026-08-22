@@ -5,6 +5,7 @@ import {
   MARK_LABEL,
   type TicketingProject,
 } from "./ticketing.js";
+import { credentialCommandRunner } from "./command-runner.js";
 import {
   GitHubTicketingAdapter,
   repoSlug,
@@ -1421,5 +1422,115 @@ describe("reading a branch's files from the forge", () => {
       "expression=timone/7-execute:doc/plans/phases/phase-03.md",
     );
     expect(calls[0].options?.repository).toBe("fvermaut/scratch-app");
+  });
+});
+
+describe("every call this adapter makes can be scoped to a repository", () => {
+  /**
+   * ✏ Written 2026-08-22, after the first real daemon run refused its own
+   * comment update.
+   *
+   * The claim that "every `gh` invocation passes `--repo`" came from grepping
+   * for `--repo` and finding what it looked for. Four `gh api` call sites name
+   * their repository in the **path** instead, and the credential runner could
+   * not see them — so the daemon could not say where a ticket stood.
+   *
+   * This drives **every method on the port**, collects the argument vector
+   * each one actually builds, and pushes every vector back through the real
+   * credential runner. A call the runner cannot scope fails here, by name,
+   * instead of in a daemon log at the worst moment.
+   */
+  const project: TicketingProject = alpha;
+
+  /** Enough of a canned answer for each method to reach its `gh` call. */
+  function answers(): string {
+    return JSON.stringify({
+      data: {
+        repository: {
+          defaultBranchRef: { name: "main", target: { oid: "aaa" } },
+          ref: null,
+          object: null,
+        },
+      },
+      number: 7,
+      title: "t",
+      body: "b",
+      labels: [],
+      url: "https://github.com/fvermaut/scratch-app/issues/7",
+      author: { login: "fvermaut" },
+      createdAt: "2026-08-02T10:00:00Z",
+      comments: [],
+      reviews: [],
+      state: "OPEN",
+      headRefOid: "aaa",
+      assignees: [],
+      blockedBy: { nodes: [], totalCount: 0 },
+    });
+  }
+
+  async function vectorsFromEveryMethod(): Promise<
+    { args: string[]; options?: CommandOptions }[]
+  > {
+    const vectors: { args: string[]; options?: CommandOptions }[] = [];
+    const run: CommandRunner = async (_command, args, options) => {
+      vectors.push({ args, options });
+      return answers();
+    };
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    // Every method on the port. A new one that forgets its scope shows up
+    // here as a compile error first, and as a failure second.
+    const calls: (() => Promise<unknown>)[] = [
+      () => adapter.readBranches(project, "b"),
+      () => adapter.readFile(project, "b", "p.md"),
+      () => adapter.listFiles(project, "b", "doc"),
+      () => adapter.mergeIntoDefault(project, "b", "m"),
+      () => adapter.listMarkedTickets(project),
+      () => adapter.listOpenTickets(project),
+      () => adapter.listSteps(project, 7),
+      () => adapter.createStep(project, 7, { title: "t", body: "b" }),
+      () => adapter.blockStep(project, 8, 7),
+      () => adapter.setTicketBody(project, 7, "b"),
+      () => adapter.ensureLabel(project, "timone:held", "d"),
+      () => adapter.getTicket(project, 7),
+      () => adapter.postComment(project, 7, "hello"),
+      () => adapter.upsertComment(project, 7, "📌", "hello"),
+      () => adapter.closeTicket(project, 7, "completed"),
+      () => adapter.findPullRequest(project, "b"),
+      () => adapter.getPullRequestThread(project, 9),
+      () => adapter.applyLabel(project, 7, "timone:held"),
+      () => adapter.postPullRequestComment(project, 9, "hi"),
+      () => adapter.upsertPullRequestComment(project, 9, "📌", "hi"),
+    ];
+
+    for (const call of calls) {
+      // A method that throws on the canned answer still recorded its vector,
+      // which is all this test reads.
+      await call().catch(() => undefined);
+    }
+    return vectors;
+  }
+
+  it("names a repository in every argument vector it builds", async () => {
+    const vectors = await vectorsFromEveryMethod();
+    expect(vectors.length).toBeGreaterThan(15);
+
+    // Both routes count, because both are how the adapter scopes a call: the
+    // repository in the arguments, or declared in the options for a `gh api
+    // graphql` call whose vector cannot carry one.
+    const unscoped: string[] = [];
+    for (const { args, options } of vectors) {
+      const run = credentialCommandRunner({
+        credentials: { async tokenFor() { return "ghs_x"; } },
+        run: async () => "",
+      });
+      await run("gh", args, options).catch((error: unknown) => {
+        if (/names no repository/.test(String(error))) {
+          unscoped.push(args.join(" ").slice(0, 90));
+        }
+      });
+    }
+
+    expect(unscoped, `unscoped:\n${unscoped.join("\n")}`).toEqual([]);
   });
 });

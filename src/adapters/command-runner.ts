@@ -224,19 +224,34 @@ export interface CredentialRunnerOptions {
 }
 
 /**
- * Pull `--repo <owner/name>` out of an argument vector.
+ * Pull the repository this command acts on out of its own argument vector.
  *
  * The scope of the credential is taken from the command's **own arguments**
  * rather than from an ambient notion of "the current project", and that is the
  * point rather than an implementation detail: a token derived this way can
- * never be wider than the call that uses it. Every `gh` invocation in
- * `github-tickets.ts` passes `--repo`, so this covers all of them.
+ * never be wider than the call that uses it.
+ *
+ * **Two spellings, because `gh` has two.** A porcelain command takes `--repo
+ * <owner/name>`; `gh api` takes the repository inside its **path**, as
+ * `repos/<owner>/<name>/…`.
+ *
+ * ✏ **The second was missing until 2026-08-22**, and it was missing for a
+ * reason worth writing down: the claim *"every `gh` invocation passes
+ * `--repo`"* came from grepping for `--repo` and finding what it looked for.
+ * Four `gh api` call sites did not, and the first real daemon run refused its
+ * own comment update — the daemon could not say where a ticket stood.
  */
 function repositoryInArgs(args: string[]): string | undefined {
   const at = args.indexOf("--repo");
-  if (at === -1 || at === args.length - 1) return undefined;
-  const value = args[at + 1];
-  return value === "" ? undefined : value;
+  if (at !== -1 && at < args.length - 1 && args[at + 1] !== "") {
+    return args[at + 1];
+  }
+
+  for (const arg of args) {
+    const path = /^\/?repos\/([^/\s]+)\/([^/\s]+)(?:\/|$)/.exec(arg);
+    if (path !== null) return `${path[1]}/${path[2]}`;
+  }
+  return undefined;
 }
 
 /**
