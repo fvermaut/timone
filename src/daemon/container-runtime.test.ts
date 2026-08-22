@@ -706,3 +706,65 @@ describe("refusing a version the box could never follow", () => {
     expect(calls.filter((entry) => entry.args[0] === "run")).toHaveLength(1);
   });
 });
+
+describe("cloning a remote the box can actually reach", () => {
+  function sshRequest(): SessionRequest {
+    return sessionRequest({
+      cwd: "/root",
+      prompt: "do the thing",
+      model: "claude-opus-5",
+      workspace: {
+        // What `git remote get-url origin` answers on a machine set up with
+        // SSH keys — which is fvermaut's, and is how his timone checkout is
+        // configured. Caught on 2026-08-22, before he hit it.
+        timone: { commit: "a".repeat(40), remote: "git@github.com:fvermaut/timone.git" },
+        project: {
+          name: "scratch-app",
+          repoUrl: "ssh://git@github.com/fvermaut/scratch-app.git",
+        },
+        branch: "timone/7-slow",
+      },
+    });
+  }
+
+  it("turns an SSH remote into one the box's token can open", async () => {
+    // The box holds a forge token and no SSH key, and it never will — a key
+    // is host state, which is the one thing this phase keeps out. So an SSH
+    // remote must become HTTPS on the way in, or the clone asks for a
+    // passphrase nobody is there to type.
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await runtimeWith(spawn).start(sshRequest());
+
+    const env = calls.find((entry) => entry.args[0] === "run")!.env!;
+    expect(env.TIMONE_REMOTE).toBe("https://github.com/fvermaut/timone.git");
+    expect(env.PROJECT_REMOTE).toBe("https://github.com/fvermaut/scratch-app.git");
+  });
+
+  it("leaves an HTTPS remote exactly as it is", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await runtimeWith(spawn).start(request());
+
+    const env = calls.find((entry) => entry.args[0] === "run")!.env!;
+    expect(env.PROJECT_REMOTE).toBe("https://github.com/fvermaut/scratch-app.git");
+  });
+
+  it("mints for the repository whichever spelling the remote used", async () => {
+    const minted: string[] = [];
+    const { spawn } = fakeContainer([started, result()]);
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      credentials: {
+        async tokenFor(repository) {
+          minted.push(repository);
+          return "ghs_boxed";
+        },
+      },
+    }).start(sshRequest());
+
+    expect(minted).toEqual(["fvermaut/scratch-app"]);
+  });
+});

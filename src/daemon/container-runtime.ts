@@ -138,6 +138,23 @@ const SHM_SIZE = "1g";
 const WORKSPACE = "/workspace";
 
 /**
+ * The remote as a URL the box can actually open.
+ *
+ * **The box holds a forge token and no SSH key, and it never will** — a key is
+ * host state, which is the one thing this phase keeps out. But a checkout on a
+ * machine set up with SSH answers `git@github.com:owner/name.git` to `git
+ * remote get-url origin`, and that is what the pin carries. Cloning it inside
+ * the box asks for a passphrase nobody is there to type.
+ *
+ * Caught on 2026-08-22 by reading the request the fixed spawner built, before
+ * it reached a real run — the earlier live checks had passed an HTTPS URL by
+ * hand and so never met it.
+ */
+function cloneable(remote: string): string {
+  return `https://github.com/${repoSlug(remote)}.git`;
+}
+
+/**
  * Turn one line of the CLI's stdout into a message
  * {@link SessionProgress.observe} understands.
  *
@@ -366,9 +383,9 @@ export function containerRuntime(
 
       const name = nameFor(request);
       const env: Record<string, string> = {
-        TIMONE_REMOTE: workspace.timone.remote,
+        TIMONE_REMOTE: cloneable(workspace.timone.remote),
         TIMONE_COMMIT: workspace.timone.commit,
-        PROJECT_REMOTE: workspace.project.remote,
+        PROJECT_REMOTE: cloneable(workspace.project.remote),
         PROJECT_BRANCH: workspace.project.branch,
         TIMONE_PROMPT: request.prompt,
         TIMONE_MODEL: request.model,
