@@ -537,8 +537,19 @@ describe("the daemon acts under Timone's own identity, never a borrowed one", ()
 });
 
 describe("choosing which runtime a daemon spawns sessions in", () => {
-  it("uses the in-process runtime when nothing asks for a box", () => {
-    expect(runtimeFor({ image: "timone-box:test" })).toBe(agentSdkRuntime);
+  it("uses the container runtime when nothing asks for anything", () => {
+    // ✏ 30k flipped this on 2026-08-22. It was `in-process` for as long as
+    // the box was unproven, and moved only after a real session and a real
+    // browser pass had been watched inside one.
+    expect(runtimeFor({ image: "timone-box:test" })).not.toBe(agentSdkRuntime);
+  });
+
+  it("goes back to the in-process runtime in one word", () => {
+    // The way out, and it has to stay one word: this is what an operator
+    // reaches for when a box misbehaves at two in the morning.
+    expect(runtimeFor({ runtime: "in-process", image: "timone-box:test" })).toBe(
+      agentSdkRuntime,
+    );
   });
 
   it("uses the container runtime when asked for one", () => {
@@ -562,10 +573,8 @@ describe("choosing which runtime a daemon spawns sessions in", () => {
     expect(DEFAULT_IMAGE.split(":")[0]).toBe("timone-agent");
   });
 
-  it("is off by default, so this phase does not flip anything by accident", () => {
-    // 30k flips it, deliberately and with a live gate. Until then a daemon
-    // started with no flag behaves exactly as it did before this slice.
-    expect(DEFAULT_RUNTIME).toBe("in-process");
+  it("is the box by default, which is what 30k set out to make true", () => {
+    expect(DEFAULT_RUNTIME).toBe("container");
   });
 });
 

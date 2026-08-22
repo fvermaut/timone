@@ -98,6 +98,10 @@ const GIT_USERS: Record<string, string> = {
     "`fromDefaultBranch`, the on-disk source `timone status` builds. The " +
     "machine's source is `fromForgeDefaultBranch`, in this same file, and it " +
     "reaches no disk.",
+  "commands/daemon.ts":
+    "Asks whether the commit the daemon is standing on is on the remote, " +
+    "before starting a boxed run that could not follow it (30k). The " +
+    "**timone** checkout, offline, read-only — never a project's.",
   "daemon/session.ts":
     "Reads the **timone** checkout — which version of Timone is running, and " +
     "what in it is uncommitted (ADR-0041 D2, phase 30's 30f). Never a " +

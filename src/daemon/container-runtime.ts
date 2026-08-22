@@ -110,6 +110,18 @@ export interface ContainerRuntimeOptions {
    * model fails after cloning two repositories and standing up a database.
    */
   modelToken?: ModelTokenSource;
+  /**
+   * Whether the remote already carries the commit the request pins Timone to.
+   *
+   * **A boxed run is built from the remotes**, so a commit nobody has pushed
+   * is not in the clone the box makes. Left as a readable failure by 30h;
+   * made a refusal by 30k, because that is where the box becomes the default
+   * and it stops being hypothetical. A run that cannot possibly work should
+   * not first spend a compose build and two clones finding that out.
+   *
+   * Absent means the question is not asked, which is what a test wants.
+   */
+  commitIsPushed?: (commit: string) => Promise<boolean>;
 }
 
 /**
@@ -316,6 +328,21 @@ export function containerRuntime(
           : await options.credentials.tokenFor(
               repoSlug(workspace.project.remote),
             );
+
+      // First of all, and before anything is created: this is an offline
+      // question about what the checkout last saw, and the alternative is
+      // discovering the answer after a compose build and two clones.
+      if (
+        options.commitIsPushed !== undefined &&
+        !(await options.commitIsPushed(workspace.timone.commit))
+      ) {
+        throw new Error(
+          `Timone is at ${workspace.timone.commit}, and that commit is not on ` +
+            "the remote. A boxed run is built from the remotes, so it cannot " +
+            "follow a commit nobody has pushed. Push it, or run the daemon on " +
+            "a commit that is pushed.",
+        );
+      }
 
       // Before the container, deliberately. A stack that refuses stops the
       // spawn here, with nothing started to clean up.

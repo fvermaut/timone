@@ -630,3 +630,79 @@ describe("how the box talks to the model", () => {
     expect(downs).toBe(1);
   });
 });
+
+describe("refusing a version the box could never follow", () => {
+  it("does not start anything when the pinned commit is not on the remote", async () => {
+    // Found live on 2026-08-22 and left as a readable failure by 30h; 30k
+    // makes it a refusal, because 30k is where the box becomes the default
+    // and this stops being hypothetical. The run should not start rather
+    // than start, clone, stand up a database and then die.
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await expect(
+      containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        commitIsPushed: async () => false,
+      }).start(request()),
+    ).rejects.toThrow(/not on the remote/);
+
+    expect(calls.filter((entry) => entry.args[0] === "run")).toHaveLength(0);
+  });
+
+  it("names the commit and what to do about it", async () => {
+    const { spawn } = fakeContainer([started, result()]);
+
+    await expect(
+      containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        commitIsPushed: async () => false,
+      }).start(request()),
+    ).rejects.toThrow(new RegExp(`${TIMONE_COMMIT}[\\s\\S]*[Pp]ush`));
+  });
+
+  it("asks before standing a stack up, so a refusal leaves nothing running", async () => {
+    // The order matters and it is the cheap half: the check is offline, the
+    // stack is a compose build.
+    const order: string[] = [];
+    const { spawn } = fakeContainer([started, result()]);
+
+    await expect(
+      containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        commitIsPushed: async () => {
+          order.push("checked");
+          return false;
+        },
+        services: async () => {
+          order.push("stack");
+          return { network: "n", project: "p", down: async () => {} };
+        },
+      }).start(request()),
+    ).rejects.toThrow(/not on the remote/);
+
+    expect(order).toEqual(["checked"]);
+  });
+
+  it("starts normally when the commit is on the remote", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      commitIsPushed: async () => true,
+    }).start(request());
+
+    expect(calls.filter((entry) => entry.args[0] === "run")).toHaveLength(1);
+  });
+
+  it("starts normally when nobody configured the check", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await runtimeWith(spawn).start(request());
+
+    expect(calls.filter((entry) => entry.args[0] === "run")).toHaveLength(1);
+  });
+});

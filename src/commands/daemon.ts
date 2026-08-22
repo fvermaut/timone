@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
+import { isCommitOnRemote } from "../git.js";
 import {
   GitHubTicketingAdapter,
   repoSlug,
@@ -114,12 +115,20 @@ export type RuntimeName = (typeof RUNTIMES)[number];
 /**
  * Which runtime a daemon uses when nobody says.
  *
- * **In-process, and it stays that way until 30k flips it deliberately, behind
- * a live gate.** A phase that changed where every run happens as a side effect
- * of building the option would be exactly the "two runtimes and neither
- * trusted" state phase 30's own stopping rule warns about.
+ * ✏ **Flipped to `container` by phase 30's 30k, on 2026-08-22.** Until then it
+ * was `in-process` deliberately: a phase that changed where every run happens
+ * as a side effect of building the option would be exactly the "two runtimes
+ * and neither trusted" state phase 30's own stopping rule warns about. The
+ * box was built at 30h, given its services at 30i, and watched running a real
+ * session and a real browser pass at 30j before this line moved.
+ *
+ * **This is the daemon's default, and only the daemon's.** Sessions fvermaut
+ * opens himself are untouched by it
+ * ([ADR-0041](../../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md)
+ * D5) — they do not come through here at all. `--runtime in-process` puts a
+ * daemon back the old way in one word.
  */
-export const DEFAULT_RUNTIME: RuntimeName = "in-process";
+export const DEFAULT_RUNTIME: RuntimeName = "container";
 
 /**
  * The image a boxed run is started from, unless a flag names another.
@@ -176,6 +185,9 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
       ...(root === undefined
         ? {}
         : {
+            // Offline, and asked before anything is created: a commit nobody
+            // has pushed is not in the clone the box makes (30k).
+            commitIsPushed: (commit: string) => isCommitOnRemote(root, commit),
             services: async (request) => {
               const workspace = request.workspace!;
               return bringUpServices({

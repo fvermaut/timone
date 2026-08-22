@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { checkoutVersion, uncommittedFiles } from "./git.js";
+import {
+  checkoutVersion,
+  isCommitOnRemote,
+  uncommittedFiles,
+} from "./git.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
 const tempDirs: string[] = [];
@@ -98,5 +102,50 @@ describe("what a checkout has not committed", () => {
     const { dir } = checkout();
 
     expect(await uncommittedFiles(dir)).toEqual([]);
+  });
+});
+
+describe("whether a commit is on the remote", () => {
+  /** A checkout whose one commit the remote is recorded as carrying. */
+  function pushed(): { dir: string; commit: string } {
+    const { dir, commit } = checkout();
+    // What a real `git push` leaves behind, without a network: the remote
+    // tracking ref. `--contains` reads exactly this.
+    git(dir, "update-ref", "refs/remotes/origin/main", commit);
+    return { dir, commit };
+  }
+
+  it("says yes for a commit the remote carries", async () => {
+    const { dir, commit } = pushed();
+
+    await expect(isCommitOnRemote(dir, commit)).resolves.toBe(true);
+  });
+
+  it("says no for a commit nobody has pushed", async () => {
+    // This is the whole point. A boxed run is built from the remotes, so a
+    // commit the daemon is standing on but nobody has pushed simply is not
+    // in the clone — and git's own words for that are "reference is not a
+    // tree", which names no cause and suggests no action. Watched live on
+    // 2026-08-22, before this existed, on the first real boxed session.
+    const { dir } = pushed();
+    writeFileSync(join(dir, "later.md"), "not pushed\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "later");
+
+    await expect(
+      isCommitOnRemote(dir, git(dir, "rev-parse", "HEAD").trim()),
+    ).resolves.toBe(false);
+  });
+
+  it("says no rather than throwing when the directory is no checkout", async () => {
+    await expect(
+      isCommitOnRemote("/nowhere-at-all", "a".repeat(40)),
+    ).resolves.toBe(false);
+  });
+
+  it("says no for a commit that does not exist at all", async () => {
+    const { dir } = pushed();
+
+    await expect(isCommitOnRemote(dir, "b".repeat(40))).resolves.toBe(false);
   });
 });

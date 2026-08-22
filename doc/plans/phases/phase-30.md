@@ -634,11 +634,23 @@ docker network ls --format '{{.Name}}' | grep '^timone-'    # expect nothing
 
 ### Sub-phase 30k: Flip the default, and the live gate on `scratch-app`
 
-> **⛔ Blocked 2026-08-22 by [blocker (e)](#-refined-2026-08-20--blockers-found-at-pre-flight).** Every item below is an observation of a session running in the box, and a boxed session cannot reach the model until fvermaut says how it authenticates. Nothing here can be started, and nothing below it faked. The **human gate** at the end of this slice is unaffected in kind — it is still the one thing no test can assert — but it cannot be reached first.
+> **◐ Half done, 2026-08-22. The default is flipped and four of the six checks are watched. The two that remain need fvermaut at the keyboard.**
 >
-> **Two things arrive here from earlier slices and must not be lost:**
-> - **30h's finding:** a boxed run cannot follow a Timone commit nobody has pushed. The box says so readably now; **the better fix is a pre-flight refusal beside 30f's dirty-checkout refusal**, and this slice is where that is decided, because this is where the default flips and it stops being hypothetical.
-> - **30d's two live items:** with the daemon running a real `scratch-app` ticket, `git status` and the reflog in `projects/scratch-app` show no movement, and a branch switched mid-run is where it was left. Both are this gate's run.
+> **The default is `container`.** `DEFAULT_RUNTIME` moved only after 30h built the box, 30i gave it services, and 30j watched a real session and a real browser pass inside one. **`--runtime in-process` puts a daemon back the old way in one word** — that has to stay one word, because it is what an operator reaches for when a box misbehaves at two in the morning. Sessions fvermaut opens himself never come through here at all (ADR-0041 D5).
+>
+> **30h's finding is decided, and the answer is a refusal.** A boxed run cannot follow a Timone commit nobody has pushed. `isCommitOnRemote` reads the remote **tracking refs**, so the question is offline — what this checkout last saw — rather than a network call at every spawn, and being a cycle out of date errs the safe way: it refuses a run that would have worked rather than starting one that cannot. It is asked **before anything is created**, so a run that could never work does not first spend a compose build and two clones finding out.
+>
+> **What was watched, on 2026-08-22:**
+> - **The container, inspected while running.** `Mounts: []`, `Binds: []`, `Privileged: false`. From inside: no `docker` on `PATH`, no `/var/run/docker.sock`, no `/Users`, **zero mounts under `/workspace`**, and `uid=1001(pwuser)` — not root.
+> - **A second managed repository is invisible from inside the box.** With a token minted for `scratch-app`, `git clone` and `git push --dry-run` against `ivtrends` both answer **`Repository not found`** — not "permission denied". A token that cannot see a repository cannot be talked into acting on one.
+> - **The dirty-checkout refusal fires and reads well**, demonstrated against this session's own uncommitted work: it names the files and says what to do, in one line, because the poll loop keeps only the first.
+> - **The `--runtime` and `--image` flags are on the CLI**, with `container` as the printed default.
+>
+> **What is left, and it is his:**
+> - **One real marked ticket on `scratch-app`, driven end to end**, with R15's provenance check watched across the whole run — it has fired wrongly four times in one session before, and changing commit authorship is exactly what would set it off again.
+> - **The human gate.** He switches branches in `projects/scratch-app` during a build, without warning anybody, and says whether he still has to think about it. That is the entire point of this phase and the one thing no test can assert.
+>
+> **30d's two live items ride on that same run** — `git status` and the reflog showing no movement, and a branch switched mid-run staying switched. A weaker form of both was seen at 30j: after three boxed sessions and two stacks, `projects/scratch-app` was on `main` with an empty `git status`, and fvermaut's own dev stack was still running untouched beside them.
 
 The container runtime becomes the default for daemon-spawned sessions. Sessions fvermaut opens himself are untouched ([ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) D5).
 
@@ -646,11 +658,11 @@ Then drive one real marked ticket on `scratch-app` end to end, and while it buil
 
 > Depends on every preceding sub-phase.
 
-- [ ] The run completes and the checkout is exactly where fvermaut left it — `git status` and the reflog both clean
-- [ ] The container is inspected while running: no mounts from the host, no docker socket, no docker CLI
-- [ ] A push attempted from inside the box to a **second** managed repository is refused
-- [ ] The daemon is stopped with an uncommitted timone change and refuses to spawn, readably
-- [ ] Comments and commits from the run are authored by the machine account; R15's provenance check is watched across the whole run and reports nothing false — it has fired wrongly four times in one session before, and changing commit authorship is exactly what would set it off again
+- [ ] The run completes and the checkout is exactly where fvermaut left it — `git status` and the reflog both clean. **Needs the real run.** A weaker form was seen at 30j: clean after three boxed sessions and two stacks
+- [x] The container is inspected while running: no mounts from the host, no docker socket, no docker CLI — and no `/Users`, no `Binds`, not privileged, and **not root**
+- [x] A push attempted from inside the box to a **second** managed repository is refused — **`Repository not found`**, not "permission denied": it is invisible
+- [x] The daemon is stopped with an uncommitted timone change and refuses to spawn, readably — demonstrated against this session's own uncommitted work
+- [ ] Comments and commits from the run are authored by the machine account; R15's provenance check is watched across the whole run. **Needs the real run.** Authorship itself is watched: a comment on [scratch-app#45](https://github.com/fvermaut/scratch-app/issues/45) and a merge commit both signed `timone-agent`, the merge still carrying `Timone-Stage:`
 - [ ] **Human gate:** fvermaut switches branches during a build, without warning anybody, and says whether he still has to think about it — which is the entire point of this phase and the one thing no test can assert
 
 ---

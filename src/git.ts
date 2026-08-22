@@ -90,6 +90,42 @@ export async function checkoutVersion(
 }
 
 /**
+ * Whether `commit` is one the remote already carries.
+ *
+ * **A boxed run is built from the remotes** ([ADR-0041](../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md)
+ * D1), so a commit the daemon is standing on but nobody has pushed is simply
+ * not in the clone the box makes. Git's own words for that are `fatal:
+ * reference is not a tree` — a true sentence naming no cause and suggesting
+ * no action. It happened on the first real boxed session, on 2026-08-22,
+ * because the daemon's branch was unpushed, and **it will happen to fvermaut
+ * the first time he runs a boxed daemon on unmerged work.**
+ *
+ * Read from the remote **tracking refs**, which is what a `git push` or a
+ * `git fetch` leaves behind. That makes this an offline question about what
+ * this checkout last saw, not a network call on every spawn — and being a
+ * cycle out of date errs the safe way: it refuses a run that would have
+ * worked, rather than starting one that cannot.
+ *
+ * False for anything it cannot answer — a directory that is no checkout, a
+ * commit that does not exist. The caller's next move is to refuse, and
+ * refusing on an unanswerable question is the conservative direction.
+ */
+export async function isCommitOnRemote(
+  dir: string,
+  commit: string,
+): Promise<boolean> {
+  try {
+    const branches = await runGit(
+      ["branch", "--remotes", "--contains", commit],
+      dir,
+    );
+    return branches.trim() !== "";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The paths in `dir` carrying changes that are not committed — staged,
  * unstaged and untracked alike — renames counted at their destination.
  *
