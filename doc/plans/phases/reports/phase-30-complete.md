@@ -71,6 +71,22 @@ Five faults, and the first three share a shape worth naming: **an absent answer 
 
 And one that would have made three later checks pass vacuously: **GitHub renders the same App two ways** — `timone-agent` on GraphQL, `timone-agent[bot]` on REST — and this code reads both surfaces (30a).
 
+## A fault this phase's own guardrail caught, in this phase's own work
+
+**Five commits on `scratch-app`'s `main` carry no `Timone-Stage:` trailer**, and they are mine: 30c's live check created and deleted marker files through GitHub's Contents API, whose `message` strings were written by hand. Filed as [timone#54](https://github.com/fvermaut/timone/issues/54).
+
+- `0f738da`, `b7208ef` — marker files created on two fixture branches
+- `3732431`, `69ad47e` — the same files deleted afterwards
+- `48b1502` — a merge commit, from the one live check that passed a hand-written message instead of `mergeMessage(branch)`
+
+**Timone's own machinery is not at fault, and that was checked rather than assumed.** The merge that went through the real code path — `ace8698`, built by `mergeMessage()` — carries `Timone-Stage: breakdown`. R19 does not regress. What went wrong is a hand-written script going around the machinery.
+
+**Not fixed by amending, deliberately.** That would mean force-pushing rewritten history on a client repository's default branch. The marker files are already deleted, so nothing but commit messages would change — and the rewrite would invalidate shas this report, the plan and several commit messages cite as evidence, `69ad47ed` most of all, which is the commit 30j's two verification passes were compared on.
+
+**The gap worth closing is named in the issue:** `mergeMessage()` exists because a *merge* through the forge needed a trailer, and nothing builds a message for any other kind of forge-API commit — while this phase has just made the forge the way this system writes to repositories.
+
+**The `Stop` hook found this**, on real work rather than on a fixture, which is the R15 bracket doing its job.
+
 ## What was deleted
 
 `mergeIntoDefault` and `mergeInProgress`, from `src/git.ts`, **last** — after the forge path had carried real traffic. **Nothing else in that file went with it**: the other seven exports keep `workspace sync` as their caller, which 30d went out of its way to preserve. Both `timone projects list` and `timone workspace sync` were run afterwards and work.
