@@ -1,0 +1,82 @@
+# The tests, and the guard that keeps the machine out of fvermaut's folders.
+#
+# **This file is fvermaut's, and the machine cannot change it.** The Timone
+# GitHub App is installed without the Workflows permission, deliberately: a
+# token that can rewrite `.github/workflows` can widen its own grant on the
+# next run (ADR-0042). So this was drafted by the machine and committed by
+# hand, once, and every later edit is a hand edit too. That is the whole
+# reason it is a human artifact rather than something a stage maintains.
+#
+# It is phase 30's blocker (d), answered — see `doc/plans/phases/phase-30.md`.
+# Until it existed, `npm test` ran only in a terminal and at each session's
+# `Stop` hook: often, but never on anything pushed.
+#
+# What it needs is small, and was measured rather than guessed — by cloning
+# this repository into a clean container and running the suite there before
+# this file was written:
+#
+#   - node and git, nothing else. No Docker: every test that talks to Docker
+#     drives a fake command runner.
+#   - no network. Every forge call goes through an injected runner too.
+#   - no global git identity. The tests that build real repositories — and
+#     several do, deliberately, because the rules they check are rules about
+#     git — set `user.email` per repository themselves.
+#
+# That simulation earned its keep immediately: **fourteen tests passed on
+# macOS and failed in a clean container**, because a fixture let the real
+# `rmSync` run against `/root`, which does not exist on a Mac and is not
+# writable in a container. Fixed in `72a42b5`, before this file was written.
+
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only. This workflow builds and tests; it publishes nothing, and
+# nothing it does should be able to write to the repository.
+permissions:
+  contents: read
+
+# A second push to the same branch makes the first run irrelevant. Runs on
+# `main` are never cancelled — that history is what tells you when something
+# broke.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # The suite finishes in seconds; ten minutes is a stuck job, not a slow one.
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # `package.json` requires >=22. Pinned to a major rather than left
+          # floating: a run that silently changes node is a run whose result
+          # means something different from yesterday's.
+          node-version: "24"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        # `tsc`, so a type error fails here. Vitest transpiles without
+        # type-checking, so the suite alone would not catch one.
+        run: npm run build
+
+      - name: The human's checkout is his alone
+        # Phase 30's 30d promised this guard would "run in CI alongside the
+        # tests". It is part of `npm test` below and would run either way —
+        # named separately so that what it asserts is visible on the checks
+        # page, rather than buried in a count of 1420.
+        run: npx vitest run src/guards
+
+      - name: Tests
+        run: npm test
