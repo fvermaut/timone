@@ -552,7 +552,7 @@ npm run build && npx vitest run src/daemon && npm test
 ```
 
 - [x] Red→green trace for all five cases — 15 in `services.test.ts`, 6 more in `container-runtime.test.ts` for the attachment and teardown
-- [ ] On `scratch-app`, a real session reads and writes its database by name from inside the box — **deferred to 30k**, which is where a session calls the model from inside the box. `scratch-app` does commit `compose.yaml`, so there is a stack to stand up; a container on a fixture stack reaching `db:5432` by name was watched live and is recorded above
+- [x] On `scratch-app`, a real session reads and writes its database by name from inside the box — **done at 30j**: `scratch-app`'s real stack was brought up through `bringUpServices`, and its own accessibility suite ran inside the box against `db:5432` **by service name**, migrating and seeding rows as it went. fvermaut's own dev stack was up on the host at the same time and the two never met
 - [x] `docker network ls` and `docker ps -a` clean after a passing run — watched live, including the compose-profile trap that made an earlier teardown silently leak everything. The failing and killed runs are unit-covered and go to 30k
 
 > **✏ Refined 2026-08-20 — two small things, neither one blocking.** The command `npx vitest run src/daemon && npm test` is **redundant**: `npm test` is a strict superset of the first half. Harmless, kept as written, but the first half buys nothing except a slightly earlier failure. And **case (4) needs confirming before it is asserted**: `ivtrends` carries `preview: docker` in `timone.yaml`, while this plan states it commits no compose file. One of those two is wrong. Settle which before the refusal is written, or the first thing the new refusal does is contradict the manifest.
@@ -572,9 +572,25 @@ This is a named slice because fvermaut asked the question directly and because a
 
 #### Agent Validation Steps
 
-- [ ] The same verification pass run in a box and on the host, same commit, and the two reports diffed — differences explained or fixed, never noted and moved past
-- [ ] The server-start pattern the verify skill mandates — backgrounded, polled with `curl`, killed at the end — works unchanged inside the box
-- [ ] A deliberately broken page produces a **failing** pass in the box, so the pass is proved non-vacuous
+- [x] The same verification pass run in a box and on the host, same commit (`69ad47ed`), and the two compared — **22 passed both ways, the same 22 test names**. No differences to explain
+- [x] The server-start pattern the verify skill mandates — backgrounded, polled, killed at the end — works unchanged inside the box. Playwright's own `webServer` did it, against the project's committed configuration
+- [x] A deliberately broken page produces a **failing** pass in the box — an `<img>` with no `alt` took it to **3 failures, exactly the axe tests**, keyboard and reflow still passing
+
+> **✅ Built and watched 2026-08-22 — 30j is done, and the browser leg is identical in the box and out of it.**
+>
+> **The comparison the slice is built around, run for real.** `scratch-app`'s own `tests/e2e/accessibility.spec.ts` — the axe scan, the keyboard traversal, and the reflow checks at 320 px and 200 % zoom — was run twice on commit **`69ad47ed`**: once **inside the box** against 30i's live stack, once **on the host** outside any container. **22 passed in the box. 22 passed on the host. The same 22 test names.** The findings match, which is the assertion, and neither run was a scan finding nothing because the page never rendered — the reflow legs print the boxes they measured, and they measured them.
+>
+> **The pass is non-vacuous, proved by breaking a page rather than by arguing.** An `<img>` with no alternative text was added to `src/app/page.tsx` inside the box, and the run went to **3 failures — exactly the three axe-violation tests**, with the keyboard and reflow tests still passing, which is correct: a missing `alt` does not change tab order. A browser leg that cannot fail is not a browser leg.
+>
+> **The server-start pattern works unchanged inside the box.** `playwright.config.ts` declares a `webServer` that runs `npm run dev`, polls `http://localhost:3000` and kills it at the end. It did exactly that **inside the container**, and the suite completed — no change to the project's own configuration, and nothing about the box visible to it.
+>
+> **The project brings its own tooling and the box needs nothing extra.** `@axe-core/playwright` and `@playwright/test` are `scratch-app`'s devDependencies; `npm ci` inside the box installs them, and the browsers come from the image. The box provides node and browsers; the project provides what it wants to test with. That is the right seam and it was not designed — it fell out of running the thing.
+>
+> **Two live observations worth keeping, neither of them planned:**
+> - **fvermaut's own `scratch-app` dev stack was running on the host throughout**, holding host port 5433. The boxed stack published nothing and the two never met — case (5)'s property observed against a real collision rather than a hypothetical one.
+> - **His checkout came through clean.** `projects/scratch-app` was on `main` with an empty `git status` after three boxed sessions and two stacks. Not the full 30k gate, which is daemon-driven, but the same property.
+>
+> **Everything was taken down.** No `timone-*` container, no `timone-*` network, no clone under `.timone/stacks/`. His own stack was still running, untouched.
 
 > **✏ Refined 2026-08-20: this slice has no `Agent Validation Steps` command block, and every other slice in this phase has one.** process.md stage 5 requires copy-pasteable validation commands per sub-phase. The comparison this slice is built around — two real verification reports, produced and diffed — is not a gate until a named command produces both and diffs them; as written, "the two reports diffed" is an instruction to a human, and an executing agent has nothing to run. **The gap is recorded, not filled**: the command depends on how 30h and 30i end up invoking the verify stage inside the box, which is not settled. Write it when 30i closes, before this slice starts.
 
