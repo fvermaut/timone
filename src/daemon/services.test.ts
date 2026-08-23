@@ -251,6 +251,43 @@ describe("getting the project's source without touching the human's checkout", (
     );
   });
 
+  it("falls back to the default branch when the run's branch does not exist yet", async () => {
+    // Watched live on `ivtrends` #1, 2026-08-23. A run's work branch is cut by
+    // the first session that owns one and pushed from inside the box — so at
+    // this point, on the very first stage that owns a branch, it does not
+    // exist and git says `Remote branch ... not found in upstream origin`.
+    // Refusing there makes a boxed run impossible to start on a fresh branch.
+    const runner = fakeRunner();
+    runner.on(
+      (call) => call.args.includes("--branch"),
+      new Error("fatal: Remote branch timone/7-slow not found in upstream origin"),
+    );
+
+    await expect(bringUp({ run: runner.run })).resolves.toBeDefined();
+
+    const clones = runner.calls.filter((call) => call.args.includes("clone"));
+    expect(clones).toHaveLength(2);
+    expect(clones[1].args).not.toContain("--branch");
+    // Still shallow, and still into the daemon's own scratch space.
+    expect(clones[1].args).toContain("--depth");
+    expect(clones[1].args.join(" ")).toContain("/root/.timone/stacks/");
+  });
+
+  it("reports the real reason when the fallback clone fails too", async () => {
+    // The `catch` must not swallow a bad credential or a missing repository.
+    // Both calls fail for the same reason, and the second one's message is
+    // what the human is told.
+    const runner = fakeRunner();
+    runner.on(
+      (call) => call.args.includes("clone"),
+      new Error("fatal: could not read Username for 'https://github.com'"),
+    );
+
+    await expect(bringUp({ run: runner.run })).rejects.toThrow(
+      /could not read Username/,
+    );
+  });
+
   it("carries the credential in the environment, never in the URL it logs", async () => {
     const runner = fakeRunner();
 

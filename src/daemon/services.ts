@@ -126,20 +126,32 @@ export async function bringUpServices(
   const source = join(options.root, ".timone", "stacks", name);
 
   remove(source);
-  await run(
-    "git",
-    [
-      "clone",
-      "--quiet",
-      "--depth",
-      "1",
-      "--branch",
-      options.branch,
-      remoteFor(options.project.repoUrl),
-      source,
-    ],
-    credentialEnv(options.token),
-  );
+  const remote = remoteFor(options.project.repoUrl);
+  const env = credentialEnv(options.token);
+  const shallow = ["clone", "--quiet", "--depth", "1"];
+
+  // **The branch may not exist yet, and that is the ordinary case, not a
+  // fault.** A run's work branch is cut by the first session that owns one and
+  // pushed from inside the box; this clone happens *before* that session
+  // starts. So the very first stage of a run that owns a branch — `breakdown`
+  // for an initiative, `planning` for a step — asks for a branch nobody has
+  // made, and git answers `Remote branch ... not found in upstream origin`.
+  //
+  // The box's own script has always allowed for this (`checkout ... || true`)
+  // and this call did not, which made a boxed run impossible to start on a
+  // fresh branch. Watched live on `ivtrends` #1, 2026-08-23.
+  //
+  // The default branch is the right fallback and not a guess: what this clone
+  // is for is the compose file and the env template, which are the project's
+  // committed shape rather than the run's work.
+  try {
+    await run("git", [...shallow, "--branch", options.branch, remote, source], env);
+  } catch {
+    // A real failure — no network, a bad credential, no such repository —
+    // fails the second call too, and its message is the one that surfaces.
+    remove(source);
+    await run("git", [...shallow, remote, source], env);
+  }
 
   const compose = COMPOSE_FILES.accepted.find((file) =>
     exists(join(source, file)),

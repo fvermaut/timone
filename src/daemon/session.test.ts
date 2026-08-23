@@ -1484,7 +1484,11 @@ describe("the plan gate", () => {
 
     expect(requests[0].prompt).not.toContain("Awaiting approval");
     expect(requests[0].prompt).toMatch(/commit the phase file/i);
-    expect(requests[0].prompt).toMatch(/stay on the branch/i);
+    // ✏ 2026-08-23 — "work on the branch", not "stay on" it. A step ticket's
+    // run enters at planning, and the branch it names does not exist until
+    // this session cuts it.
+    expect(requests[0].prompt).toMatch(/work on the branch/i);
+    expect(requests[0].prompt).toMatch(/cut it from/i);
   });
 
   it("parks on the breakdown's gate, and puts the pieces in front of the human", async () => {
