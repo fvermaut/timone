@@ -49,6 +49,25 @@ const ENV_TEMPLATE = ".env.example";
 /** How long compose may take to report every service healthy. */
 const DEFAULT_WAIT_SECONDS = 180;
 
+/**
+ * How much longer than its own wait the compose call is allowed to take
+ * before the runner kills it.
+ *
+ * **The two used to be set in different files and could not both be true**
+ * ([#60](https://github.com/fvermaut/timone/issues/60)). This asked compose to
+ * wait 180 seconds and then called it through a runner whose deadline is 90 —
+ * sized against a slow `gh` call, for good reasons of its own
+ * ([#47](https://github.com/fvermaut/timone/issues/47)) — so the 180 was
+ * unreachable by construction and every stack that took longer than a minute
+ * and a half was reported as unhealthy when it was still starting.
+ *
+ * Derived from the wait rather than written beside it, so the two cannot
+ * drift apart again. The margin covers what compose does either side of
+ * waiting: reading the files, creating the network and the volumes, and
+ * pulling an image it does not have yet.
+ */
+const WAIT_MARGIN_SECONDS = 60;
+
 /** A stack that is up, and how to take it down. */
 export interface ServiceStack {
   /**
@@ -170,13 +189,28 @@ export async function bringUpServices(
   const envFile = exists(join(source, ENV_TEMPLATE))
     ? ["--env-file", ENV_TEMPLATE]
     : [];
-  // **`COMPOSE_PROFILES` is on every compose call, including `down`.** A
-  // service declared under a profile is invisible to compose without it, and
-  // `docker compose down` then **exits 0 having removed nothing** —
-  // `--remove-orphans` does not save it. Watched live on 2026-08-22. A
-  // teardown that reports success and leaks the container, the network and
-  // the volumes is how a machine fills up quietly.
-  const context = {
+  // **`COMPOSE_PROFILES` is on `down`, and on nothing else.**
+  //
+  // It is needed there: a service declared under a profile is invisible to
+  // compose without it, and `docker compose down` then **exits 0 having
+  // removed nothing** — `--remove-orphans` does not save it. Watched live on
+  // 2026-08-22. A teardown that reports success and leaks the container, the
+  // network and the volumes is how a machine fills up quietly.
+  //
+  // **It was on every call, and that is what stopped every boxed run on
+  // `ivtrends` from starting** ([#60](https://github.com/fvermaut/timone/issues/60)).
+  // The fix above was right about `down` and was written into a context the
+  // other calls shared, where it does something else entirely: it pulls the
+  // profile-gated `app` service into the stack a run stands up. `app` is
+  // `build: .`, so every run built a production image of the whole
+  // application first — 190 seconds against 5 for the database alone, and
+  // longer than any deadline it was given.
+  //
+  // **Nothing wanted that image.** A boxed run clones the project and builds
+  // and runs it *inside the box*; what it needs beside it is the database.
+  // The project's own compose file says the profile is the preview adapter's.
+  const context = { cwd: source };
+  const teardownContext = {
     cwd: source,
     env: { COMPOSE_PROFILES: APP_PROFILE },
   };
@@ -216,12 +250,14 @@ export async function bringUpServices(
       await run(
         "docker",
         [...composeArgs, "down", "-v", "--remove-orphans"],
-        context,
+        teardownContext,
       );
     } finally {
       remove(source);
     }
   };
+
+  const waitSeconds = options.waitSeconds ?? DEFAULT_WAIT_SECONDS;
 
   try {
     await run(
@@ -232,18 +268,32 @@ export async function bringUpServices(
         "-d",
         "--wait",
         "--wait-timeout",
-        String(options.waitSeconds ?? DEFAULT_WAIT_SECONDS),
+        String(waitSeconds),
       ],
-      context,
+      // Longer than the wait it just asked for, so compose is the thing that
+      // decides a stack is unhealthy — and it says which service.
+      { ...context, timeoutMs: (waitSeconds + WAIT_MARGIN_SECONDS) * 1000 },
     );
   } catch (error) {
     // Down first, then report: a stack that failed half-up is still holding a
     // network and volumes, and the reason is no use to anybody if the next run
     // cannot start either.
     await down().catch(() => undefined);
+    // Which of the two happened is the whole of what a reader can act on, and
+    // the old wording asserted the wrong one of them: a command killed on our
+    // own deadline was reported as a stack that had reported itself unhealthy,
+    // which sends a reader to compose files and healthchecks that are correct
+    // (#60).
+    const reason = oneLine(error);
+    const killed = reason.includes("was killed");
     throw new Error(
-      `${options.project.name}'s services never became healthy, so no session ` +
-        `was started against them: ${oneLine(error)}`,
+      killed
+        ? `${options.project.name}'s services took longer than ` +
+          `${waitSeconds + WAIT_MARGIN_SECONDS}s to come up, so no session was ` +
+          `started against them: ${reason}. They may be healthy by now — this ` +
+          "is a deadline, not a verdict on the stack."
+        : `${options.project.name}'s services never became healthy, so no ` +
+          `session was started against them: ${reason}`,
     );
   }
 

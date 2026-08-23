@@ -351,3 +351,40 @@ describe("a forge call that never comes back, and one that comes back wrong", ()
     expect(waits).toEqual([2_000, 8_000]);
   });
 });
+
+describe("a deadline the caller sets for one command", () => {
+  it("overrides the runner's own, for a command that was told to wait", async () => {
+    // `docker compose up --wait` is *given* how long to wait. A runner that
+    // killed it earlier made that argument unreachable and reported a
+    // healthy-but-slow stack as a broken one (#60).
+    const seen: number[] = [];
+    const run = execRunner({
+      timeoutMs: 90_000,
+      spawn: async (_command, _args, options) => {
+        seen.push(options.timeout as number);
+        return "";
+      },
+    });
+
+    await run("docker", ["compose", "up"], { timeoutMs: 240_000 });
+    await run("gh", ["issue", "list"]);
+
+    expect(seen).toEqual([240_000, 90_000]);
+  });
+
+  it("quotes the deadline that actually applied when it kills something", async () => {
+    const run = execRunner({
+      timeoutMs: 90_000,
+      retryWaitsMs: [],
+      spawn: async () => {
+        const error = new Error("killed") as Error & { killed?: boolean };
+        error.killed = true;
+        throw error;
+      },
+    });
+
+    await expect(
+      run("docker", ["compose", "up"], { timeoutMs: 240_000 }),
+    ).rejects.toThrow(/within 240s/);
+  });
+});

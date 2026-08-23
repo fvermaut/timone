@@ -36,6 +36,20 @@ export interface CommandOptions {
    * ordinary route.
    */
   repository?: string;
+  /**
+   * A deadline for this one call, overriding the runner's own.
+   *
+   * **For a call that legitimately takes longer than the default**, which is
+   * sized against a slow `gh` request and is far too short for some of what
+   * the daemon runs. `docker compose up --wait` is the case that forced this:
+   * it is *given* how long to wait, and a runner that killed it earlier made
+   * that argument unreachable and reported a healthy-but-slow stack as a
+   * broken one ([#60](https://github.com/fvermaut/timone/issues/60)).
+   *
+   * A caller that sets this should derive it from whatever it told the
+   * command to wait for, so the two cannot drift apart.
+   */
+  timeoutMs?: number;
 }
 
 /**
@@ -165,6 +179,9 @@ export function execRunner(options: ExecRunnerOptions = {}): CommandRunner {
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   return async (command, args, callerOptions) => {
+    // The caller's own deadline wins where it gave one: only the caller knows
+    // that this particular command was told to spend three minutes waiting.
+    const deadline = callerOptions?.timeoutMs ?? timeout;
     let attempt = 0;
     for (;;) {
       try {
@@ -175,7 +192,7 @@ export function execRunner(options: ExecRunnerOptions = {}): CommandRunner {
             callerOptions?.env === undefined
               ? process.env
               : { ...process.env, ...callerOptions.env },
-          timeout,
+          timeout: deadline,
           killSignal: "SIGTERM",
         });
       } catch (error) {
@@ -189,7 +206,7 @@ export function execRunner(options: ExecRunnerOptions = {}): CommandRunner {
         const killed = (error as ExecFileError).killed === true;
         const stderr = (error as ExecFileError).stderr?.trim();
         const reason = killed
-          ? `gave no answer within ${Math.round(timeout / 1000)}s and was killed`
+          ? `gave no answer within ${Math.round(deadline / 1000)}s and was killed`
           : stderr !== undefined && stderr !== ""
             ? stderr
             : error instanceof Error

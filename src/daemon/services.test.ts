@@ -160,13 +160,61 @@ describe("the services a boxed run reaches", () => {
     expect(down?.options?.env?.COMPOSE_PROFILES).toBe("app");
   });
 
-  it("names the profile when bringing the stack up too", async () => {
+  it("does NOT name the profile when bringing the stack up", async () => {
+    // The reverse of the test above, and the reverse of what this used to
+    // assert (#60). The profile is right for `down` and wrong for `up`: it
+    // pulls the profile-gated `app` service into the stack a run stands up,
+    // and `app` is `build: .`. Every boxed run on `ivtrends` built a
+    // production image of the whole application before the agent did
+    // anything — 190 seconds against 5 for the database alone, longer than
+    // any deadline it was given, so no run could start at all.
+    //
+    // Nothing wanted that image: a boxed run clones the project and builds
+    // and runs it inside the box. What it needs beside it is the database.
     const runner = fakeRunner();
 
     await bringUp({ run: runner.run });
 
     const up = runner.calls.find((call) => call.args.includes("up"));
-    expect(up?.options?.env?.COMPOSE_PROFILES).toBe("app");
+    expect(up?.options?.env?.COMPOSE_PROFILES).toBeUndefined();
+
+    const config = runner.calls.find((call) => call.args.includes("config"));
+    expect(config?.options?.env?.COMPOSE_PROFILES).toBeUndefined();
+  });
+
+  it("gives the stack longer to come up than it told it to wait", async () => {
+    // These two numbers lived in different files and could not both be true:
+    // compose was told to wait 180s by `services.ts` and killed at 90s by the
+    // runner's own default, so the 180 was unreachable by construction (#60).
+    const runner = fakeRunner();
+
+    await bringUp({ run: runner.run });
+
+    const up = runner.calls.find((call) => call.args.includes("up"))!;
+    const waitSeconds = Number(up.args[up.args.indexOf("--wait-timeout") + 1]);
+
+    expect(waitSeconds).toBeGreaterThan(0);
+    expect(up.options?.timeoutMs).toBeGreaterThan(waitSeconds * 1000);
+  });
+
+  it("says a deadline was a deadline, rather than calling the stack unhealthy", async () => {
+    // The wording that sent a reader to compose files and healthchecks that
+    // were correct. A command killed on our own deadline has told us nothing
+    // about the stack's health (#60).
+    const runner = fakeRunner();
+    runner.on(
+      (call) => call.args.includes("up"),
+      new Error("docker compose up failed after 3 attempts: gave no answer within 240s and was killed"),
+    );
+
+    const said = await bringUp({ run: runner.run }).then(
+      () => "it did not fail at all",
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+
+    expect(said).toMatch(/took longer than/i);
+    expect(said).toMatch(/deadline, not a verdict/i);
+    expect(said).not.toMatch(/never became healthy/i);
   });
 
   it("refuses a project that commits no compose file, and names what it must commit", async () => {
