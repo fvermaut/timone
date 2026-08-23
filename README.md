@@ -27,6 +27,36 @@ timone projects list
 
 `npm link` is not optional: every instruction Timone writes on a ticket names the bare `timone` command, and without the link none of them can be followed.
 
+### Give the daemon a lasting login
+
+The daemon runs each ticket in a container, and a container cannot log in by itself. It is handed a token when it starts, and it keeps that token for the whole run.
+
+**Set this up once.** Without it the daemon borrows your own Claude login, which lives about six hours counted from when you last used the CLI — not from when a run starts. A run that outlives it is refused partway and loses everything it has done since its last push.
+
+```bash
+claude setup-token                  # prints a long-lived token; copy it
+
+# keep it in the keychain, not in a file. `-w` last means it prompts,
+# so the token never reaches your shell history or a `ps` listing.
+security add-generic-password -a "$USER" -s timone-model-token -U -w
+```
+
+Then add this to `~/.zshrc`, so every terminal — and every daemon started from one — has it:
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s timone-model-token -w 2>/dev/null)"
+```
+
+Open a new terminal and start the daemon. **It says which login it has, every time:**
+
+```
+Model login: a lasting token, from this daemon's environment. Runs of any length are covered.
+```
+
+If it says *borrowed from this machine's Claude login* instead, the variable did not reach it — check that the terminal you started the daemon from is a new one. The first read from the keychain asks for permission; choose "Always Allow" so an unattended daemon is never blocked on it.
+
+**Check it again whenever runs start failing on login.** That line is the fastest way to tell a missing variable from an expired token, and a missing variable is much the more likely of the two: a token lives a long time, an exported variable lasts until the next new terminal.
+
 ## Everyday commands
 
 ```bash
@@ -39,6 +69,8 @@ timone projects add|update <name> --repo <url> …   # register or correct a pro
 ```
 
 Only one daemon works at a time; a second one exits saying who holds the lock. Restart the daemon after pulling — a running process keeps executing the code it started with.
+
+Two credentials keep a boxed run alive, and neither is yours to manage after setup. The model login comes from the token above. The GitHub token is minted per run, scoped to the one repository, and refreshed into the running container every twenty minutes — a minted token dies after an hour and runs last longer than that. [manual/how-the-daemon-works.md](manual/how-the-daemon-works.md) has both in full.
 
 ## The stages
 
