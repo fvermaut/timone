@@ -714,6 +714,31 @@ describe("ctaFor — a run the machine broke itself", () => {
     expect(cta.needFromYou).toMatch(/login needs fixing first/);
   });
 
+  it("says the login ran out, which is a different thing from being refused", () => {
+    // #55: the ticket used to say the login was refused and that fvermaut had
+    // to fix it. Nothing was refused and nothing of his was broken — the
+    // token simply ran out mid-run, and by the time this note is written the
+    // daemon has already tried again and failed again.
+    const cta = ctaFor({
+      project: "ivtrends",
+      ticket: 24,
+      run: run({
+        project: "ivtrends",
+        ticket: 24,
+        status: "failed",
+        failure:
+          "the session stopped on an API error (authentication_failed: Failed to " +
+          "authenticate. API Error: 401 OAuth access token has expired.)",
+      }),
+    });
+
+    expect(cta.headline).toBe(
+      "My login ran out while I was working, and did not come back, so I stopped.",
+    );
+    expect(cta.needFromYou).toMatch(/login needs fixing first/);
+    expect(cta.command).toBe("timone retry ivtrends#24");
+  });
+
   it("keeps the old words for a failure that was about the work", () => {
     const cta = ctaFor({
       project: "ivtrends",

@@ -48,6 +48,7 @@ import {
 import {
   AgentSessionSpawner,
   parkedComment,
+  apiErrorFrom,
   sessionOutcomeFrom,
   sessionRequest,
   type ProgressReader,
@@ -3389,6 +3390,43 @@ describe("how a session's ending is judged", () => {
     ).toMatchObject({ ok: false, error: "error_max_turns" });
   });
 
+  it("keeps the sentence beside the code, not just the code", () => {
+    // #55: the runtime puts `authentication_failed` in `error` and the reason
+    // — expired, or refused — only in the message's text. Keeping the code
+    // alone lost the one word that decides whether the daemon retries.
+    expect(
+      apiErrorFrom({
+        error: "authentication_failed",
+        message: {
+          content: [
+            {
+              type: "text",
+              text: "Failed to authenticate. API Error: 401 OAuth access token has expired.",
+            },
+          ],
+        },
+      }),
+    ).toBe(
+      "authentication_failed: Failed to authenticate. API Error: 401 OAuth access " +
+        "token has expired.",
+    );
+  });
+
+  it("answers the code alone when the message said nothing else", () => {
+    expect(apiErrorFrom({ error: "server_error", message: { content: [] } })).toBe(
+      "server_error",
+    );
+    expect(apiErrorFrom({ error: "server_error" })).toBe("server_error");
+  });
+
+  it("answers nothing for a message that was not an error", () => {
+    // Load-bearing: the caller assigns this unconditionally, so a real
+    // message after a recovered error has to clear it.
+    expect(
+      apiErrorFrom({ message: { content: [{ type: "text", text: "on with it" }] } }),
+    ).toBeUndefined();
+  });
+
   it("does not fail a session that recovered from a transient error", () => {
     // The caller clears the error whenever the model speaks again, so an
     // error the CLI retried past never reaches here. Recording the rule where
@@ -3671,6 +3709,80 @@ describe("a stop the machine can survive on its own", () => {
     expect(waits).toEqual([]);
     expect(store.get("scratch-app#7/1")?.status).toBe("failed");
     expect(comments.at(-1)?.body ?? "").toMatch(/login/i);
+  });
+
+  it("tries again when the token ran out, and gets on with the work", async () => {
+    // The fault behind #55. `ivtrends#24` was refused three hours in with
+    // `401 OAuth access token has expired`, and the daemon parked it as a
+    // login to be fixed — telling fvermaut his login needed attention when it
+    // was fine. The token is read afresh at every spawn, so the next attempt
+    // does not carry the one that just ran out: this is a stop the machine
+    // mends by itself.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const waits: number[] = [];
+    const { runtime, starts } = flakyRuntime(
+      [
+        {
+          ok: false,
+          error:
+            "the session stopped on an API error (authentication_failed: Failed " +
+            "to authenticate. API Error: 401 OAuth access token has expired. " +
+            "Re-authenticate to continue.)",
+        },
+        { ok: true },
+      ],
+      classifies(adapter),
+    );
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(starts()).toBe(2);
+    expect(waits).toEqual([60_000]);
+    expect(store.get("scratch-app#7/1")?.status).not.toBe("failed");
+    // Nothing is said on the ticket about a stop the machine got past on its
+    // own, which is the whole point of retrying it.
+    expect(comments.map((posted) => posted.body).join("\n")).not.toMatch(/login/i);
+  });
+
+  it("gives up on a token that keeps running out, and then says so plainly", async () => {
+    // The attempts run out, so the credential really is dead rather than
+    // stale — and at that point the operator does have something to fix.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime, starts } = flakyRuntime([
+      { ok: false, error: "API Error: 401 OAuth access token has expired." },
+    ]);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      sleep: async () => {},
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(starts()).toBe(3);
+    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+
+    const posted = comments.at(-1)?.body ?? "";
+    expect(posted).toMatch(/ran out while I was working/i);
+    expect(posted).toMatch(/fault on my side/i);
+    // The claim that was wrong: a run stopped by an expiry was never refused,
+    // and saying so sent fvermaut looking for a broken login he did not have.
+    expect(posted).not.toMatch(/would be refused the same way/i);
   });
 
   it("does not try again when the stage itself broke", async () => {

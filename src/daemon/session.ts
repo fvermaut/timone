@@ -313,6 +313,49 @@ export interface Ticker {
  * from is followed by a real message, which clears it, and only an error
  * nothing came back from survives to be reported.
  */
+/**
+ * What the main thread's last word said, when that word was an API error.
+ *
+ * **The short code alone is not enough to act on.** The runtime puts a code
+ * in `error` — `authentication_failed` — and the sentence that says *which*
+ * kind of failure it was in the message's own text. On 2026-08-23 a run died
+ * carrying `error: "authentication_failed"` beside the text `Failed to
+ * authenticate. API Error: 401 OAuth access token has expired.
+ * Re-authenticate to continue.` Only the second of those two says the token
+ * timed out rather than being refused, and that is the whole difference
+ * between a stop the daemon mends by itself and one it puts in front of a
+ * human ([#55](https://github.com/fvermaut/timone/issues/55)).
+ *
+ * The daemon kept only the code, so neither {@link technicalFault} nor the
+ * reader of the ticket ever saw the word "expired". Both halves are kept now,
+ * the code first because it is the stable one.
+ */
+export function apiErrorFrom(message: {
+  error?: string;
+  message?: { content?: unknown };
+}): string | undefined {
+  if (message.error === undefined) return undefined;
+  const said = spokenText(message.message?.content);
+  return said === undefined ? message.error : `${message.error}: ${said}`;
+}
+
+/** The text blocks of a message's content, joined; undefined when there are none. */
+function spokenText(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const said = content
+    .filter(
+      (block): block is { text: string } =>
+        typeof block === "object" &&
+        block !== null &&
+        (block as { type?: unknown }).type === "text" &&
+        typeof (block as { text?: unknown }).text === "string",
+    )
+    .map((block) => block.text.trim())
+    .filter((text) => text !== "")
+    .join(" ");
+  return said === "" ? undefined : said;
+}
+
 export function sessionOutcomeFrom(
   sessionId: string,
   result: { subtype: string; is_error?: boolean },
@@ -572,7 +615,9 @@ export function unreachableComment(
   const headline =
     fault === "credentials"
       ? "**My login to the service I run on was refused, so I stopped here.**"
-      : "**I could not reach the service I run on, so I stopped here.**";
+      : fault === "expired"
+        ? "**My login ran out while I was working, so I stopped here.**"
+        : "**I could not reach the service I run on, so I stopped here.**";
   const what =
     fault === "credentials"
       ? `Trying again would be refused the same way: ${reason}.`
@@ -1180,11 +1225,16 @@ export class AgentSessionSpawner implements SessionSpawner {
       const outcome = await this.attemptSession(run, stage, request, attempt);
       if (outcome.ok) return { outcome, attempts: attempt };
 
-      // Only a broken link is retried. A refused login would be refused
-      // again, and a stage that broke on its own work would break the same
-      // way — both are told to the human at once, in their own words.
+      // A broken link is retried, and so is a token that ran out: the box is
+      // handed a credential read fresh at every spawn, so the next attempt
+      // does not present the one that just timed out
+      // ([#55](https://github.com/fvermaut/timone/issues/55)). A login that
+      // was *refused* is not retried — that one would be refused again — and
+      // neither is a stage that broke on its own work. Both are told to the
+      // human at once, in their own words.
+      const fault = technicalFault(outcome.error);
       const wait =
-        technicalFault(outcome.error) === "link"
+        fault === "link" || fault === "expired"
           ? this.linkRetryWaitsMs[attempt - 1]
           : undefined;
       if (wait === undefined) return { outcome, attempts: attempt };
@@ -2206,7 +2256,7 @@ export const agentSdkRuntime: SessionRuntime = {
             resolveId(id);
           }
           if (message.type === "assistant" && message.parent_tool_use_id === null) {
-            lastApiError = message.error;
+            lastApiError = apiErrorFrom(message);
           }
           if (message.type === "result") {
             resolveId(id);

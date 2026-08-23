@@ -5,6 +5,7 @@
 - **Source:** [timone#29](https://github.com/fvermaut/timone/issues/29), filed on fvermaut's ruling of 2026-08-18 — *"a failed run for technical/transient reasons should not surface on the ticket"*
 - **Takes up:** [ADR-0017](0017-a-runs-liveness-is-its-heartbeat.md)'s own escalation clause — *"if that proves to be the wrong trade, the escalation already discussed is one free automatic re-arm per run with an attempt counter, and this ADR is what to revisit"*
 - **Bounds:** [ADR-0020](0020-liveness-is-judged-only-over-witnessed-time.md), whose *"reclaim is still not recovery"* is left exactly as it stands; [ADR-0023](0023-one-answer-one-session.md), whose claim-then-start order every attempt keeps
+- **✏ Corrected 2026-08-23** — D1 and D3 lumped two different failures under one word. A token that *ran out* is now its own kind and is retried; see the notes on D1 and D3, and [timone#55](https://github.com/fvermaut/timone/issues/55)
 
 ## Context
 
@@ -42,11 +43,17 @@ Each posted the same comment — *"Something went wrong while I was working on t
 
 **A failure the machine can survive on its own is survived, not reported.**
 
-**D1 — A stop is technical when the daemon can recognise it as such, and only then.** `technicalFault` reads the failure's own words and returns `link` (the connection, or the service behind it: a dropped socket, a 500, an overload, a rate limit), `credentials` (the login refused), or nothing. **An unrecognised wording is not technical.** The unknown case is reported to a human rather than retried in silence, because a stop nobody has taught the daemon about is exactly the stop that should not be repeated unattended. It lives in a module of its own (`src/daemon/faults.ts`) and stays pure: two surfaces need this judgement and only one of them may load an agent runtime.
+**D1 — A stop is technical when the daemon can recognise it as such, and only then.** `technicalFault` reads the failure's own words and returns `link` (the connection, or the service behind it: a dropped socket, a 500, an overload, a rate limit), ~~`credentials` (the login refused)~~ **✏ 2026-08-23: `expired` (the token ran out while the session worked) or `credentials` (the login was refused)**, or nothing. **An unrecognised wording is not technical.** The unknown case is reported to a human rather than retried in silence, because a stop nobody has taught the daemon about is exactly the stop that should not be repeated unattended. It lives in a module of its own (`src/daemon/faults.ts`) and stays pure: two surfaces need this judgement and only one of them may load an agent runtime.
 
 **D2 — A broken link is tried again, up to a ceiling, and the ticket hears nothing while it is.** Two further attempts, after 60s and 300s. The ceiling is the guard ADR-0017 asked for: a stage that breaks every time reaches a human within about six minutes rather than looping. Between attempts nothing is posted, no label moves and no state is written beyond the run's own.
 
 **D3 — A refused login is not retried.** It is technical by D1 and unfixable by repetition: the next attempt presents the same refused login. It fails at once, with the technical wording.
+
+> **✏ Corrected 2026-08-23 — this was right about a revoked login and wrong about an expired one, and a run paid for the difference.** `ivtrends` [#24](https://github.com/fvermaut/ivtrends/issues/24) ran for three hours in a box and was refused mid-sentence with `401 OAuth access token has expired`. D3 read that as a refused login, failed it at once, and told fvermaut on the ticket that his login needed fixing before anything would start again. His login was fine. The box is handed a token **read afresh at every spawn**, so the next attempt would not have presented the one that had just run out — a retry would very likely have worked, and 134 turns and $43 of work would not have been thrown away.
+>
+> **What changed.** An expiry is its own kind, `expired`, and it is retried on D2's ladder like a broken link, silently. D3 keeps its wording for a login that is genuinely refused — revoked, wrong, or not entitled — which is still unfixable by repetition. A token that keeps running out through every attempt does reach D5's comment, and at that point the credential really is dead, so asking the operator to mend it is finally true.
+>
+> **The two are only separable if the daemon can read the difference**, and it could not: the runtime puts a short code in the message's `error` field — `authentication_failed`, the same for both — and the sentence that says which one it was in the message's *text*. The daemon kept only the code. It now keeps both, which is what makes this decision possible at all. See [timone#55](https://github.com/fvermaut/timone/issues/55).
 
 **D4 — The heartbeat keeps beating through a wait.** The ticker that stamps `heartbeatAt` belongs to a session, and between attempts there is none. An unstamped wait longer than four intervals is, by ADR-0017's own rule as ADR-0020 narrowed it, evidence of a dead run — so a silent wait would have the recovery machinery reclaim the run it is nursing. The ticker therefore runs over the wait too, stamping and printing nothing.
 
