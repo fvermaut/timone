@@ -47,6 +47,10 @@ The agent's container carries node, the toolchain and the browsers. Everything e
 
 **The agent's container receives no docker socket, no docker CLI and no ability to create containers.** Whatever a run needs standing up is stood up for it, by the daemon, before the session starts.
 
+> **✏ Noted 2026-08-23 — the daemon reaches *into* a running box, and that direction was always open.** Fixing [timone#56](https://github.com/fvermaut/timone/issues/56) needed a way to hand a running box a freshly minted forge token, since the box cannot mint one itself and must not be able to. It is done with `docker exec`, from the daemon, every twenty minutes.
+>
+> **This takes nothing away from the sentence above.** The box still has no socket, no CLI and no ability to create anything; what changed is that the daemon uses a channel it already had — the same one that starts the container and destroys it afterwards. No port is opened, nothing listens inside the box, and the direction is one-way: the box cannot call out on it. The alternative, mounting a host file the daemon rewrites, is the thing D1 exists to forbid, and was not considered further.
+
 The cost is a real prerequisite: a project with no working compose file cannot be built by an agent at all. `ivtrends` does not have one today.
 
 ### D4 — Outbound network is open, and this is recorded as an accepted risk
