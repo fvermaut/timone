@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-22, afternoon.
+**Last updated:** 2026-08-23, morning.
 
 ---
 
@@ -43,15 +43,21 @@ This is not a rough edge to file off. It is the same fact as the machine no long
 - **It will not run a version of Timone you have not pushed.** The container downloads Timone from GitHub, so it cannot follow a commit that only exists on your laptop. It says so plainly rather than failing with a git error. So merge or push first.
 - **It borrows your Claude login** — the choice you made this morning. It reads it fresh each time and keeps no copy. While a container is running, a token that can spend your subscription is inside it. That is the trade you took over a separate bill.
 
-**2. The trading app cannot be built in a container yet.** `ivtrends` has no `compose.yaml`, so the machine has nothing to start beside it — no database, nothing. It refuses rather than guessing. The to-do app has one and is fine. When you want `ivtrends` built again, it needs that file; say the word and I will write one for you to review.
+**2. The trading app can be built in a container again.** It had no `compose.yaml`, so the machine had nothing to start beside it and refused rather than guessing. The file is back, and it starts a database and nothing else — there is no application to start yet, and the file says so and says which commit to bring it back from.
 
-**3. A second, smaller question you can leave for later.** There is still no automatic test run when code is pushed. The check that keeps the machine out of your folders runs whenever a session finishes, which is often, but not on GitHub. Setting that up means **you** committing one file by hand, once — the machine deliberately cannot write it, because a machine that can rewrite its own test setup can switch its own safety checks off. Say the word and I will write the file for you to commit.
+**3. The tests now run on GitHub too.** You committed the file on 22 August. Every push runs the whole suite and the check that keeps the machine out of your folders, so a fault no longer waits for a session to end to be seen.
 
-**4. The trading app still needs one command.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) stopped on a server error at the other end:
+**4. The trading app is ready to be planned again, and it takes two commands.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) has everything the planning needs: the 23 decisions, the specification you approved on 16 August, the design language, and the screener you clicked. What the wind-back removed is the **list of pieces** — the short list you approve once, that says what gets built and in what order — so that is written first.
+
+A fault was found and fixed on 23 August before this could run: the machine would have skipped writing that list and gone straight to planning the whole milestone in one go, on the ticket itself. It now writes the list and asks you.
+
+Add the `timone` label to [#1](https://github.com/fvermaut/ivtrends/issues/1), then:
 
 ```
-timone retry ivtrends#1
+node dist/cli.js daemon
 ```
+
+It writes the list on a branch and asks you to approve it on the ticket. When you approve, it opens one ticket per piece, turns #1 into a map of them, and starts on the first piece. **You are asked once, for the list.**
 
 **5. Two old jobs on the to-do app.** [#13](https://github.com/fvermaut/scratch-app/issues/13) stopped the same way, and #10 was a throwaway:
 
@@ -97,7 +103,7 @@ Of the ten on the second list that are not kept: four lost their tick because yo
 
 **It can log in to Claude, using your subscription.** Read fresh each time, kept nowhere.
 
-**Two more things it cannot do, and both now say so plainly.** It will not run a version of Timone you have not pushed — the container downloads it, so it cannot follow a commit that is only on your laptop. And it will not build a project with no `compose.yaml`, which is why the trading app is on hold.
+**Two more things it cannot do, and both now say so plainly.** It will not run a version of Timone you have not pushed — the container downloads it, so it cannot follow a commit that is only on your laptop. And it will not build a project with no `compose.yaml`, which held the trading app up until that file was written back.
 
 **Five faults were found by running things rather than reading them.** Three share a shape worth remembering: **a missing answer and a wrong question look identical.** A dropped connection read as "that branch does not exist". `docker compose down` succeeding while deleting nothing. A check of mine that said the to-do app had no `compose.yaml` when it has one. The other two: the container ran as the root user, which Claude refuses to work under — so it could not have run a single job — and the settings it was given never reached inside it. Eleven tests said those settings were correct and all eleven were right; none of them could see it.
 
