@@ -122,6 +122,61 @@ interface StoredCredentials {
 export function claudeSubscriptionToken(
   options: ClaudeSubscriptionTokenOptions = {},
 ): ModelTokenSource {
+  return async () => (await resolveModelLogin(options)).token;
+}
+
+/**
+ * Which login a boxed run would be given, said in one line, **without the
+ * token in it**.
+ *
+ * **The point of this is that a daemon can be checked rather than trusted.**
+ * A lasting token arrives in an environment variable, and an environment
+ * variable is one new terminal, one reboot or one edited profile away from
+ * being absent — at which point the daemon silently goes back to borrowing
+ * the host's login and long runs start dying again months later, for a reason
+ * nobody connects to a shell that forgot something
+ * ([#55](https://github.com/fvermaut/timone/issues/55)).
+ *
+ * So the daemon says which one it has at startup, every time. A refusal is
+ * returned here as its own words rather than thrown: this is a report, and a
+ * daemon must not fail to start because it could not describe itself.
+ */
+export async function modelLoginSummary(
+  options: ClaudeSubscriptionTokenOptions = {},
+): Promise<string> {
+  const now = options.now ?? Date.now;
+  try {
+    const login = await resolveModelLogin(options);
+    if (login.source === "lasting") {
+      return "Model login: a lasting token, from this daemon's environment. Runs of any length are covered.";
+    }
+    const left =
+      login.expiresAt === undefined
+        ? undefined
+        : Math.round((login.expiresAt - now()) / 60000);
+    return (
+      "Model login: borrowed from this machine's Claude login" +
+      (left === undefined ? "" : `, about ${left} minute(s) left`) +
+      ". A run that lasts longer than that is refused partway and loses its " +
+      "work. Give the daemon a lasting token with `claude setup-token`."
+    );
+  } catch (error) {
+    return `Model login: none usable. ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+/** Which login there is, and — for a borrowed one — when it dies. */
+type ModelLogin =
+  | { source: "lasting"; token: string }
+  | { source: "borrowed"; token: string; expiresAt?: number };
+
+/**
+ * The one place the two sources are chosen between, so what a run is given
+ * and what the daemon says it will be given can never disagree.
+ */
+async function resolveModelLogin(
+  options: ClaudeSubscriptionTokenOptions,
+): Promise<ModelLogin> {
   const run = options.run ?? execCommandRunner;
   const now = options.now ?? Date.now;
   const env = options.env ?? process.env;
@@ -135,77 +190,77 @@ export function claudeSubscriptionToken(
       }
     });
 
-  return async () => {
-    // A lasting token beats a borrowed one, and asking the host anything at
-    // all is pointless once there is one: it has no expiry to read, no
-    // keychain to unlock and nothing that runs out mid-run.
-    const lasting = env[LASTING_TOKEN_VAR];
-    if (typeof lasting === "string" && lasting.trim() !== "") {
-      return lasting.trim();
-    }
+  // A lasting token beats a borrowed one, and asking the host anything at
+  // all is pointless once there is one: it has no expiry to read, no
+  // keychain to unlock and nothing that runs out mid-run.
+  const lasting = env[LASTING_TOKEN_VAR];
+  if (typeof lasting === "string" && lasting.trim() !== "") {
+    return { source: "lasting", token: lasting.trim() };
+  }
 
-    // The file first: where it exists it is the whole answer, and asking the
-    // keychain on a host that has no keychain is a subprocess for nothing.
-    let raw = readCredentialsFile();
+  // The file first: where it exists it is the whole answer, and asking the
+  // keychain on a host that has no keychain is a subprocess for nothing.
+  let raw = readCredentialsFile();
 
-    if (raw === undefined) {
-      try {
-        raw = await run("security", [
-          "find-generic-password",
-          "-s",
-          KEYCHAIN_SERVICE,
-          "-w",
-        ]);
-      } catch {
-        throw new Error(
-          "This machine is not logged in to Claude, so a boxed run has no way " +
-            "to reach the model. Run `claude` once and log in, then start the " +
-            "daemon again.",
-        );
-      }
-    }
-
-    const stored = parse(raw);
-    const token = stored?.claudeAiOauth?.accessToken;
-    const expiresAt = stored?.claudeAiOauth?.expiresAt;
-
-    if (typeof token !== "string" || token === "") {
+  if (raw === undefined) {
+    try {
+      raw = await run("security", [
+        "find-generic-password",
+        "-s",
+        KEYCHAIN_SERVICE,
+        "-w",
+      ]);
+    } catch {
       throw new Error(
-        "Timone could not read this machine's Claude login — the stored " +
-          "credential is not the shape it expects. Run `claude` once and log " +
-          "in again.",
+        "This machine is not logged in to Claude, so a boxed run has no way " +
+          "to reach the model. Run `claude` once and log in, then start the " +
+          "daemon again.",
+      );
+    }
+  }
+
+  const stored = parse(raw);
+  const token = stored?.claudeAiOauth?.accessToken;
+  const expiresAt = stored?.claudeAiOauth?.expiresAt;
+
+  if (typeof token !== "string" || token === "") {
+    throw new Error(
+      "Timone could not read this machine's Claude login — the stored " +
+        "credential is not the shape it expects. Run `claude` once and log " +
+        "in again.",
+    );
+  }
+
+  if (typeof expiresAt === "number") {
+    const leftMs = expiresAt - now();
+
+    if (leftMs <= 0) {
+      // The host's CLI refreshes on use, so this means nobody has opened
+      // Claude Code for a while rather than that anything is broken.
+      throw new Error(
+        "This machine's Claude login has expired, so a boxed run cannot " +
+          "reach the model. Run `claude` once — that refreshes it — and " +
+          "start the daemon again.",
       );
     }
 
-    if (typeof expiresAt === "number") {
-      const leftMs = expiresAt - now();
-
-      if (leftMs <= 0) {
-        // The host's CLI refreshes on use, so this means nobody has opened
-        // Claude Code for a while rather than that anything is broken.
-        throw new Error(
-          "This machine's Claude login has expired, so a boxed run cannot " +
-            "reach the model. Run `claude` once — that refreshes it — and " +
-            "start the daemon again.",
-        );
-      }
-
-      if (leftMs < BORROWED_MARGIN_MS) {
-        // Refused rather than started, because the run would die partway and
-        // everything it had done would be thrown away (#55). Better to lose
-        // the start than the hour.
-        throw new Error(
-          `This machine's Claude login has about ${Math.round(leftMs / 60000)} ` +
-            "minute(s) left, which is not enough to start a run on — a run " +
-            "that outlives it loses everything it has done. Run `claude` " +
-            "once to refresh it, or give the daemon a lasting token with " +
-            `\`claude setup-token\` and start it with ${LASTING_TOKEN_VAR} set.`,
-        );
-      }
+    if (leftMs < BORROWED_MARGIN_MS) {
+      // Refused rather than started, because the run would die partway and
+      // everything it had done would be thrown away (#55). Better to lose
+      // the start than the hour.
+      throw new Error(
+        `This machine's Claude login has about ${Math.round(leftMs / 60000)} ` +
+          "minute(s) left, which is not enough to start a run on — a run " +
+          "that outlives it loses everything it has done. Run `claude` " +
+          "once to refresh it, or give the daemon a lasting token with " +
+          `\`claude setup-token\` and start it with ${LASTING_TOKEN_VAR} set.`,
+      );
     }
+  }
 
-    return token;
-  };
+  return typeof expiresAt === "number"
+    ? { source: "borrowed", token, expiresAt }
+    : { source: "borrowed", token };
 }
 
 /** Parse the stored credential, answering undefined for anything unreadable. */

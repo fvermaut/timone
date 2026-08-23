@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CommandRunner } from "./command-runner.js";
-import { claudeSubscriptionToken } from "./model-token.js";
+import { claudeSubscriptionToken, modelLoginSummary } from "./model-token.js";
 
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse("2026-08-22T12:00:00Z");
@@ -152,5 +152,66 @@ describe("the token a boxed session talks to the model with", () => {
 
     expect(error).not.toContain("sk-ant-oat-secret");
     expect(error).not.toContain("sk-ant-ort-secret");
+  });
+});
+
+describe("what the daemon says about the login it will hand a box", () => {
+  function summary(
+    reply: string | Error,
+    options: {
+      readFile?: () => string | undefined;
+      env?: Record<string, string | undefined>;
+    } = {},
+  ): Promise<string> {
+    const run: CommandRunner = async () => {
+      if (reply instanceof Error) throw reply;
+      return reply;
+    };
+    return modelLoginSummary({
+      run,
+      now: () => NOW,
+      readFile: options.readFile ?? ((): string | undefined => undefined),
+      env: options.env ?? {},
+    });
+  }
+
+  it("says a lasting token covers a run of any length", async () => {
+    const said = await summary(entry(), {
+      env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-lasting" },
+    });
+
+    expect(said).toMatch(/lasting token/i);
+    expect(said).toMatch(/any length/i);
+  });
+
+  it("says a borrowed login is borrowed, and how long is left", async () => {
+    // The failure this line exists to catch is not the token expiring. It is
+    // a new terminal, a reboot or an edited profile losing the variable, so
+    // the daemon quietly borrows the host's login and nobody notices until a
+    // long run dies months later (#55).
+    const said = await summary(entry({ expiresAt: NOW + 2 * HOUR }));
+
+    expect(said).toMatch(/borrowed/i);
+    expect(said).toMatch(/120 minute/);
+    expect(said).toMatch(/setup-token/);
+  });
+
+  it("reports a refusal in its own words rather than throwing", async () => {
+    // A daemon must not fail to start because it could not describe itself.
+    const said = await summary(new Error("no keychain here"));
+
+    expect(said).toMatch(/none usable/i);
+    expect(said).toMatch(/not logged in/i);
+  });
+
+  it("never puts the token in the line", async () => {
+    const lasting = await summary(entry(), {
+      env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-lasting" },
+    });
+    const borrowed = await summary(entry());
+
+    expect(lasting).not.toContain("sk-ant-oat-lasting");
+    expect(borrowed).not.toContain("sk-ant-oat-secret");
+    expect(borrowed).not.toContain("sk-ant-ort-secret");
   });
 });

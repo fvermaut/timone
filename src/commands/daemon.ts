@@ -42,6 +42,7 @@ import { bringUpServices } from "../daemon/services.js";
 import { renderMessage } from "../daemon/transcript.js";
 import {
   claudeSubscriptionToken,
+  modelLoginSummary,
   type ModelTokenSource,
 } from "../adapters/model-token.js";
 
@@ -532,6 +533,16 @@ export function registerDaemonCommand(program: Command): void {
         console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
         return;
+      }
+
+      // Said at startup, every time, and never with the token in it. A
+      // lasting token lives in an environment variable, and a variable is one
+      // new terminal or one reboot away from being absent — at which point
+      // the daemon quietly goes back to borrowing the host's login and long
+      // runs start dying again for a reason nobody connects to a shell
+      // (#55). This line is how that is noticed on day one instead.
+      if ((options.runtime ?? DEFAULT_RUNTIME) === "container") {
+        log(await modelLoginSummary());
       }
 
       // No guardrail bracket here any more (ADR-0018): the checks live in
