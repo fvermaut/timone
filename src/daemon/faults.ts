@@ -19,11 +19,36 @@
  * ticket caused it and nothing on the ticket mends it, so the daemon tries
  * again rather than reporting it.
  *
- * `credentials` — the login is being refused. Technical in exactly the same
- * sense, and the one technical stop that trying again cannot mend, because
- * the next attempt presents the same refused login.
+ * `expired` — the token the session was given ran out while it was working.
+ * Retried, and this is the correction of a rule that was wrong: `expired`
+ * used to be part of `credentials`, on the reasoning that a refused login is
+ * refused again. That is true of a login that was revoked and false of one
+ * that timed out, because the token is read afresh at every spawn and the
+ * host keeps it current. The two used to be one word and one behaviour;
+ * telling them apart is what lets the recoverable one recover
+ * ([#55](https://github.com/fvermaut/timone/issues/55)).
+ *
+ * `credentials` — the login is being refused: revoked, wrong, or not
+ * entitled. Technical in the same sense, and the one technical stop that
+ * trying again cannot mend, because the next attempt presents the same
+ * refused login.
  */
-export type TechnicalFault = "link" | "credentials";
+export type TechnicalFault = "link" | "expired" | "credentials";
+
+/**
+ * Wordings that mean the token ran out rather than that it was refused.
+ * Checked before the refusal's, because every one of these also trips a
+ * refusal sign — the service says "authentication failed" for both — and the
+ * first match wins. Read in that order, an expiry is a refusal that says why.
+ *
+ * The wording seen live on 2026-08-23 was `401 OAuth access token has
+ * expired. Re-authenticate to continue.`
+ */
+const EXPIRED_SIGNS: readonly string[] = [
+  "token has expired",
+  "token expired",
+  "re-authenticate to continue",
+];
 
 /**
  * Wordings that mean the login was refused. Checked before the link's, since
@@ -37,7 +62,6 @@ const CREDENTIAL_SIGNS: readonly string[] = [
   "invalid api key",
   "permission_error",
   "unauthorized",
-  "token has expired",
 ];
 
 /** Wordings that mean the link, or the service at the other end of it, broke. */
@@ -82,6 +106,7 @@ const LINK_SIGNS: readonly string[] = [
 export function technicalFault(error: string | undefined): TechnicalFault | undefined {
   if (error === undefined) return undefined;
   const text = error.toLowerCase();
+  if (EXPIRED_SIGNS.some((sign) => text.includes(sign))) return "expired";
   if (CREDENTIAL_SIGNS.some((sign) => text.includes(sign))) return "credentials";
   if (LINK_SIGNS.some((sign) => text.includes(sign))) return "link";
   return undefined;

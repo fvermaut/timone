@@ -9,6 +9,7 @@ import { repoSlug } from "../adapters/github-tickets.js";
 import { SessionProgress } from "./progress.js";
 import type { ServiceStack } from "./services.js";
 import {
+  apiErrorFrom,
   sessionOutcomeFrom,
   type SessionOutcome,
   type SessionRequest,
@@ -508,7 +509,7 @@ export function containerRuntime(
             progress.observe(message);
 
             if (message.type === "assistant" && message.parent_tool_use_id === null) {
-              lastApiError = message.error;
+              lastApiError = apiErrorFrom(message);
             }
             if (message.type === "result") {
               outcome = sessionOutcomeFrom(id, message, lastApiError);

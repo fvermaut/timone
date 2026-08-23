@@ -265,6 +265,33 @@ Rules that make the waits safe:
   not it noticed. This is
   [ADR-0033](../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)'s floor.
 
+### The login a boxed run works on
+
+A boxed run cannot log in by itself, so the daemon hands it a token when it
+starts the container. There are two kinds, and which one you give it decides
+whether long runs survive.
+
+**Give the daemon a lasting token.** Run `claude setup-token` once, and start
+the daemon in a shell where `CLAUDE_CODE_OAUTH_TOKEN` holds what it printed.
+A token from that command outlives any run.
+
+**Without one, the daemon borrows your own login.** It reads it fresh at every
+spawn and it works, but it comes with a deadline: the token lives about six
+hours counted from when your CLI last refreshed it, not from when the run
+starts. A box gets whatever is left, and nothing inside can renew it.
+
+A run that outlives its token is refused mid-sentence and everything it has
+done since its last push is lost. That happened on `ivtrends#24` on
+2026-08-23 — three hours of work, refused with `401 OAuth access token has
+expired`. Two things came out of it
+([#55](https://github.com/fvermaut/timone/issues/55)):
+
+- A borrowed token with less than half an hour on it no longer starts a run at
+  all. The daemon says so and names `claude setup-token`.
+- A run stopped by an expiry is **tried again**, up to three times, without a
+  word on the ticket. Only a login that is genuinely refused, or one that
+  keeps running out, is put in front of you.
+
 ## 5. One poll cycle, in order
 
 The order matters. Each step is written where it is because of something that
@@ -338,7 +365,9 @@ Computed once, in `ctaFor`, and rendered by both the ticket comment and
 | `done`, pieces left | "Piece 3 is next." | nothing |
 | `done`, no pieces left | "This one is finished." | nothing |
 | `failed` | "Something went wrong while I was working on this." | `timone retry` |
-| `failed`, network or login | "I could not reach the service I run on." | fix it, then `timone retry` |
+| `failed`, network | "I could not reach the service I run on." | fix it, then `timone retry` |
+| `failed`, login refused | "My login to the service I run on was refused." | fix it, then `timone retry` |
+| `failed`, login ran out | "My login ran out while I was working." | fix it, then `timone retry` |
 | `cancelled` | "I stopped work on this one." | nothing — a fresh run starts next pass |
 
 ## 8. Where the model was uneven

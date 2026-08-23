@@ -23,7 +23,10 @@ function entry(overrides: Record<string, unknown> = {}): string {
 
 function source(
   reply: string | Error,
-  options: { readFile?: () => string | undefined } = {},
+  options: {
+    readFile?: () => string | undefined;
+    env?: Record<string, string | undefined>;
+  } = {},
 ) {
   const calls: string[][] = [];
   const run: CommandRunner = async (_command, args) => {
@@ -37,6 +40,10 @@ function source(
       run,
       now: () => NOW,
       readFile: options.readFile ?? ((): string | undefined => undefined),
+      // Always given, never inherited: a machine that happens to export a
+      // lasting token would otherwise pass every one of these tests without
+      // reading a single line of what they are about.
+      env: options.env ?? {},
     }),
   };
 }
@@ -87,6 +94,43 @@ describe("the token a boxed session talks to the model with", () => {
 
     await expect(token()).rejects.toThrow(/expired/i);
     await expect(token()).rejects.toThrow(/claude/i);
+  });
+
+  it("takes a lasting token over the host's login, and asks the host nothing", async () => {
+    // `claude setup-token` issues a credential that outlives a run. Where
+    // there is one, the borrowed login is not read at all — no keychain, no
+    // file, no expiry to run out mid-session (#55).
+    const { token, calls } = source(entry(), {
+      env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-lasting" },
+      readFile: () => entry(),
+    });
+
+    await expect(token()).resolves.toBe("sk-ant-oat-lasting");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("ignores a lasting token that is set but empty", async () => {
+    const { token } = source(entry(), { env: { CLAUDE_CODE_OAUTH_TOKEN: "   " } });
+
+    await expect(token()).resolves.toBe("sk-ant-oat-secret");
+  });
+
+  it("refuses a borrowed token with too little left to start a run on", async () => {
+    // The fault behind #55: the only question used to be whether the token
+    // was already dead, so one with minutes on it started a session that ran
+    // for hours and lost everything when it was refused partway. Losing the
+    // start is the cheaper of the two.
+    const { token } = source(entry({ expiresAt: NOW + 4 * 60 * 1000 }));
+
+    await expect(token()).rejects.toThrow(/not enough to start a run/i);
+    await expect(token()).rejects.toThrow(/4 minute/i);
+    await expect(token()).rejects.toThrow(/setup-token/i);
+  });
+
+  it("starts on a borrowed token that has hours left", async () => {
+    const { token } = source(entry({ expiresAt: NOW + 3 * HOUR }));
+
+    await expect(token()).resolves.toBe("sk-ant-oat-secret");
   });
 
   it("refuses an entry it cannot read, rather than passing nonsense to the box", async () => {

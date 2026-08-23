@@ -19,7 +19,29 @@ describe("telling a stop about the machinery from a stop about the work", () => 
     expect(
       technicalFault("the session stopped on an API error (authentication_failed)"),
     ).toBe("credentials");
-    expect(technicalFault("OAuth token has expired")).toBe("credentials");
+    expect(technicalFault("invalid_api_key")).toBe("credentials");
+  });
+
+  it("tells a token that ran out from a login that was refused", () => {
+    // The distinction the daemon acts on: one of these is retried and the
+    // other is handed to a human (#55). Both carry the same short code, so
+    // the sentence beside it is the only thing that separates them — which is
+    // why the runtime's full wording is kept and not just the code.
+    expect(technicalFault("OAuth token has expired")).toBe("expired");
+    expect(
+      technicalFault(
+        "the session stopped on an API error (authentication_failed: Failed to " +
+          "authenticate. API Error: 401 OAuth access token has expired. " +
+          "Re-authenticate to continue.)",
+      ),
+    ).toBe("expired");
+  });
+
+  it("still calls a bare authentication code a refusal, since nothing says otherwise", () => {
+    // The safe direction of this particular pair. A code with no sentence
+    // beside it is not evidence of an expiry, so it is reported rather than
+    // retried.
+    expect(technicalFault("authentication_failed")).toBe("credentials");
   });
 
   it("calls everything it does not recognise a failure about the work", () => {

@@ -304,9 +304,11 @@ export function ctaFor(state: TicketState): Cta {
         headline:
           fault === "credentials"
             ? "My login to the service I run on was refused, so I stopped."
-            : "I could not reach the service I run on, so I stopped.",
+            : fault === "expired"
+              ? "My login ran out while I was working, and did not come back, so I stopped."
+              : "I could not reach the service I run on, so I stopped.",
         needFromYou:
-          fault === "credentials"
+          fault === "credentials" || fault === "expired"
             ? "nothing on this ticket — my login needs fixing first, and then this command starts me again."
             : "nothing on this ticket — this one is mine. Once it is sorted, this command starts me again.",
         waitingOnYou: false,
