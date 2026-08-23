@@ -292,6 +292,33 @@ expired`. Two things came out of it
   word on the ticket. Only a login that is genuinely refused, or one that
   keeps running out, is put in front of you.
 
+### The forge token a boxed run works on
+
+The daemon mints a GitHub token scoped to the one repository a run is for, and
+a minted token dies after an hour. Runs last longer than that.
+
+**The daemon hands a running box a fresh token every twenty minutes.** The box
+cannot mint one itself — that needs the App private key, which stays on the
+host and never enters a box. Inside, `git` and `gh` both read the token from a
+file the daemon rewrites, so a refreshed token takes effect with nothing
+restarted.
+
+Before this, a box was given one token when it started and never another.
+`ivtrends#24` pushed once, lost its token an hour in, and went on committing
+for two more hours into a container that was then destroyed. A whole
+sub-phase of work never reached the remote and nothing said so, because a
+dead forge token stops no session
+([#56](https://github.com/fvermaut/timone/issues/56)).
+
+A refresh that fails does not stop the run — the token already in the box is
+still good for a while and the next attempt mends it — but it is written to
+the daemon log, because silence is what made this expensive.
+
+**One thing is still not covered.** `GH_TOKEN` is set in the container as the
+starting value, so a script that reads that variable by hand, rather than
+calling `git` or `gh`, gets the token from when the run started and will see a
+401 after an hour.
+
 ## 5. One poll cycle, in order
 
 The order matters. Each step is written where it is because of something that

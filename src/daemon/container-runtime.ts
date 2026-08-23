@@ -124,6 +124,26 @@ export interface ContainerRuntimeOptions {
    */
   commitIsPushed?: (commit: string) => Promise<boolean>;
   /**
+   * How often a running box is handed a freshly minted forge token, in
+   * milliseconds. Defaults to twenty minutes; a test passes something short.
+   */
+  refreshIntervalMs?: number;
+  /**
+   * The wait between refreshes. Behind a seam so a test is not clock-bound.
+   * The real one is a timer that can be cut short when the run ends.
+   */
+  sleep?: (ms: number) => Promise<void>;
+  /**
+   * Where a refresh that failed is reported. The daemon's log, in production.
+   *
+   * **A failed refresh never fails the run.** One blip leaves the previous
+   * token in place, which is still good for a while, and the next attempt
+   * mends it. What must not happen is silence: a box whose token stopped
+   * being refreshed loses every commit it makes from then on, which is the
+   * fault this whole mechanism exists to end.
+   */
+  log?: (message: string) => void;
+  /**
    * Keeps every line the session printed, on the **host**.
    *
    * ✏ 2026-08-22. The first real boxed run cost an hour and $22, stopped
@@ -163,6 +183,33 @@ const SHM_SIZE = "1g";
 
 /** Where the box puts what it clones. Nothing here comes from the host. */
 const WORKSPACE = "/workspace";
+
+/**
+ * Where the box keeps the forge token, and the one place either reader looks.
+ *
+ * Under the box's own home rather than the workspace: the workspace holds two
+ * git checkouts, and a secret written inside one of them is a secret one
+ * `git add -A` away from a public repository.
+ */
+const FORGE_TOKEN_DIR = "$HOME/.timone";
+
+/** The token itself. Written 0600, by the box at start and the daemon after. */
+const FORGE_TOKEN_FILE = `${FORGE_TOKEN_DIR}/gh-token`;
+
+/** Where the `gh` shim goes. First on PATH, so it is the `gh` that runs. */
+const WRAPPER_DIR = "$HOME/.local/bin";
+
+/** The variable a refreshed token travels in, host to box. Never an argument. */
+const FORGE_TOKEN_VAR = "TIMONE_FORGE_TOKEN";
+
+/**
+ * How often the daemon writes a fresh forge token into a running box.
+ *
+ * A minted installation token lives one hour, and `tokenFor` re-mints once
+ * five minutes are left. Twenty minutes is comfortably inside both, and the
+ * cost of being early is one extra mint an hour.
+ */
+const FORGE_REFRESH_MS = 20 * 60 * 1000;
 
 /**
  * The remote as a URL the box can actually open.
@@ -269,12 +316,37 @@ function boxScript(request: SessionRequest): string {
     // Timone, at the exact commit the daemon is running (ADR-0041 D2). Cloned
     // whole rather than shallow: a commit is not reachable from a depth-1
     // clone of a branch tip.
-    // The token reaches git through a credential helper rather than through
-    // the URL: a URL carrying a secret lands in a log line, a `ps` listing and
-    // git's own error messages.
+    //
+    // **The forge token is read from a file, and never from the environment
+    // the container started with** ([#56](https://github.com/fvermaut/timone/issues/56)).
+    // A minted token dies within the hour and a run lasts longer than that,
+    // so a value fixed at spawn is dead for most of the run. The daemon
+    // rewrites this file from outside while the run works; both readers below
+    // open it afresh every time they are asked, so a refreshed token takes
+    // effect with nothing restarted.
+    //
+    // The token still never reaches an argument vector: a URL carrying a
+    // secret lands in a log line, a `ps` listing and git's own error messages.
     'if [ -n "${GH_TOKEN:-}" ]; then',
-    '  git config --global credential.helper ' +
-      "'!f() { echo \"username=x-access-token\"; echo \"password=$GH_TOKEN\"; }; f'",
+    `  mkdir -p "${FORGE_TOKEN_DIR}" "${WRAPPER_DIR}"`,
+    `  ( umask 077; printf %s "$GH_TOKEN" > "${FORGE_TOKEN_FILE}" )`,
+    // git asks the helper on every request, so it re-reads the file each time.
+    "  git config --global credential.helper " +
+      `'!f() { echo "username=x-access-token"; echo "password=$(cat "${FORGE_TOKEN_FILE}")"; }; f'`,
+    // `gh` reads only its environment, and the environment of a running
+    // process cannot be changed from outside. So it is shadowed: a wrapper
+    // earlier on PATH sets the variable from the file and hands over to the
+    // real binary. Every `gh` call is a new process, so every one of them
+    // reads the current token.
+    `  cat > "${WRAPPER_DIR}/gh" <<'TIMONE_GH_WRAPPER'`,
+    "#!/bin/sh",
+    `GH_TOKEN=$(cat "${FORGE_TOKEN_FILE}" 2>/dev/null)`,
+    "GITHUB_TOKEN=$GH_TOKEN",
+    "export GH_TOKEN GITHUB_TOKEN",
+    'exec /usr/local/bin/gh "$@"',
+    "TIMONE_GH_WRAPPER",
+    `  chmod 0755 "${WRAPPER_DIR}/gh"`,
+    `  export PATH="${WRAPPER_DIR}:$PATH"`,
     "fi",
     `git clone --quiet "$TIMONE_REMOTE" ${WORKSPACE}/timone`,
     // A commit the daemon is standing on but nobody has pushed is not in the
@@ -364,6 +436,122 @@ function runArgs(
     "-c",
     script,
   ];
+}
+
+/** A running refresh loop, stoppable. */
+export interface ForgeTokenRefresh {
+  /** Stop refreshing. Safe to call more than once, and after the box is gone. */
+  stop(): void;
+}
+
+export interface ForgeTokenRefreshOptions {
+  spawn: ContainerSpawn;
+  /** The container to write into. */
+  name: string;
+  /** The repository the token is scoped to — `owner/name`. */
+  repository: string;
+  credentials: CredentialProvider;
+  intervalMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (message: string) => void;
+}
+
+/**
+ * Keep a running box's forge token current for as long as it runs
+ * ([#56](https://github.com/fvermaut/timone/issues/56)).
+ *
+ * **The box cannot do this for itself and never will.** Minting needs the
+ * App's private key, and the key stays on the host — that is ADR-0042 D3 and
+ * it is not up for revision. So the only party that can hand a box a fresh
+ * credential is the daemon, and the only thing it needs is a way in.
+ *
+ * `docker exec` is that way. It is the same command channel the runtime
+ * already uses to start and destroy the container, it needs no port, no
+ * mount and no listening socket in the box, and it costs one process every
+ * twenty minutes.
+ *
+ * **The token is passed by name, not by value**, exactly as the spawn passes
+ * it: `-e NAME` takes the value from this process's environment, so it never
+ * appears in the exec's argument vector, in `ps`, or in a docker log line.
+ */
+export function keepForgeTokenFresh(
+  options: ForgeTokenRefreshOptions,
+): ForgeTokenRefresh {
+  const intervalMs = options.intervalMs ?? FORGE_REFRESH_MS;
+  let stopped = false;
+  let cutShort: (() => void) | undefined;
+
+  const sleep =
+    options.sleep ??
+    ((ms: number) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        // A daemon must not be held open by this loop's next tick.
+        timer.unref?.();
+        cutShort = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+      }));
+
+  void (async () => {
+    // The first write is the box script's own, from the token the spawn gave
+    // it, so the loop waits before it does anything.
+    while (!stopped) {
+      await sleep(intervalMs);
+      if (stopped) return;
+
+      try {
+        const token = await options.credentials.tokenFor(options.repository);
+        const exit = await writeForgeToken(options.spawn, options.name, token);
+        if (exit.code !== 0 && !stopped) {
+          options.log?.(
+            `could not hand ${options.name} a fresh forge token: ` +
+              `${reasonFor(exit)}. Its current one dies within the hour, and ` +
+              "anything it commits after that would not reach the remote.",
+          );
+        }
+      } catch (error) {
+        if (!stopped) {
+          options.log?.(
+            `could not mint a forge token for ${options.name}: ${oneLine(error)}`,
+          );
+        }
+      }
+    }
+  })();
+
+  return {
+    stop() {
+      stopped = true;
+      cutShort?.();
+    },
+  };
+}
+
+/** Write one token into a running box, out of this process's environment. */
+function writeForgeToken(
+  spawn: ContainerSpawn,
+  name: string,
+  token: string,
+): Promise<ContainerExit> {
+  return spawn(
+    "docker",
+    [
+      "exec",
+      // By name. The value is in the environment below, never in this array.
+      "-e",
+      FORGE_TOKEN_VAR,
+      name,
+      "sh",
+      "-c",
+      // `mkdir` because a refresh can land before the box script has run,
+      // and `umask` because the token is readable by nobody else.
+      `mkdir -p "${FORGE_TOKEN_DIR}" && umask 077 && ` +
+        `printf %s "$${FORGE_TOKEN_VAR}" > "${FORGE_TOKEN_FILE}"`,
+    ],
+    { env: { [FORGE_TOKEN_VAR]: token } },
+  ).exit;
 }
 
 /**
@@ -466,6 +654,24 @@ export function containerRuntime(
         { env },
       );
 
+      // Started with the container, stopped with it. Without this the token
+      // the spawn just handed over is the only one the box will ever have,
+      // and it dies within the hour (#56).
+      const refresh =
+        options.credentials === undefined
+          ? undefined
+          : keepForgeTokenFresh({
+              spawn,
+              name,
+              repository: repoSlug(workspace.project.remote),
+              credentials: options.credentials,
+              ...(options.refreshIntervalMs === undefined
+                ? {}
+                : { intervalMs: options.refreshIntervalMs }),
+              ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
+              ...(options.log === undefined ? {} : { log: options.log }),
+            });
+
       let resolveId!: (id: string) => void;
       const sessionId = new Promise<string>((resolve) => {
         resolveId = resolve;
@@ -521,6 +727,11 @@ export function containerRuntime(
           container.kill();
           outcome = { sessionId: id, ok: false, error: oneLine(error) };
         }
+
+        // Before the container is waited on, let alone destroyed: a refresh
+        // firing into a box that is going away is a `docker exec` failure
+        // reported as if the token had stopped being renewed.
+        refresh?.stop();
 
         const exit = await container.exit;
         // Destroyed on **every** path, including this one — a leaked container

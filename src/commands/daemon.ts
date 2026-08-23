@@ -155,6 +155,15 @@ export interface RuntimeChoice {
   modelToken?: ModelTokenSource;
   /** Who the box commits as, from the manifest's identity. */
   commitIdentity?: { name: string; email: string };
+  /**
+   * Where a boxed run's own operational notes go — today, only a forge token
+   * that could not be refreshed ([#56](https://github.com/fvermaut/timone/issues/56)).
+   *
+   * **Wired, not optional in practice.** A refresh that fails silently is the
+   * whole of the fault #56 describes: the box carries on committing and none
+   * of it reaches the remote.
+   */
+  log?: (message: string) => void;
 }
 
 /**
@@ -238,6 +247,7 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
       // nowhere (blocker (e), answered 2026-08-22).
       modelToken: choice.modelToken ?? claudeSubscriptionToken(),
       ...(credentials === undefined ? {} : { credentials }),
+      ...(choice.log === undefined ? {} : { log: choice.log }),
       ...(choice.commitIdentity === undefined
         ? {}
         : { commitIdentity: choice.commitIdentity }),
@@ -490,9 +500,12 @@ export function registerDaemonCommand(program: Command): void {
         return;
       }
 
+      const log = (message: string): void => console.log(message);
+
       let runtime: SessionRuntime;
       try {
         runtime = runtimeFor({
+          log,
           ...(options.runtime === undefined
             ? {}
             : { runtime: options.runtime as RuntimeName }),
@@ -521,7 +534,6 @@ export function registerDaemonCommand(program: Command): void {
         return;
       }
 
-      const log = (message: string): void => console.log(message);
       // No guardrail bracket here any more (ADR-0018): the checks live in
       // `.claude/settings.json`'s SessionStart/Stop hooks, which every session
       // at the timone root passes through — including the ones a human starts.

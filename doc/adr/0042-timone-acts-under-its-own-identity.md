@@ -46,7 +46,8 @@ Alternatives considered:
 
 - **Copy fvermaut's credentials into each container.** Works on day one, needs no setup, and rejected: it puts the agent in a box and then hands it the key to the house. The blast radius of a bad run stays every repository he has access to, which is the thing the box was built to shrink.
 - **One credential for the machine account, valid across all managed repositories.** The middle option, and rejected for the same reason at smaller scale: a run sent to work on one project has no business being able to push to another, and a per-run scope costs little once an account exists.
-  - **✏ Refined 2026-08-21:** under the App shape it costs even less than that. Scoping a minted token to one repository is a field in the mint request, so the rejected middle option is not merely worse — it is *more* work than the option taken.
+  - **✏ Added 2026-08-23:** a run longer than an hour now costs one extra mint every twenty minutes, and one `docker exec` with it. See D2's correction.
+- **✏ Refined 2026-08-21:** under the App shape it costs even less than that. Scoping a minted token to one repository is a field in the mint request, so the rejected middle option is not merely worse — it is *more* work than the option taken.
 
 ## Decision
 
@@ -65,6 +66,14 @@ The credential handed to a container is scoped to the single target project, and
 The daemon holds whatever mints it. **No long-lived credential capable of reaching more than one repository is ever placed inside a container.**
 
 > **✏ Refined 2026-08-21 — what mints it is now concrete.** The daemon holds the **App private key**; it signs a JWT with it, exchanges the JWT for an **installation access token scoped to the target repository**, and hands *that* to the container. The token expires in an hour, so "short-lived" is the platform's guarantee rather than ours to enforce. The private key stays on the host and never enters a box — it is the one long-lived secret in the system, and D3's rule about fvermaut's credentials applies to it word for word.
+
+> **✏ Corrected 2026-08-23 — "expires in an hour" was written as a property of the credential, and it is also a deadline on the run.** A box was handed one token at spawn and never another. Runs last longer than an hour, so for most of a long run the box held a dead credential: `ivtrends` [#24](https://github.com/fvermaut/ivtrends/issues/24) pushed once, lost the token an hour in, and went on committing for two more hours into a container that was then destroyed. A whole sub-phase of work — including a gate fvermaut had sat through — never reached the remote, and **nothing said so**, because a dead forge token stops no session ([timone#56](https://github.com/fvermaut/timone/issues/56)).
+>
+> **The box still cannot mint, and still must not.** Minting needs the private key and the key stays on the host; that half of D2 is untouched and is the reason the fix looks the way it does. **The daemon now hands a running box a fresh token every twenty minutes**, over `docker exec` — the same command channel it already uses to start and destroy the container, needing no port, no mount and no listening socket in the box. The token travels by variable *name*, so it is in no argument vector, no `ps` listing and no docker log line, exactly as at spawn.
+>
+> **What changed inside the box is where the token is read from.** It lands in a file under the box's own home, 0600, outside the workspace — a secret written inside a checkout is one `git add -A` away from a public repository. `git` reads it through its credential helper, which is asked on every request. `gh` reads only its environment, and a running process's environment cannot be changed from outside, so `gh` is shadowed by a wrapper first on `PATH` that sets the variable from the file and hands over to the real binary. Both therefore see the current token with nothing restarted.
+>
+> **Known limit, stated rather than hidden:** `GH_TOKEN` is still exported into the container as the starting value, so a script that reads that variable by hand rather than calling `git` or `gh` gets the spawn-time token and will see a 401 after an hour. Removing it would turn a stale token into an empty one, which fails at minute one instead. The two real consumers are covered; this one is not.
 
 ### D3 — fvermaut's credentials never enter a container
 

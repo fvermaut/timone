@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   containerRuntime,
+  keepForgeTokenFresh,
   parseSessionMessage,
   type ContainerExit,
   type ContainerProcess,
@@ -876,5 +877,183 @@ describe("the box can run Timone's own tooling", () => {
     // And it must fail loudly: a run without its guardrails is a run that
     // should not happen quietly.
     expect(script).toMatch(/guardrails|exit 79/);
+  });
+});
+
+describe("the forge token a running box works on", () => {
+  /** Lets the test decide when the refresh loop's wait is over. */
+  function handSleep() {
+    const waiting: (() => void)[] = [];
+    return {
+      sleep: () => new Promise<void>((resolve) => void waiting.push(resolve)),
+      pending: () => waiting.length,
+      async tick(): Promise<void> {
+        waiting.shift()?.();
+        // Enough turns for the loop's two awaits — mint, then write — to run.
+        for (let i = 0; i < 6; i += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+      },
+    };
+  }
+
+  function boxScriptOf(calls: { args: string[] }[]): string {
+    const run = calls.find((call) => call.args[0] === "run")!;
+    return run.args[run.args.length - 1];
+  }
+
+  it("reads its token from a file, so a refreshed one is picked up at once", async () => {
+    // The fault behind #56: git and `gh` both read a value fixed when the
+    // container started, and a minted token dies within the hour. Neither
+    // reads the environment now — they read a file the daemon can rewrite.
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      credentials: {
+        async tokenFor() {
+          return "ghs_boxed";
+        },
+      },
+    }).start(request());
+
+    const script = boxScriptOf(calls);
+
+    // git asks its helper on every request, and the helper opens the file.
+    expect(script).toContain('password=$(cat "$HOME/.timone/gh-token")');
+    // `gh` reads only its environment, and a running process's environment
+    // cannot be changed from outside — so `gh` is shadowed by a wrapper that
+    // sets the variable from the file and hands over to the real binary.
+    expect(script).toContain('GH_TOKEN=$(cat "$HOME/.timone/gh-token"');
+    expect(script).toContain('export PATH="$HOME/.local/bin:$PATH"');
+    // The token is out of the workspace, which holds two git checkouts.
+    expect(script).not.toContain("/workspace/timone/.timone/gh-token");
+  });
+
+  it("hands a running box a freshly minted token, over and over", async () => {
+    const minted: string[] = [];
+    const clock = handSleep();
+    const { spawn, calls } = fakeContainer([]);
+
+    const refresh = keepForgeTokenFresh({
+      spawn,
+      name: "timone-ivtrends-1",
+      repository: "fvermaut/ivtrends",
+      credentials: {
+        async tokenFor(repository) {
+          minted.push(repository);
+          return `ghs_round_${minted.length}`;
+        },
+      },
+      sleep: clock.sleep,
+    });
+
+    await clock.tick();
+    await clock.tick();
+    refresh.stop();
+
+    const execs = calls.filter((call) => call.args[0] === "exec");
+    expect(execs).toHaveLength(2);
+    expect(minted).toEqual(["fvermaut/ivtrends", "fvermaut/ivtrends"]);
+    expect(execs[0].env?.TIMONE_FORGE_TOKEN).toBe("ghs_round_1");
+    expect(execs[1].env?.TIMONE_FORGE_TOKEN).toBe("ghs_round_2");
+  });
+
+  it("passes the token by name, so it is in no argument vector", async () => {
+    const clock = handSleep();
+    const { spawn, calls } = fakeContainer([]);
+
+    const refresh = keepForgeTokenFresh({
+      spawn,
+      name: "timone-ivtrends-1",
+      repository: "fvermaut/ivtrends",
+      credentials: {
+        async tokenFor() {
+          return "ghs_secret_value";
+        },
+      },
+      sleep: clock.sleep,
+    });
+
+    await clock.tick();
+    refresh.stop();
+
+    const exec = calls.find((call) => call.args[0] === "exec")!;
+    expect(exec.args).toContain("TIMONE_FORGE_TOKEN");
+    expect(exec.args.join(" ")).not.toContain("ghs_secret_value");
+    expect(exec.env?.TIMONE_FORGE_TOKEN).toBe("ghs_secret_value");
+  });
+
+  it("says so when it could not hand one over, and does not take the run down", async () => {
+    // Silence is the thing that must not happen. A box whose token stopped
+    // being refreshed loses every commit it makes from then on, which is
+    // exactly how #56 lost a phase's work without anybody being told.
+    const said: string[] = [];
+    const clock = handSleep();
+    const { spawn } = fakeContainer([]);
+
+    const refresh = keepForgeTokenFresh({
+      spawn,
+      name: "timone-ivtrends-1",
+      repository: "fvermaut/ivtrends",
+      credentials: {
+        async tokenFor() {
+          throw new Error("the forge refused to mint");
+        },
+      },
+      sleep: clock.sleep,
+      log: (message) => void said.push(message),
+    });
+
+    await clock.tick();
+    // Still going: one failure is not the end of the loop, because the next
+    // attempt is what mends it.
+    await clock.tick();
+    refresh.stop();
+
+    expect(said).toHaveLength(2);
+    expect(said[0]).toContain("could not mint");
+    expect(said[0]).toContain("the forge refused to mint");
+  });
+
+  it("stops refreshing once the run is over", async () => {
+    const clock = handSleep();
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      credentials: {
+        async tokenFor() {
+          return "ghs_boxed";
+        },
+      },
+      sleep: clock.sleep,
+    }).start(request());
+
+    // The loop is genuinely waiting, so the assertion below is about it
+    // having stopped rather than about it never having started.
+    expect(clock.pending()).toBe(1);
+
+    await session.completed;
+    await clock.tick();
+
+    // Nothing was written into a box that is being destroyed — a refresh
+    // firing at a container on its way out is a docker failure reported as
+    // if the token had stopped being renewed.
+    expect(calls.filter((call) => call.args[0] === "exec")).toHaveLength(0);
+  });
+
+  it("refreshes nothing when the box was given no forge credential", async () => {
+    const clock = handSleep();
+    const { spawn } = fakeContainer([started, result()]);
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      sleep: clock.sleep,
+    }).start(request());
+
+    expect(clock.pending()).toBe(0);
   });
 });
