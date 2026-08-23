@@ -4732,13 +4732,17 @@ describe("pollOnce — a ticket's next chunk", () => {
     expect(contexts).toEqual([{ stage: "planning" }]);
   });
 
-  it("enters a map's successor chunk at planning, not back at charting", async () => {
+  it("enters a map's later run at breakdown, not back at charting", async () => {
     // timone#21. A `wayfinder:map` label is read before the sequence number,
     // which is right for a decision ticket and wrong for the map: a map is a
-    // question only once — "shall I write the specification?" — and every
-    // chunk after that one is a piece of an approved breakdown. Entering them
-    // at `charting` sent the map back to a go-ahead it was already given, and
-    // its second piece was never built.
+    // question only once — "shall I write the specification?" — so entering a
+    // later run at `charting` sent it back to a go-ahead it was already given.
+    //
+    // ✏ 2026-08-23 — and the stage it goes to instead is `breakdown`, not
+    // `planning`. This adapter carries no files, so the breakdown is absent —
+    // and absent is the only thing it can be here, because `successorHeldBack`
+    // holds the ticket back for every other answer. A map with no list of
+    // pieces has nothing to plan against.
     const store = newStore();
     chunkDone(store, 1, 9);
     const { run: second } = store.register("scratch-app", 6);
@@ -4762,7 +4766,7 @@ describe("pollOnce — a ticket's next chunk", () => {
       },
     });
 
-    expect(contexts).toEqual([{ stage: "planning" }]);
+    expect(contexts).toEqual([{ stage: "breakdown" }]);
   });
 
   it("still enters a decision ticket's successor chunk at its own stage", async () => {

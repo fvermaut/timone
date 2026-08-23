@@ -1559,13 +1559,25 @@ function standingCta(thread: TicketThread): string | undefined {
  * **A map is the one exception, and the sequence wins there.** A
  * `wayfinder:map` ticket is not a question — it is the effort, and its stage
  * exists for a single transition: handing the whole of stage 2 to stage 3 once
- * the way is clear. That happens once. Every chunk after it is a piece of the
- * breakdown the human has already approved, so it needs what any other
- * successor needs, a plan for its own piece. Reading the label there sent
- * every piece of a map back to `charting`, where the frontier label — never
+ * the way is clear. That happens once. Reading the label after that sent every
+ * later run on a map back to `charting`, where the frontier label — never
  * taken off — parked it on a go-ahead the human gave the day before, and the
  * map never built its second piece
  * ([#21](https://github.com/fvermaut/timone/issues/21)).
+ *
+ * **✏ 2026-08-23 — a later run on a map enters at `breakdown`, not at
+ * `planning`.** It went to planning because the list of pieces was written on
+ * the map's first run and could be assumed to exist by the second. That
+ * assumption is no longer true, and it was never checked here:
+ * {@link successorHeldBack} lets a later run open on a ticket **only** when
+ * its breakdown is absent or unreadable — an approved one answers `finished`
+ * and holds the ticket back, a regrown one answers `reproposed`. So a map
+ * reaching this line has no usable list, and planning it writes one phase file
+ * for a whole initiative on the map ticket. That is the chunk model wearing
+ * the new model's clothes: phase 29's live gate caught it on `scratch-app`,
+ * and `recordApproval` in `session.ts` refuses to walk on into planning for
+ * the same reason. Found on `ivtrends` #1, whose list was deleted by the
+ * wind-back of 2026-08-20.
  *
  * Everything else gets `undefined` — the spawner's own default is triage, and
  * naming it here as well would let the two disagree.
@@ -1606,10 +1618,13 @@ function entryContext(
   // opened it came before it.
   const successor = isStep || run.seq > 1;
 
-  if (!(successor && isMap(labels))) {
-    const charted = wayfinderStage(labels);
-    if (charted !== undefined) return { stage: charted };
-  }
+  // A map with no usable list of pieces needs that list written before
+  // anything can be planned. The note above is why that is the only state a
+  // map can be in by the time it reaches this line.
+  if (successor && isMap(labels)) return { stage: "breakdown" };
+
+  const charted = wayfinderStage(labels);
+  if (charted !== undefined) return { stage: charted };
 
   return successor ? { stage: "planning" } : undefined;
 }
