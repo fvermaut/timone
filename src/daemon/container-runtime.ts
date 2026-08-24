@@ -372,14 +372,43 @@ function boxScript(request: SessionRequest): string {
     // Without this the R15 guardrail bracket is silently absent from every
     // boxed session, which is the opposite of what this phase promised.
     `cd ${WORKSPACE}/timone`,
-    "npm ci --no-audit --no-fund --silent || {",
+    // **The output goes to a file, not to nowhere.** Both of these ran under
+    // `--silent` until 2026-08-24, and npm's `--silent` is a log level: it
+    // suppresses errors too. A run died here on 2026-08-24 (ivtrends#25/1) and
+    // the only words anybody got were our own sentence below, so what npm
+    // objected to was unknowable — and, worse, `technicalFault` reads the
+    // failure's own words to decide whether a stop was a broken link. npm
+    // would have written `ECONNRESET` or `fetch failed`; with those deleted
+    // the stop looked like broken work, so ADR-0034's retry never fired and a
+    // transient install failure went to the human instead.
+    //
+    // Redirecting is what `--silent` was reaching for and got wrong: the box's
+    // **stdout is the session's stream-json channel**, so npm must not write
+    // to it, but that is an argument for sending the output somewhere, not for
+    // destroying it.
+    "timone_reason() {",
+    // npm prefixes every line with `npm error `; tsc does not. Strip it where
+    // it is there, drop the blank spacer lines and the trailing pointer to a
+    // log file inside a container nobody will ever open, and keep the first
+    // three lines — which is where npm puts the code and the message, and
+    // where tsc puts the first type error.
+    "  sed -e 's/^npm \\(error\\|ERR!\\) *//' \"$1\" |",
+    "    grep -v '^[[:space:]]*$' |",
+    "    grep -v '^A complete log of this run' |",
+    // Bounded: this sentence ends up on a ticket a human reads, and npm's
+    // usage text runs for pages.
+    "    head -3 | tr '\\n' ' ' | cut -c 1-300",
+    "}",
+    "npm ci --no-audit --no-fund > /tmp/timone-npm-ci.log 2>&1 || {",
     '  echo "could not install Timone\'s dependencies in the box, so its' +
-      ' guardrail hooks would not run. Refusing to work without them." >&2',
+      " guardrail hooks would not run. Refusing to work without them." +
+      ' npm said: $(timone_reason /tmp/timone-npm-ci.log)" >&2',
     "  exit 79",
     "}",
-    "npm run build --silent || {",
+    "npm run build > /tmp/timone-npm-build.log 2>&1 || {",
     '  echo "could not build Timone in the box, so its guardrail hooks would' +
-      ' not run. Refusing to work without them." >&2',
+      " not run. Refusing to work without them." +
+      ' The build said: $(timone_reason /tmp/timone-npm-build.log)" >&2',
     "  exit 79",
     "}",
     // The prompt on stdin, so it is never a shell word.

@@ -878,6 +878,43 @@ describe("the box can run Timone's own tooling", () => {
     // should not happen quietly.
     expect(script).toMatch(/guardrails|exit 79/);
   });
+
+  it("keeps what npm said when the install fails, so the stop can be named", async () => {
+    // ✏ 2026-08-24, after ivtrends#25/1 died here and told nobody why. Both
+    // steps ran under `npm --silent`, and npm's `--silent` is a log level, not
+    // an output channel: it suppresses errors as well. The run's whole failure
+    // text was the sentence this file writes, and npm's own — the one naming
+    // ECONNRESET, or a lock file out of sync — was gone.
+    //
+    // It cost more than a diagnosis. `technicalFault` reads a failure's own
+    // words to decide whether a stop was a broken link worth retrying
+    // (ADR-0034). With npm's words deleted there was nothing to read, so a
+    // transient install failure was judged as broken work and put in front of
+    // a human.
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await runtimeWith(spawn).start(request());
+
+    const script = calls.find((entry) => entry.args[0] === "run")!.args.at(-1)!;
+
+    // The flag that did it, on either step, in any of its spellings.
+    expect(script).not.toMatch(/npm (ci|run build)[^\n]*(--silent|--loglevel[= ]silent|\s-s\b)/);
+
+    // Not silenced, and not on stdout either: stdout is the session's
+    // stream-json channel. The output is kept in a file so the failure branch
+    // can read it back.
+    expect(script).toMatch(/npm ci[^\n]*>\s*\S+\s+2>&1/);
+    expect(script).toMatch(/npm run build[^\n]*>\s*\S+\s+2>&1/);
+
+    // And read back it is: each refusal quotes what the tool said.
+    const refusals = script
+      .split("\n")
+      .filter((line) => line.includes("Refusing to work without them"));
+    expect(refusals).toHaveLength(2);
+    for (const refusal of refusals) {
+      expect(refusal).toContain("$(timone_reason ");
+    }
+  });
 });
 
 describe("the forge token a running box works on", () => {
