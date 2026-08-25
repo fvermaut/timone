@@ -127,6 +127,9 @@ describe("ensure — the contract with Docker", () => {
     expect(up?.options).toEqual({
       cwd: WORKTREE,
       env: { APP_PORT: "0", POSTGRES_PORT: "0", COMPOSE_PROFILES: "app" },
+      // Longer than the 600 it just asked compose to wait, so the wait is
+      // reachable rather than decorative (#64).
+      timeoutMs: 660_000,
     });
   });
 
@@ -539,5 +542,54 @@ describe("what a failure is allowed to say", () => {
 
     expect(reason).toHaveLength(300);
     expect(reason.endsWith("\u2026")).toBe(true);
+  });
+});
+
+describe("the deadline a preview build runs under", () => {
+  it("gives the build longer than the wait it asked compose for", async () => {
+    // Asked compose to wait 600s and then called it through a runner whose
+    // own deadline is 90s, so the 600 was unreachable by construction and
+    // every preview whose image was not already built was killed mid-build
+    // and reported to a client's pull request as a build that had broken
+    // (#64 — the same fault #60 fixed in the other compose call site).
+    const runner = fakeRunner();
+    runner.on((call) => call.args.includes("list"), worktreeList());
+    runner.on((call) => call.args.includes("port"), "0.0.0.0:54321\n");
+
+    await adapterWith(runner.run).ensure(scratchApp, 12, "abc1234");
+
+    const up = runner.calls.find((call) => call.args.includes("up"));
+    const asked = Number(up?.args[up.args.indexOf("--wait-timeout") + 1]);
+    expect(up?.options?.timeoutMs).toBeGreaterThan(asked * 1000);
+  });
+
+  it("derives it from the wait, so a different wait moves both", async () => {
+    const runner = fakeRunner();
+    runner.on((call) => call.args.includes("list"), worktreeList());
+    runner.on((call) => call.args.includes("port"), "0.0.0.0:54321\n");
+
+    await new DockerPreviewAdapter({
+      root: ROOT,
+      run: runner.run,
+      exists: () => false,
+      waitTimeoutSeconds: 120,
+    }).ensure(scratchApp, 12, "abc1234");
+
+    const up = runner.calls.find((call) => call.args.includes("up"));
+    expect(up?.args).toContain("120");
+    expect(up?.options?.timeoutMs).toBe(180_000);
+  });
+
+  it("leaves the quick compose calls on the runner's own deadline", async () => {
+    // Only the call that was *given* a wait needs one of its own. A `port`
+    // read that hung for eleven minutes would be a fault worth hearing about.
+    const runner = fakeRunner();
+    runner.on((call) => call.args.includes("list"), worktreeList());
+    runner.on((call) => call.args.includes("port"), "0.0.0.0:54321\n");
+
+    await adapterWith(runner.run).ensure(scratchApp, 12, "abc1234");
+
+    const port = runner.calls.find((call) => call.args.includes("port"));
+    expect(port?.options?.timeoutMs).toBeUndefined();
   });
 });

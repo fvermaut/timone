@@ -388,3 +388,82 @@ describe("a deadline the caller sets for one command", () => {
     ).rejects.toThrow(/within 240s/);
   });
 });
+
+describe("a build killed on a deadline we set ourselves", () => {
+  it("is not retried, because the kill was our own instruction", async () => {
+    // A kill is ordinarily a transport failure worth retrying: `gh` gave no
+    // answer and the next attempt costs a second. When the deadline that fired
+    // was the caller's own, retrying rebuilt a ten-minute image three times
+    // before anybody was told (#64).
+    let attempts = 0;
+    const run = execRunner({
+      retryWaitsMs: [2_000, 8_000],
+      sleep: async () => undefined,
+      spawn: async () => {
+        attempts += 1;
+        const error = new Error("killed") as Error & { killed?: boolean };
+        error.killed = true;
+        throw error;
+      },
+    });
+
+    await expect(
+      run("docker", ["compose", "up"], { timeoutMs: 660_000 }),
+    ).rejects.toThrow(/within 660s and was killed/);
+    expect(attempts).toBe(1);
+  });
+
+  it("says nothing about attempts, having made only one", async () => {
+    const run = execRunner({
+      retryWaitsMs: [2_000, 8_000],
+      sleep: async () => undefined,
+      spawn: async () => {
+        const error = new Error("killed") as Error & { killed?: boolean };
+        error.killed = true;
+        throw error;
+      },
+    });
+
+    await expect(
+      run("docker", ["compose", "up"], { timeoutMs: 660_000 }),
+    ).rejects.not.toThrow(/attempts/);
+  });
+
+  it("still retries a call killed on the runner's own deadline", async () => {
+    // The `gh` case #48 was filed for is untouched: nobody told that call how
+    // long it had, so a kill there is the forge not answering.
+    let attempts = 0;
+    const run = execRunner({
+      retryWaitsMs: [2_000, 8_000],
+      sleep: async () => undefined,
+      spawn: async () => {
+        attempts += 1;
+        const error = new Error("killed") as Error & { killed?: boolean };
+        error.killed = true;
+        throw error;
+      },
+    });
+
+    await expect(run("gh", ["issue", "list"])).rejects.toThrow(/3 attempts/);
+    expect(attempts).toBe(3);
+  });
+
+  it("still retries a caller-deadlined call that failed on the network", async () => {
+    // The deadline is not a blanket "never retry this call": a reset
+    // connection is still the forge not having spoken.
+    let attempts = 0;
+    const run = execRunner({
+      retryWaitsMs: [2_000, 8_000],
+      sleep: async () => undefined,
+      spawn: async () => {
+        attempts += 1;
+        throw new Error("ECONNRESET");
+      },
+    });
+
+    await expect(
+      run("docker", ["compose", "up"], { timeoutMs: 660_000 }),
+    ).rejects.toThrow(/3 attempts/);
+    expect(attempts).toBe(3);
+  });
+});

@@ -182,6 +182,7 @@ export function execRunner(options: ExecRunnerOptions = {}): CommandRunner {
     // The caller's own deadline wins where it gave one: only the caller knows
     // that this particular command was told to spend three minutes waiting.
     const deadline = callerOptions?.timeoutMs ?? timeout;
+    const callerDeadline = callerOptions?.timeoutMs !== undefined;
     let attempt = 0;
     for (;;) {
       try {
@@ -196,7 +197,17 @@ export function execRunner(options: ExecRunnerOptions = {}): CommandRunner {
           killSignal: "SIGTERM",
         });
       } catch (error) {
-        const retryable = isTransportFailure(error);
+        // A kill is ordinarily worth retrying: `gh` gave no answer at all, and
+        // the next attempt costs a second. It is not worth retrying when the
+        // deadline that fired was the caller's own, because then the kill is
+        // this system carrying out its own instruction rather than the network
+        // failing. Retrying turns one long build into three
+        // ([#64](https://github.com/fvermaut/timone/issues/64)): a preview
+        // killed at its own 660s deadline was rebuilt from scratch twice more
+        // before anybody was told.
+        const ownDeadline =
+          callerDeadline && (error as ExecFileError).killed === true;
+        const retryable = isTransportFailure(error) && !ownDeadline;
         if (retryable && attempt < waits.length) {
           await sleep(waits[attempt]);
           attempt += 1;

@@ -17,6 +17,28 @@ import type { Preview, PreviewAdapter, PreviewProject } from "./preview.js";
 export const PREVIEW_WAIT_TIMEOUT_SECONDS = 600;
 
 /**
+ * How much longer than its own wait the compose call is allowed to take before
+ * the runner kills it.
+ *
+ * **The two used to be set in different files and could not both be true**
+ * ([#64](https://github.com/fvermaut/timone/issues/64)). This asked compose to
+ * wait 600 seconds and then called it through a runner whose deadline is 90 —
+ * sized against a slow `gh` call, for good reasons of its own
+ * ([#47](https://github.com/fvermaut/timone/issues/47)) — so the 600 was
+ * unreachable by construction. Every preview whose image was not already built
+ * was killed mid-build and reported to a client's pull request as a build that
+ * had broken.
+ *
+ * This is the same fault [#60](https://github.com/fvermaut/timone/issues/60)
+ * fixed in `src/daemon/services.ts`, left behind in the other of the two call
+ * sites that pass `--wait-timeout`.
+ *
+ * Derived from the wait rather than written beside it, so the two cannot drift
+ * apart again.
+ */
+const WAIT_MARGIN_SECONDS = 60;
+
+/**
  * The container port a preview's application listens on.
  *
  * Deliberately a constant rather than something read from the project: it is
@@ -225,14 +247,22 @@ export class DockerPreviewAdapter implements PreviewAdapter {
     // `--wait` is what makes readiness the project's own answer rather than
     // this adapter's guess: it holds until every service's healthcheck passes
     // and every gating job has exited successfully.
-    await this.compose(project, pr, worktree, [
-      "up",
-      "--build",
-      "--detach",
-      "--wait",
-      "--wait-timeout",
-      String(this.waitTimeoutSeconds),
-    ]);
+    await this.compose(
+      project,
+      pr,
+      worktree,
+      [
+        "up",
+        "--build",
+        "--detach",
+        "--wait",
+        "--wait-timeout",
+        String(this.waitTimeoutSeconds),
+      ],
+      // Longer than the wait it just asked for, so compose is the thing that
+      // decides a stack is unhealthy — and it says which service.
+      (this.waitTimeoutSeconds + WAIT_MARGIN_SECONDS) * 1000,
+    );
 
     await this.seed(project, pr, worktree);
 
@@ -282,6 +312,7 @@ export class DockerPreviewAdapter implements PreviewAdapter {
     pr: number,
     worktree: string,
     args: string[],
+    timeoutMs?: number,
   ): Promise<string> {
     const envFile = this.exists(join(worktree, ENV_TEMPLATE))
       ? ["--env-file", ENV_TEMPLATE]
@@ -289,7 +320,12 @@ export class DockerPreviewAdapter implements PreviewAdapter {
     return this.run(
       "docker",
       ["compose", "-p", composeProject(project.name, pr), ...envFile, ...args],
-      this.composeContext(worktree),
+      {
+        ...this.composeContext(worktree),
+        // Only the call that was *given* a wait carries a deadline of its own;
+        // the rest are quick and keep the runner's default.
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      },
     );
   }
 
