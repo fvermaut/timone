@@ -20,6 +20,7 @@ import type { Manifest } from "../manifest.js";
 import { RunStore } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
 import { acquireStateLock, stateLockPath } from "../daemon/lock.js";
+import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { enqueue, pending, settle } from "../daemon/requests.js";
 import {
   parseTarget,
@@ -989,6 +990,97 @@ describe("takeover claims through the run, not the lock", () => {
     });
 
     expect(duringSignal).toBe("parked");
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+  });
+
+  /**
+   * The fault the daemon found on ivtrends #27: the claim is `active`, and an
+   * active run that stops stamping its heartbeat is reclaimed as dead after
+   * two minutes — which killed every takeover while its human was still
+   * sitting in it. The beat is asserted from inside the launcher, because
+   * that is the whole window it exists for.
+   */
+  it("keeps the claimed run's heartbeat warm while the conversation runs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-beat-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    let clock = "2026-08-03T10:00:00Z";
+    const store = RunStore.open(statePath, { now: () => clock });
+    parkedOnConversation(store);
+    const { adapter } = fakeAdapter();
+
+    let beat: (() => void) | undefined;
+    let interval: number | undefined;
+    let stopped = 0;
+    const before = store.get("scratch-app#6/1")?.heartbeatAt;
+
+    const launcher: ProcessLauncher = {
+      async run() {
+        clock = "2026-08-03T10:01:00Z";
+        beat?.();
+        return 0;
+      },
+    };
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      ticker: (onTick, intervalMs) => {
+        beat = onTick;
+        interval = intervalMs;
+        return { stop: () => void stopped++ };
+      },
+      log: () => {},
+    });
+
+    expect(code).toBe(0);
+    // Stamped while the human was in the conversation, so the daemon's dead-run
+    // pass sees a live run rather than a quiet one.
+    expect(store.get("scratch-app#6/1")?.heartbeatAt).toBe("2026-08-03T10:01:00Z");
+    expect(store.get("scratch-app#6/1")?.heartbeatAt).not.toBe(before);
+    // The same interval the daemon's own sessions beat at, so the two cannot
+    // drift into one being reclaimed and the other not.
+    expect(interval).toBe(DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000);
+    // And no timer is left behind to hold the process open.
+    expect(stopped).toBeGreaterThan(0);
+  });
+
+  it("stops beating when a signal ends the conversation", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-beat-signal-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-03T10:00:00Z" });
+    parkedOnConversation(store);
+    const { adapter } = fakeAdapter();
+
+    let stoppedDuringSignal = 0;
+    let stopped = 0;
+    const launcher: ProcessLauncher = {
+      async run() {
+        process.emit("SIGINT");
+        stoppedDuringSignal = stopped;
+        return 130;
+      },
+    };
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => void stopped++ }),
+      log: () => {},
+    });
+
+    // Ctrl-C runs no `finally`, so the beat has to be stopped on that path
+    // too — a live timer would hold the process open past the conversation.
+    expect(stoppedDuringSignal).toBeGreaterThan(0);
     expect(store.get("scratch-app#6/1")?.status).toBe("parked");
   });
 

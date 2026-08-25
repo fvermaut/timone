@@ -398,8 +398,15 @@ function waitWords(ms: number): string {
   return total >= 60 && total % 60 === 0 ? `${total / 60}m` : `${total}s`;
 }
 
-/** The real ticker. Behind a seam so tests need no clock. */
-function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
+/**
+ * The real ticker. Behind a seam so tests need no clock.
+ *
+ * Exported because the daemon is no longer the only thing that has to keep a
+ * run's heartbeat warm: `timone takeover` holds a run `active` for as long as
+ * a human sits in it, and a run that goes quiet is reclaimed as dead. Both
+ * beat with the same mechanism rather than two that could drift.
+ */
+export function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
   const handle = setInterval(onTick, intervalMs);
   return { stop: () => clearInterval(handle) };
 }

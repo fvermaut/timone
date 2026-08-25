@@ -26,7 +26,7 @@ import {
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
 import { enqueue, waitUntilSettled, type WaitOptions } from "../daemon/requests.js";
-import { waitOf } from "../daemon/session.js";
+import { intervalTicker, waitOf, type Ticker } from "../daemon/session.js";
 
 /** A parsed `<project>#<ticket>` target. */
 export interface TakeoverTarget {
@@ -86,6 +86,11 @@ export interface TakeoverDeps {
   wait?: WaitOptions;
   /** The timone root: the conversation runs here, never in the project (ADR-0007). */
   root: string;
+  /**
+   * What keeps the claimed run's heartbeat warm, behind the same seam the
+   * daemon's own sessions use, so a test needs no clock.
+   */
+  ticker?: (onTick: () => void, intervalMs: number) => Ticker;
   log?: (message: string) => void;
 }
 
@@ -429,12 +434,36 @@ export async function runTakeover(
   // always had exclusivity (ADR-0032). No lock is held across the
   // conversation, so the daemon carries on with every other project.
   //
+  // A claimed run is `active`, and an active run that stops stamping its
+  // heartbeat is reclaimed as dead by the daemon's next pass (ADR-0020) —
+  // after four progress intervals, which is two minutes. Only the daemon's
+  // own sessions used to stamp it, so every takeover was killed a couple of
+  // minutes in while the human was still sitting in it. Seen live on
+  // ivtrends #27 on 2026-08-25: the conversation ran to a correct fix, and
+  // the run it was holding had been marked failed before the first commit
+  // landed, which left the ticket unable to accept another word.
+  const beat = (deps.ticker ?? intervalTicker)(() => {
+    try {
+      deps.store.heartbeat(claimed.run.id);
+    } catch {
+      // The run left the ledger under us — cancelled elsewhere, or the file
+      // rewritten. Nothing here can fix that, and a takeover that died on a
+      // failed heartbeat would lose the conversation over bookkeeping.
+    }
+  }, DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000);
+
   // A signal does not run a `finally`, and Ctrl-C is how a conversation ends
-  // more often than not, so the claim is given back on that path too. A claim
-  // that outlives its session is the stuck run phase 14 closed.
-  const giveBack = (): void => releaseClaim(target, claimed.run, deps, log);
+  // more often than not, so the claim is given back on that path too — and
+  // the beat stopped with it, since a timer left running would hold the
+  // process open past the conversation it was beating for. A claim that
+  // outlives its session is the stuck run phase 14 closed.
+  const giveBack = (): void => {
+    beat.stop();
+    releaseClaim(target, claimed.run, deps, log);
+  };
   process.once("SIGINT", giveBack);
   process.once("SIGTERM", giveBack);
+
   try {
     return claimed.escalation === true
       ? await escalate(target, claimed.run, claimed.thread, deps, log)
