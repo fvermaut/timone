@@ -308,12 +308,62 @@ describe("ensure — seeding", () => {
       "scratch-app-pr-12",
       "--env-file",
       ".env.example",
-      "--profile",
-      "seed",
       "config",
       "--services",
     ]);
     expect(runner.calls.every((call) => call.command !== "npm")).toBe(true);
+  });
+
+  it("keeps the app profile enabled while it asks about seeding, so migrate stays defined", async () => {
+    const runner = fakeRunner();
+    runner.on((call) => call.args.includes("list"), worktreeList());
+    runner.on((call) => call.args.includes("config"), "db\nmigrate\napp\nseed\n");
+    runner.on((call) => call.args.includes("port"), "0.0.0.0:54321\n");
+
+    const preview = await adapterWith(runner.run).ensure(scratchApp, 12, "abc1234");
+
+    expect(preview.state).toBe("ready");
+    // Both profiles on both seeding calls, and never as a `--profile` flag:
+    // the flag replaces COMPOSE_PROFILES rather than adding to it, so asking
+    // for the seed profile that way dropped `migrate` — which the seed job
+    // depends on — out of the project, and compose rejected the whole file
+    // (#66).
+    for (const verb of ["config", "run"]) {
+      const call = runner.calls.find(
+        (invocation) =>
+          invocation.command === "docker" && invocation.args.includes(verb),
+      );
+      expect(call?.options?.env?.COMPOSE_PROFILES).toBe("app,seed");
+      expect(call?.args).not.toContain("--profile");
+    }
+  });
+
+  it("gives the seed job the same deadline as the wait, not the runner's default", async () => {
+    const runner = fakeRunner();
+    runner.on((call) => call.args.includes("list"), worktreeList());
+    runner.on((call) => call.args.includes("config"), "db\nmigrate\napp\nseed\n");
+    runner.on((call) => call.args.includes("port"), "0.0.0.0:54321\n");
+
+    await adapterWith(runner.run).ensure(scratchApp, 12, "abc1234");
+
+    // Filling a database is a long job like building an image, and the
+    // runner's own 90 seconds are sized against a `gh` request (#47).
+    const seed = runner.calls.find((call) => call.args.includes("run"));
+    expect(seed?.options?.timeoutMs).toBe(660_000);
+  });
+
+  it("leaves the stack's own calls on the app profile alone", async () => {
+    const runner = fakeRunner();
+    runner.on((call) => call.args.includes("list"), worktreeList());
+    runner.on((call) => call.args.includes("config"), "db\nmigrate\napp\nseed\n");
+    runner.on((call) => call.args.includes("port"), "0.0.0.0:54321\n");
+
+    await adapterWith(runner.run).ensure(scratchApp, 12, "abc1234");
+
+    // `up` must not enable the seed profile: the seed is run as a job of its
+    // own, after the stack is up and its migrations have run.
+    const up = runner.calls.find((call) => call.args.includes("up"));
+    expect(up?.options?.env?.COMPOSE_PROFILES).toBe("app");
   });
 });
 

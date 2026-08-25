@@ -58,6 +58,29 @@ const APP_SERVICE = "app";
 const SEED_PROFILE = "seed";
 const SEED_SERVICE = "seed";
 
+/** What is enabled for every call that is only about running the stack. */
+const APP_PROFILES = [APP_PROFILE] as const;
+
+/**
+ * What is enabled for the two calls about seeding: the seed profile **and the
+ * app profile with it**.
+ *
+ * **The app profile is the whole point of this constant**
+ * ([#66](https://github.com/fvermaut/timone/issues/66)). A seed job waits for
+ * the migration job — `depends_on: migrate: service_completed_successfully` is
+ * the only way to fill a database whose tables exist — and that migration job
+ * lives in the app profile, because it is part of running the stack. Enable
+ * the seed profile alone and compose cannot see `migrate` at all: it rejects
+ * the file with `service "seed" depends on undefined service "migrate":
+ * invalid compose project`, and every preview of a project that seeds itself
+ * failed, after its stack had already come up healthy.
+ *
+ * Passed as an environment variable rather than as `--profile` flags because
+ * the flag *replaces* `COMPOSE_PROFILES` instead of adding to it — which is
+ * what quietly dropped the app profile in the first place.
+ */
+const SEED_PROFILES = [APP_PROFILE, SEED_PROFILE] as const;
+
 /**
  * The committed env template a project's compose file interpolates from.
  * Committed, non-secret and obviously local by convention — which is exactly
@@ -75,6 +98,14 @@ export interface DockerPreviewAdapterOptions {
   exists?: (path: string) => boolean;
   /** Seconds to wait for a stack to become healthy. */
   waitTimeoutSeconds?: number;
+}
+
+/** What one `docker compose` call needs beyond its own arguments. */
+interface ComposeOptions {
+  /** Which compose profiles are enabled. Defaults to {@link APP_PROFILES}. */
+  profiles?: readonly string[];
+  /** A deadline for this call, for the ones that legitimately run long. */
+  timeoutMs?: number;
 }
 
 /** What the adapter last made true for one pull request. */
@@ -261,7 +292,7 @@ export class DockerPreviewAdapter implements PreviewAdapter {
       ],
       // Longer than the wait it just asked for, so compose is the thing that
       // decides a stack is unhealthy — and it says which service.
-      (this.waitTimeoutSeconds + WAIT_MARGIN_SECONDS) * 1000,
+      { timeoutMs: (this.waitTimeoutSeconds + WAIT_MARGIN_SECONDS) * 1000 },
     );
 
     await this.seed(project, pr, worktree);
@@ -289,12 +320,13 @@ export class DockerPreviewAdapter implements PreviewAdapter {
     pr: number,
     worktree: string,
   ): Promise<void> {
-    const services = await this.compose(project, pr, worktree, [
-      "--profile",
-      SEED_PROFILE,
-      "config",
-      "--services",
-    ]);
+    const services = await this.compose(
+      project,
+      pr,
+      worktree,
+      ["config", "--services"],
+      { profiles: SEED_PROFILES },
+    );
     const declared = services
       .split("\n")
       .map((line) => line.trim())
@@ -303,7 +335,14 @@ export class DockerPreviewAdapter implements PreviewAdapter {
 
     // `run` rather than `up`: a seed is a job that ends, and this waits for
     // its exit status instead of for a healthcheck it does not have.
-    await this.compose(project, pr, worktree, ["run", "--rm", SEED_SERVICE]);
+    //
+    // The deadline is the wait's, not the runner's 90 seconds: filling a
+    // database is the same kind of long job as building an image, and the
+    // default is sized against a `gh` request (#47).
+    await this.compose(project, pr, worktree, ["run", "--rm", SEED_SERVICE], {
+      profiles: SEED_PROFILES,
+      timeoutMs: (this.waitTimeoutSeconds + WAIT_MARGIN_SECONDS) * 1000,
+    });
   }
 
   /** One `docker compose` invocation against this pull request's stack. */
@@ -312,7 +351,7 @@ export class DockerPreviewAdapter implements PreviewAdapter {
     pr: number,
     worktree: string,
     args: string[],
-    timeoutMs?: number,
+    options: ComposeOptions = {},
   ): Promise<string> {
     const envFile = this.exists(join(worktree, ENV_TEMPLATE))
       ? ["--env-file", ENV_TEMPLATE]
@@ -321,10 +360,10 @@ export class DockerPreviewAdapter implements PreviewAdapter {
       "docker",
       ["compose", "-p", composeProject(project.name, pr), ...envFile, ...args],
       {
-        ...this.composeContext(worktree),
-        // Only the call that was *given* a wait carries a deadline of its own;
-        // the rest are quick and keep the runner's default.
-        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        ...this.composeContext(worktree, options.profiles ?? APP_PROFILES),
+        // Only a call that was *given* how long to take carries a deadline of
+        // its own; the rest are quick and keep the runner's default.
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       },
     );
   }
@@ -337,13 +376,16 @@ export class DockerPreviewAdapter implements PreviewAdapter {
    * the env file for compose interpolation, which is what makes this
    * override work against a project's own committed defaults.
    */
-  private composeContext(worktree: string): CommandOptions {
+  private composeContext(
+    worktree: string,
+    profiles: readonly string[],
+  ): CommandOptions {
     return {
       cwd: worktree,
       env: {
         APP_PORT: "0",
         POSTGRES_PORT: "0",
-        COMPOSE_PROFILES: APP_PROFILE,
+        COMPOSE_PROFILES: profiles.join(","),
       },
     };
   }
