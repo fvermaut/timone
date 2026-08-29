@@ -319,6 +319,43 @@ starting value, so a script that reads that variable by hand, rather than
 calling `git` or `gh`, gets the token from when the run started and will see a
 401 after an hour.
 
+### The environment a boxed run gets for the project
+
+A boxed run is built from the remotes, so it has what the project commits and
+nothing else. That is a problem twice over:
+
+- A project's `.env` is gitignored. The box gets `.env.example`, where every
+  secret is empty on purpose.
+- The addresses in that template are the **host's** way to reach a service —
+  `localhost:5434` for `ivtrends`. Inside the box, `localhost` is the box.
+
+**Put what a run needs in `.timone/env/<project>.env`.** Same format as any
+`.env`: `NAME=value`, one per line, `#` for a comment. The daemon reads it at
+every spawn, hands the values to the container by name, and writes them into
+`projects/<name>/.env` inside the box, on top of the committed template — so
+they win, and everything the template declares stays.
+
+For `ivtrends` that file holds the AlphaVantage key and the three connection
+strings pointing at `db:5432`, which is where the database beside the box
+actually answers.
+
+A missing file is fine. A project that needs no secret and talks to nothing
+gets what it always got, and the daemon log says which file it read or did not
+find.
+
+Two things are refused, with the line named, before any container starts: a
+variable the box sets for itself (`GH_TOKEN`, `TIMONE_PROMPT`, and the rest —
+one of those in a project file would redirect the run), and a value carrying a
+quote or a backslash, which a shell and dotenv would read differently.
+
+**The box also now says what it is.** Every boxed run's prompt opens with where
+its checkouts are, that `docker` is absent on purpose, which services are
+running beside it and by what name, and which values were written into `.env`.
+Without that, `ivtrends#33` checked for `docker`, found none, checked a port on
+`localhost`, found nothing, and reported that no database was running — while a
+healthy one answered on the network its own container had joined
+([ADR-0045](../doc/adr/0045-a-boxed-runs-project-environment-comes-from-a-file-the-daemon-owns.md)).
+
 ## 5. One poll cycle, in order
 
 The order matters. Each step is written where it is because of something that
