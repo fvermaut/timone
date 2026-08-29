@@ -39,6 +39,7 @@ import {
 } from "../daemon/session.js";
 import { containerRuntime } from "../daemon/container-runtime.js";
 import { bringUpServices } from "../daemon/services.js";
+import { readRunEnv } from "../daemon/run-env.js";
 import { renderMessage } from "../daemon/transcript.js";
 import {
   claudeSubscriptionToken,
@@ -264,6 +265,14 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
             // Kept on the host, because the container that wrote it is
             // destroyed and a failed run has to be readable afterwards.
             transcript: transcriptWriter(root),
+            // What the box knows about the project it works on beyond what is
+            // committed: the real secrets, and the addresses of the services
+            // standing beside it (ADR-0045).
+            runEnv: async (request) =>
+              readRunEnv({
+                root,
+                project: request.workspace!.project.name,
+              }),
             services: async (request) => {
               const workspace = request.workspace!;
               return bringUpServices({

@@ -77,6 +77,19 @@ export interface ServiceStack {
   network: string;
   /** The compose project name, unique to this run. */
   project: string;
+  /**
+   * The names the compose file gives its services, which is how the box
+   * reaches them.
+   *
+   * **Kept because the box has no way to find them out for itself.** It has no
+   * docker CLI and no socket by design, so an agent looking for a database
+   * finds nothing running, no port open on `localhost`, and concludes there is
+   * no database — which is what happened on
+   * [ivtrends#33](https://github.com/fvermaut/ivtrends/issues/33), with a
+   * healthy PostgreSQL sitting on the very network its container had joined.
+   * The runtime tells the agent these names instead (ADR-0045).
+   */
+  services: readonly string[];
   /** Take it down, with its volumes, and remove the source it came from. */
   down(): Promise<void>;
 }
@@ -302,6 +315,7 @@ export async function bringUpServices(
     // container joins.
     network: `${name}_default`,
     project: name,
+    services,
     down,
   };
 }

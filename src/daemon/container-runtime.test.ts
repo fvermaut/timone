@@ -341,7 +341,7 @@ describe("what the box is given, and what it is not", () => {
   it("keeps the prompt out of the command line entirely", async () => {
     const call = runCall();
 
-    expect(call.env?.TIMONE_PROMPT).toBe("do the thing");
+    expect(call.env?.TIMONE_PROMPT).toContain("do the thing");
     expect(call.args.join(" ")).not.toContain("do the thing");
   });
 
@@ -380,6 +380,168 @@ describe("what the box is given, and what it is not", () => {
     });
 
     await expect(runtimeWith(spawn).start(bare)).rejects.toThrow(/workspace/);
+  });
+});
+
+describe("the environment the box gets for the project", () => {
+  async function boxed(values: Record<string, string>, present = true) {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      credentials: { async tokenFor() { return "ghs_boxed"; } },
+      runEnv: async () => ({
+        path: "/root/.timone/env/scratch-app.env",
+        present,
+        values,
+      }),
+    }).start(request());
+    const call = calls.find((entry) => entry.args[0] === "run")!;
+    return { call, script: call.args[call.args.length - 1] };
+  }
+
+  it("carries the project's own values into the box, by name", async () => {
+    // ivtrends#33, 2026-08-29: the run asked fvermaut to buy an AlphaVantage
+    // subscription he had already bought. The key was on his disk, in the one
+    // file nothing may read (ADR-0043 D1), and no other way in existed.
+    const { call } = await boxed({ ALPHAVANTAGE_API_KEY: "premium-key" });
+
+    expect(call.env?.ALPHAVANTAGE_API_KEY).toBe("premium-key");
+    expect(call.args).toContain("ALPHAVANTAGE_API_KEY");
+    // By name and never by value, like every other secret the box is handed.
+    expect(call.args.join(" ")).not.toContain("premium-key");
+  });
+
+  it("writes them where the project's own tooling looks", async () => {
+    // A value in the environment is not enough on its own: the project's
+    // scripts do `set -a; . ./.env`, which then puts the committed template's
+    // `localhost` addresses back over the top of it.
+    const { script } = await boxed({
+      DATABASE_URL: "postgresql://ivtrends:ivtrends@db:5432/ivtrends",
+    });
+
+    expect(script).toContain(".env.example");
+    expect(script).toContain('printf "%s=\'%s\'\\n" DATABASE_URL "$DATABASE_URL"');
+    // The template is copied first and these lines appended, so these win:
+    // a shell and dotenv both take the last assignment of a name.
+    expect(script.indexOf("cp ")).toBeLessThan(script.indexOf("DATABASE_URL"));
+    // The value itself is nowhere in the vector.
+    expect(script).not.toContain("ivtrends:ivtrends@db");
+  });
+
+  it("keeps the written file out of any commit the run makes", async () => {
+    const { script } = await boxed({ ALPHAVANTAGE_API_KEY: "premium-key" });
+
+    expect(script).toContain(".git/info/exclude");
+    expect(script).toContain("chmod 0600");
+  });
+
+  it("writes nothing at all when the project declares nothing", async () => {
+    const { script } = await boxed({}, false);
+
+    expect(script).not.toContain(".env.example");
+    expect(script).not.toContain(".git/info/exclude");
+  });
+
+  it("cannot be used to take over the box's own identity", async () => {
+    // `run-env.ts` refuses these names when it reads the file. This is the
+    // second lock on the same door: whatever reaches the seam, the daemon's
+    // own values are the ones the box runs on.
+    const { call } = await boxed({
+      GH_TOKEN: "ghp_someone_else",
+      TIMONE_PROMPT: "do something else entirely",
+    } as Record<string, string>);
+
+    expect(call.env?.GH_TOKEN).toBe("ghs_boxed");
+    expect(call.env?.TIMONE_PROMPT).toMatch(/do the thing$/);
+    expect(call.env?.TIMONE_PROMPT).not.toContain("do something else entirely");
+  });
+
+  it("says which file it read, so a missing one is visible before the run", async () => {
+    const said: string[] = [];
+    const { spawn } = fakeContainer([started, result()]);
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      log: (message) => said.push(message),
+      runEnv: async () => ({
+        path: "/root/.timone/env/scratch-app.env",
+        present: false,
+        values: {},
+      }),
+    }).start(request());
+
+    expect(said.join("\n")).toContain("/root/.timone/env/scratch-app.env");
+  });
+});
+
+describe("what the box tells the agent about the box", () => {
+  async function prompt(options: {
+    services?: string[];
+    values?: Record<string, string>;
+  }) {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      ...(options.services === undefined
+        ? {}
+        : {
+            services: async () => ({
+              network: "n",
+              project: "p",
+              services: options.services!,
+              down: async () => {},
+            }),
+          }),
+      ...(options.values === undefined
+        ? {}
+        : {
+            runEnv: async () => ({
+              path: "/root/.timone/env/scratch-app.env",
+              present: true,
+              values: options.values!,
+            }),
+          }),
+    }).start(request());
+    return calls.find((entry) => entry.args[0] === "run")!.env!.TIMONE_PROMPT;
+  }
+
+  it("says a database beside the box is reached by name, not on localhost", async () => {
+    // ivtrends#33: the agent checked for `docker`, then for a port on
+    // `localhost`, and told fvermaut no database was running. One was, on the
+    // network its own container had joined. Neither check could have found it.
+    const said = await prompt({ services: ["db", "migrate", "app"] });
+
+    expect(said).toContain("db, migrate, app");
+    expect(said).toContain("no `docker` in this container");
+    expect(said).toContain("Never `localhost`");
+  });
+
+  it("says so plainly when nothing was stood up beside it", async () => {
+    expect(await prompt({})).toContain("No services were stood up");
+  });
+
+  it("names the values written into the project's .env, and never their content", async () => {
+    const said = await prompt({ values: { ALPHAVANTAGE_API_KEY: "premium-key" } });
+
+    expect(said).toContain("ALPHAVANTAGE_API_KEY");
+    expect(said).not.toContain("premium-key");
+  });
+
+  it("says where a value a run still needs has to be put", async () => {
+    // So a run that is genuinely missing something asks for the one action
+    // that fixes it, instead of asking a human to buy what he already owns.
+    expect(await prompt({})).toContain(".timone/env/scratch-app.env");
+  });
+
+  it("keeps the stage's own prompt, and puts it after", async () => {
+    const said = await prompt({});
+
+    expect(said).toContain("do the thing");
+    expect(said.indexOf("running inside a container")).toBeLessThan(
+      said.indexOf("do the thing"),
+    );
   });
 });
 
@@ -450,6 +612,7 @@ describe("the services beside the box", () => {
       stack: {
         network: "timone-scratch-app-7-1_default",
         project: "timone-scratch-app-7-1",
+        services: ["db"],
         down: async () => {
           downs += 1;
         },
@@ -618,6 +781,7 @@ describe("how the box talks to the model", () => {
         services: async () => ({
           network: "n",
           project: "p",
+          services: ["db"],
           down: async () => {
             downs += 1;
           },
@@ -679,7 +843,7 @@ describe("refusing a version the box could never follow", () => {
         },
         services: async () => {
           order.push("stack");
-          return { network: "n", project: "p", down: async () => {} };
+          return { network: "n", project: "p", services: [], down: async () => {} };
         },
       }).start(request()),
     ).rejects.toThrow(/not on the remote/);

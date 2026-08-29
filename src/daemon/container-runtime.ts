@@ -7,6 +7,7 @@ import type { CredentialProvider } from "../adapters/credentials.js";
 import type { ModelTokenSource } from "../adapters/model-token.js";
 import { repoSlug } from "../adapters/github-tickets.js";
 import { SessionProgress } from "./progress.js";
+import { RUN_ENV_DIR, type RunEnv } from "./run-env.js";
 import type { ServiceStack } from "./services.js";
 import {
   apiErrorFrom,
@@ -97,6 +98,24 @@ export interface ContainerRuntimeOptions {
    * that are not there fails in a way that reads as the agent's fault.
    */
   services?: (request: SessionRequest) => Promise<ServiceStack>;
+  /**
+   * The environment this run gets for the project it works on: the real
+   * secrets, and the addresses of the services stood up beside the box
+   * ([ADR-0045](../../doc/adr/0045-a-boxed-runs-project-environment-comes-from-a-file-the-daemon-owns.md)).
+   *
+   * **A boxed run had neither, and reported both as the human's problem.** A
+   * project's `.env` is gitignored, so a box built from the remotes gets the
+   * committed template: empty secrets, and `localhost` addresses that describe
+   * the host rather than the private network the container is on. Watched live
+   * on [ivtrends#33](https://github.com/fvermaut/ivtrends/issues/33) on
+   * 2026-08-29, where a run stopped before writing any code and asked for a
+   * subscription that had already been bought, and reported no database while
+   * a healthy one sat on its own network.
+   *
+   * Absent means the box gets the committed template only, which is what a
+   * test wants and what every project needing nothing gets anyway.
+   */
+  runEnv?: (request: SessionRequest) => Promise<RunEnv>;
   /**
    * How the box talks to the model
    * ([blocker (e)](../../doc/plans/phases/phase-30.md), answered by fvermaut
@@ -299,7 +318,10 @@ const dockerSpawn: ContainerSpawn = (command, args, options) => {
  * arbitrary human and machine text, and building a shell command out of it is
  * how a ticket body ends up executed.
  */
-function boxScript(request: SessionRequest): string {
+function boxScript(
+  request: SessionRequest,
+  runEnv: readonly string[],
+): string {
   const workspace = request.workspace!;
   // **Beneath the timone root, not beside it.** ADR-0007 fixes the layout as
   // `<timone root>/projects/<name>`, and every skill and prompt says
@@ -366,6 +388,33 @@ function boxScript(request: SessionRequest): string {
     `mkdir -p ${WORKSPACE}/timone/projects`,
     `git clone --quiet "$PROJECT_REMOTE" ${project}`,
     `git -C ${project} checkout --quiet "$PROJECT_BRANCH" 2>/dev/null || true`,
+
+    // The environment this run gets for the project, written where the
+    // project's own tooling looks for it (ADR-0045). The committed template
+    // first, then these values, so these win: a shell that sources the file
+    // and dotenv both take the last assignment of a name.
+    //
+    // **The values are read from the environment by name and never appear in
+    // this script**, which is an argument to `docker run` and so a string a
+    // `ps` listing shows.
+    ...(runEnv.length === 0
+      ? []
+      : [
+          `if [ -f "${project}/.env.example" ]; then`,
+          `  cp "${project}/.env.example" "${project}/.env"`,
+          "fi",
+          "{",
+          '  echo ""',
+          `  echo "# Written by Timone at the start of this run, from the daemon's own ${RUN_ENV_DIR}/ file. Never committed."`,
+          ...runEnv.map((name) => `  printf "%s='%s'\\n" ${name} "$${name}"`),
+          `} >> "${project}/.env"`,
+          `chmod 0600 "${project}/.env"`,
+          // Belt and braces: a project that forgot to gitignore `.env` would
+          // otherwise be one `git add -A` away from publishing a real key.
+          // `.git/info/exclude` is local to this throwaway clone and changes
+          // nothing the project tracks.
+          `printf "%s\\n" ".env" >> "${project}/.git/info/exclude"`,
+        ]),
     // Timone's own dependencies and build. `dist/` and `node_modules/` are
     // gitignored, so the clone has neither — and **both** hooks in
     // `.claude/settings.json` run `node "$CLAUDE_PROJECT_DIR/dist/cli.js"`.
@@ -417,6 +466,63 @@ function boxScript(request: SessionRequest): string {
       ' --model "$TIMONE_MODEL"' +
       ' --permission-mode bypassPermissions' +
       ' ${TIMONE_EFFORT:+--effort "$TIMONE_EFFORT"}',
+  ].join("\n");
+}
+
+/**
+ * What the box tells the agent about the box, before the stage's own prompt.
+ *
+ * **A boxed run had no idea it was in a box, and drew the wrong conclusion
+ * from it.** On [ivtrends#33](https://github.com/fvermaut/ivtrends/issues/33)
+ * the agent checked for `docker`, found none, checked `localhost:5434`, found
+ * nothing listening, and reported to fvermaut that no database was running.
+ * A healthy PostgreSQL was answering on `db:5432` on the very network its
+ * container had joined. Neither check could have found it, because both are
+ * questions about a host this run is not on.
+ *
+ * So the container says what it is. Facts only, and only the ones an agent
+ * cannot establish for itself from inside: where the two checkouts are, that
+ * `docker` is absent on purpose, which services are up and what they are
+ * called, and what was written into the project's `.env`. Everything else is
+ * the stage's to say.
+ */
+function boxPreamble(
+  request: SessionRequest,
+  stack: ServiceStack | undefined,
+  runEnv: RunEnv | undefined,
+): string {
+  const project = request.workspace!.project.name;
+  const names = Object.keys(runEnv?.values ?? {});
+
+  return [
+    "You are running inside a container. The following is true of this run " +
+      "whatever else this prompt says, and you cannot find any of it out from " +
+      "inside.",
+    "",
+    `- Timone is at ${WORKSPACE}/timone and the project is at ` +
+      `${WORKSPACE}/timone/projects/${project}. Both were cloned from the ` +
+      "remotes a moment ago. Nothing of the human's own machine is here.",
+    "- There is no `docker` in this container and there will not be one. " +
+      "`docker` being absent tells you nothing about whether a service is " +
+      "running.",
+    stack === undefined || stack.services.length === 0
+      ? "- No services were stood up beside this container for this run."
+      : "- The project's services are already running beside this container, " +
+        `on its network: ${stack.services.join(", ")}. Reach one by its name ` +
+        "and its own port — `db:5432`, for example. Never `localhost`, and " +
+        "never a port published on a host: this container is not that host.",
+    names.length === 0
+      ? `- \`projects/${project}/.env\` holds nothing but the project's ` +
+        "committed template, so its secrets are empty and its addresses " +
+        "describe a machine this is not. If you need a value, name it, and " +
+        "say it belongs in the daemon's " +
+        `\`${RUN_ENV_DIR}/${project}.env\` file.`
+      : `- \`projects/${project}/.env\` has been written for you: the ` +
+        "project's committed template, with the values this run was given " +
+        `written over the top of it (${names.join(", ")}). Use that file. Do ` +
+        "not overwrite it from `.env.example`. If a value you need is not " +
+        "in it, name it, and say it belongs in the daemon's " +
+        `\`${RUN_ENV_DIR}/${project}.env\` file.`,
   ].join("\n");
 }
 
@@ -628,6 +734,19 @@ export function containerRuntime(
         );
       }
 
+      // Offline, and before anything is created, for the same reason as the
+      // question above: a file with a bad line in it must stop the run here
+      // rather than reach an agent as a missing key (ADR-0045).
+      const runEnv =
+        options.runEnv === undefined ? undefined : await options.runEnv(request);
+      if (runEnv !== undefined) {
+        options.log?.(
+          runEnv.present
+            ? `run environment: ${Object.keys(runEnv.values).length} value(s) from ${runEnv.path}`
+            : `no run environment at ${runEnv.path}: the box gets the project's committed template only`,
+        );
+      }
+
       // Before the container, deliberately. A stack that refuses stops the
       // spawn here, with nothing started to clean up.
       const stack =
@@ -650,11 +769,17 @@ export function containerRuntime(
 
       const name = nameFor(request);
       const env: Record<string, string> = {
+        // First, so the box's own names below always win. `run-env.ts` already
+        // refuses those names; this is the second lock on the same door.
+        ...(runEnv?.values ?? {}),
         TIMONE_REMOTE: cloneable(workspace.timone.remote),
         TIMONE_COMMIT: workspace.timone.commit,
         PROJECT_REMOTE: cloneable(workspace.project.remote),
         PROJECT_BRANCH: workspace.project.branch,
-        TIMONE_PROMPT: request.prompt,
+        // The stage's prompt, with what the box knows about itself in front
+        // of it. A run that does not know it is in a container reports the
+        // container as the project's problem (ADR-0045).
+        TIMONE_PROMPT: `${boxPreamble(request, stack, runEnv)}\n\n${request.prompt}`,
         TIMONE_MODEL: request.model,
         ...(request.effort === undefined ? {} : { TIMONE_EFFORT: request.effort }),
         ...(token === undefined ? {} : { GH_TOKEN: token, GITHUB_TOKEN: token }),
@@ -676,7 +801,7 @@ export function containerRuntime(
         runArgs(
           name,
           options.image,
-          boxScript(request),
+          boxScript(request, Object.keys(runEnv?.values ?? {})),
           stack?.network,
           Object.keys(env),
         ),
