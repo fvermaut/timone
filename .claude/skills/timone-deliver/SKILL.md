@@ -120,6 +120,20 @@ Silence is a valid report. An axis that always finds something is padding, not r
 
 <What this phase delivers, in the phase file's own terms: the requirement IDs claimed, or the un-anchored stamp with its date and approver.>
 
+## How to try it
+
+### Against the preview
+
+<The preview URL is not known when this report is written — the machine posts it in its own comment on the pull request. Write the steps so they take that URL as their one variable.>
+
+1. <step — the exact command or the exact page, and what the reviewer should see>
+
+### On a local checkout
+
+<Name the project's own setup document rather than repeating it, then give only the steps this phase adds.>
+
+1. <step>
+
 ## Verification outcome
 
 <The verdict table from the verification report, quoted — ID / priority / channel / verdict / loop — plus loops consumed.>
@@ -147,6 +161,18 @@ Silence is a valid report. An axis that always finds something is padding, not r
 
 **An axis is re-run when its subject changed, not when any commit landed.** The subject is the range's non-process files. Your own previous delivery is a commit on this branch, so a rule of "re-run on any new commit" makes every re-delivery re-review the delivery report it just wrote, and the next one re-review that — a loop with no fixed point. When only process artifacts moved since the last delivery, say so in the iteration section, carry the prior findings forward unchanged, and do not spawn the axes. When the subject did change, re-run both and report what appeared or went away.
 
+## How to try it
+
+**Every pull request carries it, and both halves are always written** (`process.md`, stage 8). One half runs against the preview, whose URL the machine posts in a comment on the same pull request; the other runs on a local checkout, which is what the reviewer has whenever the preview did not build. Write both even when the preview is up: a preview can fail after the pull request opens, and nothing rewrites the body when it does.
+
+**Lift the steps, never invent them.** Their source is the phase file's validation commands and the verification report's HUMAN-CHECK scripts. Those commands were actually run, so they work; a command written fresh at delivery time has been run by nobody. Adapt only what has to change — a local database URL becomes the preview's address, a script path becomes a `curl` against the running app.
+
+**Be specific to this phase, and say what the reviewer should see.** "Run the app" is not a step. "`curl -X POST <preview>/api/nightly`, then open `<preview>/universe` and check every watched name shows today's date" is. A step with no expected outcome cannot be judged, only performed.
+
+**Do not repeat the project's setup.** The local half links to the project's own setup document — its `README.md` or `CONTEXT.md` — for install, environment and database, then lists only the steps this phase adds. A pull request that restates setup goes stale the moment setup changes.
+
+**A phase with no user-facing screen still gets this section, and needs it most.** A preview URL alone says nothing about a scheduled job, an API route or a migration. The written step is the only way in. Never write "nothing to try" — if the phase changed observable behaviour, there is a way to observe it; if it genuinely changed none, say what the reviewer can run to see that the existing behaviour is intact.
+
 ## The pull request
 
 Opened with `gh pr create` from within `projects/<name>/`, after the delivery report is committed and the branch is pushed.
@@ -160,6 +186,17 @@ Delivers **phase NN — <theme>** of [`<project>`](.).
 ## Scope
 
 <One paragraph, then the driving ticket reference — or, when the project has no ticket home, the requirement IDs this phase claims, linked to the criteria register. R13's "ticket/requirements" is a disjunction: name the requirements when there is no ticket, never neither.>
+
+## How to try it
+
+**Against the preview** — the machine posts the URL in its own comment on this pull request. If that comment says the branch would not build, use the local steps below instead.
+
+1. <step — exact command or exact page, and what you should see>
+
+**On your own machine**
+
+1. <checkout and setup, by link to the project's setup document — never repeated here>
+2. <step — only what this phase adds>
 
 ## Verification
 
@@ -202,10 +239,11 @@ Before finishing, update the target project's `STATUS.md` — **on the project's
 3. Check out the phase branch; refuse dirt. Determine the base branch and record why. Push to `origin`.
 4. Compute the diff range `<base>...<head>` once.
 5. Spawn both axes in parallel as fresh contexts, each with its own read list. Collect two reports; never merge them.
-6. Write and commit the delivery report — `docs: deliver phase NN — <theme>` — before opening anything.
-7. Open the PR with `gh pr create --base <base>`, or refresh the existing one and append an iteration section.
-8. Update `STATUS.md`.
-9. Report per Closing below.
+6. Write the **How to try it** steps, lifting them from the phase file's validation commands and the verification report's HUMAN-CHECK scripts. Both halves — preview and local.
+7. Write and commit the delivery report — `docs: deliver phase NN — <theme>` — before opening anything.
+8. Open the PR with `gh pr create --base <base>`, or refresh the existing one and append an iteration section.
+9. Update `STATUS.md`.
+10. Report per Closing below.
 
 
 ## Commit provenance
