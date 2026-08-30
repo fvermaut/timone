@@ -1165,9 +1165,15 @@ describe("pollOnce — a run parked on a pull-request review", () => {
   function reviewAdapter(
     state: "open" | "merged" | "closed",
     comments: PullRequestThread["comments"],
-  ): { adapter: TicketingAdapter; posted: PostedComment[]; closed: string[] } {
+  ): {
+    adapter: TicketingAdapter;
+    posted: PostedComment[];
+    closed: string[];
+    labelled: string[];
+  } {
     const posted: PostedComment[] = [];
     const closed: string[] = [];
+    const labelled: string[] = [];
     const base = ticket(6, { labels: ["timone", "triage:feature"] });
     const adapter: TicketingAdapter = {
       ...noBranches,
@@ -1184,7 +1190,11 @@ describe("pollOnce — a run parked on a pull-request review", () => {
       async postComment(project, number, body): Promise<void> {
         posted.push({ project: project.name, number, body });
       },
-      async applyLabel(): Promise<void> {},
+      // The hold label is ensured before it is applied — the stub throws.
+      async ensureLabel(): Promise<void> {},
+      async applyLabel(_project, number, label): Promise<void> {
+        labelled.push(`${number}:${label}`);
+      },
       async findPullRequest() {
         return {
           number: 9,
@@ -1211,7 +1221,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
         closed.push(`${number}:${reason}`);
       },
     };
-    return { adapter, posted, closed };
+    return { adapter, posted, closed, labelled };
   }
 
   it("completes the run and promotes the queue when the PR merged", async () => {
@@ -1234,17 +1244,39 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     void spawned;
   });
 
-  it("completes the run as declined when the PR was closed unmerged", async () => {
+  it("holds the ticket and asks when the PR was closed unmerged", async () => {
     const store = newStore();
     parkedOnReview(store);
-    const { adapter, posted, closed } = reviewAdapter("closed", []);
+    const { adapter, posted, closed, labelled } = reviewAdapter("closed", []);
     const { spawner } = fakeSpawner();
 
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
+    // The run is over either way: nothing is left running.
     expect(store.get("scratch-app#6/1")?.status).toBe("done");
     expect(posted.some((comment) => /without merging/i.test(comment.body))).toBe(true);
-    expect(closed).toEqual(["6:not-planned"]);
+    // **The ticket is not closed.** A close by hand is a question, not a
+    // verdict, and reading it as one advanced an initiative past work that was
+    // finished and waiting to be read (ADR-0046).
+    expect(closed).toEqual([]);
+    // The hold is what stops the next cycle picking it straight back up.
+    expect(labelled).toEqual(["6:timone:held"]);
+  });
+
+  it("tells the human every way out when a PR is closed unmerged", async () => {
+    const store = newStore();
+    parkedOnReview(store);
+    const { adapter, posted } = reviewAdapter("closed", []);
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    const asked = posted.map((comment) => comment.body).join("\n");
+    expect(asked).toContain("reopen the pull request");
+    expect(asked).toContain("close this ticket");
+    expect(asked).toContain("timone:held");
+    // And it must not claim a decision nobody made.
+    expect(asked).not.toMatch(/treating this work as declined/i);
   });
 
   it("spawns a remediation carrying the human's words on a new review comment", async () => {
@@ -4497,6 +4529,7 @@ describe("pollOnce — a ticket's next chunk", () => {
       async postComment(project, number, body): Promise<void> {
         posted.push({ project: project.name, number, body });
       },
+      async ensureLabel(): Promise<void> {},
       async applyLabel(): Promise<void> {},
       async findPullRequest(): Promise<PullRequest | undefined> {
         return undefined;
@@ -4550,7 +4583,7 @@ describe("pollOnce — a ticket's next chunk", () => {
     expect(closing).toContain("#12");
   });
 
-  it("still declines a pull request closed without merging, breakdown or no breakdown", async () => {
+  it("holds a pull request closed without merging, breakdown or no breakdown", async () => {
     const store = newStore();
     chunkOnReview(store, 1, 9);
     const { adapter, closed } = successionAdapter({ 9: "closed" });
@@ -4566,7 +4599,10 @@ describe("pollOnce — a ticket's next chunk", () => {
             ...breakdownIn(rootWith(breakdown(["The ledger learns chunks", "The next chunk opens"]))),
     });
 
-    expect(closed).toEqual(["6:not-planned"]);
+    // Whether or not the ticket has a breakdown, a close by hand decides
+    // nothing: the ticket stays open and held, and the human is asked
+    // ([ADR-0046](../../doc/adr/0046-a-pull-request-closed-without-merging-holds-its-ticket-and-asks.md)).
+    expect(closed).toEqual([]);
     expect(store.get("scratch-app#6/1")?.status).toBe("done");
   });
 

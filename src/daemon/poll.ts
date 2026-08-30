@@ -67,7 +67,12 @@ import { resolveTakeover } from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
 import {
   type InitiativeRecord, type Run, type RunStore, type Witness } from "./runs.js";
-import { HELD_LABEL, MAP_LABEL, nextStep } from "./steps.js";
+import {
+  HELD_LABEL,
+  HELD_LABEL_DESCRIPTION,
+  MAP_LABEL,
+  nextStep,
+} from "./steps.js";
 // The same comment the spawner posts when a session ends badly, because this
 // is the same kind of ending: work stopped, nothing was decided, try again.
 // `waitOf` comes from there too, so a run put back onto its wait is described
@@ -369,16 +374,29 @@ function listOf(prs: readonly number[]): string {
   return `${marked.slice(0, -1).join(", ")} and ${marked.at(-1)}`;
 }
 
-/** The comment posted when the pull request was closed without merging. */
+/**
+ * The comment posted when the pull request was closed without merging.
+ *
+ * **It asks; it does not conclude.** A pull request closed by hand can mean
+ * the work was rejected, and it can equally mean somebody clicked the wrong
+ * button — or that a sentence in another pull request's body carried a word
+ * GitHub reads as an instruction to close this one. The machine cannot tell
+ * those apart, so it says what it saw and stops.
+ */
 export function closedUnmergedComment(pr: number): string {
   return [
     "**The pull request was closed without merging.**",
     "",
-    `Pull request #${pr} for this ticket was closed rather than merged, so I'm`,
-    "treating this work as declined and closing this ticket with it. The",
-    "branch and everything on it stay where they are.",
+    `Pull request #${pr} for this ticket was closed rather than merged. I have`,
+    "not closed this ticket and I have not started anything else: a close by",
+    "hand can mean the work was wrong, or it can mean the close was a mistake,",
+    "and I cannot tell which.",
     "",
-    "**What I need from you:** nothing — reopen and re-mark this ticket if you want the work picked back up.",
+    "Nothing is running. The branch and everything on it stay where they are.",
+    "",
+    "**What I need from you:** one of three things — reopen the pull request if " +
+      `the close was a mistake, close this ticket if the work is not wanted, or ` +
+      `remove the \`${HELD_LABEL}\` label and I'll start it again from scratch.`,
   ].join("\n");
 }
 
@@ -1135,6 +1153,14 @@ async function pollProject(
       log(`hold   ${project.name}#${ticket.number} — ${heldBack}`);
       continue;
     }
+
+    // **A held ticket is not picked up, whether or not it is a step.** For a
+    // step the frontier already refuses it, because `nextStep` skips the hold;
+    // this is the same refusal for everything else, and without it a ticket
+    // held by a declined pull request would simply be registered afresh on the
+    // next cycle and rebuilt. Nothing here removes a hold: taking it off is
+    // the human's half of the rule (ADR-0044 D7).
+    if (ticket.labels.includes(HELD_LABEL)) continue;
 
     const occupier = store.occupyingRun(project.name);
     const { run, created } = store.register(project.name, ticket.number);
@@ -1909,8 +1935,22 @@ async function concludeReview(
   if (pr.state === "merged") {
     await concludeInitiative(run, project, pr.number, deps, result, log);
   } else {
+    // **A declined pull request stops the work; it does not decide anything.**
+    // This used to close the ticket as `not-planned`, which read a close by
+    // hand as "the human rejected this" and let the initiative advance to its
+    // next step. On 2026-08-30 an accidental close — a sentence in another
+    // pull request's body that GitHub read as a closing instruction — closed a
+    // ticket whose work was finished and awaiting review, and a run nobody
+    // wanted started 86 seconds after the ticket closed ([ADR-0046](../../doc/adr/0046-a-pull-request-closed-without-merging-holds-its-ticket-and-asks.md)).
+    //
+    // So the ticket stays open and gains the hold. The hold is what keeps the
+    // frontier off it — `nextStep` passes over a held step, and the
+    // registration loop passes over any held ticket — and only a human takes
+    // it off. The run itself is already over: `store.complete` above ended it
+    // and freed the project, so nothing is left running either way.
+    await adapter.ensureLabel(project, HELD_LABEL, HELD_LABEL_DESCRIPTION);
+    await adapter.applyLabel(project, run.ticket, HELD_LABEL);
     await adapter.postComment(project, run.ticket, closedUnmergedComment(pr.number));
-    await adapter.closeTicket(project, run.ticket, "not-planned");
   }
 
   result.completed.push(run.id);
