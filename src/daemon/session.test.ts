@@ -4926,3 +4926,198 @@ describe("a request carries the workspace a boxed session clones from", () => {
     expect(requests[0].workspace).toBeUndefined();
   });
 });
+
+/**
+ * A run cancelled while its session is running
+ * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+ *
+ * The daemon writes the cancellation and *then* calls {@link
+ * AgentSessionSpawner.stop}, so every test here starts from a ledger that
+ * already says `cancelled`.
+ */
+describe("a run cancelled while it was running", () => {
+  /**
+   * A runtime whose session runs until something ends it, and whose stopping
+   * is visible — which is all a cancellation needs from a runtime.
+   *
+   * `end` is the test's own way out, so a session the *spawner* cannot stop
+   * still finishes rather than leaving a promise hanging past the test.
+   */
+  function stoppableRuntime(options: { stoppable?: boolean } = {}): {
+    runtime: SessionRuntime;
+    stops: () => number;
+    starts: () => number;
+    end: () => void;
+  } {
+    const state = { stops: 0, starts: 0, end: () => {} };
+    const runtime: SessionRuntime = {
+      async start() {
+        state.starts += 1;
+        const sessionId = `session-abc-${state.starts}`;
+        const ended = new Promise<void>((resolve) => {
+          state.end = resolve;
+        });
+        return {
+          sessionId,
+          completed: (async () => {
+            await ended;
+            return {
+              sessionId,
+              // **Deliberately link-shaped.** A box killed mid-request ends
+              // on whatever error the connection to it was making at the
+              // time, and ADR-0034 retries a broken link — so a stop that
+              // reads as one is how a cancelled run starts working again.
+              error: "the session stopped on an API error (server_error)",
+              ok: false,
+            };
+          })(),
+          ...(options.stoppable === false
+            ? {}
+            : {
+                stop: () => {
+                  state.stops += 1;
+                  state.end();
+                },
+              }),
+        };
+      },
+    };
+    return {
+      runtime,
+      stops: () => state.stops,
+      starts: () => state.starts,
+      end: () => state.end(),
+    };
+  }
+
+  /** Let the walk get as far as having a session to stop. */
+  async function untilStarted(starts: () => number): Promise<void> {
+    for (let waited = 0; waited < 1_000 && starts() === 0; waited += 1) {
+      await new Promise((done) => setTimeout(done, 1));
+    }
+  }
+
+  /** A spawner over a runtime, with the options every test here shares. */
+  function spawnerOver(
+    store: RunStore,
+    adapter: TicketingAdapter,
+    runtime: SessionRuntime,
+    extra: { log?: (message: string) => void; sleep?: (ms: number) => Promise<void> } = {},
+  ): AgentSessionSpawner {
+    return new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      // Never reached while a cancellation ends the walk — and if one stops
+      // doing that, these tests fail in milliseconds rather than timing out
+      // on ADR-0034's real sixty-second wait.
+      sleep: async () => {},
+      ...extra,
+    });
+  }
+
+  it("ends the session the run is in", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, stops, starts } = stoppableRuntime();
+    const run = pickedUpRun(store);
+    const spawner = spawnerOver(store, adapter, runtime);
+
+    // Started and left running, exactly as a cycle blocked on a run leaves
+    // it; the cancellation arrives from the other clock.
+    const walking = spawner.spawn(run, project, { stage: "triage" });
+    await untilStarted(starts);
+    store.cancel(run.id, "started by mistake");
+    spawner.stop(run.id);
+    await walking;
+
+    expect(stops()).toBe(1);
+  });
+
+  it("says nothing on the ticket, because the human already knows", async () => {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter();
+    const { runtime, starts } = stoppableRuntime();
+    const run = pickedUpRun(store);
+    const spawner = spawnerOver(store, adapter, runtime);
+
+    const walking = spawner.spawn(run, project, { stage: "triage" });
+    await untilStarted(starts);
+    store.cancel(run.id, "started by mistake");
+    spawner.stop(run.id);
+    await walking;
+
+    // Cancelled, and still cancelled: a session a human stopped is not a
+    // failure, and recording one over it would lose why the run ended.
+    expect(store.get(run.id)?.status).toBe("cancelled");
+    expect(store.get(run.id)?.cancellation).toBe("started by mistake");
+    expect(comments.map((posted) => posted.body)).not.toContainEqual(
+      expect.stringContaining("went wrong"),
+    );
+  });
+
+  it("does not read the stop as a broken link and run the stage again", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, starts } = stoppableRuntime();
+    const run = pickedUpRun(store);
+    const waits: number[] = [];
+    const spawner = spawnerOver(store, adapter, runtime, {
+      sleep: async (ms) => {
+        waits.push(ms);
+      },
+    });
+
+    const walking = spawner.spawn(run, project, { stage: "triage" });
+    await untilStarted(starts);
+    store.cancel(run.id, "started by mistake");
+    spawner.stop(run.id);
+    await walking;
+
+    expect(starts()).toBe(1);
+    expect(waits).toEqual([]);
+  });
+
+  it("stops the walk rather than starting the next stage", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, starts } = stoppableRuntime();
+    const run = pickedUpRun(store);
+    const spawner = spawnerOver(store, adapter, runtime);
+
+    // Cancelled between two stages: no session is running, so there is
+    // nothing to stop — and the walk must still end where it stands.
+    store.cancel(run.id, "started by mistake");
+    spawner.stop(run.id);
+    await spawner.spawn(run, project, { stage: "triage" });
+
+    expect(starts()).toBe(0);
+    expect(store.get(run.id)?.status).toBe("cancelled");
+  });
+
+  it("still cancels when the runtime cannot stop a session, and says so", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const { runtime, starts, end } = stoppableRuntime({ stoppable: false });
+    const lines: string[] = [];
+    const run = pickedUpRun(store);
+    const spawner = spawnerOver(store, adapter, runtime, {
+      log: (message) => lines.push(message),
+    });
+
+    const walking = spawner.spawn(run, project, { stage: "triage" });
+    await untilStarted(starts);
+    store.cancel(run.id, "started by mistake");
+    spawner.stop(run.id);
+    // Nothing stopped it, so it runs to its own end — which is the cost of a
+    // runtime that cannot be stopped, not a failure of the cancellation.
+    end();
+    await walking;
+
+    expect(store.get(run.id)?.status).toBe("cancelled");
+    expect(lines.join("\n")).toContain("cannot stop a running session");
+  });
+});

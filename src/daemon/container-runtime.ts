@@ -903,7 +903,22 @@ export function containerRuntime(
         return { sessionId: id, ok: false, error: reasonFor(exit) };
       })();
 
-      return { sessionId: await sessionId, completed, progress };
+      return {
+        sessionId: await sessionId,
+        completed,
+        progress,
+        // **Removing the container is what stops the work**
+        // ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+        // Killing the `docker run` client would only stop the daemon
+        // *watching*: the container it started keeps its agent running, keeps
+        // spending money and keeps pushing commits, which is
+        // [#69](https://github.com/fvermaut/timone/issues/69) exactly. With
+        // the container gone the client exits by itself, the line stream
+        // ends, and `completed` settles down the ordinary path — including
+        // the `destroy` below, which is content to remove what is already
+        // gone.
+        stop: () => destroy(spawn, name),
+      };
     },
   };
 }

@@ -113,6 +113,16 @@ export interface SessionSpawner {
     project: TicketingProject,
     context?: SpawnContext,
   ): Promise<void>;
+  /**
+   * End the session this run is in, because it has just been cancelled
+   * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+   *
+   * Called **after** the cancellation is in the ledger, so the spawner reads
+   * a cancelled run when its session ends and reports nothing. Optional
+   * because a spawner with no session to stop — every fake in these tests —
+   * should not have to say so.
+   */
+  stop?(runId: string): void;
 }
 
 export interface PollDeps {
@@ -145,6 +155,13 @@ export interface PollDeps {
    * already resolved for the lock, so every real daemon has one.
    */
   statePath?: string;
+  /**
+   * How often a cycle that is busy looks for a cancellation to carry out
+   * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+   * Injected so a test does not wait real seconds for the watch to come
+   * round; {@link CANCEL_WATCH_INTERVAL_MS} otherwise.
+   */
+  cancelWatchIntervalMs?: number;
   /**
    * How long a run may go without a heartbeat before it is treated as
    * orphaned by a dead daemon (ADR-0020). Four progress intervals by default,
@@ -222,6 +239,17 @@ export const DEFAULT_POLL_INTERVAL_SECONDS = 60;
  * running.
  */
 export const UNWITNESSED_POLL_INTERVALS = 2;
+
+/**
+ * How often a cycle in progress looks for a cancellation
+ * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+ *
+ * **Seconds, not a poll interval.** The whole value of a cancellation is how
+ * soon it lands, and the cycle it has to interrupt is one that may be hours
+ * long. The cost of a look is one `readdir` of a directory that is almost
+ * always empty.
+ */
+export const CANCEL_WATCH_INTERVAL_MS = 2_000;
 
 /**
  * The comment posted on the ticket when its **last** pull request was merged
@@ -599,6 +627,41 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   // is at the end, and the end is the one place this may not go.
   await applyRequests(deps, result, log);
 
+  // From here to the end of the cycle, a cancellation is read on a clock of
+  // its own (ADR-0047). Everything below can block for as long as a run
+  // takes, and a `timone cancel` that waits for that is a cancel that never
+  // arrives (#69).
+  const cancellations = watchForCancellations(deps, result, log);
+  try {
+    await pollProjects(deps, result, log);
+  } finally {
+    await cancellations.stop();
+  }
+
+  // Last of all, and after the per-project catch so a project that threw does
+  // not cost the daemon its own alibi: this cycle has stopped working, so the
+  // next one measures the gap it was idle rather than the gap since this one
+  // began (timone#49).
+  deps.store.cycleEnded();
+
+  return result;
+}
+
+/**
+ * Every project, polled in turn — the body of a cycle, minus the requests it
+ * opens with and the stamps it closes with.
+ *
+ * Its own function so that {@link watchForCancellations} can wrap exactly the
+ * part of a cycle that blocks, and so the watch is stopped on the way out
+ * whatever happens in here.
+ */
+async function pollProjects(
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { manifest } = deps;
+
   // Once for the whole cycle, and before any project is looked at (ADR-0020).
   // Per-project would let the first project's fresh stamp answer for the
   // second, which is exactly the masking that makes two daemons unsafe.
@@ -640,14 +703,6 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
       log(`error  ${line}`);
     }
   }
-
-  // Last of all, and after the per-project catch so a project that threw does
-  // not cost the daemon its own alibi: this cycle has stopped working, so the
-  // next one measures the gap it was idle rather than the gap since this one
-  // began (timone#49).
-  deps.store.cycleEnded();
-
-  return result;
 }
 
 /**
@@ -685,32 +740,136 @@ async function applyRequests(
   }
 
   for (const request of requests) {
-    const { body } = request;
-    const what = `${body.kind} ${body.project}#${body.ticket}`;
-    const said: string[] = [];
-    const say = (message: string): void => {
-      said.push(message);
-    };
-
-    let code: number;
-    try {
-      code = await applyRequest(request, deps, say);
-    } catch (error) {
-      code = 1;
-      say(oneLine(error));
-    }
-    settle(request.path);
-
-    const words = said.join(" ");
-    if (code === 0) {
-      result.applied.push(what);
-      log(`apply  ${what} (asked by ${request.askedBy}) — ${words}`);
-      continue;
-    }
-    const line = `could not apply ${what} asked by ${request.askedBy}: ${words}`;
-    result.errors.push(line);
-    log(`error  ${line}`);
+    await carryOut(request, deps, result, log);
   }
+}
+
+/**
+ * One request, carried out, settled and reported — whichever clock found it.
+ *
+ * Shared by the top of the cycle and by the cancellation watch that runs
+ * *during* it ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)),
+ * so a cancellation applied while a run is in flight is applied by the same
+ * code, settled the same way and reported on the same cycle as one applied
+ * before the projects are walked.
+ */
+async function carryOut(
+  request: QueuedRequest,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { body } = request;
+  const what = `${body.kind} ${body.project}#${body.ticket}`;
+  const said: string[] = [];
+  const say = (message: string): void => {
+    said.push(message);
+  };
+
+  let code: number;
+  try {
+    code = await applyRequest(request, deps, say);
+  } catch (error) {
+    code = 1;
+    say(oneLine(error));
+  }
+  settle(request.path);
+
+  const words = said.join(" ");
+  if (code === 0) {
+    result.applied.push(what);
+    log(`apply  ${what} (asked by ${request.askedBy}) — ${words}`);
+    return;
+  }
+  const line = `could not apply ${what} asked by ${request.askedBy}: ${words}`;
+  result.errors.push(line);
+  log(`error  ${line}`);
+}
+
+/** A cancellation watch, stoppable — and awaited when it is stopped. */
+interface CancelWatch {
+  stop(): Promise<void>;
+}
+
+/**
+ * Look for cancellations on a clock of the watch's own, for as long as this
+ * cycle lasts ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+ *
+ * **Why a second clock exists at all.** ADR-0032 put requests first in the
+ * cycle so that none of them waits a whole cycle, and that placement is
+ * right. What defeats it is that a cycle does not come round again while a
+ * run is in flight: the daemon spawns a session and awaits it, so "first in
+ * the next cycle" and "when the run ends" are the same moment. On 2026-08-30
+ * that was nine minutes, over two commands, on the one request whose entire
+ * purpose is to interrupt work that is happening now
+ * ([#69](https://github.com/fvermaut/timone/issues/69)).
+ *
+ * **Cancellations only, and deliberately.** Every other request asks for work
+ * to *start* or to *move*, and a cycle already walking the projects is the
+ * worst moment to be told either — a retry applied halfway through the
+ * registration loop is exactly the race ADR-0032 avoided by applying requests
+ * before the walk. A cancellation is the opposite: it asks for work to stop,
+ * it is the one request that is worth less the later it lands, and nothing it
+ * touches is something the cycle is going on to start.
+ *
+ * **The order between the two clocks is the request's own order**, which is
+ * all ADR-0032 promised: cancellations are carried out oldest first here, as
+ * they are there. A cancellation may overtake a retry that was asked for
+ * earlier, and that is the intended effect rather than a lost guarantee.
+ */
+function watchForCancellations(
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): CancelWatch {
+  const { statePath } = deps;
+  if (statePath === undefined) return { stop: async () => {} };
+
+  // One look at a time. A look that runs long — a cancellation posts nothing,
+  // but it does write the ledger — must not be overtaken by the next tick and
+  // settle the same request twice.
+  let looking: Promise<void> | undefined;
+  const look = async (): Promise<void> => {
+    if (looking !== undefined) return;
+    looking = (async () => {
+      try {
+        for (const request of pending(statePath).requests) {
+          if (request.body.kind !== "cancel") continue;
+          await carryOut(request, deps, result, log);
+        }
+      } catch (error) {
+        // Caught in here, so this promise never rejects: it is awaited both
+        // by the tick that made it and by whoever stops the watch, and a
+        // rejection would reach one of them as the cycle's own failure. A
+        // watch that cannot look is worth a line, never the poll.
+        const line = `could not look for cancellations: ${oneLine(error)}`;
+        result.errors.push(line);
+        log(`error  ${line}`);
+      }
+    })();
+    try {
+      await looking;
+    } finally {
+      looking = undefined;
+    }
+  };
+
+  const handle = setInterval(
+    () => void look(),
+    deps.cancelWatchIntervalMs ?? CANCEL_WATCH_INTERVAL_MS,
+  );
+  // The daemon's own loop is what keeps the process alive; this timer must
+  // never be the reason a `--once` run refuses to exit.
+  handle.unref?.();
+
+  return {
+    async stop(): Promise<void> {
+      clearInterval(handle);
+      // A look already in flight finishes before the cycle reports: it is
+      // writing the ledger and appending to this cycle's result.
+      await looking;
+    },
+  };
 }
 
 /**
@@ -735,8 +894,25 @@ async function applyRequest(
   switch (body.kind) {
     case "retry":
       return runRetry(target, { manifest, store, log });
-    case "cancel":
-      return runCancel(target, { manifest, store, reason: body.reason, log });
+    case "cancel": {
+      const code = await runCancel(target, {
+        manifest,
+        store,
+        reason: body.reason,
+        log,
+      });
+      // The ledger first, the work second, and never the other way round
+      // ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)):
+      // the spawner reads the run when its session ends, and a session
+      // stopped before the cancellation was written would be reported as a
+      // failure. Only when the cancellation actually took — a refused one
+      // has stopped nothing and must not kill a session that is fine.
+      if (code === 0) {
+        const cancelled = store.runsForTicket(body.project, body.ticket).at(-1);
+        if (cancelled !== undefined) deps.spawner.stop?.(cancelled.id);
+      }
+      return code;
+    }
     case "claim-takeover": {
       // The daemon resolves as the command would, which is what makes a
       // takeover of a ticket the ledger has never heard of work while the

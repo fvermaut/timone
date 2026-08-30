@@ -365,6 +365,8 @@ went wrong when it was elsewhere.
    not write the ledger while the daemon holds it — they leave a request file,
    and the daemon carries it out here. First, so a retry does not wait a whole
    cycle. ([ADR-0032](../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md))
+   A `cancel` is also read *during* the cycle — see below
+   ([ADR-0047](../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
 2. **Witness.** Record that a daemon was watching, once for the whole cycle. A
    run is only judged dead if somebody was listening throughout.
    ([ADR-0020](../doc/adr/0020-liveness-is-judged-only-over-witnessed-time.md))
@@ -390,6 +392,16 @@ went wrong when it was elsewhere.
 
 An error anywhere inside a project's turn is caught, logged, and the next
 project still runs.
+
+**A cancellation does not wait for step 1 of the next cycle.** Step 3.5 spawns a
+session and waits for it, so a cycle does not come round again while a run is in
+flight — and "first in the next cycle" and "when the run ends" become the same
+moment. So for as long as a cycle lasts, the daemon looks for a **cancellation**
+every two seconds, carries it out, and stops the session the run is in: a boxed
+run has its container removed. Only cancellations are read on that clock; every
+other request asks for work to start or move, and the middle of the walk is the
+worst moment to be told either.
+([ADR-0047](../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md))
 
 ## 6. Who holds the project
 

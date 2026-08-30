@@ -5198,6 +5198,142 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
 });
 
 /**
+ * A cancellation that arrives while the cycle is blocked on the run it stops
+ * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+ *
+ * Every test here enqueues the request **from inside the spawn**, because
+ * that is the situation the whole slice is about: the human types the command
+ * while the run is going, and the cycle that would read it at its top is the
+ * cycle that is not going to come round until the run ends
+ * ([#69](https://github.com/fvermaut/timone/issues/69)).
+ */
+describe("pollOnce — a cancellation while the run it stops is still going", () => {
+  /**
+   * A spawner whose run keeps going until it is stopped, and which records
+   * what it was told to stop and what the ledger said when it was told.
+   */
+  function blockedSpawner(
+    store: RunStore,
+    ask: () => void,
+  ): { spawner: SessionSpawner; stopped: string[]; statusWhenStopped: () => string | undefined } {
+    const stopped: string[] = [];
+    let status: string | undefined;
+    return {
+      stopped,
+      statusWhenStopped: () => status,
+      spawner: {
+        async spawn(run) {
+          ask();
+          while (stopped.length === 0) {
+            await new Promise((done) => setTimeout(done, 1));
+          }
+          status = store.get(run.id)?.status;
+        },
+        stop(runId) {
+          stopped.push(runId);
+        },
+      },
+    };
+  }
+
+  it("carries it out, and stops the work, without waiting for the cycle", async () => {
+    const { store, statePath } = newStoreAt();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner, stopped, statusWhenStopped } = blockedSpawner(store, () =>
+      enqueue(statePath, {
+        kind: "cancel",
+        project: "scratch-app",
+        ticket: 7,
+        reason: "I started this by mistake",
+      }),
+    );
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+      cancelWatchIntervalMs: 1,
+    });
+
+    expect(result.applied).toEqual(["cancel scratch-app#7"]);
+    expect(stopped).toEqual(["scratch-app#7/1"]);
+    expect(store.get("scratch-app#7/1")?.cancellation).toBe("I started this by mistake");
+    // The ledger first, the work second: the spawner has to be able to read
+    // the run as cancelled the moment its session ends.
+    expect(statusWhenStopped()).toBe("cancelled");
+    expect(pending(statePath).requests).toEqual([]);
+  });
+
+  /**
+   * The one request that clock reads. Everything else asks for work to start
+   * or to move, and a cycle already walking the projects is the worst moment
+   * to be told either — which is why ADR-0032 put requests before the walk.
+   */
+  it("reads nothing else on that clock, and leaves it for the next cycle", async () => {
+    const { store, statePath } = newStoreAt();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = blockedSpawner(store, () => {
+      enqueue(statePath, { kind: "retry", project: "scratch-app", ticket: 31 });
+      enqueue(statePath, { kind: "cancel", project: "scratch-app", ticket: 7 });
+    });
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+      cancelWatchIntervalMs: 1,
+    });
+
+    expect(result.applied).toEqual(["cancel scratch-app#7"]);
+    expect(
+      pending(statePath).requests.map((request) => request.body.kind),
+    ).toEqual(["retry"]);
+  });
+
+  /**
+   * A cancellation for a run this daemon is not running is applied all the
+   * same. The clock exists for the blocked cycle, not for the blocked run:
+   * the command's own watch is the same length either way.
+   */
+  it("applies one for a run that is not the one holding the cycle", async () => {
+    const { store, statePath } = newStoreAt();
+    const other = failedRun(store, 31);
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const stopped: string[] = [];
+    // The run holding the cycle is #7 and the cancellation is for #31, so
+    // nothing stops the blocked run: it waits for the other one to be
+    // cancelled and then ends of its own accord.
+    const spawner: SessionSpawner = {
+      async spawn() {
+        enqueue(statePath, { kind: "cancel", project: "scratch-app", ticket: 31 });
+        while (store.get(other.id)?.status !== "cancelled") {
+          await new Promise((done) => setTimeout(done, 1));
+        }
+      },
+      stop(runId) {
+        stopped.push(runId);
+      },
+    };
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+      cancelWatchIntervalMs: 1,
+    });
+
+    expect(result.applied).toEqual(["cancel scratch-app#31"]);
+    expect(stopped).toEqual(["scratch-app#31/1"]);
+  });
+});
+
+/**
  * The gate's own failure, as tests: a run handed back mid-build, and the word
  * the human wrote under it
  * ([ADR-0031](../../doc/adr/0031-a-handoff-is-a-wait-not-a-failure.md)).

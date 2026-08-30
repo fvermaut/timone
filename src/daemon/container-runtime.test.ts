@@ -217,6 +217,56 @@ describe("a session that runs in a box", () => {
     expect(removed.some((call) => call.startsWith("rm -f"))).toBe(true);
   });
 
+  /**
+   * Stopping a boxed session, for a run a human cancelled
+   * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+   *
+   * The fake ends its line stream when the container is removed, which is
+   * what really happens: with the container gone the `docker run` client
+   * exits and the pipe closes.
+   */
+  it("stops a session by removing the container, not by killing the client", async () => {
+    const removed: string[] = [];
+    let end!: () => void;
+    const ending = new Promise<void>((resolve) => {
+      end = resolve;
+    });
+    let kills = 0;
+    const spawn: ContainerSpawn = (_command, args) => {
+      if (args[0] !== "run") {
+        removed.push(args.join(" "));
+        end();
+        return oneShot();
+      }
+      return {
+        lines: (async function* () {
+          yield started;
+          await ending;
+        })(),
+        exit: Promise.resolve({ code: 137, signal: null, stderr: "" }),
+        kill: () => {
+          kills += 1;
+        },
+      };
+    };
+
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: () => "timone-scratch-app-1",
+    }).start(request());
+    session.stop!();
+    const outcome = await session.completed;
+
+    // The container by name, and the client left to notice. Killing the
+    // client instead would leave the box working, which is #69 itself.
+    expect(removed[0]).toBe("rm -f timone-scratch-app-1");
+    expect(kills).toBe(0);
+    // And it really ends: a run whose session never settles holds its
+    // project for ever, cancelled or not.
+    expect(outcome.ok).toBe(false);
+  });
+
   it("destroys the container when the stream itself throws", async () => {
     const spawn: ContainerSpawn = (command, args) => {
       if (args[0] !== "run") return oneShot();

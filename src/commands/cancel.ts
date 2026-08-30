@@ -89,6 +89,14 @@ export async function runCancel(raw: string, deps: CancelDeps): Promise<number> 
  * This is the command [ADR-0031](../../doc/adr/0031-a-handoff-is-a-wait-not-a-failure.md)
  * leans on: a handoff nobody wants to answer holds its project, and this is
  * the way out of it. It was unrunnable against a live daemon until now.
+ *
+ * **The daemon reads this one while it works**
+ * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)), and
+ * stops the session the run is in. Until then a cancellation was read at the
+ * top of a cycle that does not come round while a run is in flight — so the
+ * one command whose purpose is to interrupt work in progress was the one that
+ * could not, and the words below promised a pass that was not coming
+ * ([#69](https://github.com/fvermaut/timone/issues/69)).
  */
 async function askForCancel(
   raw: string,
@@ -121,13 +129,15 @@ async function askForCancel(
   });
   log(
     `${holder.command} (pid ${holder.pid}) has the ledger, so I've asked it to ` +
-      `stop work on ${name} on its next pass. Watching for that.`,
+      `stop work on ${name}. It reads that within a few seconds, even while ` +
+      "it is running something. Watching for that.",
   );
 
   if (!(await waitUntilSettled(path, deps.wait))) {
     log(
-      `${name} is still queued — the daemon hasn't taken it yet. It will on its ` +
-        "next pass; run `timone status` to see where things stand.",
+      `${name} is still queued — the daemon has not taken it. It reads a ` +
+        "cancellation within a few seconds whatever it is doing, so check " +
+        "that it is still running; `timone status` says where things stand.",
     );
     return 1;
   }

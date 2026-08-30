@@ -289,6 +289,22 @@ export interface StartedSession {
    * not have to invent numbers to satisfy the interface.
    */
   progress?: ProgressReader;
+  /**
+   * End the session now, because a human asked for the run to stop
+   * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+   *
+   * **It must really stop the work, not just stop watching it.** A session
+   * the daemon has looked away from is still spending money and still
+   * pushing commits, which is [#69](https://github.com/fvermaut/timone/issues/69)
+   * exactly. `completed` settles afterwards, with whatever the ending looked
+   * like from outside; nobody reads it, because the run is cancelled.
+   *
+   * Returns nothing and never throws: a stop that fails must not become the
+   * cancelling cycle's error, and there is nothing the caller could do with
+   * one. Optional for the same reason {@link progress} is — a fake has no
+   * work to stop.
+   */
+  stop?(): void;
 }
 
 /** A running ticker, stoppable. */
@@ -940,6 +956,17 @@ export class AgentSessionSpawner implements SessionSpawner {
   private readonly progressIntervalMs: number;
   private readonly linkRetryWaitsMs: readonly number[];
   private readonly sleep: (ms: number) => Promise<void>;
+  /**
+   * The sessions running here right now, by run id, so that a cancellation
+   * can reach the work it cancels
+   * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+   *
+   * Written where the session is awaited and cleared in the same `finally`,
+   * so an entry here always means a session that is genuinely still running.
+   * A map rather than one field because the daemon polls several projects and
+   * each may have a session of its own.
+   */
+  private readonly running = new Map<string, StartedSession>();
 
   constructor(private readonly options: AgentSessionSpawnerOptions) {
     this.log = options.log ?? (() => {});
@@ -949,6 +976,42 @@ export class AgentSessionSpawner implements SessionSpawner {
     this.linkRetryWaitsMs = options.linkRetryWaitsMs ?? DEFAULT_LINK_RETRY_WAITS_MS;
     this.sleep =
       options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  }
+
+  /**
+   * Stop the session a run is in, because the run has just been cancelled
+   * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
+   *
+   * **Called after the ledger already says `cancelled`**, never before. That
+   * order is what lets the stage walk tell a session somebody stopped from a
+   * session that broke: it reads the ledger when the session ends, and a run
+   * marked cancelled is not a failure to report.
+   *
+   * Silent when there is nothing to stop — a run parked, queued, or being
+   * worked by a different daemon has no session here — and silent when the
+   * runtime cannot stop one. In both cases the cancellation still stands; all
+   * that is lost is the work stopping early.
+   */
+  stop(runId: string): void {
+    const started = this.running.get(runId);
+    if (started === undefined) return;
+    if (started.stop === undefined) {
+      this.log(`stop   ${runId} — this runtime cannot stop a running session`);
+      return;
+    }
+    this.log(`stop   ${runId} — cancelled, so its session is being ended`);
+    try {
+      started.stop();
+    } catch (error) {
+      // A stop that throws is not the cancelling cycle's failure. The run is
+      // cancelled either way, and the session ends when it ends.
+      this.log(`stop   ${runId} — could not end its session: ${oneLine(error)}`);
+    }
+  }
+
+  /** Whether a human has cancelled this run since it was last looked at. */
+  private cancelled(runId: string): boolean {
+    return this.options.store.get(runId)?.status === "cancelled";
   }
 
   async spawn(
@@ -999,6 +1062,16 @@ export class AgentSessionSpawner implements SessionSpawner {
     }
 
     for (;;) {
+      // Before anything else in the walk: a cancellation that landed between
+      // two stages ends the run here rather than starting the next stage on
+      // a run the ledger already calls finished (ADR-0047). Every store write
+      // below would throw on a cancelled run, and the throw would be reported
+      // as the cycle's fault instead of as the human's decision.
+      if (this.cancelled(run.id)) {
+        this.log(`stopped ${run.id} — cancelled, so the next stage is not started`);
+        return;
+      }
+
       if (!isBuilt(stage)) {
         await this.park(run, project, stage);
         return;
@@ -1154,6 +1227,15 @@ export class AgentSessionSpawner implements SessionSpawner {
       }),
     );
 
+    // Asked to stop while this session was running (ADR-0047). The ledger
+    // already says cancelled and the session was ended to make that true, so
+    // there is nothing here to fail and nothing to tell the ticket that
+    // `timone cancel` has not said already.
+    if (this.cancelled(run.id)) {
+      this.log(`stopped ${run.id} (${stage}) — cancelled while it was running`);
+      return { ok: false };
+    }
+
     if (!outcome.ok) {
       const reason = outcome.error ?? "the session ended without a result";
       // Whose failure it was decides which words the ticket gets (ADR-0034).
@@ -1231,6 +1313,14 @@ export class AgentSessionSpawner implements SessionSpawner {
     for (let attempt = 1; ; attempt += 1) {
       const outcome = await this.attemptSession(run, stage, request, attempt);
       if (outcome.ok) return { outcome, attempts: attempt };
+
+      // Before any of the judgement below: a session ended by a cancellation
+      // is not a broken link, whatever its ending looks like from outside
+      // (ADR-0047). A box killed mid-request ends on whatever the connection
+      // to it was saying, which reads as exactly the fault this loop retries
+      // — so without this the work would start again seconds after a human
+      // asked for it to stop.
+      if (this.cancelled(run.id)) return { outcome, attempts: attempt };
 
       // A broken link is retried, and so is a token that ran out: the box is
       // handed a credential read fresh at every spawn, so the next attempt
@@ -1758,7 +1848,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { store } = this.options;
 
     if (readConversationRecord(ticket, cursor) === undefined) {
-      this.stop(run, {
+      this.putOnWait(run, {
         waitingOn: run.waitingOn ?? "a conversation in your terminal",
         kind: "conversation",
         stage,
@@ -2107,7 +2197,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     await adapter.postComment(project, run.ticket, opened.comment);
     const after = await adapter.getTicket(project, run.ticket);
 
-    this.stop(run, {
+    this.putOnWait(run, {
       waitingOn: opened.waitingOn,
       kind: "conversation",
       stage,
@@ -2133,7 +2223,7 @@ export class AgentSessionSpawner implements SessionSpawner {
    * answered from, on the cycle the frontier turns out to be empty.
    */
   private holdMap(run: Run, stage: PipelineStage): void {
-    this.stop(run, {
+    this.putOnWait(run, {
       waitingOn: "this map's own questions to be answered",
       stage,
     });
@@ -2148,7 +2238,7 @@ export class AgentSessionSpawner implements SessionSpawner {
   ): Promise<void> {
     const { adapter } = this.options;
 
-    this.stop(run, { waitingOn: "the next stage to be built", stage });
+    this.putOnWait(run, { waitingOn: "the next stage to be built", stage });
     await adapter.postComment(project, run.ticket, parkedComment(stage));
     this.log(`parked ${run.id} at ${stage} — not built yet`);
   }
@@ -2158,7 +2248,7 @@ export class AgentSessionSpawner implements SessionSpawner {
    * something else. A resumed run that advances into a stage nothing can run
    * yet never became active, so what changes is its wait, not its state.
    */
-  private stop(run: Run, options: ParkOptions): Run {
+  private putOnWait(run: Run, options: ParkOptions): Run {
     const { store } = this.options;
     const current = store.get(run.id);
     return current?.status === "parked"
@@ -2195,9 +2285,14 @@ export class AgentSessionSpawner implements SessionSpawner {
       }
     }, this.progressIntervalMs);
 
+    // Reachable while it runs, and only while it runs: this is what a
+    // cancellation stops (ADR-0047).
+    this.running.set(runId, started);
+
     try {
       return await started.completed;
     } finally {
+      this.running.delete(runId);
       ticker.stop();
       const summary = progress?.summary();
       if (summary !== undefined) {
@@ -2220,9 +2315,15 @@ export class AgentSessionSpawner implements SessionSpawner {
  */
 export const agentSdkRuntime: SessionRuntime = {
   async start(request: SessionRequest): Promise<StartedSession> {
+    // What a cancellation pulls (ADR-0047). The SDK's own `interrupt` needs a
+    // streaming input this runtime does not use, and abandoning the iterator
+    // would leave the session running inside the daemon's own process — so
+    // the controller is the one thing here that really ends the work.
+    const controller = new AbortController();
     const session = query({
       prompt: request.prompt,
       options: {
+        abortController: controller,
         cwd: request.cwd,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
@@ -2278,6 +2379,11 @@ export const agentSdkRuntime: SessionRuntime = {
       }
     })();
 
-    return { sessionId: await sessionId, completed, progress };
+    return {
+      sessionId: await sessionId,
+      completed,
+      progress,
+      stop: () => controller.abort(),
+    };
   },
 };
