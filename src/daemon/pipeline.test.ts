@@ -340,20 +340,44 @@ describe("the model and effort each stage runs on", () => {
     expect(modelFor("breakdown")).toBe("claude-opus-5");
     expect(effortFor("breakdown")).toBe("high");
 
-    expect(modelFor("planning")).toBe("claude-opus-5");
+    expect(modelFor("planning")).toBe("claude-sonnet-5");
     expect(effortFor("planning")).toBe("high");
 
-    expect(modelFor("execution")).toBe("claude-opus-5");
-    expect(effortFor("execution")).toBe("xhigh");
+    expect(modelFor("execution")).toBe("claude-sonnet-5");
+    expect(effortFor("execution")).toBe("high");
 
     expect(modelFor("verification")).toBe("claude-opus-5");
-    expect(effortFor("verification")).toBe("xhigh");
+    expect(effortFor("verification")).toBe("high");
 
-    expect(modelFor("delivery")).toBe("claude-opus-5");
-    expect(effortFor("delivery")).toBe("high");
+    expect(modelFor("delivery")).toBe("claude-sonnet-5");
+    expect(effortFor("delivery")).toBe("medium");
 
-    expect(modelFor("remediation")).toBe("claude-opus-5");
+    expect(modelFor("remediation")).toBe("claude-sonnet-5");
     expect(effortFor("remediation")).toBe("high");
+  });
+
+  it("keeps Opus on the three judgements nothing downstream repeats", () => {
+    // ✏ Added at the 2026-08-30 step down, which fvermaut asked for because
+    // the runs cost too many tokens. Most stages moved to Sonnet; these three
+    // did not, and this test says which they are so that a later sweep for
+    // savings has to argue with a named list rather than with a table.
+    //
+    // - `requirements` is the artifact every phase is planned and verified
+    //   against, and nothing later rewrites it.
+    // - `breakdown` is the one cut of a whole initiative the human approves.
+    // - `verification` is now the only check standing over a build Sonnet
+    //   wrote.
+    expect(modelFor("requirements")).toBe("claude-opus-5");
+    expect(modelFor("breakdown")).toBe("claude-opus-5");
+    expect(modelFor("verification")).toBe("claude-opus-5");
+  });
+
+  it("sends no stage a reasoning effort above high", () => {
+    // ✏ The other half of the 2026-08-30 step down. `execution` and
+    // `verification` were the two `xhigh` rows and both came down one notch.
+    for (const stage of PIPELINE_STAGES) {
+      expect(effortFor(stage), `${stage} runs above high`).not.toBe("xhigh");
+    }
   });
 
   it("runs a conversation the daemon ingests an answer into on the same pair as planning", () => {
@@ -364,10 +388,14 @@ describe("the model and effort each stage runs on", () => {
     // session judges whether an answer settles a decision, re-asks or
     // resolves on that judgement, and may write an ADR: requirements' and
     // planning's class of work, so requirements' and planning's pair.
-    expect(modelFor("clarification")).toBe("claude-opus-5");
+    //
+    // ✏ Both moved to Sonnet with planning on 2026-08-30. The effort stays
+    // `high`, because judging whether an answer settles a question is the
+    // whole of what these sessions do.
+    expect(modelFor("clarification")).toBe("claude-sonnet-5");
     expect(effortFor("clarification")).toBe("high");
 
-    expect(modelFor("wayfinding")).toBe("claude-opus-5");
+    expect(modelFor("wayfinding")).toBe("claude-sonnet-5");
     expect(effortFor("wayfinding")).toBe("high");
   });
 

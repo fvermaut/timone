@@ -448,7 +448,7 @@ describe("renderStatus — what a run is costing right now", () => {
 
     // The same phrasing the daemon's own progress line uses, so the two agree
     // rather than being two dialects for one fact.
-    expect(lineFor(output, "scratch-app")).toContain("claude-opus-5");
+    expect(lineFor(output, "scratch-app")).toContain("claude-sonnet-5");
     expect(lineFor(output, "scratch-app")).toContain("for 12m04s");
   });
 
@@ -507,7 +507,7 @@ describe("renderStatus — what a run is costing right now", () => {
       { stateExists: true },
     );
 
-    expect(lineFor(output, "scratch-app")).toContain("claude-opus-5");
+    expect(lineFor(output, "scratch-app")).toContain("claude-sonnet-5");
     expect(lineFor(output, "scratch-app")).not.toContain(" for ");
   });
 });

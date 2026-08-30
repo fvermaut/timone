@@ -203,6 +203,14 @@ export const APPROVAL_RECORD_MODEL = "claude-haiku-4-5";
  * strictly per-*project* and this is per-*stage*; moving them later would be
  * a refactor, and changing one is a one-line edit — which is why the choice
  * is recorded in phase 14's plan rather than in an ADR.
+ *
+ * ✏ On 2026-08-30 fvermaut said the runs cost too many tokens and asked
+ * for a step down. Sonnet now runs every stage that works from an artifact a
+ * human has already approved, and every stage that ends in a question rather
+ * than in code. Opus stays on the three judgements nothing downstream
+ * repeats: the specification, the cut of the initiative, and the check of
+ * what was built. The two `xhigh` rows came down to `high`. Nothing came
+ * down two notches, and nothing moved to Haiku.
  */
 const STAGES: Record<PipelineStage, StageSpec> = {
   triage: {
@@ -231,7 +239,10 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // settles the question, resolves or asks the one remaining thing on that
     // judgement, and may write an ADR: the same class of work as requirements
     // and planning, which carry the same pair.
-    model: "claude-opus-5",
+    // ✏ Sonnet since 2026-08-30. The work is reading one written answer
+    // and deciding whether it settles the question. The effort stays `high`,
+    // because that judgement is the whole of the session.
+    model: "claude-sonnet-5",
     effort: "high",
     next: "requirements",
   },
@@ -247,7 +258,8 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     built: true,
     // The same pair as `clarification`, for the same reason and read on the
     // same occasion: the daemon-spawned session that ingests a written answer.
-    model: "claude-opus-5",
+    // ✏ Down to Sonnet on 2026-08-30, with `clarification`.
+    model: "claude-sonnet-5",
     effort: "high",
     // **Nothing follows, on purpose.** A decision ticket's answer resolves
     // that ticket and ends its run. The destination artifact is the whole
@@ -299,7 +311,9 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // what this stage produces is an answer somebody's decision rests on, and
     // a lookup that is confidently wrong is worse than one that says it could
     // not find out. Judging what a source is worth is the work here.
-    model: "claude-opus-5",
+    // ✏ Sonnet since 2026-08-30. Still not the cheapest model, and the
+    // effort stays `high`: what came down is the model, not the care.
+    model: "claude-sonnet-5",
     effort: "high",
     // **Nothing follows, on purpose** — `wayfinding`'s reasoning exactly. A
     // research answer resolves its own ticket and feeds the map; advancing on
@@ -312,6 +326,8 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     ownsBranch: true,
     built: true,
     // The PRD everything downstream is built and verified against.
+    // ✏ Kept on Opus at the 2026-08-30 step down: nothing later rewrites
+    // this artifact, and every phase is planned and verified against it.
     model: "claude-opus-5",
     effort: "high",
     next: "breakdown",
@@ -334,6 +350,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // The one cut the human approves for the whole initiative, and the only
     // approval standing between a specification and every pull request that
     // follows it. A bad cut is not a bad phase, it is a bad five phases.
+    // ✏ Kept on Opus at the 2026-08-30 step down, for that reason.
     model: "claude-opus-5",
     effort: "high",
     next: "planning",
@@ -350,7 +367,10 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     built: true,
     // Unchanged: a bad cut of one chunk still costs a whole phase, and this is
     // now the last unattended judgement before code gets written.
-    model: "claude-opus-5",
+    // ✏ Sonnet since 2026-08-30. This stage writes one chunk's phase file
+    // from a cut the human has already approved, so the hard judgement was
+    // made upstream at `breakdown`, which stayed on Opus.
+    model: "claude-sonnet-5",
     effort: "high",
     next: "execution",
   },
@@ -362,8 +382,12 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     built: true,
     // A fleet: `timone-execute` spawns one sub-agent per sub-phase, and they
     // inherit this row.
-    model: "claude-opus-5",
-    effort: "xhigh",
+    // ✏ The largest saving of the 2026-08-30 step down, because this row
+    // is multiplied by every sub-agent. Sonnet at `high` writes code against
+    // a phase file that already says what to build, and what judges the
+    // result is `verification`, which stayed on Opus.
+    model: "claude-sonnet-5",
+    effort: "high",
     next: "verification",
   },
   verification: {
@@ -373,8 +397,10 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     ownsBranch: true,
     built: true,
     // The check nobody else performs — correctness over cost.
+    // ✏ Kept on Opus on 2026-08-30, and now the only check standing over
+    // a build Sonnet wrote. The effort came down from `xhigh` to `high`.
     model: "claude-opus-5",
-    effort: "xhigh",
+    effort: "high",
     next: "delivery",
   },
   delivery: {
@@ -384,8 +410,11 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     ownsBranch: true,
     built: true,
     // Also a fleet: two review axes as parallel fresh contexts.
-    model: "claude-opus-5",
-    effort: "high",
+    // ✏ Sonnet at `medium` since 2026-08-30. Both axes read a build that
+    // `verification` has already checked, and a human reads the pull request
+    // after them.
+    model: "claude-sonnet-5",
+    effort: "medium",
     // Nothing follows in the graph: the run ends at the pull request, whose
     // merge or close is a terminal event on the run, not a stage.
   },
@@ -399,7 +428,9 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     ownsBranch: true,
     built: true,
     // Coding, on a live pull request.
-    model: "claude-opus-5",
+    // ✏ Sonnet since 2026-08-30, with `execution`, which it is a small
+    // version of. A full verification runs after it either way.
+    model: "claude-sonnet-5",
     effort: "high",
     next: "verification",
   },

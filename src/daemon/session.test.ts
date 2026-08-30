@@ -3015,7 +3015,10 @@ describe("the model each session runs on", () => {
     }).spawn(parkedAt(store, "planning"), project, { stage: "execution" });
 
     expect(requests[0].model).toBe(modelFor("execution"));
-    expect(requests[0].effort).toBe("xhigh");
+    // ✏ Was `xhigh` until the 2026-08-30 step down. Still a literal rather
+    // than `effortFor`, so the test can fail: triage runs at `medium`, and
+    // what this asserts is that the execution row is read, not triage's.
+    expect(requests[0].effort).toBe("high");
   });
 
   it("runs the approval record on its own declared model, never the default", async () => {
