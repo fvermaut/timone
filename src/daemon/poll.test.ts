@@ -1272,11 +1272,28 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
 
     const asked = posted.map((comment) => comment.body).join("\n");
-    expect(asked).toContain("reopen the pull request");
     expect(asked).toContain("close this ticket");
     expect(asked).toContain("timone:held");
+    expect(asked).toContain("reopen pull request #9");
     // And it must not claim a decision nobody made.
     expect(asked).not.toMatch(/treating this work as declined/i);
+  });
+
+  it("does not promise to notice a reopened pull request merging", async () => {
+    const store = newStore();
+    parkedOnReview(store);
+    const { adapter, posted } = reviewAdapter("closed", []);
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    const asked = posted.map((comment) => comment.body).join("\n");
+    // The run ended when the pull request closed, and only a parked run
+    // watches one. So reopening and merging closes nothing by itself, and the
+    // comment has to say so rather than send somebody away believing it does
+    // (ADR-0046, Consequences).
+    expect(asked).toContain("close this ticket yourself");
+    expect(asked).toMatch(/will not see it merge/i);
   });
 
   it("spawns a remediation carrying the human's words on a new review comment", async () => {

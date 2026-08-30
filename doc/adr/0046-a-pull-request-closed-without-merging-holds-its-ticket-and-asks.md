@@ -37,12 +37,19 @@ Alternatives considered:
 
 **D3 — The registration loop passes over any held ticket, not only a held step.** Without this, a held ticket that is nobody's step — a chore, anything run by hand — would be registered afresh on the next cycle and rebuilt, which is the loop that closing the ticket used to prevent. The hold now means one thing everywhere: *do not pick this up*.
 
-**D4 — The comment asks, and names all three ways out.** Reopen the pull request if the close was a mistake; close the ticket if the work is not wanted; remove the hold label to have the work done again from scratch. It says plainly that nothing is running and that the branch is untouched. It no longer claims the work was declined, because nobody said so.
+**D4 — The comment asks, and names every way out honestly.** Close the ticket if the work is not wanted; remove the hold label to have the work done again from scratch; or reopen the pull request and merge it — **and close the ticket by hand when you do**, because the run ended when the pull request closed and only a parked run watches one. It says plainly that nothing is running and that the branch is untouched. It no longer claims the work was declined, because nobody said so, and it does not promise to notice a reopened pull request merging, because it cannot.
 
 ## Consequences
 
 **A ticket whose pull request was closed sits open until a person acts.** That is the point, and it is also the cost: the tracker will carry open held tickets that nothing is working. They are visible, they say what they need, and an initiative with one of them makes no further progress until it is answered — which is the correct behaviour when the last thing that happened cannot be interpreted.
 
 **Deliberately rejecting work now takes two actions instead of one:** close the pull request, then close the ticket. The comment says so. One extra click is the price of not treating every accidental close as a decision.
+
+**A reopened pull request is not watched again, and the comment says so.** `store.complete` still runs before this branch, which is what frees the project and promotes anything queued behind it. The cost is that only a *parked* run watches a pull request, so a pull request reopened after this point can merge with nothing noticing, leaving the ticket open for ever. That is exactly what happened on 2026-08-30: the accidental close ended the run at 13:46:05, the pull request was reopened and merged at 14:51:43, and the ticket had to be closed by hand. **This ADR does not fix that** — it makes the machine say it, which is the difference between a limitation and a trap.
+
+The two candidate fixes were both weighed and neither is taken here, because each buys the watch with something worse:
+
+- **Leave the run parked instead of completing it.** Then a reopened pull request is seen. But the project stays occupied by a run whose pull request is closed, so nothing else on it can start; the closed-ticket cancellation only reaches a `picked-up` run, so closing the ticket would leave the parked run stuck for ever; and removing the hold would do nothing, because a live run is already registered. Three new problems for one.
+- **Watch settled runs' pull requests too**, from the pass that already walks every run for previews. Cheaper, and it needs a way to conclude an initiative from a run that is already settled. Worth doing; worth deciding on its own rather than inside this one.
 
 **The old behaviour is recoverable from git if this proves wrong.** It was four lines.

@@ -394,9 +394,15 @@ export function closedUnmergedComment(pr: number): string {
     "",
     "Nothing is running. The branch and everything on it stay where they are.",
     "",
-    "**What I need from you:** one of three things — reopen the pull request if " +
-      `the close was a mistake, close this ticket if the work is not wanted, or ` +
-      `remove the \`${HELD_LABEL}\` label and I'll start it again from scratch.`,
+    "**What I need from you:** one of these.",
+    "",
+    "- The work is not wanted: **close this ticket**, and I'll carry on without it.",
+    "- You want it built again from scratch: **remove the " +
+      `\`${HELD_LABEL}\` label**, and I'll start it afresh on the next pass.`,
+    `- The close was a mistake: **reopen pull request #${pr} and merge it** — but` +
+      " **close this ticket yourself when you do.** I stopped watching that pull" +
+      " request when it closed, so I will not see it merge and I will not close" +
+      " this ticket for you.",
   ].join("\n");
 }
 
