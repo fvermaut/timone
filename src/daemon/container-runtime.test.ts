@@ -595,6 +595,99 @@ describe("what the box tells the agent about the box", () => {
   });
 });
 
+describe("a command that takes longer than a couple of minutes", () => {
+  async function boxed() {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({ image: "timone-box:test", spawn }).start(request());
+    const call = calls.find((entry) => entry.args[0] === "run")!;
+    return { call, script: call.args[call.args.length - 1] };
+  }
+
+  it("is given ten minutes by default, and thirty if the agent asks", async () => {
+    // ivtrends#35, 2026-08-30: the CLI's own two-minute default moved `npm
+    // install` and an integration suite into the background, and both
+    // sessions then ended waiting for a notification an unattended run never
+    // gets. Neither command was an unusual one.
+    const { call } = await boxed();
+
+    expect(call.env?.BASH_DEFAULT_TIMEOUT_MS).toBe("600000");
+    expect(call.env?.BASH_MAX_TIMEOUT_MS).toBe("1800000");
+  });
+
+  it("forwards both into the container, by name", async () => {
+    // Setting them on the docker CLI's own process would change nothing
+    // inside the box. Same trap as `TIMONE_REMOTE` on 2026-08-22.
+    const { call } = await boxed();
+
+    expect(call.args).toContain("BASH_DEFAULT_TIMEOUT_MS");
+    expect(call.args).toContain("BASH_MAX_TIMEOUT_MS");
+  });
+
+  it("tells the agent what the budget is, and that a backgrounded command is lost", async () => {
+    const { call } = await boxed();
+
+    expect(call.env?.TIMONE_PROMPT).toContain("ten minutes");
+    expect(call.env?.TIMONE_PROMPT).toContain("moved to the background is lost");
+  });
+});
+
+describe("the project's dependencies", () => {
+  async function boxed() {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({ image: "timone-box:test", spawn }).start(request());
+    const call = calls.find((entry) => entry.args[0] === "run")!;
+    return { call, script: call.args[call.args.length - 1] };
+  }
+
+  it("are installed by the box, not by the session", async () => {
+    // `node_modules/` is gitignored, so the clone has none, and installing
+    // them is the longest single command a stage runs. Doing it here takes
+    // it out of the session entirely.
+    const { script } = await boxed();
+
+    expect(script).toContain("/workspace/timone/projects/scratch-app/package.json");
+    expect(script).toContain("npm ci --no-audit --no-fund");
+    expect(script).toContain("/tmp/timone-project-install.log");
+  });
+
+  it("falls back to `npm install` when there is no lockfile, or `npm ci` refuses", async () => {
+    const { script } = await boxed();
+
+    expect(script).toContain("if [ -f package-lock.json ]; then");
+    expect(script).toContain("npm install --no-audit --no-fund");
+  });
+
+  it("does not take the box down when they will not install", async () => {
+    // Timone's own install is a refusal, because the guardrail hooks depend
+    // on it. This one is not: a project whose dependencies will not install
+    // is something the stage must see and report, not a reason to kill the
+    // box before the agent has read a file.
+    const { script } = await boxed();
+
+    const project = script.slice(script.indexOf("timone-project-install.log"));
+    expect(project).not.toContain("exit 79");
+    expect(script).toContain("the run has to install them itself");
+  });
+
+  it("leaves Timone's own install as the refusal it was", async () => {
+    const { script } = await boxed();
+
+    expect(script).toContain("Refusing to work without them.");
+    // Timone first: a box that cannot run its own hooks must stop before it
+    // spends minutes installing the project's tree.
+    expect(script.indexOf("/tmp/timone-npm-ci.log")).toBeLessThan(
+      script.indexOf("/tmp/timone-project-install.log"),
+    );
+  });
+
+  it("tells the agent they are already there, and where npm's words are", async () => {
+    const { call } = await boxed();
+
+    expect(call.env?.TIMONE_PROMPT).toContain("installed before this session started");
+    expect(call.env?.TIMONE_PROMPT).toContain("/tmp/timone-project-install.log");
+  });
+});
+
 describe("reading a message that arrived as text", () => {
   it("parses a line the CLI printed into a message progress understands", () => {
     const message = parseSessionMessage(messageDelta(120));

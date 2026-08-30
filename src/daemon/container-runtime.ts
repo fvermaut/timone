@@ -231,6 +231,34 @@ const FORGE_TOKEN_VAR = "TIMONE_FORGE_TOKEN";
 const FORGE_REFRESH_MS = 20 * 60 * 1000;
 
 /**
+ * How long a command the agent runs is allowed to take before the CLI stops
+ * waiting for it, and the longest the agent may ask for.
+ *
+ * **A boxed run cannot survive a command being taken away from it.** The CLI's
+ * own default is two minutes; anything longer is moved to the background and
+ * the agent is told to expect a notification. In an unattended `claude -p`
+ * session there is no notification, because nothing continues the conversation
+ * after the turn ends — so the agent either invents a polling loop or ends the
+ * turn with the work undone. On 2026-08-30 ivtrends#35 ended that way three
+ * times over: once on `npm install`, once on the integration suite, once on a
+ * push that could not authenticate.
+ *
+ * The commands that hit it are not unusual ones. Installing a Next.js
+ * project's dependencies, building it, and running its integration tests all
+ * take longer than two minutes on ordinary hardware, and every one of them is
+ * something an execution or a verification pass has to run.
+ *
+ * Ten minutes by default and thirty at the agent's request are both well
+ * inside the run's own life, and neither hides a hang: a command that has not
+ * returned in thirty minutes is a fault worth reporting, not a slow one worth
+ * waiting for.
+ */
+const BASH_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** The ceiling the agent may raise a single command to. See above. */
+const BASH_MAX_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
  * The remote as a URL the box can actually open.
  *
  * **The box holds a forge token and no SSH key, and it never will** — a key is
@@ -460,6 +488,56 @@ function boxScript(
       ' The build said: $(timone_reason /tmp/timone-npm-build.log)" >&2',
     "  exit 79",
     "}",
+
+    // ---------------------------------------------------------------------
+    // The project's own dependencies, before the session rather than during
+    // it.
+    //
+    // `node_modules/` is gitignored, so the clone above has none, and every
+    // stage that runs a validation command — a build, a type check, a test
+    // suite — needs them. Until 2026-08-30 the box left that to the agent,
+    // and the execution skill duly told it to install them
+    // (`.claude/skills/timone-execute/SKILL.md`). That reads as a small
+    // chore and is not one: installing a Next.js project's dependencies is
+    // the single longest command in the run, and on ivtrends#35 it was long
+    // enough to be taken off the agent and moved to the background, which is
+    // how that session ended with the phase unbuilt.
+    //
+    // Doing it here removes the command from the session altogether. It is
+    // also the right place on its own merits: the box already installs and
+    // builds Timone above, and neither is the agent's work either.
+    //
+    // **A failure here does not stop the run.** Timone's own install is a
+    // refusal because the guardrail hooks depend on it; this one is a
+    // convenience, and a project whose dependencies will not install is
+    // something the stage must see, report and possibly fix — not something
+    // to kill the box over before the agent has read a single file.
+    `if [ -f "${project}/package.json" ]; then`,
+    `  cd ${project}`,
+    // `npm ci` when the lockfile is there, because it is the reproducible
+    // one; `npm install` when it is not, or when `npm ci` refuses because
+    // the lockfile and the manifest disagree. That leaves the lockfile
+    // modified, which the execution skill already excludes from the dirt
+    // that blocks a start.
+    "  if [ -f package-lock.json ]; then",
+    "    npm ci --no-audit --no-fund > /tmp/timone-project-install.log 2>&1 ||",
+    "      npm install --no-audit --no-fund" +
+      " > /tmp/timone-project-install.log 2>&1 || {",
+    '      echo "could not install the project\'s dependencies in the box, so' +
+      " the run has to install them itself before it can validate anything." +
+      ' npm said: $(timone_reason /tmp/timone-project-install.log)" >&2',
+    "    }",
+    "  else",
+    "    npm install --no-audit --no-fund" +
+      " > /tmp/timone-project-install.log 2>&1 || {",
+    '      echo "could not install the project\'s dependencies in the box, so' +
+      " the run has to install them itself before it can validate anything." +
+      ' npm said: $(timone_reason /tmp/timone-project-install.log)" >&2',
+    "    }",
+    "  fi",
+    `  cd ${WORKSPACE}/timone`,
+    "fi",
+
     // The prompt on stdin, so it is never a shell word.
     'printf "%s" "$TIMONE_PROMPT" | exec claude -p' +
       " --output-format stream-json --verbose --include-partial-messages" +
@@ -523,6 +601,21 @@ function boxPreamble(
         "not overwrite it from `.env.example`. If a value you need is not " +
         "in it, name it, and say it belongs in the daemon's " +
         `\`${RUN_ENV_DIR}/${project}.env\` file.`,
+    // ✏ Added 2026-08-30, after ivtrends#35 ended three sessions in a row
+    // with the work undone. Two of the three were sitting on a command the
+    // CLI had moved to the background, waiting for a notification that an
+    // unattended session never gets.
+    "- The project's dependencies were installed before this session started," +
+      " so `node_modules/` is already there. What npm said is in " +
+      "`/tmp/timone-project-install.log`. If something is still missing," +
+      " install it yourself.",
+    "- A command you run has ten minutes before the CLI stops waiting for it," +
+      " and you may ask for up to thirty on a single command. Use that. **A" +
+      " command that is moved to the background is lost to you**: nothing" +
+      " continues this conversation after your turn ends, so no notification" +
+      " about it will ever arrive. If one is backgrounded anyway, read its" +
+      " output file in a loop until it is finished — never end your turn" +
+      " waiting for it.",
   ].join("\n");
 }
 
@@ -782,6 +875,11 @@ export function containerRuntime(
         TIMONE_PROMPT: `${boxPreamble(request, stack, runEnv)}\n\n${request.prompt}`,
         TIMONE_MODEL: request.model,
         ...(request.effort === undefined ? {} : { TIMONE_EFFORT: request.effort }),
+        // So an install, a build or a test suite finishes where the agent can
+        // see it finish, instead of being moved to a background nothing in an
+        // unattended session can wait for. See the constants.
+        BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
+        BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
         ...(token === undefined ? {} : { GH_TOKEN: token, GITHUB_TOKEN: token }),
         ...(modelToken === undefined
           ? {}
