@@ -179,6 +179,7 @@ Opened with `gh pr create` from within `projects/<name>/`, after the delivery re
 
 - **Title:** the phase's theme, in the project's convention — `<type>: phase NN — <theme>`.
 - **Base:** the branch determined above, passed explicitly with `--base`. Never rely on the repository's default.
+- **Never put a closing keyword in front of a `#N` reference** (`process.md`, Writing to the human). GitHub matches `close`/`fix`/`resolve` and their inflections followed by `#N` and closes `#N` on merge, without reading the sentence. Negation does not save you: "this does not fix #48" closed `ivtrends` #48 on 2026-08-30. Write the number first — "#48 still needs this change" — whenever this PR's body names another one, which the stacked-branch note and any "does not affect" line both do.
 
 ````markdown
 Delivers **phase NN — <theme>** of [`<project>`](.).
