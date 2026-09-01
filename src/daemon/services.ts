@@ -96,8 +96,14 @@ export interface ServiceStack {
 
 export interface BringUpOptions {
   project: TicketingProject;
-  /** The branch this run works on — the source the stack is built from. */
-  branch: string;
+  /**
+   * The branch this run works on — the source the stack is built from.
+   *
+   * Absent at a stage that owns no branch (`triage`, `clarification`,
+   * `wayfinding`, `research`), and then the project's default branch is the
+   * source, which is what the fallback below already reaches for.
+   */
+  branch?: string;
   /** The run's id, which is what makes this stack nobody else's. */
   runId: string;
   /** The timone root. The source is cloned beneath its `.timone/`. */
@@ -176,13 +182,25 @@ export async function bringUpServices(
   // The default branch is the right fallback and not a guess: what this clone
   // is for is the compose file and the env template, which are the project's
   // committed shape rather than the run's work.
-  try {
-    await run("git", [...shallow, "--branch", options.branch, remote, source], env);
-  } catch {
-    // A real failure — no network, a bad credential, no such repository —
-    // fails the second call too, and its message is the one that surfaces.
-    remove(source);
+  //
+  // A run that names no branch at all skips straight to the fallback: there is
+  // no branch to ask for, and asking for `undefined` would be a clone command
+  // built out of a missing value.
+  if (options.branch === undefined) {
     await run("git", [...shallow, remote, source], env);
+  } else {
+    try {
+      await run(
+        "git",
+        [...shallow, "--branch", options.branch, remote, source],
+        env,
+      );
+    } catch {
+      // A real failure — no network, a bad credential, no such repository —
+      // fails the second call too, and its message is the one that surfaces.
+      remove(source);
+      await run("git", [...shallow, remote, source], env);
+    }
   }
 
   const compose = COMPOSE_FILES.accepted.find((file) =>

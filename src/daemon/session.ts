@@ -99,8 +99,13 @@ export interface SessionWorkspace {
    * The target project, at the branch this chunk's run works on — the layout
    * ADR-0007 already fixed, `projects/<name>/`, said in the terms a clone
    * needs.
+   *
+   * **The branch is absent at every stage that owns none**: triage,
+   * clarification, wayfinding and research all read the project and none of
+   * them cuts a branch. A clone with no branch named stands on the remote's
+   * default branch, which is what those stages want to read.
    */
-  project: { name: string; remote: string; branch: string };
+  project: { name: string; remote: string; branch?: string };
 }
 
 /**
@@ -177,7 +182,8 @@ export function uncommittedRefusal(files: readonly string[]): string {
 export interface WorkspaceInput {
   timone: TimonePin;
   project: TicketingProject;
-  branch: string;
+  /** Absent at a stage that owns no branch. See {@link SessionWorkspace}. */
+  branch?: string;
 }
 
 /** What the spawner asks a runtime to run. */
@@ -261,7 +267,10 @@ function workspaceOf(input: WorkspaceInput): SessionWorkspace {
     project: {
       name: input.project.name,
       remote: input.project.repoUrl,
-      branch: input.branch,
+      // Spread rather than assigned, for `sessionRequest`'s reason: a stage
+      // that owns no branch produces a workspace with no `branch` key, not
+      // one set to undefined that a runtime would have to tell apart.
+      ...(input.branch === undefined ? {} : { branch: input.branch }),
     },
   };
 }
@@ -771,18 +780,39 @@ async function forgeVerificationReport(
  * half correct on its own, and no unit test able to see the gap between them,
  * because until the box became the default no runtime read the field.
  *
- * Absent when the checkout can name no version, or the run holds no branch
- * yet. Both are legitimate: the in-process runtime ignores the field, and a
- * stage that has not cut a branch has none to name. The container runtime
- * refuses such a request, which is the right answer for it.
+ * Absent only when the checkout can name no version. That is legitimate: the
+ * in-process runtime ignores the field, and a root that is no repository is a
+ * wiring mistake with a different fix.
+ *
+ * **A run that holds no branch still gets a workspace**, and it used to not.
+ * `triage`, `clarification`, `wayfinding` and `research` own no branch, so the
+ * old rule handed the container runtime a request with no workspace at all —
+ * which it refuses, by design. The refusal escapes to the poll loop, which
+ * logs it and leaves the run `picked-up`, so the next cycle refuses it again:
+ * a ticket that reads *"picked up, about to start"* for ever, and never
+ * starts. Seen live on ivtrends #57 on 2026-09-01, the first ordinary ticket
+ * filed on a project since the box became the default on 2026-08-22 — every
+ * run in between was a step of an initiative, and a step enters at `planning`,
+ * which does own a branch.
+ *
+ * The branch is what a clone is told to check out, and a stage that owns none
+ * wants the project's default branch — which is where a clone stands when it
+ * is told nothing. So the honest request is "clone the project, name no
+ * branch", not "no workspace at all".
  */
 function workspaceFor(
   pin: TimonePin | undefined,
   project: TicketingProject,
   branch: string | undefined,
 ): { workspace?: WorkspaceInput } {
-  if (pin === undefined || branch === undefined) return {};
-  return { workspace: { timone: pin, project, branch } };
+  if (pin === undefined) return {};
+  return {
+    workspace: {
+      timone: pin,
+      project,
+      ...(branch === undefined ? {} : { branch }),
+    },
+  };
 }
 
 /** Reduce an error to one readable line. */

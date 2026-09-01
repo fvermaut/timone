@@ -431,6 +431,41 @@ describe("what the box is given, and what it is not", () => {
 
     await expect(runtimeWith(spawn).start(bare)).rejects.toThrow(/workspace/);
   });
+
+  it("starts on a workspace that names no branch, and checks none out", async () => {
+    // The stuck-run fault, seen live on ivtrends #57 on 2026-09-01: `triage`
+    // owns no branch, the spawner therefore sent no workspace at all, and this
+    // runtime refused every cycle for ever. A workspace with no branch is the
+    // honest request — clone the project, stand on its default branch — and
+    // the box has to accept it.
+    const { spawn, calls } = fakeContainer([started, result()]);
+    const branchless = sessionRequest({
+      cwd: "/root",
+      prompt: "do the thing",
+      model: "claude-sonnet-5",
+      workspace: {
+        timone: {
+          commit: TIMONE_COMMIT,
+          remote: "https://github.com/fvermaut/timone.git",
+        },
+        project: {
+          name: "scratch-app",
+          repoUrl: "https://github.com/fvermaut/scratch-app.git",
+        },
+      },
+    });
+
+    const session = await runtimeWith(spawn).start(branchless);
+
+    expect(session.sessionId).toBe("sess-1");
+    const call = calls.find((entry) => entry.args[0] === "run")!;
+    expect(call.env?.PROJECT_BRANCH).toBeUndefined();
+    const script = call.args.at(-1)!;
+    expect(script).toContain(
+      'git clone --quiet "$PROJECT_REMOTE" /workspace/timone/projects/scratch-app',
+    );
+    expect(script).not.toContain("$PROJECT_BRANCH");
+  });
 });
 
 describe("the environment the box gets for the project", () => {
