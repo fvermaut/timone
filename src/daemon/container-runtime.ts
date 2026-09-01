@@ -413,9 +413,15 @@ function boxScript(
     // The project, on the branch this run works. A branch that does not exist
     // yet is the ordinary case before the stage that cuts one, so the checkout
     // is allowed to fail and the clone's default branch stands.
+    //
+    // **A stage that owns no branch names none**, and then there is nothing to
+    // check out: the clone's default branch is already the right place for
+    // triage, clarification, wayfinding and research to read the project from.
     `mkdir -p ${WORKSPACE}/timone/projects`,
     `git clone --quiet "$PROJECT_REMOTE" ${project}`,
-    `git -C ${project} checkout --quiet "$PROJECT_BRANCH" 2>/dev/null || true`,
+    ...(workspace.project.branch === undefined
+      ? []
+      : [`git -C ${project} checkout --quiet "$PROJECT_BRANCH" 2>/dev/null || true`]),
 
     // The environment this run gets for the project, written where the
     // project's own tooling looks for it (ADR-0045). The committed template
@@ -868,7 +874,11 @@ export function containerRuntime(
         TIMONE_REMOTE: cloneable(workspace.timone.remote),
         TIMONE_COMMIT: workspace.timone.commit,
         PROJECT_REMOTE: cloneable(workspace.project.remote),
-        PROJECT_BRANCH: workspace.project.branch,
+        // Absent at a stage that owns no branch — the box's script asks for no
+        // checkout then, and the clone's default branch stands.
+        ...(workspace.project.branch === undefined
+          ? {}
+          : { PROJECT_BRANCH: workspace.project.branch }),
         // The stage's prompt, with what the box knows about itself in front
         // of it. A run that does not know it is in a container reports the
         // container as the project's problem (ADR-0045).

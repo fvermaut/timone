@@ -280,8 +280,14 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
                   name: workspace.project.name,
                   repoUrl: workspace.project.remote,
                 },
-                branch: workspace.project.branch,
-                runId: `${workspace.project.name}-${workspace.project.branch}`,
+                ...(workspace.project.branch === undefined
+                  ? {}
+                  : { branch: workspace.project.branch }),
+                // A stage that owns no branch works on the project's default
+                // branch, and every such run of one project shares this stack
+                // name — which is right: only one run of a project is ever
+                // running at a time (ADR-0026's one-session-per-project rule).
+                runId: `${workspace.project.name}-${workspace.project.branch ?? "default"}`,
                 root,
                 ...(credentials === undefined
                   ? {}

@@ -4906,6 +4906,38 @@ describe("a request carries the workspace a boxed session clones from", () => {
     }
   });
 
+  it("still names a workspace at a stage that owns no branch", async () => {
+    // The stuck-run fault, watched live on ivtrends #57 on 2026-09-01. A run
+    // entering at `triage` owns no branch, so the old rule sent the container
+    // runtime no workspace — which it refuses. The poll loop logged the
+    // refusal and left the run `picked-up`, so the next cycle refused it
+    // again, for ever: a ticket reading "picked up, about to start" and never
+    // starting. Nothing was said on the ticket and nothing failed.
+    const store = newStore();
+    const { adapter } = fakeAdapter({ ...thread, labels: ["timone"], comments: [] });
+    const { runtime, requests } = fakeRuntime();
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      timoneProbe: async () => ({ uncommitted: [], pin: PIN }),
+      repoProbe: movingProbe(),
+    }).spawn(pickedUpRun(store), project, { stage: "triage" });
+
+    expect(requests.length).toBeGreaterThan(0);
+    const workspace = requests[0].workspace;
+    expect(workspace?.timone).toEqual(PIN);
+    expect(workspace?.project.name).toBe("scratch-app");
+    expect(workspace?.project.remote).toBe(project.repoUrl);
+    // No branch key at all, rather than one set to undefined: the runtime has
+    // nothing to tell apart, and a clone told nothing stands on the default
+    // branch, which is what a stage owning no branch wants to read.
+    expect(workspace?.project).not.toHaveProperty("branch");
+  });
+
   it("omits the workspace when the checkout can name no version", async () => {
     // A fixture root that is no repository. The in-process runtime ignores
     // the field entirely, so such a run still works exactly as it did.
