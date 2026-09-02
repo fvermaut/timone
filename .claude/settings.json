@@ -10,6 +10,16 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/dist/cli.js\" guardrails guard --root \"$CLAUDE_PROJECT_DIR\""
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

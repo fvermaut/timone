@@ -39,6 +39,8 @@ Your independence is a **closed allowed list**; anything not on it is not read, 
 - **`README.md`, `CONTEXT.md`, `doc/standards.md`, `STATUS.md`** in the target project — operational instructions, the domain's canonical terms, the conventions record (whose open non-conformances may already predict a failure), and the status file you are obliged to update at the end.
 - **The operational configuration that stands the app up rather than implementing it** — compose files, `.env` / `.env.example`, the run and test scripts a package manifest declares. These tell you which port, which credentials, which command; they carry no behaviour under test. Reading the *application* config a criterion's behaviour depends on is a different act and stays forbidden.
 - **Timone's own `standards/` baseline** — the accessibility and UI/UX entries are what the browser channel's baseline leg enforces.
+- **Your own probe directory, `doc/plans/phases/probes/`** — the probes previous verification passes committed. It is yours: only this stage writes there, and stage 6 is blocked from reading it. See The probes below.
+- **Timone's shared baseline probes, `standards/baseline/probes/`** — the accessibility and UI/UX checks every project's browser channel runs.
 
 **Never read:**
 
@@ -47,9 +49,9 @@ Your independence is a **closed allowed list**; anything not on it is not read, 
 - **Anything under the source tree, including the committed test suite.** The suite encodes the builder's understanding of the requirements; verifying against it verifies the builder against the builder.
 - **ADRs** — build intent. Observable behaviour does not need them.
 
-The project's own suite may be run **once**, as a build-health smoke, and reported as exactly that — it is never criterion evidence. All evidence comes from probes you author yourself, from the register's clauses alone, written in scratch space **outside the project tree** and never committed.
+The project's own suite may be run **once**, as a build-health smoke, and reported as exactly that — it is never criterion evidence. All criterion evidence comes from probes authored by a verifier — this pass or an earlier one — from the register's clauses alone.
 
-**A smoke that contradicts a probe is an instrument alarm, not a footnote.** When the build-health smoke fails on behaviour one of your probes passes — or passes behaviour your probes fail — one of the two instruments is measuring wrong, and the pass may not conclude until you know which. Resolve it instrument-side: re-calibrate your probe and prove what it actually transmits and observes. The suite stays non-evidence either way; what it is here is a tripwire, and filing the contradiction as "a discrepancy for the human" while your verdicts stand is exactly the false-negative path this rule exists to close.
+**A smoke that contradicts a probe is an instrument alarm, not a footnote.** When the build-health smoke fails on behaviour one of your probes passes — or passes behaviour your probes fail — one of the two instruments is measuring wrong, and the pass may not conclude until you know which. Resolve it instrument-side: run the probe's break step and prove what it actually transmits and observes. The suite stays non-evidence either way; what it is here is a tripwire, and filing the contradiction as "a discrepancy for the human" while your verdicts stand is exactly the false-negative path this rule exists to close.
 
 ## The gates
 
@@ -65,7 +67,7 @@ Each gate stops verification. When one fires you write **nothing** into the proj
 
 - **Verify at the phase branch's HEAD** (`phase-NN-<slug>`). Refuse a dirty working tree — report what is dirty; never stash or reset around it.
 - **When the phase stacks on a phase whose verification commits are absent from its ancestry, merge that branch in first and say so** in the report. A stacked phase cut before its parent was verified cannot see the parent's register flips, so its regression computation would read stale `draft` statuses and silently verify nothing. The merge is recorded as part of the environment, not hidden.
-- **Leave the clone on the verified branch, clean.** Your probes live outside the tree, so nothing of yours should be left behind.
+- **Leave the clone on the verified branch, clean.** Your probes are committed with the report, so the only thing left behind is the artifact you meant to leave; scratch working files stay outside the tree.
 - **Re-verifying an already-reported phase appends an iteration section** to the existing report — dated, with its own verdict table — never a second file. The register reflects the latest iteration.
 
 ## Scope
@@ -87,11 +89,34 @@ Stand the app up **in its production form** where the stack distinguishes one �
 
 Each criterion carries a `Verify-via` channel; each of its clauses gets its own outcome.
 
-- **`api`** — terminal-checkable. Author your own probes from the clause alone: HTTP against the running app, direct database readback through the project's own client tooling. Scripts live in scratch space, never in the tree, never committed. This channel forms the standing regression suite.
-- **`browser`** — driven UI checks (Playwright, or the playwright MCP tools). For **user-facing deliverables the baseline leg is unconditional**: the automated accessibility scan (violations are failures — the baseline's rule, enforced here), a keyboard-only pass in which focus assertions are mechanical (where `document.activeElement` lands after each action is a fact, not a judgement), and the baseline's reflow checks. Where tooling cannot reach a baseline requirement, that clause becomes a HUMAN-CHECK with a precise script — never a silent skip, never an assumed pass.
+- **`api`** — terminal-checkable. HTTP against the running app, direct database readback through the project's own client tooling. Run the criterion's committed probe when one exists; author it from the clause alone when it does not. This channel forms the standing regression suite, and it is the one the saved probes pay off on.
+- **`browser`** — driven UI checks (Playwright, or the playwright MCP tools). For **user-facing deliverables the baseline leg is unconditional**: the automated accessibility scan (violations are failures — the baseline's rule, enforced here), a keyboard-only pass in which focus assertions are mechanical (where `document.activeElement` lands after each action is a fact, not a judgement), and the baseline's reflow checks. **Do not write these yourself** — they are Timone's, at `standards/baseline/probes/`, they take a page address, and they are the same for every project. Write a project probe only for what the project's own criteria assert. Where tooling cannot reach a baseline requirement, that clause becomes a HUMAN-CHECK with a precise script — never a silent skip, never an assumed pass.
 - **`human`** — reported as **HUMAN-CHECK** with a precise manual script in the template below: setup, numbered steps, the expected observation, where to record the result. Emitting the script *is* this channel's deliverable; performing it is the human's act, on the human's schedule. Never simulate one, never mark one performed on your own authority.
 
-**Calibrate the instrument before trusting it.** A probe that cannot fail is not evidence. Before a probe's verdict counts, show it could have detected the failure it exists to catch — above all when the clause asserts a transformation of input (trimming, normalization, rejection): first prove the probe delivers its input **verbatim** to the app's boundary, because transport tooling silently normalizes (a multipart flag that strips padding, a shell that eats quotes, a client that URL-encodes), and a probe that pre-applies the expected transformation can only agree with the app. This is the verification-side twin of stage 6's tautological-assertion rule: a probe passing on arrival, never having been seen to distinguish conforming from non-conforming behaviour, deserves the same suspicion as a test never seen red.
+## The probes
+
+A probe is a **committed artifact of this stage**, at `projects/<name>/doc/plans/phases/probes/<criterion-id>.<ext>` — one file per criterion, beside the reports, never in the source tree and never in the project's own test directories. It goes into the same `docs: verify phase NN — <theme>` commit as the report and the register flip.
+
+**Author fresh, then run.** A probe is written from the register's clauses the first time its criterion is checked. Later passes **run** it — you do not re-derive it, and re-deriving it by hand is the cost this exists to remove. Throw it away and write it again from the register when the criterion's status is `revised`: changed intent makes the old probe stale by definition.
+
+Reading a probe a previous verifier wrote is the same carve-out this skill already grants HUMAN-CHECK scripts — a stage-7 artifact carries evidence and scripts, never build knowledge. **It does not extend to the builder's suite**, which stays unreadable for the reason it always was.
+
+**Red before green — a probe's pass counts only after the probe has been seen to fail, in this run, on this build.** Every probe carries a step that breaks, on purpose, the thing it exists to catch. Every run does both legs, in order:
+
+1. Break it. Run the probe. **It must go red.**
+2. Restore it. Run the probe. **It must go green.**
+
+Green alone is not evidence. Green on both legs means the instrument is broken, not that the app is right: stop there, say so, and record no pass for that criterion. This is the executed form of the rule that used to ask you to calibrate — [timone#36](https://github.com/fvermaut/timone/issues/36) is the record of what asking was worth, three passes running. It also catches decay for free: a probe whose query or selector has stopped matching the app cannot be made to go red either.
+
+Where the clause asserts a **transformation of input** (trimming, normalization, rejection), the break step is the one that proves transport: show the probe delivers its input **verbatim** to the app's boundary, because tooling silently normalizes (a multipart flag that strips padding, a shell that eats quotes, a client that URL-encodes), and a probe that pre-applies the expected transformation can only agree with the app.
+
+**A probe with no break step is still committed, and flagged.** Some clauses have no single fact to flip — *"nothing raw survives the night"* has none. Mark it in the file and in the report, with the reason. It still runs. The report states the count plainly — *"18 probes proven able to fail, 2 not"* — so an unproven probe is a visible number and never a silent assumption.
+
+**Label the output per clause, in the register's words.** `=== R1 clause 4 — a watched name with no index membership is still ingested`. Each pass, compare the register's clause list against the labels the probe printed: a criterion with seven clauses whose probe prints six has a gap, and you write the missing clause now. This catches a clause added to a criterion whose probe was never extended. It does not catch a probe that covers every clause but tests one wrongly — the break step is what limits that, since a probe aimed at the wrong fact usually cannot be made to go red on the right one.
+
+**The baseline probes are Timone's, not the project's.** The accessibility and UI/UX checks live once under `standards/baseline/probes/`, take a page address, and are run by every project's browser channel. The project's own directory holds only what is specific to its rules and data.
+
+**Run the set with one command, in parallel.** `node doc/plans/phases/probes/run.mjs --regression` against the standing app, printing a verdict table and each probe's per-clause output. The report quotes that output, so its required elements are unchanged — commands as run, per-clause outcomes.
 
 ## The fix loop
 
@@ -119,7 +144,7 @@ Each criterion carries a `Verify-via` channel; each of its clauses gets its own 
 
 **Verdicts:** PASS / FAIL / HUMAN-CHECK / BLOCKED. **REGRESSION** is the FAIL variant reserved for a criterion that entered the pass already `verified` — same failure class, counts against the gate's zero-regressions clause, consumes the same fix loop; the distinct label exists because shipped behaviour broke and stage 9 reads it differently. **BLOCKED** asserts nothing about behaviour: register untouched, gate blocked, human routed, no loop consumed.
 
-**Only this stage writes the register's `Status` field** — once per pass, at pass conclusion, never mid-pass, in the same commit as the report: `docs: verify phase NN — <theme>` on the phase's branch. The report-flip coupling in one commit is the evidence link; the register line itself stays bare.
+**Only this stage writes the register's `Status` field** — once per pass, at pass conclusion, never mid-pass, in the same commit as the report and the probes: `docs: verify phase NN — <theme>` on the phase's branch. The report-flip coupling in one commit is the evidence link; the register line itself stays bare.
 
 - `draft` → `verified` on PASS.
 - `draft` → `failed` at loop exhaustion.
@@ -147,7 +172,7 @@ Each criterion carries a `Verify-via` channel; each of its clauses gets its own 
 
 ## Independence declaration
 
-Read: <the allowed-list artifacts actually read, by path>. Not read: handoffs, diffs, source, the committed test suite, ADRs. No implementation source was read; all criterion evidence below comes from verifier-authored probes.
+Read: <the allowed-list artifacts actually read, by path>. Not read: handoffs, diffs, source, the committed test suite, ADRs. No implementation source was read; all criterion evidence below comes from verifier-authored probes, run from `doc/plans/phases/probes/` and `standards/baseline/probes/` or written this pass.
 
 ## Verdict summary
 
@@ -174,6 +199,10 @@ Read: <the allowed-list artifacts actually read, by path>. Not read: handoffs, d
 
 <The derived set's results, one line per ID — or "The derived regression set is empty; nothing to re-run." Stated, never omitted.>
 
+## Probes
+
+<The count, stated plainly: "N probes proven able to fail, M not." Then, per probe: its criterion, whether it was authored this pass or run from the directory, and the outcome of its break step. Every probe with no break step is named here with the reason it has none. Probes written or rewritten this pass are listed with why — first check of the criterion, or the criterion was `revised`. Clause coverage: any criterion whose register clause count exceeds the labels its probe printed, and what was written to close the gap.>
+
 ## Fix-loop accounting
 
 <N of 2 loops consumed. Per loop: the briefs issued, the fix commits returned, the full re-verify's outcome. "0 of 2 — the initial pass was clean." when so.>
@@ -199,9 +228,9 @@ Before finishing, update the target project's `STATUS.md` — **on the project's
 4. Check out the phase branch; merge in an unancestored parent's verification commits when stacked; refuse dirt.
 5. Derive the scope: claimed set + computed regression set. List both.
 6. Stand up the environment in production form (gate 3 if it will not come up — everything BLOCKED, report, stop).
-7. Check every in-scope criterion per its channel; write HUMAN-CHECK scripts where only a human can look.
+7. For every in-scope criterion, run its committed probe, or author one when there is none or the criterion is `revised`. Run the shared baseline probes for the browser channel. Every probe runs its break step first: red, then green. Compare each register clause list against the labels the probe printed and close any gap. Write HUMAN-CHECK scripts where only a human can look.
 8. FAILs → defect briefs → fresh fix context → full re-verify. Max 2 loops, then exhaustion protocol.
-9. Write the report and flip the register in one `docs: verify phase NN — <theme>` commit. Update `STATUS.md`.
+9. Write the report, commit the probes, and flip the register — all in one `docs: verify phase NN — <theme>` commit. Update `STATUS.md`.
 10. Report per Closing below.
 
 

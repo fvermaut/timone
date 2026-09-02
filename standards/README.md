@@ -20,6 +20,8 @@ Discipline for every entry (see `process.md`, "The standards library"):
 
 Every project's `doc/standards.md` includes the baseline unconditionally. Enforcement: PRD accessibility criteria (stage 3), verification checks (stage 7), delivery Standards review (stage 8).
 
+**The baseline's stage-7 checks are code, not prose** — [baseline/probes/](baseline/probes/README.md) holds them, written once and run by every project's browser channel ([ADR-0048](../doc/adr/0048-a-verification-probe-is-kept-proved-able-to-fail-and-hidden-from-the-builder.md) D5). Stage 6 may not read that directory, and a hook refuses it rather than a rule asking.
+
 ## Review references (applied by stage 8 to every project, overridable)
 
 | Entry | Scope | Status |

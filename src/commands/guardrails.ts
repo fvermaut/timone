@@ -17,6 +17,7 @@ import {
   type Violation,
 } from "../daemon/hooks.js";
 import { loadManifest, type Manifest } from "../manifest.js";
+import { probeGuardDecision } from "../daemon/probeGuard.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 
 /** How long a parked baseline outlives the session that wrote it. */
@@ -26,6 +27,9 @@ const BASELINE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export interface HookPayload {
   session_id: string;
   cwd?: string;
+  /** `PreToolUse` only: which tool is about to run, and with what. */
+  tool_name?: string;
+  tool_input?: unknown;
 }
 
 /**
@@ -115,6 +119,37 @@ export function trailerInstruction(sessionId: string): string {
     "makes machine-authored work identifiable from git history alone, and an",
     "automatic check at the end of this session reports any commit that lacks them.",
   ].join("\n");
+}
+
+export interface GuardDeps {
+  store: RunStore;
+  sessionId: string;
+  toolInput: unknown;
+}
+
+/**
+ * `PreToolUse`: refuse a builder the verifier's probes
+ * ([ADR-0048](../../doc/adr/0048-a-verification-probe-is-kept-proved-able-to-fail-and-hidden-from-the-builder.md) D4).
+ *
+ * Returns the hook's JSON reply, or undefined to say nothing — which is the
+ * answer for almost every tool call ever made. The stage comes from the
+ * ledger the same way {@link runCheck} finds the run: resolved from the
+ * session id, never configured, so an interactive session is recognised by
+ * having no run rather than by being told it has none.
+ */
+export function runGuard(deps: GuardDeps): string | undefined {
+  const run = runForSession(deps.store, deps.sessionId);
+  const decision = probeGuardDecision({
+    toolInput: deps.toolInput,
+    stage: run?.stage,
+  });
+  if (decision === undefined) return undefined;
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      ...decision,
+    },
+  });
 }
 
 export interface CheckDeps {
@@ -260,6 +295,39 @@ export function registerGuardrailsCommand(program: Command): void {
     } catch (error) {
       console.error(
         `guardrails baseline: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  });
+
+  commonOptions(
+    guardrails
+      .command("guard")
+      .description(
+        "Refuse a build run the verifier's probes (PreToolUse hook)",
+      ),
+  ).action(async (options: { root: string; state?: string }) => {
+    // Same posture as the other two: nothing here may fail a session. A guard
+    // that throws blocks every tool call in every session, which is a far
+    // worse outcome than the leak it is watching for.
+    try {
+      const payload = await readHookPayload(process.stdin);
+      if (payload === undefined) return;
+      const root = resolve(options.root);
+      const statePath =
+        options.state === undefined
+          ? defaultStatePath(root)
+          : resolve(options.state);
+      const reply = runGuard({
+        store: RunStore.open(statePath),
+        sessionId: payload.session_id,
+        toolInput: payload.tool_input,
+      });
+      // Silence is the common case and the correct one: no opinion, no delay,
+      // no line in anybody's transcript.
+      if (reply !== undefined) console.log(reply);
+    } catch (error) {
+      console.error(
+        `guardrails guard: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   });

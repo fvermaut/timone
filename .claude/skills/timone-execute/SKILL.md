@@ -42,6 +42,10 @@ Never execute from the plan excerpt alone. Read, in the target project:
 - **`doc/specs/prd/*.criteria.md`** for the requirement IDs the phase claims — the behaviour the code owes. You never flip a criterion's `Status`: `verified` / `failed` are stage 7's to write.
 - **Timone's own `standards/`** — the `Approved` entries for this project's stack, read **unconditionally**. They are normative, and they routinely decide questions a slice would otherwise treat as an open choice.
 
+**Never read — and this one is enforced, not requested:**
+
+- **`doc/plans/phases/probes/` in the project, and `standards/baseline/probes/` in Timone.** These are the checks stage 7 runs against what you build. A builder that reads them writes code to pass them, which is the same fault as a verifier checking against your test suite, with the two parties swapped. **A `PreToolUse` hook refuses the read**, so a slip costs a refused tool call rather than a tainted build; do not work around it, and do not ask a sub-agent to fetch them for you. If you believe a probe is wrong, that is a finding for the human, not a file to open.
+
 Then, before cutting any branch, **check the plan against the repository**: does every file a slice marks `[MODIFY]` actually exist, and can each validation command run **and its stated assertions be satisfied** on this project as it stands? A command that executes cleanly while its assertion can never be true — a linter that is already failing on untouched code, a probe for a condition the slice's own file list forbids delivering — is as much a blocker as one that will not run. This costs one pass and it is the cheapest moment to catch a plan that cannot execute — gate 3 otherwise fires only after a branch exists and a slice has been dispatched. Report every problem you find in one go, not the first one.
 
 **What to do with what pre-flight finds.** A blocker affecting the slice you are about to run stops execution before the branch is cut. A blocker scoped to a *later* slice does not: deliver the slices ahead of it, then stop at the blocked one and route — an early abort would forfeit sound work to fix something the plan can be amended for. Say up front which slice you expect to stop at, so the stop is a prediction you announced rather than a surprise. The exception is a blocker that invalidates the earlier slices' own work; then stop cold.
@@ -105,6 +109,8 @@ Nothing else. Not the rest of the phase file, not the PRD, not your reasoning ab
 The slice writes code, tests, and its handoff section. It does not create the branch and does not commit. You gate, then you commit.
 
 **Mechanism is an example, never a requirement.** Today the obvious instrument is a sub-agent spawned from this session with that input set as its prompt. PRD-02's daemon will spawn the same contract through the Agent SDK ([ADR-0002](../../../doc/adr/0002-typescript-claude-agent-sdk.md)). Anything that delivers those inputs and returns those two outputs satisfies stage 6; do not write a spawning mechanism into a slice's requirements, and do not treat one runtime's affordances as part of the contract.
+
+**Every sub-agent inherits this prohibition.** The probe directories are not on a slice's file list and never can be; say so in the slice's prompt, because a fresh context that was never told will try, be refused, and waste a turn working out why.
 
 ## Walking the sub-phases
 
