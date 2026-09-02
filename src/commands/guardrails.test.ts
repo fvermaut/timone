@@ -30,6 +30,7 @@ import {
   runBaseline,
   runCheck,
   runForSession,
+  runGuard,
 } from "./guardrails.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
@@ -203,6 +204,70 @@ describe("reading the hook payload", () => {
     expect(await readHookPayload(Readable.from(["not json"]))).toBeUndefined();
     expect(await readHookPayload(Readable.from(["{}"]))).toBeUndefined();
     expect(await readHookPayload(Readable.from([""]))).toBeUndefined();
+  });
+});
+
+describe("guarding the verifier's probes", () => {
+  /** A ledger holding one run for `session-abc`, parked at `stage`. */
+  const ledgerAt = (root: string, stage: "execution" | "verification"): RunStore => {
+    const store = newStore(root);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-abc");
+    store.setStage(run.id, stage);
+    return store;
+  };
+
+  it("says nothing about a tool call that touches no probe", () => {
+    const { root } = workspace();
+    expect(
+      runGuard({
+        store: ledgerAt(root, "execution"),
+        sessionId: "session-abc",
+        toolInput: { file_path: "src/index.ts" },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("refuses a build run the probe directory", () => {
+    const { root } = workspace();
+    const reply = runGuard({
+      store: ledgerAt(root, "execution"),
+      sessionId: "session-abc",
+      toolInput: { file_path: "doc/plans/phases/probes/PRD-01.R3.mjs" },
+    });
+
+    expect(JSON.parse(reply ?? "{}")).toMatchObject({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+      },
+    });
+  });
+
+  it("lets the verification run that owns them through", () => {
+    const { root } = workspace();
+    const reply = runGuard({
+      store: ledgerAt(root, "verification"),
+      sessionId: "session-abc",
+      toolInput: { file_path: "doc/plans/phases/probes/PRD-01.R3.mjs" },
+    });
+
+    expect(JSON.parse(reply ?? "{}").hookSpecificOutput.permissionDecision).toBe(
+      "allow",
+    );
+  });
+
+  it("asks when no run drove the session, because a human is at the keyboard", () => {
+    const { root } = workspace();
+    const reply = runGuard({
+      store: newStore(root),
+      sessionId: "session-nobody",
+      toolInput: { command: "cat standards/baseline/probes/axe.mjs" },
+    });
+
+    expect(JSON.parse(reply ?? "{}").hookSpecificOutput.permissionDecision).toBe(
+      "ask",
+    );
   });
 });
 
