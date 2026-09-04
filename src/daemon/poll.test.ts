@@ -58,6 +58,7 @@ function breakdownIn(
 }
 
 import { enqueue, pending, requestsDir } from "./requests.js";
+import type { Holder } from "./holder.js";
 import { RunStore, type Run } from "./runs.js";
 import { pollOnce, type SessionSpawner, type SpawnContext } from "./poll.js";
 import { processStage, stageLabel } from "./pipeline.js";
@@ -2059,6 +2060,174 @@ function fakePreviews(
     released,
   };
 }
+
+describe("a run whose holder can be asked about", () => {
+  const FOUR_INTERVALS = 4 * 30 * 1000;
+  const POLL_INTERVAL = 60 * 1000;
+
+  /**
+   * A store whose clock and whose idea of the process table the test sets
+   * (ADR-0049 D2, extending ADR-0025). The pid table is injected for the
+   * reason `lock.test.ts` gives: a test cannot portably manufacture a dead
+   * pid, so an uninjected probe would leave these cases asserting against
+   * whatever the runner's machine happens to be running.
+   */
+  function watchedStore(alive: readonly number[]): {
+    store: RunStore;
+    set: (iso: string) => void;
+  } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-holder-sweep-"));
+    tempDirs.push(dir);
+    let instant = "2026-09-04T10:00:00Z";
+    return {
+      store: RunStore.open(join(dir, ".timone", "state.json"), {
+        now: () => instant,
+        livenessOf: (holder) => (alive.includes(holder.pid) ? "alive" : "gone"),
+      }),
+      set: (iso) => {
+        instant = iso;
+      },
+    };
+  }
+
+  /** A holder as a daemon or a terminal records one. */
+  function holderOf(command: string, pid: number): Holder {
+    return {
+      token: `token-${pid}`,
+      command,
+      pid,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    };
+  }
+
+  /** Leave the witness where a daemon polling right through would leave it. */
+  function watchingSince(store: RunStore, from: string, to: string): void {
+    for (let at = Date.parse(from); at < Date.parse(to); at += POLL_INTERVAL) {
+      store.witness({
+        unwitnessedAfterMs: 2 * POLL_INTERVAL,
+        staleAfterMs: FOUR_INTERVALS,
+        now: new Date(at).toISOString(),
+      });
+    }
+  }
+
+  /** A run active on a work branch, held by whoever `holder` says. */
+  function runningRun(store: RunStore, holder?: Holder): string {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1", holder);
+    store.claimBranch(run.id, "timone/7-slow");
+    return run.id;
+  }
+
+  /** One cycle at `at`, with the sweep's threshold set to four intervals. */
+  async function cycleAt(
+    store: RunStore,
+    set: (iso: string) => void,
+    at: string,
+    lines: string[],
+  ) {
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    watchingSince(store, "2026-09-04T10:00:00Z", at);
+    set(at);
+    return pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      log: (line) => lines.push(line),
+    });
+  }
+
+  it("leaves a silent run alone while its holder's process is still running", async () => {
+    // ADR-0025's argument, applied where it was always needed. A session that
+    // is thinking says nothing for as long as it thinks, and the clock cannot
+    // tell that from a corpse. The pid can.
+    const { store, set } = watchedStore([4213]);
+    const id = runningRun(store, holderOf("timone daemon scratch-app#7/1", 4213));
+    const lines: string[] = [];
+
+    const result = await cycleAt(store, set, "2026-09-04T10:09:00Z", lines);
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get(id)?.status).toBe("active");
+  });
+
+  it("reclaims a silent run whose holder's process is gone", async () => {
+    const { store, set } = watchedStore([]);
+    const id = runningRun(store, holderOf("timone daemon scratch-app#7/1", 4213));
+    const lines: string[] = [];
+
+    await cycleAt(store, set, "2026-09-04T10:09:00Z", lines);
+
+    expect(store.get(id)?.status).not.toBe("active");
+  });
+
+  it("still judges a run with no holder by witnessed time", async () => {
+    // ADR-0020's path, untouched. Every run written before ADR-0049 is in
+    // this state, and a phase that fixed runs by deleting the overnight
+    // protection would have traded one live defect for a worse one.
+    const { store, set } = watchedStore([]);
+    const id = runningRun(store);
+    const lines: string[] = [];
+
+    const result = await cycleAt(store, set, "2026-09-04T10:09:00Z", lines);
+
+    expect(result.reclaimed).toEqual([id]);
+  });
+
+  it("reclaims nothing with no holder and a gap it cannot vouch for", async () => {
+    const { store, set } = watchedStore([]);
+    const id = runningRun(store);
+    const lines: string[] = [];
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    // One cycle, then nothing for an hour: the daemon was not there and
+    // cannot say whether the run went quiet or the machine did.
+    store.witness({
+      unwitnessedAfterMs: 2 * POLL_INTERVAL,
+      staleAfterMs: FOUR_INTERVALS,
+      now: "2026-09-04T10:00:00Z",
+    });
+    set("2026-09-04T11:00:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      log: (line) => lines.push(line),
+    });
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get(id)?.status).toBe("active");
+    expect(lines.some((line) => line.includes("was not running for"))).toBe(true);
+  });
+
+  it("does not take a run away from a live takeover", async () => {
+    // timone#63, replayed. A terminal holds the run through a conversation
+    // that may last an hour, and the sweep took it back after two minutes —
+    // so the handback could never be read and the human's session was talking
+    // to a run that had been failed under it.
+    const { store, set } = watchedStore([9100]);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/7-slow");
+    store.park(run.id, { waitingOn: "me — a question", kind: "conversation" });
+    store.claim(run.id, holderOf("timone takeover scratch-app#7", 9100));
+    const lines: string[] = [];
+
+    const result = await cycleAt(store, set, "2026-09-04T10:09:00Z", lines);
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get(run.id)?.status).toBe("active");
+    expect(store.get(run.id)?.holder?.pid).toBe(9100);
+  });
+});
 
 describe("pollOnce — previews are opt-in", () => {
   it("does not reconcile a project with no preview binding at all", async () => {

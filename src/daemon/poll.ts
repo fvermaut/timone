@@ -951,6 +951,13 @@ async function applyRequest(
   }
 }
 
+/** Who is holding a run, as a log line names them. */
+function heldBy(run: Run): string {
+  const holder = run.holder;
+  if (holder === undefined) return "nobody";
+  return `${holder.command} (pid ${holder.pid})`;
+}
+
 /**
  * Why the daemon is not checking for dead runs, in the terms an operator can
  * act on — and in plain words, because a person reads this line.
@@ -1027,10 +1034,34 @@ async function reclaimStale(
   threadsFor: (ticket: number) => RunThreads,
 ): Promise<void> {
   const { store, adapter } = deps;
-  if (!witness.mayJudge) return;
 
   for (const run of store.staleRuns(threshold)) {
     if (run.project !== project.name) continue;
+
+    // Who is holding it decides, and the clock only decides where nobody is
+    // (ADR-0049 D2, extending ADR-0025 to runs).
+    //
+    // `alive` ends it here however long the silence: a session that is
+    // thinking says nothing for as long as it thinks, and a terminal holds a
+    // takeover for as long as the conversation lasts — which is timone#63,
+    // where the sweep took a run back from a live conversation after two
+    // minutes and the handback could never be read.
+    //
+    // `gone` is proof, so it does not wait for the witness: the daemon does
+    // not need to have been watching to know a pid it can ask about is not
+    // there. That is what lets a killed session stop reading as working
+    // (timone#11) rather than waiting out a window nobody was present for.
+    //
+    // `unknown` and `none` fall through to ADR-0020 exactly as before. A
+    // holder on another machine cannot be asked, and a run with no holder is
+    // every run written before this — so witnessed time still protects a
+    // laptop that slept, which is what phase 17 verified.
+    const held = store.hold(run);
+    if (held === "alive") {
+      log(`holding ${run.id} — ${heldBy(run)} is still running`);
+      continue;
+    }
+    if (held !== "gone" && !witness.mayJudge) continue;
 
     // The verdict on the branch is asked for before the verdict on the
     // session, and it overrules it. A session can die *after* its pull request
