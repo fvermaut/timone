@@ -97,7 +97,7 @@ Pre-flight finding (a), and [timone#70](https://github.com/fvermaut/timone/issue
 
 **The false one first.** A commit that is an ancestor of the remote default branch was not "written on this branch", whatever `git branch --contains` says. Fixing this alone removes the finding that fired wrongly on 2026-09-04 and on `ivtrends` on 2026-08-30.
 
-**The true one is a decision, not a bug.** A Timone self-run writes `STATUS.md` on a work branch because that is what every run does, and the file is genuinely not on `main` until the pull request merges. The rule is *right* and the answer is *"yes, and that is the process"*. Either the rule learns that a run's own work branch is where a status file is supposed to be written — the finding being about a *stray* commit, not a planned one — or it is dropped for a repository that is a managed project. **This slice may not guess**: it is on the question list below.
+**The true one is a decision, not a bug.** A Timone self-run writes `STATUS.md` on a work branch because that is what every run does, and the file is genuinely not on `main` until the pull request merges. The rule is *right* and the answer is *"yes, and that is the process"*. Either the rule learns that a run's own work branch is where a status file is supposed to be written — the finding being about a *stray* commit, not a planned one — or it is dropped for a repository that is a managed project. **This slice does not guess**: D-2 below settles it — expected on a run's own work branch, a finding anywhere else.
 
 Red-green: (1) a commit on the default branch and on a branch cut from it produces no finding; (2) a commit written only on a branch still does; (3) `ivtrends`' 2026-08-30 pair is replayed and only the true half fires.
 
@@ -108,7 +108,7 @@ npm run build && npx vitest run src/daemon/hooks.test.ts
 - [ ] Three cases, each seen red first
 - [ ] Case (3) uses the shas from the issue, not invented ones
 
-> Depends on nothing. **Its second half is blocked on the question below.**
+> Depends on nothing. Its second half is settled by D-2 below.
 
 ---
 
@@ -139,7 +139,7 @@ A real daemon, a real Timone ticket, in a box.
 
 Four things:
 
-1. **A Timone ticket is picked up, built in a box and opened as a pull request**, with `~/dev/timone` untouched throughout.
+1. **One of D-1's three tickets is picked up, built in a box and opened as a pull request**, with `~/dev/timone` untouched throughout.
 2. **The guards are silent** — no harness finding, no STATUS finding, no path finding, on a run that committed `src/`, `doc/` and `STATUS.md`.
 3. **The merge is fvermaut's** (D3), and the pull request says what it changed the way a client project's does.
 4. **The daemon says it is out of date** the moment that pull request merges (32a), which is D6's whole point.
@@ -167,8 +167,26 @@ Completion report at `reports/phase-32-complete.md`, and the first reading of D2
 32c ──┘
 ```
 
-## Questions for fvermaut, before this is approved
+## The two open questions, decided
 
-**1. How much of the open list goes to the daemon at first?** ADR-0050 speaks of the open issues becoming step tickets, and there are 26. Marking all of them means 26 pull requests to review under D3. Marking three means D2's number has a baseline and a bad first run costs one ticket. **My recommendation: three, chosen by you, none of them in `src/daemon`.** D4 says there is no fence, and that stands — this is a first week, not a fence.
+**fvermaut delegated both on 2026-09-04** — *"I let you decide the answers, whatever is fine for me"*. They are written here rather than left in a conversation, because a decision nobody can find later is a decision that gets taken again.
 
-**2. What should the STATUS.md rule say about a Timone self-run?** 32c fixes the false half either way. The true half is a real question: a run that writes `STATUS.md` on its work branch is doing what the process asks, and the guard calls it a fault. Either the rule accepts a status file on a run's own branch, or it stays and every self-run carries a finding you have to learn to ignore. **My recommendation: accept it on a run's own work branch, and keep the finding for a commit on any other branch** — that is what the rule was written to catch.
+### D-1 — Three tickets go first, and one of them is in `src/daemon`
+
+- **[#39](https://github.com/fvermaut/timone/issues/39)** — primary sources owed for the UI/UX baseline's craft rules. Documentation only, no code, and it exercises the whole loop cheaply. It may well hand back on the judgement it contains — a rule that is house style rather than research has to be *called* house style — and a handback on the first ticket is worth reading rather than avoiding.
+- **[#15](https://github.com/fvermaut/timone/issues/15)** — `timone status` is blind to three things the tickets know. `src/commands`, user-visible, and checkable at a terminal in one command.
+- **[#20](https://github.com/fvermaut/timone/issues/20)** — the duplicate approval comment. Small, its effect is visible on a ticket, and **it is in `src/daemon`**.
+
+**The third one contradicts this plan's own first recommendation, and the recommendation was weak.** It said "none of them in `src/daemon`", on the grounds that a bad change to the daemon breaks the machine making the change. [ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) already answers that: a run cannot modify the daemon hosting it, and D3's merge gate is where a change that would break the machine is caught. [ADR-0050 D4](../../adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md) refuses a fence in as many words, and a first three that only touched prose would prove nothing about the bet.
+
+**Three and not twenty-six**, because D2's number needs a baseline and a first week that goes wrong should cost one ticket rather than a day of reviewing.
+
+### D-2 — A status file on a run's own work branch is expected; anywhere else it is still a finding
+
+`checkStatusPlacement` keeps its purpose — a status file the human will not see is worth saying out loud — and gains two corrections.
+
+**The false half, which is [timone#70](https://github.com/fvermaut/timone/issues/70).** A commit that is an ancestor of the remote default branch was not written on this branch, whatever containment says. This is the fix that stops the rule reporting merges that have already landed.
+
+**The true half.** A run writes `STATUS.md` on its work branch because that is what the process asks of every stage, and the file reaches `main` when the pull request does. So a status file on a **run's own work branch, in the repository that run is working**, is expected and silent. The prefix is already known to this module — `checkBranchPlacement` uses it.
+
+**Everywhere else the finding stands**, and that includes an interactive session's own branch. It fired twice on this session's branches on 2026-09-04 and it was right both times: the file was not going to be seen until a pull request merged, and saying so once per branch is the reminder the rule was written to give.
