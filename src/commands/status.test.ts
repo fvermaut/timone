@@ -149,7 +149,7 @@ describe("renderStatus", () => {
         ticket: 7,
         status: "parked",
         stage: "triage",
-        waitingOn: "approval on the ticket",
+        wait: { on: "approval on the ticket" },
       }),
     ];
     const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
@@ -168,14 +168,14 @@ describe("renderStatus", () => {
         ticket: 6,
         status: "parked",
         stage: "clarification",
-        waitingOn: "an answer about how it should behave",
+        wait: { on: "an answer about how it should behave" },
       }),
       run({
         project: "scratch-app",
         ticket: 7,
         status: "parked",
         stage: "clarification",
-        waitingOn: "an answer about the wording",
+        wait: { on: "an answer about the wording" },
       }),
     ];
     const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
@@ -192,7 +192,7 @@ describe("renderStatus", () => {
         project: "scratch-app",
         ticket: 6,
         status: "parked",
-        waitingOn: "an answer",
+        wait: { on: "an answer" },
       }),
       run({ project: "scratch-app", ticket: 7, status: "active", stage: "requirements" }),
     ];
@@ -204,8 +204,8 @@ describe("renderStatus", () => {
 
   it("names every waiting ticket in the closing line", () => {
     const runs = [
-      run({ project: "scratch-app", ticket: 6, status: "parked", waitingOn: "an answer" }),
-      run({ project: "other-app", ticket: 2, status: "parked", waitingOn: "approval" }),
+      run({ project: "scratch-app", ticket: 6, status: "parked", wait: { on: "an answer" } }),
+      run({ project: "other-app", ticket: 2, status: "parked", wait: { on: "approval" } }),
     ];
     const lastLine =
       renderStatus(manifest, runs, { stateExists: true }).trimEnd().split("\n").at(-1) ?? "";
@@ -233,7 +233,7 @@ describe("renderStatus", () => {
         project: "scratch-app",
         ticket: 7,
         status: "parked",
-        waitingOn: "the next stage",
+        wait: { on: "the next stage" },
         flags: ["unpushed commits on phase/01"],
       }),
     ];
@@ -307,7 +307,7 @@ describe("renderStatus", () => {
         project: "scratch-app",
         ticket: 7,
         status: "parked",
-        waitingOn: "approval on the ticket",
+        wait: { on: "approval on the ticket" },
       }),
     ];
     const output = renderStatus(manifest, runs, { stateExists: true });
@@ -356,8 +356,7 @@ describe("renderStatus — the back half of the pipeline", () => {
           ticket: 6,
           status: "parked",
           stage: "delivery",
-          waitingKind: "review",
-          waitingOn: "your review",
+          wait: { kind: "review", on: "your review" },
           pr: 9,
           branch: "timone/6-fiddly-box",
         }),
@@ -479,8 +478,7 @@ describe("renderStatus — what the terminal can ask without a daemon", () => {
           ticket: 7,
           status: "parked",
           stage: "requirements",
-          waitingOn: "your approval of the specification",
-          waitingKind: "gate",
+          wait: { on: "your approval of the specification", kind: "gate" },
         }),
       ],
       { stateExists: true },
@@ -585,8 +583,7 @@ describe("renderStatus — what a run is costing right now", () => {
           ticket: 7,
           status: "parked",
           stage: "planning",
-          waitingOn: "your answer on the ticket",
-          waitingKind: "gate",
+          wait: { on: "your answer on the ticket", kind: "gate" },
         }),
       ],
       { stateExists: true, now: new Date("2026-08-06T10:00:30Z") },
@@ -625,8 +622,7 @@ describe("renderStatus — a ticket built in pieces", () => {
         ticket: 51,
         status: "parked",
         stage: "delivery",
-        waitingKind: "review",
-        waitingOn: "your review",
+        wait: { kind: "review", on: "your review" },
         pr: 9,
       }),
     ];
@@ -667,8 +663,7 @@ describe("renderStatus — a ticket built in pieces", () => {
         ticket: 6,
         status: "parked",
         stage: "delivery",
-        waitingKind: "review",
-        waitingOn: "your review",
+        wait: { kind: "review", on: "your review" },
         pr: 9,
       }),
     ];
@@ -692,8 +687,7 @@ describe("renderStatus — one computation, two renderers", () => {
       ticket: 6,
       status: "parked",
       stage: "delivery",
-      waitingKind: "review",
-      waitingOn: "your review",
+      wait: { kind: "review", on: "your review" },
       pr: 9,
       branch: "timone/6-fiddly-box",
     });
@@ -725,8 +719,7 @@ describe("renderStatus — one computation, two renderers", () => {
       ticket: 31,
       status: "parked",
       stage: "verification",
-      waitingKind: "escalation",
-      waitingOn: "me — I can't take this one further myself.",
+      wait: { kind: "escalation", on: "me — I can't take this one further myself." },
       branch: "timone/31-slow-page",
     });
 
@@ -768,8 +761,7 @@ describe("renderStatus — one computation, two renderers", () => {
         ticket: 52,
         status: "parked",
         stage: "delivery",
-        waitingKind: "review",
-        waitingOn: "your review",
+        wait: { kind: "review", on: "your review" },
         pr: 12,
       }),
     ];
@@ -822,8 +814,7 @@ describe("renderStatus — one computation, two renderers", () => {
         ticket: 6,
         status: "parked",
         stage: "planning",
-        waitingKind: "gate",
-        waitingOn: "your answer on the ticket",
+        wait: { kind: "gate", on: "your answer on the ticket" },
       }),
       run({ project: "scratch-app", ticket: 7, status: "active", stage: "execution" }),
       run({

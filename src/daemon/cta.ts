@@ -383,7 +383,7 @@ export function ctaFor(state: TicketState): Cta {
     };
   }
 
-  if (run.waitingKind === "review" && run.pr !== undefined) {
+  if (run.wait?.kind === "review" && run.pr !== undefined) {
     // The pull request number leads, because it is what the reviewer
     // navigates by; the piece follows it, because it is what tells them how
     // much of the initiative this review is. A ticket with no breakdown reads
@@ -417,7 +417,7 @@ export function ctaFor(state: TicketState): Cta {
   // is not bookkeeping leaked onto the ticket: being told "I can't do this"
   // and being told "I asked you the same thing twice" are different pieces of
   // news, and only the second is the machine's own fault to apologise for.
-  if (run.waitingKind === "escalation") {
+  if (run.wait?.kind === "escalation") {
     // The machine wrote itself a note and cannot read it back
     // ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
     // D3). Refusing to guess is right — a guess starts work at the wrong step
@@ -480,7 +480,7 @@ export function ctaFor(state: TicketState): Cta {
   // go-ahead is written here, in a comment, exactly as any other written
   // answer.
   if (run.stage === "charting") {
-    return run.waitingKind === undefined
+    return run.wait?.kind === undefined
       ? {
           headline: "I'm working through this map's questions.",
           needFromYou:
@@ -502,12 +502,12 @@ export function ctaFor(state: TicketState): Cta {
     // recorded wait names what would unblock it — "the next stage to be
     // built" — which is what R21's first criterion asks of such a ticket.
     headline:
-      run.waitingKind === undefined
+      run.wait?.kind === undefined
         ? "That's as far as I can take this one for now."
         : "This one is waiting on you.",
-    needFromYou: run.waitingOn ?? "an answer",
+    needFromYou: run.wait?.on ?? "an answer",
     waitingOnYou: true,
-    ...(run.waitingKind === "conversation"
+    ...(run.wait?.kind === "conversation"
       ? { command: takeoverCommand(state.project, state.ticket) }
       : {}),
   };

@@ -160,24 +160,46 @@ const runSchema = z.strictObject({
   ]),
   /** Lifecycle stage the run has reached, for `timone status` and for resuming. */
   stage: z.enum([...PIPELINE_STAGES]).optional(),
-  /** What a parked run is waiting for, in the human's terms. */
-  waitingOn: z.string().optional(),
   /**
-   * Which *kind* of wait that is — what an arriving answer may resolve.
+   * What this run is waiting for, whole
+   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+   * D5). It replaces `waitingOn`, `waitingKind` and `waitCursor`, which were
+   * three fields that were always written together and could nevertheless be
+   * read apart.
    *
-   * `escalation` resolves to nothing arriving: it is a run stopped where no
-   * written answer can help, waiting on a person to pick it up
-   * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+   * **Its absence carries meaning and is not the same as an empty one.** A
+   * parked run with no wait at all is a run stopped because a stage's
+   * machinery does not exist — `resolveWait` has a case of its own for it —
+   * and that is a different thing from a wait nothing can resolve, which D6
+   * refuses outright.
+   *
+   * Old ledgers are folded into this shape on load, as {@link
+   * normaliseSequences} folds a run with no chunk number.
    */
-  waitingKind: z
-    .enum(["gate", "conversation", "review", "escalation"])
+  wait: z
+    .strictObject({
+      /** What it is waiting for, in the human's terms. */
+      on: z.string(),
+      /**
+       * Which *kind* of wait it is — what an arriving answer may resolve.
+       *
+       * `escalation` resolves to nothing arriving: it is a run stopped where
+       * no written answer can help, waiting on a person to pick it up
+       * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+       *
+       * **Optional, and its absence is its own state**: a run parked at a
+       * stage whose machinery does not exist has words for the human and no
+       * kind of answer that would end the wait.
+       */
+      kind: z.enum(["gate", "conversation", "review", "escalation"]).optional(),
+      /**
+       * The instant the wait was opened — the gate comment, or the invitation
+       * to a conversation. Anything at or before it belongs to an earlier
+       * question and cannot answer this one.
+       */
+      opened: z.string().optional(),
+    })
     .optional(),
-  /**
-   * The instant the wait was opened — the gate comment, or the invitation to
-   * a conversation. Anything at or before it belongs to an earlier question
-   * and cannot answer this one.
-   */
-  waitCursor: z.string().optional(),
   /**
    * How many times running this run has read a written answer and then asked
    * again at the same stage — the count ADR-0033's floor keeps.
@@ -189,6 +211,13 @@ const runSchema = z.strictObject({
    * number tells them apart.
    */
   reAsksAfterAnswer: z.number().int().nonnegative().optional(),
+  // Left outside {@link Run.wait} deliberately, with `consumedAnswerAt`
+  // below. ADR-0049 D5 groups both into the wait, and they cannot go there:
+  // every clearing of a wait — `activate`, `fail` — must keep them. The
+  // marker exists precisely to outlive the wait it was read under, and the
+  // count accumulates across parks separated by activations, so a version of
+  // either living inside the wait would be reset by the transition it was
+  // added to survive. See 31g's finding, recorded in the ADR.
   /**
    * The instant of the written answer this run has read and not yet acted on
    * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)).
@@ -484,6 +513,13 @@ const stateSchema = z.strictObject({
 });
 
 export type Run = z.infer<typeof runSchema>;
+
+/**
+ * What a run is waiting for, as one value
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D5) — {@link Run.wait}, named so that readers can talk about it.
+ */
+export type RunWait = NonNullable<Run["wait"]>;
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
 export type IntroductionRecord = z.infer<typeof introductionRecordSchema>;
 export type InitiativeRecord = z.infer<typeof initiativeRecordSchema>;
@@ -940,7 +976,7 @@ export class RunStore {
    */
   complete(id: string): Run {
     return this.transition(id, "done", (run) => {
-      run.waitingOn = undefined;
+      run.wait = undefined;
       run.consumedAnswerAt = undefined;
       run.holder = undefined;
     });
@@ -1669,9 +1705,7 @@ function heldRunMessage(holder: Holder, held: Liveness): string {
 
 /** Clear the wait a run has finished waiting on. */
 function stopWaiting(run: Run): void {
-  run.waitingOn = undefined;
-  run.waitingKind = undefined;
-  run.waitCursor = undefined;
+  run.wait = undefined;
 }
 
 /**
@@ -1742,9 +1776,11 @@ function applyPark(run: Run, options: ParkOptions): void {
   const count = reAsked ? (run.reAsksAfterAnswer ?? 0) + 1 : run.reAsksAfterAnswer;
   const caught = reAsked && (count ?? 0) >= RE_ASK_LIMIT;
 
-  run.waitingOn = caught ? ESCALATION_WAIT : options.waitingOn;
-  run.waitingKind = caught ? "escalation" : options.kind;
-  run.waitCursor = options.waitCursor;
+  run.wait = {
+    on: caught ? ESCALATION_WAIT : options.waitingOn,
+    ...(caught ? { kind: "escalation" as const } : options.kind === undefined ? {} : { kind: options.kind }),
+    ...(options.waitCursor === undefined ? {} : { opened: options.waitCursor }),
+  };
   run.consumedAnswerAt = options.consumedAnswerAt;
   run.reAsksAfterAnswer = count;
   if (options.stage !== undefined) run.stage = options.stage;
@@ -1796,7 +1832,62 @@ function holdsProject(run: Run): boolean {
 function normaliseSequences(data: unknown): unknown {
   if (typeof data !== "object" || data === null) return data;
   if (!("runs" in data) || !Array.isArray(data.runs)) return data;
-  return { ...data, runs: data.runs.map(normaliseSequence) };
+  return {
+    ...data,
+    runs: data.runs.map(normaliseSequence).map(normaliseWait),
+  };
+}
+
+/**
+ * Fold a run's three old wait fields into one {@link Run.wait}
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D5), before the schema is asked to validate it.
+ *
+ * **`waitingOn` is the whole of the evidence, and it is enough.** The three
+ * were only ever written together, by `applyPark` — a run with a kind or a
+ * cursor and no words is a state nothing has ever produced. So the rule has
+ * no judgement in it: words mean there is a wait, and the kind and the cursor
+ * go with them.
+ *
+ * **Idempotent, because it runs constantly.** {@link RunStore.refresh}
+ * re-reads the file at the top of every public read and every mutation, so
+ * this is on the hot path rather than a start-up step. A run already in the
+ * new shape is returned untouched.
+ *
+ * **It normalises rather than migrating**: `version` stays `1` and no file is
+ * rewritten on its account, exactly as {@link normaliseSequences} does. The
+ * new shape reaches disk the next time something persists, and until then
+ * every load produces it afresh — which is also what makes a rollback
+ * survivable.
+ */
+function normaliseWait(run: unknown): unknown {
+  if (typeof run !== "object" || run === null) return run;
+  const old = run as Record<string, unknown>;
+  if (
+    !("waitingOn" in old) &&
+    !("waitingKind" in old) &&
+    !("waitCursor" in old)
+  ) {
+    return run;
+  }
+
+  const { waitingOn, waitingKind, waitCursor, ...rest } = old;
+  // **A kind or a cursor with no words is a finished run's leftovers**, and
+  // they are dropped rather than carried across. `complete` used to clear
+  // `waitingOn` alone, so every run the old daemon finished on a review or a
+  // conversation kept a kind and a cursor for a wait nothing was waiting on —
+  // both of the done runs in the 2026-08-14 ledger are in that state. That is
+  // the dead-data-that-looks-live this collapse exists to make unwritable, so
+  // the normalisation does not write it either.
+  if (typeof waitingOn !== "string") return rest;
+  return {
+    ...rest,
+    wait: {
+      on: waitingOn,
+      ...(typeof waitingKind === "string" ? { kind: waitingKind } : {}),
+      ...(typeof waitCursor === "string" ? { opened: waitCursor } : {}),
+    },
+  };
 }
 
 /** {@link normaliseSequences} for one run: an id with no `/` is chunk 1. */

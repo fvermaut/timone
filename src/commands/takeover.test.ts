@@ -414,10 +414,12 @@ describe("a ticket the ledger has never heard of", () => {
     expect(store.get("scratch-app#12/1")).toMatchObject({
       status: "parked",
       stage: "wayfinding",
-      waitingKind: "conversation",
-      // Past everything already said: the newest comment on the thread, so
-      // nothing written before this conversation existed can answer it.
-      waitCursor: "2026-08-03T09:30:00Z",
+      wait: {
+        kind: "conversation",
+        // Past everything already said: the newest comment on the thread, so
+        // nothing written before this conversation existed can answer it.
+        opened: "2026-08-03T09:30:00Z",
+      },
     });
   });
 
@@ -437,7 +439,7 @@ describe("a ticket the ledger has never heard of", () => {
       status: "picked-up",
       stage: "triage",
     });
-    expect(store.get("scratch-app#5/1")?.waitingKind).toBeUndefined();
+    expect(store.get("scratch-app#5/1")?.wait?.kind).toBeUndefined();
   });
 
   it("still refuses a closed ticket, in a sentence of its own", async () => {
@@ -1069,7 +1071,7 @@ describe("takeover claims through the run, not the lock", () => {
     // And it is given back afterwards, on the wait it came from.
     const after = store.get("scratch-app#6/1");
     expect(after?.status).toBe("parked");
-    expect(after?.waitingKind).toBe("conversation");
+    expect(after?.wait?.kind).toBe("conversation");
     expect(after?.stage).toBe("clarification");
   });
 

@@ -478,10 +478,12 @@ describe("the holds-the-project rule", () => {
     });
 
     expect(store.get(run.id)).toMatchObject({
-      waitingOn: "approval on the ticket",
-      waitingKind: "gate",
+      wait: {
+        on: "approval on the ticket",
+        kind: "gate",
+        opened: "2026-08-03T10:00:00Z",
+      },
       stage: "requirements",
-      waitCursor: "2026-08-03T10:00:00Z",
       branch: "timone/7-reset-password",
     });
   });
@@ -491,8 +493,8 @@ describe("the holds-the-project rule", () => {
     const id = parkedBranchless(store, 7);
     store.activate(id, "session-1b");
 
-    expect(store.get(id)?.waitingOn).toBeUndefined();
-    expect(store.get(id)?.waitingKind).toBeUndefined();
+    expect(store.get(id)?.wait?.on).toBeUndefined();
+    expect(store.get(id)?.wait?.kind).toBeUndefined();
   });
 });
 
@@ -537,8 +539,8 @@ describe("the answer a run has read and not acted on", () => {
     store.fail(id, "Claude Code process terminated by signal SIGKILL");
 
     // The wait is gone, cursor included — that is what activating a run means.
-    expect(active?.waitCursor).toBeUndefined();
-    expect(active?.waitingKind).toBeUndefined();
+    expect(active?.wait?.opened).toBeUndefined();
+    expect(active?.wait?.kind).toBeUndefined();
     // The answer it read is not, and it is on disk, where the next process
     // reads it: a session dying here is the whole reason the field exists.
     expect(active?.consumedAnswerAt).toBe(readAt);
@@ -608,9 +610,8 @@ describe("a run parked on something nothing written can resolve", () => {
 
     expect(reopened.get(run.id)).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation", opened: stopped },
       stage: "verification",
-      waitCursor: stopped,
     });
   });
 
@@ -697,7 +698,7 @@ describe("the floor under a stage that does not notice", () => {
       stage: "verification",
       waitCursor: "2026-08-03T09:35:00Z",
     });
-    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.wait?.kind).toBe("conversation");
     expect(store.get(id)?.reAsksAfterAnswer).toBe(1);
 
     // Twice. The answer was read, the same question came back, and asking a
@@ -710,7 +711,7 @@ describe("the floor under a stage that does not notice", () => {
       waitCursor: "2026-08-03T10:05:00Z",
     });
 
-    expect(store.get(id)?.waitingKind).toBe("escalation");
+    expect(store.get(id)?.wait?.kind).toBe("escalation");
     expect(store.get(id)?.reAsksAfterAnswer).toBe(2);
   });
 
@@ -730,7 +731,7 @@ describe("the floor under a stage that does not notice", () => {
       });
     }
 
-    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.wait?.kind).toBe("conversation");
     expect(store.get(id)?.reAsksAfterAnswer ?? 0).toBe(0);
   });
 
@@ -763,7 +764,7 @@ describe("the floor under a stage that does not notice", () => {
       waitCursor: "2026-08-03T11:35:00Z",
     });
 
-    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.wait?.kind).toBe("conversation");
     expect(store.get(id)?.reAsksAfterAnswer).toBe(1);
   });
 
@@ -788,7 +789,7 @@ describe("the floor under a stage that does not notice", () => {
       waitCursor: "2026-08-03T10:05:00Z",
     });
 
-    expect(store.get(id)?.waitingKind).toBe("review");
+    expect(store.get(id)?.wait?.kind).toBe("review");
   });
 
   it("counts only a re-ask at the same stage", () => {
@@ -803,7 +804,7 @@ describe("the floor under a stage that does not notice", () => {
       waitCursor: "2026-08-03T09:35:00Z",
     });
 
-    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.wait?.kind).toBe("conversation");
     expect(store.get(id)?.reAsksAfterAnswer ?? 0).toBe(0);
   });
 
@@ -1024,7 +1025,7 @@ describe("the pull request on a run", () => {
     const reopened = RunStore.open(path).get(run.id);
 
     expect(reopened?.pr).toBe(9);
-    expect(reopened?.waitingKind).toBe("review");
+    expect(reopened?.wait?.kind).toBe("review");
     expect(reopened?.stage).toBe("delivery");
   });
 
@@ -1165,8 +1166,8 @@ describe("cancelling a run", () => {
     const cancelled = store.cancel(run.id, "you asked me to stop");
 
     expect(cancelled.status).toBe("cancelled");
-    expect(cancelled.waitingOn).toBeUndefined();
-    expect(cancelled.waitingKind).toBeUndefined();
+    expect(cancelled.wait?.on).toBeUndefined();
+    expect(cancelled.wait?.kind).toBeUndefined();
   });
 
   it("refuses to cancel a run that is already finished", () => {
@@ -2089,9 +2090,9 @@ describe("a failed run stops waiting", () => {
     const run = store.get(id);
 
     expect(run?.status).toBe("failed");
-    expect(run?.waitingOn).toBeUndefined();
-    expect(run?.waitingKind).toBeUndefined();
-    expect(run?.waitCursor).toBeUndefined();
+    expect(run?.wait?.on).toBeUndefined();
+    expect(run?.wait?.kind).toBeUndefined();
+    expect(run?.wait?.opened).toBeUndefined();
   });
 
   it("keeps the answer it read and never acted on", () => {
@@ -2413,8 +2414,8 @@ describe("a run whose holder died", () => {
 
     expect(outcome.rearmed).toBe(false);
     expect(outcome.run.status).toBe("parked");
-    expect(outcome.run.waitingOn).toContain("the machine running it stopped");
-    expect(outcome.run.waitingOn).toContain("the box could not reach the model");
+    expect(outcome.run.wait?.on).toContain("the machine running it stopped");
+    expect(outcome.run.wait?.on).toContain("the box could not reach the model");
   });
 
   it("keeps the chunk number a re-arm was given", () => {
@@ -2436,5 +2437,88 @@ describe("a run whose holder died", () => {
     store.cancel(id, "you closed the ticket");
 
     expect(() => store.reclaim(id, "and again")).toThrow(/cancelled/);
+  });
+});
+
+describe("the wait as one value", () => {
+  it("carries all four kinds through the file and back out", () => {
+    // ADR-0049 D5 was written with three and there are four: `gate` was
+    // missing, and it is not a minor one — it is how every requirements and
+    // breakdown approval is read.
+    const kinds = ["gate", "conversation", "review", "escalation"] as const;
+    for (const kind of kinds) {
+      const path = statePath();
+      const store = newStore(path);
+      const { run } = store.register("scratch-app", 7);
+      store.activate(run.id, "session-1");
+      store.park(run.id, {
+        waitingOn: `something of the ${kind} sort`,
+        kind,
+        waitCursor: "2026-09-04T10:00:00Z",
+      });
+
+      expect(RunStore.open(path).get(run.id)?.wait).toEqual({
+        on: `something of the ${kind} sort`,
+        kind,
+        opened: "2026-09-04T10:00:00Z",
+      });
+    }
+  });
+
+  it("folds a real pre-collapse ledger into the new shape", () => {
+    // The ledger the daemon was running on 2026-08-14, copied unchanged.
+    // Real rather than invented, because what is under test is whether *this*
+    // file still loads.
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(PRE_CHUNK_LEDGER, path);
+
+    const store = RunStore.open(path);
+
+    // A parked run keeps its words, and gains a wait it never had a field for.
+    expect(store.get("scratch-app#4/1")?.wait).toEqual({
+      on: "the next stage to be built",
+    });
+    // And a run the old daemon finished keeps nothing: `complete` cleared
+    // `waitingOn` alone and left a kind and a cursor behind for a wait nothing
+    // was waiting on. Both done runs in this file are in that state.
+    expect(store.get("scratch-app#6/1")?.status).toBe("done");
+    expect(store.get("scratch-app#6/1")?.wait).toBeUndefined();
+  });
+
+  it("keeps an absent wait absent, which is its own state", () => {
+    // Finding (b) of the phase's pre-flight. `resolveWait` treats a parked run
+    // with no kind of wait as a run stopped because a stage's machinery did
+    // not exist, and that is not the same thing as a wait nothing can answer.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.park(run.id, { waitingOn: "the next stage to be built" });
+
+    const parked = store.get(run.id);
+    expect(parked?.wait?.on).toBe("the next stage to be built");
+    expect(parked?.wait?.kind).toBeUndefined();
+  });
+
+  it("moves a wait with repark, without the double-park refusal firing", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.park(run.id, { waitingOn: "an answer", kind: "conversation" });
+
+    const moved = store.repark(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+    });
+
+    expect(moved.wait).toEqual({
+      on: "your review of pull request #9",
+      kind: "review",
+    });
+    // And parking it again is still refused, which is what `repark` exists to
+    // let through without.
+    expect(() =>
+      store.park(run.id, { waitingOn: "something else" }),
+    ).toThrow(/parked/);
   });
 });

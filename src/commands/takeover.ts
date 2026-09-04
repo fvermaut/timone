@@ -211,17 +211,17 @@ export async function resolveTakeover(
       break;
   }
 
-  if (run.waitingKind === "gate") {
+  if (run.wait?.kind === "gate") {
     return {
       kind: "answer-on-ticket",
       message:
         `${target.project} #${target.ticket} isn't waiting for a conversation — ` +
-        `it's waiting for your answer on the ticket: ${run.waitingOn ?? "a decision"}. ` +
+        `it's waiting for your answer on the ticket: ${run.wait?.on ?? "a decision"}. ` +
         "Reply there and I'll carry on from your reply.",
     };
   }
 
-  if (run.waitingKind === "review") {
+  if (run.wait?.kind === "review") {
     return {
       kind: "answer-on-ticket",
       message:
@@ -237,16 +237,16 @@ export async function resolveTakeover(
   // cannot hold a conversation for. That refusal, on the one park whose CTA
   // hands the human this very command, is the wedged project ADR-0033's
   // ordering exists to prevent.
-  if (run.waitingKind === "escalation") {
+  if (run.wait?.kind === "escalation") {
     return { kind: "escalation", run };
   }
 
-  if (run.waitingKind !== "conversation" || run.stage === undefined) {
+  if (run.wait?.kind !== "conversation" || run.stage === undefined) {
     return {
       kind: "nothing-to-do",
       message:
         `${target.project} #${target.ticket} is parked, but not on anything I ` +
-        `can pick up in a conversation: ${run.waitingOn ?? "no reason recorded"}.`,
+        `can pick up in a conversation: ${run.wait?.on ?? "no reason recorded"}.`,
     };
   }
 
@@ -621,7 +621,7 @@ async function claimForTakeover(
   // The claim cleared nothing about what the run was waiting on
   // (`RunStore.claim` keeps the wait deliberately), so which session to open
   // is still readable off the run the daemon handed back.
-  return run.waitingKind === "escalation"
+  return run.wait?.kind === "escalation"
     ? { kind: "claimed", run, escalation: true }
     : { kind: "claimed", run };
 }
@@ -665,7 +665,7 @@ async function withdraw(
       return {
         kind: "applied",
         claim:
-          run.waitingKind === "escalation"
+          run.wait?.kind === "escalation"
             ? { kind: "claimed", run, escalation: true }
             : { kind: "claimed", run },
       };

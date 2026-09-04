@@ -468,8 +468,8 @@ describe("routing after triage", () => {
     const parked = store.get(run.id);
     expect(parked?.status).toBe("parked");
     expect(parked?.stage).toBe("clarification");
-    expect(parked?.waitingKind).toBe("conversation");
-    expect(parked?.waitCursor).toBeTruthy();
+    expect(parked?.wait?.kind).toBe("conversation");
+    expect(parked?.wait?.opened).toBeTruthy();
     expect(comments.at(-1)?.body).toContain("timone takeover scratch-app#7");
   });
 
@@ -678,9 +678,9 @@ describe("claiming a run before its session exists", () => {
 
     const after = store.get(run.id)!;
     expect(after.status).toBe("parked");
-    expect(after.waitingOn).toBe("a conversation in your terminal");
-    expect(after.waitingKind).toBe("conversation");
-    expect(after.waitCursor).toBe("2026-08-02T10:00:00Z");
+    expect(after.wait?.on).toBe("a conversation in your terminal");
+    expect(after.wait?.kind).toBe("conversation");
+    expect(after.wait?.opened).toBe("2026-08-02T10:00:00Z");
     // And the project is free for the next cycle, rather than held by a
     // session that never started.
     expect(store.runningRun("scratch-app")).toBeUndefined();
@@ -744,7 +744,7 @@ describe("the conversation invitation", () => {
     }).spawn(run, project);
 
     expect(comments.at(-1)?.body).toBe("come and talk to me");
-    expect(store.get(run.id)?.waitingOn).toBe("a chat somewhere");
+    expect(store.get(run.id)?.wait?.on).toBe("a chat somewhere");
   });
 
   it("sets the cursor past its own invitation, so it cannot answer itself", async () => {
@@ -763,7 +763,7 @@ describe("the conversation invitation", () => {
     }).spawn(run, project);
 
     const invitation = ticket.comments.at(-1)!;
-    expect(store.get(run.id)?.waitCursor).toBe(invitation.createdAt);
+    expect(store.get(run.id)?.wait?.opened).toBe(invitation.createdAt);
   });
 
   it("tells the session, in its prompt, how to mark the record it posts back", async () => {
@@ -864,7 +864,7 @@ describe("ingesting a written answer", () => {
     }).spawn(run, project, { stage: "clarification" });
 
     expect(requests).toEqual([]);
-    expect(store.get(run.id)?.waitingKind).toBe("conversation");
+    expect(store.get(run.id)?.wait?.kind).toBe("conversation");
   });
 
   it("re-parks on the conversation, with a fresh cursor, when nothing was settled", async () => {
@@ -893,10 +893,10 @@ describe("ingesting a written answer", () => {
 
     const parked = store.get(run.id);
     expect(parked?.status).toBe("parked");
-    expect(parked?.waitingKind).toBe("conversation");
+    expect(parked?.wait?.kind).toBe("conversation");
     expect(parked?.stage).toBe("clarification");
-    expect(parked?.waitCursor).toBe(ticket.comments.at(-1)?.createdAt);
-    expect(parked?.waitCursor).not.toBe("2026-08-02T10:00:00Z");
+    expect(parked?.wait?.opened).toBe(ticket.comments.at(-1)?.createdAt);
+    expect(parked?.wait?.opened).not.toBe("2026-08-02T10:00:00Z");
   });
 
   it("advances a clarification the session recorded as agreed", async () => {
@@ -1042,7 +1042,7 @@ describe("run lifecycle", () => {
     const finished = store.get(run.id);
     expect(finished?.status).toBe("parked");
     expect(finished?.sessionId).toBe("session-abc");
-    expect(finished?.waitingOn).toBeTruthy();
+    expect(finished?.wait?.on).toBeTruthy();
     // The session's own comment, then the invitation.
     expect(comments).toHaveLength(2);
     expect(comments[0].number).toBe(7);
@@ -1294,9 +1294,9 @@ describe("the requirements gate", () => {
 
     const parked = store.get("scratch-app#7/1");
     expect(parked?.status).toBe("parked");
-    expect(parked?.waitingKind).toBe("gate");
+    expect(parked?.wait?.kind).toBe("gate");
     expect(parked?.stage).toBe("requirements");
-    expect(parked?.waitCursor).toBe(live.comments.at(-1)?.createdAt);
+    expect(parked?.wait?.opened).toBe(live.comments.at(-1)?.createdAt);
   });
 
   it("names the branch when the clone URL is not one it can link into", async () => {
@@ -1514,7 +1514,7 @@ describe("the plan gate", () => {
 
     const parked = store.get(run.id);
     expect(parked?.stage).toBe("breakdown");
-    expect(parked?.waitingKind).toBe("gate");
+    expect(parked?.wait?.kind).toBe("gate");
     expect(comments.at(-1)?.body).toContain("Here's how I propose to break this up.");
   });
 });
@@ -1568,7 +1568,7 @@ describe("a finished planning session, now that planning is wait-free", () => {
     // Two sessions, and the second is the build — not a conversation.
     expect(requests.length).toBeGreaterThanOrEqual(2);
     expect(requests[1].prompt).toMatch(/build what was planned/i);
-    expect(store.get("scratch-app#7/1")?.waitingKind).not.toBe("conversation");
+    expect(store.get("scratch-app#7/1")?.wait?.kind).not.toBe("conversation");
   });
 
   it("advances a chore to execution instead of spawning planning for ever", async () => {
@@ -1664,7 +1664,7 @@ describe("a finished planning session, now that planning is wait-free", () => {
     }).spawn(readyToPlan(store), project, { stage: "planning" });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("parked");
-    expect(store.get("scratch-app#7/1")?.waitingKind).toBe("conversation");
+    expect(store.get("scratch-app#7/1")?.wait?.kind).toBe("conversation");
     // The session's own comment is the report; the daemon adds nothing on top.
     expect(comments.at(-1)?.body).toContain("Here is the phase.");
     expect(requests).toHaveLength(1);
@@ -2362,7 +2362,7 @@ describe("a gate is never opened over nothing", () => {
     }).spawn(atRequirements(store), project, { stage: "requirements" });
 
     expect(comments.at(-1)!.body).toContain("`approve`");
-    expect(store.get("scratch-app#7/1")?.waitingKind).toBe("gate");
+    expect(store.get("scratch-app#7/1")?.wait?.kind).toBe("gate");
   });
 
   it("treats a branch that did not exist before as work, once it does", async () => {
@@ -2522,12 +2522,12 @@ describe("the execution stage", () => {
     // A wait, not a failure (ADR-0031): the reply this session invited can now
     // start something, and the cursor is the question's own instant so only
     // what is said after it counts as an answer to it.
-    expect(run?.waitingKind).toBe("conversation");
+    expect(run?.wait?.kind).toBe("conversation");
     expect(run?.stage).toBe("execution");
     // The handoff comment's own instant, read off the thread the session
     // posted into — not a clock, which a second of skew would make swallow a
     // reply typed immediately.
-    expect(run?.waitCursor).toBe(thread.comments.at(-1)?.createdAt);
+    expect(run?.wait?.opened).toBe(thread.comments.at(-1)?.createdAt);
     // The session's own comment is the report; the daemon adds nothing on top.
     // Asserted on the count, not just the last one: a `failedComment` saying
     // "something went wrong" underneath the session's own polite question is
@@ -2657,14 +2657,14 @@ describe("the verification stage", () => {
 
     const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBe("escalation");
+    expect(run?.wait?.kind).toBe("escalation");
     // The stage that stopped, not the one that would have followed: the
     // person picking this up needs to know where it stopped.
     expect(run?.stage).toBe("verification");
     // The escalation comment's own instant, off the thread the session posted
     // into — never a clock. The prompt finds the stage's account by that
     // instant, so a second of skew loses the account entirely.
-    expect(run?.waitCursor).toBe(thread.comments.at(-1)?.createdAt);
+    expect(run?.wait?.opened).toBe(thread.comments.at(-1)?.createdAt);
     // The session's own comment is the whole report. "Something went wrong"
     // underneath a stage explaining itself clearly is the ticket ivtrends #1
     // had.
@@ -2694,7 +2694,7 @@ describe("the verification stage", () => {
 
     const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBe("conversation");
+    expect(run?.wait?.kind).toBe("conversation");
     // The session's own comment is R6's failure report; nothing is added.
     expect(comments.at(-1)?.body).toContain("both loops");
   });
@@ -2776,12 +2776,12 @@ describe("the delivery stage", () => {
 
     const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBe("review");
+    expect(run?.wait?.kind).toBe("review");
     expect(run?.pr).toBe(9);
-    expect(run?.waitingOn).toMatch(/pull request #9/);
+    expect(run?.wait?.on).toMatch(/pull request #9/);
     // The cursor sits at the PR thread's newest comment, so only what the
     // human says after the park can wake the run.
-    expect(run?.waitCursor).toBe("2026-08-06T09:00:00Z");
+    expect(run?.wait?.opened).toBe("2026-08-06T09:00:00Z");
   });
 
   it("fails the run when the session said done but no pull request exists", async () => {
@@ -2826,7 +2826,7 @@ describe("the delivery stage", () => {
 
     const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBe("conversation");
+    expect(run?.wait?.kind).toBe("conversation");
     expect(run?.stage).toBe("delivery");
     expect(comments.at(-1)?.body).toContain("refused delivery");
   });
@@ -2928,10 +2928,10 @@ describe("the remediation stage", () => {
 
     const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBe("review");
+    expect(run?.wait?.kind).toBe("review");
     // The cursor advanced past the session's own reply, so only what the
     // human says next can wake it again.
-    expect(run?.waitCursor).toBe("2026-08-06T13:00:00Z");
+    expect(run?.wait?.opened).toBe("2026-08-06T13:00:00Z");
   });
 
   it("waits, rather than failing, when the remediation handed the work to a person", async () => {
@@ -2957,7 +2957,7 @@ describe("the remediation stage", () => {
     }).spawn(atRemediation(store), project, { stage: "remediation" });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("parked");
-    expect(store.get("scratch-app#7/1")?.waitingKind).toBe("conversation");
+    expect(store.get("scratch-app#7/1")?.wait?.kind).toBe("conversation");
     expect(comments.at(-1)?.body).toContain("moves a requirement");
   });
 });
@@ -3091,7 +3091,7 @@ describe("the model each session runs on", () => {
     }).spawn(store.get(run.id)!, project, { stage: "clarification" });
 
     expect(requests).toHaveLength(0);
-    expect(store.get("scratch-app#7/1")?.waitingKind).toBe("conversation");
+    expect(store.get("scratch-app#7/1")?.wait?.kind).toBe("conversation");
   });
 });
 
@@ -3919,7 +3919,7 @@ describe("the two stages phase 27 built", () => {
 
       const parked = store.get(run.id);
       expect(parked?.status).toBe("parked");
-      expect(parked?.waitingKind).toBe("conversation");
+      expect(parked?.wait?.kind).toBe("conversation");
     });
   });
 

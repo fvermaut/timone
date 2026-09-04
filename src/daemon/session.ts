@@ -1024,10 +1024,10 @@ function escalate(
 
 export function waitOf(run: Run): ParkOptions {
   return {
-    waitingOn: run.waitingOn ?? "a human",
-    ...(run.waitingKind === undefined ? {} : { kind: run.waitingKind }),
+    waitingOn: run.wait?.on ?? "a human",
+    ...(run.wait?.kind === undefined ? {} : { kind: run.wait?.kind }),
     ...(run.stage === undefined ? {} : { stage: run.stage }),
-    ...(run.waitCursor === undefined ? {} : { waitCursor: run.waitCursor }),
+    ...(run.wait?.opened === undefined ? {} : { waitCursor: run.wait?.opened }),
   };
 }
 
@@ -1968,7 +1968,7 @@ export class AgentSessionSpawner implements SessionSpawner {
 
     if (readConversationRecord(ticket, cursor) === undefined) {
       this.putOnWait(run, {
-        waitingOn: run.waitingOn ?? "a conversation in your terminal",
+        waitingOn: run.wait?.on ?? "a conversation in your terminal",
         kind: "conversation",
         stage,
         // Never before the answer this session was started on (ADR-0023).

@@ -792,7 +792,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
     expect(spawned).toEqual([]);
     expect(posted).toEqual([]);
     expect(store.get("scratch-app#6/1")?.status).toBe("parked");
-    expect(store.get("scratch-app#6/1")?.waitCursor).toBe(invitation.createdAt);
+    expect(store.get("scratch-app#6/1")?.wait?.opened).toBe(invitation.createdAt);
   });
 
   it("advances a gate the human approved", async () => {
@@ -976,7 +976,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
             ticket: 4,
             status: "parked",
             stage: "triage",
-            waitingOn: "the next stage to be built",
+            wait: { on: "the next stage to be built" },
             flags: [],
             createdAt: "2026-08-02T18:29:31.940Z",
             updatedAt: "2026-08-02T18:32:29.650Z",
@@ -2853,7 +2853,7 @@ describe("pollOnce — a wayfinder decision ticket", () => {
     expect(run?.stage).toBe("wayfinding");
     expect(processStage("wayfinding")).toBe(2);
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBe("conversation");
+    expect(run?.wait?.kind).toBe("conversation");
     // A decision ticket produces a decision, so nothing was branched.
     expect(run?.branch).toBeUndefined();
   });
@@ -3159,7 +3159,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
     });
 
     const atSpawn = ledger[0];
-    expect(atSpawn?.waitCursor).toBe(answer.createdAt);
+    expect(atSpawn?.wait?.opened).toBe(answer.createdAt);
     expect(atSpawn?.consumedAnswerAt).toBe(answer.createdAt);
     // The words that instant belongs to are the words the session was given.
     expect(contexts[0]?.feedback).toBe(answer.body);
@@ -3431,7 +3431,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       { stage: "clarification", feedback: answer.body },
     ]);
     // … and the same ledger write: the answer is still consumed (ADR-0023).
-    expect(store.get("scratch-app#6/1")?.waitCursor).toBe(answer.createdAt);
+    expect(store.get("scratch-app#6/1")?.wait?.opened).toBe(answer.createdAt);
   });
 
   it("reads the pull request once to resume a review, and resumes on the same words", async () => {
@@ -3514,7 +3514,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
     // A review park is not consumed, and the loop wrote nothing to the ledger.
     const after = store.get("scratch-app#6/1");
     expect(after?.status).toBe("parked");
-    expect(after?.waitCursor).toBe("2026-08-06T10:00:00Z");
+    expect(after?.wait?.opened).toBe("2026-08-06T10:00:00Z");
   });
 });
 
@@ -4556,7 +4556,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     const run = store.get("ivtrends#1/1");
     expect(run?.stage).toBe("charting");
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBeUndefined();
+    expect(run?.wait?.kind).toBeUndefined();
     expect(run?.branch).toBeUndefined();
     expect(posted.map((comment) => comment.body).join("\n")).not.toMatch(
       /two ways to answer/i,
@@ -4588,7 +4588,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     expect(second.resumed).toEqual([]);
     expect(second.errors).toEqual([]);
     expect(store.get("ivtrends#1/1")?.stage).toBe("charting");
-    expect(store.get("ivtrends#1/1")?.waitingKind).toBeUndefined();
+    expect(store.get("ivtrends#1/1")?.wait?.kind).toBeUndefined();
     expect(ctas.at(-1)?.body).toContain("nothing right now");
   });
 
@@ -4610,7 +4610,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     // The discriminating half: before the frontier empties this map is
     // waiting on nobody, so the flip below is caused by the label and not by
     // the map having been a conversation all along.
-    expect(store.get("ivtrends#1/1")?.waitingKind).toBeUndefined();
+    expect(store.get("ivtrends#1/1")?.wait?.kind).toBeUndefined();
 
     labels.push("wayfinder:frontier-empty");
     reads.length = 0;
@@ -4622,10 +4622,10 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     expect(reads).toEqual([1]);
     const run = store.get("ivtrends#1/1");
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBe("conversation");
+    expect(run?.wait?.kind).toBe("conversation");
     // Asked *now*, from the machine's last word — so nothing said before the
     // way was clear can be read as agreeing to it.
-    expect(run?.waitCursor).toBe(closingSummary.createdAt);
+    expect(run?.wait?.opened).toBe(closingSummary.createdAt);
     expect(ctas.at(-1)?.body).toContain(
       "**What I need from you:** say go ahead here and I'll write the specification this map has been finding its way to.",
     );
@@ -4653,7 +4653,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     await pollOnce(deps);
     labels.push("wayfinder:frontier-empty");
     await pollOnce(deps);
-    expect(store.get("ivtrends#1/1")?.waitingKind).toBe("conversation");
+    expect(store.get("ivtrends#1/1")?.wait?.kind).toBe("conversation");
 
     labels.splice(labels.indexOf("wayfinder:frontier-empty"), 1);
     comments.push(goAhead);
@@ -4725,7 +4725,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
 
     const chunk = store.get("ivtrends#1/2");
     expect(chunk?.stage).not.toBe("charting");
-    expect(chunk?.waitingOn ?? "").not.toMatch(/go-ahead/);
+    expect(chunk?.wait?.on ?? "").not.toMatch(/go-ahead/);
     // And it did the one thing the stuck chunk never did: it ran.
     expect(prompts).not.toHaveLength(0);
   });
@@ -5622,7 +5622,7 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     expect(after?.status).toBe("parked");
     // Back on the same wait, read off the run rather than remembered by the
     // process that claimed it — which may no longer exist.
-    expect(after?.waitingKind).toBe("conversation");
+    expect(after?.wait?.kind).toBe("conversation");
     expect(after?.stage).toBe("clarification");
   });
 
@@ -6060,7 +6060,7 @@ describe("pollOnce — a park nothing written can end", () => {
     expect(spawned).toEqual([]);
     expect(store.get("scratch-app#31/1")).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation" },
       stage: "verification",
     });
     expect(result.errors).toEqual([]);
@@ -6293,7 +6293,7 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     expect(spawned).toEqual([]);
     expect(store.get("scratch-app#31/1")).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation" },
     });
   });
 
@@ -6320,7 +6320,7 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     });
 
     const run = store.get("scratch-app#31/1");
-    expect(run?.waitCursor).toBe(question.createdAt);
+    expect(run?.wait?.opened).toBe(question.createdAt);
     expect(run?.consumedAnswerAt).toBeUndefined();
     expect(thread).toContainEqual(answer);
   });
@@ -6435,7 +6435,7 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     expect(spawned).toHaveLength(2);
     expect(store.get("scratch-app#32/1")).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation" },
       stage: "verification",
       reAsksAfterAnswer: 2,
     });
@@ -6634,7 +6634,7 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     expect(result.errors).toEqual([]);
     expect(store.get("scratch-app#41/1")).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation" },
     });
     // And it says which name it could not read, so the person can see what
     // the machine wrote down wrong.
@@ -6715,7 +6715,7 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     });
 
     expect(spawned).toEqual([]);
-    expect(store.get("scratch-app#41/1")?.waitingKind).toBe("escalation");
+    expect(store.get("scratch-app#41/1")?.wait?.kind).toBe("escalation");
   });
 
   it("still starts nothing on the human writing again, ten cycles running", async () => {
@@ -6745,7 +6745,7 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     }
 
     expect(spawned).toEqual([]);
-    expect(store.get("scratch-app#41/1")?.waitingKind).toBe("escalation");
+    expect(store.get("scratch-app#41/1")?.wait?.kind).toBe("escalation");
   });
 });
 

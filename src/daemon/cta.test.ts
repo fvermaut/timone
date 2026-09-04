@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ctaComment, ctaFor } from "./cta.js";
 import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
-import { runId, type Run } from "./runs.js";
+import { runId, type Run, type RunWait } from "./runs.js";
 
 /** A run in whatever state the test needs, with the rest left plausible. */
 function run(overrides: Partial<Run> & Pick<Run, "project" | "ticket">): Run {
@@ -27,8 +27,7 @@ describe("ctaFor", () => {
         ticket: 6,
         status: "parked",
         stage: "delivery",
-        waitingKind: "review",
-        waitingOn: "your review",
+        wait: { kind: "review", on: "your review" },
         pr: 9,
       }),
     });
@@ -46,8 +45,7 @@ describe("ctaFor", () => {
         ticket: 7,
         status: "parked",
         stage: "planning",
-        waitingKind: "gate",
-        waitingOn: "your answer on the ticket",
+        wait: { kind: "gate", on: "your answer on the ticket" },
       }),
     });
 
@@ -253,8 +251,7 @@ describe("ctaFor", () => {
         ticket: 6,
         status: "parked",
         stage: "clarification",
-        waitingKind: "conversation",
-        waitingOn: "a conversation in your terminal",
+        wait: { kind: "conversation", on: "a conversation in your terminal" },
       }),
     });
 
@@ -343,8 +340,7 @@ describe("ctaFor", () => {
         ticket: 6,
         status: "parked",
         stage: "delivery",
-        waitingKind: "review",
-        waitingOn: "your review",
+        wait: { kind: "review", on: "your review" },
         pr: 9,
       }),
       progress: {
@@ -464,7 +460,7 @@ describe("ctaFor", () => {
         ticket: 4,
         status: "parked",
         stage: "triage",
-        waitingOn: "the next stage to be built",
+        wait: { on: "the next stage to be built" },
       }),
     });
 
@@ -483,7 +479,7 @@ describe("ctaFor", () => {
         ticket: 4,
         status: "parked",
         stage: "triage",
-        waitingOn: "the next stage to be built",
+        wait: { on: "the next stage to be built" },
       }),
     });
     const broken = ctaFor({
@@ -503,14 +499,16 @@ describe("ctaFor", () => {
 
 describe("ctaFor — the wayfinder map's two states", () => {
   /** The map ticket's run, parked at its own stage. */
-  function map(waitingKind: Run["waitingKind"]): Run {
+  function map(kind: RunWait["kind"]): Run {
     return run({
       project: "ivtrends",
       ticket: 1,
       status: "parked",
       stage: "charting",
-      waitingKind,
-      waitingOn: "this map's own questions to be answered",
+      wait: {
+        on: "this map's own questions to be answered",
+        ...(kind === undefined ? {} : { kind }),
+      },
     });
   }
 
@@ -581,7 +579,7 @@ describe("ctaFor — the wayfinder map's two states", () => {
  * implementation's way proves nothing. A stage that waits on nothing parks only
  * when what follows it is unbuilt, which records no kind of wait at all.
  */
-const WAIT_AT: Record<PipelineStage, Run["waitingKind"]> = {
+const WAIT_AT: Record<PipelineStage, RunWait["kind"]> = {
   triage: undefined,
   clarification: "conversation",
   wayfinding: "conversation",
@@ -620,8 +618,7 @@ describe("ctaFor — every stage in the graph", () => {
           ticket: 42,
           status: "parked",
           stage,
-          waitingKind: kind,
-          waitingOn: "the thing this stage stopped on",
+          wait: { kind: kind, on: "the thing this stage stopped on" },
           ...(kind === "review" ? { pr: 11 } : {}),
         }),
       });
@@ -767,9 +764,7 @@ describe("ctaFor — a run the machine cannot take further itself", () => {
       ticket: 31,
       status: "parked",
       stage: "verification",
-      waitingKind: "escalation",
-      waitingOn: "me — I can't take this one further myself.",
-      waitCursor: "2026-08-17T10:00:00Z",
+      wait: { kind: "escalation", on: "me — I can't take this one further myself.", opened: "2026-08-17T10:00:00Z" },
       ...overrides,
     });
   }
@@ -825,8 +820,7 @@ describe("ctaFor — a run the machine cannot take further itself", () => {
         ticket: 6,
         status: "parked",
         stage: "clarification",
-        waitingKind: "conversation",
-        waitingOn: "a conversation in your terminal",
+        wait: { kind: "conversation", on: "a conversation in your terminal" },
       }),
     });
     const review = ctaFor({
@@ -837,8 +831,7 @@ describe("ctaFor — a run the machine cannot take further itself", () => {
         ticket: 6,
         status: "parked",
         stage: "delivery",
-        waitingKind: "review",
-        waitingOn: "your review",
+        wait: { kind: "review", on: "your review" },
         pr: 9,
       }),
     });
@@ -850,8 +843,7 @@ describe("ctaFor — a run the machine cannot take further itself", () => {
         ticket: 6,
         status: "parked",
         stage: "requirements",
-        waitingKind: "gate",
-        waitingOn: "your approval of what I wrote down",
+        wait: { kind: "gate", on: "your approval of what I wrote down" },
       }),
     });
     const unbuilt = ctaFor({
@@ -862,7 +854,7 @@ describe("ctaFor — a run the machine cannot take further itself", () => {
         ticket: 4,
         status: "parked",
         stage: "triage",
-        waitingOn: "the next stage to be built",
+        wait: { on: "the next stage to be built" },
       }),
     });
 
@@ -883,9 +875,7 @@ describe("ctaFor — the machine could not read its own note", () => {
     ticket: 41,
     status: "parked",
     stage: "clarification",
-    waitingKind: "escalation",
-    waitingOn: "me — I can't take this one further on my own.",
-    waitCursor: "2026-08-19T10:00:00Z",
+    wait: { kind: "escalation", on: "me — I can't take this one further on my own.", opened: "2026-08-19T10:00:00Z" },
   });
 
   const state = { project: "scratch-app", ticket: 41, run: stopped };

@@ -1643,7 +1643,7 @@ async function openGoAheads(
   for (const ticket of tickets) {
     const run = store.runsForTicket(project.name, ticket.number).at(-1);
     if (run === undefined || run.stage !== "charting") continue;
-    if (run.status !== "parked" || run.waitingKind !== undefined) continue;
+    if (run.status !== "parked" || run.wait?.kind !== undefined) continue;
     if (!frontierIsEmpty(ticket.labels)) continue;
 
     try {
@@ -2024,7 +2024,7 @@ async function resumeAnswered(
 
     // A review park is the one wait that can end the run outright — a PR
     // merged or closed is a terminal event, not a stage to spawn.
-    if (run.waitingKind === "review") {
+    if (run.wait?.kind === "review") {
       try {
         const ended = await concludeReview(run, project, threads, deps, result, log);
         if (ended) return;
@@ -2038,7 +2038,7 @@ async function resumeAnswered(
 
     // A conversation park is the other one, for a different reason: at a
     // stage nothing follows, the answer *is* the whole of the run.
-    if (run.waitingKind === "conversation") {
+    if (run.wait?.kind === "conversation") {
       try {
         const ended = await concludeLastConversation(run, threads, deps, result, log);
         if (ended) return;
@@ -2144,10 +2144,10 @@ function misreadStep(
   run: Run | undefined,
   thread: TicketThread,
 ): TicketState["misreadStep"] {
-  if (run?.waitingKind !== "escalation" || run.waitCursor === undefined) {
+  if (run?.wait?.kind !== "escalation" || run.wait?.opened === undefined) {
     return undefined;
   }
-  const handback = readHandback(thread, run.waitCursor);
+  const handback = readHandback(thread, run.wait?.opened);
   if (handback === undefined) return undefined;
   if (handback.kind === "unnamed") return undefined;
   if (handbackStage(handback, run.stage ?? "triage") !== undefined) return undefined;
@@ -2681,7 +2681,8 @@ async function concludeLastConversation(
   log: (message: string) => void,
 ): Promise<boolean> {
   const { store } = deps;
-  const { stage, waitCursor } = run;
+  const { stage } = run;
+  const waitCursor = run.wait?.opened;
   if (stage === undefined || waitCursor === undefined) return false;
 
   // A handoff parks a **work** stage on a conversation wait
@@ -2755,7 +2756,7 @@ async function resolveWait(
   // run, and resuming must run *that stage itself* — asking "what follows?"
   // would skip it, and for a park at execution that means verifying code
   // nobody wrote.
-  if (run.waitingKind === undefined) {
+  if (run.wait?.kind === undefined) {
     // A map being worked is the one park with no wait that is not a run
     // stopped for want of machinery. It is waiting on its own decision
     // tickets, and what moves it is {@link openGoAheads} finding the frontier
@@ -2772,7 +2773,7 @@ async function resolveWait(
       : undefined;
   }
 
-  const cursor = run.waitCursor;
+  const cursor = run.wait?.opened;
   if (cursor === undefined) return undefined;
 
   // The wait no *answer* resolves
@@ -2787,7 +2788,7 @@ async function resolveWait(
   // in the same shape as a conversation record and read the same way. Without
   // it a stop the human had already cleared stayed stopped for ever, with the
   // ticket still asking them to run the command they had just run.
-  if (run.waitingKind === "escalation") {
+  if (run.wait?.kind === "escalation") {
     const thread = await threads.ticket();
     const handback = readHandback(thread, cursor);
     if (handback === undefined) return undefined;
@@ -2796,7 +2797,7 @@ async function resolveWait(
     return resume === undefined ? undefined : { context: { stage: resume } };
   }
 
-  if (run.waitingKind === "gate") {
+  if (run.wait?.kind === "gate") {
     const thread = await threads.ticket();
     const decision = readGateDecision(thread, cursor);
     const transition = readGate(stage, decision);
@@ -2824,7 +2825,7 @@ async function resolveWait(
     return undefined;
   }
 
-  if (run.waitingKind === "conversation") {
+  if (run.wait?.kind === "conversation") {
     // The map's conversation is the one whose answer is *agreement* rather
     // than information (ADR-0024). Everywhere else a written answer re-enters
     // the same stage, because that stage has to judge whether the answer
@@ -2889,7 +2890,7 @@ async function resolveWait(
       : { context: { stage, feedback: answer.words }, consumed: answer.at };
   }
 
-  if (run.waitingKind === "review") {
+  if (run.wait?.kind === "review") {
     if (run.pr === undefined) return undefined;
     const pr = await threads.pullRequest(run.pr);
 
