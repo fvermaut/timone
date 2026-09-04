@@ -1,6 +1,6 @@
 # Phase 31: A run says who is holding it, and what it is waiting for
 
-> **Status:** Awaiting approval — written 2026-09-04. **Runs before [ADR-0050](../../adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md) is acted on**: D1 there says Timone joins its own manifest only once this phase is built *and watched working on a real run*, not when its tests are green.
+> **Status:** Complete — written 2026-09-04, built the same day. Fourteen slices, 1571 tests, one fault found by the live gate and fixed. See the [completion report](reports/phase-31-complete.md) and the [live gate](reports/phase-31-live-gate.md). Three of this plan's premises did not hold against the tree and are recorded in the report rather than worked around. **Runs before [ADR-0050](../../adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md) is acted on**: D1 there says Timone joins its own manifest only once this phase is built *and watched working on a real run*, not when its tests are green.
 >
 > Governing decisions:
 > [ADR-0049](../../adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md) — the whole of this phase;
