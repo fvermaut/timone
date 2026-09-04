@@ -2,25 +2,27 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-04, night.
+**Last updated:** 2026-09-04, late night.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** Timone worked one of its own tickets tonight. It stopped near the end for a good reason, that reason has been decided and built, and **the ticket can now finish.** One thing is worth two minutes.
+> **Read this first.** The check on ticket #39 ran again with your answer in force, and your answer worked: nothing is blocked any more. One last thing stands between that ticket and its pull request, and it needs you to watch a run.
 
-**1. Answer on [#39](https://github.com/fvermaut/timone/issues/39) so its work can finish.**
+**1. Run a watched check for [#39](https://github.com/fvermaut/timone/issues/39) so its work can be delivered.**
 
-Timone sorted, planned, wrote and checked this ticket on its own, in a container, in 34 minutes for $6.22. It stopped at the last check and asked a question. **The question has been answered** (below), so the job can pick up where it left off, finish, and open a pull request for you to merge.
+The re-run went as your decision said it should: the two promises that can be checked from a terminal were checked again and hold, and the eighteen that need a running machine now each point at the last watched run that saw them — instead of stopping the job. The full account is in [the report, second part](doc/plans/phases/reports/phase-33-verification.md), on the ticket's branch `timone/39-primary-sources-owed-for-the-ui-ux-basel`.
 
-Reply on the ticket, or:
+One rule from your decision now applies to this very ticket: a change gets a watched run before delivery when it touches something a promise rests on. This ticket edited the design-rules file `standards/baseline/ui-ux.md`, and two promises rest on that folder — that every project gets the design and accessibility rules without exception, and that a new project's rules file lists them. Neither has ever had a watched run. So the job stopped before its pull request, on purpose, and a written reply will not move it.
+
+To run it with you watching:
 
 ```
 timone takeover timone#39
 ```
 
-**Why it matters:** nothing Timone has built for itself has reached a pull request yet. This would be the first.
+**Why it matters:** nothing Timone has built for itself has reached a pull request yet. This is the last stop before the first one.
 
 **2. What it asked, and what was decided.**
 
@@ -100,6 +102,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**4 September, late night — the check on ticket #39 ran again, on your machine, and your answer held up.** The first run, in the container, could check 2 of 20 promises and had to stop on the other 18. This run read the promise lists as you re-marked them: the 18 now name the watched run that last saw them instead of blocking, the 2 that remain terminal-checkable were re-run and hold (each check was first made to fail on purpose, so a pass means something), and all 1615 automatic tests pass on the branch with `main` merged in. Nothing failed, nothing regressed. The one thing left is above: the ticket's own edit touched the design-rules file, so two promises resting on it want a watched run before the pull request opens. This is the first time that new rule has fired, and it fired on the very change that created it.
 
 **4 September, night — two faults found by reading back what the job wrote.** A job running in a container [wrote to the main branch directly](https://github.com/fvermaut/timone/issues/85), with no branch and no pull request — the same code on your to-do app writes to its main branch, and the check meant to catch it is blind to exactly that case. And the check that stops a job reading the tests it will be judged by [does not work in a container at all](https://github.com/fvermaut/timone/issues/87), in either direction. Neither was found by a test; both were found by looking at what actually happened.
 
@@ -305,7 +309,7 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 - **The safety net has never fired in the wild.** If a step never notices it is stuck, the machine is supposed to notice after you have answered the same thing twice. That is proven by test and has not been seen live, because every step that was watched noticed by itself.
 - **A stopped job that is holding a project has not been watched blocking one.** It is the cost you accepted on 16 August, and it is still only argued.
 - **A handed-back job has not been watched running all the way to a pull request.** It was stopped on purpose when the test ticket was done.
-- **A Timone job has never reached a pull request.** One ran all the way to the last step on 4 September and stopped there. The reason was decided and built the same night, and the job can now finish — it needs your reply on [#39](https://github.com/fvermaut/timone/issues/39).
+- **A Timone job has never reached a pull request.** One ran all the way to the last step on 4 September, stopped, was answered, and ran the last step again late that night — cleanly. It now waits only for a watched run of two design-rules promises before its pull request opens; the command is at the top of this file. A written reply will not move it.
 - **The check that keeps a builder out of the verifier's checks does not work inside a container**, which is where every job runs. [#87](https://github.com/fvermaut/timone/issues/87). It cannot tell which step is running there, so it blocks the step that should be allowed and lets through the step that should not.
 - **Sixteen of Timone's own promises have never been watched working.** They now say so, each in its own line, which is more than was true this morning. Nothing forces anybody to act on that.
 - **One of the two checks fixed on 4 September was never seen working for real.** The rule about the status file being written in the wrong place: the job that ran never wrote one, because it stopped before the step that writes it. It is proven by tests and by replaying two real cases from August, and not by watching.
