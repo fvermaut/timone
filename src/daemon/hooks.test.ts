@@ -321,6 +321,129 @@ describe("checkPathContainment", () => {
   });
 });
 
+describe("checkPathContainment — the harness rule's one exception", () => {
+  const TIMONE = "https://github.com/fvermaut/timone.git";
+
+  /**
+   * A self-run: the workspace is Timone's harness clone and the project
+   * checkout is Timone's own repository, cloned a second time at the branch
+   * the run works on (pre-flight finding (c) — two clones of one repository,
+   * and that is correct).
+   */
+  function selfRun(options: { projectOrigin?: string; label?: string } = {}): SessionEvidence {
+    const label = options.label ?? "timone";
+    return {
+      target: label,
+      workspace: { ...quietRepo("timone"), originUrl: TIMONE },
+      projects: [
+        {
+          repo: label,
+          ...(options.projectOrigin === undefined
+            ? {}
+            : { originUrl: options.projectOrigin }),
+          defaultBranch: "main",
+          branches: [{ name: "timone/39-1", unpushed: [], hasUpstream: true }],
+          commits: [
+            {
+              sha: "aaa1111",
+              branch: "timone/39-1",
+              files: [
+                "standards/ui-ux/README.md",
+                "process.md",
+                ".claude/skills/timone-plan/SKILL.md",
+                "src/daemon/hooks.ts",
+              ],
+              trailers: ["Timone-Stage: execution"],
+            },
+          ],
+          workingTree: [],
+        },
+      ],
+    };
+  }
+
+  it("still refuses a harness file committed into a client repo", () => {
+    const evidence = cleanEvidence();
+    evidence.workspace.originUrl = TIMONE;
+    projectRepo(evidence).originUrl = "https://github.com/fvermaut/scratch-app.git";
+    projectRepo(evidence).commits = [
+      {
+        sha: "fff6666",
+        branch: "phase/01",
+        files: [".claude/skills/timone-plan/SKILL.md"],
+        trailers: ["Timone-Stage: execution"],
+      },
+    ];
+
+    const violations = checkPathContainment(evidence);
+
+    expect(violations).toHaveLength(1);
+    // The words are unchanged: R2's sentence is what a reader has learnt.
+    expect(violations[0].summary).toMatch(
+      /harness file\(s\) were committed into scratch-app/,
+    );
+    expect(violations[0].detail.join(" ")).toMatch(
+      /receives process artifacts only/,
+    );
+  });
+
+  it("lets Timone commit its own harness files into its own checkout", () => {
+    expect(checkPathContainment(selfRun({ projectOrigin: TIMONE }))).toEqual([]);
+  });
+
+  it("reads the same repository through ssh and https alike", () => {
+    // A daemon clones over https; fvermaut's own remote may be ssh. Two urls
+    // for one repository must not be read as two repositories.
+    expect(
+      checkPathContainment(
+        selfRun({ projectOrigin: "git@github.com:fvermaut/timone.git" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still refuses a client project whose manifest key is `timone`", () => {
+    // The name is not the test. A suite with the two cases above and not this
+    // one passes against a string comparison, and one typo in a manifest
+    // would then hand a client the whole harness.
+    const evidence = selfRun({
+      projectOrigin: "https://github.com/acme/timone.git",
+    });
+
+    const violations = checkPathContainment(evidence);
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0].summary).toMatch(/committed into timone/);
+  });
+
+  it("refuses rather than exempts when it cannot tell what the checkout is", () => {
+    // No `origin` on the project checkout. Not knowing is not the same as
+    // knowing they are the same repository, and the harm this rule prevents
+    // is a client repository receiving the harness.
+    expect(checkPathContainment(selfRun())).toHaveLength(1);
+  });
+
+  it("leaves `doc/` and `CONTEXT.md` alone in both repositories", () => {
+    // R2, which does not move: process artifacts are what a client repo does
+    // receive, and they were never what this half was about.
+    const client = cleanEvidence();
+    client.workspace.originUrl = TIMONE;
+    projectRepo(client).originUrl = "https://github.com/fvermaut/scratch-app.git";
+    projectRepo(client).commits = [
+      {
+        sha: "fff6666",
+        branch: "phase/01",
+        files: ["doc/plans/phases/phase-01.md", "CONTEXT.md"],
+        trailers: ["Timone-Stage: execution"],
+      },
+    ];
+    expect(checkPathContainment(client)).toEqual([]);
+
+    const own = selfRun({ projectOrigin: TIMONE });
+    own.projects[0].commits[0].files = ["doc/adr/0050-x.md", "CONTEXT.md"];
+    expect(checkPathContainment(own)).toEqual([]);
+  });
+});
+
 interface PostedComment {
   number: number;
   body: string;

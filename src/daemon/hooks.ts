@@ -45,6 +45,22 @@ export interface CommitEvidence {
 export interface RepoEvidence {
   /** Label used in messages: the project name, or "timone" for the workspace. */
   repo: string;
+  /**
+   * Where this checkout was cloned from — `git remote get-url origin`.
+   *
+   * **The repository's identity, which is not the same thing as {@link repo}.**
+   * The label is a manifest key: whoever writes the manifest chooses it, and a
+   * client project could be called `timone`. This is what the checkout
+   * actually is, and it is what {@link checkPathContainment} tests when it
+   * decides whether a harness file is at home
+   * ([ADR-0050](../../doc/adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md)
+   * D5).
+   *
+   * Optional, and its absence means *cannot tell* — evidence built before
+   * this field existed, and a checkout with no `origin`. Every rule that
+   * reads it must treat that as "no exemption", never as "same repository".
+   */
+  originUrl?: string;
   defaultBranch: string;
   branches: BranchEvidence[];
   commits: CommitEvidence[];
@@ -225,6 +241,43 @@ function isHarnessPath(path: string): boolean {
 }
 
 /**
+ * A remote url reduced to the thing two urls for one repository have in
+ * common: no scheme difference, no `.git`, no trailing slash, no case.
+ *
+ * `git@github.com:fvermaut/timone.git` and
+ * `https://github.com/fvermaut/timone` are the same repository, and a daemon
+ * clones over https while a human's checkout may well use ssh.
+ *
+ * Undefined for anything with no repository in it, which callers read as
+ * *cannot tell*.
+ */
+function repoIdentity(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  const trimmed = url.trim().replace(/\/+$/, "").replace(/\.git$/, "");
+  if (trimmed === "") return undefined;
+  return trimmed
+    .replace(/^git@([^:/]+):/, "https://$1/")
+    .replace(/^ssh:\/\/git@/, "https://")
+    .toLowerCase();
+}
+
+/**
+ * True when these two checkouts are the same repository.
+ *
+ * **False whenever it cannot tell**, which is the direction that matters: the
+ * only caller uses this to *stop* refusing something, and an unanswerable
+ * question must not exempt anybody.
+ */
+export function isSameRepository(
+  one: RepoEvidence,
+  other: RepoEvidence,
+): boolean {
+  const left = repoIdentity(one.originUrl);
+  const right = repoIdentity(other.originUrl);
+  return left !== undefined && left === right;
+}
+
+/**
  * **Path containment.** Two halves, and they have different preconditions.
  *
  * In the workspace repo: a session sent to work one project should have
@@ -238,6 +291,18 @@ function isHarnessPath(path: string): boolean {
  * Process artifacts under `doc/` and `CONTEXT.md` are exactly what a client
  * repo does receive (R2); `.claude/`, `.timone/` and the rest are not. This
  * half needs no target and runs for both kinds.
+ *
+ * ✏ **With one exception, since ADR-0050 D5: Timone's own checkout.** Timone
+ * is a managed project now, and a run working it commits `process.md`,
+ * `standards/` and `.claude/` because that is the work. Those are harness
+ * files at home rather than harness files riding along, and flagging every
+ * honest self-run is how a check stops being read.
+ *
+ * **The test is the repository, not its name.** A manifest key is chosen by
+ * whoever writes the manifest, so `repo === "timone"` would silently exempt a
+ * client project that happened to be called that — one typo from a client
+ * receiving the whole harness. {@link isSameRepository} compares the two
+ * checkouts' `origin`, and answers false whenever it cannot tell.
  */
 export function checkPathContainment(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
@@ -267,6 +332,10 @@ export function checkPathContainment(evidence: SessionEvidence): Violation[] {
   }
 
   for (const project of evidence.projects) {
+    // Timone working on itself. Its harness files are its own source
+    // (ADR-0050 D5), and nothing here is a client repository receiving them.
+    if (isSameRepository(project, evidence.workspace)) continue;
+
     const harness = project.commits.flatMap((commit) =>
       commit.files
         .filter(isHarnessPath)
@@ -573,6 +642,12 @@ async function branchTips(dir: string): Promise<Map<string, string>> {
   return tips;
 }
 
+/** Where `dir` was cloned from, or undefined when it has no `origin`. */
+async function originUrlOf(dir: string): Promise<string | undefined> {
+  const url = (await git(dir, ["remote", "get-url", "origin"])).trim();
+  return url === "" ? undefined : url;
+}
+
 /** The remote's default branch, falling back to `main` when unknown. */
 async function defaultBranchOf(dir: string): Promise<string> {
   const ref = (
@@ -661,6 +736,7 @@ async function collectRepo(
     };
   }
 
+  const originUrl = await originUrlOf(dir);
   const tips = await branchTips(dir);
   const touched = [...tips.entries()].filter(
     ([name, sha]) => baseline.get(name) !== sha,
@@ -706,6 +782,7 @@ async function collectRepo(
 
   return {
     repo: label,
+    ...(originUrl === undefined ? {} : { originUrl }),
     defaultBranch: await defaultBranchOf(dir),
     branches,
     commits,
