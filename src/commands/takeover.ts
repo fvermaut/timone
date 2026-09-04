@@ -17,7 +17,11 @@ import {
   wayfinderStage,
   type PipelineStage,
 } from "../daemon/pipeline.js";
-import { outcomeCursorFrom } from "../daemon/outcomes.js";
+import {
+  outcomeCursorFrom,
+  readStageOutcome,
+  type StageOutcome,
+} from "../daemon/outcomes.js";
 import {
   PROMPTED_STAGES,
   escalationPrompt,
@@ -478,7 +482,13 @@ export async function runTakeover(
   } finally {
     process.off("SIGINT", giveBack);
     process.off("SIGTERM", giveBack);
-    giveBack();
+    // **The ordinary ending reads what the session recorded; a signal cannot**
+    // (ADR-0049 D6). Ctrl-C runs no `await`, so the signal handler above stays
+    // the blind restore it has always been — a claim given back is better than
+    // a claim held by a process that is gone. This path has time to ask the
+    // ticket what happened.
+    beat.stop();
+    await endTakeover(target, claimed.run, deps, log);
   }
 }
 
@@ -624,6 +634,167 @@ async function claimForTakeover(
   return run.wait?.kind === "escalation"
     ? { kind: "claimed", run, escalation: true }
     : { kind: "claimed", run };
+}
+
+/** Reduce an error to one readable line. */
+function oneLine(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.split("\n")[0];
+}
+
+/**
+ * End a takeover by reading what its session actually recorded, and say at the
+ * terminal what changed
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D6, second half).
+ *
+ * **`releaseClaim` restored the old wait blindly, and that is timone#76.**
+ * `ivtrends` #58's building and checking were both finished inside a takeover
+ * and pushed; the session posted `🏁 Step finished`; and the run was then
+ * parked again on exactly the wait it had before, cursor and all. The ticket
+ * went on asking a person for an answer they had given three hours earlier by
+ * doing the work.
+ *
+ * So the ending consults the ticket from the claim's own cursor with the same
+ * {@link readStageOutcome} the spawner uses. A finished step advances the run;
+ * anything else goes back to the wait it came from.
+ *
+ * **And it says so, either way.** Ending silently is what left #58 looking
+ * answered: the person walked away from a terminal that had told them nothing
+ * about what their session had or had not moved.
+ */
+async function endTakeover(
+  target: TakeoverTarget,
+  run: Run,
+  deps: TakeoverDeps,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store } = deps;
+  const name = `${target.project} #${target.ticket}`;
+
+  // Somebody else moved it while the conversation ran — the daemon reclaimed
+  // it, a `timone cancel` landed, another terminal took it. Saying so is the
+  // point: this used to be a silent early return, which is timone#63's
+  // handback that could never be read.
+  const now = store.get(run.id);
+  if (now === undefined || now.status !== "active") {
+    log(
+      `${name} moved while we were talking — it is now ` +
+        `${now?.status ?? "gone from the ledger"}. I've left it alone rather ` +
+        "than writing over whatever did that.",
+    );
+    return;
+  }
+
+  const cursor = run.wait?.opened;
+  const stage = run.stage;
+  if (cursor === undefined || stage === undefined) {
+    releaseClaim(target, run, deps, log);
+    log(`${name} goes back to what it was waiting for.`);
+    return;
+  }
+
+  let outcome: StageOutcome | undefined;
+  try {
+    const project = {
+      name: target.project,
+      repoUrl: deps.manifest.projects[target.project].repo_url,
+    };
+    outcome = readStageOutcome(
+      await deps.adapter.getTicket(project, target.ticket),
+      cursor,
+    );
+  } catch (error) {
+    // An unreadable ticket is no grounds to move a run. The claim goes back
+    // and the next cycle reads the thread with a clearer head.
+    log(
+      `I couldn't read ${name} to see what we finished: ${oneLine(error)}. ` +
+        "It goes back to what it was waiting for.",
+    );
+    releaseClaim(target, run, deps, log);
+    return;
+  }
+
+  if (outcome?.kind !== "advanced") {
+    releaseClaim(target, run, deps, log);
+    log(
+      outcome === undefined
+        ? `${name} goes back to what it was waiting for — nothing was recorded ` +
+            "as finished, so I've changed nothing."
+        : `${name} goes back to what it was waiting for.`,
+    );
+    return;
+  }
+
+  // The wait itself says which stage may end it (31h), so this is not a guess
+  // about whose work the outcome was: a step finished at a stage the wait does
+  // not name is somebody else's business.
+  const endedBy = run.wait?.resolvableBy;
+  if (endedBy !== undefined && !endedBy.includes(stage)) {
+    releaseClaim(target, run, deps, log);
+    log(
+      `${name} goes back to what it was waiting for — what we finished isn't ` +
+        "what it was waiting on.",
+    );
+    return;
+  }
+
+  // **Parked with no kind of wait, which is the ledger's way of saying "not
+  // waiting on a person, carry on when you can".** `resolveWait` resumes such
+  // a run at its own stage on the next cycle, and that stage then finishes
+  // through every check it already has — the phase file's status, the branch
+  // having moved, the outcome the session posted.
+  //
+  // Deliberately *not* "work out the next stage and go there". What follows a
+  // work stage is decided by `afterWorkStage`, which reads the branch; a
+  // command that skipped it to save one cheap session would be advancing a
+  // run past a check on the strength of a comment. One more pass is the right
+  // price for not guessing.
+  release(target, deps, () => {
+    store.park(run.id, {
+      waitingOn: "nothing — I'll carry on from where you left it.",
+      stage,
+      waitCursor: outcome.comment.createdAt,
+    });
+  });
+  log(
+    `${name} has the step you finished recorded against it, so it stops ` +
+      "asking. I'll carry it on from there on my next pass.",
+  );
+}
+
+/**
+ * Do `write` under the ledger's lock, or leave the daemon a request to take
+ * the run back. {@link releaseClaim}'s two roads, without its wait.
+ */
+function release(
+  target: TakeoverTarget,
+  deps: TakeoverDeps,
+  write: () => void,
+): void {
+  const { statePath } = deps;
+  if (statePath === undefined) return;
+
+  const acquired = acquireStateLock({
+    statePath,
+    command: "timone takeover (writing back what we finished)",
+    staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
+  });
+  if (acquired.ok) {
+    try {
+      write();
+    } finally {
+      acquired.lock.release();
+    }
+    return;
+  }
+  if (acquired.error.holder === undefined) return;
+  enqueue(statePath, {
+    kind: "release-takeover",
+    project: target.project,
+    ticket: target.ticket,
+    outcome: "ended",
+  });
 }
 
 /**

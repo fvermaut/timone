@@ -9,15 +9,17 @@ import type {
   Step,
   Ticket,
   TicketingAdapter,
+  TicketComment,
   TicketingProject,
   TicketThread,
 } from "../adapters/ticketing.js";
+import { STAGE_DONE_MARKER } from "../adapters/ticketing.js";
 import {
   noBranches,
   noFiles,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
-import { RunStore } from "../daemon/runs.js";
+import { RunStore, type Run } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
 import { acquireStateLock, stateLockPath } from "../daemon/lock.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
@@ -219,15 +221,22 @@ function fakeAdapter(open: readonly Ticket[] = []): {
   return { adapter, asked, listings };
 }
 
-function fakeLauncher(exitCode = 0): {
+function fakeLauncher(
+  options: number | { exitCode?: number; onRun?: () => void } = 0,
+): {
   launcher: ProcessLauncher;
   calls: { command: string; args: readonly string[]; cwd: string }[];
 } {
+  const settings = typeof options === "number" ? { exitCode: options } : options;
   const calls: { command: string; args: readonly string[]; cwd: string }[] = [];
   const launcher: ProcessLauncher = {
-    async run(command, args, options) {
-      calls.push({ command, args, cwd: options.cwd });
-      return exitCode;
+    async run(command, args, opened) {
+      calls.push({ command, args, cwd: opened.cwd });
+      // What the person did while the conversation was open, when a case
+      // needs one: the ledger moving under a live takeover is a real event
+      // and can only be staged from here.
+      settings.onRun?.();
+      return settings.exitCode ?? 0;
     },
   };
   return { launcher, calls };
@@ -1001,6 +1010,169 @@ describe("a takeover that gives up leaves nothing behind", () => {
       expect(ticks).toHaveLength(1);
     } finally {
       ticker.stop();
+    }
+  });
+});
+
+describe("a takeover that finishes the step it took over", () => {
+  /**
+   * `ivtrends` #58's shape: a run parked on a conversation at a **work**
+   * stage, because the building step stopped and asked for a person.
+   */
+  /** A store and the path it is written to, which this command needs both of. */
+  function ledger(): { store: RunStore; statePath: string } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-end-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    let tick = 0;
+    return {
+      statePath,
+      store: RunStore.open(statePath, {
+        now: () => `2026-08-03T10:${String(tick++).padStart(2, "0")}:00Z`,
+      }),
+    };
+  }
+
+  function handedBackAtExecution(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-the-backfill");
+    store.park(run.id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "execution",
+      waitCursor: "2026-08-03T09:30:00Z",
+      resolvableBy: ["execution"],
+    });
+    return store.get(run.id) as Run;
+  }
+
+  /** A tracker whose thread carries whatever the takeover session posted. */
+  function trackerSaying(comments: readonly TicketComment[]): TicketingAdapter {
+    const said: TicketThread = { ...thread, comments: [...comments] };
+    return {
+      ...fakeAdapter().adapter,
+      async getTicket(): Promise<TicketThread> {
+        return said;
+      },
+    };
+  }
+
+  /** What a session posts when it has finished the step it was given. */
+  const finished: TicketComment = {
+    author: "fvermaut",
+    body: `${STAGE_DONE_MARKER}\n\nThe backfill says where it has got to.`,
+    createdAt: "2026-08-03T10:48:00Z",
+    fromTimone: true,
+  };
+
+  it("stops the run asking, once the session has recorded a finished step", async () => {
+    // timone#76. `ivtrends` #58's building and checking were both finished
+    // inside a takeover and pushed, the session posted the finished marker,
+    // and the run was parked again on exactly the wait it had before — cursor
+    // and all. The ticket went on asking a person for an answer they had
+    // given three hours earlier by doing the work.
+    const { store, statePath } = ledger();
+    handedBackAtExecution(store);
+    const { launcher } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter: trackerSaying([finished]),
+      launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(0);
+    const after = store.get("scratch-app#6/1");
+    // Parked with no kind of wait: the ledger's way of saying "not waiting on
+    // a person, carry on when you can". `resolveWait` resumes such a run at
+    // its own stage on the next cycle.
+    expect(after?.status).toBe("parked");
+    expect(after?.wait?.kind).toBeUndefined();
+    expect(after?.stage).toBe("execution");
+    expect(said.join("\n")).toContain("stops asking");
+  });
+
+  it("puts the run back exactly as it was when nothing was recorded", async () => {
+    const { store, statePath } = ledger();
+    handedBackAtExecution(store);
+    const { launcher } = fakeLauncher();
+    const said: string[] = [];
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter: trackerSaying([]),
+      launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    const after = store.get("scratch-app#6/1");
+    expect(after?.status).toBe("parked");
+    expect(after?.wait?.kind).toBe("conversation");
+    expect(after?.wait?.opened).toBe("2026-08-03T09:30:00Z");
+    expect(said.join("\n")).toContain("nothing was recorded");
+  });
+
+  it("says so, and writes nothing, when the run moved under it", async () => {
+    // timone#63's silent early return. `releaseClaim` returned without a word
+    // when the run was no longer active, so a person whose run had been
+    // reclaimed, cancelled or taken by another terminal saw a conversation end
+    // normally and had no way to know the ledger had gone the other way.
+    const { store, statePath } = ledger();
+    handedBackAtExecution(store);
+    const { launcher } = fakeLauncher({
+      onRun: () => store.cancel("scratch-app#6/1", "you closed the ticket"),
+    });
+    const said: string[] = [];
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter: trackerSaying([finished]),
+      launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(store.get("scratch-app#6/1")?.status).toBe("cancelled");
+    expect(said.join("\n")).toContain("moved while we were talking");
+    expect(said.join("\n")).toContain("cancelled");
+  });
+
+  it("tells the terminal what happened whichever way it went", async () => {
+    // Ending silently is what left #58 looking answered: the person walked
+    // away from a terminal that had said nothing about what their session had
+    // or had not moved.
+    for (const comments of [[finished], []]) {
+      const { store, statePath } = ledger();
+      handedBackAtExecution(store);
+      const { launcher } = fakeLauncher();
+      const said: string[] = [];
+
+      await runTakeover("scratch-app#6", {
+        manifest,
+        store,
+        statePath,
+        adapter: trackerSaying(comments),
+        launcher,
+        root: "/root",
+        ticker: () => ({ stop: () => {} }),
+        log: (message) => said.push(message),
+      });
+
+      expect(said.join("\n")).toMatch(/scratch-app #6/);
     }
   });
 });
