@@ -39,12 +39,44 @@ export interface CommitEvidence {
   committerEmail?: string;
   /** How many parents the commit has. Two or more means a merge. */
   parentCount?: number;
+  /**
+   * Whether this commit is an ancestor of the remote's default branch — that
+   * is, whether it is already **on** `main`
+   * ([timone#70](https://github.com/fvermaut/timone/issues/70)).
+   *
+   * {@link branch} is decided by containment, and containment cannot tell
+   * *written here* from *arrived here from `main`*: the moment a work branch
+   * merges `main` in, every commit on `main` is contained by it. Merging the
+   * default branch into a work branch is ordinary and the process asks for
+   * it, so without this the rules report correct work — which is how a check
+   * stops being read.
+   *
+   * Optional so evidence built before this field existed still type-checks.
+   * Its absence means *cannot tell*, and the rules keep their old answer.
+   */
+  onDefaultBranch?: boolean;
 }
 
 /** What one repository did during a session. */
 export interface RepoEvidence {
   /** Label used in messages: the project name, or "timone" for the workspace. */
   repo: string;
+  /**
+   * Where this checkout was cloned from — `git remote get-url origin`.
+   *
+   * **The repository's identity, which is not the same thing as {@link repo}.**
+   * The label is a manifest key: whoever writes the manifest chooses it, and a
+   * client project could be called `timone`. This is what the checkout
+   * actually is, and it is what {@link checkPathContainment} tests when it
+   * decides whether a harness file is at home
+   * ([ADR-0050](../../doc/adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md)
+   * D5).
+   *
+   * Optional, and its absence means *cannot tell* — evidence built before
+   * this field existed, and a checkout with no `origin`. Every rule that
+   * reads it must treat that as "no exemption", never as "same repository".
+   */
+  originUrl?: string;
   defaultBranch: string;
   branches: BranchEvidence[];
   commits: CommitEvidence[];
@@ -64,8 +96,13 @@ export interface SessionEvidence {
    * A daemon session always has one — it belongs to a run, and the run names
    * its project. An interactive session belongs to no run and names nothing,
    * and that absence is meaningful rather than missing information: with no
-   * declared target there is no "should have stayed inside" to judge, and a
-   * session working on Timone itself touches nothing under `projects/` at all.
+   * declared target there is no "should have stayed inside" to judge.
+   *
+   * ✏ **Since phase 32d it can be `"timone"`**, because Timone is a managed
+   * project (ADR-0050 D1). That is a run working `projects/timone/`, which is
+   * a second clone of this repository — not an interactive session editing
+   * the workspace, which still names no target and still touches nothing
+   * under `projects/`.
    */
   target?: string;
   /** The timone repo, where every session runs (ADR-0007). */
@@ -88,8 +125,15 @@ export type GuardrailRule =
  * The prefix every run's work branch carries (`workBranch` in `prompts.ts`).
  *
  * In a project's checkout it is correct and expected. In the workspace it
- * cannot be anything but a mistake: Timone is not a managed project, so no
- * run ever targets it and no work branch is ever named for it.
+ * cannot be anything but a mistake.
+ *
+ * ✏ **The reason changed at phase 32d and the rule did not.** It used to be
+ * that Timone was not a managed project, so no run could target it. Timone is
+ * one now ([ADR-0050](../../doc/adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md)
+ * D1) and a self-run's work branch is named for a Timone ticket — but that
+ * branch is cut in `projects/timone/`, which is a **different clone** of the
+ * same repository (pre-flight finding (c)). The workspace is the harness the
+ * run obeys, and a work branch cut there still reaches nothing.
  */
 const WORK_BRANCH_PREFIX = "timone/";
 
@@ -152,12 +196,48 @@ export function checkUnpushed(evidence: SessionEvidence): Violation[] {
  * **STATUS.md placement.** The status file is the human's view of a project
  * and is read from the default branch; written on a feature branch it is
  * invisible until — and unless — that branch merges.
+ *
+ * ✏ **Two corrections, phase 32c. They are different faults and must not be
+ * conflated.**
+ *
+ * **The false one ([timone#70](https://github.com/fvermaut/timone/issues/70)).**
+ * A commit already on the default branch was not "written on this branch",
+ * whatever containment says. Merging `main` into a work branch is ordinary
+ * and the process asks for it, and every commit on `main` the branch takes
+ * used to be reported. It fired on `ivtrends` on 2026-08-30 and on this
+ * repository on 2026-09-04.
+ *
+ * **The true one, which is a decision rather than a bug (ADR-0050, D-2).** A
+ * run writes `STATUS.md` on its work branch because that is what the process
+ * asks of every stage, and the file reaches `main` when the pull request
+ * does. So a status file on a **run's own work branch, in the repository that
+ * run is working**, is expected and silent. Everywhere else the finding
+ * stands — including an interactive session's own branch, where it fired
+ * twice on 2026-09-04 and was right both times.
  */
 export function checkStatusPlacement(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
-  for (const repo of [...evidence.projects, evidence.workspace]) {
+
+  // The workspace is never a run's target. A run works a project's checkout
+  // under `projects/`, and a `timone/…` branch cut here is `checkBranchPlacement`'s
+  // finding rather than this one's exemption — which matters now that Timone
+  // is itself a managed project and `evidence.target` can be `"timone"`.
+  const repos = [
+    ...evidence.projects.map((repo) => ({
+      repo,
+      worksHere: evidence.target !== undefined && repo.repo === evidence.target,
+    })),
+    { repo: evidence.workspace, worksHere: false },
+  ];
+
+  for (const { repo, worksHere } of repos) {
     for (const commit of repo.commits) {
       if (commit.branch === repo.defaultBranch) continue;
+      // It is on `main` already, whichever other branches also contain it.
+      if (commit.onDefaultBranch === true) continue;
+      // The run's own work branch, in the project it was sent to work. This
+      // is where a status file is supposed to be written.
+      if (worksHere && commit.branch.startsWith(WORK_BRANCH_PREFIX)) continue;
       if (!commit.files.some((file) => file.endsWith("STATUS.md"))) continue;
       violations.push({
         rule: "status-placement",
@@ -184,9 +264,10 @@ export function checkStatusPlacement(evidence: SessionEvidence): Violation[] {
  *
  * The rule is decidable on the name alone, which is the only reason it can
  * exist: `timone/…` in a project is that project's work branch, and in the
- * workspace it is always misplaced. It needs no target, because the mistake
- * is the same whoever was driving — the session that made it was recording
- * an approval, and the one that paid for it was interactive.
+ * workspace it is always misplaced — including on a Timone self-run, whose
+ * work branch belongs in `projects/timone/`. It needs no target, because the
+ * mistake is the same whoever was driving — the session that made it was
+ * recording an approval, and the one that paid for it was interactive.
  */
 export function checkBranchPlacement(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
@@ -225,6 +306,43 @@ function isHarnessPath(path: string): boolean {
 }
 
 /**
+ * A remote url reduced to the thing two urls for one repository have in
+ * common: no scheme difference, no `.git`, no trailing slash, no case.
+ *
+ * `git@github.com:fvermaut/timone.git` and
+ * `https://github.com/fvermaut/timone` are the same repository, and a daemon
+ * clones over https while a human's checkout may well use ssh.
+ *
+ * Undefined for anything with no repository in it, which callers read as
+ * *cannot tell*.
+ */
+function repoIdentity(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  const trimmed = url.trim().replace(/\/+$/, "").replace(/\.git$/, "");
+  if (trimmed === "") return undefined;
+  return trimmed
+    .replace(/^git@([^:/]+):/, "https://$1/")
+    .replace(/^ssh:\/\/git@/, "https://")
+    .toLowerCase();
+}
+
+/**
+ * True when these two checkouts are the same repository.
+ *
+ * **False whenever it cannot tell**, which is the direction that matters: the
+ * only caller uses this to *stop* refusing something, and an unanswerable
+ * question must not exempt anybody.
+ */
+export function isSameRepository(
+  one: RepoEvidence,
+  other: RepoEvidence,
+): boolean {
+  const left = repoIdentity(one.originUrl);
+  const right = repoIdentity(other.originUrl);
+  return left !== undefined && left === right;
+}
+
+/**
  * **Path containment.** Two halves, and they have different preconditions.
  *
  * In the workspace repo: a session sent to work one project should have
@@ -238,6 +356,18 @@ function isHarnessPath(path: string): boolean {
  * Process artifacts under `doc/` and `CONTEXT.md` are exactly what a client
  * repo does receive (R2); `.claude/`, `.timone/` and the rest are not. This
  * half needs no target and runs for both kinds.
+ *
+ * ✏ **With one exception, since ADR-0050 D5: Timone's own checkout.** Timone
+ * is a managed project now, and a run working it commits `process.md`,
+ * `standards/` and `.claude/` because that is the work. Those are harness
+ * files at home rather than harness files riding along, and flagging every
+ * honest self-run is how a check stops being read.
+ *
+ * **The test is the repository, not its name.** A manifest key is chosen by
+ * whoever writes the manifest, so `repo === "timone"` would silently exempt a
+ * client project that happened to be called that — one typo from a client
+ * receiving the whole harness. {@link isSameRepository} compares the two
+ * checkouts' `origin`, and answers false whenever it cannot tell.
  */
 export function checkPathContainment(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
@@ -267,6 +397,10 @@ export function checkPathContainment(evidence: SessionEvidence): Violation[] {
   }
 
   for (const project of evidence.projects) {
+    // Timone working on itself. Its harness files are its own source
+    // (ADR-0050 D5), and nothing here is a client repository receiving them.
+    if (isSameRepository(project, evidence.workspace)) continue;
+
     const harness = project.commits.flatMap((commit) =>
       commit.files
         .filter(isHarnessPath)
@@ -573,6 +707,22 @@ async function branchTips(dir: string): Promise<Map<string, string>> {
   return tips;
 }
 
+/** True when git exited 0 for these args — for the questions with no output. */
+async function gitSucceeds(dir: string, args: string[]): Promise<boolean> {
+  try {
+    await execFileAsync("git", args, { cwd: dir });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Where `dir` was cloned from, or undefined when it has no `origin`. */
+async function originUrlOf(dir: string): Promise<string | undefined> {
+  const url = (await git(dir, ["remote", "get-url", "origin"])).trim();
+  return url === "" ? undefined : url;
+}
+
 /** The remote's default branch, falling back to `main` when unknown. */
 async function defaultBranchOf(dir: string): Promise<string> {
   const ref = (
@@ -661,6 +811,13 @@ async function collectRepo(
     };
   }
 
+  const originUrl = await originUrlOf(dir);
+  const defaultBranch = await defaultBranchOf(dir);
+  // The **remote's** default branch, not the local one. What the rule is
+  // about is whether anyone reading `main` will see the file, and `main` is
+  // what has been pushed (timone#70). A local branch ahead of its upstream
+  // holds commits nobody else can see yet.
+  const defaultRef = `refs/remotes/origin/${defaultBranch}`;
   const tips = await branchTips(dir);
   const touched = [...tips.entries()].filter(
     ([name, sha]) => baseline.get(name) !== sha,
@@ -700,13 +857,22 @@ async function collectRepo(
       ...baselineShas,
     ])) {
       if (madeElsewhere(commit, sessionId)) continue;
-      commits.push(commit);
+      commits.push({
+        ...commit,
+        onDefaultBranch: await gitSucceeds(dir, [
+          "merge-base",
+          "--is-ancestor",
+          commit.sha,
+          defaultRef,
+        ]),
+      });
     }
   }
 
   return {
     repo: label,
-    defaultBranch: await defaultBranchOf(dir),
+    ...(originUrl === undefined ? {} : { originUrl }),
+    defaultBranch,
     branches,
     commits,
     workingTree: await workingTreePaths(dir),

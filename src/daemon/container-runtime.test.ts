@@ -865,6 +865,11 @@ describe("the services beside the box", () => {
   it("starts no container at all when the stack refused to come up", async () => {
     // A session run against services that are not there fails in a way that
     // reads as the agent's fault. Better to have started nothing.
+    //
+    // ✏ The example used to be a project with no compose file. Since phase 32
+    // that is not a refusal at all — it is a project with no services, and
+    // Timone is one — so the example is a stack that never became healthy,
+    // which is what a refusal now means.
     const { spawn, calls } = fakeContainer([started, result()]);
 
     await expect(
@@ -872,12 +877,29 @@ describe("the services beside the box", () => {
         image: "timone-box:test",
         spawn,
         services: async () => {
-          throw new Error("scratch-app commits no compose file");
+          throw new Error("scratch-app's db never became healthy");
         },
       }).start(request()),
-    ).rejects.toThrow(/compose file/);
+    ).rejects.toThrow(/never became healthy/);
 
     expect(calls.filter((call) => call.args[0] === "run")).toHaveLength(0);
+  });
+
+  it("runs without a stack when the project commits no compose file", async () => {
+    // The path a Timone self-run takes (ADR-0050 D1): a command-line program
+    // with no services beside it. Before phase 32 this threw at the spawn.
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      services: async () => undefined,
+    }).start(request());
+
+    expect(calls.filter((call) => call.args[0] === "run")).toHaveLength(1);
+    expect(calls.find((call) => call.args[0] === "run")!.args).not.toContain(
+      "--network",
+    );
   });
 
   it("runs without a stack when nothing configures one", async () => {

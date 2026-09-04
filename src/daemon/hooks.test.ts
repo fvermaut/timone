@@ -165,6 +165,152 @@ describe("checkStatusPlacement", () => {
 });
 
 /**
+ * The two corrections of phase 32c. They are different faults: one is a bug
+ * ([timone#70](https://github.com/fvermaut/timone/issues/70)) and one is a
+ * decision (ADR-0050's D-2).
+ */
+describe("checkStatusPlacement — what is not a stray status file", () => {
+  it("says nothing about a commit that is already on the default branch", () => {
+    // Merging `main` into a work branch is ordinary and the process asks for
+    // it. Containment then holds for every commit on `main`, which is the
+    // whole of timone#70.
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "ccc3333",
+        branch: "phase/01",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: true,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toEqual([]);
+  });
+
+  it("still says so about a commit written only on a branch", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "ccc3333",
+        branch: "phase/01",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: false,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toHaveLength(1);
+  });
+
+  it("replays ivtrends' 2026-08-30 pair and reports neither", () => {
+    // The shas from the issue, not invented ones. Both were made on `main`
+    // and pushed to `main`; they reached the work branch through one merge
+    // commit, and `STATUS.md` was never edited on that branch at all. Two
+    // findings were shown to fvermaut as things wrong with the session.
+    const evidence = cleanEvidence();
+    projectRepo(evidence).repo = "ivtrends";
+    projectRepo(evidence).commits = [
+      {
+        sha: "9e3a056",
+        branch: "timone/34-11-the-nightly-run-and-the-copy-that-pro",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: true,
+      },
+      {
+        sha: "b5eb295",
+        branch: "timone/34-11-the-nightly-run-and-the-copy-that-pro",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: true,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toEqual([]);
+  });
+
+  it("says nothing about a status file on the run's own work branch", () => {
+    // D-2. A run writes STATUS.md on its work branch because that is what the
+    // process asks of every stage, and the file reaches `main` when the pull
+    // request does.
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "ccc3333",
+        branch: "timone/39-1",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: false,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toEqual([]);
+  });
+
+  it("still says so about a work branch in a project no run was sent to", () => {
+    // The exemption is about the repository the run is working, not about the
+    // shape of a branch name. A `timone/…` branch in somebody else's checkout
+    // is a status file nobody will see.
+    const evidence = cleanEvidence();
+    evidence.projects.push({
+      repo: "other-app",
+      defaultBranch: "main",
+      branches: [],
+      commits: [
+        {
+          sha: "ddd4444",
+          branch: "timone/39-1",
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: execution"],
+          onDefaultBranch: false,
+        },
+      ],
+      workingTree: [],
+    });
+
+    expect(checkStatusPlacement(evidence)).toHaveLength(1);
+  });
+
+  it("still says so on an interactive session's own branch", () => {
+    // No target, so no run, so nothing is expected anywhere. It fired twice on
+    // this repository's own branches on 2026-09-04 and was right both times.
+    const evidence = cleanEvidence();
+    delete evidence.target;
+    evidence.workspace.commits = [
+      {
+        sha: "eee5555",
+        branch: "docs/phase-32-plan",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: interactive"],
+        onDefaultBranch: false,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toHaveLength(1);
+  });
+
+  it("still says so in the workspace even when a run targets Timone itself", () => {
+    // Timone is a managed project now, so `target` can be `"timone"` and the
+    // workspace's own label is `"timone"` too. A work branch cut here is
+    // `checkBranchPlacement`'s finding, never this rule's exemption.
+    const evidence = cleanEvidence();
+    evidence.target = "timone";
+    evidence.workspace.commits = [
+      {
+        sha: "eee5555",
+        branch: "timone/39-1",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: false,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toHaveLength(1);
+  });
+});
+
+/**
  * Finding 11 of phase 20's live gate, as a rule.
  *
  * A run's work branch is named from its ticket and its chunk (`workBranch`) —
@@ -318,6 +464,129 @@ describe("checkPathContainment", () => {
 
   it("stays silent on a session that stayed where it belongs", () => {
     expect(checkPathContainment(cleanEvidence())).toEqual([]);
+  });
+});
+
+describe("checkPathContainment — the harness rule's one exception", () => {
+  const TIMONE = "https://github.com/fvermaut/timone.git";
+
+  /**
+   * A self-run: the workspace is Timone's harness clone and the project
+   * checkout is Timone's own repository, cloned a second time at the branch
+   * the run works on (pre-flight finding (c) — two clones of one repository,
+   * and that is correct).
+   */
+  function selfRun(options: { projectOrigin?: string; label?: string } = {}): SessionEvidence {
+    const label = options.label ?? "timone";
+    return {
+      target: label,
+      workspace: { ...quietRepo("timone"), originUrl: TIMONE },
+      projects: [
+        {
+          repo: label,
+          ...(options.projectOrigin === undefined
+            ? {}
+            : { originUrl: options.projectOrigin }),
+          defaultBranch: "main",
+          branches: [{ name: "timone/39-1", unpushed: [], hasUpstream: true }],
+          commits: [
+            {
+              sha: "aaa1111",
+              branch: "timone/39-1",
+              files: [
+                "standards/ui-ux/README.md",
+                "process.md",
+                ".claude/skills/timone-plan/SKILL.md",
+                "src/daemon/hooks.ts",
+              ],
+              trailers: ["Timone-Stage: execution"],
+            },
+          ],
+          workingTree: [],
+        },
+      ],
+    };
+  }
+
+  it("still refuses a harness file committed into a client repo", () => {
+    const evidence = cleanEvidence();
+    evidence.workspace.originUrl = TIMONE;
+    projectRepo(evidence).originUrl = "https://github.com/fvermaut/scratch-app.git";
+    projectRepo(evidence).commits = [
+      {
+        sha: "fff6666",
+        branch: "phase/01",
+        files: [".claude/skills/timone-plan/SKILL.md"],
+        trailers: ["Timone-Stage: execution"],
+      },
+    ];
+
+    const violations = checkPathContainment(evidence);
+
+    expect(violations).toHaveLength(1);
+    // The words are unchanged: R2's sentence is what a reader has learnt.
+    expect(violations[0].summary).toMatch(
+      /harness file\(s\) were committed into scratch-app/,
+    );
+    expect(violations[0].detail.join(" ")).toMatch(
+      /receives process artifacts only/,
+    );
+  });
+
+  it("lets Timone commit its own harness files into its own checkout", () => {
+    expect(checkPathContainment(selfRun({ projectOrigin: TIMONE }))).toEqual([]);
+  });
+
+  it("reads the same repository through ssh and https alike", () => {
+    // A daemon clones over https; fvermaut's own remote may be ssh. Two urls
+    // for one repository must not be read as two repositories.
+    expect(
+      checkPathContainment(
+        selfRun({ projectOrigin: "git@github.com:fvermaut/timone.git" }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still refuses a client project whose manifest key is `timone`", () => {
+    // The name is not the test. A suite with the two cases above and not this
+    // one passes against a string comparison, and one typo in a manifest
+    // would then hand a client the whole harness.
+    const evidence = selfRun({
+      projectOrigin: "https://github.com/acme/timone.git",
+    });
+
+    const violations = checkPathContainment(evidence);
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0].summary).toMatch(/committed into timone/);
+  });
+
+  it("refuses rather than exempts when it cannot tell what the checkout is", () => {
+    // No `origin` on the project checkout. Not knowing is not the same as
+    // knowing they are the same repository, and the harm this rule prevents
+    // is a client repository receiving the harness.
+    expect(checkPathContainment(selfRun())).toHaveLength(1);
+  });
+
+  it("leaves `doc/` and `CONTEXT.md` alone in both repositories", () => {
+    // R2, which does not move: process artifacts are what a client repo does
+    // receive, and they were never what this half was about.
+    const client = cleanEvidence();
+    client.workspace.originUrl = TIMONE;
+    projectRepo(client).originUrl = "https://github.com/fvermaut/scratch-app.git";
+    projectRepo(client).commits = [
+      {
+        sha: "fff6666",
+        branch: "phase/01",
+        files: ["doc/plans/phases/phase-01.md", "CONTEXT.md"],
+        trailers: ["Timone-Stage: execution"],
+      },
+    ];
+    expect(checkPathContainment(client)).toEqual([]);
+
+    const own = selfRun({ projectOrigin: TIMONE });
+    own.projects[0].commits[0].files = ["doc/adr/0050-x.md", "CONTEXT.md"];
+    expect(checkPathContainment(own)).toEqual([]);
   });
 });
 
@@ -668,5 +937,108 @@ describe("checkProvenance", () => {
 
     const [violation] = checkProvenance(evidence);
     expect(violation.summary).toContain("2 commit(s)");
+  });
+});
+
+/**
+ * ADR-0050 D1's whole point, as one case: a self-run that did exactly what it
+ * was told ends with nothing said about it.
+ *
+ * Three guards would have fired on it before phase 32 — the harness-file rule
+ * on `process.md` and `.claude/`, the STATUS.md rule on a status file written
+ * where every stage writes one, and the STATUS.md rule again on a commit the
+ * work branch took from `main`. A self-run that ends in three false findings
+ * is a self-run nobody will trust, and the trust is the whole of the bet.
+ */
+describe("checkAll — a Timone self-run that behaved", () => {
+  const TIMONE = "https://github.com/fvermaut/timone.git";
+
+  function selfRun(): SessionEvidence {
+    return {
+      target: "timone",
+      workspace: {
+        repo: "timone",
+        originUrl: TIMONE,
+        defaultBranch: "main",
+        branches: [],
+        commits: [],
+        workingTree: [],
+      },
+      projects: [
+        {
+          repo: "timone",
+          originUrl: TIMONE,
+          defaultBranch: "main",
+          branches: [
+            { name: "timone/39-1", unpushed: [], hasUpstream: true },
+          ],
+          commits: [
+            {
+              // The work: source, a process artifact, the harness's own files,
+              // and the status file every stage owes.
+              sha: "aaa1111",
+              branch: "timone/39-1",
+              files: [
+                "src/daemon/hooks.ts",
+                "doc/plans/phases/phase-32.md",
+                "standards/ui-ux/README.md",
+                "process.md",
+                "STATUS.md",
+              ],
+              trailers: [
+                "Timone-Stage: execution",
+                "Timone-Session: session-32e",
+                "Timone-Run: timone#39",
+              ],
+              onDefaultBranch: false,
+            },
+            {
+              // A commit the branch took from `main` by merging it in, which
+              // the process asks for. It is on `main` already.
+              sha: "bbb2222",
+              branch: "timone/39-1",
+              files: ["STATUS.md"],
+              trailers: [
+                "Timone-Stage: execution",
+                "Timone-Session: session-earlier",
+              ],
+              onDefaultBranch: true,
+            },
+          ],
+          workingTree: [],
+        },
+      ],
+    };
+  }
+
+  it("says nothing at all", () => {
+    expect(checkAll(selfRun())).toEqual([]);
+  });
+
+  it("still says something when the same run leaves work unpushed", () => {
+    // The guards are narrowed, not switched off. A self-run gets every rule
+    // that still applies to it.
+    const evidence = selfRun();
+    evidence.projects[0].branches = [
+      { name: "timone/39-1", unpushed: ["aaa1111"], hasUpstream: true },
+    ];
+
+    expect(checkAll(evidence).map((violation) => violation.rule)).toEqual([
+      "unpushed",
+    ]);
+  });
+
+  it("still says something when a self-run cuts its branch in the workspace", () => {
+    // Finding 11 does not stop being finding 11 because the project is
+    // Timone: a work branch belongs in `projects/timone/`, and one cut at the
+    // timone root reaches nothing and stays checked out for the next session.
+    const evidence = selfRun();
+    evidence.workspace.branches = [
+      { name: "timone/39-1", unpushed: [], hasUpstream: true },
+    ];
+
+    expect(checkAll(evidence).map((violation) => violation.rule)).toContain(
+      "branch-placement",
+    );
   });
 });

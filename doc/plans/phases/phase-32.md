@@ -1,6 +1,6 @@
 # Phase 32: Timone works its own tickets
 
-> **Status:** Awaiting approval — written 2026-09-04.
+> **Status:** Complete, 2026-09-04 — [completion report](reports/phase-32-complete.md), [live gate](reports/phase-32-live-gate.md). 32e reached three of its four things: no pull request was opened, because the run parked at verification and was right to ([timone#84](https://github.com/fvermaut/timone/issues/84)).
 >
 > Governing decision: [ADR-0050](../../adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md) — the whole of this phase.
 >
@@ -23,6 +23,24 @@ ADR-0050 D5 narrows one guard. This is a second one, and it is not in the decisi
 **Finding (c) — a boxed self-run clones the same repository twice, and that is correct.** `container-runtime.ts:401` clones `$TIMONE_REMOTE` to `$WORKSPACE/timone` at `$TIMONE_COMMIT`, then `$PROJECT_REMOTE` to `$WORKSPACE/timone/projects/<name>` on the work branch. For a self-run both remotes are this repository, at two different commits: the harness the run *obeys*, and the project the run *changes*. Written down so nobody removes one as a duplicate.
 
 **Finding (d) — "the daemon is out of date" is two questions, not one.** [timone#5](https://github.com/fvermaut/timone/issues/5) is about the **daemon's own process**, which loads its code once. A boxed run already pins `TIMONE_COMMIT` and refuses a commit that is not on the remote, so a *run* is never stale in the way a daemon is. A message that does not say which of the two it is talking about will send an operator to restart the wrong thing.
+
+## ✏ Findings from execution, 2026-09-04
+
+Three things the pre-flight did not see. The first blocked 32e and was fixed; the other two are recorded and not resolved.
+
+**Finding (e) — a project with no compose file could not be run at all, and Timone is one.** `bringUpServices` (`src/daemon/services.ts`) **threw** when a project committed no compose file, and the throw happens before the container exists, so the spawn is refused. Timone is a command-line program with no services beside it. Every self-run would have failed on its first cycle with a message telling fvermaut to add a database to Timone.
+
+The rule was right for the two projects that existed when it was written and wrong as a rule about every project. Not committing a compose file is a statement, not an omission. It now stands nothing up and says so on the daemon's log, keeping the message that named what to add for a project where it really was an omission. Fixed in `da4a419`, before 32e rather than during it.
+
+**Finding (f) — the workspace and the project are both called `timone` in a finding's own words.** `collectEvidence` labels the workspace `"timone"` (`hooks.ts`), and the project checkout's label is its manifest key, which is now also `timone`. So on a self-run a message reading `timone: STATUS.md was written on …` does not say which of the two clones it means.
+
+**The rules are right; only the words are ambiguous.** Neither 32b nor 32c decides anything on the label — 32b compares the repositories' `origin`, and 32c distinguishes the workspace by its position in the evidence rather than by its name. This is a readability cost on exactly the run 32e watches, and it is one line to fix. It is recorded here rather than fixed because nothing in this phase's red-green asked for it.
+
+**Finding (g) — an old `timone` build cannot read a new ledger.** The state file is a `z.strictObject`, so an unknown top-level key fails the parse and `readState` throws. 32a adds one (`daemon`). Any build from before phase 32 then fails on **every** command that reads the ledger — `status`, `takeover`, `daemon` — with `Invalid daemon state file`.
+
+This is the established pattern rather than a new hazard: `previews`, `introductions` and `initiatives` each did the same. It is written down because it sharpens 32a's own subject: an old daemon beside a new ledger is not merely stale, it is stopped.
+
+> ✏ **Corrected 2026-09-04, after fvermaut challenged it.** This finding was first written claiming the `timone` command installed on his machine was an old build and would stop working. **That was wrong.** `timone` is an `npm link` — `~/.nvm/…/bin/timone` → `~/dev/timone/dist/cli.js` — so it *is* this checkout's build and every `npm run build` updates it. It was checked against the ledger carrying the new key and answered normally, exit 0. The schema fact above stands; the claim about his command did not, and it had reached `STATUS.md` and a pull request before it was checked.
 
 ## Requirements
 
@@ -190,3 +208,13 @@ Completion report at `reports/phase-32-complete.md`, and the first reading of D2
 **The true half.** A run writes `STATUS.md` on its work branch because that is what the process asks of every stage, and the file reaches `main` when the pull request does. So a status file on a **run's own work branch, in the repository that run is working**, is expected and silent. The prefix is already known to this module — `checkBranchPlacement` uses it.
 
 **Everywhere else the finding stands**, and that includes an interactive session's own branch. It fired twice on this session's branches on 2026-09-04 and it was right both times: the file was not going to be seen until a pull request merged, and saying so once per branch is the reminder the rule was written to give.
+
+## What 32e was waiting for, and what happened
+
+**Written 2026-09-04 before the gate; kept as it was, with the outcome under it.**
+
+Two things were his and both were answered. The daemon he had running (pid 74396) was stopped at 20:05:03 UTC — nothing was in flight, `ivtrends#74` had parked three minutes earlier — after he was asked and said *"Run it now"*. [timone#39](https://github.com/fvermaut/timone/issues/39) was given the `timone` label, which had to be created on this repository first.
+
+**The gate ran 20:05–20:41 and is written up in [its own report](reports/phase-32-live-gate.md).** timone#39 was picked up, triaged, planned and built in a container, and parked at verification. It planned and executed its own phase 33 on itself. No pull request was opened, so nothing reached him to merge.
+
+**What stopped it is [timone#84](https://github.com/fvermaut/timone/issues/84)**: 2 of 20 regression criteria passed and 18 could not run at all in a box with no `docker`, no credential beyond this repository, and no other project cloned. That is a decision about how Timone verifies itself, and until it is made every Timone ticket stops in the same place.

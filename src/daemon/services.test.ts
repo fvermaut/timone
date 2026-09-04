@@ -48,10 +48,12 @@ function bringUp(
     run?: CommandRunner;
     present?: readonly string[];
     written?: { path: string; body: string }[];
+    log?: (message: string) => void;
   } = {},
-): Promise<ServiceStack> {
+): Promise<ServiceStack | undefined> {
   const { run } = overrides.run === undefined ? fakeRunner() : { run: overrides.run };
   return bringUpServices({
+    ...(overrides.log === undefined ? {} : { log: overrides.log }),
     project,
     branch: "timone/7-slow",
     runId: "scratch-app#7/1",
@@ -137,7 +139,7 @@ describe("the services a boxed run reaches", () => {
     const runner = fakeRunner();
 
     const stack = await bringUp({ run: runner.run });
-    await stack.down();
+    await stack!.down();
 
     const down = runner.vector("down");
     expect(down).toContain("-v");
@@ -154,7 +156,7 @@ describe("the services a boxed run reaches", () => {
     const runner = fakeRunner();
 
     const stack = await bringUp({ run: runner.run });
-    await stack.down();
+    await stack!.down();
 
     const down = runner.calls.find((call) => call.args.includes("down"));
     expect(down?.options?.env?.COMPOSE_PROFILES).toBe("app");
@@ -217,17 +219,41 @@ describe("the services a boxed run reaches", () => {
     expect(said).not.toMatch(/never became healthy/i);
   });
 
-  it("refuses a project that commits no compose file, and names what it must commit", async () => {
-    // Case (4). A hard prerequisite for being built at all — and today
-    // **neither** managed project satisfies it (checked on the forge,
-    // 2026-08-22), which is exactly why the message has to say what to add
-    // rather than merely that something is missing.
-    await expect(bringUp({ present: [] })).rejects.toThrow(
-      /compose\.yaml/,
-    );
-    await expect(bringUp({ present: [] })).rejects.toThrow(
-      /commit/i,
-    );
+  it("stands nothing up for a project that commits no compose file", async () => {
+    // ✏ **This used to be a refusal, and phase 32 made it a statement.** Not
+    // every managed project is an application with a database beside it:
+    // Timone is a command-line program with no services at all (ADR-0050 D1),
+    // and a rule about every project would have made every self-run
+    // impossible to start.
+    await expect(bringUp({ present: [] })).resolves.toBeUndefined();
+  });
+
+  it("says so on the daemon's log, naming what to add if it was an omission", async () => {
+    // The message that used to be a refusal keeps its job: a project that
+    // *should* have committed one tells whoever reads the log, once.
+    const said: string[] = [];
+    await bringUp({ present: [], log: (message) => said.push(message) });
+
+    expect(said.join("\n")).toMatch(/compose\.yaml/);
+    expect(said.join("\n")).toMatch(/nothing is stood up/i);
+  });
+
+  it("leaves nothing behind when there is no compose file", async () => {
+    // The clone it made to look for one. A source left in `.timone/stacks/`
+    // is the next run on the same project starting from stale code.
+    const removed: string[] = [];
+    await bringUpServices({
+      project,
+      branch: "timone/7-slow",
+      runId: "scratch-app#7/1",
+      root: "/root",
+      run: fakeRunner().run,
+      exists: () => false,
+      write: () => {},
+      remove: (path) => removed.push(path),
+    });
+
+    expect(removed.some((path) => path.includes("/.timone/stacks/"))).toBe(true);
   });
 
   it("accepts any of the names compose itself accepts", async () => {
@@ -270,8 +296,8 @@ describe("the services a boxed run reaches", () => {
   it("names the network the agent's container joins", async () => {
     const stack = await bringUp();
 
-    expect(stack.network).toContain("scratch-app");
-    expect(stack.network.endsWith("_default")).toBe(true);
+    expect(stack!.network).toContain("scratch-app");
+    expect(stack!.network.endsWith("_default")).toBe(true);
   });
 });
 
@@ -360,7 +386,7 @@ describe("getting the project's source without touching the human's checkout", (
       write: () => {},
       remove: (path) => removed.push(path),
     });
-    await stack.down();
+    await stack!.down();
 
     expect(removed.some((path) => path.includes("/.timone/stacks/"))).toBe(true);
   });

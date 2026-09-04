@@ -7462,3 +7462,57 @@ describe("a bug filed during a step takes the project before the next step", () 
     expect(spawned).not.toContain("alpha#52/1");
   });
 });
+
+describe("a project called `timone` is a project like any other", () => {
+  it("registers a run and picks it up", async () => {
+    // ADR-0050 D1. Nothing in the loop may treat Timone's own name specially:
+    // what makes a self-run different is the repository, and the repository is
+    // the harness rule's business (32b), not the pickup's.
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter({ timone: [ticket(39)] });
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("timone"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(result.pickedUp).toEqual(["timone#39/1"]);
+    expect(store.occupyingRun("timone")?.ticket).toBe(39);
+    expect(comments[0]).toMatchObject({ project: "timone", number: 39 });
+  });
+
+  it("enters at triage, the way every unclassified request does", async () => {
+    // An issue on this repository is a raw request like any other. It has not
+    // been classified, so it starts where classification happens. The real
+    // spawner and the real stage graph, because "enters at the right stage" is
+    // a claim about those and a fake spawner could only restate it.
+    const store = newStore();
+    const { adapter } = fakeAdapter({ timone: [ticket(39)] });
+    const spawner = new AgentSessionSpawner({
+      manifest: manifestWith("timone"),
+      store,
+      adapter,
+      root: "/root",
+      runtime: {
+        async start() {
+          return {
+            sessionId: "session-timone",
+            completed: Promise.resolve({
+              sessionId: "session-timone",
+              ok: true,
+            }),
+          };
+        },
+      },
+      repoProbe: async () => "sha-0",
+      headProbe: async () => "sha-root",
+    });
+
+    await pollOnce({ manifest: manifestWith("timone"), store, adapter, spawner });
+
+    expect(store.get("timone#39/1")?.stage).toBe("triage");
+  });
+});

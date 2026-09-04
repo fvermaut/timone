@@ -579,3 +579,32 @@ describe("editing a manifest that declares an identity", () => {
     ).toEqual(withIdentity.identity);
   });
 });
+
+describe("Timone is in its own manifest (ADR-0050 D1)", () => {
+  const manifest = loadManifest(join(import.meta.dirname, "..", "timone.yaml"));
+
+  it("declares itself as a managed project", () => {
+    expect(Object.keys(manifest.projects)).toContain("timone");
+  });
+
+  it("points at this repository, and at a checkout under projects/", () => {
+    // Two clones of one repository, and that is correct (pre-flight finding
+    // (c)): `~/dev/timone` is the harness a run obeys, `projects/timone` is
+    // the project a run changes. A slice that "fixed" the duplication would
+    // have broken the run.
+    const timone = manifest.projects.timone;
+    expect(timone.repo_url).toBe("https://github.com/fvermaut/timone.git");
+    expect(timone.path).toBe("projects/timone");
+  });
+
+  it("stays quiet on the twenty-six issues already open", () => {
+    // ADR-0024's switch exists for exactly this repository: introducing
+    // Timone to a backlog it has been collecting for two months is a worse
+    // first impression than silence. Absent is off.
+    expect(manifest.projects.timone.introduce_unmarked).toBeUndefined();
+  });
+
+  it("declares no preview, because there is no app to serve", () => {
+    expect(manifest.projects.timone.bindings.preview).toBeUndefined();
+  });
+});

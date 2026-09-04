@@ -2,23 +2,47 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-04, evening.
+**Last updated:** 2026-09-04, night.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** Seven faults that lost your jobs are fixed. **Nothing needs you urgently.** Two things are worth five minutes when you have them, and they are numbered below.
+> **Read this first.** Timone worked one of its own tickets tonight. It stopped near the end for a good reason, that reason has been decided and built, and **the ticket can now finish.** One thing is worth two minutes.
 
-**1. Done — and one thing about it is worth knowing.**
+**1. Answer on [#39](https://github.com/fvermaut/timone/issues/39) so its work can finish.**
 
-You merged it and started the machine, and I repeated the whole check with everything running in a container. It works: a real job ran inside a box, on the version you merged, downloaded from GitHub, with its own database beside it, and it left nothing on your disk. Your own database was running on this laptop at the same time and the two never met.
+Timone sorted, planned, wrote and checked this ticket on its own, in a container, in 34 minutes for $6.22. It stopped at the last check and asked a question. **The question has been answered** (below), so the job can pick up where it left off, finish, and open a pull request for you to merge.
 
-**The thing worth knowing:** while I was checking, **your machine and my check were both watching the to-do app at once**. Nothing went wrong, because the one ticket they could both have picked up is waiting on you. But it could have gone wrong — two jobs, two branches, one app — and it is the check's fault, not the machine's: it kept its own copy of the records and did not think to look for a second watcher. Written down in the report so the next one does.
+Reply on the ticket, or:
 
-Your machine is running now and is idle. It is idle for the right reason: the only thing it could start is item 2.
+```
+timone takeover timone#39
+```
 
-**2. The to-do app's step 2 is stopped and it is a real question for you.**
+**Why it matters:** nothing Timone has built for itself has reached a pull request yet. This would be the first.
+
+**2. What it asked, and what was decided.**
+
+Timone checks its own work against 20 promises. Tonight **2 could be checked and 18 could not be checked at all** — the sealed container it works in has no Docker, no key that reaches your other projects, and no copy of them, and almost everything Timone promises is about those things.
+
+You approved the answer. It is written down as [ADR-0051](doc/adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md).
+
+Those 18 promises are now marked as **"only a watched, running machine can check this"** — which is what tonight was. Each one now says what it needs and which watched run last saw it working. Sixteen say **"never"**. That is not new, it is the first time it has been written down: nothing was checking them before either, and now the file says so and names a report when there is one.
+
+**Nothing about the container changed.** No new keys, no new access. That was the point.
+
+**One thing you should know is weak.** A promise marked this way can be quietly forgotten — "never" is a true sentence nobody has to act on. The only thing that catches it is the rule that a job touching that machinery must run a watched check before it delivers. Nothing enforces that automatically.
+
+**3. Before you start the machine again, build first.**
+
+```
+npm run build && timone daemon
+```
+
+`timone` is linked straight to this folder's build, so building is all it takes — there is nothing to reinstall. Building matters because the machine now writes a line to its notes that a build from before today cannot read.
+
+**4. The to-do app's step 2 is still stopped and it is still a real question for you.**
 
 [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47) asks you to drop the old "no reordering" rule and answer three questions about how moving a row should behave. It cannot be planned until you do, and step 1 ([#46](https://github.com/fvermaut/scratch-app/issues/46)) is stopped for the same reason.
 
@@ -76,6 +100,34 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**4 September, night — two faults found by reading back what the job wrote.** A job running in a container [wrote to the main branch directly](https://github.com/fvermaut/timone/issues/85), with no branch and no pull request — the same code on your to-do app writes to its main branch, and the check meant to catch it is blind to exactly that case. And the check that stops a job reading the tests it will be judged by [does not work in a container at all](https://github.com/fvermaut/timone/issues/87), in either direction. Neither was found by a test; both were found by looking at what actually happened.
+
+**4 September, night — how Timone checks its own work is decided.** [#84](https://github.com/fvermaut/timone/issues/84), closed. The two roads on that ticket were both wrong in the same way: giving the container Docker and a wider key, or moving the checks onto your machine, each make the job that can change Timone itself the **least** restricted job in the system. It should be the most.
+
+So instead: a fourth kind of check, for what only a watched running machine can see. It is never faked, never turned into a list of steps for you, and never blocks a job on its own. Each promise of that kind now names what it rests on and which watched run last saw it. And a check is only re-run when the change could actually affect it — a change to a page of writing no longer drags twenty end-to-end checks behind it.
+
+**4 September, night — Timone worked one of its own tickets, start to nearly finish.** The whole story is at the top of this file and in [the report](doc/plans/phases/reports/phase-32-live-gate.md). Three things are worth knowing.
+
+**It never touched your folders.** The branch it worked on was made inside the container and pushed straight to GitHub. Your two Timone folders were untouched from start to finish.
+
+**Every change it made says who made it.** Which step, which ticket, which session — readable from the history alone, with nothing to remember.
+
+**One thing nearly stopped it before it started, and was only found by trying.** A project with no `compose.yaml` was refused outright, and Timone has none — it is a command-line program with no database beside it. Every Timone job would have died in the first minute with a message telling you to add a database to Timone. Not having one is a statement, not an omission.
+
+**4 September, late — Timone is one of the projects it looks after.** Four pieces, and the order was deliberate: every guard that would have complained about a Timone job was fixed and proved able to still complain, *before* Timone was added to the list.
+
+**The machine now says when it is running old code.** It loads its code once, when you start it, and keeps it until you stop it. It now checks each round what the main branch points at, and if it has moved on it says so — once, not once a round — and `timone status` says it too, above the projects. It names the version it is on and the command that fixes it. If it cannot reach GitHub it says nothing at all, rather than claiming to be up to date.
+
+**A check that used to complain about correct work stops doing it.** When a branch takes a fix from `main`, everything already on `main` comes with it. The check could not tell "written here" from "arrived here", so it reported the status file as misplaced every time. It did that twice on the trading app on 30 August and again on this repository today. The two real cases from that day are in the tests, with their real version numbers.
+
+**A job working on Timone may now commit Timone's own files.** The rules, the skills and the standards are Timone's source code. The check that keeps them out of a client's repository now asks *which repository is this*, by its address on GitHub — not by its name in the list, which anyone could type wrong.
+
+**One thing was found only by trying it.** A project with no `compose.yaml` was refused outright, and Timone has none — it is a command-line program with no database beside it. So every Timone job would have failed on its first round with a message telling you to add a database to Timone. Not having one is a statement, not an omission: the machine now stands nothing up, says so in its log, and carries on.
+
+1615 tests pass, up from 1588.
+
+**4 September, late — the design-rules file got its sources, and the check that followed found something bigger.** The five rules about reading a screen of figures in `standards/baseline/ui-ux.md` now each carry a source, or say plainly that they are house style with no outside source behind them. That was the whole of the job. The check that ran after it could only run two of the twenty things it is supposed to re-check, and both of those hold. What to do about the other eighteen is the entry above.
 
 **4 September — the seven faults above, built in one sitting.** Fourteen pieces. The plan for it said three things about the code that turned out not to be true, and each is written down in [the report](doc/plans/phases/reports/phase-31-complete.md) rather than quietly worked around — including one fault that had already been fixed in August and never closed. What was watched running for real, and what was not, is in [the gate's own report](doc/plans/phases/reports/phase-31-live-gate.md).
 
@@ -253,6 +305,10 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 - **The safety net has never fired in the wild.** If a step never notices it is stuck, the machine is supposed to notice after you have answered the same thing twice. That is proven by test and has not been seen live, because every step that was watched noticed by itself.
 - **A stopped job that is holding a project has not been watched blocking one.** It is the cost you accepted on 16 August, and it is still only argued.
 - **A handed-back job has not been watched running all the way to a pull request.** It was stopped on purpose when the test ticket was done.
+- **A Timone job has never reached a pull request.** One ran all the way to the last step on 4 September and stopped there. The reason was decided and built the same night, and the job can now finish — it needs your reply on [#39](https://github.com/fvermaut/timone/issues/39).
+- **The check that keeps a builder out of the verifier's checks does not work inside a container**, which is where every job runs. [#87](https://github.com/fvermaut/timone/issues/87). It cannot tell which step is running there, so it blocks the step that should be allowed and lets through the step that should not.
+- **Sixteen of Timone's own promises have never been watched working.** They now say so, each in its own line, which is more than was true this morning. Nothing forces anybody to act on that.
+- **One of the two checks fixed on 4 September was never seen working for real.** The rule about the status file being written in the wrong place: the job that ran never wrote one, because it stopped before the step that writes it. It is proven by tests and by replaying two real cases from August, and not by watching.
 - **One accessibility check on the to-do app is still owed.** Listen to it with VoiceOver and Safari and confirm the controls are announced sensibly. The script is in that project's own repository, at `doc/plans/phases/reports/phase-01-verification.md`. It needs about twenty minutes.
 
 ---

@@ -596,3 +596,113 @@ describe("a boxed daemon reaches the model with the host's own subscription", ()
     expect(asked).toBe(0);
   });
 });
+
+describe("the daemon says when its own process is running old code", () => {
+  /** A daemon that polls one quiet cycle and reports what it said. */
+  async function cycle(
+    version: () => Promise<{ commit: string; tip?: string } | undefined>,
+    options: { store?: RunStore; statePath?: string } = {},
+  ): Promise<{ said: string[]; store: RunStore; statePath: string }> {
+    const made = clockedStore();
+    const store = options.store ?? made.store;
+    const statePath = options.statePath ?? made.statePath;
+    const said: string[] = [];
+    await runDaemon({
+      manifest,
+      store,
+      statePath,
+      root: noCheckouts,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter: quietAdapter(),
+      spawner: idleSpawner,
+      version,
+      log: (line) => said.push(line),
+    });
+    return { said, store, statePath };
+  }
+
+  const TIP = "9a1c2b4f0e6d5c4b3a2918f7e6d5c4b3a2918f7e";
+  const BEHIND = "f5eb4d3c2b1a09f8e7d6c5b4a39281706f5e4d3c";
+
+  it("says nothing at all when it is running the tip", async () => {
+    const { said } = await cycle(async () => ({ commit: TIP, tip: TIP }));
+    expect(said.join("\n")).not.toMatch(/old copy/i);
+  });
+
+  it("says so when the default branch has moved past its process", async () => {
+    const { said } = await cycle(async () => ({ commit: BEHIND, tip: TIP }));
+    expect(said.join("\n")).toMatch(/old copy of Timone/i);
+  });
+
+  it("names the commit it is on and says a restart is what fixes it", async () => {
+    const { said } = await cycle(async () => ({ commit: BEHIND, tip: TIP }));
+    const notice = said.find((line) => /old copy of Timone/i.test(line)) ?? "";
+    expect(notice).toContain(BEHIND.slice(0, 7));
+    expect(notice).toContain(TIP.slice(0, 7));
+    expect(notice).toMatch(/start it again/i);
+    expect(notice).toContain("node dist/cli.js daemon");
+    // Finding (d): the message is about the daemon's process, not about runs,
+    // which pin their own commit and refuse an unpushed one.
+    expect(notice).toMatch(/daemon's own process/i);
+  });
+
+  it("makes no claim in either direction when the remote cannot be asked", async () => {
+    const { said, store } = await cycle(async () => ({ commit: BEHIND }));
+    // Not "up to date" and not "out of date". A check that reassured a reader
+    // it had looked, when it could not look, is worse than one that says
+    // nothing.
+    expect(said.join("\n")).not.toMatch(/old copy/i);
+    expect(said.join("\n")).not.toMatch(/up to date/i);
+    expect(store.daemonVersion()?.tip).toBeUndefined();
+  });
+
+  it("says it once, not once a cycle", async () => {
+    const { store, statePath } = clockedStore();
+    const said: string[] = [];
+
+    // The loop has no stop in it, so the test takes one away from it: the
+    // fourth cycle's `witness` call throws, which is the one call `pollOnce`
+    // makes outside its own per-project catch. Three cycles of **one process**
+    // is what the case needs — three separate `--once` daemons would each be
+    // entitled to say it, since each is a different process running old code.
+    let cycles = 0;
+    const stopping = Object.create(store) as RunStore;
+    stopping.witness = (options) => {
+      cycles += 1;
+      if (cycles > 3) throw new Error("that is enough cycles for this test");
+      return store.witness(options);
+    };
+
+    await runDaemon({
+      manifest,
+      store: stopping,
+      statePath,
+      root: noCheckouts,
+      intervalMs: 0,
+      once: false,
+      adapter: quietAdapter(),
+      spawner: idleSpawner,
+      version: async () => ({ commit: BEHIND, tip: TIP }),
+      log: (line) => said.push(line),
+    }).catch(() => {});
+
+    expect(cycles).toBe(4);
+    expect(said.filter((line) => /old copy of Timone/i.test(line))).toHaveLength(1);
+  });
+
+  it("writes what it is running down, so `timone status` can say it", async () => {
+    const { store } = await cycle(async () => ({ commit: BEHIND, tip: TIP }));
+    const record = store.daemonVersion();
+    expect(record?.commit).toBe(BEHIND);
+    expect(record?.tip).toBe(TIP);
+    // The daemon's own process, so a record left behind by a stopped one can
+    // be told apart from a live daemon's.
+    expect(record?.holder.pid).toBe(process.pid);
+  });
+
+  it("asks nothing when no version probe is wired, and keeps polling", async () => {
+    const { said } = await cycle(async () => undefined);
+    expect(said.join("\n")).not.toMatch(/old copy/i);
+  });
+});
