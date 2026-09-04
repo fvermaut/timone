@@ -97,7 +97,7 @@ export interface ContainerRuntimeOptions {
    * spawn before a container exists, because a session run against services
    * that are not there fails in a way that reads as the agent's fault.
    */
-  services?: (request: SessionRequest) => Promise<ServiceStack>;
+  services?: (request: SessionRequest) => Promise<ServiceStack | undefined>;
   /**
    * The environment this run gets for the project it works on: the real
    * secrets, and the addresses of the services stood up beside the box

@@ -120,6 +120,12 @@ export interface BringUpOptions {
   remove?: (path: string) => void;
   /** Seconds compose may take to report health. */
   waitSeconds?: number;
+  /**
+   * Where a plain statement about this run's services goes — the daemon's
+   * log. Today only one thing is said here: that the project commits no
+   * compose file, so nothing was stood up beside the run.
+   */
+  log?: (message: string) => void;
 }
 
 /**
@@ -137,14 +143,29 @@ function composeProject(runId: string): string {
 /**
  * Bring up the project's compose stack on a private network.
  *
- * Throws — naming what went wrong — when the project commits no compose file,
- * or when the stack never becomes healthy. Both are refusals a human can act
- * on, and both leave nothing running: a half-started stack holds a network and
- * volumes the next run on the same project cannot take back.
+ * Throws — naming what went wrong — when the stack never becomes healthy.
+ * That is a refusal a human can act on, and it leaves nothing running: a
+ * half-started stack holds a network and volumes the next run on the same
+ * project cannot take back.
+ *
+ * **Undefined when the project commits no compose file**, which is a
+ * statement rather than an omission: not every managed project is an
+ * application with a database beside it. Timone is one of them
+ * ([ADR-0050](../../doc/adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md)
+ * D1) — a command-line program with no services at all — and until phase 32
+ * this threw, which made every self-run impossible to start.
+ *
+ * ✏ **It used to throw, and the message it threw was good.** It named the
+ * file to add and what to put in it, and it was right for the two projects
+ * that existed when it was written. What was wrong was making it a rule about
+ * every project. The box is told, in its own prompt, that no services were
+ * stood up beside it, and the daemon says so on its log — so a project that
+ * *should* have a compose file and does not still tells its reader, once,
+ * where they will look.
  */
 export async function bringUpServices(
   options: BringUpOptions,
-): Promise<ServiceStack> {
+): Promise<ServiceStack | undefined> {
   const run = options.run ?? execCommandRunner;
   const exists = options.exists ?? existsSync;
   const write =
@@ -208,13 +229,16 @@ export async function bringUpServices(
   );
   if (compose === undefined) {
     remove(source);
-    throw new Error(
-      `${options.project.name} commits no compose file, so there is nothing to ` +
-        `stand up beside a run. Add a \`${COMPOSE_FILES.accepted[0]}\` at the ` +
-        "repository root declaring the services the app needs — a database, a " +
-        "queue, whatever it talks to — under an `app` profile. A boxed run " +
-        "reaches them by service name and publishes no port.",
+    // Nothing to stand up, and nothing wrong. Said once, so a project that
+    // *should* have committed one still tells whoever reads the daemon's log.
+    options.log?.(
+      `${options.project.name} commits no compose file, so nothing is stood up ` +
+        `beside this run. If it needs services — a database, a queue, whatever ` +
+        `it talks to — add a \`${COMPOSE_FILES.accepted[0]}\` at the repository ` +
+        "root under an `app` profile. A boxed run reaches them by service name " +
+        "and publishes no port.",
     );
+    return undefined;
   }
 
   const envFile = exists(join(source, ENV_TEMPLATE))

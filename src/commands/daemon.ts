@@ -285,6 +285,9 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
             services: async (request) => {
               const workspace = request.workspace!;
               return bringUpServices({
+                // A project that commits no compose file gets no stack, and
+                // that is said here rather than refused (32e's blocker).
+                ...(choice.log === undefined ? {} : { log: choice.log }),
                 project: {
                   name: workspace.project.name,
                   repoUrl: workspace.project.remote,
