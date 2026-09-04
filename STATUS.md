@@ -52,6 +52,20 @@ Answer on the ticket, or:
 node dist/cli.js takeover scratch-app#47
 ```
 
+**3. Timone cannot check most of its own promises when it works on itself. This is new tonight.**
+
+Timone now works tickets on its own repository, and each of those runs happens inside a sealed container. Tonight one of those runs checked the newest piece of work in the **Timone repository** — the branch `timone/39-primary-sources-owed-for-the-ui-ux-basel`.
+
+Twenty promises are meant to be re-checked every time anything is delivered. **Two were checked and both hold.** The other eighteen could not be checked at all. Nothing about them is broken — the container simply has no way to run them. It has no Docker, none of the machine's login keys, and no copy of the to-do app or the trading app. Every promise about the background program, about the preview link on a pull request, and about what Timone does to somebody else's repository needs at least one of those three.
+
+Three of the eighteen are worse than that: they are written so that they only count if **you** confirmed something. No unattended run can ever watch you confirm, so as written those three can never be checked this way at all.
+
+Two smaller things came out of the same run. Timone's own safety check refuses to let the checking stage write into the folder that only the checking stage is allowed to write into — it asks a person for permission, and inside a container there is no person to ask. And one link in the design-rules file (`standards/baseline/ui-ux.md`, dated 19 August) points at `ivtrends` pull request 22 and answers "not found" to anyone not logged in; it is probably just a private repository, and it is older than tonight's work.
+
+The full record is [the check's report](doc/plans/phases/reports/phase-33-verification.md), on that branch in the Timone repository. The work on that ticket is **stopped there** and has not gone to a pull request.
+
+**What I need from you:** decide which way to go — give a run in a container what it needs to check these eighteen, or move those checks somewhere that already has it. Until one of those happens, every ticket Timone works on its own repository will stop in exactly this place.
+
 **Nothing else needs you.**
 
 ---
@@ -124,6 +138,8 @@ So instead: a fourth kind of check, for what only a watched running machine can 
 **One thing was found only by trying it.** A project with no `compose.yaml` was refused outright, and Timone has none — it is a command-line program with no database beside it. So every Timone job would have failed on its first round with a message telling you to add a database to Timone. Not having one is a statement, not an omission: the machine now stands nothing up, says so in its log, and carries on.
 
 1615 tests pass, up from 1588.
+
+**4 September, late — the design-rules file got its sources, and the check that followed found something bigger.** The five rules about reading a screen of figures in `standards/baseline/ui-ux.md` now each carry a source, or say plainly that they are house style with no outside source behind them. That was the whole of the job. The check that ran after it could only run two of the twenty things it is supposed to re-check, and both of those hold. What to do about the other eighteen is the entry above.
 
 **4 September — the seven faults above, built in one sitting.** Fourteen pieces. The plan for it said three things about the code that turned out not to be true, and each is written down in [the report](doc/plans/phases/reports/phase-31-complete.md) rather than quietly worked around — including one fault that had already been fixed in August and never closed. What was watched running for real, and what was not, is in [the gate's own report](doc/plans/phases/reports/phase-31-live-gate.md).
 
