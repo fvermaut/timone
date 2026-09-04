@@ -62,6 +62,7 @@ import type { Holder } from "./holder.js";
 import { RunStore, type Run } from "./runs.js";
 import {
   pollOnce,
+  noLongerListedReason,
   reclaimedReason,
   type PollResult,
   type SessionSpawner,
@@ -393,6 +394,7 @@ describe("pollOnce — serialization", () => {
 
     await pollOnce(deps);
     store.activate("scratch-app#7/1", "session-1");
+    store.activate("scratch-app#7/1", "session-7");
     store.complete("scratch-app#7/1");
     await pollOnce(deps);
 
@@ -2407,6 +2409,110 @@ describe("a spawn the daemon keeps refusing", () => {
   });
 });
 
+describe("a ticket closed while its run waited its turn", () => {
+  /**
+   * Two marked tickets on one project: #7 running, #8 queued behind it. Then
+   * #7 finishes and #8's ticket is closed — the sequence timone#12 recorded
+   * on 2026-08-14, where the moment the project was freed a session started
+   * on a ticket that had been shut for hours.
+   */
+  async function queuedBehind(
+    listings: () => Ticket[],
+  ): Promise<{
+    store: RunStore;
+    spawned: Run[];
+    comments: PostedComment[];
+    run: () => Promise<PollResult>;
+  }> {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7), ticket(8)] });
+    const listing: TicketingAdapter = {
+      ...adapter,
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return listings();
+      },
+    };
+    const { spawner, spawned } = fakeSpawner();
+    const run = async (): Promise<PollResult> =>
+      pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter: listing,
+        spawner,
+      });
+    return { store, spawned, comments, run };
+  }
+
+  it("does not start a queued run whose ticket has been closed", async () => {
+    let open = [ticket(7), ticket(8)];
+    const { store, spawned, run } = await queuedBehind(() => open);
+
+    // First cycle: #7 runs, #8 queues behind it.
+    await run();
+    expect(store.get("scratch-app#8/1")?.status).toBe("queued");
+
+    // #7 finishes, and #8 is closed while it waited.
+    store.activate("scratch-app#7/1", "session-7");
+    store.complete("scratch-app#7/1");
+    open = [ticket(7)];
+    spawned.length = 0;
+    await run();
+
+    expect(spawned.map((each) => each.id)).not.toContain("scratch-app#8/1");
+  });
+
+  it("abandons it rather than failing it, and says what was seen", async () => {
+    // `cancelled` and not `failed`: a human closing a ticket is a decision,
+    // and `failed` would put `timone retry` in front of them for work nobody
+    // wants done.
+    let open = [ticket(7), ticket(8)];
+    const { store, run } = await queuedBehind(() => open);
+
+    await run();
+    store.activate("scratch-app#7/1", "session-7");
+    store.complete("scratch-app#7/1");
+    open = [ticket(7)];
+    await run();
+
+    const abandoned = store.get("scratch-app#8/1");
+    expect(abandoned?.status).toBe("cancelled");
+    expect(abandoned?.cancellation).toBe(noLongerListedReason());
+  });
+
+  it("still starts one whose ticket was reopened before its turn came", async () => {
+    let open = [ticket(7), ticket(8)];
+    const { store, spawned, run } = await queuedBehind(() => open);
+
+    await run();
+    // Closed, then reopened, all while it waited.
+    open = [ticket(7)];
+    await run();
+    open = [ticket(7), ticket(8)];
+    store.activate("scratch-app#7/1", "session-7");
+    store.complete("scratch-app#7/1");
+    spawned.length = 0;
+    await run();
+
+    expect(spawned.map((each) => each.id)).toContain("scratch-app#8/1");
+  });
+
+  it("asks when the run reaches the front, not when it joins the queue", async () => {
+    // A ticket closed while a run is already going is the dead-run path's
+    // business, not this one's: the session is under way and stopping it is a
+    // different event with a different cost.
+    let open = [ticket(7), ticket(8)];
+    const { store, run } = await queuedBehind(() => open);
+
+    await run();
+    // Closed while #8 is still queued. Nothing happens to it yet — it has not
+    // reached the front, and it may be reopened before it does.
+    open = [ticket(7)];
+    await run();
+
+    expect(store.get("scratch-app#8/1")?.status).toBe("queued");
+  });
+});
+
 describe("pollOnce — previews are opt-in", () => {
   it("does not reconcile a project with no preview binding at all", async () => {
     const store = newStore();
@@ -3678,6 +3784,7 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
 
     // #7's work finished and its ticket closed, so it leaves the listing —
     // and nothing else happens: no command is run, no session is started.
+    store.activate("scratch-app#7/1", "session-7");
     store.complete("scratch-app#7/1");
     listed.splice(0, 1);
     const before = calls.length;
