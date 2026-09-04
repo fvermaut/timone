@@ -17,7 +17,7 @@ import { MARK_LABEL } from "../adapters/ticketing.js";
 import { HELD_LABEL } from "./steps.js";
 import { takeoverCommand } from "../channels/terminal.js";
 import { technicalFault } from "./faults.js";
-import { type Run } from "./runs.js";
+import { CARRY_ON_WAIT, type Run } from "./runs.js";
 
 /**
  * Where a ticket's whole initiative stands, as a plain value.
@@ -461,6 +461,20 @@ export function ctaFor(state: TicketState): Cta {
         "things I can't do on my own.",
       waitingOnYou: true,
       command: takeoverCommand(state.project, state.ticket),
+    };
+  }
+
+  // A run handed back to the machine, with nothing wanted from anybody
+  // (ADR-0049 D6). It reaches the same branch as a run stopped for want of
+  // machinery — both have words and no kind of wait — and that branch says a
+  // person is being waited on, so without this clause the ticket and
+  // `timone status` both read *"waiting on you: nothing"*. Found by phase
+  // 31's live gate rather than by a test, on a run it had just watched work.
+  if (run.wait?.on === CARRY_ON_WAIT) {
+    return {
+      headline: "I've got what I need to carry on with this one.",
+      needFromYou: "nothing right now — I'll pick it up again on my next pass.",
+      waitingOnYou: false,
     };
   }
 

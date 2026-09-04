@@ -11,7 +11,12 @@ import type {
   TicketThread,
 } from "../adapters/ticketing.js";
 import { loadManifest, type Manifest } from "../manifest.js";
-import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
+import {
+  CARRY_ON_WAIT,
+  RunStore,
+  defaultStatePath,
+  type Run,
+} from "../daemon/runs.js";
 import {
   waitFor,
   wayfinderStage,
@@ -752,7 +757,7 @@ async function endTakeover(
   // price for not guessing.
   release(target, deps, () => {
     store.park(run.id, {
-      waitingOn: "nothing — I'll carry on from where you left it.",
+      waitingOn: CARRY_ON_WAIT,
       stage,
       waitCursor: outcome.comment.createdAt,
     });

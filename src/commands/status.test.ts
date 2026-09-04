@@ -36,6 +36,7 @@ import type { Holder } from "../daemon/holder.js";
 import { progressOf, reclaimedReason } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
+  CARRY_ON_WAIT,
   type InitiativeRecord, runId, type Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
 
@@ -485,6 +486,30 @@ describe("renderStatus — what the terminal can ask without a daemon", () => {
     );
 
     expect(output).toContain("waiting on you: your approval of the specification");
+  });
+
+  it("does not say a person is waited on about a run handed back to the machine", () => {
+    // Found by phase 31's live gate, check 4, on the run it had just watched
+    // work: `timone status` read "waiting on you: nothing — I'll carry on
+    // from where you left it." That is timone#14's self-contradicting
+    // sentence in a new place, and 31f's fix could not catch it because the
+    // shared calculation was answering `true`.
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "parked",
+          stage: "planning",
+          wait: { on: CARRY_ON_WAIT, resolvableBy: ["planning"] },
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    expect(lineFor(output, "scratch-app")).not.toContain("waiting on you");
+    expect(lineFor(output, "scratch-app")).toContain("on my next pass");
   });
 
   it("does not call a run working when the process running it is gone", () => {

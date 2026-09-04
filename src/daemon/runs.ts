@@ -1758,6 +1758,23 @@ const RE_ASK_LIMIT = 2;
 export const ESCALATION_WAIT = "me — I can't take this one further on my own.";
 
 /**
+ * What a run says it is waiting for when nobody is being waited on and the
+ * machine is going to carry it on by itself
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D6).
+ *
+ * **A shared constant for the same reason {@link ESCALATION_WAIT} is one:**
+ * `timone takeover` writes it and `ctaFor` reads it, and the two must not
+ * drift. Without it the ticket and the terminal both fall into the branch for
+ * a run stopped for want of machinery, which says a person is being waited
+ * on — so a run that had just been handed back to the machine read *"waiting
+ * on you: nothing"*, which is [timone#14](https://github.com/fvermaut/timone/issues/14)'s
+ * self-contradicting sentence in a new place. Found by phase 31's live gate,
+ * check 4, on the run it had just watched work.
+ */
+export const CARRY_ON_WAIT = "nothing — I'll carry on from where you left it.";
+
+/**
  * Whether this park is a run reading an answer and asking the same stage's
  * question again — the loop ADR-0033's floor is under.
  *
