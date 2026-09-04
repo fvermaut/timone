@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { Holder } from "./holder.js";
 import type { PipelineStage } from "./pipeline.js";
 import { RunStore, runId } from "./runs.js";
 
@@ -477,10 +478,12 @@ describe("the holds-the-project rule", () => {
     });
 
     expect(store.get(run.id)).toMatchObject({
-      waitingOn: "approval on the ticket",
-      waitingKind: "gate",
+      wait: {
+        on: "approval on the ticket",
+        kind: "gate",
+        opened: "2026-08-03T10:00:00Z",
+      },
       stage: "requirements",
-      waitCursor: "2026-08-03T10:00:00Z",
       branch: "timone/7-reset-password",
     });
   });
@@ -490,8 +493,8 @@ describe("the holds-the-project rule", () => {
     const id = parkedBranchless(store, 7);
     store.activate(id, "session-1b");
 
-    expect(store.get(id)?.waitingOn).toBeUndefined();
-    expect(store.get(id)?.waitingKind).toBeUndefined();
+    expect(store.get(id)?.wait?.on).toBeUndefined();
+    expect(store.get(id)?.wait?.kind).toBeUndefined();
   });
 });
 
@@ -536,8 +539,8 @@ describe("the answer a run has read and not acted on", () => {
     store.fail(id, "Claude Code process terminated by signal SIGKILL");
 
     // The wait is gone, cursor included — that is what activating a run means.
-    expect(active?.waitCursor).toBeUndefined();
-    expect(active?.waitingKind).toBeUndefined();
+    expect(active?.wait?.opened).toBeUndefined();
+    expect(active?.wait?.kind).toBeUndefined();
     // The answer it read is not, and it is on disk, where the next process
     // reads it: a session dying here is the whole reason the field exists.
     expect(active?.consumedAnswerAt).toBe(readAt);
@@ -607,9 +610,8 @@ describe("a run parked on something nothing written can resolve", () => {
 
     expect(reopened.get(run.id)).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation", opened: stopped },
       stage: "verification",
-      waitCursor: stopped,
     });
   });
 
@@ -696,7 +698,7 @@ describe("the floor under a stage that does not notice", () => {
       stage: "verification",
       waitCursor: "2026-08-03T09:35:00Z",
     });
-    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.wait?.kind).toBe("conversation");
     expect(store.get(id)?.reAsksAfterAnswer).toBe(1);
 
     // Twice. The answer was read, the same question came back, and asking a
@@ -709,7 +711,7 @@ describe("the floor under a stage that does not notice", () => {
       waitCursor: "2026-08-03T10:05:00Z",
     });
 
-    expect(store.get(id)?.waitingKind).toBe("escalation");
+    expect(store.get(id)?.wait?.kind).toBe("escalation");
     expect(store.get(id)?.reAsksAfterAnswer).toBe(2);
   });
 
@@ -729,7 +731,7 @@ describe("the floor under a stage that does not notice", () => {
       });
     }
 
-    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.wait?.kind).toBe("conversation");
     expect(store.get(id)?.reAsksAfterAnswer ?? 0).toBe(0);
   });
 
@@ -762,7 +764,7 @@ describe("the floor under a stage that does not notice", () => {
       waitCursor: "2026-08-03T11:35:00Z",
     });
 
-    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.wait?.kind).toBe("conversation");
     expect(store.get(id)?.reAsksAfterAnswer).toBe(1);
   });
 
@@ -787,7 +789,7 @@ describe("the floor under a stage that does not notice", () => {
       waitCursor: "2026-08-03T10:05:00Z",
     });
 
-    expect(store.get(id)?.waitingKind).toBe("review");
+    expect(store.get(id)?.wait?.kind).toBe("review");
   });
 
   it("counts only a re-ask at the same stage", () => {
@@ -802,7 +804,7 @@ describe("the floor under a stage that does not notice", () => {
       waitCursor: "2026-08-03T09:35:00Z",
     });
 
-    expect(store.get(id)?.waitingKind).toBe("conversation");
+    expect(store.get(id)?.wait?.kind).toBe("conversation");
     expect(store.get(id)?.reAsksAfterAnswer ?? 0).toBe(0);
   });
 
@@ -1023,7 +1025,7 @@ describe("the pull request on a run", () => {
     const reopened = RunStore.open(path).get(run.id);
 
     expect(reopened?.pr).toBe(9);
-    expect(reopened?.waitingKind).toBe("review");
+    expect(reopened?.wait?.kind).toBe("review");
     expect(reopened?.stage).toBe("delivery");
   });
 
@@ -1164,8 +1166,8 @@ describe("cancelling a run", () => {
     const cancelled = store.cancel(run.id, "you asked me to stop");
 
     expect(cancelled.status).toBe("cancelled");
-    expect(cancelled.waitingOn).toBeUndefined();
-    expect(cancelled.waitingKind).toBeUndefined();
+    expect(cancelled.wait?.on).toBeUndefined();
+    expect(cancelled.wait?.kind).toBeUndefined();
   });
 
   it("refuses to cancel a run that is already finished", () => {
@@ -2088,9 +2090,9 @@ describe("a failed run stops waiting", () => {
     const run = store.get(id);
 
     expect(run?.status).toBe("failed");
-    expect(run?.waitingOn).toBeUndefined();
-    expect(run?.waitingKind).toBeUndefined();
-    expect(run?.waitCursor).toBeUndefined();
+    expect(run?.wait?.on).toBeUndefined();
+    expect(run?.wait?.kind).toBeUndefined();
+    expect(run?.wait?.opened).toBeUndefined();
   });
 
   it("keeps the answer it read and never acted on", () => {
@@ -2252,5 +2254,328 @@ describe("refusing to retry a step the machine is holding", () => {
     store.cancel(run.id, "you asked me to stop");
 
     expect(() => store.retry(run.id)).toThrow(/mark it for me/);
+  });
+});
+
+describe("who is holding a run", () => {
+  /**
+   * A store whose idea of the process table the test writes
+   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+   * D2, extending ADR-0025). Injected for the reason `lock.test.ts` gives:
+   * a test cannot portably manufacture a dead pid.
+   */
+  function storeWatching(alive: readonly number[]): RunStore {
+    let tick = 0;
+    return RunStore.open(statePath(), {
+      now: () => `2026-09-04T10:${String(tick++).padStart(2, "0")}:00Z`,
+      livenessOf: (holder) => (alive.includes(holder.pid) ? "alive" : "gone"),
+    });
+  }
+
+  /** A holder as a command or a daemon records one. */
+  function holderOf(command: string, pid: number): Holder {
+    return {
+      token: `token-${pid}`,
+      command,
+      pid,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    };
+  }
+
+  it("writes the holder a claim is given", () => {
+    // timone#78 in one line: today `claim` writes `active` and nothing about
+    // who asked, so nothing can tell a claim somebody is holding from one
+    // nobody is.
+    const store = storeWatching([4213]);
+    const { run } = store.register("scratch-app", 7);
+
+    const claimed = store.claim(run.id, holderOf("timone takeover scratch-app#7", 4213));
+
+    expect(claimed.holder?.command).toBe("timone takeover scratch-app#7");
+    expect(claimed.holder?.pid).toBe(4213);
+    expect(store.hold(claimed)).toBe("alive");
+  });
+
+  it("refuses a second claim while the first holder is still running, naming it", () => {
+    const store = storeWatching([4213]);
+    const { run } = store.register("scratch-app", 7);
+    store.claim(run.id, holderOf("timone takeover scratch-app#7", 4213));
+
+    expect(() =>
+      store.claim(run.id, holderOf("timone takeover scratch-app#7", 9000)),
+    ).toThrow(/timone takeover scratch-app#7.*4213/);
+  });
+
+  it("lets a claim through when the holder's process is gone", () => {
+    // The case that ends timone#78's two-minute refusal. A suite with the
+    // refusal above alone passes against code that never asks about liveness
+    // at all, so this is the one that makes the question load-bearing.
+    const store = storeWatching([]);
+    const { run } = store.register("scratch-app", 7);
+    store.claim(run.id, holderOf("timone takeover scratch-app#7", 4213));
+
+    const second = store.claim(run.id, holderOf("timone takeover scratch-app#7", 9000));
+
+    expect(second.holder?.pid).toBe(9000);
+    expect(store.hold(second)).toBe("gone");
+  });
+
+  it("replaces a claim's holder with the session's when the run activates", () => {
+    const store = storeWatching([4213, 5000]);
+    const { run } = store.register("scratch-app", 7);
+    store.claim(run.id, holderOf("timone takeover scratch-app#7", 4213));
+
+    const active = store.activate(run.id, "session-1", holderOf("timone daemon", 5000));
+
+    expect(active.holder?.command).toBe("timone daemon");
+    expect(active.holder?.pid).toBe(5000);
+  });
+
+  it("clears the holder when the run parks", () => {
+    // A parked run is waiting on a person and nobody is holding it. A holder
+    // left behind is dead data that looks live, and the next claim would be
+    // refused by a process that stopped caring.
+    const store = storeWatching([4213]);
+    const { run } = store.register("scratch-app", 7);
+    store.claim(run.id, holderOf("timone daemon", 4213));
+
+    const parked = store.park(run.id, { waitingOn: "an answer on the ticket" });
+
+    expect(parked.holder).toBeUndefined();
+    expect(store.hold(parked)).toBe("none");
+  });
+
+  it("treats a run written before holders existed as held by nobody", () => {
+    const store = storeWatching([]);
+    const { run } = store.register("scratch-app", 7);
+
+    expect(store.hold(run)).toBe("none");
+    expect(() => store.claim(run.id, holderOf("timone daemon", 4213))).not.toThrow();
+  });
+});
+
+describe("a run whose holder died", () => {
+  /** A store whose idea of the process table the test writes. */
+  function storeWatching(alive: readonly number[]): RunStore {
+    let tick = 0;
+    return RunStore.open(statePath(), {
+      now: () => `2026-09-04T10:${String(tick++).padStart(2, "0")}:00Z`,
+      livenessOf: (holder) => (alive.includes(holder.pid) ? "alive" : "gone"),
+    });
+  }
+
+  /** A holder as the spawner records one. */
+  function holderOf(pid: number): Holder {
+    return {
+      token: `token-${pid}`,
+      command: "timone daemon scratch-app#7/1",
+      pid,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    };
+  }
+
+  /** A run building at `execution`, on its branch, held by a live process. */
+  function building(store: RunStore, pid: number): string {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1", holderOf(pid));
+    store.claimBranch(run.id, "timone/7-slow");
+    store.setStage(run.id, "execution");
+    return run.id;
+  }
+
+  it("re-arms the run the first time, keeping its branch and its stage", () => {
+    // ADR-0049 D4, following ADR-0034: a machine that broke is not the
+    // ticket's business while the machine still has a way through.
+    const store = storeWatching([]);
+    const id = building(store, 4213);
+
+    const outcome = store.reclaim(id, "the machine running it stopped");
+
+    expect(outcome.rearmed).toBe(true);
+    expect(outcome.run.status).toBe("picked-up");
+    expect(outcome.run.stage).toBe("execution");
+    expect(outcome.run.branch).toBe("timone/7-slow");
+    expect(outcome.run.holder).toBeUndefined();
+  });
+
+  it("parks the run the second time, carrying both reasons, and does not fail it", () => {
+    // `parked` and not `failed` is the whole point: the human can answer a
+    // park, and a failure is a dead end they have to type a command to leave.
+    const store = storeWatching([]);
+    const id = building(store, 4213);
+    store.reclaim(id, "the machine running it stopped");
+
+    store.activate(id, "session-2", holderOf(9000));
+    const outcome = store.reclaim(id, "the box could not reach the model");
+
+    expect(outcome.rearmed).toBe(false);
+    expect(outcome.run.status).toBe("parked");
+    expect(outcome.run.wait?.on).toContain("the machine running it stopped");
+    expect(outcome.run.wait?.on).toContain("the box could not reach the model");
+  });
+
+  it("keeps the chunk number a re-arm was given", () => {
+    // The count of re-arms is its own field. `seq` is which chunk of the
+    // ticket this is, and a re-armed run is the same chunk being built again.
+    const store = storeWatching([]);
+    const id = building(store, 4213);
+
+    const outcome = store.reclaim(id, "the machine running it stopped");
+
+    expect(outcome.run.seq).toBe(1);
+    expect(outcome.run.id).toBe(id);
+  });
+
+  it("refuses to re-arm a run somebody cancelled between the two deaths", () => {
+    const store = storeWatching([]);
+    const id = building(store, 4213);
+    store.reclaim(id, "the machine running it stopped");
+    store.cancel(id, "you closed the ticket");
+
+    expect(() => store.reclaim(id, "and again")).toThrow(/cancelled/);
+  });
+});
+
+describe("the wait as one value", () => {
+  it("carries all four kinds through the file and back out", () => {
+    // ADR-0049 D5 was written with three and there are four: `gate` was
+    // missing, and it is not a minor one — it is how every requirements and
+    // breakdown approval is read.
+    const kinds = ["gate", "conversation", "review", "escalation"] as const;
+    for (const kind of kinds) {
+      const path = statePath();
+      const store = newStore(path);
+      const { run } = store.register("scratch-app", 7);
+      store.activate(run.id, "session-1");
+      store.park(run.id, {
+        waitingOn: `something of the ${kind} sort`,
+        kind,
+        waitCursor: "2026-09-04T10:00:00Z",
+      });
+
+      expect(RunStore.open(path).get(run.id)?.wait).toEqual({
+        on: `something of the ${kind} sort`,
+        kind,
+        opened: "2026-09-04T10:00:00Z",
+      });
+    }
+  });
+
+  it("folds a real pre-collapse ledger into the new shape", () => {
+    // The ledger the daemon was running on 2026-08-14, copied unchanged.
+    // Real rather than invented, because what is under test is whether *this*
+    // file still loads.
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(PRE_CHUNK_LEDGER, path);
+
+    const store = RunStore.open(path);
+
+    // A parked run keeps its words, gains a wait it never had a field for,
+    // and is told which stage could end it — the answer `applyPark` would
+    // write for it today (ADR-0049 D5).
+    expect(store.get("scratch-app#4/1")?.wait).toEqual({
+      on: "the next stage to be built",
+      resolvableBy: ["triage"],
+    });
+    // And a run the old daemon finished keeps nothing: `complete` cleared
+    // `waitingOn` alone and left a kind and a cursor behind for a wait nothing
+    // was waiting on. Both done runs in this file are in that state.
+    expect(store.get("scratch-app#6/1")?.status).toBe("done");
+    expect(store.get("scratch-app#6/1")?.wait).toBeUndefined();
+  });
+
+  it("keeps an absent wait absent, which is its own state", () => {
+    // Finding (b) of the phase's pre-flight. `resolveWait` treats a parked run
+    // with no kind of wait as a run stopped because a stage's machinery did
+    // not exist, and that is not the same thing as a wait nothing can answer.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.park(run.id, { waitingOn: "the next stage to be built" });
+
+    const parked = store.get(run.id);
+    expect(parked?.wait?.on).toBe("the next stage to be built");
+    expect(parked?.wait?.kind).toBeUndefined();
+  });
+
+  it("moves a wait with repark, without the double-park refusal firing", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.park(run.id, { waitingOn: "an answer", kind: "conversation" });
+
+    const moved = store.repark(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+    });
+
+    expect(moved.wait).toEqual({
+      on: "your review of pull request #9",
+      kind: "review",
+    });
+    // And parking it again is still refused, which is what `repark` exists to
+    // let through without.
+    expect(() =>
+      store.park(run.id, { waitingOn: "something else" }),
+    ).toThrow(/parked/);
+  });
+});
+
+describe("a wait that says what can end it", () => {
+  it("refuses a wait no stage can end", () => {
+    // ADR-0049 D6. A wait nothing can resolve leaves the ticket asking a
+    // person for something for ever, so it is made unwritable rather than
+    // detectable.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+
+    expect(() =>
+      store.park(run.id, {
+        waitingOn: "something nobody can give me",
+        kind: "conversation",
+        stage: "execution",
+        resolvableBy: [],
+      }),
+    ).toThrow(/no stage can end/);
+  });
+
+  it("accepts a park with no wait at all, which is a different thing", () => {
+    // Finding (b) of the phase's pre-flight, guarded. An absent wait means a
+    // run stopped because a stage's machinery does not exist, and a slice that
+    // conflated it with an empty `resolvableBy` would take out every unbuilt
+    // stage's park.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+
+    const parked = store.park(run.id, {
+      waitingOn: "the next stage to be built",
+      stage: "triage",
+    });
+
+    expect(parked.wait?.kind).toBeUndefined();
+    expect(parked.wait?.resolvableBy).toEqual(["triage"]);
+  });
+
+  it("says remediation ends a review, because nothing else acts on one", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/7-work");
+    store.recordPullRequest(run.id, 9);
+
+    const parked = store.park(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "delivery",
+    });
+
+    expect(parked.wait?.resolvableBy).toEqual(["remediation"]);
   });
 });

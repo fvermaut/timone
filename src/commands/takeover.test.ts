@@ -9,19 +9,29 @@ import type {
   Step,
   Ticket,
   TicketingAdapter,
+  TicketComment,
   TicketingProject,
   TicketThread,
 } from "../adapters/ticketing.js";
+import { STAGE_DONE_MARKER } from "../adapters/ticketing.js";
 import {
   noBranches,
   noFiles,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
-import { RunStore } from "../daemon/runs.js";
+import { RunStore, type Run } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
 import { acquireStateLock, stateLockPath } from "../daemon/lock.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
-import { enqueue, pending, settle } from "../daemon/requests.js";
+import {
+  enqueue,
+  pending,
+  settle,
+  WATCH_BOUND_MS,
+} from "../daemon/requests.js";
+import type { Holder } from "../daemon/holder.js";
+import { intervalTicker } from "../daemon/session.js";
+import { DEFAULT_POLL_INTERVAL_SECONDS } from "../daemon/poll.js";
 import {
   parseTarget,
   resolveTakeover,
@@ -211,15 +221,22 @@ function fakeAdapter(open: readonly Ticket[] = []): {
   return { adapter, asked, listings };
 }
 
-function fakeLauncher(exitCode = 0): {
+function fakeLauncher(
+  options: number | { exitCode?: number; onRun?: () => void } = 0,
+): {
   launcher: ProcessLauncher;
   calls: { command: string; args: readonly string[]; cwd: string }[];
 } {
+  const settings = typeof options === "number" ? { exitCode: options } : options;
   const calls: { command: string; args: readonly string[]; cwd: string }[] = [];
   const launcher: ProcessLauncher = {
-    async run(command, args, options) {
-      calls.push({ command, args, cwd: options.cwd });
-      return exitCode;
+    async run(command, args, opened) {
+      calls.push({ command, args, cwd: opened.cwd });
+      // What the person did while the conversation was open, when a case
+      // needs one: the ledger moving under a live takeover is a real event
+      // and can only be staged from here.
+      settings.onRun?.();
+      return settings.exitCode ?? 0;
     },
   };
   return { launcher, calls };
@@ -406,10 +423,12 @@ describe("a ticket the ledger has never heard of", () => {
     expect(store.get("scratch-app#12/1")).toMatchObject({
       status: "parked",
       stage: "wayfinding",
-      waitingKind: "conversation",
-      // Past everything already said: the newest comment on the thread, so
-      // nothing written before this conversation existed can answer it.
-      waitCursor: "2026-08-03T09:30:00Z",
+      wait: {
+        kind: "conversation",
+        // Past everything already said: the newest comment on the thread, so
+        // nothing written before this conversation existed can answer it.
+        opened: "2026-08-03T09:30:00Z",
+      },
     });
   });
 
@@ -429,7 +448,7 @@ describe("a ticket the ledger has never heard of", () => {
       status: "picked-up",
       stage: "triage",
     });
-    expect(store.get("scratch-app#5/1")?.waitingKind).toBeUndefined();
+    expect(store.get("scratch-app#5/1")?.wait?.kind).toBeUndefined();
   });
 
   it("still refuses a closed ticket, in a sentence of its own", async () => {
@@ -812,10 +831,12 @@ describe("takeover and the ledger's one writer", () => {
     expect(said.join("\n")).toContain("timone daemon");
     expect(said.join("\n")).toContain("4213");
     expect(said.join("\n")).toContain("still queued");
-    // Asked, and the ask is still there for the daemon to find.
-    expect(pending(statePath).requests.map((request) => request.body.kind)).toEqual([
-      "claim-takeover",
-    ]);
+    // **Asked, and the ask taken back** — reversed at 31j (ADR-0049 D3). It
+    // used to be left on disk "for the daemon to find", and that is
+    // timone#78: the daemon found it minutes later and handed the run to a
+    // terminal that had gone, leaving a claim nobody was holding and a ticket
+    // answering with a refusal that was not true.
+    expect(pending(statePath).requests).toEqual([]);
     // Untouched: the conversation never started, so the run still waits.
     expect(store.get("scratch-app#6/1")?.status).toBe("parked");
   });
@@ -856,6 +877,303 @@ describe("takeover and the ledger's one writer", () => {
     expect(calls).toEqual([]);
     expect(listings).toEqual([]);
     expect(store.all()).toEqual([]);
+  });
+});
+
+describe("a takeover that gives up leaves nothing behind", () => {
+  /** A ledger with #6 parked on a conversation, and a daemon holding the lock. */
+  function heldLedger(): { statePath: string; store: RunStore } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-withdraw-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-09-04T10:00:00Z" });
+    parkedOnConversation(store);
+    const daemon = acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    expect(daemon.ok).toBe(true);
+    return { statePath, store };
+  }
+
+  it("takes its request back, so no later cycle can act on it", async () => {
+    const { statePath, store } = heldLedger();
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      wait: { intervalMs: 1, boundMs: 3, sleep: async () => {} },
+      log: () => {},
+    });
+
+    expect(code).toBe(1);
+    expect(calls).toEqual([]);
+    expect(pending(statePath).requests).toEqual([]);
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+  });
+
+  it("detects a daemon that claimed the run as the request was withdrawn", async () => {
+    // The race, played out rather than argued about. The daemon reads the
+    // request, the terminal's bound passes and it deletes the file, and the
+    // daemon then writes the claim — with the terminal's own holder on it,
+    // because that is what the request carries since 31b. A withdraw that
+    // assumed it had won would walk away from a run it is holding.
+    const { statePath, store } = heldLedger();
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+
+    // What the "daemon" read before the file was removed.
+    let read: Holder | undefined;
+    let applied = false;
+    const sleep = async (): Promise<void> => {
+      const queued = pending(statePath).requests[0];
+      if (queued?.body.kind === "claim-takeover") read = queued.body.holder;
+      if (read !== undefined && !applied && pending(statePath).requests.length === 0) {
+        applied = true;
+        store.claim("scratch-app#6/1", read);
+      }
+    };
+
+    const said: string[] = [];
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      wait: { intervalMs: 1, boundMs: 3, sleep },
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(applied).toBe(true);
+    expect(code).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(said.join("\n")).toContain("as I was giving up");
+    // And the run is not left claimed by nobody. The daemon still holds the
+    // ledger here, so the handback is asked for rather than written — and the
+    // run carries this terminal's own hold until it lands, which is exactly
+    // what timone#78 lacked.
+    expect(
+      pending(statePath).requests.map((request) => request.body.kind),
+    ).toEqual(["release-takeover"]);
+    expect(store.get("scratch-app#6/1")?.holder?.token).toBe(read?.token);
+  });
+
+  it("waits long enough for a cycle plus an interval, and says what it waited", async () => {
+    // The old bound was 75s on the words "one poll interval plus a margin".
+    // The daemon sleeps its interval *after* a cycle, so a request left just
+    // after a read waits the rest of that cycle and then a full interval —
+    // past 90 seconds on measured cycles of 29–33s.
+    expect(WATCH_BOUND_MS).toBeGreaterThanOrEqual(
+      DEFAULT_POLL_INTERVAL_SECONDS * 1000 + 90_000,
+    );
+
+    const { statePath, store } = heldLedger();
+    const { adapter } = fakeAdapter();
+    const { launcher } = fakeLauncher();
+    const said: string[] = [];
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      wait: { intervalMs: 1, boundMs: 90_000, sleep: async () => {} },
+      log: (message) => said.push(message),
+    });
+
+    // It says how long it waited and that a long cycle is not a fault, rather
+    // than implying the daemon is not coming.
+    expect(said.join("\n")).toContain("1m30s");
+    expect(said.join("\n")).toContain("taken the request back");
+  });
+
+  it("stamps a sign of life as soon as it starts holding the run", async () => {
+    // A plain `setInterval` says nothing for its first whole interval, so a
+    // takeover held a run for thirty seconds having given no sign of life at
+    // all. That is how wide timone#78's window was.
+    const ticks: number[] = [];
+    const ticker = intervalTicker(() => ticks.push(1), 60_000);
+    try {
+      expect(ticks).toHaveLength(1);
+    } finally {
+      ticker.stop();
+    }
+  });
+});
+
+describe("a takeover that finishes the step it took over", () => {
+  /**
+   * `ivtrends` #58's shape: a run parked on a conversation at a **work**
+   * stage, because the building step stopped and asked for a person.
+   */
+  /** A store and the path it is written to, which this command needs both of. */
+  function ledger(): { store: RunStore; statePath: string } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-end-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    let tick = 0;
+    return {
+      statePath,
+      store: RunStore.open(statePath, {
+        now: () => `2026-08-03T10:${String(tick++).padStart(2, "0")}:00Z`,
+      }),
+    };
+  }
+
+  function handedBackAtExecution(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-the-backfill");
+    store.park(run.id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "execution",
+      waitCursor: "2026-08-03T09:30:00Z",
+      resolvableBy: ["execution"],
+    });
+    return store.get(run.id) as Run;
+  }
+
+  /** A tracker whose thread carries whatever the takeover session posted. */
+  function trackerSaying(comments: readonly TicketComment[]): TicketingAdapter {
+    const said: TicketThread = { ...thread, comments: [...comments] };
+    return {
+      ...fakeAdapter().adapter,
+      async getTicket(): Promise<TicketThread> {
+        return said;
+      },
+    };
+  }
+
+  /** What a session posts when it has finished the step it was given. */
+  const finished: TicketComment = {
+    author: "fvermaut",
+    body: `${STAGE_DONE_MARKER}\n\nThe backfill says where it has got to.`,
+    createdAt: "2026-08-03T10:48:00Z",
+    fromTimone: true,
+  };
+
+  it("stops the run asking, once the session has recorded a finished step", async () => {
+    // timone#76. `ivtrends` #58's building and checking were both finished
+    // inside a takeover and pushed, the session posted the finished marker,
+    // and the run was parked again on exactly the wait it had before — cursor
+    // and all. The ticket went on asking a person for an answer they had
+    // given three hours earlier by doing the work.
+    const { store, statePath } = ledger();
+    handedBackAtExecution(store);
+    const { launcher } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter: trackerSaying([finished]),
+      launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(0);
+    const after = store.get("scratch-app#6/1");
+    // Parked with no kind of wait: the ledger's way of saying "not waiting on
+    // a person, carry on when you can". `resolveWait` resumes such a run at
+    // its own stage on the next cycle.
+    expect(after?.status).toBe("parked");
+    expect(after?.wait?.kind).toBeUndefined();
+    expect(after?.stage).toBe("execution");
+    expect(said.join("\n")).toContain("stops asking");
+  });
+
+  it("puts the run back exactly as it was when nothing was recorded", async () => {
+    const { store, statePath } = ledger();
+    handedBackAtExecution(store);
+    const { launcher } = fakeLauncher();
+    const said: string[] = [];
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter: trackerSaying([]),
+      launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    const after = store.get("scratch-app#6/1");
+    expect(after?.status).toBe("parked");
+    expect(after?.wait?.kind).toBe("conversation");
+    expect(after?.wait?.opened).toBe("2026-08-03T09:30:00Z");
+    expect(said.join("\n")).toContain("nothing was recorded");
+  });
+
+  it("says so, and writes nothing, when the run moved under it", async () => {
+    // timone#63's silent early return. `releaseClaim` returned without a word
+    // when the run was no longer active, so a person whose run had been
+    // reclaimed, cancelled or taken by another terminal saw a conversation end
+    // normally and had no way to know the ledger had gone the other way.
+    const { store, statePath } = ledger();
+    handedBackAtExecution(store);
+    const { launcher } = fakeLauncher({
+      onRun: () => store.cancel("scratch-app#6/1", "you closed the ticket"),
+    });
+    const said: string[] = [];
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter: trackerSaying([finished]),
+      launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(store.get("scratch-app#6/1")?.status).toBe("cancelled");
+    expect(said.join("\n")).toContain("moved while we were talking");
+    expect(said.join("\n")).toContain("cancelled");
+  });
+
+  it("tells the terminal what happened whichever way it went", async () => {
+    // Ending silently is what left #58 looking answered: the person walked
+    // away from a terminal that had said nothing about what their session had
+    // or had not moved.
+    for (const comments of [[finished], []]) {
+      const { store, statePath } = ledger();
+      handedBackAtExecution(store);
+      const { launcher } = fakeLauncher();
+      const said: string[] = [];
+
+      await runTakeover("scratch-app#6", {
+        manifest,
+        store,
+        statePath,
+        adapter: trackerSaying(comments),
+        launcher,
+        root: "/root",
+        ticker: () => ({ stop: () => {} }),
+        log: (message) => said.push(message),
+      });
+
+      expect(said.join("\n")).toMatch(/scratch-app #6/);
+    }
   });
 });
 
@@ -925,7 +1243,7 @@ describe("takeover claims through the run, not the lock", () => {
     // And it is given back afterwards, on the wait it came from.
     const after = store.get("scratch-app#6/1");
     expect(after?.status).toBe("parked");
-    expect(after?.waitingKind).toBe("conversation");
+    expect(after?.wait?.kind).toBe("conversation");
     expect(after?.stage).toBe("clarification");
   });
 

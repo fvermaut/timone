@@ -78,7 +78,14 @@ import {
 // `waitOf` comes from there too, so a run put back onto its wait is described
 // by one function wherever it is put back — the spawner's release path and
 // this loop's consume must not drift on what a run was waiting for.
-import { failedComment, waitOf } from "./session.js";
+import { refusalClears } from "./faults.js";
+import {
+  failedComment,
+  refusedComment,
+  refusedWait,
+  stoppedTwiceComment,
+  waitOf,
+} from "./session.js";
 
 /** What a spawn is resuming, when it is resuming something. */
 export interface SpawnContext {
@@ -202,6 +209,13 @@ export interface PollDeps {
 export interface PollResult {
   /** Run ids reclaimed from a dead daemon this cycle. */
   reclaimed: string[];
+  /**
+   * Run ids whose holder was found gone and which were put back to work at
+   * the stage they died in (ADR-0049 D4). They are on {@link
+   * PollResult.reclaimed} as well: the sweep took them back either way, and
+   * this says which of them are going again rather than waiting on a human.
+   */
+  rearmed: string[];
   /** Run ids newly picked up this cycle. */
   pickedUp: string[];
   /** Run ids newly queued behind an occupying run this cycle. */
@@ -610,6 +624,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   const log = deps.log ?? (() => {});
   const result: PollResult = {
     reclaimed: [],
+    rearmed: [],
     pickedUp: [],
     queued: [],
     spawned: [],
@@ -929,7 +944,10 @@ async function applyRequest(
         log(resolution.message);
         return 1;
       }
-      store.claim(resolution.run.id);
+      // On the asking terminal's behalf, never on the daemon's (ADR-0049 D1).
+      // A run the daemon recorded itself as holding is one its own sweep will
+      // reclaim from under a live conversation — timone#63.
+      store.claim(resolution.run.id, body.holder);
       log(`${target} is the terminal's for now.`);
       return 0;
     }
@@ -946,6 +964,74 @@ async function applyRequest(
       return 0;
     }
   }
+}
+
+/**
+ * How many cycles running the daemon may refuse to start the same run for the
+ * same reason before the human is told (ADR-0049 D4, timone#75).
+ *
+ * Three. One is a coincidence and the poll interval is a minute, so three is
+ * about three minutes of a run going nowhere — short enough that nobody waits
+ * two and a half hours, long enough that a refusal clearing on its own never
+ * reaches a ticket.
+ */
+const REFUSAL_LIMIT = 3;
+
+/**
+ * Count a refused spawn, and put it in front of the human once it has
+ * repeated (ADR-0049 D4, timone#75).
+ *
+ * **A refusal that clears on its own is not counted at all.** Uncommitted
+ * changes in Timone's own folder are the human in the middle of an edit, and
+ * the next cycle starts the run as soon as they commit — bounding that would
+ * break the half of this that already works.
+ *
+ * **Parked and not failed.** The run has never started, so there is nothing to
+ * retry and nothing broke; what is wanted is for somebody to look. A park is
+ * answerable and carries a call to action, where `failed` would offer
+ * `timone retry` for a run that would be refused again the moment it ran.
+ */
+async function boundRefusal(
+  run: Run,
+  project: TicketingProject,
+  error: unknown,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
+
+  // Recorded whichever kind it is, because the record is also what keeps the
+  // sweep off the run: a run the daemon is refusing to start has not died,
+  // and reclaiming it would report "the machine running it stopped" about a
+  // machine that is running perfectly and saying no.
+  const reason = oneLine(error);
+  const refused = store.refuse(run.id, reason).refusal;
+  if (refused === undefined) return;
+
+  // Counted, and never told. This is the refusal that goes away by itself.
+  if (refusalClears(error)) return;
+
+  if (refused.count < REFUSAL_LIMIT || refused.told === true) return;
+
+  store.park(run.id, {
+    waitingOn: refusedWait(reason),
+    kind: "escalation",
+  });
+  store.refusalTold(run.id);
+  log(`refused ${run.id} — ${refused.count} times, asking the human`);
+  await adapter.postComment(
+    project,
+    run.ticket,
+    refusedComment(reason, refused.count),
+  );
+}
+
+/** Who is holding a run, as a log line names them. */
+function heldBy(run: Run): string {
+  const holder = run.holder;
+  if (holder === undefined) return "nobody";
+  return `${holder.command} (pid ${holder.pid})`;
 }
 
 /**
@@ -1024,10 +1110,44 @@ async function reclaimStale(
   threadsFor: (ticket: number) => RunThreads,
 ): Promise<void> {
   const { store, adapter } = deps;
-  if (!witness.mayJudge) return;
 
   for (const run of store.staleRuns(threshold)) {
     if (run.project !== project.name) continue;
+
+    // Who is holding it decides, and the clock only decides where nobody is
+    // (ADR-0049 D2, extending ADR-0025 to runs).
+    //
+    // `alive` ends it here however long the silence: a session that is
+    // thinking says nothing for as long as it thinks, and a terminal holds a
+    // takeover for as long as the conversation lasts — which is timone#63,
+    // where the sweep took a run back from a live conversation after two
+    // minutes and the handback could never be read.
+    //
+    // `gone` is proof, so it does not wait for the witness: the daemon does
+    // not need to have been watching to know a pid it can ask about is not
+    // there. That is what lets a killed session stop reading as working
+    // (timone#11) rather than waiting out a window nobody was present for.
+    //
+    // `unknown` and `none` fall through to ADR-0020 exactly as before. A
+    // holder on another machine cannot be asked, and a run with no holder is
+    // every run written before this — so witnessed time still protects a
+    // laptop that slept, which is what phase 17 verified.
+    // A run the daemon is refusing to start is not a run that died, and it
+    // must not be reported as one (ADR-0049 D4). ivtrends #57 was told "the
+    // machine running it stopped before the work was finished" while nothing
+    // had stopped — the daemon was refusing it once a minute, in silence.
+    // What bounds it is the refusal's own count, not this sweep.
+    if (run.refusal !== undefined) {
+      log(`refused ${run.id} — ${run.refusal.reason}`);
+      continue;
+    }
+
+    const held = store.hold(run);
+    if (held === "alive") {
+      log(`holding ${run.id} — ${heldBy(run)} is still running`);
+      continue;
+    }
+    if (held !== "gone" && !witness.mayJudge) continue;
 
     // The verdict on the branch is asked for before the verdict on the
     // session, and it overrules it. A session can die *after* its pull request
@@ -1066,6 +1186,31 @@ async function reclaimStale(
         await concludeReview(run, project, threadsFor(run.ticket), deps, result, log);
         continue;
       }
+    }
+
+    // A run whose holder is provably gone is re-armed once and parks on the
+    // second death (ADR-0049 D4, following ADR-0034). A run judged dead by
+    // witnessed time alone keeps the ending phase 17 verified: witnessed time
+    // is a well-founded inference and a pid is a fact, and only the second is
+    // worth spending a second session on.
+    if (held === "gone") {
+      const outcome = store.reclaim(run.id, reclaimedReason());
+      result.reclaimed.push(run.id);
+      if (outcome.rearmed) {
+        result.rearmed.push(run.id);
+        log(
+          `re-arm ${run.id} — ${heldBy(run)} is gone, so it goes again at ` +
+            `${run.stage ?? "the start"}`,
+        );
+        continue;
+      }
+      log(`stopped twice ${run.id} — ${heldBy(run)} is gone, asking the human`);
+      await adapter.postComment(
+        project,
+        run.ticket,
+        stoppedTwiceComment(outcome.run.deaths ?? []),
+      );
+      continue;
     }
 
     const reason = reclaimedReason();
@@ -1422,12 +1567,14 @@ async function pollProject(
             store.initiativeFor(project.name, occupier.ticket) !== undefined,
           ),
         );
+        store.started(occupier.id);
         result.spawned.push(occupier.id);
         log(`spawn  ${occupier.id}`);
       } catch (error) {
         const line = `${project.name}: could not start a session for #${occupier.ticket}: ${oneLine(error)}`;
         result.errors.push(line);
         log(`error  ${line}`);
+        await boundRefusal(occupier, project, error, deps, result, log);
       }
     }
   }
@@ -1496,7 +1643,7 @@ async function openGoAheads(
   for (const ticket of tickets) {
     const run = store.runsForTicket(project.name, ticket.number).at(-1);
     if (run === undefined || run.stage !== "charting") continue;
-    if (run.status !== "parked" || run.waitingKind !== undefined) continue;
+    if (run.status !== "parked" || run.wait?.kind !== undefined) continue;
     if (!frontierIsEmpty(ticket.labels)) continue;
 
     try {
@@ -1877,7 +2024,7 @@ async function resumeAnswered(
 
     // A review park is the one wait that can end the run outright — a PR
     // merged or closed is a terminal event, not a stage to spawn.
-    if (run.waitingKind === "review") {
+    if (run.wait?.kind === "review") {
       try {
         const ended = await concludeReview(run, project, threads, deps, result, log);
         if (ended) return;
@@ -1891,7 +2038,7 @@ async function resumeAnswered(
 
     // A conversation park is the other one, for a different reason: at a
     // stage nothing follows, the answer *is* the whole of the run.
-    if (run.waitingKind === "conversation") {
+    if (run.wait?.kind === "conversation") {
       try {
         const ended = await concludeLastConversation(run, threads, deps, result, log);
         if (ended) return;
@@ -1937,12 +2084,14 @@ async function resumeAnswered(
         });
       }
       await deps.spawner.spawn(run, project, resumption.context);
+      deps.store.started(run.id);
       result.resumed.push(run.id);
       log(`resume ${run.id} → ${resumption.context.stage ?? run.stage}`);
     } catch (error) {
       const line = `${project.name}: could not resume #${run.ticket}: ${oneLine(error)}`;
       result.errors.push(line);
       log(`error  ${line}`);
+      await boundRefusal(run, project, error, deps, result, log);
     }
     return;
   }
@@ -1995,10 +2144,10 @@ function misreadStep(
   run: Run | undefined,
   thread: TicketThread,
 ): TicketState["misreadStep"] {
-  if (run?.waitingKind !== "escalation" || run.waitCursor === undefined) {
+  if (run?.wait?.kind !== "escalation" || run.wait?.opened === undefined) {
     return undefined;
   }
-  const handback = readHandback(thread, run.waitCursor);
+  const handback = readHandback(thread, run.wait?.opened);
   if (handback === undefined) return undefined;
   if (handback.kind === "unnamed") return undefined;
   if (handbackStage(handback, run.stage ?? "triage") !== undefined) return undefined;
@@ -2532,7 +2681,8 @@ async function concludeLastConversation(
   log: (message: string) => void,
 ): Promise<boolean> {
   const { store } = deps;
-  const { stage, waitCursor } = run;
+  const { stage } = run;
+  const waitCursor = run.wait?.opened;
   if (stage === undefined || waitCursor === undefined) return false;
 
   // A handoff parks a **work** stage on a conversation wait
@@ -2606,7 +2756,7 @@ async function resolveWait(
   // run, and resuming must run *that stage itself* — asking "what follows?"
   // would skip it, and for a park at execution that means verifying code
   // nobody wrote.
-  if (run.waitingKind === undefined) {
+  if (run.wait?.kind === undefined) {
     // A map being worked is the one park with no wait that is not a run
     // stopped for want of machinery. It is waiting on its own decision
     // tickets, and what moves it is {@link openGoAheads} finding the frontier
@@ -2623,7 +2773,7 @@ async function resolveWait(
       : undefined;
   }
 
-  const cursor = run.waitCursor;
+  const cursor = run.wait?.opened;
   if (cursor === undefined) return undefined;
 
   // The wait no *answer* resolves
@@ -2638,7 +2788,7 @@ async function resolveWait(
   // in the same shape as a conversation record and read the same way. Without
   // it a stop the human had already cleared stayed stopped for ever, with the
   // ticket still asking them to run the command they had just run.
-  if (run.waitingKind === "escalation") {
+  if (run.wait?.kind === "escalation") {
     const thread = await threads.ticket();
     const handback = readHandback(thread, cursor);
     if (handback === undefined) return undefined;
@@ -2647,7 +2797,7 @@ async function resolveWait(
     return resume === undefined ? undefined : { context: { stage: resume } };
   }
 
-  if (run.waitingKind === "gate") {
+  if (run.wait?.kind === "gate") {
     const thread = await threads.ticket();
     const decision = readGateDecision(thread, cursor);
     const transition = readGate(stage, decision);
@@ -2675,7 +2825,7 @@ async function resolveWait(
     return undefined;
   }
 
-  if (run.waitingKind === "conversation") {
+  if (run.wait?.kind === "conversation") {
     // The map's conversation is the one whose answer is *agreement* rather
     // than information (ADR-0024). Everywhere else a written answer re-enters
     // the same stage, because that stage has to judge whether the answer
@@ -2740,7 +2890,7 @@ async function resolveWait(
       : { context: { stage, feedback: answer.words }, consumed: answer.at };
   }
 
-  if (run.waitingKind === "review") {
+  if (run.wait?.kind === "review") {
     if (run.pr === undefined) return undefined;
     const pr = await threads.pullRequest(run.pr);
 
@@ -2756,8 +2906,14 @@ async function resolveWait(
       .filter((body) => body !== "");
     if (words.length === 0) return undefined;
 
+    // Where it resumes is read off the wait rather than named here
+    // (ADR-0049 D5): the writer recorded what could end this wait, and a
+    // second opinion at the reader is what let a wait and its answer disagree
+    // in the first place. The fallback is for a ledger written before the
+    // field existed.
+    const into = run.wait?.resolvableBy?.[0] ?? "remediation";
     return {
-      context: { stage: "remediation", feedback: words.join("\n\n---\n\n") },
+      context: { stage: into, feedback: words.join("\n\n---\n\n") },
     };
   }
 

@@ -1276,10 +1276,16 @@ export interface StoppedRun {
   stage?: PipelineStage;
   /** The work branch it holds, at the stages that hold one. */
   branch?: string;
-  /** What the ticket says it is waiting on. */
-  waitingOn?: string;
-  /** The instant it stopped — the stage's own account is the comment there. */
-  waitCursor?: string;
+  /**
+   * What it is waiting for, whole — {@link Run.wait}'s shape, so a real `Run`
+   * still satisfies this structurally (ADR-0049 D5).
+   */
+  wait?: {
+    /** What the ticket says it is waiting on. */
+    on: string;
+    /** The instant it stopped — the stage's own account is the comment there. */
+    opened?: string;
+  };
 }
 
 /**
@@ -1343,8 +1349,8 @@ export function escalationPrompt(
     `- run: \`${run.id}\``,
     `- the stage that stopped: ${stage ?? "none recorded"}`,
     `- work branch: ${run.branch ?? "none — it holds no branch"}`,
-    `- it stopped at: ${run.waitCursor ?? "not recorded"}`,
-    `- what the ticket says it waits on: ${run.waitingOn ?? "not recorded"}`,
+    `- it stopped at: ${run.wait?.opened ?? "not recorded"}`,
+    `- what the ticket says it waits on: ${run.wait?.on ?? "not recorded"}`,
     "",
     stoppedAccountBlock(run, ticket),
     "",
@@ -1421,7 +1427,7 @@ export function escalationPrompt(
  */
 function stoppedAccountBlock(run: StoppedRun, ticket: TicketThread): string {
   const said = ticket.comments.find(
-    (comment) => comment.fromTimone && comment.createdAt === run.waitCursor,
+    (comment) => comment.fromTimone && comment.createdAt === run.wait?.opened,
   );
 
   if (said === undefined) {
@@ -1511,7 +1517,7 @@ function unstamped(body: string): string {
 
 /** What the human wrote after the run stopped, when they wrote anything. */
 function humanWordsBlock(run: StoppedRun, ticket: TicketThread): string {
-  const cursor = run.waitCursor;
+  const cursor = run.wait?.opened;
   const words = ticket.comments
     .filter(
       (comment) =>

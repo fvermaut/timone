@@ -11,6 +11,8 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
+import { holderSchema } from "./holder.js";
+
 /**
  * What a human command asks the daemon to do
  * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
@@ -41,6 +43,18 @@ const bodySchema = z.discriminatedUnion("kind", [
     kind: z.literal("claim-takeover"),
     project: z.string().min(1),
     ticket: z.number().int().positive(),
+    /**
+     * The terminal that will be holding the run, so the daemon claims it on
+     * that terminal's behalf rather than on its own
+     * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+     * D1). Without it the run would record the daemon as holder, and the
+     * daemon's own sweep would then read a live conversation as its own work
+     * and reclaim it — timone#63.
+     *
+     * Optional, because a request written before this field existed is still
+     * a request. One without it claims as it always did.
+     */
+    holder: holderSchema.optional(),
   }),
   z.object({
     kind: z.literal("release-takeover"),
@@ -181,8 +195,9 @@ export interface WaitOptions {
   /** How often to look. */
   intervalMs?: number;
   /**
-   * How long to look before saying it is still queued. One poll interval plus
-   * a margin: a daemon that has not touched it by then is not about to.
+   * How long to look before taking the request back. See
+   * {@link WATCH_BOUND_MS} for what it has to cover and why it cannot cover
+   * all of it.
    */
   boundMs?: number;
   /** Injected so a test does not wait a real minute to watch a timeout. */
@@ -190,7 +205,27 @@ export interface WaitOptions {
 }
 
 const WATCH_INTERVAL_MS = 1_000;
-const WATCH_BOUND_MS = 75_000;
+
+/**
+ * How long a command waits for the daemon before taking its request back.
+ *
+ * **It was 75s on the words "one poll interval plus a margin", and that was
+ * wrong** (ADR-0049 D3). The daemon sleeps its interval *after* a cycle and
+ * reads requests at the start of the next one, so a request left just after a
+ * read waits out the rest of that cycle **and then** a full interval. Cycles
+ * on the trading app measured 29–33 seconds, which puts the real wait past 90
+ * seconds — so the old bound gave up while the daemon was still coming, and
+ * left the request behind to be applied minutes later. That is timone#78: the
+ * run was handed to a terminal that had gone.
+ *
+ * **No bound can cover all of it, and pretending otherwise is the other
+ * mistake.** A cycle awaits whatever it is running, which can be an hour. So
+ * this covers the ordinary case — a full interval plus a cycle of about
+ * ninety seconds — and what makes giving up safe is not the number: it is
+ * that the request is **withdrawn** when the bound passes, so nothing is left
+ * on disk for a later cycle to act on.
+ */
+export const WATCH_BOUND_MS = 150_000;
 
 /**
  * Wait for the daemon to deal with one request, and answer whether it did.

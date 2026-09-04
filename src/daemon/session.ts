@@ -19,7 +19,8 @@ import {
   type ConversationChannel,
 } from "../channels/conversation.js";
 import { TerminalChannel } from "../channels/terminal.js";
-import { technicalFault, type TechnicalFault } from "./faults.js";
+import { SpawnRefusal, technicalFault, type TechnicalFault } from "./faults.js";
+import { takeHold } from "./holder.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
   fromForgeDefaultBranch,
@@ -432,6 +433,13 @@ function waitWords(ms: number): string {
  * beat with the same mechanism rather than two that could drift.
  */
 export function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
+  // **Once immediately, then on the interval** (ADR-0049 D3). A plain
+  // `setInterval` says nothing for its first whole interval, so a takeover
+  // spent its first thirty seconds holding a run it had given no sign of life
+  // for at all — which is how wide timone#78's window was. The tick is
+  // idempotent (it stamps a timestamp), so an extra one at the start costs
+  // nothing and closes the gap where it is widest.
+  onTick();
   const handle = setInterval(onTick, intervalMs);
   return { stop: () => clearInterval(handle) };
 }
@@ -624,8 +632,79 @@ export function failedComment(reason: string): string {
     "",
     "Nothing was decided about this ticket, so nothing here is final.",
     "",
-    "**What I need from you:** re-mark this ticket when you want me to try again," +
-      " or leave it and tell me what looks wrong.",
+    // **Not "re-mark this ticket"**, which is what this line said until
+    // ADR-0049 D7. The mark is already on — nothing took it off — so there is
+    // no gesture there for the reader to make, and timone#27 is people trying
+    // it and watching nothing happen. The standing note on the ticket carries
+    // `timone retry`, which does work, and it is kept in one place rather
+    // than spelled here in a second dialect.
+    "**What I need from you:** the standing note below has the command that " +
+      "starts this again. Or leave it and tell me what looks wrong.",
+  ].join("\n");
+}
+
+/**
+ * What a run the daemon will not start says it is waiting on
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D4, timone#75).
+ *
+ * It names the refusal, because that is the fact somebody can act on, and it
+ * says the run never started — which is what tells it apart from a session
+ * that ran and stopped.
+ */
+export function refusedWait(reason: string): string {
+  return `me — I couldn't start this at all: ${reason}`;
+}
+
+/**
+ * The comment posted when the daemon has refused to start the same run for
+ * the same reason, cycle after cycle (ADR-0049 D4, timone#75).
+ *
+ * ivtrends #57 read "picked up, about to start" for two and a half hours
+ * while this was happening once a minute, and the only place it was ever said
+ * was a terminal nobody was reading.
+ */
+export function refusedComment(reason: string, times: number): string {
+  return [
+    "**I could not start this at all, and I have stopped trying.**",
+    "",
+    `I tried ${times} times and was refused every time, for the same reason:`,
+    "",
+    `> ${reason}`,
+    "",
+    "That is about the machine I run on, not about this ticket. No session " +
+      "ever started, so nothing here has been read, written or decided.",
+    "",
+    "**What I need from you:** have a look at what is stopping it. The " +
+      "standing note below has the command that opens this ticket with me in " +
+      "your terminal.",
+  ].join("\n");
+}
+
+/**
+ * The comment posted when a run stopped twice on its own machinery and the
+ * human is being asked
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D4).
+ *
+ * Both reasons, because two attempts that stopped differently are two pieces
+ * of news and the second is usually the one that can be acted on. It asks for
+ * nothing itself: the run is parked on an escalation, and the ticket's call to
+ * action already carries the command that opens it in a terminal.
+ */
+export function stoppedTwiceComment(deaths: readonly string[]): string {
+  const attempts = deaths.map((reason, index) => `${index + 1}. ${reason}`);
+  return [
+    "**I tried this twice and it stopped both times before the work was done.**",
+    "",
+    ...attempts,
+    "",
+    "Neither of those was about this ticket — both times it was the machine " +
+      "running the work. Nothing was decided here, so nothing above is final.",
+    "",
+    "**What I need from you:** have a look at what stopped it. The call to " +
+      "action below has the command that opens this ticket with me in your " +
+      "terminal.",
   ].join("\n");
 }
 
@@ -697,7 +776,8 @@ export function unclassifiedComment(): string {
     "I read it and finished without reaching a conclusion I could act on, which",
     "is my failure and not yours.",
     "",
-    "**What I need from you:** re-mark this ticket to make me try again, or add a line saying what you're after.",
+    "**What I need from you:** the standing note below has the command that " +
+      "starts this again. Or add a line saying what you're after.",
   ].join("\n");
 }
 
@@ -898,11 +978,24 @@ function handBack(
   outcome: { comment: TicketComment },
   log: (message: string) => void,
 ): void {
+  // **The wait names the stage that can end it** (ADR-0049 D6). This is the
+  // caller the decision was written for: it parks a *work* stage on a
+  // conversation wait, and until now it said `conversation` and nothing else
+  // — so what could answer the question was worked out later, by a reader
+  // consulting a table this writer never looked at. `ivtrends` #58 sat
+  // finished and pushed while its ticket asked a person for an answer
+  // ([timone#76](https://github.com/fvermaut/timone/issues/76)).
+  //
+  // The stage it hands back to is the stage it parked at, because a handoff
+  // resumes where it stopped. Naming it here is what lets `releaseClaim` ask
+  // whether the work it just did belongs to this wait.
+  const endedBy: PipelineStage[] = [stage];
   store.park(id, {
     waitingOn: "your answer to the question in my last comment.",
     kind: "conversation",
     stage,
     waitCursor: outcome.comment.createdAt,
+    resolvableBy: endedBy,
   });
   log(`parked ${id} — ${stage} handed back, waiting on you`);
 }
@@ -944,10 +1037,10 @@ function escalate(
 
 export function waitOf(run: Run): ParkOptions {
   return {
-    waitingOn: run.waitingOn ?? "a human",
-    ...(run.waitingKind === undefined ? {} : { kind: run.waitingKind }),
+    waitingOn: run.wait?.on ?? "a human",
+    ...(run.wait?.kind === undefined ? {} : { kind: run.wait?.kind }),
     ...(run.stage === undefined ? {} : { stage: run.stage }),
-    ...(run.waitCursor === undefined ? {} : { waitCursor: run.waitCursor }),
+    ...(run.wait?.opened === undefined ? {} : { waitCursor: run.wait?.opened }),
   };
 }
 
@@ -1052,8 +1145,10 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { manifest } = this.options;
 
     if (!(project.name in manifest.projects)) {
-      throw new Error(
+      // Never clears by itself: the manifest is a file somebody has to edit.
+      throw new SpawnRefusal(
         `Refusing to spawn a session for "${project.name}": it is not declared in the manifest`,
+        false,
       );
     }
 
@@ -1072,7 +1167,10 @@ export class AgentSessionSpawner implements SessionSpawner {
       // daemon's own log and leaves the run untouched, so the next cycle
       // starts it as soon as the changes are committed — where failing the
       // run would leave every marked ticket needing `timone retry` by hand.
-      throw new Error(uncommittedRefusal(checkout.uncommitted));
+      // Clears on its own, and is the one refusal that must never reach the
+      // ticket: it is the human in the middle of an edit, and the next cycle
+      // starts the run as soon as they commit (timone#75's working half).
+      throw new SpawnRefusal(uncommittedRefusal(checkout.uncommitted), true);
     }
     if (checkout.pin !== undefined) {
       this.log(`pinned ${run.id} — timone at ${checkout.pin.commit.slice(0, 7)}`);
@@ -1446,11 +1544,15 @@ export class AgentSessionSpawner implements SessionSpawner {
 
     const before = store.get(run.id);
     const parked = before?.status === "parked" ? before : undefined;
-    if (parked !== undefined) store.claim(run.id);
+    // The holder is this process, because this process is what is running the
+    // session (ADR-0049 D1). If it dies, the pid goes with it and the run is
+    // reclaimable at once rather than after a clock says so.
+    const holder = takeHold(`timone daemon ${run.id}`);
+    if (parked !== undefined) store.claim(run.id, holder);
 
     try {
       const started = await runtime.start(request);
-      store.activate(run.id, started.sessionId);
+      store.activate(run.id, started.sessionId, holder);
       return started;
     } catch (error) {
       if (parked !== undefined) store.park(run.id, waitOf(parked));
@@ -1879,7 +1981,7 @@ export class AgentSessionSpawner implements SessionSpawner {
 
     if (readConversationRecord(ticket, cursor) === undefined) {
       this.putOnWait(run, {
-        waitingOn: run.waitingOn ?? "a conversation in your terminal",
+        waitingOn: run.wait?.on ?? "a conversation in your terminal",
         kind: "conversation",
         stage,
         // Never before the answer this session was started on (ADR-0023).

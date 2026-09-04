@@ -32,9 +32,11 @@ function breakdownIn(
 }
 
 import { ctaComment, ctaFor } from "../daemon/cta.js";
+import type { Holder } from "../daemon/holder.js";
 import { progressOf, reclaimedReason } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
+  CARRY_ON_WAIT,
   type InitiativeRecord, runId, type Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
 
@@ -148,7 +150,7 @@ describe("renderStatus", () => {
         ticket: 7,
         status: "parked",
         stage: "triage",
-        waitingOn: "approval on the ticket",
+        wait: { on: "approval on the ticket" },
       }),
     ];
     const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
@@ -167,14 +169,14 @@ describe("renderStatus", () => {
         ticket: 6,
         status: "parked",
         stage: "clarification",
-        waitingOn: "an answer about how it should behave",
+        wait: { on: "an answer about how it should behave" },
       }),
       run({
         project: "scratch-app",
         ticket: 7,
         status: "parked",
         stage: "clarification",
-        waitingOn: "an answer about the wording",
+        wait: { on: "an answer about the wording" },
       }),
     ];
     const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
@@ -191,7 +193,7 @@ describe("renderStatus", () => {
         project: "scratch-app",
         ticket: 6,
         status: "parked",
-        waitingOn: "an answer",
+        wait: { on: "an answer" },
       }),
       run({ project: "scratch-app", ticket: 7, status: "active", stage: "requirements" }),
     ];
@@ -203,8 +205,8 @@ describe("renderStatus", () => {
 
   it("names every waiting ticket in the closing line", () => {
     const runs = [
-      run({ project: "scratch-app", ticket: 6, status: "parked", waitingOn: "an answer" }),
-      run({ project: "other-app", ticket: 2, status: "parked", waitingOn: "approval" }),
+      run({ project: "scratch-app", ticket: 6, status: "parked", wait: { on: "an answer" } }),
+      run({ project: "other-app", ticket: 2, status: "parked", wait: { on: "approval" } }),
     ];
     const lastLine =
       renderStatus(manifest, runs, { stateExists: true }).trimEnd().split("\n").at(-1) ?? "";
@@ -232,7 +234,7 @@ describe("renderStatus", () => {
         project: "scratch-app",
         ticket: 7,
         status: "parked",
-        waitingOn: "the next stage",
+        wait: { on: "the next stage" },
         flags: ["unpushed commits on phase/01"],
       }),
     ];
@@ -306,7 +308,7 @@ describe("renderStatus", () => {
         project: "scratch-app",
         ticket: 7,
         status: "parked",
-        waitingOn: "approval on the ticket",
+        wait: { on: "approval on the ticket" },
       }),
     ];
     const output = renderStatus(manifest, runs, { stateExists: true });
@@ -355,8 +357,7 @@ describe("renderStatus — the back half of the pipeline", () => {
           ticket: 6,
           status: "parked",
           stage: "delivery",
-          waitingKind: "review",
-          waitingOn: "your review",
+          wait: { kind: "review", on: "your review" },
           pr: 9,
           branch: "timone/6-fiddly-box",
         }),
@@ -430,6 +431,130 @@ describe("renderStatus — a run whose daemon died under it", () => {
   });
 });
 
+describe("renderStatus — what the terminal can ask without a daemon", () => {
+  /** A holder as the spawner records one. */
+  function holderOf(pid: number): Holder {
+    return {
+      token: `token-${pid}`,
+      command: "timone daemon scratch-app#7/1",
+      pid,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    };
+  }
+
+  it("stops saying 'waiting on you' about a ticket that needs nothing", () => {
+    // timone#14, seen live on the trading app on 2026-08-16. The shared
+    // calculation already says whether the human is being waited on, and this
+    // renderer printed the words over the top of its answer — so a map still
+    // working through its own questions read
+    // "waiting on you: nothing right now".
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "parked",
+          stage: "charting",
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    // Asserted on the project's own line: the closing summary legitimately
+    // says "nothing is waiting on you right now", and that sentence is the
+    // one this ticket's line was contradicting.
+    expect(lineFor(output, "scratch-app")).toContain("nothing right now");
+    expect(lineFor(output, "scratch-app")).not.toContain("waiting on you");
+  });
+
+  it("still says it about a ticket that does need something", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "parked",
+          stage: "requirements",
+          wait: { on: "your approval of the specification", kind: "gate" },
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    expect(output).toContain("waiting on you: your approval of the specification");
+  });
+
+  it("does not say a person is waited on about a run handed back to the machine", () => {
+    // Found by phase 31's live gate, check 4, on the run it had just watched
+    // work: `timone status` read "waiting on you: nothing — I'll carry on
+    // from where you left it." That is timone#14's self-contradicting
+    // sentence in a new place, and 31f's fix could not catch it because the
+    // shared calculation was answering `true`.
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "parked",
+          stage: "planning",
+          wait: { on: CARRY_ON_WAIT, resolvableBy: ["planning"] },
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    expect(lineFor(output, "scratch-app")).not.toContain("waiting on you");
+    expect(lineFor(output, "scratch-app")).toContain("on my next pass");
+  });
+
+  it("does not call a run working when the process running it is gone", () => {
+    // timone#11. With nothing watching, a killed session read "working on it
+    // now" for ever, because the only evidence anything had was a clock and
+    // the clock needs a daemon to be running to mean anything. A pid needs no
+    // witness, so the terminal can ask this one on its own.
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "active",
+          stage: "execution",
+          holder: holderOf(4213),
+        }),
+      ],
+      { stateExists: true, livenessOf: () => "gone" },
+    );
+
+    expect(output).not.toContain("working on it now");
+    expect(output).toContain("nobody is running this");
+  });
+
+  it("keeps today's words for a run that records no holder", () => {
+    // Every run written before ADR-0049. Guessing about them is worse than
+    // saying what has always been said.
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "active",
+          stage: "execution",
+        }),
+      ],
+      { stateExists: true, livenessOf: () => "gone" },
+    );
+
+    expect(output).toContain("working on it now");
+  });
+});
+
 describe("renderStatus — what a run is costing right now", () => {
   it("names the model and how long it has been at it", () => {
     const output = renderStatus(
@@ -483,8 +608,7 @@ describe("renderStatus — what a run is costing right now", () => {
           ticket: 7,
           status: "parked",
           stage: "planning",
-          waitingOn: "your answer on the ticket",
-          waitingKind: "gate",
+          wait: { on: "your answer on the ticket", kind: "gate" },
         }),
       ],
       { stateExists: true, now: new Date("2026-08-06T10:00:30Z") },
@@ -523,8 +647,7 @@ describe("renderStatus — a ticket built in pieces", () => {
         ticket: 51,
         status: "parked",
         stage: "delivery",
-        waitingKind: "review",
-        waitingOn: "your review",
+        wait: { kind: "review", on: "your review" },
         pr: 9,
       }),
     ];
@@ -565,8 +688,7 @@ describe("renderStatus — a ticket built in pieces", () => {
         ticket: 6,
         status: "parked",
         stage: "delivery",
-        waitingKind: "review",
-        waitingOn: "your review",
+        wait: { kind: "review", on: "your review" },
         pr: 9,
       }),
     ];
@@ -590,8 +712,7 @@ describe("renderStatus — one computation, two renderers", () => {
       ticket: 6,
       status: "parked",
       stage: "delivery",
-      waitingKind: "review",
-      waitingOn: "your review",
+      wait: { kind: "review", on: "your review" },
       pr: 9,
       branch: "timone/6-fiddly-box",
     });
@@ -623,8 +744,7 @@ describe("renderStatus — one computation, two renderers", () => {
       ticket: 31,
       status: "parked",
       stage: "verification",
-      waitingKind: "escalation",
-      waitingOn: "me — I can't take this one further myself.",
+      wait: { kind: "escalation", on: "me — I can't take this one further myself." },
       branch: "timone/31-slow-page",
     });
 
@@ -666,8 +786,7 @@ describe("renderStatus — one computation, two renderers", () => {
         ticket: 52,
         status: "parked",
         stage: "delivery",
-        waitingKind: "review",
-        waitingOn: "your review",
+        wait: { kind: "review", on: "your review" },
         pr: 12,
       }),
     ];
@@ -720,8 +839,7 @@ describe("renderStatus — one computation, two renderers", () => {
         ticket: 6,
         status: "parked",
         stage: "planning",
-        waitingKind: "gate",
-        waitingOn: "your answer on the ticket",
+        wait: { kind: "gate", on: "your answer on the ticket" },
       }),
       run({ project: "scratch-app", ticket: 7, status: "active", stage: "execution" }),
       run({

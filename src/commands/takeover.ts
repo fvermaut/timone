@@ -11,13 +11,22 @@ import type {
   TicketThread,
 } from "../adapters/ticketing.js";
 import { loadManifest, type Manifest } from "../manifest.js";
-import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
+import {
+  CARRY_ON_WAIT,
+  RunStore,
+  defaultStatePath,
+  type Run,
+} from "../daemon/runs.js";
 import {
   waitFor,
   wayfinderStage,
   type PipelineStage,
 } from "../daemon/pipeline.js";
-import { outcomeCursorFrom } from "../daemon/outcomes.js";
+import {
+  outcomeCursorFrom,
+  readStageOutcome,
+  type StageOutcome,
+} from "../daemon/outcomes.js";
 import {
   PROMPTED_STAGES,
   escalationPrompt,
@@ -25,7 +34,14 @@ import {
 } from "../daemon/prompts.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
-import { enqueue, waitUntilSettled, type WaitOptions } from "../daemon/requests.js";
+import { takeHold, type Holder } from "../daemon/holder.js";
+import {
+  enqueue,
+  settle as settleRequest,
+  waitUntilSettled,
+  WATCH_BOUND_MS,
+  type WaitOptions,
+} from "../daemon/requests.js";
 import { intervalTicker, waitOf, type Ticker } from "../daemon/session.js";
 
 /** A parsed `<project>#<ticket>` target. */
@@ -204,17 +220,17 @@ export async function resolveTakeover(
       break;
   }
 
-  if (run.waitingKind === "gate") {
+  if (run.wait?.kind === "gate") {
     return {
       kind: "answer-on-ticket",
       message:
         `${target.project} #${target.ticket} isn't waiting for a conversation — ` +
-        `it's waiting for your answer on the ticket: ${run.waitingOn ?? "a decision"}. ` +
+        `it's waiting for your answer on the ticket: ${run.wait?.on ?? "a decision"}. ` +
         "Reply there and I'll carry on from your reply.",
     };
   }
 
-  if (run.waitingKind === "review") {
+  if (run.wait?.kind === "review") {
     return {
       kind: "answer-on-ticket",
       message:
@@ -230,16 +246,16 @@ export async function resolveTakeover(
   // cannot hold a conversation for. That refusal, on the one park whose CTA
   // hands the human this very command, is the wedged project ADR-0033's
   // ordering exists to prevent.
-  if (run.waitingKind === "escalation") {
+  if (run.wait?.kind === "escalation") {
     return { kind: "escalation", run };
   }
 
-  if (run.waitingKind !== "conversation" || run.stage === undefined) {
+  if (run.wait?.kind !== "conversation" || run.stage === undefined) {
     return {
       kind: "nothing-to-do",
       message:
         `${target.project} #${target.ticket} is parked, but not on anything I ` +
-        `can pick up in a conversation: ${run.waitingOn ?? "no reason recorded"}.`,
+        `can pick up in a conversation: ${run.wait?.on ?? "no reason recorded"}.`,
     };
   }
 
@@ -471,7 +487,13 @@ export async function runTakeover(
   } finally {
     process.off("SIGINT", giveBack);
     process.off("SIGTERM", giveBack);
-    giveBack();
+    // **The ordinary ending reads what the session recorded; a signal cannot**
+    // (ADR-0049 D6). Ctrl-C runs no `await`, so the signal handler above stays
+    // the blind restore it has always been — a claim given back is better than
+    // a claim held by a process that is gone. This path has time to ask the
+    // ticket what happened.
+    beat.stop();
+    await endTakeover(target, claimed.run, deps, log);
   }
 }
 
@@ -503,6 +525,12 @@ async function claimForTakeover(
   const { store, statePath } = deps;
   if (statePath === undefined) return { kind: "no", code: 1 };
 
+  // This terminal is what will be holding the run, and it says so on the run
+  // itself (ADR-0049 D1). Until this, a claim recorded no owner at all — so a
+  // second takeover was refused with a sentence about work nobody was doing,
+  // and the sweep took the run away from a live conversation (timone#78, #63).
+  const hold = takeHold(`timone takeover ${raw}`);
+
   const acquired = acquireStateLock({
     statePath,
     command: `timone takeover ${raw}`,
@@ -519,7 +547,7 @@ async function claimForTakeover(
       if (resolution.kind === "escalation") {
         return {
           kind: "claimed",
-          run: store.claim(resolution.run.id),
+          run: store.claim(resolution.run.id, hold),
           escalation: true,
         };
       }
@@ -533,7 +561,7 @@ async function claimForTakeover(
       }
       return {
         kind: "claimed",
-        run: store.claim(resolution.run.id),
+        run: store.claim(resolution.run.id, hold),
         ...(resolution.thread === undefined ? {} : { thread: resolution.thread }),
       };
     } finally {
@@ -566,6 +594,7 @@ async function claimForTakeover(
     kind: "claim-takeover",
     project: target.project,
     ticket: target.ticket,
+    holder: hold,
   });
   log(
     `${holder.command} (pid ${holder.pid}) has the ledger, so I've asked it to ` +
@@ -573,9 +602,25 @@ async function claimForTakeover(
   );
 
   if (!(await waitUntilSettled(path, deps.wait))) {
+    // **Taken back, not left behind** (ADR-0049 D3). Until this, the request
+    // stayed on disk, the daemon applied it minutes later, and the run was
+    // handed to a terminal that had gone — timone#78. Nothing else ended that
+    // claim but the dead-run sweep.
+    const withdrawn = await withdraw(path, target, hold, deps);
+    if (withdrawn.kind === "applied") {
+      // The race the withdraw has to detect rather than assume away: the
+      // daemon had already read the request and was carrying it out as the
+      // file was removed. It really did hand the run over, so saying it did
+      // not would leave a claim nobody is holding.
+      log(`The daemon handed ${name} over as I was giving up, so I have it.`);
+      return withdrawn.claim;
+    }
     log(
-      `${name} is still queued — the daemon hasn't handed it over yet. Try ` +
-        "again in a moment; `timone status` shows where it stands.",
+      `${name} is still queued. I waited ${waitWords(boundOf(deps.wait))} and ` +
+        "the daemon didn't get to it — a cycle takes as long as whatever it " +
+        "is running, so that is not a fault. I've taken the request back, so " +
+        "nothing will happen behind you. Ask again whenever you like; " +
+        "`timone status` shows where it stands.",
     );
     return { kind: "no", code: 1 };
   }
@@ -591,9 +636,244 @@ async function claimForTakeover(
   // The claim cleared nothing about what the run was waiting on
   // (`RunStore.claim` keeps the wait deliberately), so which session to open
   // is still readable off the run the daemon handed back.
-  return run.waitingKind === "escalation"
+  return run.wait?.kind === "escalation"
     ? { kind: "claimed", run, escalation: true }
     : { kind: "claimed", run };
+}
+
+/** Reduce an error to one readable line. */
+function oneLine(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.split("\n")[0];
+}
+
+/**
+ * End a takeover by reading what its session actually recorded, and say at the
+ * terminal what changed
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D6, second half).
+ *
+ * **`releaseClaim` restored the old wait blindly, and that is timone#76.**
+ * `ivtrends` #58's building and checking were both finished inside a takeover
+ * and pushed; the session posted `🏁 Step finished`; and the run was then
+ * parked again on exactly the wait it had before, cursor and all. The ticket
+ * went on asking a person for an answer they had given three hours earlier by
+ * doing the work.
+ *
+ * So the ending consults the ticket from the claim's own cursor with the same
+ * {@link readStageOutcome} the spawner uses. A finished step advances the run;
+ * anything else goes back to the wait it came from.
+ *
+ * **And it says so, either way.** Ending silently is what left #58 looking
+ * answered: the person walked away from a terminal that had told them nothing
+ * about what their session had or had not moved.
+ */
+async function endTakeover(
+  target: TakeoverTarget,
+  run: Run,
+  deps: TakeoverDeps,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store } = deps;
+  const name = `${target.project} #${target.ticket}`;
+
+  // Somebody else moved it while the conversation ran — the daemon reclaimed
+  // it, a `timone cancel` landed, another terminal took it. Saying so is the
+  // point: this used to be a silent early return, which is timone#63's
+  // handback that could never be read.
+  const now = store.get(run.id);
+  if (now === undefined || now.status !== "active") {
+    log(
+      `${name} moved while we were talking — it is now ` +
+        `${now?.status ?? "gone from the ledger"}. I've left it alone rather ` +
+        "than writing over whatever did that.",
+    );
+    return;
+  }
+
+  const cursor = run.wait?.opened;
+  const stage = run.stage;
+  if (cursor === undefined || stage === undefined) {
+    releaseClaim(target, run, deps, log);
+    log(`${name} goes back to what it was waiting for.`);
+    return;
+  }
+
+  let outcome: StageOutcome | undefined;
+  try {
+    const project = {
+      name: target.project,
+      repoUrl: deps.manifest.projects[target.project].repo_url,
+    };
+    outcome = readStageOutcome(
+      await deps.adapter.getTicket(project, target.ticket),
+      cursor,
+    );
+  } catch (error) {
+    // An unreadable ticket is no grounds to move a run. The claim goes back
+    // and the next cycle reads the thread with a clearer head.
+    log(
+      `I couldn't read ${name} to see what we finished: ${oneLine(error)}. ` +
+        "It goes back to what it was waiting for.",
+    );
+    releaseClaim(target, run, deps, log);
+    return;
+  }
+
+  if (outcome?.kind !== "advanced") {
+    releaseClaim(target, run, deps, log);
+    log(
+      outcome === undefined
+        ? `${name} goes back to what it was waiting for — nothing was recorded ` +
+            "as finished, so I've changed nothing."
+        : `${name} goes back to what it was waiting for.`,
+    );
+    return;
+  }
+
+  // The wait itself says which stage may end it (31h), so this is not a guess
+  // about whose work the outcome was: a step finished at a stage the wait does
+  // not name is somebody else's business.
+  const endedBy = run.wait?.resolvableBy;
+  if (endedBy !== undefined && !endedBy.includes(stage)) {
+    releaseClaim(target, run, deps, log);
+    log(
+      `${name} goes back to what it was waiting for — what we finished isn't ` +
+        "what it was waiting on.",
+    );
+    return;
+  }
+
+  // **Parked with no kind of wait, which is the ledger's way of saying "not
+  // waiting on a person, carry on when you can".** `resolveWait` resumes such
+  // a run at its own stage on the next cycle, and that stage then finishes
+  // through every check it already has — the phase file's status, the branch
+  // having moved, the outcome the session posted.
+  //
+  // Deliberately *not* "work out the next stage and go there". What follows a
+  // work stage is decided by `afterWorkStage`, which reads the branch; a
+  // command that skipped it to save one cheap session would be advancing a
+  // run past a check on the strength of a comment. One more pass is the right
+  // price for not guessing.
+  release(target, deps, () => {
+    store.park(run.id, {
+      waitingOn: CARRY_ON_WAIT,
+      stage,
+      waitCursor: outcome.comment.createdAt,
+    });
+  });
+  log(
+    `${name} has the step you finished recorded against it, so it stops ` +
+      "asking. I'll carry it on from there on my next pass.",
+  );
+}
+
+/**
+ * Do `write` under the ledger's lock, or leave the daemon a request to take
+ * the run back. {@link releaseClaim}'s two roads, without its wait.
+ */
+function release(
+  target: TakeoverTarget,
+  deps: TakeoverDeps,
+  write: () => void,
+): void {
+  const { statePath } = deps;
+  if (statePath === undefined) return;
+
+  const acquired = acquireStateLock({
+    statePath,
+    command: "timone takeover (writing back what we finished)",
+    staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
+  });
+  if (acquired.ok) {
+    try {
+      write();
+    } finally {
+      acquired.lock.release();
+    }
+    return;
+  }
+  if (acquired.error.holder === undefined) return;
+  enqueue(statePath, {
+    kind: "release-takeover",
+    project: target.project,
+    ticket: target.ticket,
+    outcome: "ended",
+  });
+}
+
+/**
+ * Take back a request the daemon has not carried out, and say whether that
+ * worked (ADR-0049 D3).
+ *
+ * **The race is the whole of it.** Removing the file stops a daemon that has
+ * not read it yet, and stops nothing at all in a daemon that read it a moment
+ * ago and is applying it now — the daemon applies a request and settles it
+ * afterwards, so a file still on disk proves nothing either way. So the
+ * withdraw is not assumed to have worked: the ledger is watched for a short
+ * while afterwards for this terminal's own hold, and a claim that lands is
+ * accepted rather than abandoned.
+ *
+ * **This terminal's own token, and no weaker test.** A run that turns
+ * `active` in this window could have been claimed by anything; only the token
+ * minted for this command says it was claimed *for us*.
+ */
+async function withdraw(
+  path: string,
+  target: TakeoverTarget,
+  hold: Holder,
+  deps: TakeoverDeps,
+): Promise<{ kind: "withdrawn" } | { kind: "applied"; claim: Claim }> {
+  settleRequest(path);
+
+  const { store } = deps;
+  const intervalMs = deps.wait?.intervalMs ?? WITHDRAW_LOOK_MS;
+  const sleep =
+    deps.wait?.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
+
+  for (let looked = 0; looked <= WITHDRAW_LOOKS; looked += 1) {
+    const run = store.runsForTicket(target.project, target.ticket).at(-1);
+    if (
+      run !== undefined &&
+      run.status === "active" &&
+      run.holder?.token === hold.token
+    ) {
+      return {
+        kind: "applied",
+        claim:
+          run.wait?.kind === "escalation"
+            ? { kind: "claimed", run, escalation: true }
+            : { kind: "claimed", run },
+      };
+    }
+    if (looked < WITHDRAW_LOOKS) await sleep(intervalMs);
+  }
+  return { kind: "withdrawn" };
+}
+
+/**
+ * How long the withdraw watches the ledger, and how often.
+ *
+ * Short on purpose. The daemon writes the claim and settles the request in
+ * the same breath, so a daemon that was mid-apply shows up almost at once;
+ * anything longer would add a wait to a command that has just decided to stop
+ * waiting.
+ */
+const WITHDRAW_LOOKS = 2;
+const WITHDRAW_LOOK_MS = 1_000;
+
+/** `30s`, `2m30s` — how long a command waited, in words. */
+function waitWords(ms: number): string {
+  const total = Math.round(ms / 1000);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return seconds === 0 ? `${minutes}m` : `${minutes}m${String(seconds).padStart(2, "0")}s`;
+}
+
+/** How long this command was told to wait, or the default it uses. */
+function boundOf(wait: WaitOptions | undefined): number {
+  return wait?.boundMs ?? WATCH_BOUND_MS;
 }
 
 /**

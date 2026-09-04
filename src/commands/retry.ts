@@ -242,14 +242,14 @@ function rewind(
   // The marker first, the cursor as a fallback. They name the same instant on a
   // park this build consumed; the fallback is for a park consumed by a daemon
   // that predates the marker, which has only its cursor to go back from.
-  const at = instantOf(run.consumedAnswerAt) ?? instantOf(run.waitCursor);
+  const at = instantOf(run.consumedAnswerAt) ?? instantOf(run.wait?.opened);
 
   // The one park where "answer that and it carries on by itself" is false
   // ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
   // Nothing written restarts it, so the sentence below would send the reader
   // to write a sixth answer — which is the defect the park exists to end,
   // said by a different command.
-  if (run.waitingKind === "escalation") {
+  if (run.wait?.kind === "escalation") {
     log(
       `${name} didn't fail — I stopped because I couldn't take it further on ` +
         "my own, and writing an answer won't move it. Run this instead and " +
@@ -258,9 +258,9 @@ function rewind(
     return 1;
   }
 
-  if (run.waitingKind !== "conversation" || at === undefined) {
+  if (run.wait?.kind !== "conversation" || at === undefined) {
     log(
-      `${name} didn't fail — it's waiting on you: ${run.waitingOn ?? "an answer"}. ` +
+      `${name} didn't fail — it's waiting on you: ${run.wait?.on ?? "an answer"}. ` +
         "Answer that and it carries on by itself.",
     );
     return 1;

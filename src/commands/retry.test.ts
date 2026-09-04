@@ -445,12 +445,12 @@ describe("timone retry — the answer a killed session had already read", async 
     // What the fault rested on: the run was activated, which clears the wait,
     // so the failed run has nothing left pointing at the answer it read.
     expect(dead?.status).toBe("failed");
-    expect(dead?.waitCursor).toBeUndefined();
+    expect(dead?.wait?.opened).toBeUndefined();
     // And it is handed back anyway — to before the answer, not to now.
     expect(code).toBe(0);
     expect(rearmed?.status).toBe("parked");
-    expect(rearmed?.waitingKind).toBe("conversation");
-    expect(Date.parse(rearmed?.waitCursor ?? "")).toBeLessThan(
+    expect(rearmed?.wait?.kind).toBe("conversation");
+    expect(Date.parse(rearmed?.wait?.opened ?? "")).toBeLessThan(
       Date.parse(answer.createdAt),
     );
     // So the next cycle resumes on their words, in a second session.

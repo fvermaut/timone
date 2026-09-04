@@ -3,7 +3,19 @@ import { HELD_LABEL } from "./steps.js";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
-import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
+import {
+  holderLiveness,
+  holderSchema,
+  type Hold,
+  type Holder,
+  type Liveness,
+} from "./holder.js";
+import {
+  PIPELINE_STAGES,
+  resolvableBy,
+  type PipelineStage,
+  type WaitKind,
+} from "./pipeline.js";
 
 /**
  * A run's lifecycle. `queued` is where a pickup lands while another run holds
@@ -153,24 +165,61 @@ const runSchema = z.strictObject({
   ]),
   /** Lifecycle stage the run has reached, for `timone status` and for resuming. */
   stage: z.enum([...PIPELINE_STAGES]).optional(),
-  /** What a parked run is waiting for, in the human's terms. */
-  waitingOn: z.string().optional(),
   /**
-   * Which *kind* of wait that is — what an arriving answer may resolve.
+   * What this run is waiting for, whole
+   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+   * D5). It replaces `waitingOn`, `waitingKind` and `waitCursor`, which were
+   * three fields that were always written together and could nevertheless be
+   * read apart.
    *
-   * `escalation` resolves to nothing arriving: it is a run stopped where no
-   * written answer can help, waiting on a person to pick it up
-   * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+   * **Its absence carries meaning and is not the same as an empty one.** A
+   * parked run with no wait at all is a run stopped because a stage's
+   * machinery does not exist — `resolveWait` has a case of its own for it —
+   * and that is a different thing from a wait nothing can resolve, which D6
+   * refuses outright.
+   *
+   * Old ledgers are folded into this shape on load, as {@link
+   * normaliseSequences} folds a run with no chunk number.
    */
-  waitingKind: z
-    .enum(["gate", "conversation", "review", "escalation"])
+  wait: z
+    .strictObject({
+      /** What it is waiting for, in the human's terms. */
+      on: z.string(),
+      /**
+       * Which *kind* of wait it is — what an arriving answer may resolve.
+       *
+       * `escalation` resolves to nothing arriving: it is a run stopped where
+       * no written answer can help, waiting on a person to pick it up
+       * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+       *
+       * **Optional, and its absence is its own state**: a run parked at a
+       * stage whose machinery does not exist has words for the human and no
+       * kind of answer that would end the wait.
+       */
+      kind: z.enum(["gate", "conversation", "review", "escalation"]).optional(),
+      /**
+       * The instant the wait was opened — the gate comment, or the invitation
+       * to a conversation. Anything at or before it belongs to an earlier
+       * question and cannot answer this one.
+       */
+      opened: z.string().optional(),
+      /**
+       * Which stages may end this wait (ADR-0049 D5), recorded when it is
+       * opened rather than worked out when it is read.
+       *
+       * **It may not be empty** (D6). A wait nothing can end is a run that
+       * will sit for the life of the ledger with its ticket asking a person
+       * for something, and the refusal makes it unwritable rather than
+       * detectable. An *absent wait* is a different thing and stays legal —
+       * see {@link Run.wait}.
+       *
+       * Optional only for a ledger written before this existed; every wait
+       * written from here on has one, and the normalisation gives an old one
+       * the stage it was parked at.
+       */
+      resolvableBy: z.array(z.enum([...PIPELINE_STAGES])).optional(),
+    })
     .optional(),
-  /**
-   * The instant the wait was opened — the gate comment, or the invitation to
-   * a conversation. Anything at or before it belongs to an earlier question
-   * and cannot answer this one.
-   */
-  waitCursor: z.string().optional(),
   /**
    * How many times running this run has read a written answer and then asked
    * again at the same stage — the count ADR-0033's floor keeps.
@@ -182,6 +231,13 @@ const runSchema = z.strictObject({
    * number tells them apart.
    */
   reAsksAfterAnswer: z.number().int().nonnegative().optional(),
+  // Left outside {@link Run.wait} deliberately, with `consumedAnswerAt`
+  // below. ADR-0049 D5 groups both into the wait, and they cannot go there:
+  // every clearing of a wait — `activate`, `fail` — must keep them. The
+  // marker exists precisely to outlive the wait it was read under, and the
+  // count accumulates across parks separated by activations, so a version of
+  // either living inside the wait would be reset by the transition it was
+  // added to survive. See 31g's finding, recorded in the ADR.
   /**
    * The instant of the written answer this run has read and not yet acted on
    * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)).
@@ -221,6 +277,24 @@ const runSchema = z.strictObject({
   /** Agent SDK session identifier, once one has been spawned. */
   sessionId: z.string().optional(),
   /**
+   * Who is holding this run right now — a daemon session, or a terminal that
+   * took it over
+   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+   * D1), in the shape the ledger lock has held since ADR-0025.
+   *
+   * **It is the run's proof of life**, and it answers a question no clock can:
+   * `heartbeatAt` and `updatedAt` say whether something wrote recently, which
+   * is not the same as whether anybody is there. A spawn the daemon refused
+   * eighty times kept stamping `updatedAt` and the run looked alive for 83
+   * minutes because the daemon kept failing to start it (timone#75).
+   *
+   * **Absent means held by nobody**, and that is a legitimate state rather
+   * than a gap: a queued run, a parked one, a finished one, and every run
+   * written before this field existed. Those are judged by witnessed time
+   * exactly as before (ADR-0020) — see {@link RunStore.hold}.
+   */
+  holder: holderSchema.optional(),
+  /**
    * When the run last proved it was alive (ADR-0020, superseding ADR-0017).
    * Stamped by the same tick that prints the progress line, so liveness and
    * visibility are one mechanism rather than two that can disagree.
@@ -254,6 +328,53 @@ const runSchema = z.strictObject({
    * file from before this existed loads unchanged at `version: 1`.
    */
   cancellation: z.string().optional(),
+  /**
+   * Every time this run's holder was found gone, in the words of what was
+   * observed, oldest first
+   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+   * D4).
+   *
+   * **It is the re-arm count and the reasons at once**, because the second
+   * park has to carry both: a run stopped twice tells the human what happened
+   * on each attempt, and one number could not.
+   *
+   * It is not {@link Run.seq} — a re-armed run keeps its chunk number, since
+   * it is the same chunk being built again — and it is not
+   * {@link Run.reAsksAfterAnswer}, which counts a stage asking the same
+   * question twice. Those are three different things and each has cost a
+   * defect by being confused with another.
+   *
+   * Absent means none, which is what every run written before this means too.
+   */
+  deaths: z.array(z.string()).optional(),
+  /**
+   * The daemon's standing refusal to start this run, when it has one
+   * (ADR-0049 D4, second half).
+   *
+   * **It counts consecutive refusals for the same reason**, and it is reset
+   * by a run actually starting or by the reason changing. That is what bounds
+   * timone#75: a refusal that never clears was said once a minute into a
+   * terminal nobody was reading, and the ticket meanwhile said "I've picked
+   * this up".
+   *
+   * **Written without touching `updatedAt`**, exactly as
+   * {@link RunStore.heartbeat} is and for the opposite reason. `staleRuns`
+   * reads the later of the heartbeat and `updatedAt`, so a refusal recorded
+   * through an ordinary write would be a run proving itself alive by failing
+   * to start — which is the 83 minutes that issue measured.
+   */
+  refusal: z
+    .strictObject({
+      /** What the spawner said, in its own words. */
+      reason: z.string(),
+      /** How many cycles running it has said it. */
+      count: z.number().int().positive(),
+      /** When it first said it. */
+      since: z.string(),
+      /** Whether the human has already been told. Told once, not once a cycle. */
+      told: z.boolean().optional(),
+    })
+    .optional(),
   /** Guardrail-hook violations recorded against this run (R15). */
   flags: z.array(z.string()),
   createdAt: z.string(),
@@ -412,6 +533,13 @@ const stateSchema = z.strictObject({
 });
 
 export type Run = z.infer<typeof runSchema>;
+
+/**
+ * What a run is waiting for, as one value
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D5) — {@link Run.wait}, named so that readers can talk about it.
+ */
+export type RunWait = NonNullable<Run["wait"]>;
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
 export type IntroductionRecord = z.infer<typeof introductionRecordSchema>;
 export type InitiativeRecord = z.infer<typeof initiativeRecordSchema>;
@@ -464,6 +592,13 @@ export interface WitnessOptions {
 export interface RunStoreOptions {
   /** Injected clock, so tests get deterministic timestamps. */
   now?: () => string;
+  /**
+   * Whether a holder's process is still there. Injected, and defaulting to
+   * {@link holderLiveness}, for the reason ADR-0025 gives: a test cannot
+   * portably manufacture a dead pid, so a case left asserting against
+   * whatever the runner's pid table happens to hold asserts nothing.
+   */
+  livenessOf?: (holder: Holder) => Liveness;
 }
 
 /** Default state-file location, relative to the timone root. */
@@ -484,6 +619,13 @@ export interface ParkOptions {
   stage?: PipelineStage;
   /** The instant the wait was opened; answers before it are not answers to it. */
   waitCursor?: string;
+  /**
+   * Which stages may end this wait (ADR-0049 D5). Absent means "work it out
+   * from the kind and the stage" — {@link resolvableBy} — which is what every
+   * ordinary park wants. A caller passes one only when it knows something the
+   * table does not, and `handBack` is the caller that does.
+   */
+  resolvableBy?: PipelineStage[];
   /**
    * The instant of the answer this park has read and not yet acted on — set
    * only by the consume that read it (ADR-0023). Absent on every ordinary
@@ -521,12 +663,26 @@ export class RunStore {
     private readonly path: string,
     private state: State,
     private readonly now: () => string,
+    private readonly livenessOf: (holder: Holder) => Liveness,
   ) {}
 
   /** Open the store at `path`, starting empty when the file does not exist. */
   static open(path: string, options: RunStoreOptions = {}): RunStore {
     const now = options.now ?? (() => new Date().toISOString());
-    return new RunStore(path, readState(path), now);
+    const livenessOf = options.livenessOf ?? ((holder) => holderLiveness(holder));
+    return new RunStore(path, readState(path), now, livenessOf);
+  }
+
+  /**
+   * What can be said about the process holding `run` (ADR-0049 D2).
+   *
+   * `none` is not a failure to answer: a run nobody is holding is judged by
+   * witnessed time as it always was (ADR-0020), and `unknown` — a holder on
+   * another machine — is not a shy `gone`, because `gone` is read as
+   * permission to reclaim.
+   */
+  hold(run: Run): Hold {
+    return run.holder === undefined ? "none" : this.livenessOf(run.holder);
   }
 
   /** Every run, in pickup order. */
@@ -734,9 +890,14 @@ export class RunStore {
    * live fault of 2026-08-13: nothing left to rewind, so the question is asked
    * again.
    */
-  activate(id: string, sessionId: string): Run {
+  activate(id: string, sessionId: string, holder?: Holder): Run {
     return this.transition(id, "active", (run) => {
       run.sessionId = sessionId;
+      run.refusal = undefined;
+      // The session is the holder now, replacing the claim's (ADR-0049 D1).
+      // A claim is a slot held for a session that may never start; once one
+      // has, the process worth asking about is the one running it.
+      if (holder !== undefined) run.holder = holder;
       stopWaiting(run);
     });
   }
@@ -757,8 +918,22 @@ export class RunStore {
    * of what the run was waiting for. {@link activate} clears it a moment
    * later, once there is really a session.
    */
-  claim(id: string): Run {
-    return this.transition(id, "active", () => {});
+  claim(id: string, holder?: Holder): Run {
+    // The refusal is about the *existing* holder, so it is asked before the
+    // transition: a run somebody is holding may not be taken from them, and
+    // one whose holder's process is gone may (ADR-0049 D1, D2). Until this,
+    // the only thing that ended a claim nobody held was the dead-run sweep
+    // two minutes later — timone#78.
+    const current = this.mutable(id);
+    if (current.holder !== undefined) {
+      const held = this.livenessOf(current.holder);
+      if (held !== "gone" && current.holder.token !== holder?.token) {
+        throw new Error(heldRunMessage(current.holder, held));
+      }
+    }
+    return this.transition(id, "active", (run) => {
+      if (holder !== undefined) run.holder = holder;
+    });
   }
 
   /** Park a run against a human wait, naming what it waits for. */
@@ -828,8 +1003,9 @@ export class RunStore {
    */
   complete(id: string): Run {
     return this.transition(id, "done", (run) => {
-      run.waitingOn = undefined;
+      run.wait = undefined;
       run.consumedAnswerAt = undefined;
+      run.holder = undefined;
     });
   }
 
@@ -855,6 +1031,7 @@ export class RunStore {
     return this.transition(id, "failed", (run) => {
       run.failure = reason;
       stopWaiting(run);
+      run.holder = undefined;
     });
   }
 
@@ -876,6 +1053,7 @@ export class RunStore {
       run.cancellation = reason;
       stopWaiting(run);
       run.consumedAnswerAt = undefined;
+      run.holder = undefined;
     });
   }
 
@@ -969,7 +1147,114 @@ export class RunStore {
       rearmed.failure = undefined;
       rearmed.sessionId = undefined;
       rearmed.flags = [];
+      // Whoever held the attempt that died is not holding this one. The
+      // holder belongs to the session, as the session id beside it does.
+      rearmed.holder = undefined;
     });
+  }
+
+  /**
+   * Record that the daemon refused to start this run, and answer how many
+   * times running it has refused for the same reason (ADR-0049 D4).
+   *
+   * **`updatedAt` is deliberately left alone**, as {@link heartbeat} leaves
+   * it alone. A refusal is not the run moving and it is certainly not the run
+   * living: `staleRuns` reads the later of `updatedAt` and the heartbeat, so
+   * stamping it here would make a run immortal by failing to start.
+   */
+  refuse(id: string, reason: string): Run {
+    const run = this.mutable(id);
+    const same = run.refusal?.reason === reason;
+    run.refusal = same
+      ? { ...(run.refusal as NonNullable<Run["refusal"]>), count: run.refusal!.count + 1 }
+      : { reason, count: 1, since: this.now() };
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Forget a standing refusal, because the run got past it.
+   *
+   * Called where a spawn succeeded rather than where a session ends: what the
+   * count measures is the daemon's ability to *start* the run, and a session
+   * that started and then failed is a different piece of news.
+   */
+  started(id: string): Run {
+    const run = this.mutable(id);
+    if (run.refusal === undefined) return { ...run };
+    run.refusal = undefined;
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Say that a standing refusal has been put in front of the human, so it is
+   * not put there again on the next cycle.
+   */
+  refusalTold(id: string): Run {
+    const run = this.mutable(id);
+    if (run.refusal === undefined) return { ...run };
+    run.refusal = { ...run.refusal, told: true };
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Record that a run's holder was found gone, and do what ADR-0049 D4 says:
+   * re-arm it once, and park it on the human the second time.
+   *
+   * **Re-armed rather than failed, following ADR-0034.** A machine that broke
+   * is not the ticket's business while the machine still has a way through,
+   * and terminal `failed` on the first death is what made timone#27, #63 and
+   * #78 each end in a hand fix — the human typing `timone retry` for a
+   * decision the daemon could have taken.
+   *
+   * **The second one parks, and a park is not a dead end.** The human can
+   * answer it, where a failure has to be left by typing a command. Both
+   * reasons go on it, because two attempts that died differently are two
+   * different pieces of news.
+   *
+   * The re-arm is `active → failed → picked-up`, both legal moves in
+   * {@link TRANSITIONS}, applied as **one** write. Doing it as two calls would
+   * let the queue promote a run of the same project into the gap between them,
+   * and the re-arm would then be refused by the run that took its place.
+   */
+  reclaim(id: string, reason: string): { run: Run; rearmed: boolean } {
+    const current = this.mutable(id);
+    if (current.status === "cancelled") {
+      throw new Error(
+        `Run ${id} was cancelled, so there is nothing to re-arm — a run ` +
+          "somebody abandoned is not started again on the machine's own say-so.",
+      );
+    }
+    const deaths = [...(current.deaths ?? []), reason];
+
+    if (deaths.length > RE_ARM_LIMIT) {
+      const run = this.transition(id, "parked", (parked) => {
+        parked.deaths = deaths;
+        parked.holder = undefined;
+        applyPark(parked, {
+          waitingOn: stoppedTwiceWait(deaths),
+          kind: "escalation",
+        });
+      });
+      return { run, rearmed: false };
+    }
+
+    // Both hops checked against the table, and neither taken through
+    // `transition`, so nothing is promoted between them.
+    assertAllowed(id, current.status, "failed");
+    assertAllowed(id, "failed", "picked-up");
+    current.status = "picked-up";
+    current.failure = undefined;
+    current.sessionId = undefined;
+    current.flags = [];
+    current.holder = undefined;
+    current.deaths = deaths;
+    stopWaiting(current);
+    current.updatedAt = this.now();
+    this.persist();
+    return { run: { ...current }, rearmed: true };
   }
 
   /**
@@ -1393,11 +1678,61 @@ export function introductionKey(project: string, ticket: number): string {
   return `${project}#${ticket}`;
 }
 
+/**
+ * How many times a run whose holder died is put back to work before the
+ * human is asked (ADR-0049 D4).
+ *
+ * One. A machine that broke once is worth another go; twice running is a
+ * machine that is going to keep breaking, and paying for a third attempt
+ * before saying so is spending money to delay the same question.
+ */
+const RE_ARM_LIMIT = 1;
+
+/**
+ * What a run stopped twice by its own machinery says it is waiting on.
+ *
+ * Both reasons, in the order they happened, because they are usually not the
+ * same reason and the second one is what the human can act on.
+ */
+function stoppedTwiceWait(deaths: readonly string[]): string {
+  return (
+    "me — it stopped twice on its own and I've run out of ways through: " +
+    `first ${deaths[0]}, then ${deaths[deaths.length - 1]}.`
+  );
+}
+
+/** Refuse a move the lifecycle does not allow, in {@link RunStore.transition}'s words. */
+function assertAllowed(id: string, from: RunStatus, to: RunStatus): void {
+  const allowed = TRANSITIONS[from];
+  if (allowed.includes(to)) return;
+  throw new Error(
+    `Run ${id} cannot go from ${from} to ${to} ` +
+      `(allowed: ${allowed.join(", ") || "nothing — it is finished"})`,
+  );
+}
+
+/**
+ * One plain sentence for a claim refused by somebody who is still there.
+ *
+ * It names the command and the pid, because "the run is already claimed"
+ * tells an operator nothing they can act on and the commonest holder is a
+ * `timone takeover` they left open in another terminal.
+ */
+function heldRunMessage(holder: Holder, held: Liveness): string {
+  const since =
+    held === "unknown"
+      ? `is recorded on ${holder.host ?? "another machine"}, which this one ` +
+        "cannot ask about"
+      : `has held it since ${holder.since}`;
+  return (
+    `${holder.command} (pid ${holder.pid}) ${since} — this one stops rather ` +
+    "than taking a run out from under it."
+  );
+}
+
 /** Clear the wait a run has finished waiting on. */
 function stopWaiting(run: Run): void {
-  run.waitingOn = undefined;
-  run.waitingKind = undefined;
-  run.waitCursor = undefined;
+  run.wait = undefined;
 }
 
 /**
@@ -1421,6 +1756,23 @@ const RE_ASK_LIMIT = 2;
  * who noticed.
  */
 export const ESCALATION_WAIT = "me — I can't take this one further on my own.";
+
+/**
+ * What a run says it is waiting for when nobody is being waited on and the
+ * machine is going to carry it on by itself
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D6).
+ *
+ * **A shared constant for the same reason {@link ESCALATION_WAIT} is one:**
+ * `timone takeover` writes it and `ctaFor` reads it, and the two must not
+ * drift. Without it the ticket and the terminal both fall into the branch for
+ * a run stopped for want of machinery, which says a person is being waited
+ * on — so a run that had just been handed back to the machine read *"waiting
+ * on you: nothing"*, which is [timone#14](https://github.com/fvermaut/timone/issues/14)'s
+ * self-contradicting sentence in a new place. Found by phase 31's live gate,
+ * check 4, on the run it had just watched work.
+ */
+export const CARRY_ON_WAIT = "nothing — I'll carry on from where you left it.";
 
 /**
  * Whether this park is a run reading an answer and asking the same stage's
@@ -1459,13 +1811,37 @@ function isReAskAfterAnswer(run: Run, options: ParkOptions): boolean {
  * the stage ever noticed anything was wrong.
  */
 function applyPark(run: Run, options: ParkOptions): void {
+  // A parked run is waiting on a person, and nobody is holding it. A holder
+  // left behind is dead data that looks live: the next claim would be refused
+  // by a process that stopped caring, which is timone#78's refusal in a
+  // different disguise.
+  run.holder = undefined;
   const reAsked = isReAskAfterAnswer(run, options);
   const count = reAsked ? (run.reAsksAfterAnswer ?? 0) + 1 : run.reAsksAfterAnswer;
   const caught = reAsked && (count ?? 0) >= RE_ASK_LIMIT;
 
-  run.waitingOn = caught ? ESCALATION_WAIT : options.waitingOn;
-  run.waitingKind = caught ? "escalation" : options.kind;
-  run.waitCursor = options.waitCursor;
+  const kind = caught ? ("escalation" as const) : options.kind;
+  const stage = options.stage ?? run.stage;
+  // **Recorded, not derived later** (ADR-0049 D5). A wait with no stage at all
+  // is the one case nothing can be worked out for, and it is also the one no
+  // park produces: every caller either names a stage or the run already has
+  // one.
+  const endedBy =
+    options.resolvableBy ??
+    (stage === undefined ? undefined : resolvableBy(kind, stage));
+  if (endedBy !== undefined && endedBy.length === 0) {
+    throw new Error(
+      `Refusing to park ${run.id} on a wait no stage can end. A wait with ` +
+        "nothing that can resolve it leaves the ticket asking a person for " +
+        "something for ever (ADR-0049 D6).",
+    );
+  }
+  run.wait = {
+    on: caught ? ESCALATION_WAIT : options.waitingOn,
+    ...(kind === undefined ? {} : { kind }),
+    ...(options.waitCursor === undefined ? {} : { opened: options.waitCursor }),
+    ...(endedBy === undefined ? {} : { resolvableBy: endedBy }),
+  };
   run.consumedAnswerAt = options.consumedAnswerAt;
   run.reAsksAfterAnswer = count;
   if (options.stage !== undefined) run.stage = options.stage;
@@ -1517,7 +1893,76 @@ function holdsProject(run: Run): boolean {
 function normaliseSequences(data: unknown): unknown {
   if (typeof data !== "object" || data === null) return data;
   if (!("runs" in data) || !Array.isArray(data.runs)) return data;
-  return { ...data, runs: data.runs.map(normaliseSequence) };
+  return {
+    ...data,
+    runs: data.runs.map(normaliseSequence).map(normaliseWait),
+  };
+}
+
+/**
+ * Fold a run's three old wait fields into one {@link Run.wait}
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D5), before the schema is asked to validate it.
+ *
+ * **`waitingOn` is the whole of the evidence, and it is enough.** The three
+ * were only ever written together, by `applyPark` — a run with a kind or a
+ * cursor and no words is a state nothing has ever produced. So the rule has
+ * no judgement in it: words mean there is a wait, and the kind and the cursor
+ * go with them.
+ *
+ * **Idempotent, because it runs constantly.** {@link RunStore.refresh}
+ * re-reads the file at the top of every public read and every mutation, so
+ * this is on the hot path rather than a start-up step. A run already in the
+ * new shape is returned untouched.
+ *
+ * **It normalises rather than migrating**: `version` stays `1` and no file is
+ * rewritten on its account, exactly as {@link normaliseSequences} does. The
+ * new shape reaches disk the next time something persists, and until then
+ * every load produces it afresh — which is also what makes a rollback
+ * survivable.
+ */
+function normaliseWait(run: unknown): unknown {
+  if (typeof run !== "object" || run === null) return run;
+  const old = run as Record<string, unknown>;
+  if (
+    !("waitingOn" in old) &&
+    !("waitingKind" in old) &&
+    !("waitCursor" in old)
+  ) {
+    return run;
+  }
+
+  const { waitingOn, waitingKind, waitCursor, ...rest } = old;
+  // **A kind or a cursor with no words is a finished run's leftovers**, and
+  // they are dropped rather than carried across. `complete` used to clear
+  // `waitingOn` alone, so every run the old daemon finished on a review or a
+  // conversation kept a kind and a cursor for a wait nothing was waiting on —
+  // both of the done runs in the 2026-08-14 ledger are in that state. That is
+  // the dead-data-that-looks-live this collapse exists to make unwritable, so
+  // the normalisation does not write it either.
+  if (typeof waitingOn !== "string") return rest;
+  // An old wait carries no `resolvableBy`, so it is given the one the stage
+  // and the kind imply — the same answer `applyPark` would write today. A run
+  // with no stage recorded gets none, and `resolveWait` reads it as it always
+  // did.
+  const stage = typeof rest.stage === "string" ? rest.stage : undefined;
+  const kind = typeof waitingKind === "string" ? waitingKind : undefined;
+  const endedBy =
+    stage === undefined
+      ? undefined
+      : resolvableBy(
+          kind as WaitKind | undefined,
+          stage as PipelineStage,
+        );
+  return {
+    ...rest,
+    wait: {
+      on: waitingOn,
+      ...(kind === undefined ? {} : { kind }),
+      ...(typeof waitCursor === "string" ? { opened: waitCursor } : {}),
+      ...(endedBy === undefined ? {} : { resolvableBy: endedBy }),
+    },
+  };
 }
 
 /** {@link normaliseSequences} for one run: an id with no `/` is chunk 1. */

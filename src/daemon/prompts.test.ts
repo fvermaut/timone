@@ -832,8 +832,7 @@ describe("the escalation prompt", () => {
     id: "scratch-app#31/1",
     stage: "verification" as const,
     branch: "timone/31-slow-page",
-    waitingOn: "me — I can't take this one further myself.",
-    waitCursor: stopped,
+    wait: { on: "me — I can't take this one further myself.", opened: stopped },
   };
 
   it("is not any stage's prompt, wearing a hat", () => {

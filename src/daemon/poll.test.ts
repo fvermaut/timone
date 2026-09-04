@@ -58,8 +58,17 @@ function breakdownIn(
 }
 
 import { enqueue, pending, requestsDir } from "./requests.js";
+import type { Holder } from "./holder.js";
 import { RunStore, type Run } from "./runs.js";
-import { pollOnce, type SessionSpawner, type SpawnContext } from "./poll.js";
+import {
+  pollOnce,
+  noLongerListedReason,
+  reclaimedReason,
+  type PollResult,
+  type SessionSpawner,
+  type SpawnContext,
+} from "./poll.js";
+import { SpawnRefusal } from "./faults.js";
 import { processStage, stageLabel } from "./pipeline.js";
 import { AgentSessionSpawner } from "./session.js";
 
@@ -385,6 +394,7 @@ describe("pollOnce — serialization", () => {
 
     await pollOnce(deps);
     store.activate("scratch-app#7/1", "session-1");
+    store.activate("scratch-app#7/1", "session-7");
     store.complete("scratch-app#7/1");
     await pollOnce(deps);
 
@@ -782,7 +792,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
     expect(spawned).toEqual([]);
     expect(posted).toEqual([]);
     expect(store.get("scratch-app#6/1")?.status).toBe("parked");
-    expect(store.get("scratch-app#6/1")?.waitCursor).toBe(invitation.createdAt);
+    expect(store.get("scratch-app#6/1")?.wait?.opened).toBe(invitation.createdAt);
   });
 
   it("advances a gate the human approved", async () => {
@@ -966,7 +976,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
             ticket: 4,
             status: "parked",
             stage: "triage",
-            waitingOn: "the next stage to be built",
+            wait: { on: "the next stage to be built" },
             flags: [],
             createdAt: "2026-08-02T18:29:31.940Z",
             updatedAt: "2026-08-02T18:32:29.650Z",
@@ -2060,6 +2070,449 @@ function fakePreviews(
   };
 }
 
+describe("a run whose holder can be asked about", () => {
+  const FOUR_INTERVALS = 4 * 30 * 1000;
+  const POLL_INTERVAL = 60 * 1000;
+
+  /**
+   * A store whose clock and whose idea of the process table the test sets
+   * (ADR-0049 D2, extending ADR-0025). The pid table is injected for the
+   * reason `lock.test.ts` gives: a test cannot portably manufacture a dead
+   * pid, so an uninjected probe would leave these cases asserting against
+   * whatever the runner's machine happens to be running.
+   */
+  function watchedStore(alive: readonly number[]): {
+    store: RunStore;
+    set: (iso: string) => void;
+  } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-holder-sweep-"));
+    tempDirs.push(dir);
+    let instant = "2026-09-04T10:00:00Z";
+    return {
+      store: RunStore.open(join(dir, ".timone", "state.json"), {
+        now: () => instant,
+        livenessOf: (holder) => (alive.includes(holder.pid) ? "alive" : "gone"),
+      }),
+      set: (iso) => {
+        instant = iso;
+      },
+    };
+  }
+
+  /** A holder as a daemon or a terminal records one. */
+  function holderOf(command: string, pid: number): Holder {
+    return {
+      token: `token-${pid}`,
+      command,
+      pid,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    };
+  }
+
+  /** Leave the witness where a daemon polling right through would leave it. */
+  function watchingSince(store: RunStore, from: string, to: string): void {
+    for (let at = Date.parse(from); at < Date.parse(to); at += POLL_INTERVAL) {
+      store.witness({
+        unwitnessedAfterMs: 2 * POLL_INTERVAL,
+        staleAfterMs: FOUR_INTERVALS,
+        now: new Date(at).toISOString(),
+      });
+    }
+  }
+
+  /** A run active on a work branch, held by whoever `holder` says. */
+  function runningRun(store: RunStore, holder?: Holder): string {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1", holder);
+    store.claimBranch(run.id, "timone/7-slow");
+    return run.id;
+  }
+
+  /** One cycle at `at`, with the sweep's threshold set to four intervals. */
+  async function cycleAt(
+    store: RunStore,
+    set: (iso: string) => void,
+    at: string,
+    lines: string[],
+  ) {
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    watchingSince(store, "2026-09-04T10:00:00Z", at);
+    set(at);
+    return pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      log: (line) => lines.push(line),
+    });
+  }
+
+  it("leaves a silent run alone while its holder's process is still running", async () => {
+    // ADR-0025's argument, applied where it was always needed. A session that
+    // is thinking says nothing for as long as it thinks, and the clock cannot
+    // tell that from a corpse. The pid can.
+    const { store, set } = watchedStore([4213]);
+    const id = runningRun(store, holderOf("timone daemon scratch-app#7/1", 4213));
+    const lines: string[] = [];
+
+    const result = await cycleAt(store, set, "2026-09-04T10:09:00Z", lines);
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get(id)?.status).toBe("active");
+  });
+
+  it("reclaims a silent run whose holder's process is gone", async () => {
+    const { store, set } = watchedStore([]);
+    const id = runningRun(store, holderOf("timone daemon scratch-app#7/1", 4213));
+    const lines: string[] = [];
+
+    await cycleAt(store, set, "2026-09-04T10:09:00Z", lines);
+
+    expect(store.get(id)?.status).not.toBe("active");
+  });
+
+  it("still judges a run with no holder by witnessed time", async () => {
+    // ADR-0020's path, untouched. Every run written before ADR-0049 is in
+    // this state, and a phase that fixed runs by deleting the overnight
+    // protection would have traded one live defect for a worse one.
+    const { store, set } = watchedStore([]);
+    const id = runningRun(store);
+    const lines: string[] = [];
+
+    const result = await cycleAt(store, set, "2026-09-04T10:09:00Z", lines);
+
+    expect(result.reclaimed).toEqual([id]);
+  });
+
+  it("reclaims nothing with no holder and a gap it cannot vouch for", async () => {
+    const { store, set } = watchedStore([]);
+    const id = runningRun(store);
+    const lines: string[] = [];
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    // One cycle, then nothing for an hour: the daemon was not there and
+    // cannot say whether the run went quiet or the machine did.
+    store.witness({
+      unwitnessedAfterMs: 2 * POLL_INTERVAL,
+      staleAfterMs: FOUR_INTERVALS,
+      now: "2026-09-04T10:00:00Z",
+    });
+    set("2026-09-04T11:00:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+      log: (line) => lines.push(line),
+    });
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get(id)?.status).toBe("active");
+    expect(lines.some((line) => line.includes("was not running for"))).toBe(true);
+  });
+
+  it("puts a run whose holder died back to work, and tells the ticket nothing", async () => {
+    // ADR-0034: a machine that broke is not the ticket's business while the
+    // machine still has a way through. The first death costs a session and
+    // nothing else — no comment, no command for the human to type.
+    const { store, set } = watchedStore([]);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1", holderOf("timone daemon", 4213));
+    store.claimBranch(run.id, "timone/7-slow");
+    store.setStage(run.id, "execution");
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    watchingSince(store, "2026-09-04T10:00:00Z", "2026-09-04T10:09:00Z");
+    set("2026-09-04T10:09:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(result.rearmed).toEqual([run.id]);
+    expect(store.get(run.id)?.stage).toBe("execution");
+    expect(store.get(run.id)?.branch).toBe("timone/7-slow");
+    expect(comments.some((c) => c.body.includes("Something went wrong"))).toBe(
+      false,
+    );
+  });
+
+  it("asks the human after the second death, carrying both reasons", async () => {
+    const { store, set } = watchedStore([]);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1", holderOf("timone daemon", 4213));
+    store.claimBranch(run.id, "timone/7-slow");
+    store.setStage(run.id, "execution");
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    watchingSince(store, "2026-09-04T10:00:00Z", "2026-09-04T10:09:00Z");
+    set("2026-09-04T10:09:00Z");
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    };
+    await pollOnce(deps);
+
+    // The re-armed run gets a second session, and that one dies too.
+    store.activate(run.id, "session-2", holderOf("timone daemon", 9000));
+    watchingSince(store, "2026-09-04T10:09:00Z", "2026-09-04T10:20:00Z");
+    set("2026-09-04T10:20:00Z");
+    const result = await pollOnce(deps);
+
+    expect(result.rearmed).toEqual([]);
+    // Parked and not failed. A park is answerable; a failure is a dead end the
+    // human has to type a command to leave.
+    expect(store.get(run.id)?.status).toBe("parked");
+    expect(comments.some((c) => c.body.includes("stopped both times"))).toBe(true);
+  });
+
+  it("does not take a run away from a live takeover", async () => {
+    // timone#63, replayed. A terminal holds the run through a conversation
+    // that may last an hour, and the sweep took it back after two minutes —
+    // so the handback could never be read and the human's session was talking
+    // to a run that had been failed under it.
+    const { store, set } = watchedStore([9100]);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/7-slow");
+    store.park(run.id, { waitingOn: "me — a question", kind: "conversation" });
+    store.claim(run.id, holderOf("timone takeover scratch-app#7", 9100));
+    const lines: string[] = [];
+
+    const result = await cycleAt(store, set, "2026-09-04T10:09:00Z", lines);
+
+    expect(result.reclaimed).toEqual([]);
+    expect(store.get(run.id)?.status).toBe("active");
+    expect(store.get(run.id)?.holder?.pid).toBe(9100);
+  });
+});
+
+describe("a spawn the daemon keeps refusing", () => {
+  const TWO_MINUTES = 2 * 60 * 1000;
+
+  /** A store whose clock the test moves a minute at a time. */
+  function tickingStore(): { store: RunStore; at: (iso: string) => void } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-refusal-"));
+    tempDirs.push(dir);
+    let instant = "2026-09-04T10:00:00Z";
+    return {
+      store: RunStore.open(join(dir, ".timone", "state.json"), {
+        now: () => instant,
+      }),
+      at: (iso) => {
+        instant = iso;
+      },
+    };
+  }
+
+  /** A spawner that refuses every run, always for the same reason. */
+  function refusingSpawner(error: Error): SessionSpawner {
+    return {
+      async spawn(): Promise<void> {
+        throw error;
+      },
+    };
+  }
+
+  /** `count` cycles a minute apart, the sweep judging at two minutes. */
+  async function cycles(
+    store: RunStore,
+    at: (iso: string) => void,
+    adapter: TicketingAdapter,
+    spawner: SessionSpawner,
+    count: number,
+  ): Promise<PollResult> {
+    let result: PollResult | undefined;
+    for (let minute = 0; minute < count; minute += 1) {
+      at(`2026-09-04T10:${String(minute).padStart(2, "0")}:00Z`);
+      result = await pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        staleAfterMs: TWO_MINUTES,
+      });
+    }
+    return result as PollResult;
+  }
+
+  it("does not let a refusal stand in for a sign of life", async () => {
+    // The trap this slice has to avoid rather than the fault it found. A
+    // refusal recorded through an ordinary write would stamp `updatedAt`, and
+    // `staleRuns` reads the later of that and the heartbeat — so eighty
+    // refusals would keep a run that has never started looking alive.
+    const { store, at } = tickingStore();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const spawner = refusingSpawner(new Error("the box has no workspace"));
+
+    await cycles(store, at, adapter, spawner, 2);
+
+    const run = store.all()[0] as Run;
+    expect(run.updatedAt).toBe("2026-09-04T10:00:00Z");
+  });
+
+  it("says it once where a person can see it, not once a cycle", async () => {
+    const { store, at } = tickingStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const spawner = refusingSpawner(new Error("the box has no workspace"));
+
+    await cycles(store, at, adapter, spawner, 8);
+
+    const said = comments.filter((c) => c.body.includes("has no workspace"));
+    expect(said).toHaveLength(1);
+    expect(store.all()[0]?.status).toBe("parked");
+  });
+
+  it("says nothing at all about a refusal that clears on its own", async () => {
+    // Uncommitted changes in Timone's own folder. Retrying that for ever is
+    // correct — it is what "I'll start on my next check" is written for — and
+    // a slice that bounded both refusals would have broken the working half.
+    const { store, at } = tickingStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const spawner = refusingSpawner(
+      new SpawnRefusal("you have uncommitted changes in timone", true),
+    );
+
+    await cycles(store, at, adapter, spawner, 8);
+
+    expect(comments.some((c) => c.body.includes("uncommitted"))).toBe(false);
+    expect(store.all()[0]?.status).toBe("picked-up");
+  });
+
+  it("names the refusal, and never calls it a machine that stopped", async () => {
+    // ivtrends #57 was told "the machine running it stopped before the work
+    // was finished". Nothing had stopped: the daemon was refusing to start it,
+    // once a minute, in silence.
+    const { store, at } = tickingStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const spawner = refusingSpawner(new Error("the box has no workspace"));
+
+    await cycles(store, at, adapter, spawner, 8);
+
+    const bodies = comments.map((c) => c.body).join("\n");
+    expect(bodies).toContain("has no workspace");
+    expect(bodies).not.toContain(reclaimedReason());
+  });
+});
+
+describe("a ticket closed while its run waited its turn", () => {
+  /**
+   * Two marked tickets on one project: #7 running, #8 queued behind it. Then
+   * #7 finishes and #8's ticket is closed — the sequence timone#12 recorded
+   * on 2026-08-14, where the moment the project was freed a session started
+   * on a ticket that had been shut for hours.
+   */
+  async function queuedBehind(
+    listings: () => Ticket[],
+  ): Promise<{
+    store: RunStore;
+    spawned: Run[];
+    comments: PostedComment[];
+    run: () => Promise<PollResult>;
+  }> {
+    const store = newStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7), ticket(8)] });
+    const listing: TicketingAdapter = {
+      ...adapter,
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return listings();
+      },
+    };
+    const { spawner, spawned } = fakeSpawner();
+    const run = async (): Promise<PollResult> =>
+      pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter: listing,
+        spawner,
+      });
+    return { store, spawned, comments, run };
+  }
+
+  it("does not start a queued run whose ticket has been closed", async () => {
+    let open = [ticket(7), ticket(8)];
+    const { store, spawned, run } = await queuedBehind(() => open);
+
+    // First cycle: #7 runs, #8 queues behind it.
+    await run();
+    expect(store.get("scratch-app#8/1")?.status).toBe("queued");
+
+    // #7 finishes, and #8 is closed while it waited.
+    store.activate("scratch-app#7/1", "session-7");
+    store.complete("scratch-app#7/1");
+    open = [ticket(7)];
+    spawned.length = 0;
+    await run();
+
+    expect(spawned.map((each) => each.id)).not.toContain("scratch-app#8/1");
+  });
+
+  it("abandons it rather than failing it, and says what was seen", async () => {
+    // `cancelled` and not `failed`: a human closing a ticket is a decision,
+    // and `failed` would put `timone retry` in front of them for work nobody
+    // wants done.
+    let open = [ticket(7), ticket(8)];
+    const { store, run } = await queuedBehind(() => open);
+
+    await run();
+    store.activate("scratch-app#7/1", "session-7");
+    store.complete("scratch-app#7/1");
+    open = [ticket(7)];
+    await run();
+
+    const abandoned = store.get("scratch-app#8/1");
+    expect(abandoned?.status).toBe("cancelled");
+    expect(abandoned?.cancellation).toBe(noLongerListedReason());
+  });
+
+  it("still starts one whose ticket was reopened before its turn came", async () => {
+    let open = [ticket(7), ticket(8)];
+    const { store, spawned, run } = await queuedBehind(() => open);
+
+    await run();
+    // Closed, then reopened, all while it waited.
+    open = [ticket(7)];
+    await run();
+    open = [ticket(7), ticket(8)];
+    store.activate("scratch-app#7/1", "session-7");
+    store.complete("scratch-app#7/1");
+    spawned.length = 0;
+    await run();
+
+    expect(spawned.map((each) => each.id)).toContain("scratch-app#8/1");
+  });
+
+  it("asks when the run reaches the front, not when it joins the queue", async () => {
+    // A ticket closed while a run is already going is the dead-run path's
+    // business, not this one's: the session is under way and stopping it is a
+    // different event with a different cost.
+    let open = [ticket(7), ticket(8)];
+    const { store, run } = await queuedBehind(() => open);
+
+    await run();
+    // Closed while #8 is still queued. Nothing happens to it yet — it has not
+    // reached the front, and it may be reopened before it does.
+    open = [ticket(7)];
+    await run();
+
+    expect(store.get("scratch-app#8/1")?.status).toBe("queued");
+  });
+});
+
 describe("pollOnce — previews are opt-in", () => {
   it("does not reconcile a project with no preview binding at all", async () => {
     const store = newStore();
@@ -2400,7 +2853,7 @@ describe("pollOnce — a wayfinder decision ticket", () => {
     expect(run?.stage).toBe("wayfinding");
     expect(processStage("wayfinding")).toBe(2);
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBe("conversation");
+    expect(run?.wait?.kind).toBe("conversation");
     // A decision ticket produces a decision, so nothing was branched.
     expect(run?.branch).toBeUndefined();
   });
@@ -2706,7 +3159,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
     });
 
     const atSpawn = ledger[0];
-    expect(atSpawn?.waitCursor).toBe(answer.createdAt);
+    expect(atSpawn?.wait?.opened).toBe(answer.createdAt);
     expect(atSpawn?.consumedAnswerAt).toBe(answer.createdAt);
     // The words that instant belongs to are the words the session was given.
     expect(contexts[0]?.feedback).toBe(answer.body);
@@ -2978,7 +3431,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       { stage: "clarification", feedback: answer.body },
     ]);
     // … and the same ledger write: the answer is still consumed (ADR-0023).
-    expect(store.get("scratch-app#6/1")?.waitCursor).toBe(answer.createdAt);
+    expect(store.get("scratch-app#6/1")?.wait?.opened).toBe(answer.createdAt);
   });
 
   it("reads the pull request once to resume a review, and resumes on the same words", async () => {
@@ -3061,7 +3514,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
     // A review park is not consumed, and the loop wrote nothing to the ledger.
     const after = store.get("scratch-app#6/1");
     expect(after?.status).toBe("parked");
-    expect(after?.waitCursor).toBe("2026-08-06T10:00:00Z");
+    expect(after?.wait?.opened).toBe("2026-08-06T10:00:00Z");
   });
 });
 
@@ -3331,6 +3784,7 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
 
     // #7's work finished and its ticket closed, so it leaves the listing —
     // and nothing else happens: no command is run, no session is started.
+    store.activate("scratch-app#7/1", "session-7");
     store.complete("scratch-app#7/1");
     listed.splice(0, 1);
     const before = calls.length;
@@ -4102,7 +4556,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     const run = store.get("ivtrends#1/1");
     expect(run?.stage).toBe("charting");
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBeUndefined();
+    expect(run?.wait?.kind).toBeUndefined();
     expect(run?.branch).toBeUndefined();
     expect(posted.map((comment) => comment.body).join("\n")).not.toMatch(
       /two ways to answer/i,
@@ -4134,7 +4588,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     expect(second.resumed).toEqual([]);
     expect(second.errors).toEqual([]);
     expect(store.get("ivtrends#1/1")?.stage).toBe("charting");
-    expect(store.get("ivtrends#1/1")?.waitingKind).toBeUndefined();
+    expect(store.get("ivtrends#1/1")?.wait?.kind).toBeUndefined();
     expect(ctas.at(-1)?.body).toContain("nothing right now");
   });
 
@@ -4156,7 +4610,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     // The discriminating half: before the frontier empties this map is
     // waiting on nobody, so the flip below is caused by the label and not by
     // the map having been a conversation all along.
-    expect(store.get("ivtrends#1/1")?.waitingKind).toBeUndefined();
+    expect(store.get("ivtrends#1/1")?.wait?.kind).toBeUndefined();
 
     labels.push("wayfinder:frontier-empty");
     reads.length = 0;
@@ -4168,10 +4622,10 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     expect(reads).toEqual([1]);
     const run = store.get("ivtrends#1/1");
     expect(run?.status).toBe("parked");
-    expect(run?.waitingKind).toBe("conversation");
+    expect(run?.wait?.kind).toBe("conversation");
     // Asked *now*, from the machine's last word — so nothing said before the
     // way was clear can be read as agreeing to it.
-    expect(run?.waitCursor).toBe(closingSummary.createdAt);
+    expect(run?.wait?.opened).toBe(closingSummary.createdAt);
     expect(ctas.at(-1)?.body).toContain(
       "**What I need from you:** say go ahead here and I'll write the specification this map has been finding its way to.",
     );
@@ -4199,7 +4653,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
     await pollOnce(deps);
     labels.push("wayfinder:frontier-empty");
     await pollOnce(deps);
-    expect(store.get("ivtrends#1/1")?.waitingKind).toBe("conversation");
+    expect(store.get("ivtrends#1/1")?.wait?.kind).toBe("conversation");
 
     labels.splice(labels.indexOf("wayfinder:frontier-empty"), 1);
     comments.push(goAhead);
@@ -4271,7 +4725,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
 
     const chunk = store.get("ivtrends#1/2");
     expect(chunk?.stage).not.toBe("charting");
-    expect(chunk?.waitingOn ?? "").not.toMatch(/go-ahead/);
+    expect(chunk?.wait?.on ?? "").not.toMatch(/go-ahead/);
     // And it did the one thing the stuck chunk never did: it ran.
     expect(prompts).not.toHaveLength(0);
   });
@@ -5168,7 +5622,7 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     expect(after?.status).toBe("parked");
     // Back on the same wait, read off the run rather than remembered by the
     // process that claimed it — which may no longer exist.
-    expect(after?.waitingKind).toBe("conversation");
+    expect(after?.wait?.kind).toBe("conversation");
     expect(after?.stage).toBe("clarification");
   });
 
@@ -5606,7 +6060,7 @@ describe("pollOnce — a park nothing written can end", () => {
     expect(spawned).toEqual([]);
     expect(store.get("scratch-app#31/1")).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation" },
       stage: "verification",
     });
     expect(result.errors).toEqual([]);
@@ -5839,7 +6293,7 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     expect(spawned).toEqual([]);
     expect(store.get("scratch-app#31/1")).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation" },
     });
   });
 
@@ -5866,7 +6320,7 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     });
 
     const run = store.get("scratch-app#31/1");
-    expect(run?.waitCursor).toBe(question.createdAt);
+    expect(run?.wait?.opened).toBe(question.createdAt);
     expect(run?.consumedAnswerAt).toBeUndefined();
     expect(thread).toContainEqual(answer);
   });
@@ -5981,7 +6435,7 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
     expect(spawned).toHaveLength(2);
     expect(store.get("scratch-app#32/1")).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation" },
       stage: "verification",
       reAsksAfterAnswer: 2,
     });
@@ -6180,7 +6634,7 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     expect(result.errors).toEqual([]);
     expect(store.get("scratch-app#41/1")).toMatchObject({
       status: "parked",
-      waitingKind: "escalation",
+      wait: { kind: "escalation" },
     });
     // And it says which name it could not read, so the person can see what
     // the machine wrote down wrong.
@@ -6261,7 +6715,7 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     });
 
     expect(spawned).toEqual([]);
-    expect(store.get("scratch-app#41/1")?.waitingKind).toBe("escalation");
+    expect(store.get("scratch-app#41/1")?.wait?.kind).toBe("escalation");
   });
 
   it("still starts nothing on the human writing again, ten cycles running", async () => {
@@ -6291,7 +6745,7 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
     }
 
     expect(spawned).toEqual([]);
-    expect(store.get("scratch-app#41/1")?.waitingKind).toBe("escalation");
+    expect(store.get("scratch-app#41/1")?.wait?.kind).toBe("escalation");
   });
 });
 

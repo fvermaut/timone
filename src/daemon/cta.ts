@@ -17,7 +17,7 @@ import { MARK_LABEL } from "../adapters/ticketing.js";
 import { HELD_LABEL } from "./steps.js";
 import { takeoverCommand } from "../channels/terminal.js";
 import { technicalFault } from "./faults.js";
-import { type Run } from "./runs.js";
+import { CARRY_ON_WAIT, type Run } from "./runs.js";
 
 /**
  * Where a ticket's whole initiative stands, as a plain value.
@@ -383,7 +383,7 @@ export function ctaFor(state: TicketState): Cta {
     };
   }
 
-  if (run.waitingKind === "review" && run.pr !== undefined) {
+  if (run.wait?.kind === "review" && run.pr !== undefined) {
     // The pull request number leads, because it is what the reviewer
     // navigates by; the piece follows it, because it is what tells them how
     // much of the initiative this review is. A ticket with no breakdown reads
@@ -417,7 +417,7 @@ export function ctaFor(state: TicketState): Cta {
   // is not bookkeeping leaked onto the ticket: being told "I can't do this"
   // and being told "I asked you the same thing twice" are different pieces of
   // news, and only the second is the machine's own fault to apologise for.
-  if (run.waitingKind === "escalation") {
+  if (run.wait?.kind === "escalation") {
     // The machine wrote itself a note and cannot read it back
     // ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
     // D3). Refusing to guess is right — a guess starts work at the wrong step
@@ -464,6 +464,20 @@ export function ctaFor(state: TicketState): Cta {
     };
   }
 
+  // A run handed back to the machine, with nothing wanted from anybody
+  // (ADR-0049 D6). It reaches the same branch as a run stopped for want of
+  // machinery — both have words and no kind of wait — and that branch says a
+  // person is being waited on, so without this clause the ticket and
+  // `timone status` both read *"waiting on you: nothing"*. Found by phase
+  // 31's live gate rather than by a test, on a run it had just watched work.
+  if (run.wait?.on === CARRY_ON_WAIT) {
+    return {
+      headline: "I've got what I need to carry on with this one.",
+      needFromYou: "nothing right now — I'll pick it up again on my next pass.",
+      waitingOnYou: false,
+    };
+  }
+
   // The map's own ticket, whose two states are ADR-0024's fourth ruling
   // ("while questions are open, *nothing — I am working the list*; once the
   // frontier is empty, *say go and I will write the specification*").
@@ -480,7 +494,7 @@ export function ctaFor(state: TicketState): Cta {
   // go-ahead is written here, in a comment, exactly as any other written
   // answer.
   if (run.stage === "charting") {
-    return run.waitingKind === undefined
+    return run.wait?.kind === undefined
       ? {
           headline: "I'm working through this map's questions.",
           needFromYou:
@@ -502,12 +516,12 @@ export function ctaFor(state: TicketState): Cta {
     // recorded wait names what would unblock it — "the next stage to be
     // built" — which is what R21's first criterion asks of such a ticket.
     headline:
-      run.waitingKind === undefined
+      run.wait?.kind === undefined
         ? "That's as far as I can take this one for now."
         : "This one is waiting on you.",
-    needFromYou: run.waitingOn ?? "an answer",
+    needFromYou: run.wait?.on ?? "an answer",
     waitingOnYou: true,
-    ...(run.waitingKind === "conversation"
+    ...(run.wait?.kind === "conversation"
       ? { command: takeoverCommand(state.project, state.ticket) }
       : {}),
   };

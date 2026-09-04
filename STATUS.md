@@ -2,73 +2,61 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-08-23, morning.
+**Last updated:** 2026-09-04, evening.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** The container work is **built** — eleven of its twelve pieces, including all four that fix the problem you reported. **One thing is left and only you can do it**, and it takes about five minutes.
+> **Read this first.** Seven faults that lost your jobs are fixed. **Nothing needs you urgently.** Two things are worth five minutes when you have them, and they are numbered below.
 
-**1. The five-minute thing, and it is the whole point of this work.**
+**1. Push, then let one job run in a box.**
 
-The machine now does its building inside a container. Nothing of your machine is in there: no folders, no login of yours except the one that talks to Claude, and no way for it to reach your other projects. Your `projects/` folders are its business no longer.
+The work below was watched running for real this evening, but **not in a container** — a job in a container downloads Timone from GitHub, and none of today's work is pushed yet, so it would have refused. Everything was watched the old way instead, running on this laptop.
 
-**What is left is you proving it, because no test can.** Start the daemon on the to-do app, and while it is building, **switch branch in `projects/scratch-app` and leave it there.** Then tell me whether you still had to think about it. If you did, the work has not landed, whatever the tests say.
-
-```
-node dist/cli.js daemon
-```
-
-Everything runs in a container now by default. If anything misbehaves, one word puts it back the old way:
-
-```
-node dist/cli.js daemon --runtime in-process
-```
-
-**One thing that changes for you, permanently.**
-
-**The work will not appear in your folder any more.** It happens in a container and is pushed to GitHub from there. After a job runs, your `projects/scratch-app` is exactly where you left it — and to see what was built you have to fetch first:
-
-```
-cd ~/dev/timone/projects/scratch-app
-git fetch
-git log --oneline origin/<the branch> -5
-```
-
-This is not a rough edge to file off. It is the same fact as the machine no longer being able to fight you for that folder: before today, the work turning up on your disk and the machine writing in your folder were one and the same thing.
-
-**Two things to know before you run it.**
-
-- **It will not run a version of Timone you have not pushed.** The container downloads Timone from GitHub, so it cannot follow a commit that only exists on your laptop. It says so plainly rather than failing with a git error. So merge or push first.
-- **It borrows your Claude login** — the choice you made this morning. It reads it fresh each time and keeps no copy. While a container is running, a token that can spend your subscription is inside it. That is the trade you took over a separate bill.
-
-**2. The trading app can be built in a container again.** It had no `compose.yaml`, so the machine had nothing to start beside it and refused rather than guessing. The file is back, and it starts a database and nothing else — there is no application to start yet, and the file says so and says which commit to bring it back from.
-
-**3. The tests now run on GitHub too.** You committed the file on 22 August. Every push runs the whole suite and the check that keeps the machine out of your folders, so a fault no longer waits for a session to end to be seen.
-
-**4. The trading app is ready to be planned again, and it takes two commands.** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) has everything the planning needs: the 23 decisions, the specification you approved on 16 August, the design language, and the screener you clicked. What the wind-back removed is the **list of pieces** — the short list you approve once, that says what gets built and in what order — so that is written first.
-
-A fault was found and fixed on 23 August before this could run: the machine would have skipped writing that list and gone straight to planning the whole milestone in one go, on the ticket itself. It now writes the list and asks you.
-
-Add the `timone` label to [#1](https://github.com/fvermaut/ivtrends/issues/1), then:
+So: merge or push this branch, then start the machine and let one job go.
 
 ```
 node dist/cli.js daemon
 ```
 
-It writes the list on a branch and asks you to approve it on the ticket. When you approve, it opens one ticket per piece, turns #1 into a map of them, and starts on the first piece. **You are asked once, for the list.**
+**Why it matters:** the container is how a job stops touching your folders, and none of today's changes has been watched inside one.
 
-**5. Two old jobs on the to-do app.** [#13](https://github.com/fvermaut/scratch-app/issues/13) stopped the same way, and #10 was a throwaway:
+**2. The to-do app's step 2 is stopped and it is a real question for you.**
+
+[scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47) asks you to drop the old "no reordering" rule and answer three questions about how moving a row should behave. It cannot be planned until you do, and step 1 ([#46](https://github.com/fvermaut/scratch-app/issues/46)) is stopped for the same reason.
+
+Answer on the ticket, or:
 
 ```
-timone retry scratch-app#13
-timone cancel scratch-app#10
+timone takeover scratch-app#47
 ```
 
-**6. The slow-page job is where you left it.** [#4](https://github.com/fvermaut/scratch-app/issues/4) is stopped and its label is off, so it will not start by itself. `timone takeover scratch-app#4` picks it up.
+**Nothing else needs you.**
 
-**Nothing else needs you.** The test tickets from last week ([#45](https://github.com/fvermaut/scratch-app/issues/45)–[#48](https://github.com/fvermaut/scratch-app/issues/48)) can be closed whenever you like.
+---
+
+## What is fixed, in the words of what used to go wrong
+
+Seven ways a job could be lost. All seven are now built; four of them were watched happening correctly this evening on the to-do app.
+
+**A job you picked up by hand is no longer taken away from you.** The machine used to decide a job was dead if it had been quiet for two minutes. Now a job says **which program is holding it**, and the machine asks the operating system whether that program is still running. A program that is thinking says nothing for as long as it thinks; a program that is gone is gone. Watched: a job held at a terminal for nearly four minutes, and the machine left it alone.
+
+**"Working on it now" stops being a lie.** If the thing running a job is killed, `timone status` says so — **without the machine running at all**. It used to say "working on it now" for ever, because the only thing it had to go on was a clock, and a clock tells you nothing when nobody is watching it. Watched: a killed job read *"nobody is running this any more"* eleven seconds after it died, with nothing else running.
+
+**Asking for a job and giving up no longer hands it to a terminal you have closed.** `timone takeover` used to leave its request on disk when it gave up waiting; the machine found it minutes later and handed the job to a terminal that was gone. It now takes the request back, and it checks whether it lost the race. It also waits long enough — two and a half minutes rather than seventy-five seconds, which was too short — and it tells you what it waited and that a long wait is not a fault. Watched, with the machine deliberately frozen.
+
+**A job that broke through no fault of its own is tried once more before you are asked.** It used to stop dead and wait for you to type a command. If the second attempt also breaks, it stops and tells you both reasons. Watched: a job put back to work at the step it died in, with nothing said on the ticket, and the next attempt ran properly.
+
+**A job the machine refuses to start is no longer reported as a job that died.** It used to say *"the machine running it stopped before the work was finished"* when nothing had stopped — the machine was simply refusing, once a minute, in a terminal nobody was reading. It now says the real reason on the ticket, once, after three tries. And the one refusal that goes away by itself — you having uncommitted changes here — is still retried silently for ever, because that is the right thing to do with it.
+
+**A step you finish yourself now stops the ticket asking.** If you take a job over and finish the step, the machine reads what your session recorded instead of putting the old question back. That is what left `ivtrends` #58 asking you for an answer three hours after you had given it by doing the work. Watched.
+
+**A ticket you close while its job is queued is not started.** This one turned out to be fixed already, on 15 August, and nobody had closed the report. It is now covered by tests that would catch it coming back.
+
+**And one small thing you reported in August.** `timone status` used to say *"waiting on you: nothing right now"* about tickets that needed nothing. It says nothing of the kind now. The same fault appeared in a new place this evening while the work was being watched, and was fixed on the spot.
+
+**1571 automatic tests pass.** Tests are not the same as somebody watching it work, which is why the paragraphs above say which ones were watched.
 
 ---
 
@@ -83,15 +71,17 @@ The second half of the idea is that a background program — the daemon — driv
 | List | Where | Kept |
 |---|---|---|
 | The process | `doc/specs/prd/prd-01-process-layer.criteria.md` | 22 of 24 |
-| The automatic loop | `doc/specs/prd/prd-02-inversion-of-control.criteria.md` | 12 of 22 |
+| The automatic loop | `doc/specs/prd/prd-02-inversion-of-control.criteria.md` | 11 of 22 |
 
 Of the ten on the second list that are not kept: four lost their tick because you changed what they promise, one was checked and failed, and five have never been checked at all. The newest of the four lost it on 18 August, when you changed one of the rules yourself (below). **Nothing on that list moved on 19 August**, deliberately — four of the promises gained notes about what happened, and a promise only gets its tick back when somebody who did not build the thing checks it.
 
-1384 automatic tests pass. Tests are not the same as somebody watching it work.
+One promise lost its tick on 4 September — the one about a job being picked up again after the machine running it stopped. It was checked in August against a rule that has now been replaced, so it has to be checked again. That is a change of rule, not a fault.
 
 ---
 
 ## What changed recently
+
+**4 September — the seven faults above, built in one sitting.** Fourteen pieces. The plan for it said three things about the code that turned out not to be true, and each is written down in [the report](doc/plans/phases/reports/phase-31-complete.md) rather than quietly worked around — including one fault that had already been fixed in August and never closed. What was watched running for real, and what was not, is in [the gate's own report](doc/plans/phases/reports/phase-31-live-gate.md).
 
 **22 August, afternoon — the container work is built.** Eleven of twelve pieces. The last one is your five minutes at the top of this file.
 

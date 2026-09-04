@@ -81,11 +81,19 @@ wait?: {
 >
 > **A second thing the pre-flight found, and D6 depends on it.** The *absence* of a wait carries meaning of its own: `resolveWait` (`poll.ts:2609`) treats `waitingKind === undefined` as a run stopped because a stage's machinery did not exist, with `charting` special-cased above it. So D6 refuses an **empty** `resolvableBy` and never an **absent** wait. Conflating the two would take out every un-built stage's park.
 
+> **✏ Corrected 2026-09-04, while [phase 31](../plans/phases/phase-31.md) was built.** **Two of the five fields cannot go inside the wait, and this block says they do.** `consumedAnswerAt` and `reAsksAfterAnswer` both have to *outlive* the wait they were recorded under. Every clearing of a wait — `RunStore.activate`, `RunStore.fail` — must keep the marker, which is the whole reason it exists: a session killed after reading an answer left nothing for `timone retry` to rewind to, and the question was asked again over the human's own words (2026-08-13). And the count accumulates across parks separated by activations, which is ADR-0033's floor. A version of either living inside the wait would be reset by the very transition it was added to survive.
+>
+> So the collapse is **three fields into one**, not five: `waitingOn`, `waitingKind` and `waitCursor` become `wait`, and the two above stay beside it with a comment saying why. Twenty fields become eighteen rather than sixteen. The decision — that a wait is one value and carries what can resolve it — is unchanged; only the arithmetic and the membership are corrected.
+>
+> **`on` is also in the shape and is missing from the block above.** The words a wait is described to the human with have no other home: `ctaFor` prints them and `timone status` renders them, so dropping them would have changed what a ticket says, and this collapse changes representation and not behaviour.
+
 `resolvableBy` is the new part and it is what [#76](https://github.com/fvermaut/timone/issues/76) needs: the wait carries the stages that can end it, rather than the reader deriving that from a table the writer never consulted.
 
 ### D6 — A wait no stage can resolve cannot be written
 
 `handBack` must name a stage that appears in `resolvableBy`, and the store refuses a `wait` whose `resolvableBy` is empty. The dead end in [#76](https://github.com/fvermaut/timone/issues/76) stops being reachable rather than being detected.
+
+> **✏ Corrected 2026-09-04, at [phase 31](../plans/phases/phase-31.md)'s 31h.** **The dead end in [#76](https://github.com/fvermaut/timone/issues/76) is not made unreachable by this decision, and saying it is overstates what `resolvableBy` can do.** `ivtrends` #58's wait — `conversation` at `execution` — *is* resolvable: a person writing on the ticket ends it, and `writtenAnswer` reads exactly that. What went wrong is that the human answered by doing the work in a takeover, and the takeover threw its own outcome away. So the refusal below is a real guard against a wait nothing can end, and it is not what fixes #76; the paragraph that follows is.
 
 **A takeover that finishes the step it took over reads what it recorded.** Ending a takeover consults the ticket from the claim's cursor, the same way the spawner does, instead of restoring the old wait blindly. A takeover that changes nothing in the ledger says so at the terminal rather than ending silently.
 
