@@ -177,6 +177,36 @@ export async function defaultBranch(dir: string): Promise<string> {
   }
 }
 
+/**
+ * The sha the remote's default branch points at, or undefined when the
+ * remote could not be asked.
+ *
+ * **`ls-remote`, not `fetch`.** This runs against fvermaut's own checkout on
+ * every poll cycle, and a fetch would write remote-tracking refs into a
+ * folder he has open. Asking costs one network call and changes nothing on
+ * disk.
+ *
+ * **Undefined means "I could not ask", and callers must not read it as "up
+ * to date".** A daemon on a train has no opinion about whether it is running
+ * old code, and saying it is current when it could not look is worse than
+ * saying nothing ([timone#5](https://github.com/fvermaut/timone/issues/5)).
+ */
+export async function remoteDefaultTip(
+  dir: string,
+): Promise<string | undefined> {
+  try {
+    const branch = await defaultBranch(dir);
+    const output = await runGit(
+      ["ls-remote", "origin", `refs/heads/${branch}`],
+      dir,
+    );
+    const sha = output.trim().split(/\s+/)[0];
+    return sha === undefined || sha === "" ? undefined : sha;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Fetch from the default remote. */
 export async function fetch(dir: string): Promise<void> {
   await runGit(["fetch"], dir);
@@ -215,3 +245,4 @@ export async function fastForward(dir: string): Promise<{ updated: boolean }> {
 // The `MergeOutcome` type moved to `src/adapters/ticketing.ts` at 30c, where
 // the forge merge that replaced this one lives.
 // ---------------------------------------------------------------------------
+

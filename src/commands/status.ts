@@ -16,6 +16,7 @@ import {
 } from "../daemon/holder.js";
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
 import { initiativeProgressSync, progressOf } from "../daemon/poll.js";
+import { daemonRecordNotice } from "../daemon/version.js";
 
 /**
  * Where a project's checkout is, under the timone root.
@@ -32,6 +33,7 @@ export function checkoutOf(root: string, project: string): string {
 import {
   RunStore,
   defaultStatePath,
+  type DaemonRecord,
   type InitiativeRecord,
   type Run,
 } from "../daemon/runs.js";
@@ -48,6 +50,20 @@ const RUNNING = ["picked-up", "active"];
 export interface RenderStatusOptions {
   /** False when the daemon has never written a state file. */
   stateExists: boolean;
+  /**
+   * What the running daemon's process is built from, as the last cycle wrote
+   * it down ([timone#5](https://github.com/fvermaut/timone/issues/5)).
+   *
+   * **This is where being out of date is said**, rather than only in the
+   * daemon's terminal. A daemon prints its start-up lines into a window
+   * nobody is looking at; this command is the one a person types. The
+   * question is answered off the ledger for the same reason the initiative
+   * pictures are — no network call in front of a waiting human (ADR-0044 D5).
+   *
+   * Absent means say nothing, which is what a fixture wants and what a ledger
+   * written by an older daemon gives.
+   */
+  daemonVersion?: () => DaemonRecord | undefined;
   /**
    * The picture the daemon's last cycle wrote of the initiative a ticket
    * belongs to, or undefined for a ticket in no initiative it has seen.
@@ -435,10 +451,16 @@ export function renderStatus(
       ? "**What I need from you:** nothing — nothing is waiting on you right now."
       : `**What I need from you:** answer on ${waiting.join(", ")} — each ticket says what it needs.`;
 
+  // Above everything, because it is about the thing that produced everything
+  // below it: a reader deciding what to do about a stuck project should know
+  // first that the daemon telling them about it is running old code.
+  const outOfDate = daemonRecordNotice(options.daemonVersion?.());
+
   return [
     ...(options.stateExists
       ? []
       : ["Nothing has run yet — start it with `timone daemon`.", ""]),
+    ...(outOfDate === undefined ? [] : [outOfDate, ""]),
     ...lines,
     ...(failures.length > 0 ? ["", ...failures] : []),
     ...(cancelled.length > 0 ? ["", ...cancelled] : []),
@@ -495,6 +517,9 @@ export function registerStatusCommand(program: Command): void {
           now: new Date(),
           root: process.cwd(),
           pictures: (project) => store.initiativesFor(project),
+          // Undefined once the daemon's process is gone: nobody is running
+          // old code when nothing is running.
+          daemonVersion: () => store.daemonVersion(),
         }),
       );
     });

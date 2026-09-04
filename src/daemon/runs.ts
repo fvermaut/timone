@@ -453,6 +453,39 @@ const initiativeRecordSchema = z.strictObject({
   at: z.string(),
 });
 
+/**
+ * What the running daemon's **own process** is built from, and what the
+ * default branch had moved to when it last managed to look
+ * ([timone#5](https://github.com/fvermaut/timone/issues/5)).
+ *
+ * **About the daemon's process and nothing else.** A daemon loads its code
+ * once, at start-up, and keeps running it until somebody restarts it. A *run*
+ * is never stale in the same way: it pins its own commit and refuses one the
+ * remote does not carry (ADR-0041 D1), so a message that did not say which of
+ * the two it meant would send an operator to restart the wrong thing.
+ *
+ * **The holder is here so a record left behind by a stopped daemon says
+ * nothing.** Once the process is gone there is no daemon running old code —
+ * there is no daemon — and `timone status` would otherwise ask for a restart
+ * of something that is not running (ADR-0025's evidence, reused).
+ *
+ * Optional in the state file for the same reason `previews` is: every ledger
+ * written before this field existed loads unchanged and `version` stays `1`.
+ */
+const daemonRecordSchema = z.strictObject({
+  /** The commit the daemon's process started on. */
+  commit: z.string(),
+  /**
+   * The default branch's tip, when the remote could be asked. Absent means it
+   * could not be, which is **not** the same as being up to date.
+   */
+  tip: z.string().optional(),
+  /** The daemon's process, so a record it left behind can be told apart. */
+  holder: holderSchema,
+  /** When this was written. */
+  at: z.string(),
+});
+
 const stateSchema = z.strictObject({
   version: z.literal(1),
   runs: z.array(runSchema),
@@ -530,6 +563,12 @@ const stateSchema = z.strictObject({
    * {@link observedAt} and grant the window rather than reclaiming.
    */
   workedUntil: z.string().optional(),
+  /**
+   * What the daemon's own process is running (timone#5). Top-level, because
+   * it describes the daemon rather than anything about a run — `observedAt`
+   * is here for the same reason. Optional, so `version` stays `1`.
+   */
+  daemon: daemonRecordSchema.optional(),
 });
 
 export type Run = z.infer<typeof runSchema>;
@@ -543,6 +582,7 @@ export type RunWait = NonNullable<Run["wait"]>;
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
 export type IntroductionRecord = z.infer<typeof introductionRecordSchema>;
 export type InitiativeRecord = z.infer<typeof initiativeRecordSchema>;
+export type DaemonRecord = z.infer<typeof daemonRecordSchema>;
 type State = z.infer<typeof stateSchema>;
 
 /** What a cycle's {@link RunStore.witness} call establishes about the daemon. */
@@ -1502,6 +1542,38 @@ export class RunStore {
     return Object.values(this.state.initiatives ?? {})
       .filter((record) => record.project === project)
       .sort((a, b) => a.initiative - b.initiative);
+  }
+
+  /**
+   * Write down what this daemon's process is running, and what the default
+   * branch had moved to when it last looked (timone#5).
+   *
+   * Replaced whole on every cycle. The previous cycle's answer is worth
+   * nothing: the remote moves, and a stale tip beside a fresh commit is how a
+   * check comes to report a state that never existed.
+   */
+  recordDaemon(record: Omit<DaemonRecord, "at">): void {
+    this.refresh();
+    this.state.daemon = { ...record, at: this.now() };
+    this.persist();
+  }
+
+  /**
+   * What the daemon's process is running, or undefined when no daemon is
+   * running at all.
+   *
+   * **A record whose process is gone answers undefined**, and that is the
+   * whole reason the holder is stored. Nobody is running old code once the
+   * daemon has stopped, and asking a reader to restart something that is not
+   * running is worse than saying nothing. `unknown` — a daemon on another
+   * machine — keeps its record: not being able to look at a pid table is not
+   * evidence of death (ADR-0025).
+   */
+  daemonVersion(): DaemonRecord | undefined {
+    this.refresh();
+    const record = this.state.daemon;
+    if (record === undefined) return undefined;
+    return this.livenessOf(record.holder) === "gone" ? undefined : { ...record };
   }
 
   introducedAt(project: string, ticket: number): string | undefined {
