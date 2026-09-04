@@ -10,37 +10,16 @@ import {
 import { dirname } from "node:path";
 import { z } from "zod";
 
-/**
- * Who holds the ledger, in the words a refusal uses.
- *
- * The identity is recorded rather than inferred because the refusal has to
- * name the holder: "something else is using this" tells an operator nothing
- * they can act on, and the commonest holder is a `timone daemon` they left
- * running in another terminal.
- */
-const holderSchema = z.strictObject({
-  /**
-   * This particular hold, so a holder only ever gives up its own lock. A
-   * process whose lock was reclaimed must not delete the reclaimer's on its
-   * way out — that would hand the ledger to a third writer silently.
-   */
-  token: z.string(),
-  /** What is holding it: `timone daemon`, `timone takeover scratch-app#6`. */
-  command: z.string(),
-  /** The holder's process id, so the human can go and look for it. */
-  pid: z.number().int(),
-  /** When it took the lock. */
-  since: z.string(),
-  /**
-   * When the holder last showed it was still there. Quiet for longer than the
-   * staleness window makes a lock a *candidate* for reclaiming and nothing
-   * more: what decides is whether the process is still running
-   * ([ADR-0025](../../doc/adr/0025-a-lock-holders-proof-of-life-is-its-process.md)).
-   */
-  observedAt: z.string(),
-});
+import { holderProcessIsAlive, holderSchema, type Holder } from "./holder.js";
 
-export type LockHolder = z.infer<typeof holderSchema>;
+/**
+ * Who holds the ledger. One shape for every hold in Timone, and the lock's
+ * copy is the one that moved: {@link Holder} is `holder.ts`'s
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)),
+ * and the name is kept because a lock's holder is what every refusal in here
+ * calls it.
+ */
+export type LockHolder = Holder;
 
 /** A lock this process is holding. */
 export interface StateLock {
@@ -290,30 +269,6 @@ function codeOf(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
   const code = (error as { code?: unknown }).code;
   return typeof code === "string" ? code : undefined;
-}
-
-/**
- * Whether the process behind a hold is still running — the default answer to
- * the only question a stale lock is decided on
- * ([ADR-0025](../../doc/adr/0025-a-lock-holders-proof-of-life-is-its-process.md)).
- *
- * Signal `0` sends nothing; it asks the OS whether the pid exists and whether
- * this process may signal it. `EPERM` therefore means *alive and somebody
- * else's*, which is still alive — reading it as death would let an unprivileged
- * rival break a root daemon's lock.
- *
- * The recorded `command` is a label for a human, not an OS command line, so
- * there is nothing here to compare it against: pid reuse inside the staleness
- * window stays a bounded residual risk, as ADR-0025 records. It is the caller's
- * to refine, which is why the whole holder is passed rather than its pid.
- */
-export function holderProcessIsAlive(holder: LockHolder): boolean {
-  try {
-    process.kill(holder.pid, 0);
-    return true;
-  } catch (error) {
-    return codeOf(error) === "EPERM";
-  }
 }
 
 /** One plain sentence: who holds the ledger, and since when. */
