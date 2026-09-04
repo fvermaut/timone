@@ -25,8 +25,14 @@ import {
 } from "../daemon/prompts.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
-import { takeHold } from "../daemon/holder.js";
-import { enqueue, waitUntilSettled, type WaitOptions } from "../daemon/requests.js";
+import { takeHold, type Holder } from "../daemon/holder.js";
+import {
+  enqueue,
+  settle as settleRequest,
+  waitUntilSettled,
+  WATCH_BOUND_MS,
+  type WaitOptions,
+} from "../daemon/requests.js";
 import { intervalTicker, waitOf, type Ticker } from "../daemon/session.js";
 
 /** A parsed `<project>#<ticket>` target. */
@@ -581,9 +587,25 @@ async function claimForTakeover(
   );
 
   if (!(await waitUntilSettled(path, deps.wait))) {
+    // **Taken back, not left behind** (ADR-0049 D3). Until this, the request
+    // stayed on disk, the daemon applied it minutes later, and the run was
+    // handed to a terminal that had gone — timone#78. Nothing else ended that
+    // claim but the dead-run sweep.
+    const withdrawn = await withdraw(path, target, hold, deps);
+    if (withdrawn.kind === "applied") {
+      // The race the withdraw has to detect rather than assume away: the
+      // daemon had already read the request and was carrying it out as the
+      // file was removed. It really did hand the run over, so saying it did
+      // not would leave a claim nobody is holding.
+      log(`The daemon handed ${name} over as I was giving up, so I have it.`);
+      return withdrawn.claim;
+    }
     log(
-      `${name} is still queued — the daemon hasn't handed it over yet. Try ` +
-        "again in a moment; `timone status` shows where it stands.",
+      `${name} is still queued. I waited ${waitWords(boundOf(deps.wait))} and ` +
+        "the daemon didn't get to it — a cycle takes as long as whatever it " +
+        "is running, so that is not a fault. I've taken the request back, so " +
+        "nothing will happen behind you. Ask again whenever you like; " +
+        "`timone status` shows where it stands.",
     );
     return { kind: "no", code: 1 };
   }
@@ -602,6 +624,80 @@ async function claimForTakeover(
   return run.waitingKind === "escalation"
     ? { kind: "claimed", run, escalation: true }
     : { kind: "claimed", run };
+}
+
+/**
+ * Take back a request the daemon has not carried out, and say whether that
+ * worked (ADR-0049 D3).
+ *
+ * **The race is the whole of it.** Removing the file stops a daemon that has
+ * not read it yet, and stops nothing at all in a daemon that read it a moment
+ * ago and is applying it now — the daemon applies a request and settles it
+ * afterwards, so a file still on disk proves nothing either way. So the
+ * withdraw is not assumed to have worked: the ledger is watched for a short
+ * while afterwards for this terminal's own hold, and a claim that lands is
+ * accepted rather than abandoned.
+ *
+ * **This terminal's own token, and no weaker test.** A run that turns
+ * `active` in this window could have been claimed by anything; only the token
+ * minted for this command says it was claimed *for us*.
+ */
+async function withdraw(
+  path: string,
+  target: TakeoverTarget,
+  hold: Holder,
+  deps: TakeoverDeps,
+): Promise<{ kind: "withdrawn" } | { kind: "applied"; claim: Claim }> {
+  settleRequest(path);
+
+  const { store } = deps;
+  const intervalMs = deps.wait?.intervalMs ?? WITHDRAW_LOOK_MS;
+  const sleep =
+    deps.wait?.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
+
+  for (let looked = 0; looked <= WITHDRAW_LOOKS; looked += 1) {
+    const run = store.runsForTicket(target.project, target.ticket).at(-1);
+    if (
+      run !== undefined &&
+      run.status === "active" &&
+      run.holder?.token === hold.token
+    ) {
+      return {
+        kind: "applied",
+        claim:
+          run.waitingKind === "escalation"
+            ? { kind: "claimed", run, escalation: true }
+            : { kind: "claimed", run },
+      };
+    }
+    if (looked < WITHDRAW_LOOKS) await sleep(intervalMs);
+  }
+  return { kind: "withdrawn" };
+}
+
+/**
+ * How long the withdraw watches the ledger, and how often.
+ *
+ * Short on purpose. The daemon writes the claim and settles the request in
+ * the same breath, so a daemon that was mid-apply shows up almost at once;
+ * anything longer would add a wait to a command that has just decided to stop
+ * waiting.
+ */
+const WITHDRAW_LOOKS = 2;
+const WITHDRAW_LOOK_MS = 1_000;
+
+/** `30s`, `2m30s` — how long a command waited, in words. */
+function waitWords(ms: number): string {
+  const total = Math.round(ms / 1000);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return seconds === 0 ? `${minutes}m` : `${minutes}m${String(seconds).padStart(2, "0")}s`;
+}
+
+/** How long this command was told to wait, or the default it uses. */
+function boundOf(wait: WaitOptions | undefined): number {
+  return wait?.boundMs ?? WATCH_BOUND_MS;
 }
 
 /**

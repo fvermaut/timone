@@ -21,7 +21,15 @@ import { RunStore } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
 import { acquireStateLock, stateLockPath } from "../daemon/lock.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
-import { enqueue, pending, settle } from "../daemon/requests.js";
+import {
+  enqueue,
+  pending,
+  settle,
+  WATCH_BOUND_MS,
+} from "../daemon/requests.js";
+import type { Holder } from "../daemon/holder.js";
+import { intervalTicker } from "../daemon/session.js";
+import { DEFAULT_POLL_INTERVAL_SECONDS } from "../daemon/poll.js";
 import {
   parseTarget,
   resolveTakeover,
@@ -812,10 +820,12 @@ describe("takeover and the ledger's one writer", () => {
     expect(said.join("\n")).toContain("timone daemon");
     expect(said.join("\n")).toContain("4213");
     expect(said.join("\n")).toContain("still queued");
-    // Asked, and the ask is still there for the daemon to find.
-    expect(pending(statePath).requests.map((request) => request.body.kind)).toEqual([
-      "claim-takeover",
-    ]);
+    // **Asked, and the ask taken back** — reversed at 31j (ADR-0049 D3). It
+    // used to be left on disk "for the daemon to find", and that is
+    // timone#78: the daemon found it minutes later and handed the run to a
+    // terminal that had gone, leaving a claim nobody was holding and a ticket
+    // answering with a refusal that was not true.
+    expect(pending(statePath).requests).toEqual([]);
     // Untouched: the conversation never started, so the run still waits.
     expect(store.get("scratch-app#6/1")?.status).toBe("parked");
   });
@@ -856,6 +866,140 @@ describe("takeover and the ledger's one writer", () => {
     expect(calls).toEqual([]);
     expect(listings).toEqual([]);
     expect(store.all()).toEqual([]);
+  });
+});
+
+describe("a takeover that gives up leaves nothing behind", () => {
+  /** A ledger with #6 parked on a conversation, and a daemon holding the lock. */
+  function heldLedger(): { statePath: string; store: RunStore } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-withdraw-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-09-04T10:00:00Z" });
+    parkedOnConversation(store);
+    const daemon = acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    expect(daemon.ok).toBe(true);
+    return { statePath, store };
+  }
+
+  it("takes its request back, so no later cycle can act on it", async () => {
+    const { statePath, store } = heldLedger();
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      wait: { intervalMs: 1, boundMs: 3, sleep: async () => {} },
+      log: () => {},
+    });
+
+    expect(code).toBe(1);
+    expect(calls).toEqual([]);
+    expect(pending(statePath).requests).toEqual([]);
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+  });
+
+  it("detects a daemon that claimed the run as the request was withdrawn", async () => {
+    // The race, played out rather than argued about. The daemon reads the
+    // request, the terminal's bound passes and it deletes the file, and the
+    // daemon then writes the claim — with the terminal's own holder on it,
+    // because that is what the request carries since 31b. A withdraw that
+    // assumed it had won would walk away from a run it is holding.
+    const { statePath, store } = heldLedger();
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+
+    // What the "daemon" read before the file was removed.
+    let read: Holder | undefined;
+    let applied = false;
+    const sleep = async (): Promise<void> => {
+      const queued = pending(statePath).requests[0];
+      if (queued?.body.kind === "claim-takeover") read = queued.body.holder;
+      if (read !== undefined && !applied && pending(statePath).requests.length === 0) {
+        applied = true;
+        store.claim("scratch-app#6/1", read);
+      }
+    };
+
+    const said: string[] = [];
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      wait: { intervalMs: 1, boundMs: 3, sleep },
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(applied).toBe(true);
+    expect(code).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(said.join("\n")).toContain("as I was giving up");
+    // And the run is not left claimed by nobody. The daemon still holds the
+    // ledger here, so the handback is asked for rather than written — and the
+    // run carries this terminal's own hold until it lands, which is exactly
+    // what timone#78 lacked.
+    expect(
+      pending(statePath).requests.map((request) => request.body.kind),
+    ).toEqual(["release-takeover"]);
+    expect(store.get("scratch-app#6/1")?.holder?.token).toBe(read?.token);
+  });
+
+  it("waits long enough for a cycle plus an interval, and says what it waited", async () => {
+    // The old bound was 75s on the words "one poll interval plus a margin".
+    // The daemon sleeps its interval *after* a cycle, so a request left just
+    // after a read waits the rest of that cycle and then a full interval —
+    // past 90 seconds on measured cycles of 29–33s.
+    expect(WATCH_BOUND_MS).toBeGreaterThanOrEqual(
+      DEFAULT_POLL_INTERVAL_SECONDS * 1000 + 90_000,
+    );
+
+    const { statePath, store } = heldLedger();
+    const { adapter } = fakeAdapter();
+    const { launcher } = fakeLauncher();
+    const said: string[] = [];
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      wait: { intervalMs: 1, boundMs: 90_000, sleep: async () => {} },
+      log: (message) => said.push(message),
+    });
+
+    // It says how long it waited and that a long cycle is not a fault, rather
+    // than implying the daemon is not coming.
+    expect(said.join("\n")).toContain("1m30s");
+    expect(said.join("\n")).toContain("taken the request back");
+  });
+
+  it("stamps a sign of life as soon as it starts holding the run", async () => {
+    // A plain `setInterval` says nothing for its first whole interval, so a
+    // takeover held a run for thirty seconds having given no sign of life at
+    // all. That is how wide timone#78's window was.
+    const ticks: number[] = [];
+    const ticker = intervalTicker(() => ticks.push(1), 60_000);
+    try {
+      expect(ticks).toHaveLength(1);
+    } finally {
+      ticker.stop();
+    }
   });
 });
 

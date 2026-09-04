@@ -433,6 +433,13 @@ function waitWords(ms: number): string {
  * beat with the same mechanism rather than two that could drift.
  */
 export function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
+  // **Once immediately, then on the interval** (ADR-0049 D3). A plain
+  // `setInterval` says nothing for its first whole interval, so a takeover
+  // spent its first thirty seconds holding a run it had given no sign of life
+  // for at all — which is how wide timone#78's window was. The tick is
+  // idempotent (it stamps a timestamp), so an extra one at the start costs
+  // nothing and closes the gap where it is widest.
+  onTick();
   const handle = setInterval(onTick, intervalMs);
   return { stop: () => clearInterval(handle) };
 }
