@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { Holder } from "./holder.js";
 import type { PipelineStage } from "./pipeline.js";
 import { RunStore, runId } from "./runs.js";
 
@@ -2252,5 +2253,104 @@ describe("refusing to retry a step the machine is holding", () => {
     store.cancel(run.id, "you asked me to stop");
 
     expect(() => store.retry(run.id)).toThrow(/mark it for me/);
+  });
+});
+
+describe("who is holding a run", () => {
+  /**
+   * A store whose idea of the process table the test writes
+   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+   * D2, extending ADR-0025). Injected for the reason `lock.test.ts` gives:
+   * a test cannot portably manufacture a dead pid.
+   */
+  function storeWatching(alive: readonly number[]): RunStore {
+    let tick = 0;
+    return RunStore.open(statePath(), {
+      now: () => `2026-09-04T10:${String(tick++).padStart(2, "0")}:00Z`,
+      livenessOf: (holder) => (alive.includes(holder.pid) ? "alive" : "gone"),
+    });
+  }
+
+  /** A holder as a command or a daemon records one. */
+  function holderOf(command: string, pid: number): Holder {
+    return {
+      token: `token-${pid}`,
+      command,
+      pid,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    };
+  }
+
+  it("writes the holder a claim is given", () => {
+    // timone#78 in one line: today `claim` writes `active` and nothing about
+    // who asked, so nothing can tell a claim somebody is holding from one
+    // nobody is.
+    const store = storeWatching([4213]);
+    const { run } = store.register("scratch-app", 7);
+
+    const claimed = store.claim(run.id, holderOf("timone takeover scratch-app#7", 4213));
+
+    expect(claimed.holder?.command).toBe("timone takeover scratch-app#7");
+    expect(claimed.holder?.pid).toBe(4213);
+    expect(store.hold(claimed)).toBe("alive");
+  });
+
+  it("refuses a second claim while the first holder is still running, naming it", () => {
+    const store = storeWatching([4213]);
+    const { run } = store.register("scratch-app", 7);
+    store.claim(run.id, holderOf("timone takeover scratch-app#7", 4213));
+
+    expect(() =>
+      store.claim(run.id, holderOf("timone takeover scratch-app#7", 9000)),
+    ).toThrow(/timone takeover scratch-app#7.*4213/);
+  });
+
+  it("lets a claim through when the holder's process is gone", () => {
+    // The case that ends timone#78's two-minute refusal. A suite with the
+    // refusal above alone passes against code that never asks about liveness
+    // at all, so this is the one that makes the question load-bearing.
+    const store = storeWatching([]);
+    const { run } = store.register("scratch-app", 7);
+    store.claim(run.id, holderOf("timone takeover scratch-app#7", 4213));
+
+    const second = store.claim(run.id, holderOf("timone takeover scratch-app#7", 9000));
+
+    expect(second.holder?.pid).toBe(9000);
+    expect(store.hold(second)).toBe("gone");
+  });
+
+  it("replaces a claim's holder with the session's when the run activates", () => {
+    const store = storeWatching([4213, 5000]);
+    const { run } = store.register("scratch-app", 7);
+    store.claim(run.id, holderOf("timone takeover scratch-app#7", 4213));
+
+    const active = store.activate(run.id, "session-1", holderOf("timone daemon", 5000));
+
+    expect(active.holder?.command).toBe("timone daemon");
+    expect(active.holder?.pid).toBe(5000);
+  });
+
+  it("clears the holder when the run parks", () => {
+    // A parked run is waiting on a person and nobody is holding it. A holder
+    // left behind is dead data that looks live, and the next claim would be
+    // refused by a process that stopped caring.
+    const store = storeWatching([4213]);
+    const { run } = store.register("scratch-app", 7);
+    store.claim(run.id, holderOf("timone daemon", 4213));
+
+    const parked = store.park(run.id, { waitingOn: "an answer on the ticket" });
+
+    expect(parked.holder).toBeUndefined();
+    expect(store.hold(parked)).toBe("none");
+  });
+
+  it("treats a run written before holders existed as held by nobody", () => {
+    const store = storeWatching([]);
+    const { run } = store.register("scratch-app", 7);
+
+    expect(store.hold(run)).toBe("none");
+    expect(() => store.claim(run.id, holderOf("timone daemon", 4213))).not.toThrow();
   });
 });

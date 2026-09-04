@@ -3,6 +3,13 @@ import { HELD_LABEL } from "./steps.js";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
+import {
+  holderLiveness,
+  holderSchema,
+  type Hold,
+  type Holder,
+  type Liveness,
+} from "./holder.js";
 import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
 
 /**
@@ -220,6 +227,24 @@ const runSchema = z.strictObject({
   pr: z.number().int().positive().optional(),
   /** Agent SDK session identifier, once one has been spawned. */
   sessionId: z.string().optional(),
+  /**
+   * Who is holding this run right now — a daemon session, or a terminal that
+   * took it over
+   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+   * D1), in the shape the ledger lock has held since ADR-0025.
+   *
+   * **It is the run's proof of life**, and it answers a question no clock can:
+   * `heartbeatAt` and `updatedAt` say whether something wrote recently, which
+   * is not the same as whether anybody is there. A spawn the daemon refused
+   * eighty times kept stamping `updatedAt` and the run looked alive for 83
+   * minutes because the daemon kept failing to start it (timone#75).
+   *
+   * **Absent means held by nobody**, and that is a legitimate state rather
+   * than a gap: a queued run, a parked one, a finished one, and every run
+   * written before this field existed. Those are judged by witnessed time
+   * exactly as before (ADR-0020) — see {@link RunStore.hold}.
+   */
+  holder: holderSchema.optional(),
   /**
    * When the run last proved it was alive (ADR-0020, superseding ADR-0017).
    * Stamped by the same tick that prints the progress line, so liveness and
@@ -464,6 +489,13 @@ export interface WitnessOptions {
 export interface RunStoreOptions {
   /** Injected clock, so tests get deterministic timestamps. */
   now?: () => string;
+  /**
+   * Whether a holder's process is still there. Injected, and defaulting to
+   * {@link holderLiveness}, for the reason ADR-0025 gives: a test cannot
+   * portably manufacture a dead pid, so a case left asserting against
+   * whatever the runner's pid table happens to hold asserts nothing.
+   */
+  livenessOf?: (holder: Holder) => Liveness;
 }
 
 /** Default state-file location, relative to the timone root. */
@@ -521,12 +553,26 @@ export class RunStore {
     private readonly path: string,
     private state: State,
     private readonly now: () => string,
+    private readonly livenessOf: (holder: Holder) => Liveness,
   ) {}
 
   /** Open the store at `path`, starting empty when the file does not exist. */
   static open(path: string, options: RunStoreOptions = {}): RunStore {
     const now = options.now ?? (() => new Date().toISOString());
-    return new RunStore(path, readState(path), now);
+    const livenessOf = options.livenessOf ?? ((holder) => holderLiveness(holder));
+    return new RunStore(path, readState(path), now, livenessOf);
+  }
+
+  /**
+   * What can be said about the process holding `run` (ADR-0049 D2).
+   *
+   * `none` is not a failure to answer: a run nobody is holding is judged by
+   * witnessed time as it always was (ADR-0020), and `unknown` — a holder on
+   * another machine — is not a shy `gone`, because `gone` is read as
+   * permission to reclaim.
+   */
+  hold(run: Run): Hold {
+    return run.holder === undefined ? "none" : this.livenessOf(run.holder);
   }
 
   /** Every run, in pickup order. */
@@ -734,9 +780,13 @@ export class RunStore {
    * live fault of 2026-08-13: nothing left to rewind, so the question is asked
    * again.
    */
-  activate(id: string, sessionId: string): Run {
+  activate(id: string, sessionId: string, holder?: Holder): Run {
     return this.transition(id, "active", (run) => {
       run.sessionId = sessionId;
+      // The session is the holder now, replacing the claim's (ADR-0049 D1).
+      // A claim is a slot held for a session that may never start; once one
+      // has, the process worth asking about is the one running it.
+      if (holder !== undefined) run.holder = holder;
       stopWaiting(run);
     });
   }
@@ -757,8 +807,22 @@ export class RunStore {
    * of what the run was waiting for. {@link activate} clears it a moment
    * later, once there is really a session.
    */
-  claim(id: string): Run {
-    return this.transition(id, "active", () => {});
+  claim(id: string, holder?: Holder): Run {
+    // The refusal is about the *existing* holder, so it is asked before the
+    // transition: a run somebody is holding may not be taken from them, and
+    // one whose holder's process is gone may (ADR-0049 D1, D2). Until this,
+    // the only thing that ended a claim nobody held was the dead-run sweep
+    // two minutes later — timone#78.
+    const current = this.mutable(id);
+    if (current.holder !== undefined) {
+      const held = this.livenessOf(current.holder);
+      if (held !== "gone" && current.holder.token !== holder?.token) {
+        throw new Error(heldRunMessage(current.holder, held));
+      }
+    }
+    return this.transition(id, "active", (run) => {
+      if (holder !== undefined) run.holder = holder;
+    });
   }
 
   /** Park a run against a human wait, naming what it waits for. */
@@ -830,6 +894,7 @@ export class RunStore {
     return this.transition(id, "done", (run) => {
       run.waitingOn = undefined;
       run.consumedAnswerAt = undefined;
+      run.holder = undefined;
     });
   }
 
@@ -855,6 +920,7 @@ export class RunStore {
     return this.transition(id, "failed", (run) => {
       run.failure = reason;
       stopWaiting(run);
+      run.holder = undefined;
     });
   }
 
@@ -876,6 +942,7 @@ export class RunStore {
       run.cancellation = reason;
       stopWaiting(run);
       run.consumedAnswerAt = undefined;
+      run.holder = undefined;
     });
   }
 
@@ -969,6 +1036,9 @@ export class RunStore {
       rearmed.failure = undefined;
       rearmed.sessionId = undefined;
       rearmed.flags = [];
+      // Whoever held the attempt that died is not holding this one. The
+      // holder belongs to the session, as the session id beside it does.
+      rearmed.holder = undefined;
     });
   }
 
@@ -1393,6 +1463,25 @@ export function introductionKey(project: string, ticket: number): string {
   return `${project}#${ticket}`;
 }
 
+/**
+ * One plain sentence for a claim refused by somebody who is still there.
+ *
+ * It names the command and the pid, because "the run is already claimed"
+ * tells an operator nothing they can act on and the commonest holder is a
+ * `timone takeover` they left open in another terminal.
+ */
+function heldRunMessage(holder: Holder, held: Liveness): string {
+  const since =
+    held === "unknown"
+      ? `is recorded on ${holder.host ?? "another machine"}, which this one ` +
+        "cannot ask about"
+      : `has held it since ${holder.since}`;
+  return (
+    `${holder.command} (pid ${holder.pid}) ${since} — this one stops rather ` +
+    "than taking a run out from under it."
+  );
+}
+
 /** Clear the wait a run has finished waiting on. */
 function stopWaiting(run: Run): void {
   run.waitingOn = undefined;
@@ -1459,6 +1548,11 @@ function isReAskAfterAnswer(run: Run, options: ParkOptions): boolean {
  * the stage ever noticed anything was wrong.
  */
 function applyPark(run: Run, options: ParkOptions): void {
+  // A parked run is waiting on a person, and nobody is holding it. A holder
+  // left behind is dead data that looks live: the next claim would be refused
+  // by a process that stopped caring, which is timone#78's refusal in a
+  // different disguise.
+  run.holder = undefined;
   const reAsked = isReAskAfterAnswer(run, options);
   const count = reAsked ? (run.reAsksAfterAnswer ?? 0) + 1 : run.reAsksAfterAnswer;
   const caught = reAsked && (count ?? 0) >= RE_ASK_LIMIT;

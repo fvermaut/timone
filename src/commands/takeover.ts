@@ -25,6 +25,7 @@ import {
 } from "../daemon/prompts.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
+import { takeHold } from "../daemon/holder.js";
 import { enqueue, waitUntilSettled, type WaitOptions } from "../daemon/requests.js";
 import { intervalTicker, waitOf, type Ticker } from "../daemon/session.js";
 
@@ -503,6 +504,12 @@ async function claimForTakeover(
   const { store, statePath } = deps;
   if (statePath === undefined) return { kind: "no", code: 1 };
 
+  // This terminal is what will be holding the run, and it says so on the run
+  // itself (ADR-0049 D1). Until this, a claim recorded no owner at all — so a
+  // second takeover was refused with a sentence about work nobody was doing,
+  // and the sweep took the run away from a live conversation (timone#78, #63).
+  const hold = takeHold(`timone takeover ${raw}`);
+
   const acquired = acquireStateLock({
     statePath,
     command: `timone takeover ${raw}`,
@@ -519,7 +526,7 @@ async function claimForTakeover(
       if (resolution.kind === "escalation") {
         return {
           kind: "claimed",
-          run: store.claim(resolution.run.id),
+          run: store.claim(resolution.run.id, hold),
           escalation: true,
         };
       }
@@ -533,7 +540,7 @@ async function claimForTakeover(
       }
       return {
         kind: "claimed",
-        run: store.claim(resolution.run.id),
+        run: store.claim(resolution.run.id, hold),
         ...(resolution.thread === undefined ? {} : { thread: resolution.thread }),
       };
     } finally {
@@ -566,6 +573,7 @@ async function claimForTakeover(
     kind: "claim-takeover",
     project: target.project,
     ticket: target.ticket,
+    holder: hold,
   });
   log(
     `${holder.command} (pid ${holder.pid}) has the ledger, so I've asked it to ` +

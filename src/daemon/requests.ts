@@ -11,6 +11,8 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
+import { holderSchema } from "./holder.js";
+
 /**
  * What a human command asks the daemon to do
  * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
@@ -41,6 +43,18 @@ const bodySchema = z.discriminatedUnion("kind", [
     kind: z.literal("claim-takeover"),
     project: z.string().min(1),
     ticket: z.number().int().positive(),
+    /**
+     * The terminal that will be holding the run, so the daemon claims it on
+     * that terminal's behalf rather than on its own
+     * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+     * D1). Without it the run would record the daemon as holder, and the
+     * daemon's own sweep would then read a live conversation as its own work
+     * and reclaim it — timone#63.
+     *
+     * Optional, because a request written before this field existed is still
+     * a request. One without it claims as it always did.
+     */
+    holder: holderSchema.optional(),
   }),
   z.object({
     kind: z.literal("release-takeover"),

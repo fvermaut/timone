@@ -929,7 +929,10 @@ async function applyRequest(
         log(resolution.message);
         return 1;
       }
-      store.claim(resolution.run.id);
+      // On the asking terminal's behalf, never on the daemon's (ADR-0049 D1).
+      // A run the daemon recorded itself as holding is one its own sweep will
+      // reclaim from under a live conversation — timone#63.
+      store.claim(resolution.run.id, body.holder);
       log(`${target} is the terminal's for now.`);
       return 0;
     }

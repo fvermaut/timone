@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { z } from "zod";
 
@@ -54,6 +55,16 @@ export type Holder = z.infer<typeof holderSchema>;
  * unnoticed until the day it stops being true.
  */
 export type Liveness = "alive" | "gone" | "unknown";
+
+/**
+ * What can be said about a hold that may not exist at all.
+ *
+ * `none` is the state of every run that is queued, parked or finished, and of
+ * every run written before holders existed (ADR-0049 D1). It is not a failure
+ * to read one: it is the answer that sends the caller back to witnessed time
+ * (ADR-0020), which is what still governs a run nobody is holding.
+ */
+export type Hold = Liveness | "none";
 
 /** The two questions {@link holderLiveness} asks, injected so tests can answer them. */
 export interface LivenessProbe {
@@ -130,4 +141,36 @@ function codeOf(error: unknown): string | undefined {
 /** This machine's name, as a holder records it. */
 export function thisHost(): string {
   return hostname();
+}
+
+/**
+ * What can be said about a hold that may be absent — {@link holderLiveness}
+ * for callers that hold a `Holder | undefined`, which is most of them.
+ */
+export function holdLiveness(
+  holder: Holder | undefined,
+  probe: LivenessProbe = {},
+): Hold {
+  return holder === undefined ? "none" : holderLiveness(holder, probe);
+}
+
+/**
+ * Take a hold, here and now: a fresh token, this process, this machine.
+ *
+ * The `command` is what a refusal will name, so it is written the way the
+ * human typed it — `timone takeover scratch-app#6`, not a class name.
+ */
+export function takeHold(
+  command: string,
+  options: { now?: () => string; pid?: number; host?: string } = {},
+): Holder {
+  const at = (options.now ?? (() => new Date().toISOString()))();
+  return {
+    token: randomUUID(),
+    command,
+    pid: options.pid ?? process.pid,
+    since: at,
+    observedAt: at,
+    host: options.host ?? thisHost(),
+  };
 }

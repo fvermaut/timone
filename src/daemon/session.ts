@@ -20,6 +20,7 @@ import {
 } from "../channels/conversation.js";
 import { TerminalChannel } from "../channels/terminal.js";
 import { technicalFault, type TechnicalFault } from "./faults.js";
+import { takeHold } from "./holder.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
   fromForgeDefaultBranch,
@@ -1446,11 +1447,15 @@ export class AgentSessionSpawner implements SessionSpawner {
 
     const before = store.get(run.id);
     const parked = before?.status === "parked" ? before : undefined;
-    if (parked !== undefined) store.claim(run.id);
+    // The holder is this process, because this process is what is running the
+    // session (ADR-0049 D1). If it dies, the pid goes with it and the run is
+    // reclaimable at once rather than after a clock says so.
+    const holder = takeHold(`timone daemon ${run.id}`);
+    if (parked !== undefined) store.claim(run.id, holder);
 
     try {
       const started = await runtime.start(request);
-      store.activate(run.id, started.sessionId);
+      store.activate(run.id, started.sessionId, holder);
       return started;
     } catch (error) {
       if (parked !== undefined) store.park(run.id, waitOf(parked));
