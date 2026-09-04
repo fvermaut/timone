@@ -165,6 +165,152 @@ describe("checkStatusPlacement", () => {
 });
 
 /**
+ * The two corrections of phase 32c. They are different faults: one is a bug
+ * ([timone#70](https://github.com/fvermaut/timone/issues/70)) and one is a
+ * decision (ADR-0050's D-2).
+ */
+describe("checkStatusPlacement — what is not a stray status file", () => {
+  it("says nothing about a commit that is already on the default branch", () => {
+    // Merging `main` into a work branch is ordinary and the process asks for
+    // it. Containment then holds for every commit on `main`, which is the
+    // whole of timone#70.
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "ccc3333",
+        branch: "phase/01",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: true,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toEqual([]);
+  });
+
+  it("still says so about a commit written only on a branch", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "ccc3333",
+        branch: "phase/01",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: false,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toHaveLength(1);
+  });
+
+  it("replays ivtrends' 2026-08-30 pair and reports neither", () => {
+    // The shas from the issue, not invented ones. Both were made on `main`
+    // and pushed to `main`; they reached the work branch through one merge
+    // commit, and `STATUS.md` was never edited on that branch at all. Two
+    // findings were shown to fvermaut as things wrong with the session.
+    const evidence = cleanEvidence();
+    projectRepo(evidence).repo = "ivtrends";
+    projectRepo(evidence).commits = [
+      {
+        sha: "9e3a056",
+        branch: "timone/34-11-the-nightly-run-and-the-copy-that-pro",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: true,
+      },
+      {
+        sha: "b5eb295",
+        branch: "timone/34-11-the-nightly-run-and-the-copy-that-pro",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: true,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toEqual([]);
+  });
+
+  it("says nothing about a status file on the run's own work branch", () => {
+    // D-2. A run writes STATUS.md on its work branch because that is what the
+    // process asks of every stage, and the file reaches `main` when the pull
+    // request does.
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "ccc3333",
+        branch: "timone/39-1",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: false,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toEqual([]);
+  });
+
+  it("still says so about a work branch in a project no run was sent to", () => {
+    // The exemption is about the repository the run is working, not about the
+    // shape of a branch name. A `timone/…` branch in somebody else's checkout
+    // is a status file nobody will see.
+    const evidence = cleanEvidence();
+    evidence.projects.push({
+      repo: "other-app",
+      defaultBranch: "main",
+      branches: [],
+      commits: [
+        {
+          sha: "ddd4444",
+          branch: "timone/39-1",
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: execution"],
+          onDefaultBranch: false,
+        },
+      ],
+      workingTree: [],
+    });
+
+    expect(checkStatusPlacement(evidence)).toHaveLength(1);
+  });
+
+  it("still says so on an interactive session's own branch", () => {
+    // No target, so no run, so nothing is expected anywhere. It fired twice on
+    // this repository's own branches on 2026-09-04 and was right both times.
+    const evidence = cleanEvidence();
+    delete evidence.target;
+    evidence.workspace.commits = [
+      {
+        sha: "eee5555",
+        branch: "docs/phase-32-plan",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: interactive"],
+        onDefaultBranch: false,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toHaveLength(1);
+  });
+
+  it("still says so in the workspace even when a run targets Timone itself", () => {
+    // Timone is a managed project now, so `target` can be `"timone"` and the
+    // workspace's own label is `"timone"` too. A work branch cut here is
+    // `checkBranchPlacement`'s finding, never this rule's exemption.
+    const evidence = cleanEvidence();
+    evidence.target = "timone";
+    evidence.workspace.commits = [
+      {
+        sha: "eee5555",
+        branch: "timone/39-1",
+        files: ["STATUS.md"],
+        trailers: ["Timone-Stage: execution"],
+        onDefaultBranch: false,
+      },
+    ];
+
+    expect(checkStatusPlacement(evidence)).toHaveLength(1);
+  });
+});
+
+/**
  * Finding 11 of phase 20's live gate, as a rule.
  *
  * A run's work branch is named from its ticket and its chunk (`workBranch`) —

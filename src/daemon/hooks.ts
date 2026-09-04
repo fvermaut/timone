@@ -39,6 +39,22 @@ export interface CommitEvidence {
   committerEmail?: string;
   /** How many parents the commit has. Two or more means a merge. */
   parentCount?: number;
+  /**
+   * Whether this commit is an ancestor of the remote's default branch — that
+   * is, whether it is already **on** `main`
+   * ([timone#70](https://github.com/fvermaut/timone/issues/70)).
+   *
+   * {@link branch} is decided by containment, and containment cannot tell
+   * *written here* from *arrived here from `main`*: the moment a work branch
+   * merges `main` in, every commit on `main` is contained by it. Merging the
+   * default branch into a work branch is ordinary and the process asks for
+   * it, so without this the rules report correct work — which is how a check
+   * stops being read.
+   *
+   * Optional so evidence built before this field existed still type-checks.
+   * Its absence means *cannot tell*, and the rules keep their old answer.
+   */
+  onDefaultBranch?: boolean;
 }
 
 /** What one repository did during a session. */
@@ -168,12 +184,48 @@ export function checkUnpushed(evidence: SessionEvidence): Violation[] {
  * **STATUS.md placement.** The status file is the human's view of a project
  * and is read from the default branch; written on a feature branch it is
  * invisible until — and unless — that branch merges.
+ *
+ * ✏ **Two corrections, phase 32c. They are different faults and must not be
+ * conflated.**
+ *
+ * **The false one ([timone#70](https://github.com/fvermaut/timone/issues/70)).**
+ * A commit already on the default branch was not "written on this branch",
+ * whatever containment says. Merging `main` into a work branch is ordinary
+ * and the process asks for it, and every commit on `main` the branch takes
+ * used to be reported. It fired on `ivtrends` on 2026-08-30 and on this
+ * repository on 2026-09-04.
+ *
+ * **The true one, which is a decision rather than a bug (ADR-0050, D-2).** A
+ * run writes `STATUS.md` on its work branch because that is what the process
+ * asks of every stage, and the file reaches `main` when the pull request
+ * does. So a status file on a **run's own work branch, in the repository that
+ * run is working**, is expected and silent. Everywhere else the finding
+ * stands — including an interactive session's own branch, where it fired
+ * twice on 2026-09-04 and was right both times.
  */
 export function checkStatusPlacement(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
-  for (const repo of [...evidence.projects, evidence.workspace]) {
+
+  // The workspace is never a run's target. A run works a project's checkout
+  // under `projects/`, and a `timone/…` branch cut here is `checkBranchPlacement`'s
+  // finding rather than this one's exemption — which matters now that Timone
+  // is itself a managed project and `evidence.target` can be `"timone"`.
+  const repos = [
+    ...evidence.projects.map((repo) => ({
+      repo,
+      worksHere: evidence.target !== undefined && repo.repo === evidence.target,
+    })),
+    { repo: evidence.workspace, worksHere: false },
+  ];
+
+  for (const { repo, worksHere } of repos) {
     for (const commit of repo.commits) {
       if (commit.branch === repo.defaultBranch) continue;
+      // It is on `main` already, whichever other branches also contain it.
+      if (commit.onDefaultBranch === true) continue;
+      // The run's own work branch, in the project it was sent to work. This
+      // is where a status file is supposed to be written.
+      if (worksHere && commit.branch.startsWith(WORK_BRANCH_PREFIX)) continue;
       if (!commit.files.some((file) => file.endsWith("STATUS.md"))) continue;
       violations.push({
         rule: "status-placement",
@@ -642,6 +694,16 @@ async function branchTips(dir: string): Promise<Map<string, string>> {
   return tips;
 }
 
+/** True when git exited 0 for these args — for the questions with no output. */
+async function gitSucceeds(dir: string, args: string[]): Promise<boolean> {
+  try {
+    await execFileAsync("git", args, { cwd: dir });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Where `dir` was cloned from, or undefined when it has no `origin`. */
 async function originUrlOf(dir: string): Promise<string | undefined> {
   const url = (await git(dir, ["remote", "get-url", "origin"])).trim();
@@ -737,6 +799,12 @@ async function collectRepo(
   }
 
   const originUrl = await originUrlOf(dir);
+  const defaultBranch = await defaultBranchOf(dir);
+  // The **remote's** default branch, not the local one. What the rule is
+  // about is whether anyone reading `main` will see the file, and `main` is
+  // what has been pushed (timone#70). A local branch ahead of its upstream
+  // holds commits nobody else can see yet.
+  const defaultRef = `refs/remotes/origin/${defaultBranch}`;
   const tips = await branchTips(dir);
   const touched = [...tips.entries()].filter(
     ([name, sha]) => baseline.get(name) !== sha,
@@ -776,14 +844,22 @@ async function collectRepo(
       ...baselineShas,
     ])) {
       if (madeElsewhere(commit, sessionId)) continue;
-      commits.push(commit);
+      commits.push({
+        ...commit,
+        onDefaultBranch: await gitSucceeds(dir, [
+          "merge-base",
+          "--is-ancestor",
+          commit.sha,
+          defaultRef,
+        ]),
+      });
     }
   }
 
   return {
     repo: label,
     ...(originUrl === undefined ? {} : { originUrl }),
-    defaultBranch: await defaultBranchOf(dir),
+    defaultBranch,
     branches,
     commits,
     workingTree: await workingTreePaths(dir),

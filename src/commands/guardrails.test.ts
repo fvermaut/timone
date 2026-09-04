@@ -817,3 +817,89 @@ describe("commits another session made", () => {
     expect(printed.join("\n")).toContain("where they came from");
   });
 });
+
+describe("the STATUS.md rule, read back off real commits", () => {
+  it("says nothing about a status file the work branch took from main", async () => {
+    // [timone#70](https://github.com/fvermaut/timone/issues/70), in the shape
+    // it was seen in on `ivtrends` on 2026-08-30 and on this repository on
+    // 2026-09-04: STATUS.md is written and pushed on `main`, and a work branch
+    // then merges `main` in to take a fix. Containment reports every commit on
+    // `main` against the branch, and the human is shown correct work as
+    // something wrong with the session.
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+
+    const { printed, returned, first } = await bracket(
+      root,
+      "session-status-merged",
+      store,
+      () => {
+        writeFileSync(join(projectDir, "STATUS.md"), "# Status\n");
+        git(projectDir, "add", "-A");
+        git(
+          projectDir,
+          "commit",
+          "-q",
+          "-m",
+          trailed("docs: the status file", "session-status-merged"),
+        );
+        git(projectDir, "push", "-q", "origin", "HEAD:main");
+
+        // The work branch, cut before that commit and merging `main` in — the
+        // ordinary move the process asks for.
+        git(projectDir, "checkout", "-q", "-b", "timone/34-11", "HEAD~1");
+        writeFileSync(join(projectDir, "feature.txt"), "a\n");
+        git(projectDir, "add", "-A");
+        git(
+          projectDir,
+          "commit",
+          "-q",
+          "-m",
+          trailed("feat: the eleventh piece", "session-status-merged"),
+        );
+        git(
+          projectDir,
+          "merge",
+          "-q",
+          "--no-edit",
+          "-m",
+          trailed("Merge main into the eleventh piece", "session-status-merged"),
+          "main",
+        );
+        git(projectDir, "push", "-q", "origin", "HEAD:timone/34-11");
+      },
+    );
+
+    const said = [...printed, ...first.returned.map((v) => v.summary)].join("\n");
+    expect(said).not.toContain("STATUS.md was written on");
+    expect(returned.map((violation) => violation.rule)).not.toContain(
+      "status-placement",
+    );
+  });
+
+  it("still says so about a status file that exists only on a branch", async () => {
+    // The rule keeps its purpose: a status file nobody reading `main` will see
+    // is worth saying out loud. This session names no run, so nothing is
+    // expected on a branch anywhere.
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+
+    const { first } = await bracket(root, "session-status-stray", store, () => {
+      git(projectDir, "checkout", "-q", "-b", "phase/01");
+      writeFileSync(join(projectDir, "STATUS.md"), "# Status\n");
+      git(projectDir, "add", "-A");
+      git(
+        projectDir,
+        "commit",
+        "-q",
+        "-m",
+        trailed("docs: the status file", "session-status-stray"),
+      );
+      git(projectDir, "push", "-q", "origin", "HEAD:phase/01");
+    });
+
+    expect(first.returned.map((violation) => violation.rule)).toContain(
+      "status-placement",
+    );
+  });
+});
