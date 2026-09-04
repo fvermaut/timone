@@ -37,6 +37,7 @@ import { progressOf, reclaimedReason } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
   CARRY_ON_WAIT,
+  type DaemonRecord,
   type InitiativeRecord, runId, type Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
 
@@ -977,5 +978,78 @@ describe("which step of an initiative is live", () => {
 
     expect(line).toContain("#7");
     expect(line).not.toContain("step");
+  });
+});
+
+describe("timone status says when the daemon is running old code", () => {
+  const TIP = "9a1c2b4f0e6d5c4b3a2918f7e6d5c4b3a2918f7e";
+  const BEHIND = "f5eb4d3c2b1a09f8e7d6c5b4a39281706f5e4d3c";
+
+  /** What the last cycle wrote down about the daemon's own process. */
+  function recorded(tip?: string): DaemonRecord {
+    return {
+      commit: BEHIND,
+      ...(tip === undefined ? {} : { tip }),
+      holder: {
+        token: "daemon-hold",
+        command: "timone daemon",
+        pid: 4242,
+        since: "2026-09-04T20:00:00Z",
+        observedAt: "2026-09-04T20:10:00Z",
+        host: "laptop",
+      },
+      at: "2026-09-04T20:10:00Z",
+    };
+  }
+
+  it("names the commit it is on and the command that fixes it", () => {
+    const output = renderStatus(manifest, [], {
+      stateExists: true,
+      daemonVersion: () => recorded(TIP),
+    });
+    expect(output).toContain(BEHIND.slice(0, 7));
+    expect(output).toContain(TIP.slice(0, 7));
+    expect(output).toContain("node dist/cli.js daemon");
+  });
+
+  it("says it above the projects, before anything it produced", () => {
+    const output = renderStatus(manifest, [], {
+      stateExists: true,
+      daemonVersion: () => recorded(TIP),
+    });
+    const notice = output.split("\n").findIndex((line) => /old copy/i.test(line));
+    const project = output.split("\n").findIndex((line) =>
+      line.startsWith("scratch-app"),
+    );
+    expect(notice).toBeGreaterThanOrEqual(0);
+    expect(notice).toBeLessThan(project);
+  });
+
+  it("says nothing when the daemon is on the tip", () => {
+    const output = renderStatus(manifest, [], {
+      stateExists: true,
+      daemonVersion: () => ({ ...recorded(BEHIND) }),
+    });
+    expect(output).not.toMatch(/old copy/i);
+  });
+
+  it("says nothing when the last cycle could not reach the remote", () => {
+    const output = renderStatus(manifest, [], {
+      stateExists: true,
+      daemonVersion: () => recorded(),
+    });
+    expect(output).not.toMatch(/old copy/i);
+    expect(output).not.toMatch(/up to date/i);
+  });
+
+  it("says nothing when no daemon is running", () => {
+    // `RunStore.daemonVersion` answers undefined once the recorded process is
+    // gone, and this is the line that depends on it: asking a reader to
+    // restart a daemon that is not running is worse than saying nothing.
+    const output = renderStatus(manifest, [], {
+      stateExists: true,
+      daemonVersion: () => undefined,
+    });
+    expect(output).not.toMatch(/old copy/i);
   });
 });

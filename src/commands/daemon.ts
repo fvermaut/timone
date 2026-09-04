@@ -3,7 +3,11 @@ import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, type Manifest } from "../manifest.js";
-import { isCommitOnRemote } from "../git.js";
+import {
+  checkoutVersion,
+  isCommitOnRemote,
+  remoteDefaultTip,
+} from "../git.js";
 import {
   GitHubTicketingAdapter,
   repoSlug,
@@ -41,6 +45,11 @@ import { containerRuntime } from "../daemon/container-runtime.js";
 import { bringUpServices } from "../daemon/services.js";
 import { readRunEnv } from "../daemon/run-env.js";
 import { renderMessage } from "../daemon/transcript.js";
+import {
+  daemonVersionNotice,
+  type DaemonVersion,
+} from "../daemon/version.js";
+import { takeHold } from "../daemon/holder.js";
 import {
   claudeSubscriptionToken,
   modelLoginSummary,
@@ -276,6 +285,9 @@ export function runtimeFor(choice: RuntimeChoice): SessionRuntime {
             services: async (request) => {
               const workspace = request.workspace!;
               return bringUpServices({
+                // A project that commits no compose file gets no stack, and
+                // that is said here rather than refused (32e's blocker).
+                ...(choice.log === undefined ? {} : { log: choice.log }),
                 project: {
                   name: workspace.project.name,
                   repoUrl: workspace.project.remote,
@@ -349,6 +361,20 @@ export interface RunDaemonOptions {
   spawner: SessionSpawner;
   /** How previews are served. Absent means no project gets one. */
   previews?: PreviewAdapter;
+  /**
+   * What this daemon's process is running, asked once per cycle
+   * ([timone#5](https://github.com/fvermaut/timone/issues/5)).
+   *
+   * A seam rather than a git call inlined in the loop, for the reason every
+   * other probe in this file is one: a test cannot manufacture a remote whose
+   * default branch moves under it, and the four cases this has to get right
+   * are all about what is *answered*, not about how git answers it.
+   *
+   * **Absent means the question is not asked at all**, which is what every
+   * test of the cadence and the lock wants — and what a daemon whose root is
+   * not a checkout gets, since there is no version there to be behind.
+   */
+  version?: () => Promise<DaemonVersion | undefined>;
   log?: (message: string) => void;
 }
 
@@ -402,8 +428,20 @@ async function poll(
   lock?: StateLock,
 ): Promise<number> {
   let failures = 0;
+  // Said once, not once a cycle. A daemon left running overnight behind a
+  // merged pull request would otherwise print the same sentence every thirty
+  // seconds until morning, which is how a warning stops being read. Kept as
+  // the text rather than a flag, so a *second* merge — a different tip — is
+  // still worth saying.
+  let lastSaid: string | undefined;
 
   for (;;) {
+    await sayIfOutOfDate(options, log, lock, (notice) => {
+      if (notice === lastSaid) return;
+      lastSaid = notice;
+      log(notice);
+    });
+
     const result = await pollOnce({
       manifest: options.manifest,
       store: options.store,
@@ -432,6 +470,54 @@ async function poll(
   }
 
   return failures > 0 ? 1 : 0;
+}
+
+/**
+ * Ask what this daemon's process is running, write it down, and say so when
+ * it is behind ([timone#5](https://github.com/fvermaut/timone/issues/5)).
+ *
+ * **Recorded as well as printed, and the recording is the point.** The
+ * daemon's terminal is the surface nobody is reading — that is
+ * [#75](https://github.com/fvermaut/timone/issues/75)'s whole complaint — and
+ * `timone status` is where a person looks. What is written here is what that
+ * command renders.
+ *
+ * The holder goes down with it so a record left behind by a daemon that has
+ * since stopped says nothing: nobody is running old code once there is no
+ * daemon.
+ *
+ * A cycle that could not ask the remote records the commit and no tip, and
+ * nothing is said in either direction.
+ */
+async function sayIfOutOfDate(
+  options: RunDaemonOptions,
+  log: (message: string) => void,
+  lock: StateLock | undefined,
+  say: (notice: string) => void,
+): Promise<void> {
+  if (options.version === undefined) return;
+
+  let version: DaemonVersion | undefined;
+  try {
+    version = await options.version();
+  } catch (error) {
+    // A version this daemon cannot establish is not a reason to stop polling.
+    log(
+      `I could not work out which version of myself I am running: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+  if (version === undefined) return;
+
+  options.store.recordDaemon({
+    commit: version.commit,
+    ...(version.tip === undefined ? {} : { tip: version.tip }),
+    holder: lock?.holder ?? takeHold("timone daemon"),
+  });
+
+  const notice = daemonVersionNotice(version);
+  if (notice !== undefined) say(notice);
 }
 
 /** Register the `daemon` command on the program. */
@@ -604,6 +690,18 @@ export function registerDaemonCommand(program: Command): void {
         once: options.once === true,
         adapter,
         spawner,
+        // What this process is running, against what the default branch has
+        // moved to (timone#5). `ls-remote`, so fvermaut's own checkout is
+        // read and never written (ADR-0043's spirit, in his own folder).
+        version: async () => {
+          const pin = await checkoutVersion(process.cwd());
+          if (pin === undefined) return undefined;
+          const tip = await remoteDefaultTip(process.cwd());
+          return {
+            commit: pin.commit,
+            ...(tip === undefined ? {} : { tip }),
+          };
+        },
       });
     });
 }

@@ -2579,3 +2579,61 @@ describe("a wait that says what can end it", () => {
     expect(parked.wait?.resolvableBy).toEqual(["remediation"]);
   });
 });
+
+describe("what the daemon's own process is running", () => {
+  /** A store whose idea of the process table the test writes (ADR-0025). */
+  function storeWatching(alive: readonly number[]): RunStore {
+    return RunStore.open(statePath(), {
+      now: () => "2026-09-04T10:00:00Z",
+      livenessOf: (holder) => (alive.includes(holder.pid) ? "alive" : "gone"),
+    });
+  }
+
+  function holderOf(pid: number): Holder {
+    return {
+      token: `token-${pid}`,
+      command: "timone daemon",
+      pid,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    };
+  }
+
+  it("gives back the commit and the tip a live daemon wrote down", () => {
+    const store = storeWatching([900]);
+    store.recordDaemon({ commit: "abc1234", tip: "def5678", holder: holderOf(900) });
+    expect(store.daemonVersion()).toMatchObject({
+      commit: "abc1234",
+      tip: "def5678",
+    });
+  });
+
+  it("answers nothing once the daemon that wrote it has stopped", () => {
+    // Nobody is running old code when there is no daemon, and asking a reader
+    // to restart something that is not running is worse than saying nothing.
+    const store = storeWatching([]);
+    store.recordDaemon({ commit: "abc1234", tip: "def5678", holder: holderOf(900) });
+    expect(store.daemonVersion()).toBeUndefined();
+  });
+
+  it("keeps a record whose machine it cannot look at", () => {
+    // `unknown` is not a shy `gone` (ADR-0025): a pid table here says nothing
+    // about a pid over there.
+    const store = RunStore.open(statePath(), { livenessOf: () => "unknown" });
+    store.recordDaemon({ commit: "abc1234", tip: "def5678", holder: holderOf(900) });
+    expect(store.daemonVersion()?.commit).toBe("abc1234");
+  });
+
+  it("replaces the whole answer each cycle rather than merging it", () => {
+    // A stale tip beside a fresh commit is a state that never existed.
+    const store = storeWatching([900]);
+    store.recordDaemon({ commit: "abc1234", tip: "def5678", holder: holderOf(900) });
+    store.recordDaemon({ commit: "abc1234", holder: holderOf(900) });
+    expect(store.daemonVersion()?.tip).toBeUndefined();
+  });
+
+  it("says nothing at all before any daemon has run", () => {
+    expect(RunStore.open(statePath()).daemonVersion()).toBeUndefined();
+  });
+});

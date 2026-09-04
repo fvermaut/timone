@@ -20,16 +20,19 @@ import { describe, expect, it } from "vitest";
  * exemption below is named, with the reason it survives; adding a fifth means
  * editing this file, which is the point.
  *
- * ✏ **It runs as a vitest file, not in CI, and that is a weaker promise than
- * the plan's wording.** `.github/` does not exist in this repository: there is
- * no workflow and no runner. Option (i) — committing one — is **fvermaut's**,
- * not the machine's: the Timone App is installed without the Workflows
- * permission, deliberately, because a token that can rewrite
- * `.github/workflows` can widen its own grant on the next run
- * ([ADR-0042](../../doc/adr/0042-timone-acts-under-its-own-identity.md)). So
- * the guard is what option (ii) offers — it fails `npm test`, and `npm test`
- * runs at every session's `Stop` hook. **The CI question is recorded as open
- * and is his to answer.**
+ * ✏ **It runs in CI, and it did not always.** When this was written `.github/`
+ * did not exist here, so the guard was only what a local `npm test` offers —
+ * strong at every session's `Stop` hook and absent on a pull request. That was
+ * recorded as an open question and it was **fvermaut's** to answer, because the
+ * Timone App is installed without the Workflows permission, deliberately: a
+ * token that can rewrite `.github/workflows` can widen its own grant on the
+ * next run ([ADR-0042](../../doc/adr/0042-timone-acts-under-its-own-identity.md)).
+ *
+ * He answered it on 2026-08-22 with `bebd29e`, *"ci: run the tests and the
+ * checkout guard on every push"*. The paragraph above stood for two weeks
+ * telling every reader there was no runner, which is the cost of a note that
+ * records a question and is never revisited when it is answered. Corrected
+ * 2026-09-04, from a pull request that CI ran.
  */
 
 /** The repository's `src` directory, from this file. */

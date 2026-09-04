@@ -19,6 +19,7 @@
 - **Priority:** MUST
 - **Status:** verified
 - **Verify-via:** api
+- **Depends-on:** `src/manifest.ts, src/commands/projects.ts`
 - **Criteria:**
     - GIVEN a `timone.yaml` declaring a project with repo URL, local path, stack, and platform bindings
       WHEN Timone loads its configuration
@@ -30,6 +31,7 @@
 - **Priority:** MUST
 - **Status:** verified
 - **Verify-via:** api
+- **Depends-on:** `src/commands/workspace.ts, src/git.ts`
 - **Criteria:**
     - GIVEN a manifest project whose local path does not exist
       WHEN workspace sync runs
@@ -45,7 +47,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/, src/daemon/, src/commands/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a stage session against a managed project that is not Timone, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a session started at the timone root
       WHEN a stage skill is invoked with (or asked for) a target project
@@ -58,7 +63,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/timone-onboard/, src/manifest.ts, src/commands/workspace.ts`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs onboarding a repository that is not yet managed, and the human's confirmation inside the clause, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a repo not yet managed
       WHEN the onboarding skill runs
@@ -91,7 +99,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/timone-prd/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a full requirements session against a project, and the human's approval inside the clause, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a concluded interview (or equivalent input) on a managed project
       WHEN the PRD skill runs
@@ -102,7 +113,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/timone-adr/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a full architecture session against a project, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a significant technical decision arising on a managed project
       WHEN the ADR skill runs
@@ -115,7 +129,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/timone-plan/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a full planning session against a project, and the human's approval inside the clause, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN an approved PRD on a managed project
       WHEN the plan skill runs
@@ -129,7 +146,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/timone-execute/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a full implementation session against a project, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN an approved phase file
       WHEN the execute skill runs
@@ -140,7 +160,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/timone-verify/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a full verification session against a project, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a project with a criteria register and a runnable app
       WHEN the verify skill runs (invoked standalone or from execution)
@@ -151,7 +174,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/timone-deliver/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a full delivery session against a project, and a forge that accepts a pull request, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a completed and verified phase on a work branch
       WHEN the deliver skill runs
@@ -178,7 +204,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/timone-onboard/, standards/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs onboarding a repository that is not yet managed, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a project being onboarded (new or existing)
       WHEN onboarding completes
@@ -203,7 +232,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `.claude/skills/timone-deliver/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a full delivery session against a project, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a completed, verified phase on a work branch
       WHEN the deliver skill runs
@@ -233,7 +265,10 @@
 
 - **Priority:** MUST
 - **Status:** verified
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `standards/baseline/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a project with a user interface, and the browser baseline run against it, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN any project being onboarded
       WHEN `doc/standards.md` is produced

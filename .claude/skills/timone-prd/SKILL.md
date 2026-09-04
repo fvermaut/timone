@@ -153,7 +153,8 @@ resolve as the PRD matures.>
 | ----- | ------ | ----- |
 | Priority | `MUST` / `SHOULD` / `NICE` | `MUST` = the deliverable fails without it; drives automated verification and regression |
 | Status | `draft` / `verified` / `failed` / `revised` / `deprecated` | `draft` on creation; `verified`/`failed` set by the `timone-verify` verifier; `revised`/`deprecated` set here, with the amendment |
-| Verify-via | `api` / `browser` / `human` | `api` = checkable via HTTP/CLI/DB from a terminal (these also form the standing regression suite); `browser` = requires driving the UI; `human` = subjective (UX feel, visual quality) — both `browser` and `human` are reported as HUMAN-CHECK with a precise manual script until tooling covers them |
+| Verify-via | `api` / `browser` / `human` / `live` | `api` = checkable via HTTP/CLI/DB from a terminal (these also form the standing regression suite); `browser` = requires driving the UI; `human` = subjective (UX feel, visual quality) — both `browser` and `human` are reported as HUMAN-CHECK with a precise manual script until tooling covers them; `live` = only a **supervised run against real infrastructure** can observe it — a real daemon, real credentials, a real forge, real containers ([ADR-0051](../../../doc/adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md)), reported as LIVE-GATE and never as a script |
+| Depends-on | path prefixes, or absent | Optional. What the criterion rests on, used to narrow the standing regression set. **Absent means always in scope** — write one only when the answer is known confidently, because under-declaring is a regression escaping |
 
 ### Strictness rules
 
