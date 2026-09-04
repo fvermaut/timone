@@ -10,7 +10,12 @@ import {
   type Holder,
   type Liveness,
 } from "./holder.js";
-import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
+import {
+  PIPELINE_STAGES,
+  resolvableBy,
+  type PipelineStage,
+  type WaitKind,
+} from "./pipeline.js";
 
 /**
  * A run's lifecycle. `queued` is where a pickup lands while another run holds
@@ -198,6 +203,21 @@ const runSchema = z.strictObject({
        * question and cannot answer this one.
        */
       opened: z.string().optional(),
+      /**
+       * Which stages may end this wait (ADR-0049 D5), recorded when it is
+       * opened rather than worked out when it is read.
+       *
+       * **It may not be empty** (D6). A wait nothing can end is a run that
+       * will sit for the life of the ledger with its ticket asking a person
+       * for something, and the refusal makes it unwritable rather than
+       * detectable. An *absent wait* is a different thing and stays legal —
+       * see {@link Run.wait}.
+       *
+       * Optional only for a ledger written before this existed; every wait
+       * written from here on has one, and the normalisation gives an old one
+       * the stage it was parked at.
+       */
+      resolvableBy: z.array(z.enum([...PIPELINE_STAGES])).optional(),
     })
     .optional(),
   /**
@@ -599,6 +619,13 @@ export interface ParkOptions {
   stage?: PipelineStage;
   /** The instant the wait was opened; answers before it are not answers to it. */
   waitCursor?: string;
+  /**
+   * Which stages may end this wait (ADR-0049 D5). Absent means "work it out
+   * from the kind and the stage" — {@link resolvableBy} — which is what every
+   * ordinary park wants. A caller passes one only when it knows something the
+   * table does not, and `handBack` is the caller that does.
+   */
+  resolvableBy?: PipelineStage[];
   /**
    * The instant of the answer this park has read and not yet acted on — set
    * only by the consume that read it (ADR-0023). Absent on every ordinary
@@ -1776,10 +1803,27 @@ function applyPark(run: Run, options: ParkOptions): void {
   const count = reAsked ? (run.reAsksAfterAnswer ?? 0) + 1 : run.reAsksAfterAnswer;
   const caught = reAsked && (count ?? 0) >= RE_ASK_LIMIT;
 
+  const kind = caught ? ("escalation" as const) : options.kind;
+  const stage = options.stage ?? run.stage;
+  // **Recorded, not derived later** (ADR-0049 D5). A wait with no stage at all
+  // is the one case nothing can be worked out for, and it is also the one no
+  // park produces: every caller either names a stage or the run already has
+  // one.
+  const endedBy =
+    options.resolvableBy ??
+    (stage === undefined ? undefined : resolvableBy(kind, stage));
+  if (endedBy !== undefined && endedBy.length === 0) {
+    throw new Error(
+      `Refusing to park ${run.id} on a wait no stage can end. A wait with ` +
+        "nothing that can resolve it leaves the ticket asking a person for " +
+        "something for ever (ADR-0049 D6).",
+    );
+  }
   run.wait = {
     on: caught ? ESCALATION_WAIT : options.waitingOn,
-    ...(caught ? { kind: "escalation" as const } : options.kind === undefined ? {} : { kind: options.kind }),
+    ...(kind === undefined ? {} : { kind }),
     ...(options.waitCursor === undefined ? {} : { opened: options.waitCursor }),
+    ...(endedBy === undefined ? {} : { resolvableBy: endedBy }),
   };
   run.consumedAnswerAt = options.consumedAnswerAt;
   run.reAsksAfterAnswer = count;
@@ -1880,12 +1924,26 @@ function normaliseWait(run: unknown): unknown {
   // the dead-data-that-looks-live this collapse exists to make unwritable, so
   // the normalisation does not write it either.
   if (typeof waitingOn !== "string") return rest;
+  // An old wait carries no `resolvableBy`, so it is given the one the stage
+  // and the kind imply — the same answer `applyPark` would write today. A run
+  // with no stage recorded gets none, and `resolveWait` reads it as it always
+  // did.
+  const stage = typeof rest.stage === "string" ? rest.stage : undefined;
+  const kind = typeof waitingKind === "string" ? waitingKind : undefined;
+  const endedBy =
+    stage === undefined
+      ? undefined
+      : resolvableBy(
+          kind as WaitKind | undefined,
+          stage as PipelineStage,
+        );
   return {
     ...rest,
     wait: {
       on: waitingOn,
-      ...(typeof waitingKind === "string" ? { kind: waitingKind } : {}),
+      ...(kind === undefined ? {} : { kind }),
       ...(typeof waitCursor === "string" ? { opened: waitCursor } : {}),
+      ...(endedBy === undefined ? {} : { resolvableBy: endedBy }),
     },
   };
 }

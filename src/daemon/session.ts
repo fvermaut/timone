@@ -978,11 +978,24 @@ function handBack(
   outcome: { comment: TicketComment },
   log: (message: string) => void,
 ): void {
+  // **The wait names the stage that can end it** (ADR-0049 D6). This is the
+  // caller the decision was written for: it parks a *work* stage on a
+  // conversation wait, and until now it said `conversation` and nothing else
+  // — so what could answer the question was worked out later, by a reader
+  // consulting a table this writer never looked at. `ivtrends` #58 sat
+  // finished and pushed while its ticket asked a person for an answer
+  // ([timone#76](https://github.com/fvermaut/timone/issues/76)).
+  //
+  // The stage it hands back to is the stage it parked at, because a handoff
+  // resumes where it stopped. Naming it here is what lets `releaseClaim` ask
+  // whether the work it just did belongs to this wait.
+  const endedBy: PipelineStage[] = [stage];
   store.park(id, {
     waitingOn: "your answer to the question in my last comment.",
     kind: "conversation",
     stage,
     waitCursor: outcome.comment.createdAt,
+    resolvableBy: endedBy,
   });
   log(`parked ${id} — ${stage} handed back, waiting on you`);
 }

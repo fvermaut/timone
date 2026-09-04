@@ -589,6 +589,33 @@ export function waitFor(stage: PipelineStage): WaitKind {
   return STAGES[stage].waits;
 }
 
+/**
+ * Which stages may end a wait — the ones a resumption is allowed to enter
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D5).
+ *
+ * **It is recorded on the wait rather than derived when the wait is read**,
+ * which is the whole point: `resolveWait` used to work out what could answer a
+ * wait from a table the writer had never consulted, so a stage could park on a
+ * question and be wrong about who could settle it without anything noticing.
+ * `handBack` wrote `conversation` whatever stage it was at, and `ivtrends` #58
+ * sat finished and pushed while its ticket asked a person for an answer
+ * ([timone#76](https://github.com/fvermaut/timone/issues/76)).
+ *
+ * **The stage that asked is the stage that judges**, for every kind but one.
+ * A gate's decision is read against the gate the stage opened; a conversation
+ * is judged by the stage that has to decide whether the answer settles
+ * anything; an escalation's handback note defaults to the stage it stopped at.
+ * `review` is the exception: a reviewer's words are acted on by `remediation`
+ * and by nothing else.
+ */
+export function resolvableBy(
+  kind: WaitKind | undefined,
+  stage: PipelineStage,
+): PipelineStage[] {
+  return kind === "review" ? ["remediation"] : [stage];
+}
+
 /** Whether a run at `stage` owns a work branch, and so holds its project. */
 export function ownsBranch(stage: PipelineStage): boolean {
   return STAGES[stage].ownsBranch;

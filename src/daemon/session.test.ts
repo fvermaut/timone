@@ -2524,6 +2524,13 @@ describe("the execution stage", () => {
     // what is said after it counts as an answer to it.
     expect(run?.wait?.kind).toBe("conversation");
     expect(run?.stage).toBe("execution");
+    // **And the wait says which stage can end it** (ADR-0049 D6). This is the
+    // caller the decision was written for: a handoff parks a *work* stage on
+    // a conversation wait, and until now it said `conversation` and nothing
+    // else — what could answer the question was worked out later, by a reader
+    // consulting a table this writer never looked at. `ivtrends` #58 sat
+    // finished and pushed while its ticket asked a person for an answer.
+    expect(run?.wait?.resolvableBy).toEqual(["execution"]);
     // The handoff comment's own instant, read off the thread the session
     // posted into — not a clock, which a second of skew would make swallow a
     // reply typed immediately.

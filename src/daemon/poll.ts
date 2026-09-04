@@ -2906,8 +2906,14 @@ async function resolveWait(
       .filter((body) => body !== "");
     if (words.length === 0) return undefined;
 
+    // Where it resumes is read off the wait rather than named here
+    // (ADR-0049 D5): the writer recorded what could end this wait, and a
+    // second opinion at the reader is what let a wait and its answer disagree
+    // in the first place. The fallback is for a ledger written before the
+    // field existed.
+    const into = run.wait?.resolvableBy?.[0] ?? "remediation";
     return {
-      context: { stage: "remediation", feedback: words.join("\n\n---\n\n") },
+      context: { stage: into, feedback: words.join("\n\n---\n\n") },
     };
   }
 

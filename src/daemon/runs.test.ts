@@ -2475,9 +2475,12 @@ describe("the wait as one value", () => {
 
     const store = RunStore.open(path);
 
-    // A parked run keeps its words, and gains a wait it never had a field for.
+    // A parked run keeps its words, gains a wait it never had a field for,
+    // and is told which stage could end it — the answer `applyPark` would
+    // write for it today (ADR-0049 D5).
     expect(store.get("scratch-app#4/1")?.wait).toEqual({
       on: "the next stage to be built",
+      resolvableBy: ["triage"],
     });
     // And a run the old daemon finished keeps nothing: `complete` cleared
     // `waitingOn` alone and left a kind and a cursor behind for a wait nothing
@@ -2520,5 +2523,59 @@ describe("the wait as one value", () => {
     expect(() =>
       store.park(run.id, { waitingOn: "something else" }),
     ).toThrow(/parked/);
+  });
+});
+
+describe("a wait that says what can end it", () => {
+  it("refuses a wait no stage can end", () => {
+    // ADR-0049 D6. A wait nothing can resolve leaves the ticket asking a
+    // person for something for ever, so it is made unwritable rather than
+    // detectable.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+
+    expect(() =>
+      store.park(run.id, {
+        waitingOn: "something nobody can give me",
+        kind: "conversation",
+        stage: "execution",
+        resolvableBy: [],
+      }),
+    ).toThrow(/no stage can end/);
+  });
+
+  it("accepts a park with no wait at all, which is a different thing", () => {
+    // Finding (b) of the phase's pre-flight, guarded. An absent wait means a
+    // run stopped because a stage's machinery does not exist, and a slice that
+    // conflated it with an empty `resolvableBy` would take out every unbuilt
+    // stage's park.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+
+    const parked = store.park(run.id, {
+      waitingOn: "the next stage to be built",
+      stage: "triage",
+    });
+
+    expect(parked.wait?.kind).toBeUndefined();
+    expect(parked.wait?.resolvableBy).toEqual(["triage"]);
+  });
+
+  it("says remediation ends a review, because nothing else acts on one", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/7-work");
+    store.recordPullRequest(run.id, 9);
+
+    const parked = store.park(run.id, {
+      waitingOn: "your review of pull request #9",
+      kind: "review",
+      stage: "delivery",
+    });
+
+    expect(parked.wait?.resolvableBy).toEqual(["remediation"]);
   });
 });
