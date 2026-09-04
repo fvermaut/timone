@@ -857,6 +857,11 @@ describe("the STATUS.md rule, read back off real commits", () => {
           "-m",
           trailed("feat: the eleventh piece", "session-status-merged"),
         );
+        // `origin/main`, never the bare name. The fixture clones an empty bare
+        // repository and pushes `HEAD:main`, so the *local* branch is whatever
+        // the runner's `init.defaultBranch` says — `main` on this laptop and
+        // `master` on CI, where this failed. The remote-tracking ref is the one
+        // the push actually creates, and it is also the ref the rule reads.
         git(
           projectDir,
           "merge",
@@ -864,7 +869,7 @@ describe("the STATUS.md rule, read back off real commits", () => {
           "--no-edit",
           "-m",
           trailed("Merge main into the eleventh piece", "session-status-merged"),
-          "main",
+          "origin/main",
         );
         git(projectDir, "push", "-q", "origin", "HEAD:timone/34-11");
       },
