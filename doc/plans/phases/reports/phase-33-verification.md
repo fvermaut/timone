@@ -234,3 +234,105 @@ Nothing that was `verified` before this pass was observed to be broken. Eighteen
 **3. Carried forward from the completion report, not observed by this pass.** The link to `github.com/fvermaut/ivtrends/pull/22` in the file's 2026-08-19 history line returns 404 to an unauthenticated fetch. The completion report says it is most likely a private-repo link, that it predates phase 33, and that it sat outside the phase's edit scope. It is repeated here so it is not lost.
 
 **The closing gate did not pass.** It asks that every MUST criterion be PASS or HUMAN-CHECK; eighteen are BLOCKED. Nothing failed, nothing regressed, and no fix loop was needed or spent — the pass simply could not see most of what it is required to look at.
+
+---
+
+# Iteration 2 — 2026-09-04
+
+- **Date:** 2026-09-04
+- **Phase:** [phase-33.md](../phase-33.md) — unchanged: stamped `Complete`, completion report [phase-33-complete.md](phase-33-complete.md)
+- **Scope:** un-anchored, as in iteration 1 — the claimed set is empty by design; this pass is the standing regression set plus carried-forward HUMAN-CHECK items, of which the completion report carries none.
+- **Live gate owed:** **yes — PRD-01.R15 and PRD-01.R20.** This phase's diff edits `standards/baseline/ui-ux.md`; R15 declares `Depends-on: .claude/skills/timone-onboard/, standards/` and R20 declares `Depends-on: standards/baseline/`, and the edited file lies under both prefixes. Both carry `Last live gate: never`. No other `live` criterion's declared prefixes are touched — the rest name `src/…` or `.claude/skills/…` paths, and the phase's diff touches only `doc/plans/phases/…` and `standards/baseline/ui-ux.md`.
+- **Regression set (derived):** PRD-01.R2 and PRD-01.R3 — the only criteria at this HEAD with priority MUST, verify-via `api`, and status `verified`. **Narrowing then removes both** (see Regression below), so the narrowed set is empty.
+- **Branch:** `timone/39-primary-sources-owed-for-the-ui-ux-basel` @ `1bbaf405b17d726b0f3e60cb2e76efe9b8b88868`. The working tree was clean at entry. **`origin/main` (`e8b8f2b`) was merged in first, and this is the environment fact that decides the iteration:** iteration 1's question was answered by the human, the answer was recorded as [ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md), and its register changes — eighteen criteria re-marked `Verify-via: live` with `Last live gate:` lines, and `Depends-on:` lines on the two remaining `api` criteria — were committed on `main` after this branch was cut. A pass computed against the stale registers at the old HEAD would have re-derived the twenty-criterion set the human has already ruled unreachable, so `main` was merged in under the same rule that merges a parent's verification commits into a stacked phase: the register flips this pass must read were absent from the branch's ancestry. The merge commit is `docs`-clean (no conflicts; `main` had not touched `standards/baseline/ui-ux.md`).
+
+## Environment (iteration 2)
+
+Unlike iteration 1, this pass ran at the timone root on the human's machine, not in a container. The application under verification is the same command-line program, stood up the same way:
+
+```
+npm ci                 # exit 0
+npm run build          # tsc — exit 0
+node dist/cli.js --help
+```
+
+Every probe runs `node dist/cli.js`, the built program.
+
+**Build-health smoke, run once, and evidence for nothing:** `npm test` — 40 test files, 1615 tests, all passing, 15.0s, on the merged HEAD. No probe result contradicts it, so the instrument-alarm rule did not fire.
+
+## Independence declaration (iteration 2)
+
+**Read:** both criteria registers, whole, as merged at this HEAD (`doc/specs/prd/prd-01-process-layer.criteria.md`, `doc/specs/prd/prd-02-inversion-of-control.criteria.md`); the phase file's status line and requirements header; the completion report, whole; **iteration 1 of this same report, whole** — a re-verification appends to the existing report and cannot do so blind; it is a stage-7 artifact of this same phase, carrying verdicts and evidence, never build knowledge, and no expectation in this iteration comes from it — every expectation is quoted or derived from the registers; `STATUS.md` as it stands on the default branch; `README.md` and `CONTEXT.md`; `timone.yaml`; the `package.json` scripts; Timone's own `process.md` (stage 7) and the stage-7 skill; the file listing of `doc/plans/phases/probes/`. There is still no `doc/standards.md` in this repository.
+
+**Not read:** `phase-33-handoffs.md`, any diff or `git show` of code (`git diff --name-only` was used for the narrowing computation, which needs paths and never content), anything under `src/`, the committed test suite, and the ADRs — with one named exception: ADR-0051 is *referenced* above as the record of the human's answer because `STATUS.md` names it; its text was not opened. The ticket's own text and thread were not opened.
+
+## Verdict summary (iteration 2)
+
+| ID | Priority | Channel | Verdict | Loop |
+| --- | --- | --- | --- | --- |
+| PRD-01.R2 | MUST | api | PASS (narrowed out; run anyway — see Regression) | 0 |
+| PRD-01.R3 | MUST | api | PASS (narrowed out; run anyway — see Regression) | 0 |
+| PRD-01.R15 | MUST | live | LIVE-GATE — **fresh gate owed by this phase** | — |
+| PRD-01.R20 | MUST | live | LIVE-GATE — **fresh gate owed by this phase** | — |
+| PRD-01.R4, R5, R8–R13, R17 | MUST | live | LIVE-GATE — no fresh gate owed; last gate `never` | — |
+| PRD-02.R1 | MUST | live | LIVE-GATE — no fresh gate owed; last gate [phase-32-live-gate.md](phase-32-live-gate.md) (marked-ticket clause only) | — |
+| PRD-02.R13 | MUST | live | LIVE-GATE — no fresh gate owed; last gate [phase-32-live-gate.md](phase-32-live-gate.md) | — |
+| PRD-02.R2, R4, R6, R7, R8 | MUST | live | LIVE-GATE — no fresh gate owed; last gate `never` | — |
+
+No FAIL, no REGRESSION, no BLOCKED. Iteration 1's eighteen BLOCKED verdicts are superseded by the register the human re-marked: those criteria are now on the `live` channel, where not running here is the expected outcome, not a blocked one.
+
+## Evidence (iteration 2)
+
+The committed probes were run by the committed runner, `node doc/plans/phases/probes/run.mjs --regression`, which derives the set from the registers at run time. It derived exactly `PRD-01.R2` and `PRD-01.R3` from the merged registers — the same two this report derives by hand — and ran both probes, break leg first:
+
+```
+--- PRD-01.R2: PASS (5 clause labels, 5 passing)   — every break leg RED first
+--- PRD-01.R3: PASS (4 clause labels, 4 passing)   — every break leg RED first
+| PRD-01.R2 | PASS | R2 — Project manifest
+| PRD-01.R3 | PASS | R3 — Workspace sync
+2 passing, 0 failing, 0 with no probe.
+```
+
+Both criteria are outside the narrowed scope (below), so these runs are reported as instrument health and surplus evidence, not as owed scope. Full per-clause output matches iteration 1's form and is not repeated.
+
+## HUMAN-CHECK scripts (iteration 2)
+
+None issued and none carried forward, as in iteration 1. The two criteria whose gates this phase owes are `live`, not `human`: what they need is a watched, running machine, not a person reading steps off a page, and this stage is forbidden to write a manual script for them.
+
+## Live gates (iteration 2)
+
+Eighteen criteria in the registers are on the `live` channel; sixteen have never had a gate and two were last observed by [phase-32-live-gate.md](phase-32-live-gate.md) (2026-09-04). **This phase owes a fresh gate for two of them:**
+
+- **PRD-01.R15** — `Depends-on: .claude/skills/timone-onboard/, standards/`; this phase's diff touches `standards/baseline/ui-ux.md`, under `standards/`. Last live gate: `never`.
+- **PRD-01.R20** — `Depends-on: standards/baseline/`; same touched file. Last live gate: `never`.
+
+For the other sixteen, this phase's diff touches none of their declared prefixes, so no fresh gate is owed; their last-gate lines are quoted in the verdict table.
+
+## Regression (iteration 2)
+
+The derived set at this HEAD is PRD-01.R2 and PRD-01.R3 — every other formerly-`verified` MUST+api criterion left the derivation when the human re-marked it `live`. **The narrowing then removes both:**
+
+- **PRD-01.R2 removed** — `Depends-on: src/manifest.ts, src/commands/projects.ts`; the phase's diff touches neither.
+- **PRD-01.R3 removed** — `Depends-on: src/commands/workspace.ts, src/git.ts`; the phase's diff touches neither.
+
+The narrowed regression set is therefore **empty**, and the phase's diff — `doc/plans/phases/…` and `standards/baseline/ui-ux.md` only — is the whole of the computation. The committed runner does not yet implement the narrowing and ran both probes anyway; both passed with their break legs seen red first, so the empty set's conclusion (zero regressions) holds with or without the narrowing.
+
+## Probes (iteration 2)
+
+**2 probes proven able to fail, 0 not** — the same two committed in iteration 1, run unchanged from the directory (neither criterion is `revised`, so neither was rewritten). Nine clause labels printed, nine break legs red first. No probe was authored this pass: the narrowed scope is empty and no in-scope criterion is on a probe-bearing channel. Clause coverage is unchanged from iteration 1 and no register clause was added to R2 or R3 by the merge.
+
+## Fix-loop accounting (iteration 2)
+
+**0 of 2 loops consumed.** No FAIL and no REGRESSION was observed.
+
+## Register changes (iteration 2)
+
+**None.** The claimed set is empty; the two probe-run criteria were already `verified` and passed; `live` criteria leave the register untouched by rule — their `Last live gate:` lines are written by a gate's own report commit, never by this stage.
+
+## Handed to the human (iteration 2)
+
+**1. The phase owes a live gate on PRD-01.R15 and PRD-01.R20 before delivery, and that is the one thing between this ticket and its pull request.** This pass may not perform one: a live gate is a supervised run against real infrastructure, and nobody was watching this session. The change under those two criteria is small — five citation edits and a history line in `standards/baseline/ui-ux.md` — but the criteria declare the whole of `standards/` as what they rest on, and the rule is deliberately mechanical. What a watched run must observe is what the two criteria say: the baseline entries still land unconditionally in an onboarded project's `doc/standards.md` (R15, R20 clause 1), and the register/browser-check derivations of R20's other clauses. Both gates would be their criteria's first (`Last live gate: never`).
+
+**2. Carried forward again, still unobserved:** the `github.com/fvermaut/ivtrends/pull/22` link in the file's 2026-08-19 history line returns 404 unauthenticated; predates this phase, outside its edit scope.
+
+**The closing gate did not pass, for a narrower reason than iteration 1's.** Nothing failed, nothing regressed, nothing is blocked, and no loop was spent. Every MUST criterion is PASS or LIVE-GATE — but a phase that owes a fresh live gate does not pass until that gate has run and its report is committed, and this phase owes two.
