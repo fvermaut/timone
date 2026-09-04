@@ -1,6 +1,6 @@
 # Phase 33: Primary sources for the screen-of-figures craft rules
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-33-complete.md](reports/phase-33-complete.md).
 
 > **Companion phases:** [phase-03](phase-03.md) (complete) — drafted this file the first time and set the pattern this phase follows: cited, ~1 page, a closing `## Sources` list. No other phase touches this file. Governing decision: [ADR-0039](../../adr/0039-the-look-is-gated-twice.md) — it is why the *Reading a screen of figures* section exists at all, and its own text is what admits the section shipped without the sources every other section in this entry carries.
 
