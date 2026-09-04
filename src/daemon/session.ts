@@ -19,7 +19,7 @@ import {
   type ConversationChannel,
 } from "../channels/conversation.js";
 import { TerminalChannel } from "../channels/terminal.js";
-import { technicalFault, type TechnicalFault } from "./faults.js";
+import { SpawnRefusal, technicalFault, type TechnicalFault } from "./faults.js";
 import { takeHold } from "./holder.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
@@ -637,6 +637,44 @@ export function failedComment(reason: string): string {
 }
 
 /**
+ * What a run the daemon will not start says it is waiting on
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D4, timone#75).
+ *
+ * It names the refusal, because that is the fact somebody can act on, and it
+ * says the run never started — which is what tells it apart from a session
+ * that ran and stopped.
+ */
+export function refusedWait(reason: string): string {
+  return `me — I couldn't start this at all: ${reason}`;
+}
+
+/**
+ * The comment posted when the daemon has refused to start the same run for
+ * the same reason, cycle after cycle (ADR-0049 D4, timone#75).
+ *
+ * ivtrends #57 read "picked up, about to start" for two and a half hours
+ * while this was happening once a minute, and the only place it was ever said
+ * was a terminal nobody was reading.
+ */
+export function refusedComment(reason: string, times: number): string {
+  return [
+    "**I could not start this at all, and I have stopped trying.**",
+    "",
+    `I tried ${times} times and was refused every time, for the same reason:`,
+    "",
+    `> ${reason}`,
+    "",
+    "That is about the machine I run on, not about this ticket. No session " +
+      "ever started, so nothing here has been read, written or decided.",
+    "",
+    "**What I need from you:** have a look at what is stopping it. The " +
+      "standing note below has the command that opens this ticket with me in " +
+      "your terminal.",
+  ].join("\n");
+}
+
+/**
  * The comment posted when a run stopped twice on its own machinery and the
  * human is being asked
  * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
@@ -1087,8 +1125,10 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { manifest } = this.options;
 
     if (!(project.name in manifest.projects)) {
-      throw new Error(
+      // Never clears by itself: the manifest is a file somebody has to edit.
+      throw new SpawnRefusal(
         `Refusing to spawn a session for "${project.name}": it is not declared in the manifest`,
+        false,
       );
     }
 
@@ -1107,7 +1147,10 @@ export class AgentSessionSpawner implements SessionSpawner {
       // daemon's own log and leaves the run untouched, so the next cycle
       // starts it as soon as the changes are committed — where failing the
       // run would leave every marked ticket needing `timone retry` by hand.
-      throw new Error(uncommittedRefusal(checkout.uncommitted));
+      // Clears on its own, and is the one refusal that must never reach the
+      // ticket: it is the human in the middle of an edit, and the next cycle
+      // starts the run as soon as they commit (timone#75's working half).
+      throw new SpawnRefusal(uncommittedRefusal(checkout.uncommitted), true);
     }
     if (checkout.pin !== undefined) {
       this.log(`pinned ${run.id} — timone at ${checkout.pin.commit.slice(0, 7)}`);

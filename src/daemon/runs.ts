@@ -298,6 +298,34 @@ const runSchema = z.strictObject({
    * Absent means none, which is what every run written before this means too.
    */
   deaths: z.array(z.string()).optional(),
+  /**
+   * The daemon's standing refusal to start this run, when it has one
+   * (ADR-0049 D4, second half).
+   *
+   * **It counts consecutive refusals for the same reason**, and it is reset
+   * by a run actually starting or by the reason changing. That is what bounds
+   * timone#75: a refusal that never clears was said once a minute into a
+   * terminal nobody was reading, and the ticket meanwhile said "I've picked
+   * this up".
+   *
+   * **Written without touching `updatedAt`**, exactly as
+   * {@link RunStore.heartbeat} is and for the opposite reason. `staleRuns`
+   * reads the later of the heartbeat and `updatedAt`, so a refusal recorded
+   * through an ordinary write would be a run proving itself alive by failing
+   * to start — which is the 83 minutes that issue measured.
+   */
+  refusal: z
+    .strictObject({
+      /** What the spawner said, in its own words. */
+      reason: z.string(),
+      /** How many cycles running it has said it. */
+      count: z.number().int().positive(),
+      /** When it first said it. */
+      since: z.string(),
+      /** Whether the human has already been told. Told once, not once a cycle. */
+      told: z.boolean().optional(),
+    })
+    .optional(),
   /** Guardrail-hook violations recorded against this run (R15). */
   flags: z.array(z.string()),
   createdAt: z.string(),
@@ -802,6 +830,7 @@ export class RunStore {
   activate(id: string, sessionId: string, holder?: Holder): Run {
     return this.transition(id, "active", (run) => {
       run.sessionId = sessionId;
+      run.refusal = undefined;
       // The session is the holder now, replacing the claim's (ADR-0049 D1).
       // A claim is a slot held for a session that may never start; once one
       // has, the process worth asking about is the one running it.
@@ -1059,6 +1088,52 @@ export class RunStore {
       // holder belongs to the session, as the session id beside it does.
       rearmed.holder = undefined;
     });
+  }
+
+  /**
+   * Record that the daemon refused to start this run, and answer how many
+   * times running it has refused for the same reason (ADR-0049 D4).
+   *
+   * **`updatedAt` is deliberately left alone**, as {@link heartbeat} leaves
+   * it alone. A refusal is not the run moving and it is certainly not the run
+   * living: `staleRuns` reads the later of `updatedAt` and the heartbeat, so
+   * stamping it here would make a run immortal by failing to start.
+   */
+  refuse(id: string, reason: string): Run {
+    const run = this.mutable(id);
+    const same = run.refusal?.reason === reason;
+    run.refusal = same
+      ? { ...(run.refusal as NonNullable<Run["refusal"]>), count: run.refusal!.count + 1 }
+      : { reason, count: 1, since: this.now() };
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Forget a standing refusal, because the run got past it.
+   *
+   * Called where a spawn succeeded rather than where a session ends: what the
+   * count measures is the daemon's ability to *start* the run, and a session
+   * that started and then failed is a different piece of news.
+   */
+  started(id: string): Run {
+    const run = this.mutable(id);
+    if (run.refusal === undefined) return { ...run };
+    run.refusal = undefined;
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Say that a standing refusal has been put in front of the human, so it is
+   * not put there again on the next cycle.
+   */
+  refusalTold(id: string): Run {
+    const run = this.mutable(id);
+    if (run.refusal === undefined) return { ...run };
+    run.refusal = { ...run.refusal, told: true };
+    this.persist();
+    return { ...run };
   }
 
   /**

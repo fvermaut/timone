@@ -111,3 +111,36 @@ export function technicalFault(error: string | undefined): TechnicalFault | unde
   if (LINK_SIGNS.some((sign) => text.includes(sign))) return "link";
   return undefined;
 }
+
+/**
+ * The spawner declining to start a session at all — not a session that ran
+ * and stopped
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D4's second half).
+ *
+ * **`clears` is the whole reason this is a type rather than a message.**
+ * There are two refusals and they want opposite treatment. One clears on its
+ * own — uncommitted changes in Timone's own folder, which the human is in the
+ * middle of making — and retrying that for ever is correct. The other never
+ * clears: a missing workspace, a stage with no prompt, anything wrong with
+ * the wiring. Retrying *that* for ever is the stuck run of timone#75, which
+ * sat at "picked up, about to start" for two and a half hours.
+ *
+ * **An unclassified error does not clear**, which is the safe direction and
+ * the same one {@link technicalFault} takes: a refusal nobody has taught this
+ * about is put in front of a human rather than repeated in silence.
+ */
+export class SpawnRefusal extends Error {
+  constructor(
+    message: string,
+    readonly clears: boolean,
+  ) {
+    super(message);
+    this.name = "SpawnRefusal";
+  }
+}
+
+/** Whether a refusal is the kind that goes away without anybody being told. */
+export function refusalClears(error: unknown): boolean {
+  return error instanceof SpawnRefusal && error.clears;
+}

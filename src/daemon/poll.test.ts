@@ -60,7 +60,14 @@ function breakdownIn(
 import { enqueue, pending, requestsDir } from "./requests.js";
 import type { Holder } from "./holder.js";
 import { RunStore, type Run } from "./runs.js";
-import { pollOnce, type SessionSpawner, type SpawnContext } from "./poll.js";
+import {
+  pollOnce,
+  reclaimedReason,
+  type PollResult,
+  type SessionSpawner,
+  type SpawnContext,
+} from "./poll.js";
+import { SpawnRefusal } from "./faults.js";
 import { processStage, stageLabel } from "./pipeline.js";
 import { AgentSessionSpawner } from "./session.js";
 
@@ -2289,6 +2296,114 @@ describe("a run whose holder can be asked about", () => {
     expect(result.reclaimed).toEqual([]);
     expect(store.get(run.id)?.status).toBe("active");
     expect(store.get(run.id)?.holder?.pid).toBe(9100);
+  });
+});
+
+describe("a spawn the daemon keeps refusing", () => {
+  const TWO_MINUTES = 2 * 60 * 1000;
+
+  /** A store whose clock the test moves a minute at a time. */
+  function tickingStore(): { store: RunStore; at: (iso: string) => void } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-refusal-"));
+    tempDirs.push(dir);
+    let instant = "2026-09-04T10:00:00Z";
+    return {
+      store: RunStore.open(join(dir, ".timone", "state.json"), {
+        now: () => instant,
+      }),
+      at: (iso) => {
+        instant = iso;
+      },
+    };
+  }
+
+  /** A spawner that refuses every run, always for the same reason. */
+  function refusingSpawner(error: Error): SessionSpawner {
+    return {
+      async spawn(): Promise<void> {
+        throw error;
+      },
+    };
+  }
+
+  /** `count` cycles a minute apart, the sweep judging at two minutes. */
+  async function cycles(
+    store: RunStore,
+    at: (iso: string) => void,
+    adapter: TicketingAdapter,
+    spawner: SessionSpawner,
+    count: number,
+  ): Promise<PollResult> {
+    let result: PollResult | undefined;
+    for (let minute = 0; minute < count; minute += 1) {
+      at(`2026-09-04T10:${String(minute).padStart(2, "0")}:00Z`);
+      result = await pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        staleAfterMs: TWO_MINUTES,
+      });
+    }
+    return result as PollResult;
+  }
+
+  it("does not let a refusal stand in for a sign of life", async () => {
+    // The trap this slice has to avoid rather than the fault it found. A
+    // refusal recorded through an ordinary write would stamp `updatedAt`, and
+    // `staleRuns` reads the later of that and the heartbeat — so eighty
+    // refusals would keep a run that has never started looking alive.
+    const { store, at } = tickingStore();
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const spawner = refusingSpawner(new Error("the box has no workspace"));
+
+    await cycles(store, at, adapter, spawner, 2);
+
+    const run = store.all()[0] as Run;
+    expect(run.updatedAt).toBe("2026-09-04T10:00:00Z");
+  });
+
+  it("says it once where a person can see it, not once a cycle", async () => {
+    const { store, at } = tickingStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const spawner = refusingSpawner(new Error("the box has no workspace"));
+
+    await cycles(store, at, adapter, spawner, 8);
+
+    const said = comments.filter((c) => c.body.includes("has no workspace"));
+    expect(said).toHaveLength(1);
+    expect(store.all()[0]?.status).toBe("parked");
+  });
+
+  it("says nothing at all about a refusal that clears on its own", async () => {
+    // Uncommitted changes in Timone's own folder. Retrying that for ever is
+    // correct — it is what "I'll start on my next check" is written for — and
+    // a slice that bounded both refusals would have broken the working half.
+    const { store, at } = tickingStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const spawner = refusingSpawner(
+      new SpawnRefusal("you have uncommitted changes in timone", true),
+    );
+
+    await cycles(store, at, adapter, spawner, 8);
+
+    expect(comments.some((c) => c.body.includes("uncommitted"))).toBe(false);
+    expect(store.all()[0]?.status).toBe("picked-up");
+  });
+
+  it("names the refusal, and never calls it a machine that stopped", async () => {
+    // ivtrends #57 was told "the machine running it stopped before the work
+    // was finished". Nothing had stopped: the daemon was refusing to start it,
+    // once a minute, in silence.
+    const { store, at } = tickingStore();
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const spawner = refusingSpawner(new Error("the box has no workspace"));
+
+    await cycles(store, at, adapter, spawner, 8);
+
+    const bodies = comments.map((c) => c.body).join("\n");
+    expect(bodies).toContain("has no workspace");
+    expect(bodies).not.toContain(reclaimedReason());
   });
 });
 

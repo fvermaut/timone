@@ -78,7 +78,14 @@ import {
 // `waitOf` comes from there too, so a run put back onto its wait is described
 // by one function wherever it is put back — the spawner's release path and
 // this loop's consume must not drift on what a run was waiting for.
-import { failedComment, stoppedTwiceComment, waitOf } from "./session.js";
+import { refusalClears } from "./faults.js";
+import {
+  failedComment,
+  refusedComment,
+  refusedWait,
+  stoppedTwiceComment,
+  waitOf,
+} from "./session.js";
 
 /** What a spawn is resuming, when it is resuming something. */
 export interface SpawnContext {
@@ -959,6 +966,67 @@ async function applyRequest(
   }
 }
 
+/**
+ * How many cycles running the daemon may refuse to start the same run for the
+ * same reason before the human is told (ADR-0049 D4, timone#75).
+ *
+ * Three. One is a coincidence and the poll interval is a minute, so three is
+ * about three minutes of a run going nowhere — short enough that nobody waits
+ * two and a half hours, long enough that a refusal clearing on its own never
+ * reaches a ticket.
+ */
+const REFUSAL_LIMIT = 3;
+
+/**
+ * Count a refused spawn, and put it in front of the human once it has
+ * repeated (ADR-0049 D4, timone#75).
+ *
+ * **A refusal that clears on its own is not counted at all.** Uncommitted
+ * changes in Timone's own folder are the human in the middle of an edit, and
+ * the next cycle starts the run as soon as they commit — bounding that would
+ * break the half of this that already works.
+ *
+ * **Parked and not failed.** The run has never started, so there is nothing to
+ * retry and nothing broke; what is wanted is for somebody to look. A park is
+ * answerable and carries a call to action, where `failed` would offer
+ * `timone retry` for a run that would be refused again the moment it ran.
+ */
+async function boundRefusal(
+  run: Run,
+  project: TicketingProject,
+  error: unknown,
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
+
+  // Recorded whichever kind it is, because the record is also what keeps the
+  // sweep off the run: a run the daemon is refusing to start has not died,
+  // and reclaiming it would report "the machine running it stopped" about a
+  // machine that is running perfectly and saying no.
+  const reason = oneLine(error);
+  const refused = store.refuse(run.id, reason).refusal;
+  if (refused === undefined) return;
+
+  // Counted, and never told. This is the refusal that goes away by itself.
+  if (refusalClears(error)) return;
+
+  if (refused.count < REFUSAL_LIMIT || refused.told === true) return;
+
+  store.park(run.id, {
+    waitingOn: refusedWait(reason),
+    kind: "escalation",
+  });
+  store.refusalTold(run.id);
+  log(`refused ${run.id} — ${refused.count} times, asking the human`);
+  await adapter.postComment(
+    project,
+    run.ticket,
+    refusedComment(reason, refused.count),
+  );
+}
+
 /** Who is holding a run, as a log line names them. */
 function heldBy(run: Run): string {
   const holder = run.holder;
@@ -1064,6 +1132,16 @@ async function reclaimStale(
     // holder on another machine cannot be asked, and a run with no holder is
     // every run written before this — so witnessed time still protects a
     // laptop that slept, which is what phase 17 verified.
+    // A run the daemon is refusing to start is not a run that died, and it
+    // must not be reported as one (ADR-0049 D4). ivtrends #57 was told "the
+    // machine running it stopped before the work was finished" while nothing
+    // had stopped — the daemon was refusing it once a minute, in silence.
+    // What bounds it is the refusal's own count, not this sweep.
+    if (run.refusal !== undefined) {
+      log(`refused ${run.id} — ${run.refusal.reason}`);
+      continue;
+    }
+
     const held = store.hold(run);
     if (held === "alive") {
       log(`holding ${run.id} — ${heldBy(run)} is still running`);
@@ -1489,12 +1567,14 @@ async function pollProject(
             store.initiativeFor(project.name, occupier.ticket) !== undefined,
           ),
         );
+        store.started(occupier.id);
         result.spawned.push(occupier.id);
         log(`spawn  ${occupier.id}`);
       } catch (error) {
         const line = `${project.name}: could not start a session for #${occupier.ticket}: ${oneLine(error)}`;
         result.errors.push(line);
         log(`error  ${line}`);
+        await boundRefusal(occupier, project, error, deps, result, log);
       }
     }
   }
@@ -2004,12 +2084,14 @@ async function resumeAnswered(
         });
       }
       await deps.spawner.spawn(run, project, resumption.context);
+      deps.store.started(run.id);
       result.resumed.push(run.id);
       log(`resume ${run.id} → ${resumption.context.stage ?? run.stage}`);
     } catch (error) {
       const line = `${project.name}: could not resume #${run.ticket}: ${oneLine(error)}`;
       result.errors.push(line);
       log(`error  ${line}`);
+      await boundRefusal(run, project, error, deps, result, log);
     }
     return;
   }
