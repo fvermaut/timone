@@ -2,27 +2,21 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-04, late night.
+**Last updated:** 2026-09-05.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** The check on ticket #39 ran again with your answer in force, and your answer worked: nothing is blocked any more. One last thing stands between that ticket and its pull request, and it needs you to watch a run.
+> **Read this first.** Ticket #39's work is finished and its pull request is open. You told the machine to close it without the two watched checks, and the pull request says so plainly. Merging it is the last step, and it is yours.
 
-**1. Run a watched check for [#39](https://github.com/fvermaut/timone/issues/39) so its work can be delivered.**
+**1. Merge [pull request #89](https://github.com/fvermaut/timone/pull/89) — it closes [#39](https://github.com/fvermaut/timone/issues/39).**
 
-The re-run went as your decision said it should: the two promises that can be checked from a terminal were checked again and hold, and the eighteen that need a running machine now each point at the last watched run that saw them — instead of stopping the job. The full account is in [the report, second part](doc/plans/phases/reports/phase-33-verification.md), on the ticket's branch `timone/39-primary-sources-owed-for-the-ui-ux-basel`.
+The change is five citations and a history line in the design-rules file; nothing a rule requires was changed. It was checked twice by a reader who did not build it, and everything a terminal can check holds — the account is in [the report](doc/plans/phases/reports/phase-33-verification.md) on the ticket's branch. The two watched checks the rules asked for were **not** run: after the ticket stopped at that same point three times, you chose to skip them, and the pull request records that choice. Merging it is your acceptance.
 
-One rule from your decision now applies to this very ticket: a change gets a watched run before delivery when it touches something a promise rests on. This ticket edited the design-rules file `standards/baseline/ui-ux.md`, and two promises rest on that folder — that every project gets the design and accessibility rules without exception, and that a new project's rules file lists them. Neither has ever had a watched run. So the job stopped before its pull request, on purpose, and a written reply will not move it.
+Why the ticket asked you three times for the same thing is now its own ticket, [#88](https://github.com/fvermaut/timone/issues/88): the two promises say they rest on the whole design-rules folder, so even a citations-only edit dragged two full watched runs behind it, and nothing stopped the machine repeating a stop you had already answered. Two questions on that ticket are yours to decide, at no hurry.
 
-To run it with you watching:
-
-```
-timone takeover timone#39
-```
-
-**Why it matters:** nothing Timone has built for itself has reached a pull request yet. This is the last stop before the first one.
+**Why it matters:** nothing Timone has built for itself has reached a pull request before this one.
 
 **2. What it asked, and what was decided.**
 
