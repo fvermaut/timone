@@ -78,7 +78,7 @@ import {
 // `waitOf` comes from there too, so a run put back onto its wait is described
 // by one function wherever it is put back — the spawner's release path and
 // this loop's consume must not drift on what a run was waiting for.
-import { failedComment, waitOf } from "./session.js";
+import { failedComment, stoppedTwiceComment, waitOf } from "./session.js";
 
 /** What a spawn is resuming, when it is resuming something. */
 export interface SpawnContext {
@@ -202,6 +202,13 @@ export interface PollDeps {
 export interface PollResult {
   /** Run ids reclaimed from a dead daemon this cycle. */
   reclaimed: string[];
+  /**
+   * Run ids whose holder was found gone and which were put back to work at
+   * the stage they died in (ADR-0049 D4). They are on {@link
+   * PollResult.reclaimed} as well: the sweep took them back either way, and
+   * this says which of them are going again rather than waiting on a human.
+   */
+  rearmed: string[];
   /** Run ids newly picked up this cycle. */
   pickedUp: string[];
   /** Run ids newly queued behind an occupying run this cycle. */
@@ -610,6 +617,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   const log = deps.log ?? (() => {});
   const result: PollResult = {
     reclaimed: [],
+    rearmed: [],
     pickedUp: [],
     queued: [],
     spawned: [],
@@ -1100,6 +1108,31 @@ async function reclaimStale(
         await concludeReview(run, project, threadsFor(run.ticket), deps, result, log);
         continue;
       }
+    }
+
+    // A run whose holder is provably gone is re-armed once and parks on the
+    // second death (ADR-0049 D4, following ADR-0034). A run judged dead by
+    // witnessed time alone keeps the ending phase 17 verified: witnessed time
+    // is a well-founded inference and a pid is a fact, and only the second is
+    // worth spending a second session on.
+    if (held === "gone") {
+      const outcome = store.reclaim(run.id, reclaimedReason());
+      result.reclaimed.push(run.id);
+      if (outcome.rearmed) {
+        result.rearmed.push(run.id);
+        log(
+          `re-arm ${run.id} — ${heldBy(run)} is gone, so it goes again at ` +
+            `${run.stage ?? "the start"}`,
+        );
+        continue;
+      }
+      log(`stopped twice ${run.id} — ${heldBy(run)} is gone, asking the human`);
+      await adapter.postComment(
+        project,
+        run.ticket,
+        stoppedTwiceComment(outcome.run.deaths ?? []),
+      );
+      continue;
     }
 
     const reason = reclaimedReason();

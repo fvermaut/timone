@@ -2208,6 +2208,69 @@ describe("a run whose holder can be asked about", () => {
     expect(lines.some((line) => line.includes("was not running for"))).toBe(true);
   });
 
+  it("puts a run whose holder died back to work, and tells the ticket nothing", async () => {
+    // ADR-0034: a machine that broke is not the ticket's business while the
+    // machine still has a way through. The first death costs a session and
+    // nothing else — no comment, no command for the human to type.
+    const { store, set } = watchedStore([]);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1", holderOf("timone daemon", 4213));
+    store.claimBranch(run.id, "timone/7-slow");
+    store.setStage(run.id, "execution");
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    watchingSince(store, "2026-09-04T10:00:00Z", "2026-09-04T10:09:00Z");
+    set("2026-09-04T10:09:00Z");
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    });
+
+    expect(result.rearmed).toEqual([run.id]);
+    expect(store.get(run.id)?.stage).toBe("execution");
+    expect(store.get(run.id)?.branch).toBe("timone/7-slow");
+    expect(comments.some((c) => c.body.includes("Something went wrong"))).toBe(
+      false,
+    );
+  });
+
+  it("asks the human after the second death, carrying both reasons", async () => {
+    const { store, set } = watchedStore([]);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1", holderOf("timone daemon", 4213));
+    store.claimBranch(run.id, "timone/7-slow");
+    store.setStage(run.id, "execution");
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+
+    watchingSince(store, "2026-09-04T10:00:00Z", "2026-09-04T10:09:00Z");
+    set("2026-09-04T10:09:00Z");
+    const deps = {
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      staleAfterMs: FOUR_INTERVALS,
+    };
+    await pollOnce(deps);
+
+    // The re-armed run gets a second session, and that one dies too.
+    store.activate(run.id, "session-2", holderOf("timone daemon", 9000));
+    watchingSince(store, "2026-09-04T10:09:00Z", "2026-09-04T10:20:00Z");
+    set("2026-09-04T10:20:00Z");
+    const result = await pollOnce(deps);
+
+    expect(result.rearmed).toEqual([]);
+    // Parked and not failed. A park is answerable; a failure is a dead end the
+    // human has to type a command to leave.
+    expect(store.get(run.id)?.status).toBe("parked");
+    expect(comments.some((c) => c.body.includes("stopped both times"))).toBe(true);
+  });
+
   it("does not take a run away from a live takeover", async () => {
     // timone#63, replayed. A terminal holds the run through a conversation
     // that may last an hour, and the sweep took it back after two minutes —

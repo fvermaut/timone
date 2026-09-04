@@ -2354,3 +2354,87 @@ describe("who is holding a run", () => {
     expect(() => store.claim(run.id, holderOf("timone daemon", 4213))).not.toThrow();
   });
 });
+
+describe("a run whose holder died", () => {
+  /** A store whose idea of the process table the test writes. */
+  function storeWatching(alive: readonly number[]): RunStore {
+    let tick = 0;
+    return RunStore.open(statePath(), {
+      now: () => `2026-09-04T10:${String(tick++).padStart(2, "0")}:00Z`,
+      livenessOf: (holder) => (alive.includes(holder.pid) ? "alive" : "gone"),
+    });
+  }
+
+  /** A holder as the spawner records one. */
+  function holderOf(pid: number): Holder {
+    return {
+      token: `token-${pid}`,
+      command: "timone daemon scratch-app#7/1",
+      pid,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    };
+  }
+
+  /** A run building at `execution`, on its branch, held by a live process. */
+  function building(store: RunStore, pid: number): string {
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1", holderOf(pid));
+    store.claimBranch(run.id, "timone/7-slow");
+    store.setStage(run.id, "execution");
+    return run.id;
+  }
+
+  it("re-arms the run the first time, keeping its branch and its stage", () => {
+    // ADR-0049 D4, following ADR-0034: a machine that broke is not the
+    // ticket's business while the machine still has a way through.
+    const store = storeWatching([]);
+    const id = building(store, 4213);
+
+    const outcome = store.reclaim(id, "the machine running it stopped");
+
+    expect(outcome.rearmed).toBe(true);
+    expect(outcome.run.status).toBe("picked-up");
+    expect(outcome.run.stage).toBe("execution");
+    expect(outcome.run.branch).toBe("timone/7-slow");
+    expect(outcome.run.holder).toBeUndefined();
+  });
+
+  it("parks the run the second time, carrying both reasons, and does not fail it", () => {
+    // `parked` and not `failed` is the whole point: the human can answer a
+    // park, and a failure is a dead end they have to type a command to leave.
+    const store = storeWatching([]);
+    const id = building(store, 4213);
+    store.reclaim(id, "the machine running it stopped");
+
+    store.activate(id, "session-2", holderOf(9000));
+    const outcome = store.reclaim(id, "the box could not reach the model");
+
+    expect(outcome.rearmed).toBe(false);
+    expect(outcome.run.status).toBe("parked");
+    expect(outcome.run.waitingOn).toContain("the machine running it stopped");
+    expect(outcome.run.waitingOn).toContain("the box could not reach the model");
+  });
+
+  it("keeps the chunk number a re-arm was given", () => {
+    // The count of re-arms is its own field. `seq` is which chunk of the
+    // ticket this is, and a re-armed run is the same chunk being built again.
+    const store = storeWatching([]);
+    const id = building(store, 4213);
+
+    const outcome = store.reclaim(id, "the machine running it stopped");
+
+    expect(outcome.run.seq).toBe(1);
+    expect(outcome.run.id).toBe(id);
+  });
+
+  it("refuses to re-arm a run somebody cancelled between the two deaths", () => {
+    const store = storeWatching([]);
+    const id = building(store, 4213);
+    store.reclaim(id, "the machine running it stopped");
+    store.cancel(id, "you closed the ticket");
+
+    expect(() => store.reclaim(id, "and again")).toThrow(/cancelled/);
+  });
+});

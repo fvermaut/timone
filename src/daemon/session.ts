@@ -625,8 +625,41 @@ export function failedComment(reason: string): string {
     "",
     "Nothing was decided about this ticket, so nothing here is final.",
     "",
-    "**What I need from you:** re-mark this ticket when you want me to try again," +
-      " or leave it and tell me what looks wrong.",
+    // **Not "re-mark this ticket"**, which is what this line said until
+    // ADR-0049 D7. The mark is already on — nothing took it off — so there is
+    // no gesture there for the reader to make, and timone#27 is people trying
+    // it and watching nothing happen. The standing note on the ticket carries
+    // `timone retry`, which does work, and it is kept in one place rather
+    // than spelled here in a second dialect.
+    "**What I need from you:** the standing note below has the command that " +
+      "starts this again. Or leave it and tell me what looks wrong.",
+  ].join("\n");
+}
+
+/**
+ * The comment posted when a run stopped twice on its own machinery and the
+ * human is being asked
+ * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+ * D4).
+ *
+ * Both reasons, because two attempts that stopped differently are two pieces
+ * of news and the second is usually the one that can be acted on. It asks for
+ * nothing itself: the run is parked on an escalation, and the ticket's call to
+ * action already carries the command that opens it in a terminal.
+ */
+export function stoppedTwiceComment(deaths: readonly string[]): string {
+  const attempts = deaths.map((reason, index) => `${index + 1}. ${reason}`);
+  return [
+    "**I tried this twice and it stopped both times before the work was done.**",
+    "",
+    ...attempts,
+    "",
+    "Neither of those was about this ticket — both times it was the machine " +
+      "running the work. Nothing was decided here, so nothing above is final.",
+    "",
+    "**What I need from you:** have a look at what stopped it. The call to " +
+      "action below has the command that opens this ticket with me in your " +
+      "terminal.",
   ].join("\n");
 }
 
@@ -698,7 +731,8 @@ export function unclassifiedComment(): string {
     "I read it and finished without reaching a conclusion I could act on, which",
     "is my failure and not yours.",
     "",
-    "**What I need from you:** re-mark this ticket to make me try again, or add a line saying what you're after.",
+    "**What I need from you:** the standing note below has the command that " +
+      "starts this again. Or add a line saying what you're after.",
   ].join("\n");
 }
 

@@ -279,6 +279,25 @@ const runSchema = z.strictObject({
    * file from before this existed loads unchanged at `version: 1`.
    */
   cancellation: z.string().optional(),
+  /**
+   * Every time this run's holder was found gone, in the words of what was
+   * observed, oldest first
+   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+   * D4).
+   *
+   * **It is the re-arm count and the reasons at once**, because the second
+   * park has to carry both: a run stopped twice tells the human what happened
+   * on each attempt, and one number could not.
+   *
+   * It is not {@link Run.seq} — a re-armed run keeps its chunk number, since
+   * it is the same chunk being built again — and it is not
+   * {@link Run.reAsksAfterAnswer}, which counts a stage asking the same
+   * question twice. Those are three different things and each has cost a
+   * defect by being confused with another.
+   *
+   * Absent means none, which is what every run written before this means too.
+   */
+  deaths: z.array(z.string()).optional(),
   /** Guardrail-hook violations recorded against this run (R15). */
   flags: z.array(z.string()),
   createdAt: z.string(),
@@ -1043,6 +1062,64 @@ export class RunStore {
   }
 
   /**
+   * Record that a run's holder was found gone, and do what ADR-0049 D4 says:
+   * re-arm it once, and park it on the human the second time.
+   *
+   * **Re-armed rather than failed, following ADR-0034.** A machine that broke
+   * is not the ticket's business while the machine still has a way through,
+   * and terminal `failed` on the first death is what made timone#27, #63 and
+   * #78 each end in a hand fix — the human typing `timone retry` for a
+   * decision the daemon could have taken.
+   *
+   * **The second one parks, and a park is not a dead end.** The human can
+   * answer it, where a failure has to be left by typing a command. Both
+   * reasons go on it, because two attempts that died differently are two
+   * different pieces of news.
+   *
+   * The re-arm is `active → failed → picked-up`, both legal moves in
+   * {@link TRANSITIONS}, applied as **one** write. Doing it as two calls would
+   * let the queue promote a run of the same project into the gap between them,
+   * and the re-arm would then be refused by the run that took its place.
+   */
+  reclaim(id: string, reason: string): { run: Run; rearmed: boolean } {
+    const current = this.mutable(id);
+    if (current.status === "cancelled") {
+      throw new Error(
+        `Run ${id} was cancelled, so there is nothing to re-arm — a run ` +
+          "somebody abandoned is not started again on the machine's own say-so.",
+      );
+    }
+    const deaths = [...(current.deaths ?? []), reason];
+
+    if (deaths.length > RE_ARM_LIMIT) {
+      const run = this.transition(id, "parked", (parked) => {
+        parked.deaths = deaths;
+        parked.holder = undefined;
+        applyPark(parked, {
+          waitingOn: stoppedTwiceWait(deaths),
+          kind: "escalation",
+        });
+      });
+      return { run, rearmed: false };
+    }
+
+    // Both hops checked against the table, and neither taken through
+    // `transition`, so nothing is promoted between them.
+    assertAllowed(id, current.status, "failed");
+    assertAllowed(id, "failed", "picked-up");
+    current.status = "picked-up";
+    current.failure = undefined;
+    current.sessionId = undefined;
+    current.flags = [];
+    current.holder = undefined;
+    current.deaths = deaths;
+    stopWaiting(current);
+    current.updatedAt = this.now();
+    this.persist();
+    return { run: { ...current }, rearmed: true };
+  }
+
+  /**
    * Stamp a run as still alive (ADR-0020, superseding ADR-0017).
    *
    * `updatedAt` is deliberately left alone: a heartbeat is not the run
@@ -1461,6 +1538,39 @@ function initiativeKey(project: string, initiative: number): string {
 /** One introduction per ticket, keyed the same way runs are keyed. */
 export function introductionKey(project: string, ticket: number): string {
   return `${project}#${ticket}`;
+}
+
+/**
+ * How many times a run whose holder died is put back to work before the
+ * human is asked (ADR-0049 D4).
+ *
+ * One. A machine that broke once is worth another go; twice running is a
+ * machine that is going to keep breaking, and paying for a third attempt
+ * before saying so is spending money to delay the same question.
+ */
+const RE_ARM_LIMIT = 1;
+
+/**
+ * What a run stopped twice by its own machinery says it is waiting on.
+ *
+ * Both reasons, in the order they happened, because they are usually not the
+ * same reason and the second one is what the human can act on.
+ */
+function stoppedTwiceWait(deaths: readonly string[]): string {
+  return (
+    "me — it stopped twice on its own and I've run out of ways through: " +
+    `first ${deaths[0]}, then ${deaths[deaths.length - 1]}.`
+  );
+}
+
+/** Refuse a move the lifecycle does not allow, in {@link RunStore.transition}'s words. */
+function assertAllowed(id: string, from: RunStatus, to: RunStatus): void {
+  const allowed = TRANSITIONS[from];
+  if (allowed.includes(to)) return;
+  throw new Error(
+    `Run ${id} cannot go from ${from} to ${to} ` +
+      `(allowed: ${allowed.join(", ") || "nothing — it is finished"})`,
+  );
 }
 
 /**
