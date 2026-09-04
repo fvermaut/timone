@@ -1,6 +1,6 @@
 # Phase 32: Timone works its own tickets
 
-> **Status:** Awaiting approval — written 2026-09-04.
+> **Status:** 32a–32d built and green, 2026-09-04. **32e is waiting on fvermaut** — see [What 32e is waiting for](#what-32e-is-waiting-for) at the end of this file. 32f follows 32e.
 >
 > Governing decision: [ADR-0050](../../adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md) — the whole of this phase.
 >
@@ -23,6 +23,22 @@ ADR-0050 D5 narrows one guard. This is a second one, and it is not in the decisi
 **Finding (c) — a boxed self-run clones the same repository twice, and that is correct.** `container-runtime.ts:401` clones `$TIMONE_REMOTE` to `$WORKSPACE/timone` at `$TIMONE_COMMIT`, then `$PROJECT_REMOTE` to `$WORKSPACE/timone/projects/<name>` on the work branch. For a self-run both remotes are this repository, at two different commits: the harness the run *obeys*, and the project the run *changes*. Written down so nobody removes one as a duplicate.
 
 **Finding (d) — "the daemon is out of date" is two questions, not one.** [timone#5](https://github.com/fvermaut/timone/issues/5) is about the **daemon's own process**, which loads its code once. A boxed run already pins `TIMONE_COMMIT` and refuses a commit that is not on the remote, so a *run* is never stale in the way a daemon is. A message that does not say which of the two it is talking about will send an operator to restart the wrong thing.
+
+## ✏ Findings from execution, 2026-09-04
+
+Three things the pre-flight did not see. The first blocked 32e and was fixed; the other two are recorded and not resolved.
+
+**Finding (e) — a project with no compose file could not be run at all, and Timone is one.** `bringUpServices` (`src/daemon/services.ts`) **threw** when a project committed no compose file, and the throw happens before the container exists, so the spawn is refused. Timone is a command-line program with no services beside it. Every self-run would have failed on its first cycle with a message telling fvermaut to add a database to Timone.
+
+The rule was right for the two projects that existed when it was written and wrong as a rule about every project. Not committing a compose file is a statement, not an omission. It now stands nothing up and says so on the daemon's log, keeping the message that named what to add for a project where it really was an omission. Fixed in `da4a419`, before 32e rather than during it.
+
+**Finding (f) — the workspace and the project are both called `timone` in a finding's own words.** `collectEvidence` labels the workspace `"timone"` (`hooks.ts`), and the project checkout's label is its manifest key, which is now also `timone`. So on a self-run a message reading `timone: STATUS.md was written on …` does not say which of the two clones it means.
+
+**The rules are right; only the words are ambiguous.** Neither 32b nor 32c decides anything on the label — 32b compares the repositories' `origin`, and 32c distinguishes the workspace by its position in the evidence rather than by its name. This is a readability cost on exactly the run 32e watches, and it is one line to fix. It is recorded here rather than fixed because nothing in this phase's red-green asked for it.
+
+**Finding (g) — an old `timone` binary cannot read a new ledger.** The state file is a `z.strictObject`, so an unknown top-level key fails the parse and `readState` throws. 32a adds one (`daemon`). The moment a phase-32 daemon writes a cycle, a globally installed `timone` from before phase 32 fails on **every** command that reads the ledger — `status`, `takeover`, `daemon` — with `Invalid daemon state file`.
+
+This is the established pattern rather than a new hazard: `previews`, `introductions` and `initiatives` each did the same. It is written down because there is a globally installed old binary on this machine today, and because it sharpens 32a's own subject: an old daemon beside a new ledger is not merely stale, it is stopped.
 
 ## Requirements
 
@@ -190,3 +206,22 @@ Completion report at `reports/phase-32-complete.md`, and the first reading of D2
 **The true half.** A run writes `STATUS.md` on its work branch because that is what the process asks of every stage, and the file reaches `main` when the pull request does. So a status file on a **run's own work branch, in the repository that run is working**, is expected and silent. The prefix is already known to this module — `checkBranchPlacement` uses it.
 
 **Everywhere else the finding stands**, and that includes an interactive session's own branch. It fired twice on this session's branches on 2026-09-04 and it was right both times: the file was not going to be seen until a pull request merged, and saying so once per branch is the reminder the rule was written to give.
+
+## What 32e is waiting for
+
+**Written 2026-09-04, after 32a–32d were built and pushed.** Everything below was checked, not assumed.
+
+**Ready.**
+
+- 32a, 32b, 32c and 32d are built, green on the whole suite (1615 tests), and pushed to `origin/docs/phase-32-plan` at `da4a419` — so a boxed run can pin the commit it needs.
+- `timone` is in `timone.yaml`. `node dist/cli.js projects list` shows it and `workspace sync` cloned it to `projects/timone`. `~/dev/timone` was checked by its git status before and after and is unchanged — same commit, same branch, same working tree.
+- The Timone App can mint a token for `fvermaut/timone`, so the installation already covers this repository.
+- `timone-agent:latest` is built and Docker is running.
+- Finding (e) is fixed, so a project with no compose file no longer refuses to start.
+
+**Not ready, and both are fvermaut's.**
+
+1. **A daemon is already running and it has a run in flight.** Pid 74396, started 20:52, holding the ledger, with `ivtrends#74` picked up. 32e must be watched with the process table clear — phase 31's gate found that `--state` isolates the ledger and not the tracker, and that mistake costs more here because the project is Timone. Stopping it would kill that run, so it is not a thing to do on his behalf.
+2. **No Timone issue carries the mark.** #39, #15 and #20 are open and unlabelled. Marking an issue is what starts a real run that opens a real pull request on this repository, and D3 says the merge is his.
+
+**One more thing to know before restarting.** The daemon that runs 32e must be this branch's code, not the globally installed `timone` — and once it has written one cycle, the old binary can no longer read the ledger at all (finding (g)).
