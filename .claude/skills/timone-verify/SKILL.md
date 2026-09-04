@@ -1,6 +1,6 @@
 ---
 name: timone-verify
-description: Stage 7 (Verification) of the Timone process — on a managed project, check a completed phase's observable behaviour against the criteria register from a context that did not watch the build, per channel (api / browser / human), write the verification report, run the bounded verify-fix loop, and flip the register statuses. Use when a phase file is stamped `Complete`, when execution's closing hands over to verification, or when the user says "verify phase NN", "run verification", or "check the delivered phase".
+description: Stage 7 (Verification) of the Timone process — on a managed project, check a completed phase's observable behaviour against the criteria register from a context that did not watch the build, per channel (api / browser / human / live), write the verification report, run the bounded verify-fix loop, and flip the register statuses. Use when a phase file is stamped `Complete`, when execution's closing hands over to verification, or when the user says "verify phase NN", "run verification", or "check the delivered phase".
 argument-hint: <project-name> <phase-ref: phase-NN or a path to the phase file>
 ---
 
@@ -75,7 +75,13 @@ Each gate stops verification. When one fires you write **nothing** into the proj
 A pass covers, and the report lists, both of:
 
 1. **The claimed set** — the requirement IDs the phase file's header carries (cross-checked against the completion report's requirements line).
-2. **The standing regression set** — derived at verify time from the register(s), never maintained anywhere: every criterion with priority **MUST**, verify-via **`api`**, and status **`verified`**, as the register stands at the phase branch's HEAD. List the derived set explicitly, even when empty, so the computation audits.
+2. **The standing regression set** — derived at verify time from the register(s), never maintained anywhere: every criterion with priority **MUST**, verify-via **`api`**, and status **`verified`**, as the register stands at the phase branch's HEAD, **narrowed to those whose declared dependencies this phase's diff touches**. List the derived set explicitly, even when empty, **and list what the narrowing removed**, so the computation audits.
+
+**The narrowing, in full** ([ADR-0051](../../../doc/adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D4). A criterion may carry a `Depends-on:` line listing repository path prefixes. When it does, it is in the set only if the phase's diff touches one of them. **A criterion with no `Depends-on` is always in scope** — so a register nobody has annotated behaves exactly as it always did, and narrowing is something somebody chose, never something that happened.
+
+Declared rather than inferred, and this is the whole reason the field exists: a rule reading the diff's own paths gets it wrong in both directions. A fourteen-line change to `standards/baseline/ui-ux.md` cannot break *"the daemon picks up a marked ticket"*, and it is precisely what could break *"the accessibility baseline is mandatory"*. Only the criterion knows what it rests on.
+
+**Under-declaring is the risk, and it is a regression escaping.** A criterion whose dependencies are not confidently known carries no line at all.
 
 **An un-anchored phase** (stamped so in its header, per stage 5) claims nothing by design: the pass is the regression set plus the carried-forward HUMAN-CHECK items from the completion report, and the gate degenerates to **zero regressions**. Stage 6's validation already covered the un-anchored deliverable itself; do not invent criteria for it.
 
@@ -92,6 +98,13 @@ Each criterion carries a `Verify-via` channel; each of its clauses gets its own 
 - **`api`** — terminal-checkable. HTTP against the running app, direct database readback through the project's own client tooling. Run the criterion's committed probe when one exists; author it from the clause alone when it does not. This channel forms the standing regression suite, and it is the one the saved probes pay off on.
 - **`browser`** — driven UI checks (Playwright, or the playwright MCP tools). For **user-facing deliverables the baseline leg is unconditional**: the automated accessibility scan (violations are failures — the baseline's rule, enforced here), a keyboard-only pass in which focus assertions are mechanical (where `document.activeElement` lands after each action is a fact, not a judgement), and the baseline's reflow checks. **Do not write these yourself** — they are Timone's, at `standards/baseline/probes/`, they take a page address, and they are the same for every project. Write a project probe only for what the project's own criteria assert. Where tooling cannot reach a baseline requirement, that clause becomes a HUMAN-CHECK with a precise script — never a silent skip, never an assumed pass.
 - **`human`** — reported as **HUMAN-CHECK** with a precise manual script in the template below: setup, numbered steps, the expected observation, where to record the result. Emitting the script *is* this channel's deliverable; performing it is the human's act, on the human's schedule. Never simulate one, never mark one performed on your own authority.
+- **`live`** ✏ Added 2026-09-04 ([ADR-0051](../../../doc/adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1) — what only a **supervised run against real infrastructure** can observe: a real daemon, real credentials, a real forge, real containers, real managed projects. Reported as **LIVE-GATE**.
+
+  **You never perform one.** The deliverable is a line naming the report that last observed it, read from the criterion's own `Last live gate:` field, plus a statement of whether this phase owes a fresh gate — it does when its diff touches what the criterion declares it depends on. Never author a probe for it, never write a manual script for it, never flip its status.
+
+  **It is not `human`, and the difference is the performer.** *"The daemon picks up a marked ticket and opens a pull request on somebody else's repository"* is not something a person does by reading steps off a page; it is a machine run with a person watching. Writing a script for it would name the wrong performer and would be simulated in practice, which is the failure `human` already forbids.
+
+  **It is not `BLOCKED` either.** BLOCKED means the check could not run and the gate stops. A `live` criterion is not expected to run here, so it does not block: it reports its last gate and the pass continues.
 
 ## The probes
 
@@ -142,7 +155,7 @@ Where the clause asserts a **transformation of input** (trimming, normalization,
 
 ## Verdicts and the register
 
-**Verdicts:** PASS / FAIL / HUMAN-CHECK / BLOCKED. **REGRESSION** is the FAIL variant reserved for a criterion that entered the pass already `verified` — same failure class, counts against the gate's zero-regressions clause, consumes the same fix loop; the distinct label exists because shipped behaviour broke and stage 9 reads it differently. **BLOCKED** asserts nothing about behaviour: register untouched, gate blocked, human routed, no loop consumed.
+**Verdicts:** PASS / FAIL / HUMAN-CHECK / LIVE-GATE / BLOCKED. **REGRESSION** is the FAIL variant reserved for a criterion that entered the pass already `verified` — same failure class, counts against the gate's zero-regressions clause, consumes the same fix loop; the distinct label exists because shipped behaviour broke and stage 9 reads it differently. **BLOCKED** asserts nothing about behaviour: register untouched, gate blocked, human routed, no loop consumed. **LIVE-GATE** is the `live` channel's only outcome: register untouched, gate **not** blocked, no loop consumed — it reports which gate last observed the criterion and whether this phase owes a fresh one. It is deliberately not BLOCKED: a criterion that was never going to run here has not failed to run.
 
 **Only this stage writes the register's `Status` field** — once per pass, at pass conclusion, never mid-pass, in the same commit as the report and the probes: `docs: verify phase NN — <theme>` on the phase's branch. The report-flip coupling in one commit is the evidence link; the register line itself stays bare.
 
@@ -151,7 +164,7 @@ Where the clause asserts a **transformation of input** (trimming, normalization,
 - `verified` → `failed` on an unresolved REGRESSION, with a dated `✏` marker naming the report.
 - A requirement carrying an unperformed HUMAN-CHECK clause stays `draft`, with a dated partial-evidence marker linking the report and the script — a requirement's status is the weakest of its clauses' outcomes, and a script nobody has run is not evidence.
 
-**The closing gate, restated from the spec:** all MUST criteria PASS or HUMAN-CHECK, zero regressions, within 2 verify-fix loops.
+**The closing gate, restated from the spec:** all MUST criteria PASS, HUMAN-CHECK or LIVE-GATE, zero regressions, within 2 verify-fix loops. **A phase that owes a fresh live gate does not pass** until the gate has run and its report is committed — that is the one way a LIVE-GATE line stops a phase.
 
 ## The verification report
 
@@ -163,6 +176,7 @@ Where the clause asserts a **transformation of input** (trimming, normalization,
 - **Date:** <YYYY-MM-DD>
 - **Phase:** [phase-NN.md](../phase-NN.md) — stamped `Complete`, completion report [phase-NN-complete.md](phase-NN-complete.md)
 - **Scope:** <claimed IDs, or "un-anchored (stamped <date>, <who>) — regression set only">
+- **Live gate owed:** <yes, naming the criteria whose dependencies this diff touches — or no>
 - **Regression set (derived):** <the MUST+api+verified IDs at this HEAD, or "empty — nothing verified before this pass">
 - **Branch:** `phase-NN-<slug>` @ `<sha>` <— plus "merged in `phase-MM-<slug>` first: its verification commits were absent from this branch's ancestry" when that applied>
 
@@ -195,9 +209,13 @@ Read: <the allowed-list artifacts actually read, by path>. Not read: handoffs, d
 - **Expected.** <what the human must observe for the clause to pass>
 - **Record.** <where the result lands: this report's next iteration, and the register marker to update>
 
+## Live gates
+
+<One line per `live` criterion in scope: its ID, the report its `Last live gate:` names (or `never`), and whether this phase owes a fresh one. Or "No criterion in scope is on the `live` channel." Stated, never omitted — a section that disappears when empty is a section a reader stops looking for.>
+
 ## Regression
 
-<The derived set's results, one line per ID — or "The derived regression set is empty; nothing to re-run." Stated, never omitted.>
+<The derived set's results, one line per ID — or "The derived regression set is empty; nothing to re-run." Stated, never omitted. Then what the narrowing removed: one line per criterion dropped and the `Depends-on` prefix that dropped it, or "Nothing was narrowed out." The removals are the part a reader has to be able to argue with.>
 
 ## Probes
 
@@ -226,9 +244,9 @@ Before finishing, update the target project's `STATUS.md` — **on the project's
 2. Read the allowed list — and nothing else.
 3. Check gate 1 (completion stamp) and gate 2 (register or un-anchored stamp). If either fires, stop, route, write nothing.
 4. Check out the phase branch; merge in an unancestored parent's verification commits when stacked; refuse dirt.
-5. Derive the scope: claimed set + computed regression set. List both.
+5. Derive the scope: claimed set + computed regression set, narrowed by `Depends-on` against this phase's diff. List both, and list what the narrowing removed.
 6. Stand up the environment in production form (gate 3 if it will not come up — everything BLOCKED, report, stop).
-7. For every in-scope criterion, run its committed probe, or author one when there is none or the criterion is `revised`. Run the shared baseline probes for the browser channel. Every probe runs its break step first: red, then green. Compare each register clause list against the labels the probe printed and close any gap. Write HUMAN-CHECK scripts where only a human can look.
+7. For every in-scope criterion, run its committed probe, or author one when there is none or the criterion is `revised`. Run the shared baseline probes for the browser channel. Every probe runs its break step first: red, then green. Compare each register clause list against the labels the probe printed and close any gap. Write HUMAN-CHECK scripts where only a human can look. **For a `live` criterion, write neither probe nor script** — report its last gate and whether this phase owes a fresh one.
 8. FAILs → defect briefs → fresh fix context → full re-verify. Max 2 loops, then exhaustion protocol.
 9. Write the report, commit the probes, and flip the register — all in one `docs: verify phase NN — <theme>` commit. Update `STATUS.md`.
 10. Report per Closing below.

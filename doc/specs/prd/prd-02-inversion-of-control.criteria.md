@@ -15,7 +15,10 @@
         - **✗ The 2026-08-03 evidence clause *"[#5] ended the cycle with **0 comments** and 0 labels"* is superseded and is no longer reproducible.** It is corrected here rather than deleted, per [ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md)'s consequence. On a project with `introduce_unmarked: true` an unmarked issue now ends its first cycle with **one** comment and still **0** labels and **0** runs. `#5` itself carried that line at the gate: *"add the `timone` label if you would like me to pick this up"*. **The "0 labels, 0 runs" half of the old evidence is untouched and is the half that was ever doing the work.**
         - **✗ [STATUS.md](../../../STATUS.md)'s sentence that an unlabelled ticket *"is left completely alone"* is superseded**, and is struck through there rather than removed. The accurate sentence is that an unlabelled ticket is never *worked on* without the label — the permission boundary is intact — and that where the project has introductions enabled it now gets exactly one comment saying so.
         - **The mark label's meaning is narrowed, and that is the whole of the change to this requirement's world:** it stops bounding what Timone *says* and still bounds what it *does*.
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** [phase-32-live-gate.md](../../plans/phases/reports/phase-32-live-gate.md), 2026-09-04 — **the marked-ticket clause only.** `timone#39` was labelled at 20:06 and the cycle produced a run in `timone status` and one acknowledgement comment. The unmarked clause was not exercised: no unmarked issue was watched through a cycle, so its last observation remains [phase 20's gate](../../plans/phases/reports/phase-20-live-gate.md).
+- **Depends-on:** `src/daemon/, src/commands/daemon.ts, src/adapters/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a running daemon with its credentials and a tracker it may act on, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN the daemon is running and a managed project has an open GitHub issue marked for Timone
       WHEN the next poll cycle completes
@@ -34,7 +37,10 @@
     - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. Clause by clause: **runs from the timone root** — the spawner's cwd is the root by construction and refuses to be anything else; live session `f8982c83` ran there; **stage skills available** — that session invoked stage 1 and produced a classification, which it could not have done otherwise; **target carried and validated** — the event context names the project and the spawner refuses one absent from `timone.yaml` (unit-proven on an undeclared target, live-resolved on `scratch-app`); **no harness files in the client repo** — `git log --stat` over `scratch-app`'s entire history matches no `.claude/` or `timone.yaml` path.
     - ✏ 2026-08-03 **known limit of the evidence.** The "every file the session touches lies under `projects/X/…`" clause was satisfied by a session that **wrote no files at all** — triage records itself as an issue comment, so containment held vacuously rather than being tested. The guardrail hook that would catch a straying session ran and reported clean, but on the same empty evidence. A session that actually writes into a project — phase 13's execution path — is what makes this clause discriminating.
     - ✏ 2026-08-06 **the vacuous clause is vacuous no longer.** [Phase 13](../../plans/phases/phase-13.md)'s execution, verification, delivery and remediation sessions wrote and committed real files across five slices, three reports and a review fix; every path lay under `projects/scratch-app/…`, the guardrails ran against actual evidence and stayed silent, and `git log --stat --all` on the pilot still matches no harness path. The limit above no longer applies.
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `src/daemon/, src/commands/guardrails.ts`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a daemon-spawned session against a managed project that is not Timone, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a pipeline stage starts for project X
       WHEN the daemon spawns the agent session
@@ -82,7 +88,10 @@
 - **Status:** verified
     - ✏ 2026-08-05 verified by fvermaut at [phase 12](../../plans/phases/phase-12.md)'s 12g gate, on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6). **First clause** — the requirements stage claimed the branch `timone/6-typing-in-the-box-is-fiddly-on-my-phone`, committed and pushed the PRD pair to it, posted a plain-language summary, and the daemon posted the approval request linking the artifact on that branch; the run parked waiting. **Second clause, both directions and in that order** — fvermaut replied with a criticism first ("not sure about introducing the new edit button") and the next cycle re-ran the *same* stage carrying those words (commit `d8ff53d`, withdrawing what he questioned) rather than advancing; he then replied `approve` and the following cycle recorded the approval on the PRD (`4f00941`, status `Active`) and advanced to planning.
     - ✏ 2026-08-05 **the divergence recorded here on 2026-08-03 is resolved**, by the grill of 2026-08-05 and [ADR-0014](../../adr/0014-artifact-first-gates.md): every gated stage now writes its artifact first and gates on it, and `process.md` and both skills were amended to match. This criterion stands as written and is no longer in conflict with anything.
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `src/daemon/, .claude/skills/timone-prd/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a running daemon, a tracker it may act on, and the human's approval reply, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN clarification concluded
       WHEN the requirements stage runs
@@ -117,7 +126,10 @@
 - **Status:** verified
     - ✏ 2026-08-06 verified by fvermaut at [phase 13](../../plans/phases/phase-13.md)'s 13h gate, on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6). **Unattended execution with sub-phase validation** — the daemon resumed the parked run and one session built the approved five-slice `phase-04.md` on `timone/6-typing-in-the-box-is-fiddly-on-my-phone`: one commit per sub-phase after its own validation passed (`d424c6a`, `13c0836`, `53c2de8`, `7a909ae`, `6c712c7`), handoffs, the completion report, and the `Status:` flip the daemon reads as its artifact witness. **Fresh-context verification** — a separate session whose prompt deliberately carries neither the ticket's text nor its thread ran stage 7 and committed the report (`6e02f3b`); the pass was clean first time, 0 of 2 fix loops consumed, and the later review remediation triggered a second full pass (`18ea12f`), also clean. **Failures reported as ticket comments** — three stops landed as plain-language reports rather than silence: two pre-flight refusals over a stray commit another session had left on the branch, and a delivery that produced nothing; each was recovered with `timone retry`, and `.timone/state.json` was never edited by hand.
     - ✏ 2026-08-06 **known limit of the evidence.** The bounded verify-fix loop never fired — both live passes were clean on the first attempt — so "at most two verify-fix iterations" rests on the verify skill's own rule (exercised hand-run in phases 8–10) rather than a daemon-path observation. The failure-report clause was observed for refusals and a produced-nothing stage, not for loop exhaustion.
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `src/daemon/, .claude/skills/timone-execute/, .claude/skills/timone-verify/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a running daemon carrying a run through execution and verification unattended, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN an approved phase plan
       WHEN execution runs unattended
@@ -129,7 +141,10 @@
 - **Priority:** MUST
 - **Status:** verified
     - ✏ 2026-08-06 verified by fvermaut at [phase 13](../../plans/phases/phase-13.md)'s 13h gate. [PR #9](https://github.com/fvermaut/scratch-app/pull/9) was opened by the delivery session **from the work branch**, referencing #6; its body carries the plain-language scope summary, the full verdict table with the one advisory HUMAN-CHECK as an unticked checklist item, and both review axes under separate headings (Spec quoting requirement IDs); the delivery report was committed on the branch (`14d5e24`) **before** the PR opened, and the ticket links the PR in plain words — cross-links both ways, as the criterion asks. The review remediation refreshed the *same* PR as iteration 2 (`a2419f1`) rather than forking a second one. fvermaut merged it, the run completed, and the ticket closed as completed.
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `src/daemon/, src/adapters/, .claude/skills/timone-deliver/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a running daemon and a forge that accepts a pull request, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN execution and verification completed
       WHEN the delivery stage runs
@@ -144,7 +159,10 @@
     - ✏ 2026-08-08 **what this `verified` does not cover, recorded here rather than left for a reader to infer** ([ADR-0021](../../adr/0021-previews-are-reconciled-behind-an-adapter-seam.md)). **Phone review is not delivered.** The first adapter serves `localhost`, so a preview is reachable at the machine and nowhere else — and phone review was the thing PRD-02's exposure question named as being at stake. **Nor is a preview reachable while the machine sleeps**: the host serving previews is the host running the daemon. Both arrive with a managed-platform adapter or an always-on host, neither of which is this phase's. **A third gap is procedural**: the gate's pull request was opened by hand and its run seeded, on fvermaut's call, rather than being carried there by the pipeline — so a preview has never been observed appearing on a pipeline-opened pull request. That closes at no cost on the next real ticket that reaches delivery.
     - ✏ 2026-08-08 **two-previews-at-once is proven of the mechanism, not of the loop.** Two stacks ran simultaneously against real Docker with four distinct ports and two distinct volumes — what `compose.yaml`'s header was written for, and what an allocation scheme would have broken. Through the daemon it could not be arranged: R10 serializes work per project and `claimBranch` refuses a second branch while one run holds the project, so one project cannot today have two runs with open pull requests. Not a defect; a ceiling, and it stops being free as projects are added.
     - ✏ 2026-08-08 **both criteria revised at [phase 16](../../plans/phases/phase-16.md)'s 16a.** This is a **specification correction, not an intent change**: R8 has always asked for a running, reachable preview per pull request. What failed was the wording's ability to go red. The old first clause read *"WHEN the **preview stage** runs"* and the old second *"WHEN the **preview refresh** runs"* — both presuppose a mechanism, and under [ADR-0021](../../adr/0021-previews-are-reconciled-behind-an-adapter-seam.md) the first of them **will not exist**: previews are reconciled by the poll loop, `PIPELINE_STAGES` gains no member, and no run enters a preview state. A criterion whose precondition never becomes true cannot fail, so the requirement read as satisfiable by something nobody built. **The replacements name a state the world reaches** — what a reviewer finds on the pull request — and no mechanism at all: not a stage, not a cycle, not Docker. Both **go red against today's code**, where no preview exists anywhere. This is the same fault, found the same way, that [15d](../../plans/phases/phase-15.md) fixed in R18; correcting the second clause as well as the first was 16a's own call, because leaving one mechanism-shaped precondition beside a corrected one would have re-created the fault at the next reading.
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
+- **Depends-on:** `src/daemon/, src/adapters/docker-preview.ts`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a running daemon, a forge, and `docker` on the host, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN an open Timone pull request on a project bound to previews
       WHEN a reviewer opens that pull request
@@ -214,7 +232,10 @@
     - ✏ 2026-08-05 **known limit of the evidence.** This clause is the one entry in this register verified from fvermaut's direct report of a session **no artifact captured**: an interactive session leaves no ticket comment, no label and no commit, so unlike the daemon path there is nothing to inspect afterwards. The evidence is his observation, recorded here as such rather than dressed up as an inspection. Making the interactive path leave its own trace — the marker convention that is still an open question — is what would let this be re-checked by anyone else.
     - ✏ 2026-08-03 **first clause verified; the requirement is not.** The daemon path was proven at [phase 11](../../plans/phases/phase-11.md)'s 11g gate: [#4](https://github.com/fvermaut/scratch-app/issues/4) was filed in deliberately naive language ("the page feels slow when I add many items"), and the spawned session classified it as a **bug** with a written rationale, applied `triage:bug`, and posted a comment that names no stage, no skill and no process concept — it even reasoned about *why* the call was close (no latency requirement exists, but "shows immediately" does) and connected the ticket to work already agreed on 2026-08-02. The spawner is structurally incapable of pre-classifying: its prompt carries the ticket's raw text and the literal string `triage:<kind>`, never a verdict, and a unit test asserts the absence.
     - ✏ 2026-08-03 **the second clause has no evidence.** "An interactive timone-root session routes a raw request through triage first" is in force in `CLAUDE.md` and `process.md` but has never been observed. Being written down is not evidence. It costs nothing to obtain — the next raw request fvermaut states in a terminal session either routes through triage without a skill being named, or it does not — but until that is watched and recorded, this requirement stays `draft`.
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** [phase-32-live-gate.md](../../plans/phases/reports/phase-32-live-gate.md), 2026-09-04 — `timone#39`, a request written without a process word in it, was classified a chore and the reasoning posted on the ticket.
+- **Depends-on:** `src/daemon/, .claude/skills/timone-triage/`
+    > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a running daemon and a process-naive ticket on a tracker it may act on, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
     - GIVEN a process-naive ticket on a managed project — plain language, naming no stage, skill, or process concept
       WHEN the daemon picks it up
