@@ -193,3 +193,109 @@ A regression test was added with it.
 - **A real conversation.** Three of the checks used a stand-in for `claude`.
   What a person sees inside a takeover is unchanged by this phase, but nobody
   sat in one.
+
+
+---
+
+# The same gate, in a box
+
+> **Run:** 2026-09-04, 18:52–19:17 UTC, on `scratch-app`, with `--runtime
+> container` — the default. Timone commit `695b5f8`, which is
+> [#81](https://github.com/fvermaut/timone/pull/81) merged to `main` and on the
+> remote, which is what the first run could not have.
+
+The gate above named this as the largest thing it could not reach: everything
+was watched `--runtime in-process`, because a boxed run refuses a Timone commit
+nobody has pushed. This is that run repeated.
+
+## What a box changed, and what it did not
+
+**A real session ran inside a container** — `timone-agent:latest`, with its own
+`postgres:17.5` beside it on a private network, both torn down afterwards. It
+cloned Timone at `695b5f8` and `scratch-app` from their remotes:
+
+```
+pinned scratch-app#47/1 — timone at 695b5f8
+cost   scratch-app#47/1 (planning) — 3m02s working · 22 turns · $1.06 · claude-sonnet-5 14.9k out
+parked scratch-app#47/1 — planning handed back, waiting on you
+```
+
+`projects/scratch-app` was `main` with an empty `git status` before and after,
+and no branch was pushed — the session handed back without committing, because
+the step is genuinely blocked on a human. fvermaut's own `ivtrends-db-1` was
+running on the host throughout and the two never met.
+
+**The handback it wrote came out of the box carrying `resolvableBy`:**
+
+```json
+{"on": "your answer to the question in my last comment.", "kind": "conversation",
+ "opened": "2026-09-04T19:15:38Z", "resolvableBy": ["planning"]}
+```
+
+**Everything else behaved as it did in-process**, which is the point rather than
+a disappointment: none of this phase's mechanisms is about where the session
+runs.
+
+- **[#78](https://github.com/fvermaut/timone/issues/78)** — the daemon frozen
+  with `SIGSTOP` at 18:58:18; `timone takeover` waited 2m30s, said so, took its
+  request back; the requests directory was empty and the thawed daemon did
+  nothing with it. The daemon's own log read the freeze correctly as time it
+  could not vouch for: *"the daemon was not running for 2m40s"*.
+- **[#63](https://github.com/fvermaut/timone/issues/63)** — the daemon claimed
+  on the terminal's behalf and recorded `timone takeover scratch-app#47`, pid
+  76519, on `MacBeast.local`. Held **3m45s** against a two-minute window, zero
+  reclaims. The same limit as before: the ticker keeps the heartbeat fresh, so
+  the holder was never the thing consulted.
+- **[#11](https://github.com/fvermaut/timone/issues/11)** — the takeover killed
+  at 19:06:10, the daemon stopped, and four seconds later, with the heartbeat
+  **28 seconds old** and nothing running: *"nobody is running this any more"*.
+- **The re-arm** — `re-arm scratch-app#47/1 — timone takeover scratch-app#47
+  (pid 76519) is gone, so it goes again at planning`, with nothing said on the
+  ticket, followed by the boxed session above.
+- **[#76](https://github.com/fvermaut/timone/issues/76)** — a takeover
+  recording a finished step ended with *"it stops asking"*, and the terminal
+  read *"nothing right now — I'll pick it up again on my next pass"*, which is
+  the wording the first run's fault produced and this one confirms.
+
+Three of the checks again used a stand-in for `claude`. That is not a limit the
+box removes: `timone takeover` runs the conversation **in your terminal** by
+design (ADR-0041 is about daemon-spawned runs), so it is outside the container
+either way.
+
+## ✏ A property the first run claimed and this one cannot
+
+**`.timone/state.json` was not byte-identical this time**, and the reason is
+worth writing down rather than explaining away.
+
+**fvermaut's own daemon was running throughout** — pid 74396, started 18:52:43,
+holding the real ledger's lock and stamping it every cycle. He had merged
+[#81](https://github.com/fvermaut/timone/pull/81) and started it, which is
+exactly what `STATUS.md` asked him to do. The gate's `--state` copy and the real
+ledger are separate files with separate writers, and neither wrote the other;
+what moved the real one is a daemon doing its job.
+
+**But two daemons polled `scratch-app` at the same time, and `--state` does not
+prevent that.** It isolates the *ledger*, not the *tracker*. Both daemons list
+the same marked tickets, and had `scratch-app` #47 been startable rather than
+blocked on a human, both could have spawned a session on it — two runs, two
+branches, one repository, which is the collision R10 exists to prevent. Nothing
+collided, and that was luck.
+
+**What follows from it:** a live gate must either stop the daemon that is
+already running or use a project no live daemon is watching. The gate's own
+setup checked the ledger and did not check for another daemon. That is a gap in
+how these gates are run, not in what this phase built.
+
+## Still not reached, after both runs
+
+- **The second death and the park that follows it** (31d). Unchanged: it cannot
+  be staged from outside.
+- **A refusal repeating and then being said** (31e,
+  [#75](https://github.com/fvermaut/timone/issues/75)). Reaching it means
+  breaking the machine on purpose.
+- **A queued run whose ticket closes** (31k,
+  [#12](https://github.com/fvermaut/timone/issues/12)). Reachable only by
+  closing a real step ticket and freeing the project ahead of it, which means
+  cancelling `scratch-app` #47's chunk. Not worth spending a real ticket on
+  while tests cover it and bite.
+- **Check 1's isolation**, for the reason given above.

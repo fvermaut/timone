@@ -10,17 +10,13 @@
 
 > **Read this first.** Seven faults that lost your jobs are fixed. **Nothing needs you urgently.** Two things are worth five minutes when you have them, and they are numbered below.
 
-**1. Push, then let one job run in a box.**
+**1. Done — and one thing about it is worth knowing.**
 
-The work below was watched running for real this evening, but **not in a container** — a job in a container downloads Timone from GitHub, and none of today's work is pushed yet, so it would have refused. Everything was watched the old way instead, running on this laptop.
+You merged it and started the machine, and I repeated the whole check with everything running in a container. It works: a real job ran inside a box, on the version you merged, downloaded from GitHub, with its own database beside it, and it left nothing on your disk. Your own database was running on this laptop at the same time and the two never met.
 
-So: merge or push this branch, then start the machine and let one job go.
+**The thing worth knowing:** while I was checking, **your machine and my check were both watching the to-do app at once**. Nothing went wrong, because the one ticket they could both have picked up is waiting on you. But it could have gone wrong — two jobs, two branches, one app — and it is the check's fault, not the machine's: it kept its own copy of the records and did not think to look for a second watcher. Written down in the report so the next one does.
 
-```
-node dist/cli.js daemon
-```
-
-**Why it matters:** the container is how a job stops touching your folders, and none of today's changes has been watched inside one.
+Your machine is running now and is idle. It is idle for the right reason: the only thing it could start is item 2.
 
 **2. The to-do app's step 2 is stopped and it is a real question for you.**
 
