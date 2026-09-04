@@ -2,13 +2,13 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-04, evening.
+**Last updated:** 2026-09-04, late evening.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** Seven faults that lost your jobs are fixed. **Nothing needs you urgently.** Two things are worth five minutes when you have them, and they are numbered below.
+> **Read this first.** Seven faults that lost your jobs are fixed. **Nothing is broken.** Three things want you, and they are numbered below. The third is new tonight and it is the one that matters most.
 
 **1. Done — and one thing about it is worth knowing.**
 
@@ -27,6 +27,20 @@ Answer on the ticket, or:
 ```
 timone takeover scratch-app#47
 ```
+
+**3. Timone cannot check most of its own promises when it works on itself. This is new tonight.**
+
+Timone now works tickets on its own repository, and each of those runs happens inside a sealed container. Tonight one of those runs checked the newest piece of work in the **Timone repository** — the branch `timone/39-primary-sources-owed-for-the-ui-ux-basel`.
+
+Twenty promises are meant to be re-checked every time anything is delivered. **Two were checked and both hold.** The other eighteen could not be checked at all. Nothing about them is broken — the container simply has no way to run them. It has no Docker, none of the machine's login keys, and no copy of the to-do app or the trading app. Every promise about the background program, about the preview link on a pull request, and about what Timone does to somebody else's repository needs at least one of those three.
+
+Three of the eighteen are worse than that: they are written so that they only count if **you** confirmed something. No unattended run can ever watch you confirm, so as written those three can never be checked this way at all.
+
+Two smaller things came out of the same run. Timone's own safety check refuses to let the checking stage write into the folder that only the checking stage is allowed to write into — it asks a person for permission, and inside a container there is no person to ask. And one link in the design-rules file (`standards/baseline/ui-ux.md`, dated 19 August) points at `ivtrends` pull request 22 and answers "not found" to anyone not logged in; it is probably just a private repository, and it is older than tonight's work.
+
+The full record is [the check's report](doc/plans/phases/reports/phase-33-verification.md), on that branch in the Timone repository. The work on that ticket is **stopped there** and has not gone to a pull request.
+
+**What I need from you:** decide which way to go — give a run in a container what it needs to check these eighteen, or move those checks somewhere that already has it. Until one of those happens, every ticket Timone works on its own repository will stop in exactly this place.
 
 **Nothing else needs you.**
 
@@ -76,6 +90,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**4 September, late — the design-rules file got its sources, and the check that followed found something bigger.** The five rules about reading a screen of figures in `standards/baseline/ui-ux.md` now each carry a source, or say plainly that they are house style with no outside source behind them. That was the whole of the job. The check that runs after it is item 3 at the top of this file: it could only run two of the twenty things it is supposed to re-check, and both of those hold.
 
 **4 September — the seven faults above, built in one sitting.** Fourteen pieces. The plan for it said three things about the code that turned out not to be true, and each is written down in [the report](doc/plans/phases/reports/phase-31-complete.md) rather than quietly worked around — including one fault that had already been fixed in August and never closed. What was watched running for real, and what was not, is in [the gate's own report](doc/plans/phases/reports/phase-31-live-gate.md).
 
