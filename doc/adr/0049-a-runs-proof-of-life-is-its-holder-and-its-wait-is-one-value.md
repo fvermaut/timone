@@ -69,13 +69,17 @@ This follows [ADR-0034](0034-a-technical-stop-is-retried-not-reported.md): a mac
 
 ```
 wait?: {
-  kind: "conversation" | "escalation" | "review",
+  kind: "gate" | "conversation" | "review" | "escalation",
   opened: string,
   answerConsumed?: string,
   reAsks: number,
   resolvableBy: PipelineStage[],
 }
 ```
+
+> **✏ Corrected 2026-09-04, at [phase 31](../plans/phases/phase-31.md)'s pre-flight.** This block was written with **three** kinds and there are **four**. `gate` was missing, and it is not a minor one: it is how every PRD and breakdown approval is read, handled by `readGateDecision` and `readGate` at `poll.ts:2653`. The real set is `WaitKind` (`src/daemon/pipeline.ts:98`), and the ledger's own enum (`src/daemon/runs.ts:165-167`) is `["gate", "conversation", "review", "escalation"]`. The list above is corrected in place; the decision it belongs to is unchanged.
+>
+> **A second thing the pre-flight found, and D6 depends on it.** The *absence* of a wait carries meaning of its own: `resolveWait` (`poll.ts:2609`) treats `waitingKind === undefined` as a run stopped because a stage's machinery did not exist, with `charting` special-cased above it. So D6 refuses an **empty** `resolvableBy` and never an **absent** wait. Conflating the two would take out every un-built stage's park.
 
 `resolvableBy` is the new part and it is what [#76](https://github.com/fvermaut/timone/issues/76) needs: the wait carries the stages that can end it, rather than the reader deriving that from a table the writer never consulted.
 
