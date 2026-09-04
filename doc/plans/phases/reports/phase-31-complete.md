@@ -27,7 +27,7 @@ run could park on a question nothing would ever answer.
 | 31j giving up withdraws the request | Done, watched live |
 | 31k a ticket closed while it waited | **Already fixed**; four cases added |
 | 31l the register and the decision agree | Done |
-| 31m the live gate | Done, and it found one fault |
+| 31m the live gate | Done, and it found one fault. **Repeated in a box** after the merge |
 | 31n close the phase | This report |
 
 ## The seven issues, and what is honestly owed on each
@@ -113,9 +113,15 @@ four fail, so they are not vacuous.
 
 ## What is left
 
-1. **Repeat the gate in a box.** Everything was watched `--runtime in-process`,
-   because a boxed run refuses a Timone commit nobody has pushed and this
-   phase's commits are local. Push, then run it again.
+1. ~~**Repeat the gate in a box.**~~ **Done, 2026-09-04 19:17 UTC**, once
+   [#81](https://github.com/fvermaut/timone/pull/81) merged — see the second
+   half of [the gate report](phase-31-live-gate.md). A real session ran in a
+   container on commit `695b5f8`, cloned from the remotes, with its own
+   database beside it, and left nothing on the host. Every check behaved as it
+   had in-process. **One property the first run claimed could not be claimed
+   again:** fvermaut's own daemon was running throughout, so `.timone/state.json`
+   moved — and, more to the point, two daemons polled `scratch-app` at once.
+   `--state` isolates the ledger and not the tracker.
 2. **The second death** (31d) and **a repeating refusal** (31e) are unit-covered
    and unwatched. Neither can be staged from outside without breaking the
    machine on purpose.
