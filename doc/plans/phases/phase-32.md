@@ -36,9 +36,11 @@ The rule was right for the two projects that existed when it was written and wro
 
 **The rules are right; only the words are ambiguous.** Neither 32b nor 32c decides anything on the label — 32b compares the repositories' `origin`, and 32c distinguishes the workspace by its position in the evidence rather than by its name. This is a readability cost on exactly the run 32e watches, and it is one line to fix. It is recorded here rather than fixed because nothing in this phase's red-green asked for it.
 
-**Finding (g) — an old `timone` binary cannot read a new ledger.** The state file is a `z.strictObject`, so an unknown top-level key fails the parse and `readState` throws. 32a adds one (`daemon`). The moment a phase-32 daemon writes a cycle, a globally installed `timone` from before phase 32 fails on **every** command that reads the ledger — `status`, `takeover`, `daemon` — with `Invalid daemon state file`.
+**Finding (g) — an old `timone` build cannot read a new ledger.** The state file is a `z.strictObject`, so an unknown top-level key fails the parse and `readState` throws. 32a adds one (`daemon`). Any build from before phase 32 then fails on **every** command that reads the ledger — `status`, `takeover`, `daemon` — with `Invalid daemon state file`.
 
-This is the established pattern rather than a new hazard: `previews`, `introductions` and `initiatives` each did the same. It is written down because there is a globally installed old binary on this machine today, and because it sharpens 32a's own subject: an old daemon beside a new ledger is not merely stale, it is stopped.
+This is the established pattern rather than a new hazard: `previews`, `introductions` and `initiatives` each did the same. It is written down because it sharpens 32a's own subject: an old daemon beside a new ledger is not merely stale, it is stopped.
+
+> ✏ **Corrected 2026-09-04, after fvermaut challenged it.** This finding was first written claiming the `timone` command installed on his machine was an old build and would stop working. **That was wrong.** `timone` is an `npm link` — `~/.nvm/…/bin/timone` → `~/dev/timone/dist/cli.js` — so it *is* this checkout's build and every `npm run build` updates it. It was checked against the ledger carrying the new key and answered normally, exit 0. The schema fact above stands; the claim about his command did not, and it had reached `STATUS.md` and a pull request before it was checked.
 
 ## Requirements
 

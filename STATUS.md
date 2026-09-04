@@ -17,7 +17,7 @@ Timone sorted, planned, wrote and checked this ticket on its own, in a container
 Reply on the ticket, or:
 
 ```
-node dist/cli.js takeover timone#39
+timone takeover timone#39
 ```
 
 **Why it matters:** nothing Timone has built for itself has reached a pull request yet. This would be the first.
@@ -37,10 +37,10 @@ Those 18 promises are now marked as **"only a watched, running machine can check
 **3. Before you start the machine again, build first.**
 
 ```
-npm run build && node dist/cli.js daemon
+npm run build && timone daemon
 ```
 
-**Do not use the `timone` command installed on your machine.** It is old code, and the machine has written a line to its notes that the old command cannot read — every `timone status`, `timone takeover` and `timone daemon` would fail until you reinstall.
+`timone` is linked straight to this folder's build, so building is all it takes — there is nothing to reinstall. Building matters because the machine now writes a line to its notes that a build from before today cannot read.
 
 **4. The to-do app's step 2 is still stopped and it is still a real question for you.**
 
@@ -49,22 +49,8 @@ npm run build && node dist/cli.js daemon
 Answer on the ticket, or:
 
 ```
-node dist/cli.js takeover scratch-app#47
+timone takeover scratch-app#47
 ```
-
-**3. Timone cannot check most of its own promises when it works on itself. This is new tonight.**
-
-Timone now works tickets on its own repository, and each of those runs happens inside a sealed container. Tonight one of those runs checked the newest piece of work in the **Timone repository** — the branch `timone/39-primary-sources-owed-for-the-ui-ux-basel`.
-
-Twenty promises are meant to be re-checked every time anything is delivered. **Two were checked and both hold.** The other eighteen could not be checked at all. Nothing about them is broken — the container simply has no way to run them. It has no Docker, none of the machine's login keys, and no copy of the to-do app or the trading app. Every promise about the background program, about the preview link on a pull request, and about what Timone does to somebody else's repository needs at least one of those three.
-
-Three of the eighteen are worse than that: they are written so that they only count if **you** confirmed something. No unattended run can ever watch you confirm, so as written those three can never be checked this way at all.
-
-Two smaller things came out of the same run. Timone's own safety check refuses to let the checking stage write into the folder that only the checking stage is allowed to write into — it asks a person for permission, and inside a container there is no person to ask. And one link in the design-rules file (`standards/baseline/ui-ux.md`, dated 19 August) points at `ivtrends` pull request 22 and answers "not found" to anyone not logged in; it is probably just a private repository, and it is older than tonight's work.
-
-The full record is [the check's report](doc/plans/phases/reports/phase-33-verification.md), on that branch in the Timone repository. The work on that ticket is **stopped there** and has not gone to a pull request.
-
-**What I need from you:** decide which way to go — give a run in a container what it needs to check these eighteen, or move those checks somewhere that already has it. Until one of those happens, every ticket Timone works on its own repository will stop in exactly this place.
 
 **Nothing else needs you.**
 
@@ -114,6 +100,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**4 September, night — two faults found by reading back what the job wrote.** A job running in a container [wrote to the main branch directly](https://github.com/fvermaut/timone/issues/85), with no branch and no pull request — the same code on your to-do app writes to its main branch, and the check meant to catch it is blind to exactly that case. And the check that stops a job reading the tests it will be judged by [does not work in a container at all](https://github.com/fvermaut/timone/issues/87), in either direction. Neither was found by a test; both were found by looking at what actually happened.
 
 **4 September, night — how Timone checks its own work is decided.** [#84](https://github.com/fvermaut/timone/issues/84), closed. The two roads on that ticket were both wrong in the same way: giving the container Docker and a wider key, or moving the checks onto your machine, each make the job that can change Timone itself the **least** restricted job in the system. It should be the most.
 
@@ -318,6 +306,7 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 - **A stopped job that is holding a project has not been watched blocking one.** It is the cost you accepted on 16 August, and it is still only argued.
 - **A handed-back job has not been watched running all the way to a pull request.** It was stopped on purpose when the test ticket was done.
 - **A Timone job has never reached a pull request.** One ran all the way to the last step on 4 September and stopped there. The reason was decided and built the same night, and the job can now finish — it needs your reply on [#39](https://github.com/fvermaut/timone/issues/39).
+- **The check that keeps a builder out of the verifier's checks does not work inside a container**, which is where every job runs. [#87](https://github.com/fvermaut/timone/issues/87). It cannot tell which step is running there, so it blocks the step that should be allowed and lets through the step that should not.
 - **Sixteen of Timone's own promises have never been watched working.** They now say so, each in its own line, which is more than was true this morning. Nothing forces anybody to act on that.
 - **One of the two checks fixed on 4 September was never seen working for real.** The rule about the status file being written in the wrong place: the job that ran never wrote one, because it stopped before the step that writes it. It is proven by tests and by replaying two real cases from August, and not by watching.
 - **One accessibility check on the to-do app is still owed.** Listen to it with VoiceOver and Safari and confirm the controls are announced sensibly. The script is in that project's own repository, at `doc/plans/phases/reports/phase-01-verification.md`. It needs about twenty minutes.
