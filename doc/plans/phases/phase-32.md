@@ -1,6 +1,6 @@
 # Phase 32: Timone works its own tickets
 
-> **Status:** 32a–32d built and green, 2026-09-04. **32e is waiting on fvermaut** — see [What 32e is waiting for](#what-32e-is-waiting-for) at the end of this file. 32f follows 32e.
+> **Status:** Complete, 2026-09-04 — [completion report](reports/phase-32-complete.md), [live gate](reports/phase-32-live-gate.md). 32e reached three of its four things: no pull request was opened, because the run parked at verification and was right to ([timone#84](https://github.com/fvermaut/timone/issues/84)).
 >
 > Governing decision: [ADR-0050](../../adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md) — the whole of this phase.
 >
@@ -207,21 +207,12 @@ Completion report at `reports/phase-32-complete.md`, and the first reading of D2
 
 **Everywhere else the finding stands**, and that includes an interactive session's own branch. It fired twice on this session's branches on 2026-09-04 and it was right both times: the file was not going to be seen until a pull request merged, and saying so once per branch is the reminder the rule was written to give.
 
-## What 32e is waiting for
+## What 32e was waiting for, and what happened
 
-**Written 2026-09-04, after 32a–32d were built and pushed.** Everything below was checked, not assumed.
+**Written 2026-09-04 before the gate; kept as it was, with the outcome under it.**
 
-**Ready.**
+Two things were his and both were answered. The daemon he had running (pid 74396) was stopped at 20:05:03 UTC — nothing was in flight, `ivtrends#74` had parked three minutes earlier — after he was asked and said *"Run it now"*. [timone#39](https://github.com/fvermaut/timone/issues/39) was given the `timone` label, which had to be created on this repository first.
 
-- 32a, 32b, 32c and 32d are built, green on the whole suite (1615 tests), and pushed to `origin/docs/phase-32-plan` at `da4a419` — so a boxed run can pin the commit it needs.
-- `timone` is in `timone.yaml`. `node dist/cli.js projects list` shows it and `workspace sync` cloned it to `projects/timone`. `~/dev/timone` was checked by its git status before and after and is unchanged — same commit, same branch, same working tree.
-- The Timone App can mint a token for `fvermaut/timone`, so the installation already covers this repository.
-- `timone-agent:latest` is built and Docker is running.
-- Finding (e) is fixed, so a project with no compose file no longer refuses to start.
+**The gate ran 20:05–20:41 and is written up in [its own report](reports/phase-32-live-gate.md).** timone#39 was picked up, triaged, planned and built in a container, and parked at verification. It planned and executed its own phase 33 on itself. No pull request was opened, so nothing reached him to merge.
 
-**Not ready, and both are fvermaut's.**
-
-1. **A daemon is already running and it has a run in flight.** Pid 74396, started 20:52, holding the ledger, with `ivtrends#74` picked up. 32e must be watched with the process table clear — phase 31's gate found that `--state` isolates the ledger and not the tracker, and that mistake costs more here because the project is Timone. Stopping it would kill that run, so it is not a thing to do on his behalf.
-2. **No Timone issue carries the mark.** #39, #15 and #20 are open and unlabelled. Marking an issue is what starts a real run that opens a real pull request on this repository, and D3 says the merge is his.
-
-**One more thing to know before restarting.** The daemon that runs 32e must be this branch's code, not the globally installed `timone` — and once it has written one cycle, the old binary can no longer read the ledger at all (finding (g)).
+**What stopped it is [timone#84](https://github.com/fvermaut/timone/issues/84)**: 2 of 20 regression criteria passed and 18 could not run at all in a box with no `docker`, no credential beyond this repository, and no other project cloned. That is a decision about how Timone verifies itself, and until it is made every Timone ticket stops in the same place.
