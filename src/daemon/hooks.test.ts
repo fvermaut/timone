@@ -939,3 +939,106 @@ describe("checkProvenance", () => {
     expect(violation.summary).toContain("2 commit(s)");
   });
 });
+
+/**
+ * ADR-0050 D1's whole point, as one case: a self-run that did exactly what it
+ * was told ends with nothing said about it.
+ *
+ * Three guards would have fired on it before phase 32 — the harness-file rule
+ * on `process.md` and `.claude/`, the STATUS.md rule on a status file written
+ * where every stage writes one, and the STATUS.md rule again on a commit the
+ * work branch took from `main`. A self-run that ends in three false findings
+ * is a self-run nobody will trust, and the trust is the whole of the bet.
+ */
+describe("checkAll — a Timone self-run that behaved", () => {
+  const TIMONE = "https://github.com/fvermaut/timone.git";
+
+  function selfRun(): SessionEvidence {
+    return {
+      target: "timone",
+      workspace: {
+        repo: "timone",
+        originUrl: TIMONE,
+        defaultBranch: "main",
+        branches: [],
+        commits: [],
+        workingTree: [],
+      },
+      projects: [
+        {
+          repo: "timone",
+          originUrl: TIMONE,
+          defaultBranch: "main",
+          branches: [
+            { name: "timone/39-1", unpushed: [], hasUpstream: true },
+          ],
+          commits: [
+            {
+              // The work: source, a process artifact, the harness's own files,
+              // and the status file every stage owes.
+              sha: "aaa1111",
+              branch: "timone/39-1",
+              files: [
+                "src/daemon/hooks.ts",
+                "doc/plans/phases/phase-32.md",
+                "standards/ui-ux/README.md",
+                "process.md",
+                "STATUS.md",
+              ],
+              trailers: [
+                "Timone-Stage: execution",
+                "Timone-Session: session-32e",
+                "Timone-Run: timone#39",
+              ],
+              onDefaultBranch: false,
+            },
+            {
+              // A commit the branch took from `main` by merging it in, which
+              // the process asks for. It is on `main` already.
+              sha: "bbb2222",
+              branch: "timone/39-1",
+              files: ["STATUS.md"],
+              trailers: [
+                "Timone-Stage: execution",
+                "Timone-Session: session-earlier",
+              ],
+              onDefaultBranch: true,
+            },
+          ],
+          workingTree: [],
+        },
+      ],
+    };
+  }
+
+  it("says nothing at all", () => {
+    expect(checkAll(selfRun())).toEqual([]);
+  });
+
+  it("still says something when the same run leaves work unpushed", () => {
+    // The guards are narrowed, not switched off. A self-run gets every rule
+    // that still applies to it.
+    const evidence = selfRun();
+    evidence.projects[0].branches = [
+      { name: "timone/39-1", unpushed: ["aaa1111"], hasUpstream: true },
+    ];
+
+    expect(checkAll(evidence).map((violation) => violation.rule)).toEqual([
+      "unpushed",
+    ]);
+  });
+
+  it("still says something when a self-run cuts its branch in the workspace", () => {
+    // Finding 11 does not stop being finding 11 because the project is
+    // Timone: a work branch belongs in `projects/timone/`, and one cut at the
+    // timone root reaches nothing and stays checked out for the next session.
+    const evidence = selfRun();
+    evidence.workspace.branches = [
+      { name: "timone/39-1", unpushed: [], hasUpstream: true },
+    ];
+
+    expect(checkAll(evidence).map((violation) => violation.rule)).toContain(
+      "branch-placement",
+    );
+  });
+});

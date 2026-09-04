@@ -96,8 +96,13 @@ export interface SessionEvidence {
    * A daemon session always has one — it belongs to a run, and the run names
    * its project. An interactive session belongs to no run and names nothing,
    * and that absence is meaningful rather than missing information: with no
-   * declared target there is no "should have stayed inside" to judge, and a
-   * session working on Timone itself touches nothing under `projects/` at all.
+   * declared target there is no "should have stayed inside" to judge.
+   *
+   * ✏ **Since phase 32d it can be `"timone"`**, because Timone is a managed
+   * project (ADR-0050 D1). That is a run working `projects/timone/`, which is
+   * a second clone of this repository — not an interactive session editing
+   * the workspace, which still names no target and still touches nothing
+   * under `projects/`.
    */
   target?: string;
   /** The timone repo, where every session runs (ADR-0007). */
@@ -120,8 +125,15 @@ export type GuardrailRule =
  * The prefix every run's work branch carries (`workBranch` in `prompts.ts`).
  *
  * In a project's checkout it is correct and expected. In the workspace it
- * cannot be anything but a mistake: Timone is not a managed project, so no
- * run ever targets it and no work branch is ever named for it.
+ * cannot be anything but a mistake.
+ *
+ * ✏ **The reason changed at phase 32d and the rule did not.** It used to be
+ * that Timone was not a managed project, so no run could target it. Timone is
+ * one now ([ADR-0050](../../doc/adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md)
+ * D1) and a self-run's work branch is named for a Timone ticket — but that
+ * branch is cut in `projects/timone/`, which is a **different clone** of the
+ * same repository (pre-flight finding (c)). The workspace is the harness the
+ * run obeys, and a work branch cut there still reaches nothing.
  */
 const WORK_BRANCH_PREFIX = "timone/";
 
@@ -252,9 +264,10 @@ export function checkStatusPlacement(evidence: SessionEvidence): Violation[] {
  *
  * The rule is decidable on the name alone, which is the only reason it can
  * exist: `timone/…` in a project is that project's work branch, and in the
- * workspace it is always misplaced. It needs no target, because the mistake
- * is the same whoever was driving — the session that made it was recording
- * an approval, and the one that paid for it was interactive.
+ * workspace it is always misplaced — including on a Timone self-run, whose
+ * work branch belongs in `projects/timone/`. It needs no target, because the
+ * mistake is the same whoever was driving — the session that made it was
+ * recording an approval, and the one that paid for it was interactive.
  */
 export function checkBranchPlacement(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];

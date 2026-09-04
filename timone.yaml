@@ -32,3 +32,10 @@ projects:
     bindings:
       ticketing: github
       preview: docker
+  timone:
+    repo_url: https://github.com/fvermaut/timone.git
+    path: projects/timone
+    stack:
+      - typescript
+    bindings:
+      ticketing: github
