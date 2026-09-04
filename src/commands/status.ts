@@ -8,6 +8,12 @@ import {
   type SyncBreakdownSource,
 } from "../daemon/breakdown.js";
 import { ctaFor, type Cta, type InitiativeProgress } from "../daemon/cta.js";
+import {
+  holderLiveness,
+  type Hold,
+  type Holder,
+  type Liveness,
+} from "../daemon/holder.js";
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
 import { initiativeProgressSync, progressOf } from "../daemon/poll.js";
 
@@ -61,6 +67,21 @@ export interface RenderStatusOptions {
   /** Now, for saying how long a running session has been going. */
   now?: Date;
   /**
+   * Whether a run's holder is still there
+   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
+   * D2), defaulting to asking this machine's process table.
+   *
+   * **This is the question the terminal can answer on its own**, which is
+   * what timone#11 always lacked: with no daemon running, a killed session
+   * read "working on it now" for ever, because the only evidence anything had
+   * was a clock and a clock needs a witness to mean anything. A pid needs
+   * none.
+   *
+   * Injected for the reason ADR-0025 gives — a test cannot portably
+   * manufacture a dead pid.
+   */
+  livenessOf?: (holder: Holder) => Liveness;
+  /**
    * The timone root, so a ticket's list of pieces can be read from its
    * project's checkout ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
    * D1 names this cost: answering *is there a next piece?* means reading a
@@ -95,6 +116,8 @@ export interface RenderStatusOptions {
 interface RenderContext {
   /** Now, or undefined when the caller does not want durations. */
   now?: Date;
+  /** What can be said about the process holding a run (ADR-0049 D2). */
+  hold: (run: Run) => Hold;
   /** Where this run's ticket's initiative stands, resolved once per ticket. */
   progressOf: (run: Run) => InitiativeProgress | undefined;
   /** Every initiative of a project the daemon has a picture of. */
@@ -197,7 +220,15 @@ function ctaOf(run: Run, context: RenderContext): Cta {
 function describeWait(run: Run, context: RenderContext): string {
   const cta = ctaOf(run, context);
   const how = cta.command === undefined ? "" : ` — ${cta.command}`;
-  return `waiting on you: ${cta.needFromYou}${how}`;
+  // **The words follow the answer rather than being printed over it**
+  // ([timone#14](https://github.com/fvermaut/timone/issues/14)). The shared
+  // calculation already says whether the human is being waited on, and this
+  // renderer used to say "waiting on you" whatever it answered — so a map
+  // still working through its own questions read "waiting on you: nothing
+  // right now", which is a sentence that contradicts itself. Seen live on the
+  // trading app on 2026-08-16.
+  const opening = cta.waitingOnYou ? "waiting on you: " : "";
+  return `${opening}${cta.needFromYou}${how}`;
 }
 
 /** One run's phrase: the ticket, how far it got, and what it is doing. */
@@ -213,11 +244,21 @@ function describeRun(run: Run, context: RenderContext): string {
       ? (modelFor(run.stage) ?? "")
       : "";
   const on = model === "" ? "" : ` on ${model}`;
+  // An `active` run whose holder's process is gone is not working on
+  // anything, and the terminal can establish that with no daemon running at
+  // all (ADR-0049 D2) — which is the whole of timone#11. `unknown` is a
+  // holder on another machine and `none` is every run written before holders
+  // existed: both keep the words they have always had, because guessing about
+  // them is worse than saying what was said before.
+  const working =
+    context.hold(run) === "gone"
+      ? "nobody is running this any more — I'll start it again on my next pass"
+      : `working on it now${on}${howLong(run, now)}`;
   const what =
     run.status === "parked"
       ? describeWait(run, context)
       : run.status === "active"
-        ? `working on it now${on}${howLong(run, now)}`
+        ? working
         : "picked up, about to start";
 
   const flags =
@@ -329,8 +370,10 @@ export function renderStatus(
 
   // One reader for the whole render, so a ticket's list of pieces is read
   // once however many of its runs and closing lines mention it.
+  const livenessOf = options.livenessOf ?? ((holder) => holderLiveness(holder));
   const context: RenderContext = {
     now: options.now,
+    hold: (run) => (run.holder === undefined ? "none" : livenessOf(run.holder)),
     initiativesOf: (project) => options.pictures?.(project) ?? [],
     progressOf: progressReader(
       options.root,

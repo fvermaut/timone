@@ -32,6 +32,7 @@ function breakdownIn(
 }
 
 import { ctaComment, ctaFor } from "../daemon/cta.js";
+import type { Holder } from "../daemon/holder.js";
 import { progressOf, reclaimedReason } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
@@ -427,6 +428,107 @@ describe("renderStatus — a run whose daemon died under it", () => {
     );
 
     expect(output).toContain("timone retry scratch-app#7");
+  });
+});
+
+describe("renderStatus — what the terminal can ask without a daemon", () => {
+  /** A holder as the spawner records one. */
+  function holderOf(pid: number): Holder {
+    return {
+      token: `token-${pid}`,
+      command: "timone daemon scratch-app#7/1",
+      pid,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    };
+  }
+
+  it("stops saying 'waiting on you' about a ticket that needs nothing", () => {
+    // timone#14, seen live on the trading app on 2026-08-16. The shared
+    // calculation already says whether the human is being waited on, and this
+    // renderer printed the words over the top of its answer — so a map still
+    // working through its own questions read
+    // "waiting on you: nothing right now".
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "parked",
+          stage: "charting",
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    // Asserted on the project's own line: the closing summary legitimately
+    // says "nothing is waiting on you right now", and that sentence is the
+    // one this ticket's line was contradicting.
+    expect(lineFor(output, "scratch-app")).toContain("nothing right now");
+    expect(lineFor(output, "scratch-app")).not.toContain("waiting on you");
+  });
+
+  it("still says it about a ticket that does need something", () => {
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "parked",
+          stage: "requirements",
+          waitingOn: "your approval of the specification",
+          waitingKind: "gate",
+        }),
+      ],
+      { stateExists: true },
+    );
+
+    expect(output).toContain("waiting on you: your approval of the specification");
+  });
+
+  it("does not call a run working when the process running it is gone", () => {
+    // timone#11. With nothing watching, a killed session read "working on it
+    // now" for ever, because the only evidence anything had was a clock and
+    // the clock needs a daemon to be running to mean anything. A pid needs no
+    // witness, so the terminal can ask this one on its own.
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "active",
+          stage: "execution",
+          holder: holderOf(4213),
+        }),
+      ],
+      { stateExists: true, livenessOf: () => "gone" },
+    );
+
+    expect(output).not.toContain("working on it now");
+    expect(output).toContain("nobody is running this");
+  });
+
+  it("keeps today's words for a run that records no holder", () => {
+    // Every run written before ADR-0049. Guessing about them is worse than
+    // saying what has always been said.
+    const output = renderStatus(
+      manifest,
+      [
+        run({
+          project: "scratch-app",
+          ticket: 7,
+          status: "active",
+          stage: "execution",
+        }),
+      ],
+      { stateExists: true, livenessOf: () => "gone" },
+    );
+
+    expect(output).toContain("working on it now");
   });
 });
 
