@@ -48,6 +48,17 @@ Answer on the ticket, or:
 timone takeover scratch-app#47
 ```
 
+**5. The dashboard idea is now a list of questions, and four are yours.**
+
+You asked for a way to watch all projects from one web page, without a terminal. That idea is now mapped on [#92](https://github.com/fvermaut/timone/issues/92): six questions, two already answered by research. The four left are yours, each answerable with a comment or a `timone takeover` command written on the ticket:
+
+- [What one run's trace must record](https://github.com/fvermaut/timone/issues/95) — **start here**; it shapes the rest.
+- [What the dashboard shows](https://github.com/fvermaut/timone/issues/96) — I build a throwaway page, you react to it.
+- [Built inside this repository, managed like any other project](https://github.com/fvermaut/timone/issues/97)
+- [Where the page runs, how it gets its data, and who can open it](https://github.com/fvermaut/timone/issues/98)
+
+There is also [#91](https://github.com/fvermaut/timone/issues/91): adopting two public formats (EARS for acceptance criteria, MADR for decision records). It is marked for the machine; expect its questions on the ticket.
+
 **Nothing else needs you.**
 
 ---
@@ -96,6 +107,10 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**5 September — watching the machine from a web page is being worked out, and two of its six questions are already answered.** The idea: every run leaves a trace you can inspect, and one hosted page shows what all projects are doing — read-only; acting from the page comes later, on purpose. The map is [#92](https://github.com/fvermaut/timone/issues/92). Research found that everything a trace needs already flows through each session but is mostly thrown away or left unindexed ([#93](https://github.com/fvermaut/timone/issues/93)), and that the safest way to feed a hosted page is pushing a small snapshot out each cycle rather than opening anything on your machine ([#94](https://github.com/fvermaut/timone/issues/94)). The four remaining questions are at the top of this file. A LangChain dependency was considered and ruled out.
+
+**5 September — two public document formats proposed.** [#91](https://github.com/fvermaut/timone/issues/91) asks to write acceptance criteria in EARS and decision records in MADR, formats most comparable tools now share. It is marked and will come to you with questions.
 
 **4 September, late night — the check on ticket #39 ran again, on your machine, and your answer held up.** The first run, in the container, could check 2 of 20 promises and had to stop on the other 18. This run read the promise lists as you re-marked them: the 18 now name the watched run that last saw them instead of blocking, the 2 that remain terminal-checkable were re-run and hold (each check was first made to fail on purpose, so a pass means something), and all 1615 automatic tests pass on the branch with `main` merged in. Nothing failed, nothing regressed. The one thing left is above: the ticket's own edit touched the design-rules file, so two promises resting on it want a watched run before the pull request opens. This is the first time that new rule has fired, and it fired on the very change that created it.
 
