@@ -1534,7 +1534,7 @@ async function pollProject(
   // ahead moving, and nothing moved.
   store.promoteQueue(project.name);
   const occupier = store.occupyingRun(project.name);
-  if (occupier !== undefined && occupier.status === "picked-up") {
+  if (occupier !== undefined && occupier.status !== "active") {
     // Before the spawn, never after it: a session started on a ticket nobody
     // is asking about any more is work done into a void, and the whole cost of
     // it has been paid by the time anything else could notice.
@@ -1556,7 +1556,7 @@ async function pollProject(
       store.cancel(occupier.id, reason);
       result.cancelled.push(occupier.id);
       log(`cancel ${occupier.id} — ${reason}`);
-    } else {
+    } else if (occupier.status === "picked-up") {
       try {
         await deps.spawner.spawn(
           occupier,
