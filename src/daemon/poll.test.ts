@@ -2513,6 +2513,131 @@ describe("a ticket closed while its run waited its turn", () => {
   });
 });
 
+describe("a parked occupier whose ticket is no longer listed", () => {
+  /**
+   * A run holding its project by owning a work branch while parked — the
+   * shape ticket #39's run had in timone#99: registered, activated, given a
+   * branch, then parked on a wait no answer resolves, so only the ticket
+   * leaving the listing can end it. Same sequence as `poll.test.ts:6034`'s
+   * `escalated` helper, spelled out here since this describe is not about
+   * resuming a wait at all.
+   */
+  function parkedOnBranch(store: RunStore, ticket: number): Run {
+    const { run } = store.register("scratch-app", ticket);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, `timone/${ticket}-work`);
+    return store.park(run.id, {
+      waitingOn: "a person to comment",
+      kind: "escalation",
+      stage: "delivery",
+    });
+  }
+
+  /** A listing that can be changed between polls, like `queuedBehind`'s. */
+  function trackedListing(listings: () => Ticket[]): TicketingAdapter {
+    const { adapter } = fakeAdapter({});
+    return {
+      ...adapter,
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return listings();
+      },
+      async getTicket(_project, number): Promise<TicketThread> {
+        const found = listings().find((candidate) => candidate.number === number);
+        if (found === undefined) throw new Error(`no ticket ${number}`);
+        return { ...found, comments: [] };
+      },
+    };
+  }
+
+  it("leaves it alone while its ticket is still listed", async () => {
+    const open = [ticket(7)];
+    const store = newStore();
+    parkedOnBranch(store, 7);
+    const adapter = trackedListing(() => open);
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(store.get("scratch-app#7/1")?.status).toBe("parked");
+    expect(result.cancelled).toEqual([]);
+    expect(spawned).toEqual([]);
+  });
+
+  it("cancels it once its ticket leaves the listing", async () => {
+    const open: Ticket[] = [];
+    const store = newStore();
+    parkedOnBranch(store, 7);
+    const adapter = trackedListing(() => open);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(store.get("scratch-app#7/1")).toMatchObject({
+      status: "cancelled",
+      cancellation: noLongerListedReason(),
+    });
+    expect(spawned).toEqual([]);
+  });
+
+  it("promotes the run queued behind it in the same poll, but only starts it on the next one", async () => {
+    const store = newStore();
+    parkedOnBranch(store, 7);
+    const { run: queued } = store.register("scratch-app", 8);
+    expect(queued.status).toBe("queued");
+
+    const open = [ticket(8)];
+    const adapter = trackedListing(() => open);
+    const { spawner, spawned } = fakeSpawner();
+    const deps = { manifest: manifestWith("scratch-app"), store, adapter, spawner };
+
+    await pollOnce(deps);
+
+    expect(store.get("scratch-app#7/1")?.status).toBe("cancelled");
+    // Promoted in the very same poll that cancelled the occupier ahead of it
+    // — `store.cancel` settles the chunk, and settling promotes the queue
+    // head (ADR-0029) — but not started: this check read the old occupier
+    // before the cancel ran, and never re-reads it.
+    expect(store.get("scratch-app#8/1")?.status).toBe("picked-up");
+    expect(spawned).toEqual([]);
+
+    await pollOnce(deps);
+
+    expect(spawned.map((each) => each.id)).toEqual(["scratch-app#8/1"]);
+  });
+
+  it("leaves an active occupier's dead ticket alone", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+
+    const open: Ticket[] = [];
+    const adapter = trackedListing(() => open);
+    const { spawner, spawned } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    const after = store.get("scratch-app#7/1");
+    expect(after?.status).toBe("active");
+    expect(after?.cancellation).toBeUndefined();
+    expect(spawned).toEqual([]);
+  });
+});
+
 describe("pollOnce — previews are opt-in", () => {
   it("does not reconcile a project with no preview binding at all", async () => {
     const store = newStore();
