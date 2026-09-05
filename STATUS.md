@@ -65,6 +65,14 @@ You asked for a way to watch all projects from one web page, without a terminal.
 
 There is also [#91](https://github.com/fvermaut/timone/issues/91): adopting two public formats (EARS for acceptance criteria, MADR for decision records). It is marked for the machine; expect its questions on the ticket.
 
+**7. The "no stops between agreement and pull request" work was checked, and one decision is yours before it can go further.**
+
+The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) is built, on the branch `timone/105-1-the-run-carries-on-instead-of-stopping` in this repository. There is no pull request yet. A reader who did not build it checked it and **found nothing wrong with what was built** — nothing failed, and nothing that used to work broke. Two things stop it going further, and both are about how the work is checked rather than about the work.
+
+**The decision.** The work claims three promises. One of them, R3, says in the promise list that it can be checked from a terminal. It cannot. It describes what an agent does while it is building, there is no code behind it, and the only way to see it happen is to watch a real run. Both the plan and the build's own report already assume it needs a watched run — the promise list is the one document that disagrees. Correcting it means editing the promise list, and the checking step is not allowed to write that part. **Either move R3 to "only a watched run can check this", or reword it so a terminal can reach it.** The account is in [the report](doc/plans/phases/reports/phase-35-verification.md) on that branch.
+
+**The watched run.** The other two promises, R1 and R5, can only be seen working in a watched run, and **neither has ever been watched**. The work changed the code that picks tickets up and three of the step instructions, which is exactly what those two promises rest on. A watched run is owed before this can be delivered. R3 will need the same one if you take the first option above.
+
 **Nothing else needs you.**
 
 ---
@@ -113,6 +121,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**5 September — the first half of the "no stops between agreement and pull request" work was built and then checked.** The work is on the branch `timone/105-1-the-run-carries-on-instead-of-stopping` in this repository; there is no pull request yet. It changes the machine so that once you have agreed to something, the steps that build, check and deliver it never stop to ask you again: a step that hits something it cannot do as written writes down what it did instead and carries on. A reader who did not build it then checked it. The build itself is sound — nothing failed, and nothing that used to work broke. What the check could not do is confirm the three promises the work claims, and the reason is item 7 at the top of this file: one promise says it is checkable from a terminal and is not, and the other two have never been watched. The account is in [the report](doc/plans/phases/reports/phase-35-verification.md) on that branch. Ticket [#105](https://github.com/fvermaut/timone/issues/105).
 
 **5 September — the request to build the "no stops between agreement and pull request" work is moving again.** Ticket [#103](https://github.com/fvermaut/timone/issues/103) asks the machine to build what [PRD-03](doc/specs/prd/prd-03-a-run-ends-at-its-pull-request.md) describes. The requirements were already written and approved by you, but the machine still sent the request to the step that writes requirements. That step refused to write them a second time — rightly, since redoing them would have taken your approval back — and stopped. fvermaut opened a terminal session on the ticket. The session checked the approved documents and the ticket, found nothing left to write, and sent the work straight on to the step that cuts it into pieces. No document was changed, because everything the work needs already exists on the main branch. The wrong turn itself is filed as [#104](https://github.com/fvermaut/timone/issues/104). The next thing on the ticket is the list of pieces, for approval.
 
@@ -329,6 +339,8 @@ Earlier work is in the reports under `doc/plans/phases/reports/`, one file per p
 - **A stopped job that is holding a project has not been watched blocking one.** It is the cost you accepted on 16 August, and it is still only argued.
 - **A handed-back job has not been watched running all the way to a pull request.** It was stopped on purpose when the test ticket was done.
 - **A Timone job has never reached a pull request.** One ran all the way to the last step on 4 September, stopped, was answered, and ran the last step again late that night — cleanly. It now waits only for a watched run of two design-rules promises before its pull request opens; the command is at the top of this file. A written reply will not move it.
+- **The three promises behind the "no stops" work have no evidence behind them yet.** R1 and R5 need a watched run and have never had one. R3 says it can be checked from a terminal and cannot be. All three are still marked as unproven, correctly. The work sits on the branch `timone/105-1-the-run-carries-on-instead-of-stopping` with no pull request; item 7 at the top of this file is what unblocks it.
+- **The folder holding the checking step's own test scripts could not be opened, written to or run from inside the container.** A guard meant to keep the building step out of it does not recognise the checking step either. It cost nothing this time, because no script was needed. It would stop the next check that needs to write one.
 - **The check that keeps a builder out of the verifier's checks does not work inside a container**, which is where every job runs. [#87](https://github.com/fvermaut/timone/issues/87). It cannot tell which step is running there, so it blocks the step that should be allowed and lets through the step that should not.
 - **Sixteen of Timone's own promises have never been watched working.** They now say so, each in its own line, which is more than was true this morning. Nothing forces anybody to act on that.
 - **One of the two checks fixed on 4 September was never seen working for real.** The rule about the status file being written in the wrong place: the job that ran never wrote one, because it stopped before the step that writes it. It is proven by tests and by replaying two real cases from August, and not by watching.
