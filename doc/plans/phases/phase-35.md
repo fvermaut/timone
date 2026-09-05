@@ -1,6 +1,6 @@
 # Phase 35: A run in the build records what it bends and carries on
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-35-complete.md](reports/phase-35-complete.md).
 
 > **Companion phases:** none — first phase built against [PRD-03](../../specs/prd/prd-03-a-run-ends-at-its-pull-request.md). Piece 2 of the same initiative (the pull request's own body, the screen-at-PR reversal, and the closed-without-merging remediation flow) is a separate phase, not yet written, per [ticket-103's breakdown](../breakdowns/ticket-103.md). Governing decision: [ADR-0052](../../adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md) — the whole of this phase's shape; it also records why [ADR-0033](../../adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md) is superseded for the stages this phase touches and stands for every other stage unchanged.
 
