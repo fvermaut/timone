@@ -1299,6 +1299,46 @@ describe("the requirements gate", () => {
     expect(parked?.wait?.opened).toBe(live.comments.at(-1)?.createdAt);
   });
 
+  it("still parks on an escalation here, unchanged — the regression guard for ADR-0052's carve-out", async () => {
+    // ADR-0052 only touches execution, verification and delivery.
+    // Requirements is before the build, so an escalation here must keep
+    // ADR-0033's park-and-wait behaviour exactly as it always has.
+    //
+    // A ticket with no prior comment, unlike `settled`: the fake adapter's
+    // clock for posted comments starts on 2026-08-02, earlier than
+    // `settled`'s own seeded comment — which would make the escalation
+    // comment read as *before* the outcome cursor and go undetected.
+    const store = newStore();
+    const { adapter, ticket: live } = fakeAdapter({
+      ...thread,
+      labels: ["timone", "triage:feature"],
+    });
+    const { runtime } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(
+          project,
+          7,
+          `${STAGE_ESCALATED_MARKER}\n\nThe answer asks me to skip a check I cannot skip.`,
+        );
+      },
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+    }).spawn(atRequirements(store), project, { stage: "requirements" });
+
+    const run = store.get("scratch-app#7/1");
+    expect(run?.status).toBe("parked");
+    expect(run?.wait?.kind).toBe("escalation");
+    expect(run?.stage).toBe("requirements");
+    expect(run?.wait?.opened).toBe(live.comments.at(-1)?.createdAt);
+  });
+
   it("names the branch when the clone URL is not one it can link into", async () => {
     const store = newStore();
     const { adapter, comments } = fakeAdapter(settled);
@@ -2637,12 +2677,13 @@ describe("the verification stage", () => {
     expect(run?.failure).toMatch(/report/i);
   });
 
-  it("stops on a person, not on an answer, when it cannot use the one it was given", async () => {
-    // ivtrends #1, as a test. The stage read the answer, was right that
-    // acting on it was outside what it may do, and said so — five times,
-    // because saying so had nowhere to go.
+  it("fails the run rather than parking it, when it cannot use the answer it was given", async () => {
+    // ivtrends #1, as a test — but under ADR-0052 now: verification is a
+    // build stage, so an escalation inside it is a fault to file, not a wait
+    // to serve. This used to assert a parked run; the scenario itself is
+    // unchanged, only what it now means to the run.
     const store = newStore();
-    const { adapter, comments, ticket: thread } = fakeAdapter();
+    const { adapter, comments } = fakeAdapter();
     const { runtime } = checkingRuntime(
       adapter,
       STAGE_ESCALATED_MARKER,
@@ -2663,20 +2704,13 @@ describe("the verification stage", () => {
     }).spawn(atVerification(store), project, { stage: "verification" });
 
     const run = store.get("scratch-app#7/1");
-    expect(run?.status).toBe("parked");
-    expect(run?.wait?.kind).toBe("escalation");
-    // The stage that stopped, not the one that would have followed: the
-    // person picking this up needs to know where it stopped.
-    expect(run?.stage).toBe("verification");
-    // The escalation comment's own instant, off the thread the session posted
-    // into — never a clock. The prompt finds the stage's account by that
-    // instant, so a second of skew loses the account entirely.
-    expect(run?.wait?.opened).toBe(thread.comments.at(-1)?.createdAt);
-    // The session's own comment is the whole report. "Something went wrong"
-    // underneath a stage explaining itself clearly is the ticket ivtrends #1
-    // had.
+    expect(run?.status).toBe("failed");
+    expect(run?.wait).toBeUndefined();
+    // The escalation comment's own text carries into the failure reason, so
+    // a human reading `timone status` sees what the stage could not act on.
+    expect(run?.failure).toContain("prove nothing");
+    // Nothing new is posted: the session's own comment is the whole report.
     expect(comments).toHaveLength(1);
-    expect(comments.at(-1)?.body).toContain("prove nothing");
   });
 
   it("stops without advancing when the gate did not pass", async () => {

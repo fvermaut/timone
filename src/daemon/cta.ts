@@ -16,7 +16,7 @@
 import { MARK_LABEL } from "../adapters/ticketing.js";
 import { HELD_LABEL } from "./steps.js";
 import { takeoverCommand } from "../channels/terminal.js";
-import { technicalFault } from "./faults.js";
+import { isBuildEscalation, technicalFault } from "./faults.js";
 import { CARRY_ON_WAIT, type Run } from "./runs.js";
 
 /**
@@ -294,6 +294,21 @@ export function ctaFor(state: TicketState): Cta {
   }
 
   if (run.status === "failed") {
+    // ADR-0052: a build stage that asked a question it had no business
+    // asking is filed as a fault, never parked on a person. Checked ahead of
+    // `technicalFault` because it is a different kind of machine-caused stop
+    // — not the infrastructure breaking under it, but a stage behaving
+    // wrongly — and the wording says so rather than borrowing the login/link
+    // language below.
+    if (isBuildEscalation(run.failure)) {
+      return {
+        headline: "I asked a question inside the build that I had no business asking, so I stopped.",
+        needFromYou: "nothing on this ticket — this is mine to fix, and this command starts me again.",
+        waitingOnYou: false,
+        command: `timone retry ${state.project}#${state.ticket}`,
+      };
+    }
+
     // A stop the machine caused itself does not read like a stop about the
     // work (ADR-0034), and the ticket's two surfaces must not disagree: the
     // comment posted at the moment of failure says the fault was the

@@ -19,7 +19,12 @@ import {
   type ConversationChannel,
 } from "../channels/conversation.js";
 import { TerminalChannel } from "../channels/terminal.js";
-import { SpawnRefusal, technicalFault, type TechnicalFault } from "./faults.js";
+import {
+  BUILD_ESCALATION_PREFIX,
+  SpawnRefusal,
+  technicalFault,
+  type TechnicalFault,
+} from "./faults.js";
 import { takeHold } from "./holder.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
@@ -42,6 +47,7 @@ import {
   classificationFromLabels,
   concludeConversation,
   effortFor,
+  inBuild,
   isBuilt,
   modelFor,
   ownsBranch,
@@ -1035,6 +1041,34 @@ function escalate(
   log(`parked ${id} — ${stage} can go no further, waiting on a person`);
 }
 
+/**
+ * A **build** stage — `execution`, `verification`, `delivery` — was given an
+ * answer it may not act on
+ * ([ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
+ *
+ * {@link escalate}'s sibling for the one place ADR-0033's park-and-wait
+ * outcome no longer applies: inside the build a run never stops between its
+ * last human agreement and its pull request, so a stage stopping to ask is
+ * not a wait to serve, it is the defect. The run is failed rather than
+ * parked, which is what lets `timone retry` start it again exactly as any
+ * other failed run — no person is waited on, because none was owed an
+ * answer in the first place.
+ *
+ * The reason carries {@link BUILD_ESCALATION_PREFIX} ahead of the stage's own
+ * words so `ctaFor` can tell this apart from an ordinary technical stop
+ * without importing anything from this module (see `faults.ts`).
+ */
+function failBuildEscalation(
+  store: RunStore,
+  id: string,
+  stage: PipelineStage,
+  outcome: { comment: TicketComment },
+  log: (message: string) => void,
+): void {
+  store.fail(id, `${BUILD_ESCALATION_PREFIX}${outcome.comment.body}`);
+  log(`failed ${id} — ${stage} escalated inside the build, filed rather than parked`);
+}
+
 export function waitOf(run: Run): ParkOptions {
   return {
     waitingOn: run.wait?.on ?? "a human",
@@ -1800,13 +1834,21 @@ export class AgentSessionSpawner implements SessionSpawner {
   ): Promise<PipelineStage | undefined> {
     const { store, adapter } = this.options;
 
-    // **Before every other ending, and for every stage** (ADR-0033 D2). A
-    // stage handed something outside what it may do is stopped whatever kind
-    // of stage it is — the gate it would have opened and the conversation it
-    // would have re-parked on are both questions, and asking another question
-    // is the loop this closes.
+    // **Before every other ending, and for every stage** (ADR-0033 D2, with
+    // ADR-0052's carve-out for the build). A stage handed something outside
+    // what it may do is stopped whatever kind of stage it is — the gate it
+    // would have opened and the conversation it would have re-parked on are
+    // both questions, and asking another question is the loop this closes.
+    // **Inside the build** — `execution`, `verification`, `delivery` — a run
+    // never stops between its last human agreement and its pull request
+    // (ADR-0052), so the stop this branch used to park on a person is filed
+    // as a fault instead; everywhere else, ADR-0033's park-and-wait stands.
     if (outcome?.kind === "escalated") {
-      escalate(store, run.id, stage, outcome, this.log.bind(this));
+      if (inBuild(stage)) {
+        failBuildEscalation(store, run.id, stage, outcome, this.log.bind(this));
+      } else {
+        escalate(store, run.id, stage, outcome, this.log.bind(this));
+      }
       return undefined;
     }
 
