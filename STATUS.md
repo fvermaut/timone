@@ -8,7 +8,7 @@
 
 ## Waiting on you
 
-> **Read this first.** Two things are yours. Ticket #39's work is finished and its pull request is open — merging it is the last step. And ticket #99's fix is built and checked, and stopped one step short of its pull request because it changes the part of the machine that picks tickets up, and that part is only proved by watching it run.
+> **Read this first.** Two pull requests are open and both wait on you to merge. Ticket #39's is [#89](https://github.com/fvermaut/timone/pull/89). Ticket #99's is [#100](https://github.com/fvermaut/timone/pull/100).
 
 **1. Merge [pull request #89](https://github.com/fvermaut/timone/pull/89) — it closes [#39](https://github.com/fvermaut/timone/issues/39).**
 
@@ -18,13 +18,11 @@ Why the ticket asked you three times for the same thing is now its own ticket, [
 
 **Why it matters:** nothing Timone has built for itself has reached a pull request before this one.
 
-**2. Ticket [#99](https://github.com/fvermaut/timone/issues/99) is built and checked, and waits for one watched run.**
+**2. Merge [pull request #100](https://github.com/fvermaut/timone/pull/100) — it fixes [#99](https://github.com/fvermaut/timone/issues/99).**
 
-This is the fault where a job that stopped to ask you something kept holding its project after its ticket was closed, so the tickets behind it queued up until you stopped it by hand. The fix is on the branch `timone/99-a-parked-run-whose-ticket-was-closed-kee` in Timone's own repository. A reader who did not build it drove the machine and confirmed it: a job left waiting is now ended when its ticket is closed **or** when the `timone` label is taken off, the reason is written down, and nothing is started for it. Every check was first made to fail on purpose, so the passes mean something. All 1619 automatic tests pass. The account is in [the report](doc/plans/phases/reports/phase-34-verification.md) on that branch.
+This is the fault where a job that stopped to ask you something kept holding its project after its ticket was closed, so the tickets behind it queued up until you stopped it by hand. A reader who did not build it drove the machine and confirmed it: a job left waiting is now ended when its ticket is closed **or** when the `timone` label is taken off, the reason is written down, and nothing is started for it. Every check was first made to fail on purpose, so the passes mean something. All 1619 automatic tests pass. The account is in [the delivery report](doc/plans/phases/reports/phase-34-delivery.md) on the pull request's branch.
 
-**What is missing is the watched run.** The change is in the code that picks tickets up, and eight of Timone's promises say they rest on that code. Seven have never been watched working. The eighth was watched on 4 September for a marked ticket only — and never for a ticket whose mark was removed, which is half of what this fix changes. A container with no Docker and no keys cannot watch any of them.
-
-**You have two ways forward, and both are one step.** Start the daemon on your own machine with a throwaway ticket, close it while the job waits, and watch the queue move — then say it was watched. Or say to go ahead without it, as you did for #39, and the pull request will record that choice. Either answer on ticket #99 moves it.
+**One thing is still missing: a watched run.** The change is in the code that picks tickets up, and eight of Timone's promises say they rest on that code. Seven have never been watched working. The eighth was watched on 4 September for a marked ticket only — and never for a ticket whose mark was removed, which is half of what this fix changes. A container with no Docker and no keys cannot watch any of them. You said, on the ticket, to go ahead without it — the same choice you made for #39 — and the pull request records that. **Merging it is your acceptance of that choice.** The watched run itself is still owed, and the next piece of work that touches this part of the machine will ask for it again.
 
 **3. What it asked, and what was decided.**
 
@@ -116,7 +114,7 @@ One promise lost its tick on 4 September — the one about a job being picked up
 
 ## What changed recently
 
-**5 September — the fault where a stopped job blocked everything behind it is fixed and checked.** A job waiting for an answer used to keep holding its project even after its ticket was closed. Now the machine ends it on its next check, writes down why, and starts nothing for it — and it does the same when the `timone` label is taken off instead. Checked by a reader who did not build it, on the ticket's branch, with every check first made to fail on purpose. It waits on one watched run before its pull request opens; that is item 2 at the top of this file. Ticket [#99](https://github.com/fvermaut/timone/issues/99).
+**5 September — the fault where a stopped job blocked everything behind it reached a pull request.** A job waiting for an answer used to keep holding its project even after its ticket was closed. Now the machine ends it on its next check, writes down why, and starts nothing for it — and it does the same when the `timone` label is taken off instead. Checked by a reader who did not build it, with every check first made to fail on purpose. Two more readers then checked the pull request's diff itself, one against coding conventions and one against the requirement it claims — nothing was wrong with the code, two small notes about the phase's own wording were left for later. The pull request is [#100](https://github.com/fvermaut/timone/pull/100), and merging it is item 2 at the top of this file. Ticket [#99](https://github.com/fvermaut/timone/issues/99).
 
 **5 September — watching the machine from a web page is being worked out, and two of its six questions are already answered.** The idea: every job leaves a record you can read, and one hosted page shows what all projects are doing — read-only; acting from the page comes later, on purpose. The map is [#92](https://github.com/fvermaut/timone/issues/92). Research found that everything a trace needs already flows through each session but is mostly thrown away or left unindexed ([#93](https://github.com/fvermaut/timone/issues/93)), and that the safest way to feed a hosted page is pushing a small snapshot out each cycle rather than opening anything on your machine ([#94](https://github.com/fvermaut/timone/issues/94)). The four remaining questions are at the top of this file. A LangChain dependency was considered and ruled out.
 
