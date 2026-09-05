@@ -63,3 +63,47 @@ Checkboxes:
 - [x] Full daemon test suite green: `npx vitest run src/daemon` → 1179 passed, 21 files.
 
 **What 35b must know.** `doc/plans/phases/reports/phase-35-handoffs.md` is created at this path with the header shown above; 35b appends its own `## 35b — ...` section below this one, does not recreate the header. No dependency from 35b on this slice's internals beyond what's importable: `inBuild` from `pipeline.ts`, `BUILD_ESCALATION_PREFIX`/`isBuildEscalation` from `faults.ts`, and `failBuildEscalation` (private to `session.ts`, not exported — if 35b needs the same fail-vs-park dispatch elsewhere, use `inBuild(stage)` directly rather than reaching for this function). One gotcha worth flagging: the fake adapter's `postComment` in `session.test.ts` stamps a fixed synthetic clock starting at `2026-08-02T11:00:00Z`; any fixture seeded with a comment dated after that (like the existing `settled` thread, dated 2026-08-03) will cause anything relying on `outcomeCursorFrom`/`readStageOutcome` to miss a comment posted during a test's `work` callback. Use a bare `thread`-derived fixture with no seeded comments when a test needs to post and then have the outcome read back.
+
+## 35b — Execution amends the plan and the register itself, records what it bent, and never stops for it
+
+**Built.** `timone-execute`'s own skill instructions (`.claude/skills/timone-execute/SKILL.md`) now say what ADR-0052 requires: gate 2 (undeclared seams) and gate 3 (reality contradicts the plan) no longer stop the run and route to `timone-plan`. Each now has the execute session amend the phase file (or the criteria register, for gate 3's contradicted-requirement case) itself, in place, with a dated marker naming the run — `✏ <date> (build, timone#<ticket>): <what changed and why>` — append one entry to a new per-phase departures record, and carry on against the amended text. The two-attempt validation failure at "The transition gate and escalation" no longer stops the whole run either: it records both attempts and what was done instead (best-effort state naming what's unmet, or an openly-recorded workaround) in the departures record, commits, and starts the sub-phase's dependents. The shell slice's look-check failure funnels into this same updated handling. Gate 1 (agreement) is untouched — it still stops and routes, as ADR-0052 leaves it. A new "The departures record" section documents the `phase-NN-departures.md` convention (created on first departure, appended thereafter, one dated entry per departure) that all three of these paths write to, and the completion report template gained a header-level `**Departures:**` bullet pointing at it, alongside — not replacing — the existing "Deviations from the plan" section.
+
+**Files touched.**
+
+- `.claude/skills/timone-execute/SKILL.md` — ten edits: the "three gates" framing paragraph, gate 2's body, gate 3's body, the "which gate fires when" sentence right after both gates, the two-attempt failure paragraph under "The transition gate and escalation", the shell slice's look-check failure sentence, a new "## The departures record" section inserted between "The transition gate and escalation" and "## Handoff-note template", a new `**Departures:**` bullet in the completion-report template, and two Workflow-section sentences (step 3, and the "Gate 3 sits over steps 4–6" sentence) brought into line with the same change.
+
+**Decisions taken inside the slice.** None beyond the plan's literal instruction — all ten edits were supplied verbatim by the orchestrator as exact OLD/NEW text, and each OLD block matched the file's actual text exactly before replacement, so no wording judgement calls were needed. The four consistency-fix edits (the gate-framing paragraph, the "which gate fires when" sentence, and the two Workflow-section sentences) were each a separate restatement elsewhere in the same file of gate 2/3's old stop-and-route behaviour; left alone they would have contradicted the six plan-named edits, so they were corrected as the plan's own scope discipline section required.
+
+**Validation evidence.**
+
+```
+$ grep -n "hand to the human\|route to \`timone-plan\`.*re-enter" .claude/skills/timone-execute/SKILL.md; echo "exit: $?"
+exit: 1
+
+$ grep -n "phase-NN-departures.md" .claude/skills/timone-execute/SKILL.md; echo "exit: $?"
+67:**2 — Undeclared-seams gate.** ... phase's departures record (`phase-NN-departures.md`, defined below in *The departures record*) ...
+71:**3 — Reality-contradicts-the-plan gate.** ... phase's departures record (`phase-NN-departures.md`, defined below in *The departures record*) ...
+169:**Failure → at most two attempts, then record and carry on.** ... phase's departures record (`phase-NN-departures.md`, defined below in *The departures record*) ...
+175:✏ Added [ADR-0052](...). Every departure this stage records ... goes to one file: `projects/<name>/doc/plans/phases/reports/phase-NN-departures.md`. ...
+248:- **Departures:** `phase-NN-departures.md` — N entries, or *none — the phase executed as planned*.
+exit: 0
+```
+
+Checkboxes: first grep exits 1 — pass. Second grep exits 0 — pass. `timone-adr` authority sentence at the end of gate 3's paragraph is present, unchanged — pass. The completion report's new `**Departures:**` bullet sits alongside the untouched "## Deviations from the plan" section, not replacing it — pass. Read the whole file end to end after editing: headings intact, all fences balanced (the new entry-template fence, the untouched handoff-template fence, and the untouched completion-report-template fence all open and close correctly).
+
+**No behaviour-carrying code in this sub-phase** — documentation-only change to one skill file plus this handoff entry.
+
+**What 35c must know.** The new section is titled exactly `## The departures record`, placed between `## The transition gate and escalation` and `## Handoff-note template` in `.claude/skills/timone-execute/SKILL.md`. The departures-entry template (nested in a four-backtick fence, matching the file's existing double-fence convention for templates) is:
+
+````markdown
+## <date> — <run/ticket>, <stage>
+
+**Kind:** plan step | requirement | check not run | workaround
+**Agreed:** <what the plan or requirement said>
+**Did instead:** <what happened>
+**Why:** <the reason, one or two sentences>
+````
+
+The in-place amendment marker convention to mirror when touching `timone-verify`'s own skill file is `✏ <date> (build, timone#<ticket>): <what changed and why>` — distinct from the pre-existing `✏ Refined <date>` marker style used for stage-5 plan amendments, and distinct from the `✏ <date> ([ADR-NNNN](path))` style used for citing an accepted decision.
+
+**Post-review addendum (orchestrator, same session).** A read-through after the sub-agent's ten edits landed found three more passages in the same file still describing the pre-ADR-0052 behaviour: "Read before you execute"'s note on an uncommitted handoff section, the matching sentence under "What 'dirty' means", and the "Closing" section's report-order list. All three assumed gate 2, gate 3, or an exhausted retry could still leave a slice mid-flight and uncommitted, or stop the whole report. Amended in place, using this same sub-phase's new authority, and recorded as the phase's first entry in `phase-35-departures.md` (created by this fix). 35c needs nothing further from this — the observation raised in the sub-agent's own report above is resolved.
