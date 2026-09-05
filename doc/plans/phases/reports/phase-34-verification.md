@@ -227,3 +227,23 @@ The behaviour this phase built is checked and holds — a run left parked, holdi
 What is not checked is the thing that can only be watched. The change is in the daemon's ticket-pickup loop, and eight of Timone's promises say plainly that they rest on that code. Seven of the eight have never been watched running at all; the eighth was watched on 4 September for the *marked* half of its clause and explicitly not for the *unmarked* half — which is half of what this phase changed. A container with no Docker, no forge credential and no copy of the managed projects cannot watch any of them, and this pass did not pretend to.
 
 So the phase is finished, correct as far as a terminal can tell, and **owes one watched run before it is delivered**. There is nothing here for a fix context to fix and nothing to route to triage.
+
+## Addendum — 2026-09-05: the watched run is waived for this delivery
+
+**Written by a takeover session, not by the verifier.** The pass above ended saying this phase owes one watched run before it is delivered. fvermaut read that on [ticket #99](https://github.com/fvermaut/timone/issues/99) and answered at 2026-09-05T13:15:46Z: *"go ahead without it"*. The stage that was running may not act on such an answer — it only checks work and writes down what it finds — so the run stopped, and fvermaut opened a takeover session (`timone takeover timone#99`, session `31307100-f5ce-462d-9536-849cc9879a6a`). This addendum is that session's record, owed by [ADR-0033](../../../adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md) D5 and bounded by [ADR-0035](../../../adr/0035-a-resolved-escalation-hands-the-run-back.md) D1.
+
+**What is decided.** The pull request for phase 34 is opened without the watched run. The decision is fvermaut's, in his own words on the ticket, and this note is the committed form of it.
+
+**What the waiver covers, and what it does not:**
+
+- It covers this delivery only: the pull request may be opened while the live gate this phase owes is unrun.
+- It changes no register line. The eight `live` criteria named under Live gates keep their `Last live gate:` values — seven still say `never` — and PRD-02.R22 stays `draft`.
+- The debt stands. The next phase whose diff touches `src/daemon/` owes a live gate under the same rule, and one watched run can pay several of these lines at once.
+- The pull request must say plainly what was not watched and that **merging is fvermaut's acceptance of the skipped run** — the same wording the pull request for #39 carried ([PR #89](https://github.com/fvermaut/timone/pull/89)).
+
+**Departures from defaults, named:**
+
+1. This file is a stage-7 artifact and only stage 7 writes it. The takeover session wrote this addendum anyway, because this report is where delivery reads the verification outcome, and the waiver belongs next to the sentence it answers. It is the record of a human decision, not verifier evidence; no verdict above changes, and the report's account of what was and was not checked stands word for word.
+2. The stopped stage's own closing said the way forward was a watched run on fvermaut's machine, or his choice carried into the pull request. The second is what happens; the first remains open to him at any time before merging.
+
+**What the takeover session did, in full:** read this report, the stage-7 and stage-8 rules in `process.md`, ADR-0033, ADR-0035, and PR #89's record of the same choice; wrote this addendum; committed and pushed it on the phase's branch; handed the run back to delivery on the ticket. It wrote no application code, changed no register, and opened no pull request.
