@@ -8,7 +8,7 @@
 
 ## Waiting on you
 
-> **Read this first.** Ticket #39's work is finished and its pull request is open. You told the machine to close it without the two watched checks, and the pull request says so plainly. Merging it is the last step, and it is yours.
+> **Read this first.** Two things are yours. Ticket #39's work is finished and its pull request is open — merging it is the last step. And ticket #99's fix is built and checked, and stopped one step short of its pull request because it changes the part of the machine that picks tickets up, and that part is only proved by watching it run.
 
 **1. Merge [pull request #89](https://github.com/fvermaut/timone/pull/89) — it closes [#39](https://github.com/fvermaut/timone/issues/39).**
 
@@ -18,7 +18,15 @@ Why the ticket asked you three times for the same thing is now its own ticket, [
 
 **Why it matters:** nothing Timone has built for itself has reached a pull request before this one.
 
-**2. What it asked, and what was decided.**
+**2. Ticket [#99](https://github.com/fvermaut/timone/issues/99) is built and checked, and waits for one watched run.**
+
+This is the fault where a job that stopped to ask you something kept holding its project after its ticket was closed, so the tickets behind it queued up until you stopped it by hand. The fix is on the branch `timone/99-a-parked-run-whose-ticket-was-closed-kee` in Timone's own repository. A reader who did not build it drove the machine and confirmed it: a job left waiting is now ended when its ticket is closed **or** when the `timone` label is taken off, the reason is written down, and nothing is started for it. Every check was first made to fail on purpose, so the passes mean something. All 1619 automatic tests pass. The account is in [the report](doc/plans/phases/reports/phase-34-verification.md) on that branch.
+
+**What is missing is the watched run.** The change is in the code that picks tickets up, and eight of Timone's promises say they rest on that code. Seven have never been watched working. The eighth was watched on 4 September for a marked ticket only — and never for a ticket whose mark was removed, which is half of what this fix changes. A container with no Docker and no keys cannot watch any of them.
+
+**You have two ways forward, and both are one step.** Start the daemon on your own machine with a throwaway ticket, close it while the job waits, and watch the queue move — then say it was watched. Or say to go ahead without it, as you did for #39, and the pull request will record that choice. Either answer on ticket #99 moves it.
+
+**3. What it asked, and what was decided.**
 
 Timone checks its own work against 20 promises. Tonight **2 could be checked and 18 could not be checked at all** — the sealed container it works in has no Docker, no key that reaches your other projects, and no copy of them, and almost everything Timone promises is about those things.
 
@@ -30,7 +38,7 @@ Those 18 promises are now marked as **"only a watched, running machine can check
 
 **One thing you should know is weak.** A promise marked this way can be quietly forgotten — "never" is a true sentence nobody has to act on. The only thing that catches it is the rule that a job touching that machinery must run a watched check before it delivers. Nothing enforces that automatically.
 
-**3. Before you start the machine again, build first.**
+**4. Before you start the machine again, build first.**
 
 ```
 npm run build && timone daemon
@@ -38,7 +46,7 @@ npm run build && timone daemon
 
 `timone` is linked straight to this folder's build, so building is all it takes — there is nothing to reinstall. Building matters because the machine now writes a line to its notes that a build from before today cannot read.
 
-**4. The to-do app's step 2 is still stopped and it is still a real question for you.**
+**5. The to-do app's step 2 is still stopped and it is still a real question for you.**
 
 [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47) asks you to drop the old "no reordering" rule and answer three questions about how moving a row should behave. It cannot be planned until you do, and step 1 ([#46](https://github.com/fvermaut/scratch-app/issues/46)) is stopped for the same reason.
 
@@ -48,7 +56,7 @@ Answer on the ticket, or:
 timone takeover scratch-app#47
 ```
 
-**5. The dashboard idea is now a list of questions, and four are yours.**
+**6. The dashboard idea is now a list of questions, and four are yours.**
 
 You asked for a way to watch all projects from one web page, without a terminal. That idea is now mapped on [#92](https://github.com/fvermaut/timone/issues/92): six questions, two already answered by research. The four left are yours, each answerable with a comment or a `timone takeover` command written on the ticket:
 
@@ -107,6 +115,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**5 September — the fault where a stopped job blocked everything behind it is fixed and checked.** A job waiting for an answer used to keep holding its project even after its ticket was closed. Now the machine ends it on its next check, writes down why, and starts nothing for it — and it does the same when the `timone` label is taken off instead. Checked by a reader who did not build it, on the ticket's branch, with every check first made to fail on purpose. It waits on one watched run before its pull request opens; that is item 2 at the top of this file. Ticket [#99](https://github.com/fvermaut/timone/issues/99).
 
 **5 September — watching the machine from a web page is being worked out, and two of its six questions are already answered.** The idea: every job leaves a record you can read, and one hosted page shows what all projects are doing — read-only; acting from the page comes later, on purpose. The map is [#92](https://github.com/fvermaut/timone/issues/92). Research found that everything a trace needs already flows through each session but is mostly thrown away or left unindexed ([#93](https://github.com/fvermaut/timone/issues/93)), and that the safest way to feed a hosted page is pushing a small snapshot out each cycle rather than opening anything on your machine ([#94](https://github.com/fvermaut/timone/issues/94)). The four remaining questions are at the top of this file. A LangChain dependency was considered and ruled out.
 
