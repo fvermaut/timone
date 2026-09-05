@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-05.
+**Last updated:** 2026-09-06.
 
 ---
 
@@ -73,6 +73,12 @@ The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) i
 
 **The watched run.** The other two promises, R1 and R5, can only be seen working in a watched run, and **neither has ever been watched**. The work changed the code that picks tickets up and three of the step instructions, which is exactly what those two promises rest on. A watched run is owed before this can be delivered. R3 will need the same one if you take the first option above.
 
+**Checked again on 6 September, with the same result.** A second reader who did not build it ran the whole check afresh: the build is still sound (all 1179 automatic tests pass), nothing that used to work broke, and the same two things still stand in the way. The second account is at the end of [the same report](doc/plans/phases/reports/phase-35-verification.md) on that branch. Writing on the ticket will not move this; the way to settle it is:
+
+```
+timone takeover timone#105
+```
+
 **Nothing else needs you.**
 
 ---
@@ -121,6 +127,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**6 September — the "no stops" work was checked a second time, by a second reader, and the answer did not change.** The check on the branch `timone/105-1-the-run-carries-on-instead-of-stopping` was run again from scratch by a reader who did not build the work and did not see the first check's reasoning. Same outcome: the build is sound, all 1179 automatic tests pass, nothing that used to work broke — and the work still cannot be called proven, because two of its promises need a watched run that has never happened, and the third is written as terminal-checkable when it is not. Both points are item 7 at the top of this file, and both wait on you. The second account is at the end of [the report](doc/plans/phases/reports/phase-35-verification.md) on that branch. Ticket [#105](https://github.com/fvermaut/timone/issues/105).
 
 **5 September — the first half of the "no stops between agreement and pull request" work was built and then checked.** The work is on the branch `timone/105-1-the-run-carries-on-instead-of-stopping` in this repository; there is no pull request yet. It changes the machine so that once you have agreed to something, the steps that build, check and deliver it never stop to ask you again: a step that hits something it cannot do as written writes down what it did instead and carries on. A reader who did not build it then checked it. The build itself is sound — nothing failed, and nothing that used to work broke. What the check could not do is confirm the three promises the work claims, and the reason is item 7 at the top of this file: one promise says it is checkable from a terminal and is not, and the other two have never been watched. The account is in [the report](doc/plans/phases/reports/phase-35-verification.md) on that branch. Ticket [#105](https://github.com/fvermaut/timone/issues/105).
 
