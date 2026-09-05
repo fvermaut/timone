@@ -55,13 +55,13 @@ The project's own suite may be run **once**, as a build-health smoke, and report
 
 ## The gates
 
-Each gate stops verification. When one fires you write **nothing** into the project, state which gate fired and why in one short paragraph, and name the skill or the human to route to. A stopped verification is a valid, complete outcome of this skill.
+Gates 1 and 2 stop verification, exactly as before: you write **nothing** into the project, state which gate fired and why in one short paragraph, and name the skill or the human to route to. Gate 3 no longer does: ✏ since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), it blocks the affected criteria, records a departure, and lets the pass continue to its ordinary completion — see gate 3 below. A stopped verification, at gate 1 or gate 2, is a valid, complete outcome of this skill.
 
 **1 — Completion gate.** A phase file not stamped `Complete — see …` is not verifiable — there is no completion report to run the app from, and stage 6's own validation has not finished vouching for the branch. Route to **`timone-execute`** when the phase is mid-execution or never started; route to the **human** when the state is unclear. Never verify "the parts that are done".
 
 **2 — Register gate.** No criteria register covering the phase's claimed IDs, and no un-anchored stamp in the phase file's header, means there is nothing to verify against. Route to **`timone-prd`** (missing register) or **`timone-plan`** (missing anchoring statement). An un-anchored stamp is not this gate firing — see Scope below.
 
-**3 — Environment gate.** The environment will not come up per the completion report's instructions — a container that won't start, a port that's taken, a missing local dependency. Every in-scope criterion is **BLOCKED**: the report is written saying so, no probe runs, no register line changes, no fix loop is consumed — a fix loop is for behaviour that is observably wrong, and BLOCKED asserts nothing about behaviour. Route to the human with what failed to start and the exact command that failed.
+**3 — Environment gate.** The environment will not come up per the completion report's instructions — a container that won't start, a port that's taken, a missing local dependency. Every in-scope criterion is still **BLOCKED**: the report is written saying so, no probe runs, no register line changes, no fix loop is consumed — a fix loop is for behaviour that is observably wrong, and BLOCKED asserts nothing about behaviour. ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), this no longer stops the pass: record a departure naming what failed to start and the exact command that failed, and let the pass continue for whatever in scope does not depend on the environment coming up. The stage still posts its ordinary completion, and the run proceeds to delivery.
 
 ## The branch
 
@@ -138,7 +138,7 @@ Where the clause asserts a **transformation of input** (trimming, normalization,
 1. Every FAIL (and REGRESSION) in the pass produces a **defect brief** in the template below — written from observation, quoting the register's clause, never speculating about cause in the code.
 2. A **fresh fix context** receives the brief, the repository, and `doc/standards.md`; it implements, commits `fix: verify NN — <criterion-id> <slug>` on the phase's branch, and returns the commit SHA plus a one-paragraph note. You ingest **only the SHA** — never its transcript, never its diff.
 3. **One full re-verify** — everything in scope except already-scripted HUMAN-CHECKs. A fix is a code change made by a context that did not watch the build; nothing short of a full re-run is defensible, because you cannot know what else it touched without reading it.
-4. That brief-fix-reverify cycle is **one loop**. **Max 2 loops after the initial pass.** At exhaustion: remaining failures recorded with evidence, their register lines flipped to `failed`, and the work goes to the human as a **new ticket** naming the phase and the failures, which stage 1 then reads and classifies (✏ 2026-08-19: stage 9 until [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired it) — the report's handed-to-the-human section says exactly what remains and why.
+4. That brief-fix-reverify cycle is **one loop**. **Max 2 loops after the initial pass.** ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), exhaustion no longer files a new ticket: remaining failures are recorded with evidence, their register lines flipped to `failed` exactly as before — that flip is still true evidence — and one entry is appended to the phase's departures record (`phase-NN-departures.md`) naming the remaining failures and why they were not resolved within the two loops. The stage posts its ordinary completion and the run proceeds to delivery; the report's carried-forward section (below) says exactly what remains.
 
 **Mechanism is an example, never a requirement.** Today the obvious instrument for the fix context is a sub-agent spawned from this session with the brief as its prompt; PRD-02's daemon will spawn the same contract through the Agent SDK. Anything that receives those inputs and returns a SHA satisfies the contract.
 
@@ -229,9 +229,9 @@ Read: <the allowed-list artifacts actually read, by path>. Not read: handoffs, d
 
 <Every `Status` flip and marker written this pass, by ID — or "None: <why>.">
 
-## Handed to the human
+## Carried forward
 
-<Only when anything remains: what, the evidence, and that it routes via stage 9. Omit the section when nothing does.>
+<Only when anything remains BLOCKED or `failed`: what, the evidence, and a pointer to the phase's departures record (`phase-NN-departures.md`) for the entry recording it. Omit the section when nothing does.>
 ````
 
 ## Status reporting
@@ -245,7 +245,7 @@ Before finishing, update the target project's `STATUS.md` — **on the project's
 3. Check gate 1 (completion stamp) and gate 2 (register or un-anchored stamp). If either fires, stop, route, write nothing.
 4. Check out the phase branch; merge in an unancestored parent's verification commits when stacked; refuse dirt.
 5. Derive the scope: claimed set + computed regression set, narrowed by `Depends-on` against this phase's diff. List both, and list what the narrowing removed.
-6. Stand up the environment in production form (gate 3 if it will not come up — everything BLOCKED, report, stop).
+6. Stand up the environment in production form (gate 3 if it will not come up — everything BLOCKED, record a departure, report, and continue rather than stop).
 7. For every in-scope criterion, run its committed probe, or author one when there is none or the criterion is `revised`. Run the shared baseline probes for the browser channel. Every probe runs its break step first: red, then green. Compare each register clause list against the labels the probe printed and close any gap. Write HUMAN-CHECK scripts where only a human can look. **For a `live` criterion, write neither probe nor script** — report its last gate and whether this phase owes a fresh one.
 8. FAILs → defect briefs → fresh fix context → full re-verify. Max 2 loops, then exhaustion protocol.
 9. Write the report, commit the probes, and flip the register — all in one `docs: verify phase NN — <theme>` commit. Update `STATUS.md`.
@@ -272,11 +272,11 @@ so leaving it off costs a correction rather than passing quietly.
 
 Report to the user, in this order:
 
-1. The gate outcome, if one fired: which gate, why, and the exact next invocation — then stop, nothing below applies.
+1. The gate outcome, if gate 1 or gate 2 fired: which gate, why, and the exact next invocation — then stop, nothing below applies. ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), gate 3 no longer produces this outcome — it shows up in the departures record instead, covered by item 5 below.
 2. The scope verified — claimed set, derived regression set — and the verdict table.
 3. Fix loops consumed, with the fix commit SHAs.
 4. The report's path, and every script waiting on a human.
-5. Anything handed to the human via stage 9.
+5. Anything carried forward — BLOCKED or `failed` — per the report's own "Carried forward" section and the phase's departures record.
 6. The next invocation: `/timone-deliver <project> <phase-NN>` — naming the phase, because delivery refuses to pick one for the user just as you do.
 
 Verification observes and reports. It never fixes with its own hands, never merges, and never opens a PR. Stop here.
