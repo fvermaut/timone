@@ -1,6 +1,6 @@
 # ADR-0033: A stage that cannot act on an answer escalates
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0052](0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)
 - **Date:** 2026-08-18
 - **Source:** fvermaut's rulings of 2026-08-18, in the grill session on [timone#28](https://github.com/fvermaut/timone/issues/28) — four questions, each answered against a recommendation
 - **Extends:** [ADR-0031](0031-a-handoff-is-a-wait-not-a-failure.md), whose conversation park assumed the stage that asks a question is a stage that can act on the answer

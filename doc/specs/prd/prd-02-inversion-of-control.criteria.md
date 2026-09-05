@@ -49,6 +49,8 @@
 
 ## R3 — Async clarification via a conversation
 
+> ✏ Revised 2026-09-05: the requirements interview of 2026-09-05 ([PRD-03](prd-03-a-run-ends-at-its-pull-request.md)) takes the 2026-08-18 narrowing back the other way. [ADR-0033](../../adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md) answered "this stage may not act on the answer" by parking the run on a person; PRD-03.R5 rules the question itself the defect — a stage may only ask a question the machinery can act on the answer to, so the class ADR-0033 handled must be empty. Its machinery may stay as a last-resort guard, but a run entering it is a fault to file, never a wait to serve — [timone#99](https://github.com/fvermaut/timone/issues/99)'s third intervention is the recorded cost. The written-answer clauses below stand unchanged, and inside the build no question is asked at all (PRD-03.R1).
+
 > ✏ Revised 2026-08-18: [ADR-0033](../../adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md) **narrows** this requirement, and it is the first revision here that takes something back. ADR-0031 widened the written path to every kind of stop; this one removes the single class where writing cannot help. A stage that is handed an answer it **may not act on** now stops on a person rather than on a reply: the run parks on a wait no comment resolves, and what moves it is the human running the command the ticket carries. Clause 3's promise — that a written answer is picked up and acted on — is therefore deliberately false for that class, which is why this is a revision and not a marker. **Why it was needed:** `ivtrends` [#1](https://github.com/fvermaut/ivtrends/issues/1) was verified five times at `claude-opus-5`/`xhigh`, and each pass read the human's answer, judged correctly that acting on it was outside what the stage may do, and asked again. Judgement was never the scarce resource; authority was.
 
 > ✏ Revised 2026-08-16: [ADR-0031](../../adr/0031-a-handoff-is-a-wait-not-a-failure.md) widens the written path to the one class of stop that could not use it. A stage that stops part-way and asks the human for something now **parks** rather than failing, carrying a `conversation` wait, so the answer is read and acted on by the machinery [ADR-0022](../../adr/0022-a-conversation-ticket-can-be-answered-in-writing.md) built and [phase 19](../../plans/phases/phase-19.md) made safe. Nothing about the clause below changes; what changes is how many kinds of stop it reaches. **The reason it is recorded here rather than as a new criterion:** on `scratch-app` [#31](https://github.com/fvermaut/scratch-app/issues/31) the machine invited a written answer, the human wrote one, and the words were carried into the resuming session's prompt and could still start nothing — a criterion promising the written path is picked up was, for that stop, false.
@@ -122,8 +124,11 @@
 
 ## R6 — Autonomous execution with verification
 
+> ✏ Revised 2026-09-05: the requirements interview of 2026-09-05 ([PRD-03](prd-03-a-run-ends-at-its-pull-request.md)) changes where remaining failures land. They were reported as a ticket comment and the run stopped there; they now ride into the pull request's opening section (PRD-03.R1, R2) and the run continues to delivery — red included. The criterion's loop bound is unchanged; its ending clause is rewritten below.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** revised
+    - ✏ 2026-09-05 **dropped from `verified` by the revision above, and by nothing observed against the built machinery.** The 2026-08-06 evidence stands as history of the clause it was gathered against — an ending that no longer exists. What must be seen: a run whose verify-fix loops are exhausted continuing to a pull request that opens on the failure, with no stop and no ticket question in between.
     - ✏ 2026-08-06 verified by fvermaut at [phase 13](../../plans/phases/phase-13.md)'s 13h gate, on `scratch-app` [#6](https://github.com/fvermaut/scratch-app/issues/6). **Unattended execution with sub-phase validation** — the daemon resumed the parked run and one session built the approved five-slice `phase-04.md` on `timone/6-typing-in-the-box-is-fiddly-on-my-phone`: one commit per sub-phase after its own validation passed (`d424c6a`, `13c0836`, `53c2de8`, `7a909ae`, `6c712c7`), handoffs, the completion report, and the `Status:` flip the daemon reads as its artifact witness. **Fresh-context verification** — a separate session whose prompt deliberately carries neither the ticket's text nor its thread ran stage 7 and committed the report (`6e02f3b`); the pass was clean first time, 0 of 2 fix loops consumed, and the later review remediation triggered a second full pass (`18ea12f`), also clean. **Failures reported as ticket comments** — three stops landed as plain-language reports rather than silence: two pre-flight refusals over a stray commit another session had left on the branch, and a delivery that produced nothing; each was recovered with `timone retry`, and `.timone/state.json` was never edited by hand.
     - ✏ 2026-08-06 **known limit of the evidence.** The bounded verify-fix loop never fired — both live passes were clean on the first attempt — so "at most two verify-fix iterations" rests on the verify skill's own rule (exercised hand-run in phases 8–10) rather than a daemon-path observation. The failure-report clause was observed for refusals and a produced-nothing stage, not for loop exhaustion.
 - **Verify-via:** live
@@ -133,22 +138,25 @@
 - **Criteria:**
     - GIVEN an approved phase plan
       WHEN execution runs unattended
-      THEN sub-phase validation and the fresh-context verification of PRD-01 both run, with at most two verify-fix iterations before remaining failures are reported as a ticket comment
+      THEN sub-phase validation and the fresh-context verification of PRD-01 both run, with at most two verify-fix iterations before remaining failures are carried into the pull request's opening section (PRD-03.R2) — the run continues to delivery and never stops on them
 - **Verification hint:** run on the pilot ticket; inspect the verification report and criteria statuses; force a failure to see the bounded loop and ticket report.
 
 ## R7 — Pull request delivery
 
+> ✏ Revised 2026-09-05: the requirements interview of 2026-09-05 ([PRD-03](prd-03-a-run-ends-at-its-pull-request.md)) makes the pull request every run's only ending. It no longer waits on verification passing or on anything else: it opens for a red run too, saying so first-thing, and its body's first section is the departure list of PRD-03.R2. The cross-linking and scope-summary clauses below are unchanged; the entry condition is rewritten.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** revised
+    - ✏ 2026-09-05 **dropped from `verified` by the revision above, and by nothing observed against the built machinery.** The 2026-08-06 evidence stands as history: it watched a pull request open after a clean verification, which is still one of the cases and no longer the requirement. What must be seen: a pull request opening from a run that did not pass, its body opening on that fact.
     - ✏ 2026-08-06 verified by fvermaut at [phase 13](../../plans/phases/phase-13.md)'s 13h gate. [PR #9](https://github.com/fvermaut/scratch-app/pull/9) was opened by the delivery session **from the work branch**, referencing #6; its body carries the plain-language scope summary, the full verdict table with the one advisory HUMAN-CHECK as an unticked checklist item, and both review axes under separate headings (Spec quoting requirement IDs); the delivery report was committed on the branch (`14d5e24`) **before** the PR opened, and the ticket links the PR in plain words — cross-links both ways, as the criterion asks. The review remediation refreshed the *same* PR as iteration 2 (`a2419f1`) rather than forking a second one. fvermaut merged it, the run completed, and the ticket closed as completed.
 - **Verify-via:** live
 - **Last live gate:** never
 - **Depends-on:** `src/daemon/, src/adapters/, .claude/skills/timone-deliver/`
     > ✏ Moved from `api` to `live` on 2026-09-04 ([ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D1). It needs a running daemon and a forge that accepts a pull request, which no verification pass has. It was reported BLOCKED, not checked, before this.
 - **Criteria:**
-    - GIVEN execution and verification completed
+    - GIVEN execution and verification concluded — passed or not
       WHEN the delivery stage runs
-      THEN a pull request exists from the work branch referencing the ticket, its description summarizes scope and verification outcome, and the ticket links to the PR
+      THEN a pull request exists from the work branch referencing the ticket, its body opens with the departure section (PRD-03.R2) and then summarizes scope and verification outcome, and the ticket links to the PR
 - **Verification hint:** `gh pr view` on the pilot repo; check cross-links both ways.
 
 ## R8 — Docker preview per pull request

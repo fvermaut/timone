@@ -172,8 +172,11 @@
 
 ## R13 — Deliver skill
 
+> ✏ Revised 2026-09-05: the requirements interview of 2026-09-05 ([PRD-03](prd-03-a-run-ends-at-its-pull-request.md)) removes delivery's two refusals to open. It opens the pull request for a run whose verification did not pass — saying so first-thing (PRD-03.R1) — and it no longer holds a pull request back until the human has viewed a built screen: the viewing moves into the pull request itself (PRD-03.R4, reversing [ADR-0039](../../adr/0039-the-look-is-gated-twice.md)'s delivery-side stop). The body's first section is the departure list of PRD-03.R2. The conventions clause below is unchanged; a second clause is added for the case delivery used to refuse.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** revised
+    - ✏ 2026-09-05 **dropped from `verified` by the revision above, and by nothing observed against the built machinery.** The 2026-07-29 evidence stands as history of the passing case. What must be seen: a pull request opened from a phase whose verification did not pass, and one for a screen-carrying phase opened with no prior viewing.
 - **Verify-via:** live
 - **Last live gate:** never
 - **Depends-on:** `.claude/skills/timone-deliver/`
@@ -182,6 +185,9 @@
     - GIVEN a completed and verified phase on a work branch
       WHEN the deliver skill runs
       THEN a pull request exists referencing the driving ticket/requirements, its description summarizes scope and verification outcome, and branch/commit conventions match the process spec
+    - GIVEN a completed phase whose verification did not pass, or one carrying a user-facing screen nobody has viewed
+      WHEN the deliver skill runs
+      THEN the pull request still opens — no refusal, no waiting — its body opening on the failure or carrying the preview and comparison, per PRD-03
 - **Verification hint:** `gh pr view` on the pilot repo; check cross-links.
 - **Evidence:** ✏ 2026-07-29 verified — phase 09's dry run opened two real pull requests on `scratch-app` ([#1](https://github.com/fvermaut/scratch-app/pull/1) against `main`, [#2](https://github.com/fvermaut/scratch-app/pull/2) stacked on its parent branch), each referencing its requirement IDs in the absence of a ticket home, summarizing scope and the verification outcome, and following the phase's branch/commit conventions. Two terminal refusals were also exercised. Records: `projects/scratch-app/doc/plans/phases/reports/phase-01-delivery.md` and `phase-02-delivery.md`. Gate passed by fvermaut 2026-07-29.
 
