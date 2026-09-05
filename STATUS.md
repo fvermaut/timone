@@ -52,9 +52,9 @@ timone takeover scratch-app#47
 
 You asked for a way to watch all projects from one web page, without a terminal. That idea is now mapped on [#92](https://github.com/fvermaut/timone/issues/92): six questions, two already answered by research. The four left are yours, each answerable with a comment or a `timone takeover` command written on the ticket:
 
-- [What one run's trace must record](https://github.com/fvermaut/timone/issues/95) — **start here**; it shapes the rest.
-- [What the dashboard shows](https://github.com/fvermaut/timone/issues/96) — I build a throwaway page, you react to it.
-- [Built inside this repository, managed like any other project](https://github.com/fvermaut/timone/issues/97)
+- [What the record of a job must keep](https://github.com/fvermaut/timone/issues/95) — **start here**; it shapes the rest.
+- [What the page shows](https://github.com/fvermaut/timone/issues/96) — I build an example page, you react to it.
+- [The page's code lives in this repository, but is built like a client project](https://github.com/fvermaut/timone/issues/97)
 - [Where the page runs, how it gets its data, and who can open it](https://github.com/fvermaut/timone/issues/98)
 
 There is also [#91](https://github.com/fvermaut/timone/issues/91): adopting two public formats (EARS for acceptance criteria, MADR for decision records). It is marked for the machine; expect its questions on the ticket.
@@ -108,7 +108,7 @@ One promise lost its tick on 4 September — the one about a job being picked up
 
 ## What changed recently
 
-**5 September — watching the machine from a web page is being worked out, and two of its six questions are already answered.** The idea: every run leaves a trace you can inspect, and one hosted page shows what all projects are doing — read-only; acting from the page comes later, on purpose. The map is [#92](https://github.com/fvermaut/timone/issues/92). Research found that everything a trace needs already flows through each session but is mostly thrown away or left unindexed ([#93](https://github.com/fvermaut/timone/issues/93)), and that the safest way to feed a hosted page is pushing a small snapshot out each cycle rather than opening anything on your machine ([#94](https://github.com/fvermaut/timone/issues/94)). The four remaining questions are at the top of this file. A LangChain dependency was considered and ruled out.
+**5 September — watching the machine from a web page is being worked out, and two of its six questions are already answered.** The idea: every job leaves a record you can read, and one hosted page shows what all projects are doing — read-only; acting from the page comes later, on purpose. The map is [#92](https://github.com/fvermaut/timone/issues/92). Research found that everything a trace needs already flows through each session but is mostly thrown away or left unindexed ([#93](https://github.com/fvermaut/timone/issues/93)), and that the safest way to feed a hosted page is pushing a small snapshot out each cycle rather than opening anything on your machine ([#94](https://github.com/fvermaut/timone/issues/94)). The four remaining questions are at the top of this file. A LangChain dependency was considered and ruled out.
 
 **5 September — two public document formats proposed.** [#91](https://github.com/fvermaut/timone/issues/91) asks to write acceptance criteria in EARS and decision records in MADR, formats most comparable tools now share. It is marked and will come to you with questions.
 
