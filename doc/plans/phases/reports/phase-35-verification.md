@@ -198,3 +198,88 @@ Three things remain. None is a defect in what phase 35 built.
 3. **Two smaller record defects, both for the requirements owner.** PRD-03 gives none of its four `live` criteria the `Last live gate:` line the process requires. And `phase-35-complete.md` contradicts itself on R3's channel between its Requirements line and its closing section.
 
 A separate note for whoever maintains the harness rather than the requirements: this stage's probe directory refused every read, write and execute from this session. It did not cost this pass anything, because no probe was owed. It would stop the next pass that needs one.
+
+---
+
+# Iteration 2 — 2026-09-06
+
+- **Date:** 2026-09-06
+- **Phase:** [phase-35.md](../phase-35.md) — stamped `Complete`, completion report [phase-35-complete.md](phase-35-complete.md)
+- **Scope:** claimed set PRD-03.R1 (MUST, `live`), PRD-03.R3 (MUST, `api`), PRD-03.R5 (MUST, `live`)
+- **Live gate owed:** yes — PRD-03.R1 and PRD-03.R5: this phase's diff touches `src/daemon/`, `.claude/skills/timone-execute/`, `.claude/skills/timone-verify/`, `.claude/skills/timone-deliver/`, which their `Depends-on` lines declare
+- **Regression set (derived):** empty — the only MUST + `api` + `verified` criteria at this HEAD are PRD-01.R2 and PRD-01.R3, and both were narrowed out (below)
+- **Branch:** `timone/105-1-the-run-carries-on-instead-of-stopping` @ `f7fbcbe` — not stacked; no parent merge needed
+
+## Environment
+
+Timone is a CLI and daemon; its production form is the compiled build. `npm run build` (tsc) compiled cleanly. Build-health smoke, run once: `npx vitest run src/daemon` — 1179 tests in 21 files, all passing, matching the completion report's stated count. The smoke is build health only, never criterion evidence. No server was stood up: no in-scope criterion is checkable against a running process in this pass (see verdicts), and the regression set is empty.
+
+## Independence declaration
+
+Read: `doc/specs/prd/prd-03-a-run-ends-at-its-pull-request.criteria.md` and the other two registers' status/priority/channel/depends-on lines (scope derivation only); `doc/specs/prd/prd-03-a-run-ends-at-its-pull-request.md` (narrative); `doc/plans/phases/phase-35.md` status line and requirements header only; `doc/plans/phases/reports/phase-35-complete.md` whole; this report's own `## HUMAN-CHECK scripts` section from iteration 1 (lines 130–133 — it carries none forward); `README.md`, `CONTEXT.md`, `STATUS.md` (`doc/standards.md` does not exist in this repository); `doc/plans/phases/probes/` listing; the diff's file names only (scope narrowing). Not read: handoffs, the departures record, sub-phase bodies, diffs' content, source, the committed test suite, ADRs, iteration 1's verdicts or evidence. No implementation source was read.
+
+## Verdict summary
+
+| ID | Priority | Channel | Verdict | Loop |
+| --- | --- | --- | --- | --- |
+| PRD-03.R1 | MUST | live | LIVE-GATE | 0 |
+| PRD-03.R3 | MUST | api | BLOCKED | 0 |
+| PRD-03.R5 | MUST | live | LIVE-GATE | 0 |
+
+## Evidence
+
+### PRD-03.R1 — LIVE-GATE
+
+`Verify-via: live`. The criterion carries no `Last live gate:` field — never observed by a live gate. This phase's diff touches every prefix its `Depends-on` line declares, so a fresh gate is owed. No probe and no manual script are authored for a `live` criterion; the register line is untouched.
+
+### PRD-03.R3 — BLOCKED
+
+`Verify-via: api`, but neither clause can be exercised from a terminal against this build:
+
+- Clause 1 (a build step that amends the plan or the register commits the amendment with a dated marker naming the run, original wording readable in place): its GIVEN is a build step making an amendment. No such amendment exists on this branch — the diff touches no register file, and the completion report records no plan or register amendment (its one departure is a skill-file fix). Producing an instance means driving a build step through a contradiction, which is a supervised live run, not a terminal probe.
+- Clause 2 (merged → amendments ratified; closed unmerged → amendments die with the branch): no pull request from this run exists yet, and opening or closing one is not this pass's to do.
+
+BLOCKED asserts nothing about behaviour: no probe was authored (any probe would simulate the build step and then measure the simulation), the register line is untouched, no fix loop is consumed. Note for the human: the criterion's own verification hint says "inspect the work branch **after a driven amendment**" — its substance is only observable after a live driven run, so its declared channel (`api`) looks wrong. Revising the register is not this pass's authority. The completion report and the phase file both call R3 `live` in one passage while the register says `api`; the register is the authority, and this discrepancy is recorded here as a finding.
+
+### PRD-03.R5 — LIVE-GATE
+
+`Verify-via: live`. No `Last live gate:` field — never observed. Its `Depends-on` (`src/daemon/`, `.claude/skills/`) is touched by this diff, so a fresh gate is owed. Register line untouched.
+
+## HUMAN-CHECK scripts
+
+None. No criterion in scope is on the `human` or `browser` channel, and iteration 1 carried none forward.
+
+## Live gates
+
+- PRD-03.R1 — last live gate: never. This phase owes a fresh one.
+- PRD-03.R5 — last live gate: never. This phase owes a fresh one.
+
+## Regression
+
+The derived regression set is empty; nothing to re-run. What the narrowing removed:
+
+- PRD-01.R2 (MUST, api, verified) — `Depends-on: src/manifest.ts, src/commands/projects.ts`; this diff touches neither.
+- PRD-01.R3 (MUST, api, verified) — `Depends-on: src/commands/workspace.ts, src/git.ts`; this diff touches neither.
+
+No other criterion at this HEAD is MUST + `api` + `verified`.
+
+## Probes
+
+0 probes run, 0 authored. R1 and R5 are `live` (no probe by rule); R3 is BLOCKED with no authorable probe (its preconditions cannot be produced from the terminal — see its evidence section). The committed probe set (`prd-01.r2.mjs`, `prd-01.r3.mjs`, `prd-02.r22.mjs`) was not run: none of their criteria are in scope after narrowing.
+
+## Fix-loop accounting
+
+0 of 2 loops consumed — nothing FAILED; BLOCKED consumes no loop.
+
+## Register changes
+
+None: LIVE-GATE leaves the register untouched by rule, and BLOCKED asserts nothing about behaviour.
+
+## Handed to the human
+
+The phase cannot pass this check as things stand, and no re-run of it will change that:
+
+- R1 and R5 owe a live gate — a supervised run on real infrastructure — that this stage never performs and that has never been run. Until that gate has run and its report is committed, the phase does not pass.
+- R3 is BLOCKED: declared terminal-checkable, but only observable after a driven run. It needs either the live gate (which would produce the amendment and the pull request its clauses require) or a register revision correcting its channel.
+
+Both roads go through a person: scheduling the watched run, or revising the register. The ticket comment for this pass says so and carries the takeover command.
