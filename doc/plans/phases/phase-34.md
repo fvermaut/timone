@@ -1,6 +1,6 @@
 # Phase 34: A parked occupier is cancelled the same way a picked-up one is
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-34-complete.md](reports/phase-34-complete.md).
 
 > **Companion phases:** none — first phase to touch this part of the registration cycle since [phase 22](phase-22.md)'s 22b wrote it. Governing decision: [ADR-0026](../../adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md) — the chunk, not the ticket, holds the project, which is why a parked run can hold one at all and why cancelling it is what frees the queue behind it.
 
