@@ -1,6 +1,6 @@
 # PRD-03: A run ends at its pull request
 
-> **Status:** Draft
+> **Status:** Active — approved by fvermaut 2026-09-05
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-03-a-run-ends-at-its-pull-request.criteria.md](prd-03-a-run-ends-at-its-pull-request.criteria.md)
 > **Phases:** none yet
