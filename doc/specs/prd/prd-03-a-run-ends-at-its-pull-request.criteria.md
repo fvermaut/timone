@@ -9,6 +9,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** never
 - **Depends-on:** `src/daemon/, .claude/skills/timone-execute/, .claude/skills/timone-verify/, .claude/skills/timone-deliver/`
 - **Criteria:**
     - GIVEN a run past its last human agreement (an approved list of pieces, or a chore's triage record)
@@ -27,6 +28,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** never
 - **Depends-on:** `src/daemon/, .claude/skills/timone-deliver/`
 - **Criteria:**
     - GIVEN a run in which anything departed from what was agreed — a plan amendment, a requirement amendment, a check not run, a workaround, a failing state
@@ -39,9 +41,12 @@
 
 ## R3 — Mid-build amendments carry their marks
 
+> ✏ Revised 2026-09-06 by fvermaut (interactive session, ticket [timone#105](https://github.com/fvermaut/timone/issues/105)): `Verify-via` changed from `api` to `live`. The criterion describes what an agent does while building; its only dependencies are two instruction files with no code behind them, and its own hint presupposes a driven run. Both verification passes found it unverifiable from a terminal — the account is in [phase-35-verification.md](../../plans/phases/reports/phase-35-verification.md). Clauses unchanged.
+
 - **Priority:** MUST
 - **Status:** draft
-- **Verify-via:** api
+- **Verify-via:** live
+- **Last live gate:** never
 - **Depends-on:** `.claude/skills/timone-execute/, .claude/skills/timone-verify/`
 - **Criteria:**
     - GIVEN a build step that amends the plan or the requirements it is building against
@@ -56,6 +61,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** never
 - **Depends-on:** `src/daemon/, .claude/skills/timone-deliver/`
 - **Criteria:**
     - GIVEN a completed run that built or substantially changed a user-facing screen
@@ -68,6 +74,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** never
 - **Depends-on:** `src/daemon/, .claude/skills/`
 - **Criteria:**
     - GIVEN a ticket waiting on a question the process asked
