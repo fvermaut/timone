@@ -6,9 +6,14 @@
 
 ## R1 — The build has one ending: a pull request
 
+> ✏ 2026-09-07: the [phase-35 live gate](../../plans/phases/reports/phase-35-live-gate.md) watched this on the scratch-app fixture. Clause 1 (adapt and carry on, no stop, reach a PR) passed, seen organically four times. Clause 2 (failing tests still open a PR) was never triggered — no run's own work failed — but delivery was watched opening a pull request with the test suite red (scratch-app#58, failures named), and the refuse-not-on-red mechanism is unit-tested in phase 35; the own-tests-red case remains owed a direct sighting. Clause 3 was found to **diverge**: the daemon parks the ticket and asks the human rather than re-entering the rejection on its own.
+>
+> ✏ 2026-09-07, decided by fvermaut ([timone#111](https://github.com/fvermaut/timone/issues/111)): clause 3 is **reworded to the stop-and-ask that exists**, rather than changing the code to re-enter automatically. The reworded clause matches what the gate observed, so it passes. R1 moves to `verified` on clauses 1 and 3; clause 2's own-tests-red case is the one thin spot, resting on the unit test and the partial sighting above.
+
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** live
+- **Last live gate:** [phase-35-live-gate.md](../../plans/phases/reports/phase-35-live-gate.md) — 2026-09-07, clause 1 PASS, clause 3 PASS (reworded to observed behaviour), clause 2 mechanism unit-tested + delivery seen opening on a red suite, own-tests-red case owed a direct sighting
 - **Depends-on:** `src/daemon/, .claude/skills/timone-execute/, .claude/skills/timone-verify/, .claude/skills/timone-deliver/`
 - **Criteria:**
     - GIVEN a run past its last human agreement (an approved list of pieces, or a chore's triage record)
@@ -19,14 +24,15 @@
       THEN the pull request still opens, and its body says first-thing that the work does not pass its own tests
     - GIVEN a pull request from a run is closed without merging
       WHEN the next poll cycle completes
-      THEN nothing further is committed to that branch, and the rejection re-enters as a new request anchored on the pull request's discussion
-- **Verification hint:** on the fixture project, drive one run into a plan contradiction and one into exhausted retries; watch both reach a pull request with no waiting state in `timone status` and no question on the ticket. Close one PR unmerged and watch a new triage record appear, with no new commits on the closed branch.
+      THEN nothing further is committed to that branch and the requirements on the default branch are unchanged, and the run stops rather than restarting on its own: the ticket is marked held and a comment asks the human which of three things the close meant — the work is unwanted (close the ticket), it should be built again from scratch (remove the held label), or the close was a mistake (reopen and merge the pull request by hand)
+- **Verification hint:** on the fixture project, drive one run into a plan contradiction and one into exhausted retries; watch both reach a pull request with no waiting state in `timone status` and no question on the ticket. Close one PR unmerged and watch the ticket park with the held label and a comment offering those three choices — no new commits on the closed branch, and the default branch's requirements unchanged.
 
 ## R2 — The pull request opens on what was bent
 
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** never
 - **Depends-on:** `src/daemon/, .claude/skills/timone-deliver/`
 - **Criteria:**
     - GIVEN a run in which anything departed from what was agreed — a plan amendment, a requirement amendment, a check not run, a workaround, a failing state
@@ -39,9 +45,12 @@
 
 ## R3 — Mid-build amendments carry their marks
 
+> ✏ Revised 2026-09-06 by fvermaut (interactive session, ticket [timone#105](https://github.com/fvermaut/timone/issues/105)): `Verify-via` changed from `api` to `live`. The criterion describes what an agent does while building; its only dependencies are two instruction files with no code behind them, and its own hint presupposes a driven run. Both verification passes found it unverifiable from a terminal — the account is in [phase-35-verification.md](../../plans/phases/reports/phase-35-verification.md). Clauses unchanged.
+
 - **Priority:** MUST
-- **Status:** draft
-- **Verify-via:** api
+- **Status:** verified
+- **Verify-via:** live
+- **Last live gate:** [phase-35-live-gate.md](../../plans/phases/reports/phase-35-live-gate.md) — 2026-09-07, PASS (watched in scratch-app#53 and #56: dated amendments naming the run, original wording readable, merged amendments stand and closed ones died with the branch)
 - **Depends-on:** `.claude/skills/timone-execute/, .claude/skills/timone-verify/`
 - **Criteria:**
     - GIVEN a build step that amends the plan or the requirements it is building against
@@ -56,6 +65,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** never
 - **Depends-on:** `src/daemon/, .claude/skills/timone-deliver/`
 - **Criteria:**
     - GIVEN a completed run that built or substantially changed a user-facing screen
@@ -66,8 +76,9 @@
 ## R5 — No question without the power to act on its answer
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** live
+- **Last live gate:** [phase-35-live-gate.md](../../plans/phases/reports/phase-35-live-gate.md) — 2026-09-07, PASS (watched across many rounds on scratch-app#50 and #51: every typed reply moved the work; two granted unusual answers — a scope trim and a removed behaviour — and both were acted on; no reply was redirected to a command)
 - **Depends-on:** `src/daemon/, .claude/skills/`
 - **Criteria:**
     - GIVEN a ticket waiting on a question the process asked

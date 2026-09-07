@@ -33,7 +33,8 @@ Each gate stops delivery. When one fires you write **nothing** into the project,
 
 **3 — Verification gate.** Read the verification report at `doc/plans/phases/reports/phase-NN-verification.md`, latest iteration.
 - **No report at all** → route to **`timone-verify`**. A `Complete` stamp is stage 6 vouching for its own work; stage 7 is what makes it presentable.
-- **The stage-7 gate did not pass** — any MUST criterion neither PASS, HUMAN-CHECK nor LIVE-GATE, any unresolved regression, any register line reading `failed`, any BLOCKED verdict, **or a live gate the phase owes and has not run** ([ADR-0051](../../../doc/adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D3: owed when the diff touches what a `live` criterion declares it depends on, and the gate's report must be committed) — → file it as a ticket for **stage 1**, not back to stage 7 (✏ 2026-08-19: stage 9 until [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired it). A failed pass has already spent its fix loops; re-running verification cannot manufacture a different answer.
+- **A live gate the phase owes and has not run** ([ADR-0051](../../../doc/adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D3: owed when the diff touches what a `live` criterion declares it depends on, and the gate's report must be committed) → route to **the human**, naming which criteria's live gate is owed. ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), this is the one refusal this gate still carries besides a missing report — its own consequences name only the failed-verification and unviewed-screen refusals as lost, and a live gate nobody has run is not evidence a pull request can open on.
+- ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), **a stage-7 gate that otherwise did not pass no longer refuses** — any MUST criterion neither PASS, HUMAN-CHECK nor LIVE-GATE, any unresolved regression, any register line reading `failed`, any BLOCKED verdict. Delivery proceeds regardless, drawing the verdict table and the outstanding-items list straight from the verification report exactly as the "Verification outcome" and "Outstanding for the human" sections already do; the pull request opens on it.
 - **An unperformed HUMAN-CHECK is not this gate firing.** See below.
 
 **4 — Look gate.** ✏ 2026-08-19 ([ADR-0039](../../../doc/adr/0039-the-look-is-gated-twice.md)). **A phase carrying a user-facing screen does not get a pull request until the human has seen the built screen beside its reference and said yes.**
@@ -115,6 +116,7 @@ Silence is a valid report. An axis that always finds something is padding, not r
 - **Base:** `<base>` — <why: the project's default branch, or "phase-MM-<slug> is complete but unmerged; this phase was stacked on it">
 - **Pull request:** <URL, added when opened — see below>
 - **Look gate:** <"no user-facing screen in this phase" | "seen and approved by <who> on <date>, against <the reference>"> — [ADR-0039](../../../doc/adr/0039-the-look-is-gated-twice.md)
+- **Departures:** `phase-NN-departures.md` — N entries, or *none — the phase executed as planned*.
 
 ## Scope
 

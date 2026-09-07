@@ -125,6 +125,16 @@ interface StageFacts {
    * talk to the human touch no repository and hold nothing.
    */
   ownsBranch: boolean;
+  /**
+   * Whether this stage is inside the build — `execution`, `verification`,
+   * `delivery` — where a run no longer stops between its last human
+   * agreement and its pull request
+   * ([ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
+   * An escalation at a stage this is true for is a fault to file, never a
+   * wait to serve; every other stage keeps ADR-0033's park-and-wait
+   * behaviour unchanged.
+   */
+  inBuild: boolean;
   /** Whether the machinery for this stage exists yet. */
   built: boolean;
   /** The stage that follows, once this one's outcome is accepted. */
@@ -225,6 +235,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // skips a gate and nobody is told a gate was skipped.
     model: "claude-sonnet-5",
     effort: "medium",
+    inBuild: false,
     // What follows depends on the classification: see `routeAfterTriage`.
   },
   clarification: {
@@ -244,6 +255,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // because that judgement is the whole of the session.
     model: "claude-sonnet-5",
     effort: "high",
+    inBuild: false,
     next: "requirements",
   },
   wayfinding: {
@@ -261,6 +273,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // ✏ Down to Sonnet on 2026-08-30, with `clarification`.
     model: "claude-sonnet-5",
     effort: "high",
+    inBuild: false,
     // **Nothing follows, on purpose.** A decision ticket's answer resolves
     // that ticket and ends its run. The destination artifact is the whole
     // map's to hand to stage 3 once the effort closes, and advancing one
@@ -290,6 +303,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // waiting and a call to action tracking its own state. See
     // {@link UnspawnedStage}.
     spawns: false,
+    inBuild: false,
     next: "requirements",
   },
   research: {
@@ -315,6 +329,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // effort stays `high`: what came down is the model, not the care.
     model: "claude-sonnet-5",
     effort: "high",
+    inBuild: false,
     // **Nothing follows, on purpose** — `wayfinding`'s reasoning exactly. A
     // research answer resolves its own ticket and feeds the map; advancing on
     // one would write requirements off a single lookup.
@@ -330,6 +345,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // this artifact, and every phase is planned and verified against it.
     model: "claude-opus-5",
     effort: "high",
+    inBuild: false,
     next: "breakdown",
   },
   breakdown: {
@@ -353,6 +369,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // ✏ Kept on Opus at the 2026-08-30 step down, for that reason.
     model: "claude-opus-5",
     effort: "high",
+    inBuild: false,
     next: "planning",
   },
   planning: {
@@ -372,6 +389,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // made upstream at `breakdown`, which stayed on Opus.
     model: "claude-sonnet-5",
     effort: "high",
+    inBuild: false,
     next: "execution",
   },
   execution: {
@@ -388,6 +406,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // result is `verification`, which stayed on Opus.
     model: "claude-sonnet-5",
     effort: "high",
+    inBuild: true,
     next: "verification",
   },
   verification: {
@@ -401,6 +420,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // a build Sonnet wrote. The effort came down from `xhigh` to `high`.
     model: "claude-opus-5",
     effort: "high",
+    inBuild: true,
     next: "delivery",
   },
   delivery: {
@@ -415,6 +435,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // after them.
     model: "claude-sonnet-5",
     effort: "medium",
+    inBuild: true,
     // Nothing follows in the graph: the run ends at the pull request, whose
     // merge or close is a terminal event on the run, not a stage.
   },
@@ -432,6 +453,12 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // version of. A full verification runs after it either way.
     model: "claude-sonnet-5",
     effort: "high",
+    // `inBuild` is false here on purpose: remediation acts on a pull request
+    // a human already reviewed, and its escalation path is ADR-0033's, not
+    // ADR-0052's — that carve-out names execution, verification and delivery
+    // only, the run between an approved list of pieces and its first pull
+    // request.
+    inBuild: false,
     next: "verification",
   },
 };
@@ -624,6 +651,14 @@ export function ownsBranch(stage: PipelineStage): boolean {
 /** Whether the machinery for `stage` exists yet. */
 export function isBuilt(stage: PipelineStage): boolean {
   return STAGES[stage].built;
+}
+
+/**
+ * Whether `stage` is inside the build — where an escalation is a fault to
+ * file rather than a wait to serve (ADR-0052).
+ */
+export function inBuild(stage: PipelineStage): boolean {
+  return STAGES[stage].inBuild;
 }
 
 /**

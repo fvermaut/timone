@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ctaComment, ctaFor } from "./cta.js";
+import { BUILD_ESCALATION_PREFIX } from "./faults.js";
 import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
 import { runId, type Run, type RunWait } from "./runs.js";
 
@@ -749,6 +750,34 @@ describe("ctaFor — a run the machine broke itself", () => {
     });
 
     expect(cta.headline).toBe("Something went wrong while I was working on this.");
+  });
+
+  /**
+   * ADR-0052: a build stage asking an unanswerable question is now a fault
+   * to file, never a wait to serve. `session.ts`'s `failBuildEscalation`
+   * writes the reason with `BUILD_ESCALATION_PREFIX` ahead of the stage's own
+   * account, and this is the CTA that reads it back — worded as the
+   * machine's own defect, with no "waiting on you" framing, matching the
+   * shape of the technical-fault branches just above it.
+   */
+  it("says the question itself was the defect, when a build stage escalated", () => {
+    const cta = ctaFor({
+      project: "ivtrends",
+      ticket: 1,
+      run: run({
+        project: "ivtrends",
+        ticket: 1,
+        status: "failed",
+        failure:
+          `${BUILD_ESCALATION_PREFIX}You told me to go ahead, but two of the ` +
+          "promises I check against cannot pass as they are worded.",
+      }),
+    });
+
+    expect(cta.headline).not.toBe("Something went wrong while I was working on this.");
+    expect(cta.waitingOnYou).toBe(false);
+    expect(cta.needFromYou).not.toMatch(/waiting on you/i);
+    expect(cta.command).toBe("timone retry ivtrends#1");
   });
 });
 

@@ -144,3 +144,33 @@ export class SpawnRefusal extends Error {
 export function refusalClears(error: unknown): boolean {
   return error instanceof SpawnRefusal && error.clears;
 }
+
+/**
+ * The prefix a build-stage escalation's failure reason carries
+ * ([ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
+ *
+ * A stage at `execution`, `verification` or `delivery` that is handed an
+ * answer it may not act on no longer parks the run on a person — the
+ * question itself is the defect, so the run is filed as failed instead. This
+ * is what `session.ts`'s `failBuildEscalation` writes ahead of the
+ * escalation comment's own words, and what {@link isBuildEscalation} looks
+ * for. It lives here, beside {@link technicalFault}, rather than in
+ * `session.ts`: `ctaFor` reads it too, and `session.ts` is the one surface
+ * that may load the agent runtime.
+ */
+export const BUILD_ESCALATION_PREFIX = "a build stage escalated: ";
+
+/**
+ * Whether a run's failure reason is a build-stage escalation (ADR-0052)
+ * rather than an ordinary technical stop or a defect in the work itself.
+ *
+ * **Not a `TechnicalFault` variant.** A technical fault is the machine's own
+ * infrastructure breaking under it; this is a stage that behaved wrongly by
+ * asking a question it had no authority to ask. Both are the machine's fault
+ * rather than the reader's, which is why `ctaFor` checks this first and
+ * `technicalFault` second, but they are different kinds of wrong and stay
+ * different types.
+ */
+export function isBuildEscalation(failure: string | undefined): boolean {
+  return failure !== undefined && failure.startsWith(BUILD_ESCALATION_PREFIX);
+}

@@ -9,6 +9,7 @@ import {
   classificationFromLabels,
   concludeConversation,
   effortFor,
+  inBuild,
   isBuilt,
   modelFor,
   ownsBranch,
@@ -319,6 +320,38 @@ describe("the stage graph", () => {
     for (const stage of PIPELINE_STAGES) {
       expect(typeof waitFor(stage)).toBe("string");
       expect(typeof ownsBranch(stage)).toBe("boolean");
+    }
+  });
+});
+
+describe("inBuild", () => {
+  // ADR-0052: from the run's last human agreement to its pull request, an
+  // escalation is a fault to file rather than a wait to serve — but only
+  // inside the build. `inBuild` is the pure fact `afterStage` branches on.
+
+  it("is true for the three build stages", () => {
+    expect(inBuild("execution")).toBe(true);
+    expect(inBuild("verification")).toBe(true);
+    expect(inBuild("delivery")).toBe(true);
+  });
+
+  it("is false for every stage before the build, and for remediation", () => {
+    expect(inBuild("triage")).toBe(false);
+    expect(inBuild("clarification")).toBe(false);
+    expect(inBuild("wayfinding")).toBe(false);
+    expect(inBuild("charting")).toBe(false);
+    expect(inBuild("research")).toBe(false);
+    expect(inBuild("requirements")).toBe(false);
+    expect(inBuild("breakdown")).toBe(false);
+    expect(inBuild("planning")).toBe(false);
+    // Remediation acts on a pull request a human already reviewed: its
+    // escalation path stays ADR-0033's, not ADR-0052's carve-out.
+    expect(inBuild("remediation")).toBe(false);
+  });
+
+  it("is exhaustive over every declared stage", () => {
+    for (const stage of PIPELINE_STAGES) {
+      expect(typeof inBuild(stage)).toBe("boolean");
     }
   });
 });
