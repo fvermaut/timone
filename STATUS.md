@@ -65,9 +65,9 @@ You asked for a way to watch all projects from one web page, without a terminal.
 
 There is also [#91](https://github.com/fvermaut/timone/issues/91): adopting two public formats (EARS for acceptance criteria, MADR for decision records). It is marked for the machine; expect its questions on the ticket.
 
-**7. The "no stops between agreement and pull request" work is built, watched running for real, and signed off. It is ready for its own pull request.**
+**7. The "no stops between agreement and pull request" work is built, watched running for real, signed off, and now open as a pull request: [#114](https://github.com/fvermaut/timone/pull/114). It waits on you to merge.**
 
-The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) is on the branch `timone/105-1-the-run-carries-on-instead-of-stopping`. Everything that blocked it is cleared. The watched run it owed happened overnight, on the to-do app, on a real daemon — full account in [the live-gate report](doc/plans/phases/reports/phase-35-live-gate.md) on the branch.
+The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) is [pull request #114](https://github.com/fvermaut/timone/pull/114). Both reviews came back clean — nothing found on how it is built, nothing found against what was asked for. It is the first piece of work Timone has built for itself to reach a pull request. Everything that blocked it is cleared; the watched run it owed happened overnight on the to-do app, on a real daemon — full account in [the live-gate report](doc/plans/phases/reports/phase-35-live-gate.md) on the branch.
 
 **All three promises now hold.** Typed answers move the work (R5): watched many times, including two answers that gave something unusual, none bounced back with "run this command". Mid-build changes carry their marks (R3): watched twice — two builds hit a wrong plan step, changed the plan themselves with a dated note, and carried on. The run reaches a pull request and never stops on the way (R1): four runs went from your approval to a pull request with no stop at all, two of them after hitting real trouble mid-build.
 
