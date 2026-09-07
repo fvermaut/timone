@@ -8,7 +8,7 @@
 
 ## Waiting on you
 
-> **Read this first.** Two pull requests are open and both wait on you to merge. Ticket #39's is [#89](https://github.com/fvermaut/timone/pull/89). Ticket #99's is [#100](https://github.com/fvermaut/timone/pull/100).
+> **Read this first.** Two pull requests are open and both wait on you to merge. Ticket #39's is [#89](https://github.com/fvermaut/timone/pull/89). Ticket #99's is [#100](https://github.com/fvermaut/timone/pull/100). A third thing waits on you too, and it is not a merge: item 8 below asks for one watched run.
 
 **1. Merge [pull request #89](https://github.com/fvermaut/timone/pull/89) — it closes [#39](https://github.com/fvermaut/timone/issues/39).**
 
@@ -65,9 +65,9 @@ You asked for a way to watch all projects from one web page, without a terminal.
 
 There is also [#91](https://github.com/fvermaut/timone/issues/91): adopting two public formats (EARS for acceptance criteria, MADR for decision records). It is marked for the machine; expect its questions on the ticket.
 
-**7. The "no stops between agreement and pull request" work is built, watched running for real, signed off, and now open as a pull request: [#114](https://github.com/fvermaut/timone/pull/114). It waits on you to merge.**
+**7. The "no stops between agreement and pull request" work is merged. Nothing about it needs you any more.**
 
-The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) is [pull request #114](https://github.com/fvermaut/timone/pull/114). Both reviews came back clean — nothing found on how it is built, nothing found against what was asked for. It is the first piece of work Timone has built for itself to reach a pull request. Everything that blocked it is cleared; the watched run it owed happened overnight on the to-do app, on a real daemon — full account in [the live-gate report](doc/plans/phases/reports/phase-35-live-gate.md) on the branch.
+The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) was [pull request #114](https://github.com/fvermaut/timone/pull/114), and it is now merged into the main branch of this repository. Both reviews came back clean — nothing found on how it is built, nothing found against what was asked for. It was the first piece of work Timone built for itself to reach a pull request. The watched run it owed happened on the to-do app, on a real daemon — full account in [the live-gate report](doc/plans/phases/reports/phase-35-live-gate.md).
 
 **All three promises now hold.** Typed answers move the work (R5): watched many times, including two answers that gave something unusual, none bounced back with "run this command". Mid-build changes carry their marks (R3): watched twice — two builds hit a wrong plan step, changed the plan themselves with a dated note, and carried on. The run reaches a pull request and never stops on the way (R1): four runs went from your approval to a pull request with no stop at all, two of them after hitting real trouble mid-build.
 
@@ -80,6 +80,16 @@ The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) i
 ```
 npm run build && timone daemon
 ```
+
+**8. The second half of that work is built and checked, and it needs one watched run from you before it can be called done.**
+
+Ticket [#106](https://github.com/fvermaut/timone/issues/106) is the other half: the pull request a run opens should now start by saying what was bent along the way, and — when the work changed a screen — carry the screen's comparison and its preview address before anything else, instead of stopping to ask you to look at the screen first. It is built, on the branch `timone/106-2-the-pull-request-carries-the-judgement` in this repository. There is no pull request for it yet.
+
+A reader who did not build it has now checked it, and the check came back with nothing wrong: the build is sound, all 1624 automatic tests pass, and nothing that used to work broke. What it could not do is confirm the two promises the work claims. Both say in writing that they can only be judged by watching a real run against real machinery — a real daemon, a real project, a real pull request opening — and neither has ever been watched. That is not a fault in the work; it is the only way those two promises can be settled, and a reader at a terminal is the wrong instrument for it.
+
+**What the watched run has to show.** One real delivery, on a real daemon, on a project whose work includes a screen and where at least one thing was bent along the way — so both new sections appear at once. Then read the pull request it opens: the two sections must come before everything else in the body, every bent thing must name what was agreed, what was done instead and why, and a run where nothing was bent must still say so out loud rather than leave the section out. Nothing anywhere on the ticket may ask you to look at the screen before the pull request exists.
+
+The full account is in [the report](doc/plans/phases/reports/phase-36-verification.md) on that branch.
 
 **Nothing else needs you.**
 
@@ -129,6 +139,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**7 September — the second half of the "no stops" work was checked, and it came back clean but unfinished.** The work on the branch `timone/106-2-the-pull-request-carries-the-judgement` makes a pull request open by saying what was bent, and carry a changed screen's comparison and preview address, rather than stopping to ask you to look at the screen first. A reader who did not build it checked it and found nothing wrong: the build is sound, all 1624 automatic tests pass, and nothing that used to work broke. Neither of the two promises the work claims could be ticked, because both say in writing that only a watched run against real machinery can settle them, and neither has ever been watched. That is item 8 at the top of this file, and it is what the work waits on. Nothing was fixed, because nothing was found broken. The account is in [the report](doc/plans/phases/reports/phase-36-verification.md) on that branch. Ticket [#106](https://github.com/fvermaut/timone/issues/106).
 
 **6 September — the "no stops" work was checked a second time, by a second reader, and the answer did not change.** The check on the branch `timone/105-1-the-run-carries-on-instead-of-stopping` was run again from scratch by a reader who did not build the work and did not see the first check's reasoning. Same outcome: the build is sound, all 1179 automatic tests pass, nothing that used to work broke — and the work still cannot be called proven, because two of its promises need a watched run that has never happened, and the third is written as terminal-checkable when it is not. Both points are item 7 at the top of this file, and both wait on you. The second account is at the end of [the report](doc/plans/phases/reports/phase-35-verification.md) on that branch. Ticket [#105](https://github.com/fvermaut/timone/issues/105).
 
