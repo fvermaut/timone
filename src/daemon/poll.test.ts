@@ -513,12 +513,15 @@ describe("pollOnce — resilience", () => {
 
 describe("pollOnce — resuming a run whose human answered", () => {
   /** A thread whose comments the test controls. */
-  function threadedAdapter(comments: TicketThread["comments"]): {
+  function threadedAdapter(
+    comments: TicketThread["comments"],
+    labels: string[] = ["timone", "triage:feature"],
+  ): {
     adapter: TicketingAdapter;
     posted: PostedComment[];
   } {
     const posted: PostedComment[] = [];
-    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const base = ticket(6, { labels });
     const adapter: TicketingAdapter = {
       ...noBranches,
     ...noFiles,
@@ -956,6 +959,100 @@ describe("pollOnce — resuming a run whose human answered", () => {
     expect(spawned).toHaveLength(1);
   });
 
+  it("does not resume a conversation wait when the ticket is held", async () => {
+    const store = newStore();
+    parkedOnConversation(store);
+    const { adapter } = threadedAdapter(
+      [
+        invitation,
+        {
+          author: "fvermaut",
+          body: `${MACHINE_MARKER}\n\n---\n\n${CONVERSATION_RECORD_MARKER}\n\nwe agreed the send button is the problem`,
+          createdAt: "2026-08-03T11:00:00Z",
+          fromTimone: true,
+        },
+      ],
+      ["timone", "triage:feature", HELD_LABEL],
+    );
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(result.resumed).toEqual([]);
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+  });
+
+  it("does not resume a gate wait when the ticket is held", async () => {
+    const store = newStore();
+    parkedOnGate(store);
+    const { adapter } = threadedAdapter(
+      [
+        invitation,
+        {
+          author: "fvermaut",
+          body: "approve",
+          createdAt: "2026-08-03T11:00:00Z",
+          fromTimone: false,
+        },
+      ],
+      ["timone", "triage:feature", HELD_LABEL],
+    );
+    const { spawner, spawned } = fakeSpawner();
+
+    const result = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+    });
+
+    expect(result.resumed).toEqual([]);
+    expect(spawned).toEqual([]);
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+  });
+
+  it("does not consume the answer while held, so lifting the hold resumes on it", async () => {
+    const store = newStore();
+    parkedOnConversation(store);
+    const comments = [
+      invitation,
+      {
+        author: "fvermaut",
+        body: `${MACHINE_MARKER}\n\n---\n\n${CONVERSATION_RECORD_MARKER}\n\nwe agreed the send button is the problem`,
+        createdAt: "2026-08-03T11:00:00Z",
+        fromTimone: true,
+      },
+    ];
+
+    const held = threadedAdapter(comments, ["timone", "triage:feature", HELD_LABEL]);
+    const first = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter: held.adapter,
+      spawner: fakeSpawner().spawner,
+    });
+    expect(first.resumed).toEqual([]);
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+
+    const lifted = threadedAdapter(comments, ["timone", "triage:feature"]);
+    const { spawner, spawned } = fakeSpawner();
+    const second = await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter: lifted.adapter,
+      spawner,
+    });
+
+    expect(second.resumed).toEqual(["scratch-app#6/1"]);
+    expect(spawned).toHaveLength(1);
+  });
+
   it("starts a run left queued behind a park that no longer holds anything", async () => {
     // The exact ledger phase 11 left on disk: #4 parked holding the project
     // under the old rule, #6 queued behind it forever. Written as a file
@@ -1175,6 +1272,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
   function reviewAdapter(
     state: "open" | "merged" | "closed",
     comments: PullRequestThread["comments"],
+    labels: string[] = ["timone", "triage:feature"],
   ): {
     adapter: TicketingAdapter;
     posted: PostedComment[];
@@ -1184,7 +1282,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     const posted: PostedComment[] = [];
     const closed: string[] = [];
     const labelled: string[] = [];
-    const base = ticket(6, { labels: ["timone", "triage:feature"] });
+    const base = ticket(6, { labels });
     const adapter: TicketingAdapter = {
       ...noBranches,
     ...noFiles,
@@ -1270,6 +1368,27 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     // finished and waiting to be read (ADR-0046).
     expect(closed).toEqual([]);
     // The hold is what stops the next cycle picking it straight back up.
+    expect(labelled).toEqual(["6:timone:held"]);
+  });
+
+  it("still ends a review wait when the ticket is already held for an unrelated reason", async () => {
+    // The guard added for a held ticket's resume path must not reach here:
+    // concludeReview ends a run, it never starts one, so it is not "picking
+    // this up" in the sense the hold forbids.
+    const store = newStore();
+    parkedOnReview(store);
+    const { adapter, posted, closed, labelled } = reviewAdapter(
+      "closed",
+      [],
+      ["timone", "triage:feature", HELD_LABEL],
+    );
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+
+    expect(store.get("scratch-app#6/1")?.status).toBe("done");
+    expect(posted.some((comment) => /without merging/i.test(comment.body))).toBe(true);
+    expect(closed).toEqual([]);
     expect(labelled).toEqual(["6:timone:held"]);
   });
 
