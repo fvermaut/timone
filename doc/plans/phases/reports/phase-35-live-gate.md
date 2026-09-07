@@ -56,6 +56,8 @@ This is exactly the behaviour phase 35 built, seen in the wild rather than in a 
 
 **Because clause 3 diverges and clause 2 was never seen, R1 is not passed by this gate.** Its register status stays `draft`. The register-versus-behaviour question is fvermaut's to settle, and is filed as a defect.
 
+> ✏ 2026-09-07 — resolved. fvermaut chose ([timone#111](https://github.com/fvermaut/timone/issues/111)) to **reword the criterion to the stop-and-ask that exists** rather than change the code to re-enter automatically. Clause 3 now matches what this gate observed and passes; R1 moved to `verified` on clauses 1 and 3, with clause 2's own-tests-red case the one spot still resting on the unit test plus the partial sighting (delivery opened scratch-app#58 on a red suite).
+
 ### PRD-03.R3 — mid-build amendments carry their marks — **PASS**
 
 Watched twice, in `#53` and `#56` (the departure records above). Each amendment was committed on the work branch with a dated marker naming the run (`✏ … (build, scratch-app#NN)`), and the original wording stayed readable. The merged-versus-closed half of the clause was also exercised: `#55`/`#56`'s amendments merged into `main` with their PRs and stand there; `#53`'s died with its closed branch, and `main` was unchanged. Its status moves `draft` → `verified`.
