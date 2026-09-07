@@ -8,7 +8,7 @@
 
 ## Waiting on you
 
-> **Read this first.** Three pull requests are open and all three wait on you to merge. Ticket #39's is [#89](https://github.com/fvermaut/timone/pull/89). Ticket #99's is [#100](https://github.com/fvermaut/timone/pull/100). Ticket #106's is [#118](https://github.com/fvermaut/timone/pull/118) — item 8 below. A third thing waits on you too, and it is not a merge: item 8 below asks for one watched run.
+> **Read this first.** Three pull requests are open and all three wait on you to merge. Ticket #39's is [#89](https://github.com/fvermaut/timone/pull/89). Ticket #99's is [#100](https://github.com/fvermaut/timone/pull/100). Ticket #106's is [#118](https://github.com/fvermaut/timone/pull/118) — item 8 below. Two other things wait on you and neither is a merge: item 8 and item 9 each ask for one watched run.
 
 **1. Merge [pull request #89](https://github.com/fvermaut/timone/pull/89) — it closes [#39](https://github.com/fvermaut/timone/issues/39).**
 
@@ -91,6 +91,14 @@ Two independent reviews read the change; neither blocks the merge. On how it is 
 
 **Getting here surfaced two faults, both filed.** The ticket stopped twice at the same point and told you to run a command that refuses to work in that situation ([#116](https://github.com/fvermaut/timone/issues/116)); and the stage stopped at all when the new rules say it should have written the skip down and carried on ([#117](https://github.com/fvermaut/timone/issues/117)). The pull request was opened by hand from a terminal session instead.
 
+**9. One watched run is needed before ticket [#115](https://github.com/fvermaut/timone/issues/115) can get its pull request.**
+
+The fix is on the branch `timone/115-daemon-resumes-a-parked-run-on-a-held-ti` in this repository. It closes the hole that let the machine restart a job on a ticket you had put on hold: the part of the machine that starts fresh work already refused to touch a held ticket, but the part that carries on a waiting job never looked at the hold at all. Now it does, and it stops before it reads the waiting answer — so the comment you left is still there, unread, and taking the hold off later lets that same comment start the work.
+
+A reader who did not build it has checked it. The build is sound, all 1628 automatic tests pass, and nothing that used to work broke. The one promise this work claims can only be settled by watching a real run against real machinery, and that has not been done since this change. That is why the pull request is not open yet, and it is the only thing standing in the way. The account is in [the report](doc/plans/phases/reports/phase-37-verification.md) on that branch.
+
+**What I need from you:** either watch one run that puts a job on hold and confirms it stays put, or tell me on the ticket to open the pull request without it — the same choice you made on #106.
+
 **Nothing else needs you.**
 
 ---
@@ -139,6 +147,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**7 September (evening) — the fix for ticket #115 was checked, and it came back clean but not finished.** The work on the branch `timone/115-daemon-resumes-a-parked-run-on-a-held-ti` stops the machine restarting a waiting job on a ticket you have put on hold. A reader who did not build it checked it: the build is sound, all 1628 automatic tests pass, and nothing that used to work broke. Nothing was fixed, because nothing was found broken. The single promise the work claims says in writing that only a watched run against real machinery can settle it, and this change touches the very part of the machine that promise rests on — so it needs a fresh watched run before its pull request can open. That is item 9 at the top of this file. The account is in [the report](doc/plans/phases/reports/phase-37-verification.md) on that branch. Ticket [#115](https://github.com/fvermaut/timone/issues/115).
 
 **7 September (afternoon) — ticket #106 got its pull request, opened by hand after the machine stuck twice.** You answered "go ahead without it" to the question about the watched run; the checking step could not act on that answer and stopped, told you to run a takeover command, and that command refused because of how the stop was now recorded. A retry hit the same wall. Both faults are filed ([#116](https://github.com/fvermaut/timone/issues/116), [#117](https://github.com/fvermaut/timone/issues/117)). A terminal session then wrote your skip decision into the phase's record of what was bent, ran both delivery reviews (2 findings each, none blocking), and opened [pull request #118](https://github.com/fvermaut/timone/pull/118) — whose body itself starts with the departures section, the very format it delivers. Item 8 at the top has what to do.
 
