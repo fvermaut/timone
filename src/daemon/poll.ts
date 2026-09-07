@@ -2052,6 +2052,15 @@ async function resumeAnswered(
 
     let resumption: Resumption | undefined;
     try {
+      // A held ticket's parked run does not resume itself, the sibling of
+      // the registration-path check above (`:1490`) for a run already
+      // waiting rather than a fresh chunk. Read before `resolveWait`, not
+      // after: that call is what consumes an answer, and this run must leave
+      // one unread for whenever the hold comes off, not read it now and act
+      // on nothing.
+      const ticket = await threads.ticket();
+      if (ticket.labels.includes(HELD_LABEL)) continue;
+
       resumption = await resolveWait(run, threads);
     } catch (error) {
       const line = `${project.name}: could not read #${run.ticket}: ${oneLine(error)}`;
