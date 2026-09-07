@@ -37,14 +37,12 @@ Each gate stops delivery. When one fires you write **nothing** into the project,
 - ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), **a stage-7 gate that otherwise did not pass no longer refuses** — any MUST criterion neither PASS, HUMAN-CHECK nor LIVE-GATE, any unresolved regression, any register line reading `failed`, any BLOCKED verdict. Delivery proceeds regardless, drawing the verdict table and the outstanding-items list straight from the verification report exactly as the "Verification outcome" and "Outstanding for the human" sections already do; the pull request opens on it.
 - **An unperformed HUMAN-CHECK is not this gate firing.** See below.
 
-**4 — Look gate.** ✏ 2026-08-19 ([ADR-0039](../../../doc/adr/0039-the-look-is-gated-twice.md)). **A phase carrying a user-facing screen does not get a pull request until the human has seen the built screen beside its reference and said yes.**
+**4 — The screen.** ✏ 2026-08-19, revised 2026-09-07 ([ADR-0039](../../../doc/adr/0039-the-look-is-gated-twice.md), [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
 
 - **Skip it entirely** when the phase built no user-facing screen. Say so in the delivery report rather than leaving its absence to inference.
-- **Otherwise: stand the app up, capture the screen, and put it in front of them** next to the reference the phase file names — the kept prototype ([ADR-0037](../../../doc/adr/0037-a-prototype-that-settles-a-look-is-kept-and-only-its-presentation-crosses.md)), or the project's `doc/design.md`. Hand over the shell slice's recorded difference list from the completion report: that list is the substance of what they are approving, since a difference explained there is a difference this process accepted on the builder's word.
-- **Ask once, plainly, and end with the call to action.** The question is "does this look right" — not a review, not a checklist. Their yes is recorded in the delivery report with the date.
-- **A "no" stops delivery.** Write nothing, push nothing, open nothing. It is not a review finding and it does not go back to stage 7: it re-enters **stage 1** as a later request, per [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md). Say that in one short paragraph and stop — a stopped delivery is a valid, complete outcome.
-
-**This does not reverse the HUMAN-CHECK rule below.** A scripted accessibility check is *evidence*, gathered later, and withholding the PR would hide it from the person who discharges it. The look gate is a *judgement*, and it is the judgement the pull request exists to obtain — presenting a screen its owner has not seen is not presenting it.
+- **A phase with a screen carries exactly one refusal here: no shell-slice comparison at all.** When the phase's completion report carries no recorded difference list from the shell slice, that is a missing artifact — [ADR-0038](../../../doc/adr/0038-a-screens-shell-is-built-before-its-behaviours.md)'s shell gate either never ran or was never recorded, not a difference this process explained and accepted. Refuse, and route to **`timone-execute`**, naming the sub-phase whose validation should have produced the list.
+- **Otherwise: read, don't ask.** Take the shell slice's recorded difference list and the reference it names straight from the completion report, and carry both into the PR body's screen section (below). This gate no longer asks the human anything and no longer refuses on "no" — there is nothing left here for a human to say yes or no to before the PR opens.
+- **This reverses only the delivery-time half of ADR-0039.** The shell slice's own fresh-context comparison — that ADR's check 1 — is unaffected: it still runs, and still blocks, at execution time, under stage 6's bounded retries. What is gone is the second look this gate used to demand from the human before a PR could open; that judgement now happens after the PR opens, against the screen itself, with merging as the yes.
 
 **5 — Platform gate.** The pull request *is* this stage's artifact ([ADR-0004](../../../doc/adr/0004-github-first-adapter-pair.md)), so there is no fallback surface:
 - The project's `repo_url` in `timone.yaml` is not GitHub-hosted (does not match `github.com`) → refuse **loudly** and route to the human. Unlike stage 1's triage record there is no doc-record substitute: a delivery record with no review surface would mean shipping nothing while reporting success.
@@ -115,7 +113,7 @@ Silence is a valid report. An axis that always finds something is padding, not r
 - **Branch:** `phase-NN-<slug>` @ `<sha>`
 - **Base:** `<base>` — <why: the project's default branch, or "phase-MM-<slug> is complete but unmerged; this phase was stacked on it">
 - **Pull request:** <URL, added when opened — see below>
-- **Look gate:** <"no user-facing screen in this phase" | "seen and approved by <who> on <date>, against <the reference>"> — [ADR-0039](../../../doc/adr/0039-the-look-is-gated-twice.md)
+- **Screen:** <"no user-facing screen in this phase" | "no prior viewing — the shell slice's comparison and the preview are carried in the pull request body"> — [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)
 - **Departures:** `phase-NN-departures.md` — N entries, or *none — the phase executed as planned*.
 
 ## Scope
@@ -186,6 +184,22 @@ Opened with `gh pr create` from within `projects/<name>/`, after the delivery re
 ````markdown
 Delivers **phase NN — <theme>** of [`<project>`](.).
 
+## Departures
+
+<Every entry in `phase-NN-departures.md`, quoted in full — kind, agreed, did instead, why. When the file does not exist: the sentence "Nothing was bent building this phase." verbatim.>
+
+## The screen
+
+<Omit this whole section when the phase built no user-facing screen.>
+
+Compared against <the reference the shell slice named>, recorded when that slice closed:
+
+<the shell slice's difference list, quoted from the completion report>
+
+**Preview:** <"this project has no preview configured for pull requests — see the local checkout steps below" when the project has no `bindings.preview` in `timone.yaml`, otherwise "building now — the machine posts its address in a comment on this pull request as soon as it is ready, usually within a few minutes.">
+
+No prior viewing: merging this pull request is the yes.
+
 ## Scope
 
 <One paragraph, then the driving ticket reference — or, when the project has no ticket home, the requirement IDs this phase claims, linked to the criteria register. R13's "ticket/requirements" is a disjunction: name the requirements when there is no ticket, never neither.>
@@ -243,10 +257,11 @@ Before finishing, update the target project's `STATUS.md` — **on the project's
 4. Compute the diff range `<base>...<head>` once.
 5. Spawn both axes in parallel as fresh contexts, each with its own read list. Collect two reports; never merge them.
 6. Write the **How to try it** steps, lifting them from the phase file's validation commands and the verification report's HUMAN-CHECK scripts. Both halves — preview and local.
-7. Write and commit the delivery report — `docs: deliver phase NN — <theme>` — before opening anything.
-8. Open the PR with `gh pr create --base <base>`, or refresh the existing one and append an iteration section.
-9. Update `STATUS.md`.
-10. Report per Closing below.
+7. Compose the **Departures** section (always) and **The screen** section (when the phase carries one) as the first content written into the PR body, reading `phase-NN-departures.md` and the completion report respectively.
+8. Write and commit the delivery report — `docs: deliver phase NN — <theme>` — before opening anything.
+9. Open the PR with `gh pr create --base <base>`, or refresh the existing one and append an iteration section.
+10. Update `STATUS.md`.
+11. Report per Closing below.
 
 
 ## Commit provenance
