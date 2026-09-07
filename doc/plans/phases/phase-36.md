@@ -1,6 +1,6 @@
 # Phase 36: The pull request opens on what was bent, and carries the screen
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-36-complete.md](reports/phase-36-complete.md).
 
 > **Companion phases:** [phase-35](phase-35.md) — piece 1 of the same initiative. It built the `phase-NN-departures.md` record and taught `execution` and `verification` to write every departure — a plan or requirement amendment, a check not run, a workaround, and (via the fix-loop-exhaustion and environment-gate paths) a failing or blocked state — into that one file instead of stopping. This phase is the piece that reads it. Governing decisions: [ADR-0052](../../adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md) — the whole shape of this phase, including the reversal of [ADR-0039](../../adr/0039-the-look-is-gated-twice.md)'s delivery-time viewing gate; [ADR-0021](../../adr/0021-previews-are-reconciled-behind-an-adapter-seam.md) — why the preview address cannot be known when the pull request opens, which shapes sub-phase 36a's design; [ADR-0038](../../adr/0038-a-screens-shell-is-built-before-its-behaviours.md) — the shell-slice comparison this phase quotes but does not rebuild.
 
