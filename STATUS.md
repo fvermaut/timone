@@ -8,7 +8,7 @@
 
 ## Waiting on you
 
-> **Read this first.** Two pull requests are open and both wait on you to merge. Ticket #39's is [#89](https://github.com/fvermaut/timone/pull/89). Ticket #99's is [#100](https://github.com/fvermaut/timone/pull/100). A third thing waits on you too, and it is not a merge: item 8 below asks for one watched run.
+> **Read this first.** Three pull requests are open and all three wait on you to merge. Ticket #39's is [#89](https://github.com/fvermaut/timone/pull/89). Ticket #99's is [#100](https://github.com/fvermaut/timone/pull/100). Ticket #106's is [#118](https://github.com/fvermaut/timone/pull/118) — item 8 below. A third thing waits on you too, and it is not a merge: item 8 below asks for one watched run.
 
 **1. Merge [pull request #89](https://github.com/fvermaut/timone/pull/89) — it closes [#39](https://github.com/fvermaut/timone/issues/39).**
 
@@ -81,15 +81,15 @@ The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) w
 npm run build && timone daemon
 ```
 
-**8. The second half of that work is built and checked, and it needs one watched run from you before it can be called done.**
+**8. Merge [pull request #118](https://github.com/fvermaut/timone/pull/118) — it finishes [#106](https://github.com/fvermaut/timone/issues/106).**
 
-Ticket [#106](https://github.com/fvermaut/timone/issues/106) is the other half: the pull request a run opens should now start by saying what was bent along the way, and — when the work changed a screen — carry the screen's comparison and its preview address before anything else, instead of stopping to ask you to look at the screen first. It is built, on the branch `timone/106-2-the-pull-request-carries-the-judgement` in this repository. There is no pull request for it yet.
+This is the other half of the "no stops" work: the pull request a run opens now starts by saying what was bent along the way — or that nothing was — and, when the work changed a screen, carries the screen's comparison and its preview address up front instead of asking you to look at the screen first. The change is two instruction files; there is no program code in it.
 
-A reader who did not build it has now checked it, and the check came back with nothing wrong: the build is sound, all 1624 automatic tests pass, and nothing that used to work broke. What it could not do is confirm the two promises the work claims. Both say in writing that they can only be judged by watching a real run against real machinery — a real daemon, a real project, a real pull request opening — and neither has ever been watched. That is not a fault in the work; it is the only way those two promises can be settled, and a reader at a terminal is the wrong instrument for it.
+A reader who did not build it checked it and found nothing wrong: all 1624 automatic tests pass and nothing that used to work broke. The two promises it claims can only be proven by watching a real delivery happen, and none has been watched. **You chose, on the ticket, to open the pull request without that watched run.** The choice is written down as the first section of the pull request itself, and merging is your acceptance of it — the same as pull requests #89 and #100. The watched run stays owed after the merge.
 
-**What the watched run has to show.** One real delivery, on a real daemon, on a project whose work includes a screen and where at least one thing was bent along the way — so both new sections appear at once. Then read the pull request it opens: the two sections must come before everything else in the body, every bent thing must name what was agreed, what was done instead and why, and a run where nothing was bent must still say so out loud rather than leave the section out. Nothing anywhere on the ticket may ask you to look at the screen before the pull request exists.
+Two independent reviews read the change; neither blocks the merge. On how it is written: 2 findings — the wording it orders into future pull requests breaks this repo's own plain-language rule, and one step list inside the file contradicts the rule list it sits next to. On what was asked: 2 findings — one requirement's written text can no longer be met word for word by what the instructions now do, and the change adds one new stop nobody asked for. All four are spelled out in [the delivery report](https://github.com/fvermaut/timone/blob/timone/106-2-the-pull-request-carries-the-judgement/doc/plans/phases/reports/phase-36-delivery.md); tell me which you want fixed and each becomes its own ticket.
 
-The full account is in [the report](doc/plans/phases/reports/phase-36-verification.md) on that branch.
+**Getting here surfaced two faults, both filed.** The ticket stopped twice at the same point and told you to run a command that refuses to work in that situation ([#116](https://github.com/fvermaut/timone/issues/116)); and the stage stopped at all when the new rules say it should have written the skip down and carried on ([#117](https://github.com/fvermaut/timone/issues/117)). The pull request was opened by hand from a terminal session instead.
 
 **Nothing else needs you.**
 
@@ -139,6 +139,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**7 September (afternoon) — ticket #106 got its pull request, opened by hand after the machine stuck twice.** You answered "go ahead without it" to the question about the watched run; the checking step could not act on that answer and stopped, told you to run a takeover command, and that command refused because of how the stop was now recorded. A retry hit the same wall. Both faults are filed ([#116](https://github.com/fvermaut/timone/issues/116), [#117](https://github.com/fvermaut/timone/issues/117)). A terminal session then wrote your skip decision into the phase's record of what was bent, ran both delivery reviews (2 findings each, none blocking), and opened [pull request #118](https://github.com/fvermaut/timone/pull/118) — whose body itself starts with the departures section, the very format it delivers. Item 8 at the top has what to do.
 
 **7 September — the second half of the "no stops" work was checked, and it came back clean but unfinished.** The work on the branch `timone/106-2-the-pull-request-carries-the-judgement` makes a pull request open by saying what was bent, and carry a changed screen's comparison and preview address, rather than stopping to ask you to look at the screen first. A reader who did not build it checked it and found nothing wrong: the build is sound, all 1624 automatic tests pass, and nothing that used to work broke. Neither of the two promises the work claims could be ticked, because both say in writing that only a watched run against real machinery can settle them, and neither has ever been watched. That is item 8 at the top of this file, and it is what the work waits on. Nothing was fixed, because nothing was found broken. The account is in [the report](doc/plans/phases/reports/phase-36-verification.md) on that branch. Ticket [#106](https://github.com/fvermaut/timone/issues/106).
 
