@@ -1,6 +1,6 @@
 # Phase 37: A held ticket's parked run does not resume itself
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-37-complete.md](reports/phase-37-complete.md).
 
 > **Companion phases:** none — a standalone bug fix, not part of a breakdown. Governing decisions: [ADR-0046](../../adr/0046-a-pull-request-closed-without-merging-holds-its-ticket-and-asks.md) D3 — "the hold now means one thing everywhere: *do not pick this up*," the sentence this phase's fix completes; [ADR-0044](../../adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D7 — only a human removes a hold, which is why the fix must never do so itself.
 
