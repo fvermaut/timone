@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-06.
+**Last updated:** 2026-09-07.
 
 ---
 
@@ -65,18 +65,22 @@ You asked for a way to watch all projects from one web page, without a terminal.
 
 There is also [#91](https://github.com/fvermaut/timone/issues/91): adopting two public formats (EARS for acceptance criteria, MADR for decision records). It is marked for the machine; expect its questions on the ticket.
 
-**7. The "no stops between agreement and pull request" work was checked, and one decision is yours before it can go further.**
+**7. The "no stops between agreement and pull request" work was watched running for real, and one decision is now yours.**
 
-The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) is built, on the branch `timone/105-1-the-run-carries-on-instead-of-stopping` in this repository. There is no pull request yet. A reader who did not build it checked it and **found nothing wrong with what was built** — nothing failed, and nothing that used to work broke. Two things stop it going further, and both are about how the work is checked rather than about the work.
+The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) is built, on the branch `timone/105-1-the-run-carries-on-instead-of-stopping`. The two things that blocked it on 6 September are both cleared. The promise-list line that was wrong is fixed on the branch. And the watched run it owed has now happened — overnight, on the to-do app, on a real daemon. The full account is in [the live-gate report](doc/plans/phases/reports/phase-35-live-gate.md) on the branch.
 
-**The decision.** The work claims three promises. One of them, R3, says in the promise list that it can be checked from a terminal. It cannot. It describes what an agent does while it is building, there is no code behind it, and the only way to see it happen is to watch a real run. Both the plan and the build's own report already assume it needs a watched run — the promise list is the one document that disagrees. Correcting it means editing the promise list, and the checking step is not allowed to write that part. **Either move R3 to "only a watched run can check this", or reword it so a terminal can reach it.** The account is in [the report](doc/plans/phases/reports/phase-35-verification.md) on that branch.
+**Two of the three promises now hold and are marked proven.** Typed answers move the work (R5): watched many times, including two answers that gave something unusual, and none was ever bounced back with "run this command". Mid-build changes carry their marks (R3): watched twice — two builds hit a wrong plan step, changed the plan themselves with a dated note, and carried on.
 
-**The watched run.** The other two promises, R1 and R5, can only be seen working in a watched run, and **neither has ever been watched**. The work changed the code that picks tickets up and three of the step instructions, which is exactly what those two promises rest on. A watched run is owed before this can be delivered. R3 will need the same one if you take the first option above.
+**The third promise (R1) is not proven, and one part of it is yours to decide.** The main part held and was the best thing watched all night: four runs went from your approval to a pull request with no stop at all, two of them after hitting real trouble mid-build. But when a pull request is closed without merging, the promise says the work should quietly start again — and it does not. The machine stops, marks the ticket held, and asks you. Its reason is fair, but it is not what the promise says.
 
-**Checked again on 6 September, with the same result.** A second reader who did not build it ran the whole check afresh: the build is still sound (all 1179 automatic tests pass), nothing that used to work broke, and the same two things still stand in the way. The second account is at the end of [the same report](doc/plans/phases/reports/phase-35-verification.md) on that branch. Writing on the ticket will not move this; the way to settle it is:
+**The decision.** Either the machine is changed to start the work again by itself, or the promise is reworded to the stop-and-ask that exists today. It is filed as [#111](https://github.com/fvermaut/timone/issues/111). Until you pick one, R1 cannot be called proven and this ticket cannot reach its own pull request. Answer on [#105](https://github.com/fvermaut/timone/issues/105) or on #111.
+
+**The night also found five more faults, all filed:** [#110](https://github.com/fvermaut/timone/issues/110) (a run costs an hour a step, and two thirds of it is not the model), [#111](https://github.com/fvermaut/timone/issues/111), [#112](https://github.com/fvermaut/timone/issues/112), [#113](https://github.com/fvermaut/timone/issues/113), and a new note on [#73](https://github.com/fvermaut/timone/issues/73). The takeover loop that made this ticket ask you the same thing twice is [#108](https://github.com/fvermaut/timone/issues/108).
+
+**One housekeeping note.** The daemon is stopped — I started one for the watched run and stopped it when it finished. Build and start it again when you want the machine back:
 
 ```
-timone takeover timone#105
+npm run build && timone daemon
 ```
 
 **Nothing else needs you.**
