@@ -6,10 +6,12 @@
 
 ## R1 — The build has one ending: a pull request
 
+> ✏ 2026-09-07: the [phase-35 live gate](../../plans/phases/reports/phase-35-live-gate.md) watched this on the scratch-app fixture. Clause 1 (adapt and carry on, no stop, reach a PR) passed, seen organically four times. Clause 2 (failing tests still open a PR) was never triggered — no run's own work failed — so it stays owed. Clause 3 (a PR closed unmerged re-enters as a new request) **diverges**: the daemon parks the ticket and asks the human instead of re-entering. Stays `draft` until clause 3 is reconciled and clause 2 is seen.
+
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
-- **Last live gate:** never
+- **Last live gate:** [phase-35-live-gate.md](../../plans/phases/reports/phase-35-live-gate.md) — 2026-09-07, clause 1 PASS, clause 2 not triggered, clause 3 divergent
 - **Depends-on:** `src/daemon/, .claude/skills/timone-execute/, .claude/skills/timone-verify/, .claude/skills/timone-deliver/`
 - **Criteria:**
     - GIVEN a run past its last human agreement (an approved list of pieces, or a chore's triage record)
@@ -44,9 +46,9 @@
 > ✏ Revised 2026-09-06 by fvermaut (interactive session, ticket [timone#105](https://github.com/fvermaut/timone/issues/105)): `Verify-via` changed from `api` to `live`. The criterion describes what an agent does while building; its only dependencies are two instruction files with no code behind them, and its own hint presupposes a driven run. Both verification passes found it unverifiable from a terminal — the account is in [phase-35-verification.md](../../plans/phases/reports/phase-35-verification.md). Clauses unchanged.
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** live
-- **Last live gate:** never
+- **Last live gate:** [phase-35-live-gate.md](../../plans/phases/reports/phase-35-live-gate.md) — 2026-09-07, PASS (watched in scratch-app#53 and #56: dated amendments naming the run, original wording readable, merged amendments stand and closed ones died with the branch)
 - **Depends-on:** `.claude/skills/timone-execute/, .claude/skills/timone-verify/`
 - **Criteria:**
     - GIVEN a build step that amends the plan or the requirements it is building against
@@ -72,9 +74,9 @@
 ## R5 — No question without the power to act on its answer
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** live
-- **Last live gate:** never
+- **Last live gate:** [phase-35-live-gate.md](../../plans/phases/reports/phase-35-live-gate.md) — 2026-09-07, PASS (watched across many rounds on scratch-app#50 and #51: every typed reply moved the work; two granted unusual answers — a scope trim and a removed behaviour — and both were acted on; no reply was redirected to a command)
 - **Depends-on:** `src/daemon/, .claude/skills/`
 - **Criteria:**
     - GIVEN a ticket waiting on a question the process asked
