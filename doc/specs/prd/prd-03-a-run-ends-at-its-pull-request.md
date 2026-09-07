@@ -39,7 +39,7 @@ The interview resolved the direction: stop stopping. The human's judgement is re
 - **An agent that answers for the human.** Considered in the interview and rejected: it would rubber-stamp the one gate that matters. The fix is removing the stops, not automating the yes.
 - **Draft pull requests as a third state.** A red run opens an ordinary pull request that says it is red.
 - **Changing the agreements before the build.** Requirements approval and the approval of the list of pieces stay exactly as they are, takeover included.
-- **Patching a rejected pull request in place.** Rejection is remediation — a fresh cycle — always.
+- **Patching a rejected pull request in place.** A rejection is never patched in place. When the human asks for the work to be built again it is a fresh cycle, never a patch — but a close no longer always means a rebuild (✏ 2026-09-07, [timone#111](https://github.com/fvermaut/timone/issues/111): a close may instead mean the work was unwanted, or was a mistake; the machine asks which — see R1).
 - **Changing how a project is held.** One pull request in flight per project, the run holding it until merge or close, stays as it is (PRD-02.R10): the human's merge paces the pipeline, by design.
 
 ## Open Questions
