@@ -353,3 +353,43 @@
 - **Mechanism: undecided.** Version stamping per entry, a scheduled re-verification, executing each entry's commands in CI, and deriving drift from execution failures are all candidates and none is chosen. **This requirement is not plannable as written** — it goes through stage 2 (`timone-grill`) first, and its criteria are rewritten from that session before any phase consumes it.
 - **Verification hint:** deliberately stale one entry against the live ecosystem and confirm the mechanism reports it, naming the entry and the specific instruction.
 - **Origin:** the weekend of 2026-07-25/26, **five** approved entries were found to contain instructions that do not work — `create-next-app` cannot run in place; TypeScript 7 is uninstallable alongside `eslint-config-next`; `prisma.config.ts` has no `directUrl` key; the generators emit harness files R4 forbids; the Prisma client is unloadable by bare `node` without `importFileExtension`. Each was correct when written and each was discovered only because something finally executed it. Entries bind every managed project, so an undetected stale entry is followed faithfully until someone stubs a toe on it.
+
+## R25 — A piece is a thin path through every layer, and names only what it finishes
+
+> ✏ Added 2026-09-10, [ADR-0053](../../adr/0053-a-piece-is-a-thin-path-through-every-layer-and-names-only-what-it-finishes.md), after `ivtrends` #88 stamped two requirements `failed` on a piece that could never have delivered them ([timone#121](https://github.com/fvermaut/timone/issues/121)).
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** human
+- **Depends-on:** `process.md, .claude/skills/timone-plan/, .claude/skills/timone-verify/`
+- **Criteria:**
+    - GIVEN an initiative being cut into pieces
+      WHEN the list of pieces is written
+      THEN each piece is a thin path through every layer the work touches, working end to end, and no piece is one layer of the product — a wide mechanical change across the codebase being the one shape allowed to be horizontal, sequenced as expand–contract
+    - GIVEN a piece that delivers only part of a requirement
+      WHEN that piece's plan file is written
+      THEN it does not name that requirement, and prose saying the requirement does not close here is not a claim to the contrary
+    - GIVEN a requirement no piece has delivered in full
+      WHEN a verification pass runs
+      THEN that requirement's register line is not stamped `failed`, because nothing that could have delivered it has been checked
+- **Verification hint:** read the breakdown and the phase files of the next feature initiative built after this lands. Every piece must reach the product's outer layer, and every requirement ID named by a phase file must be one that piece finishes. Re-read `ivtrends` #86's breakdown as the counter-example this criterion exists to forbid.
+
+## R26 — A cut that names a requirement it cannot deliver is refused before the human sees it
+
+> ✏ Added 2026-09-10, [ADR-0053](../../adr/0053-a-piece-is-a-thin-path-through-every-layer-and-names-only-what-it-finishes.md). fvermaut chose code over an instruction: [timone#36](https://github.com/fvermaut/timone/issues/36) records what a rule an agent is merely asked to honour is worth.
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Depends-on:** `src/, .claude/skills/timone-plan/`
+- **Criteria:**
+    - GIVEN a breakdown file
+      WHEN it is written
+      THEN it names, per piece, the requirement IDs that piece delivers, and the stamp the human approves covers that mapping
+    - GIVEN a piece that names a requirement whose `Verify-via` channel the piece cannot exercise — a `browser` requirement in a piece that plans no screen
+      WHEN the list of pieces is checked
+      THEN the list is refused with the piece and the requirement named, and it is re-cut before it is put in front of the human
+    - GIVEN a list of pieces that passes the check
+      WHEN it is put in front of the human
+      THEN no stop has been added to the run: the refusal and the re-cut happened without asking anyone
+- **Verification hint:** write a breakdown naming a `browser` requirement on a piece whose plan has no shell sub-phase and assert the check refuses it, naming both. Then assert a correctly cut list passes and reaches its approval with no extra ticket comment and no extra wait in `timone status`.
