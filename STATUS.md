@@ -2,49 +2,35 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-07.
+**Last updated:** 2026-09-10.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** Four pull requests are open and all four wait on you to merge. Ticket #39's is [#89](https://github.com/fvermaut/timone/pull/89). Ticket #99's is [#100](https://github.com/fvermaut/timone/pull/100). Ticket #106's is [#118](https://github.com/fvermaut/timone/pull/118) — item 8 below. Ticket #115's is [#119](https://github.com/fvermaut/timone/pull/119) — item 9 below. Nothing besides merging waits on you.
+> **Read this first.** Nothing is waiting to be merged — all four pull requests are in. One thing needs five minutes of yours: starting the machine, so the takeover fault gets fixed. Two older questions are still yours to answer, at no hurry.
 
-**1. Merge [pull request #89](https://github.com/fvermaut/timone/pull/89) — it closes [#39](https://github.com/fvermaut/timone/issues/39).**
-
-The change is five citations and a history line in the design-rules file; nothing a rule requires was changed. It was checked twice by a reader who did not build it, and everything a terminal can check holds — the account is in [the report](doc/plans/phases/reports/phase-33-verification.md) on the ticket's branch. The two watched checks the rules asked for were **not** run: after the ticket stopped at that same point three times, you chose to skip them, and the pull request records that choice. Merging it is your acceptance.
-
-Why the ticket asked you three times for the same thing is now its own ticket, [#88](https://github.com/fvermaut/timone/issues/88): the two promises say they rest on the whole design-rules folder, so even a citations-only edit dragged two full watched runs behind it, and nothing stopped the machine repeating a stop you had already answered. Two questions on that ticket are yours to decide, at no hurry.
-
-**Why it matters:** nothing Timone has built for itself has reached a pull request before this one.
-
-**2. Merge [pull request #100](https://github.com/fvermaut/timone/pull/100) — it fixes [#99](https://github.com/fvermaut/timone/issues/99).**
-
-This is the fault where a job that stopped to ask you something kept holding its project after its ticket was closed, so the tickets behind it queued up until you stopped it by hand. A reader who did not build it drove the machine and confirmed it: a job left waiting is now ended when its ticket is closed **or** when the `timone` label is taken off, the reason is written down, and nothing is started for it. Every check was first made to fail on purpose, so the passes mean something. All 1619 automatic tests pass. The account is in [the delivery report](doc/plans/phases/reports/phase-34-delivery.md) on the pull request's branch.
-
-**One thing is still missing: a watched run.** The change is in the code that picks tickets up, and eight of Timone's promises say they rest on that code. Seven have never been watched working. The eighth was watched on 4 September for a marked ticket only — and never for a ticket whose mark was removed, which is half of what this fix changes. A container with no Docker and no keys cannot watch any of them. You said, on the ticket, to go ahead without it — the same choice you made for #39 — and the pull request records that. **Merging it is your acceptance of that choice.** The watched run itself is still owed, and the next piece of work that touches this part of the machine will ask for it again.
-
-**3. What it asked, and what was decided.**
-
-Timone checks its own work against 20 promises. Tonight **2 could be checked and 18 could not be checked at all** — the sealed container it works in has no Docker, no key that reaches your other projects, and no copy of them, and almost everything Timone promises is about those things.
-
-You approved the answer. It is written down as [ADR-0051](doc/adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md).
-
-Those 18 promises are now marked as **"only a watched, running machine can check this"** — which is what tonight was. Each one now says what it needs and which watched run last saw it working. Sixteen say **"never"**. That is not new, it is the first time it has been written down: nothing was checking them before either, and now the file says so and names a report when there is one.
-
-**Nothing about the container changed.** No new keys, no new access. That was the point.
-
-**One thing you should know is weak.** A promise marked this way can be quietly forgotten — "never" is a true sentence nobody has to act on. The only thing that catches it is the rule that a job touching that machinery must run a watched check before it delivers. Nothing enforces that automatically.
-
-**4. Before you start the machine again, build first.**
+**1. Start the machine, and build first.**
 
 ```
 npm run build && timone daemon
 ```
 
-`timone` is linked straight to this folder's build, so building is all it takes — there is nothing to reinstall. Building matters because the machine now writes a line to its notes that a build from before today cannot read.
+Ticket [#122](https://github.com/fvermaut/timone/issues/122) is marked and waiting. It is the fault you hit today: you ran `timone takeover ivtrends#88`, it re-ran the whole checking step instead of dealing with what the ticket asked, refused again, and left the ticket offering you the very same command. Three separate faults sit behind that one experience and the ticket names all three.
 
-**5. The to-do app's step 2 is still stopped and it is still a real question for you.**
+`timone` is linked straight to this folder's build, so building is all it takes — there is nothing to reinstall.
+
+**What I need from you:** run the two commands above. The ticket will start commenting on itself within a cycle.
+
+**2. Once #122's pull request is merged, mark [#121](https://github.com/fvermaut/timone/issues/121).**
+
+That is the deeper fault behind the same day: work was cut into a piece that built the maths and a piece that built the screen, the first piece was made answerable for a requirement about the screen it did not have, and the check stamped that requirement `failed` — which is untrue and is what later work reads. You decided today what the rule should be, and it is written down as [ADR-0053](doc/adr/0053-a-piece-is-a-thin-path-through-every-layer-and-names-only-what-it-finishes.md).
+
+It is deliberately held back until #122 is in, because it changes the format of the list of pieces you approve. Letting it land while another job is mid-flight would judge that job's already-approved list against a format it was never written in.
+
+**What I need from you:** nothing now — add the `timone` label to #121 after #122 merges.
+
+**3. The to-do app's step 2 is still stopped and it is still a real question for you.**
 
 [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47) asks you to drop the old "no reordering" rule and answer three questions about how moving a row should behave. It cannot be planned until you do, and step 1 ([#46](https://github.com/fvermaut/scratch-app/issues/46)) is stopped for the same reason.
 
@@ -54,54 +40,18 @@ Answer on the ticket, or:
 timone takeover scratch-app#47
 ```
 
-**6. The dashboard idea is now a list of questions, and four are yours.**
+**Be aware that command is the one that is broken** — that is what #122 fixes. On this ticket it should still work, because the job is stopped on a question the interview step can act on, which is the case the takeover handles correctly. If it comes back with the same refusal twice, answer on the ticket instead and tell me.
 
-You asked for a way to watch all projects from one web page, without a terminal. That idea is now mapped on [#92](https://github.com/fvermaut/timone/issues/92): six questions, two already answered by research. The four left are yours, each answerable with a comment or a `timone takeover` command written on the ticket:
+**What I need from you:** answer the three questions, on the ticket or in a terminal.
 
-- [What the record of a job must keep](https://github.com/fvermaut/timone/issues/95) — **start here**; it shapes the rest.
-- [What the page shows](https://github.com/fvermaut/timone/issues/96) — I build an example page, you react to it.
-- [The page's code lives in this repository, but is built like a client project](https://github.com/fvermaut/timone/issues/97)
-- [Where the page runs, how it gets its data, and who can open it](https://github.com/fvermaut/timone/issues/98)
+**4. The dashboard idea is a list of questions, and four are yours.**
 
-There is also [#91](https://github.com/fvermaut/timone/issues/91): adopting two public formats (EARS for acceptance criteria, MADR for decision records). It is marked for the machine; expect its questions on the ticket.
+You asked for a way to watch all projects from one web page, without a terminal. That idea is mapped on [#92](https://github.com/fvermaut/timone/issues/92): six questions, two already answered by research. The four left are yours, each answerable with a comment or a `timone takeover` command written on the ticket. No hurry, and nothing is blocked on them.
 
-**7. The "no stops between agreement and pull request" work is merged. Nothing about it needs you any more.**
-
-The first half of ticket [#103](https://github.com/fvermaut/timone/issues/103) was [pull request #114](https://github.com/fvermaut/timone/pull/114), and it is now merged into the main branch of this repository. Both reviews came back clean — nothing found on how it is built, nothing found against what was asked for. It was the first piece of work Timone built for itself to reach a pull request. The watched run it owed happened on the to-do app, on a real daemon — full account in [the live-gate report](doc/plans/phases/reports/phase-35-live-gate.md).
-
-**All three promises now hold.** Typed answers move the work (R5): watched many times, including two answers that gave something unusual, none bounced back with "run this command". Mid-build changes carry their marks (R3): watched twice — two builds hit a wrong plan step, changed the plan themselves with a dated note, and carried on. The run reaches a pull request and never stops on the way (R1): four runs went from your approval to a pull request with no stop at all, two of them after hitting real trouble mid-build.
-
-**One decision you made along the way.** The watched run found that when a pull request is closed without merging, the machine stops and asks you rather than starting the work again by itself — which is not what the promise said. You chose to reword the promise to match the machine ([#111](https://github.com/fvermaut/timone/issues/111), now closed), rather than change the machine. The one thin spot left, recorded plainly: a run whose *own* tests fail was never seen tonight, because none did.
-
-**The night found five faults, all filed:** [#110](https://github.com/fvermaut/timone/issues/110) (a run costs an hour a step, and two thirds of it is not the model), [#112](https://github.com/fvermaut/timone/issues/112) (parallel pieces collide on file names), [#113](https://github.com/fvermaut/timone/issues/113) (a run can be pinned to the wrong commit), and a new note on [#73](https://github.com/fvermaut/timone/issues/73). The takeover loop that made this ticket ask you the same thing twice is [#108](https://github.com/fvermaut/timone/issues/108).
-
-**One housekeeping note.** The daemon is stopped — I started one for the watched run and stopped it when it finished. Build and start it again when you want the machine back:
-
-```
-npm run build && timone daemon
-```
-
-**8. Merge [pull request #118](https://github.com/fvermaut/timone/pull/118) — it finishes [#106](https://github.com/fvermaut/timone/issues/106).**
-
-This is the other half of the "no stops" work: the pull request a run opens now starts by saying what was bent along the way — or that nothing was — and, when the work changed a screen, carries the screen's comparison and its preview address up front instead of asking you to look at the screen first. The change is two instruction files; there is no program code in it.
-
-A reader who did not build it checked it and found nothing wrong: all 1624 automatic tests pass and nothing that used to work broke. The two promises it claims can only be proven by watching a real delivery happen, and none has been watched. **You chose, on the ticket, to open the pull request without that watched run.** The choice is written down as the first section of the pull request itself, and merging is your acceptance of it — the same as pull requests #89 and #100. The watched run stays owed after the merge.
-
-Two independent reviews read the change; neither blocks the merge. On how it is written: 2 findings — the wording it orders into future pull requests breaks this repo's own plain-language rule, and one step list inside the file contradicts the rule list it sits next to. On what was asked: 2 findings — one requirement's written text can no longer be met word for word by what the instructions now do, and the change adds one new stop nobody asked for. All four are spelled out in [the delivery report](https://github.com/fvermaut/timone/blob/timone/106-2-the-pull-request-carries-the-judgement/doc/plans/phases/reports/phase-36-delivery.md); tell me which you want fixed and each becomes its own ticket.
-
-**Getting here surfaced two faults, both filed.** The ticket stopped twice at the same point and told you to run a command that refuses to work in that situation ([#116](https://github.com/fvermaut/timone/issues/116)); and the stage stopped at all when the new rules say it should have written the skip down and carried on ([#117](https://github.com/fvermaut/timone/issues/117)). The pull request was opened by hand from a terminal session instead.
-
-**9. Merge [pull request #119](https://github.com/fvermaut/timone/pull/119) — ticket [#115](https://github.com/fvermaut/timone/issues/115) is finished by it.**
-
-It closes the hole that let the machine restart a job on a ticket you had put on hold: the part of the machine that starts fresh work already refused to touch a held ticket, but the part that carries on a waiting job never looked at the hold at all. Now it does, and it stops before it reads the waiting answer — so the comment you left is still there, unread, and taking the hold off later lets that same comment start the work.
-
-A reader who did not build it has checked it: all 1628 automatic tests pass and nothing that used to work broke. The one promise this work claims can only be settled by watching a real run against real machinery. **You chose, on 7 September, to open the pull request without that watched run** — the same choice you made on #106. The choice is written as the first section of the pull request itself, and merging is your acceptance of it. The watched run stays owed after the merge: the next change to this part of the machine will ask for it again.
-
-Two independent reviews read the change; each found 1 thing and neither blocks the merge. On how it is written: a comment in the code points at its sibling check by a line number that will go stale. On what was asked: the list of promises carries no note yet that this promise was seen to fail, or that this change repairs it. Both are spelled out in [the delivery report](https://github.com/fvermaut/timone/blob/timone/115-daemon-resumes-a-parked-run-on-a-held-ti/doc/plans/phases/reports/phase-37-delivery.md); tell me if you want either fixed and it becomes its own ticket.
-
-**What I need from you:** merge [#119](https://github.com/fvermaut/timone/pull/119), or close it to reject the work.
+**What I need from you:** nothing until you want the page.
 
 **Nothing else needs you.**
+
 
 ---
 
@@ -149,6 +99,18 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**10 September — the takeover you ran did not fix what it was sent to fix, and you settled the deeper fault behind it.**
+
+You ran `timone takeover ivtrends#88`. It re-ran the whole checking step from the start instead of dealing with the question the ticket was asking, refused again, and left the ticket offering you the same command. Three faults sit behind that. The checking step should never have stopped at all — the rule since [ADR-0052](doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md) is that nothing between your agreement and the pull request asks you anything. The takeover then opened the stage named on the job rather than the decision. And the refusal the takeover itself produced was never written into the machine's own record, so the ticket kept offering the same way out, without limit. Filed as one job, [#122](https://github.com/fvermaut/timone/issues/122), which must close [#117](https://github.com/fvermaut/timone/issues/117), [#108](https://github.com/fvermaut/timone/issues/108) and [#120](https://github.com/fvermaut/timone/issues/120). It is marked and waiting for you to start the machine — item 1 at the top.
+
+You then named the deeper problem yourself: the work had been cut into a piece that builds the maths and a piece that builds the screen, and neither piece on its own respects the requirement it was made answerable for. That turned out to be a rule that already existed one level too low. Timone requires work to be cut end to end — never layer by layer — but only of the slices *inside* a piece. Where an initiative is cut into pieces, it asked for size and order and nothing about shape. So a backend-only piece was legal by the letter.
+
+Four decisions, written down as [ADR-0053](doc/adr/0053-a-piece-is-a-thin-path-through-every-layer-and-names-only-what-it-finishes.md): the end-to-end rule moves up to the pieces themselves; a piece names only the requirements it delivers in full; the list of pieces you approve now says which requirements each piece delivers; and code refuses a bad cut **before** the list reaches you, so you get no new stop. What that must be checked against is PRD-01 R25 and R26. Ticket [#121](https://github.com/fvermaut/timone/issues/121) carries the work, deliberately held until #122 is merged.
+
+One thing is left open on purpose and is written into the ADR: a requirement that covers a whole initiative — the trading app has one saying everything added meets the accessibility standard — is true of every piece and delivered in full by none. The new rule gives it no owner.
+
+The lasting damage on the trading app is still there: two of its requirements are stamped `failed` on that branch for work that could never have delivered them. That is not repaired yet, and ivtrends [#88](https://github.com/fvermaut/ivtrends/issues/88) is still stopped.
 
 **7 September (evening) — ticket #115 got its pull request, opened by hand on your decision.** You said the run had stopped again at the same point as #106's, and you chose to open the pull request without the watched run. A terminal session wrote that decision into the phase's record of what was bent, ran both delivery reviews (1 finding each, neither blocking), and opened [pull request #119](https://github.com/fvermaut/timone/pull/119). The stop itself — the checking step still asks for a watched run instead of writing it down as owed and carrying on — is recorded as a second sighting on [#117](https://github.com/fvermaut/timone/issues/117), with the exact sentence in the instructions that causes it. Item 9 at the top has what to do.
 
