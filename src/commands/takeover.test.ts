@@ -269,6 +269,43 @@ describe("resolveTakeover", () => {
     expect(resolution).toMatchObject({ kind: "converse", stage: "clarification" });
   });
 
+  it("refuses a ticket parked on a conversation inside the build, rather than re-opening the stage", async () => {
+    // `ivtrends` #88: the checking step parked on a question it should never
+    // have asked, and this command opened that stage again — which asked the
+    // same question, at the same price, and left the ticket offering the same
+    // command. Nothing parks a build stage like this any more (ADR-0052), so
+    // a ledger that still says so is old, and the answer is a way out that is
+    // not this command.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-message-box");
+    store.park(run.id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "verification",
+      waitCursor: "2026-08-03T10:00:00Z",
+    });
+
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store, adapter: fakeAdapter().adapter },
+    );
+
+    expect(resolution.kind).toBe("nothing-to-do");
+    expect(resolution).toMatchObject({
+      message: expect.stringContaining("scratch-app #6"),
+    });
+    // The way out is another command, not this one again — the whole point of
+    // the refusal.
+    expect(resolution).toMatchObject({
+      message: expect.stringContaining("timone cancel scratch-app#6"),
+    });
+    expect((resolution as { message: string }).message).not.toContain(
+      "timone takeover",
+    );
+  });
+
   it("sends a ticket waiting on a gate back to the ticket, rather than opening an interview", async () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);
@@ -1033,16 +1070,24 @@ describe("a takeover that finishes the step it took over", () => {
     };
   }
 
-  function handedBackAtExecution(store: RunStore): Run {
+  /**
+   * A run handed back to a person, parked on a conversation at a stage where
+   * that is still legal. It used to sit at `execution`, which is where
+   * `ivtrends` #58 was; a build stage cannot park this way any more
+   * (ADR-0052), and `resolveTakeover` now refuses one before `endTakeover` is
+   * ever reached. The stage is all that changed — what these tests check is
+   * the restoring itself, which does not care which stage it restores.
+   */
+  function handedBackAtRequirements(store: RunStore): Run {
     const { run } = store.register("scratch-app", 6);
     store.activate(run.id, "session-1");
     store.claimBranch(run.id, "timone/6-the-backfill");
     store.park(run.id, {
       waitingOn: "your answer to the question in my last comment.",
       kind: "conversation",
-      stage: "execution",
+      stage: "requirements",
       waitCursor: "2026-08-03T09:30:00Z",
-      resolvableBy: ["execution"],
+      resolvableBy: ["requirements"],
     });
     return store.get(run.id) as Run;
   }
@@ -1073,7 +1118,7 @@ describe("a takeover that finishes the step it took over", () => {
     // and all. The ticket went on asking a person for an answer they had
     // given three hours earlier by doing the work.
     const { store, statePath } = ledger();
-    handedBackAtExecution(store);
+    handedBackAtRequirements(store);
     const { launcher } = fakeLauncher();
     const said: string[] = [];
 
@@ -1095,13 +1140,13 @@ describe("a takeover that finishes the step it took over", () => {
     // its own stage on the next cycle.
     expect(after?.status).toBe("parked");
     expect(after?.wait?.kind).toBeUndefined();
-    expect(after?.stage).toBe("execution");
+    expect(after?.stage).toBe("requirements");
     expect(said.join("\n")).toContain("stops asking");
   });
 
   it("puts the run back exactly as it was when nothing was recorded", async () => {
     const { store, statePath } = ledger();
-    handedBackAtExecution(store);
+    handedBackAtRequirements(store);
     const { launcher } = fakeLauncher();
     const said: string[] = [];
 
@@ -1129,7 +1174,7 @@ describe("a takeover that finishes the step it took over", () => {
     // reclaimed, cancelled or taken by another terminal saw a conversation end
     // normally and had no way to know the ledger had gone the other way.
     const { store, statePath } = ledger();
-    handedBackAtExecution(store);
+    handedBackAtRequirements(store);
     const { launcher } = fakeLauncher({
       onRun: () => store.cancel("scratch-app#6/1", "you closed the ticket"),
     });
@@ -1157,7 +1202,7 @@ describe("a takeover that finishes the step it took over", () => {
     // or had not moved.
     for (const comments of [[finished], []]) {
       const { store, statePath } = ledger();
-      handedBackAtExecution(store);
+      handedBackAtRequirements(store);
       const { launcher } = fakeLauncher();
       const said: string[] = [];
 

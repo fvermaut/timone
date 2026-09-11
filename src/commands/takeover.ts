@@ -18,6 +18,7 @@ import {
   type Run,
 } from "../daemon/runs.js";
 import {
+  inBuild,
   waitFor,
   wayfinderStage,
   type PipelineStage,
@@ -259,6 +260,18 @@ export async function resolveTakeover(
     };
   }
 
+  // **A build stage is never a stage this command opens a conversation at**
+  // ([ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
+  // Nothing may park a run there any more, so reaching this line means a
+  // ledger written by older code, or a way in nobody has thought of yet.
+  // Opening the stage is what `ivtrends` #88 did: the checking step ran again
+  // from the start, could not act, and put the same question back — so the
+  // ticket offered this same command again, without limit. The refusal says
+  // what is wrong and gives a way out that is not this command again.
+  if (inBuild(run.stage)) {
+    return { kind: "nothing-to-do", message: parkedInBuild(target, run.stage) };
+  }
+
   return { kind: "converse", run, stage: run.stage };
 }
 
@@ -377,6 +390,25 @@ function cannotConverse(target: TakeoverTarget): string {
   return (
     `${target.project} #${target.ticket} is waiting at a stage I can't hold a ` +
     "conversation for yet. Nothing has changed."
+  );
+}
+
+/**
+ * What a ticket parked on a conversation inside the build is told.
+ *
+ * It names the fault rather than the stage's own question, because the
+ * question is not the human's to answer — it should never have been asked.
+ * And it ends on a command that is not this one: repeating this one is the
+ * loop the refusal exists to break.
+ */
+function parkedInBuild(target: TakeoverTarget, stage: PipelineStage): string {
+  return (
+    `${target.project} #${target.ticket} is stopped at the ${stage} step, ` +
+    "waiting on you. That should not happen: once you have approved the work, " +
+    "nothing before the pull request asks you anything. Running this command " +
+    "again will do the same thing. Throw this attempt away with " +
+    `\`timone cancel ${target.project}#${target.ticket}\` and the ticket will ` +
+    "say what to do next."
   );
 }
 
