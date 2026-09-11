@@ -5870,6 +5870,37 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     expect(after?.stage).toBe("clarification");
   });
 
+  it("records the conversation as the answer being read, before it hands the run over", async () => {
+    // The daemon-mediated half of the same marking the command does under the
+    // lock itself. A takeover claimed this way and ending in the same stop
+    // must count against the re-ask floor too, or the bound exists on one path
+    // and not the other, silently.
+    const { store, statePath } = newStoreAt();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "a conversation in your terminal",
+      kind: "conversation",
+      stage: "clarification",
+      waitCursor: "2026-08-03T09:30:00Z",
+    });
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(6)] });
+    const { spawner } = fakeSpawner();
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner,
+      statePath,
+    });
+
+    const claimed = store.get(run.id);
+    expect(claimed?.status).toBe("active");
+    expect(claimed?.consumedAnswerAt).toBe("2026-08-03T09:30:00Z");
+  });
+
   it("says so, and changes nothing, when there is nothing to hand over", async () => {
     const { store, statePath } = newStoreAt();
     enqueue(statePath, {

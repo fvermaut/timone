@@ -63,7 +63,7 @@ import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 // at the terminal (ADR-0032).
 import { runRetry } from "../commands/retry.js";
 import { runCancel } from "../commands/cancel.js";
-import { resolveTakeover } from "../commands/takeover.js";
+import { markAnswerConsumed, resolveTakeover } from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
 import {
   type InitiativeRecord, type Run, type RunStore, type Witness } from "./runs.js";
@@ -943,6 +943,14 @@ async function applyRequest(
       if (resolution.kind !== "converse" && resolution.kind !== "escalation") {
         log(resolution.message);
         return 1;
+      }
+      // The conversation about to start is this run's answer being read, and
+      // it is marked as such here for the same reason the command's own
+      // direct-lock path marks it — a takeover that changes nothing must
+      // count against the re-ask floor. Before the claim, because `repark`
+      // refuses a run that is not parked.
+      if (resolution.kind === "converse") {
+        markAnswerConsumed(store, resolution.run);
       }
       // On the asking terminal's behalf, never on the daemon's (ADR-0049 D1).
       // A run the daemon recorded itself as holding is one its own sweep will

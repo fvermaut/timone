@@ -529,6 +529,35 @@ export async function runTakeover(
   }
 }
 
+/**
+ * Say, on the run itself, that this conversation is the answer being read —
+ * so a conversation that changes nothing counts against ADR-0033's re-ask
+ * floor exactly as a written reply that changes nothing already does.
+ *
+ * **Why it is needed at all.** A takeover that ends without the session
+ * recording a finished step puts the run back on the wait it came from, cursor
+ * and all. Nothing distinguished that from a run nobody had ever spoken to, so
+ * the ticket went on offering `timone takeover` and each run of it cost a full
+ * session and moved nothing. `ivtrends` #88 is the sighting: same command,
+ * same stop, no bound. With the marker set, the second stuck takeover at the
+ * same stage trips `RE_ASK_LIMIT` in `applyPark` and the wait becomes an
+ * escalation — which `resolveTakeover` already opens differently.
+ *
+ * **Ordered before the claim, never after**: `repark` refuses a run that is
+ * not parked, and the claim makes it active. The same order the daemon's own
+ * resumption path uses in `poll.ts`.
+ *
+ * Silent when the run is not parked — a takeover that has just enrolled a
+ * ticket at a stage with no wait has nothing to have asked twice.
+ */
+export function markAnswerConsumed(store: RunStore, run: Run): void {
+  if (store.get(run.id)?.status !== "parked") return;
+  store.repark(run.id, {
+    ...waitOf(run),
+    consumedAnswerAt: run.wait?.opened ?? run.updatedAt,
+  });
+}
+
 /** A claimed run, or the exit code of a takeover that never started one. */
 type Claim =
   | { kind: "claimed"; run: Run; thread?: TicketThread; escalation?: true }
@@ -591,6 +620,7 @@ async function claimForTakeover(
         log(cannotConverse(target));
         return { kind: "no", code: 1 };
       }
+      markAnswerConsumed(store, resolution.run);
       return {
         kind: "claimed",
         run: store.claim(resolution.run.id, hold),

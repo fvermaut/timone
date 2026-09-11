@@ -1052,10 +1052,6 @@ describe("a takeover that gives up leaves nothing behind", () => {
 });
 
 describe("a takeover that finishes the step it took over", () => {
-  /**
-   * `ivtrends` #58's shape: a run parked on a conversation at a **work**
-   * stage, because the building step stopped and asked for a person.
-   */
   /** A store and the path it is written to, which this command needs both of. */
   function ledger(): { store: RunStore; statePath: string } {
     const dir = mkdtempSync(join(tmpdir(), "timone-takeover-end-"));
@@ -1166,6 +1162,70 @@ describe("a takeover that finishes the step it took over", () => {
     expect(after?.wait?.kind).toBe("conversation");
     expect(after?.wait?.opened).toBe("2026-08-03T09:30:00Z");
     expect(said.join("\n")).toContain("nothing was recorded");
+  });
+
+  it("stops offering itself once two conversations running have moved nothing", async () => {
+    // `ivtrends` #88. The ticket said to run `timone takeover`, it was run, the
+    // stage could not act, and the run went back on exactly the wait it came
+    // from — so the ticket said to run the same command again, at the same
+    // price, without limit. A conversation is now recorded as an answer read,
+    // which is what feeds ADR-0033's floor.
+    const { store, statePath } = ledger();
+    handedBackAtRequirements(store);
+    const said: string[] = [];
+    const twice = async (): Promise<void> => {
+      await runTakeover("scratch-app#6", {
+        manifest,
+        store,
+        statePath,
+        adapter: trackerSaying([]),
+        launcher: fakeLauncher().launcher,
+        root: "/root",
+        ticker: () => ({ stop: () => {} }),
+        log: (message) => said.push(message),
+      });
+    };
+
+    await twice();
+    // Once is a stage that asked badly and may settle it next time, so the
+    // ticket may still offer the conversation.
+    expect(store.get("scratch-app#6/1")?.wait?.kind).toBe("conversation");
+
+    await twice();
+    // Twice running is proof the conversation does not reach what is blocking
+    // it. The wait becomes one no answer and no takeover resumes.
+    expect(store.get("scratch-app#6/1")?.wait?.kind).toBe("escalation");
+
+    // And that is what the ticket and the command now read: a third attempt
+    // opens the escalation, not the stage that has twice failed to move.
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store, adapter: trackerSaying([]) },
+    );
+    expect(resolution.kind).toBe("escalation");
+  });
+
+  it("leaves the floor alone when the session finished the step", async () => {
+    // The other side of the same marker: a takeover that moves the work must
+    // not spend a strike on the run it just advanced.
+    const { store, statePath } = ledger();
+    handedBackAtRequirements(store);
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter: trackerSaying([finished]),
+      launcher: fakeLauncher().launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => {} }),
+      log: () => {},
+    });
+
+    const after = store.get("scratch-app#6/1");
+    expect(after?.wait?.kind).toBeUndefined();
+    expect(after?.consumedAnswerAt).toBeUndefined();
+    expect(after?.reAsksAfterAnswer ?? 0).toBe(0);
   });
 
   it("says so, and writes nothing, when the run moved under it", async () => {
