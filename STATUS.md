@@ -30,7 +30,7 @@ That is the deeper fault behind the same day: work was cut into a piece that bui
 
 It was held back until #122 was in, because it changes the format of the list of pieces you approve. That much has happened. What has changed is who builds it: marking it for the machine was the plan, and you have just decided to stop the machine working on Timone itself.
 
-**What I need from you:** say whether #121 is built by hand in a terminal, like #122 was, or whether the machine goes back to working on Timone.
+**What I need from you:** say whether #121 is built by hand in a terminal, like #122 was, or whether the machine goes back to working on Timone. It has never been marked, so nothing starts it by itself.
 
 **3. The to-do app's step 2 is still stopped and it is still a real question for you.**
 
@@ -106,7 +106,9 @@ One promise lost its tick on 4 September — the one about a job being picked up
 
 You said running Timone's own jobs on Timone is not working and was probably too ambitious, and to go back to improving Timone in a plain terminal session. The machine had already written the plan for [#122](https://github.com/fvermaut/timone/issues/122) and then died before building it, twice. The plan itself was sound, so a terminal session built it as written: three fixes, each with its tests watched failing first. [Pull request #123](https://github.com/fvermaut/timone/pull/123) is item 1 at the top.
 
-Nothing has been taken out of the machine's list. Timone is still in `timone.yaml`, and the marked tickets on this repository are still marked — so a machine you start can still pick them up. What to do about that is a decision, not a tidy-up, and it is yours.
+Two things were done on your word. The `timone` label came off all eight open tickets on this repository, so a machine you start picks up none of them. Timone stays in `timone.yaml`, so `timone takeover timone#95` and the other conversation tickets still work exactly as they did, and putting a label back is all it takes to change your mind. And the machine you started on the evening of the 10th was stopped — it was running that day's code and had already failed on #122 twice.
+
+One thing is worth knowing for when #123 is merged. The trading app's [#88](https://github.com/fvermaut/ivtrends/issues/88) is still stopped on the very wait this work makes impossible. The fix does not repair a job already in that state: `timone takeover ivtrends#88` will now refuse it and tell you to run `timone cancel ivtrends#88` instead.
 
 **10 September — the takeover you ran did not fix what it was sent to fix, and you settled the deeper fault behind it.**
 
