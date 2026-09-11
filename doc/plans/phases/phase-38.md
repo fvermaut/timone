@@ -1,6 +1,6 @@
 # Phase 38: The build never parks, a takeover never reopens a park that shouldn't exist, and a stuck takeover stops offering itself
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-38-complete.md](reports/phase-38-complete.md).
 
 > **Companion phases:** First phase to touch this exact fault; no prior phase built the code this one corrects. Governing decisions: [ADR-0052](../../adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md) — the rule this phase closes the last gap in: from the approved list of pieces to the pull request, a run never parks on a person, and an escalation inside the build is a fault to file, not a wait to serve. [ADR-0033](../../adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md) — the re-ask floor this phase extends to the takeover path, unchanged in substance.
 
