@@ -2,33 +2,35 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-10.
+**Last updated:** 2026-09-11.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** Nothing is waiting to be merged — all four pull requests are in. One thing needs five minutes of yours: starting the machine, so the takeover fault gets fixed. Two older questions are still yours to answer, at no hurry.
+> **Read this first.** One pull request is waiting for you. The takeover fault is fixed — by hand, in a terminal, because you decided to stop running Timone's own jobs on Timone for now. Two older questions are still yours to answer, at no hurry.
 
-**1. Start the machine, and build first.**
+**1. Read and merge [pull request #123](https://github.com/fvermaut/timone/pull/123).**
 
-```
-npm run build && timone daemon
-```
+It is the fault you hit yesterday: you ran `timone takeover ivtrends#88`, it re-ran the whole checking step instead of dealing with what the ticket asked, refused again, and left the ticket offering you the very same command. Three faults sat behind that one experience, and all three are fixed:
 
-Ticket [#122](https://github.com/fvermaut/timone/issues/122) is marked and waiting. It is the fault you hit today: you ran `timone takeover ivtrends#88`, it re-ran the whole checking step instead of dealing with what the ticket asked, refused again, and left the ticket offering you the very same command. Three separate faults sit behind that one experience and the ticket names all three.
+- a building, checking or delivery step that hands its work to a person is now recorded as a fault to retry, instead of stopping the job to wait on you — nothing between your approval and the pull request may ask you anything;
+- `timone takeover` refuses to re-open one of those steps, and names a different command instead of itself;
+- a takeover that changes nothing twice running turns the job's wait into one no answer restarts, so the ticket stops offering the same command for ever.
 
-`timone` is linked straight to this folder's build, so building is all it takes — there is nothing to reinstall.
+1632 tests pass, up from 1628. Every new test was watched failing first. It closes [#122](https://github.com/fvermaut/timone/issues/122), [#117](https://github.com/fvermaut/timone/issues/117), [#108](https://github.com/fvermaut/timone/issues/108) and [#120](https://github.com/fvermaut/timone/issues/120).
 
-**What I need from you:** run the two commands above. The ticket will start commenting on itself within a cycle.
+Two things it does not do. The two promises it rests on ([PRD-03](doc/specs/prd/prd-03-a-run-ends-at-its-pull-request.md) R1 and R5) still have no watched run behind them, and this work does not give them one. And the words a ticket shows when a build step now fails this way were written for the other kind of stop; nobody has re-read them for this one.
 
-**2. Once #122's pull request is merged, mark [#121](https://github.com/fvermaut/timone/issues/121).**
+**What I need from you:** read #123 and merge it.
 
-That is the deeper fault behind the same day: work was cut into a piece that built the maths and a piece that built the screen, the first piece was made answerable for a requirement about the screen it did not have, and the check stamped that requirement `failed` — which is untrue and is what later work reads. You decided today what the rule should be, and it is written down as [ADR-0053](doc/adr/0053-a-piece-is-a-thin-path-through-every-layer-and-names-only-what-it-finishes.md).
+**2. Once #123 is merged, decide how [#121](https://github.com/fvermaut/timone/issues/121) gets built.**
 
-It is deliberately held back until #122 is in, because it changes the format of the list of pieces you approve. Letting it land while another job is mid-flight would judge that job's already-approved list against a format it was never written in.
+That is the deeper fault behind the same day: work was cut into a piece that built the maths and a piece that built the screen, the first piece was made answerable for a requirement about the screen it did not have, and the check stamped that requirement `failed` — which is untrue and is what later work reads. You decided what the rule should be, and it is written down as [ADR-0053](doc/adr/0053-a-piece-is-a-thin-path-through-every-layer-and-names-only-what-it-finishes.md).
 
-**What I need from you:** nothing now — add the `timone` label to #121 after #122 merges.
+It was held back until #122 was in, because it changes the format of the list of pieces you approve. That much has happened. What has changed is who builds it: marking it for the machine was the plan, and you have just decided to stop the machine working on Timone itself.
+
+**What I need from you:** say whether #121 is built by hand in a terminal, like #122 was, or whether the machine goes back to working on Timone.
 
 **3. The to-do app's step 2 is still stopped and it is still a real question for you.**
 
@@ -40,7 +42,7 @@ Answer on the ticket, or:
 timone takeover scratch-app#47
 ```
 
-**Be aware that command is the one that is broken** — that is what #122 fixes. On this ticket it should still work, because the job is stopped on a question the interview step can act on, which is the case the takeover handles correctly. If it comes back with the same refusal twice, answer on the ticket instead and tell me.
+**Be aware that command is still the broken one until #123 is merged** — and the machine now running was started before the fix existed, so it is running the old code either way. On this ticket it should still work, because the job is stopped on a question the interview step can act on, which is the case the takeover handles correctly. If it comes back with the same refusal twice, answer on the ticket instead and tell me.
 
 **What I need from you:** answer the three questions, on the ticket or in a terminal.
 
@@ -99,6 +101,12 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**11 September — the takeover fault is fixed, and Timone stopped working on itself for now.**
+
+You said running Timone's own jobs on Timone is not working and was probably too ambitious, and to go back to improving Timone in a plain terminal session. The machine had already written the plan for [#122](https://github.com/fvermaut/timone/issues/122) and then died before building it, twice. The plan itself was sound, so a terminal session built it as written: three fixes, each with its tests watched failing first. [Pull request #123](https://github.com/fvermaut/timone/pull/123) is item 1 at the top.
+
+Nothing has been taken out of the machine's list. Timone is still in `timone.yaml`, and the marked tickets on this repository are still marked — so a machine you start can still pick them up. What to do about that is a decision, not a tidy-up, and it is yours.
 
 **10 September — the takeover you ran did not fix what it was sent to fix, and you settled the deeper fault behind it.**
 
