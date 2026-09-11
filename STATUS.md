@@ -8,23 +8,25 @@
 
 ## Waiting on you
 
-> **Read this first.** One pull request is waiting for you. The takeover fault is fixed — by hand, in a terminal, because you decided to stop running Timone's own jobs on Timone for now. Two older questions are still yours to answer, at no hurry.
+> **Read this first.** Two pull requests are waiting for you — one here, one on `ivtrends`. Pull request #123 is merged. The checking step stopped and asked you a question on `ivtrends` this afternoon, which it is not allowed to do; that is fixed here and the `ivtrends` work is open for review. Two older questions are still yours to answer, at no hurry.
 
-**1. Read and merge [pull request #123](https://github.com/fvermaut/timone/pull/123).**
+**1. Read and merge [pull request #126](https://github.com/fvermaut/timone/pull/126).**
 
-It is the fault you hit yesterday: you ran `timone takeover ivtrends#88`, it re-ran the whole checking step instead of dealing with what the ticket asked, refused again, and left the ticket offering you the very same command. Three faults sat behind that one experience, and all three are fixed:
+The checking step is not allowed to ask you anything. Between your agreement to a piece and its pull request, nothing stops on a person. On `ivtrends` [#89](https://github.com/fvermaut/ivtrends/issues/89) it did its whole job correctly — checked the four promises, found and fixed a real fault, wrote its record, wrote down everything it could not check — and then posted "two things stop it being signed off" and stopped the job. It sat waiting on you from 13:22 until this evening.
 
-- a building, checking or delivery step that hands its work to a person is now recorded as a fault to retry, instead of stopping the job to wait on you — nothing between your approval and the pull request may ask you anything;
-- `timone takeover` refuses to re-open one of those steps, and names a different command instead of itself;
-- a takeover that changes nothing twice running turns the job's wait into one no answer restarts, so the ticket stops offering the same command for ever.
+The two things it stopped for were nine standing checks the stale test data blocked, and two accessibility checks only a person can do. Neither is a fault in the work, and both belong at the top of the pull request.
 
-1632 tests pass, up from 1628. Every new test was watched failing first. It closes [#122](https://github.com/fvermaut/timone/issues/122), [#117](https://github.com/fvermaut/timone/issues/117), [#108](https://github.com/fvermaut/timone/issues/108) and [#120](https://github.com/fvermaut/timone/issues/120).
+The cause was three sentences in the checking step's own instructions, left behind when [ADR-0052](doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md) was applied to that file: one said a check that cannot run means the gate stops, one said "human routed", and the sign-off rule never said what to do when it is not met. Nothing said plainly that the step may never ask. `process.md` had it right all along; the file disagreed with it. It is filed as [#125](https://github.com/fvermaut/timone/issues/125).
 
-Two things it does not do. The two promises it rests on ([PRD-03](doc/specs/prd/prd-03-a-run-ends-at-its-pull-request.md) R1 and R5) still have no watched run behind them, and this work does not give them one. And the words a ticket shows when a build step now fails this way were written for the other kind of stop; nobody has re-read them for this one.
+**This is not what #123 fixed.** That one changed what the machine does *after* such a stop exists. It does not stop one being created, and it landed four hours after this one was.
 
-**What I need from you:** read #123 and merge it.
+No code changed — these are instructions an agent follows, so there is nothing to run and nothing to watch until the next checking step runs on a real piece. **Until it is merged, the machine is still running the old instructions and the same stop can happen again.**
 
-**2. Once #123 is merged, decide how [#121](https://github.com/fvermaut/timone/issues/121) gets built.**
+**What I need from you:** read #126 and merge it.
+
+**1b. Read and merge [`ivtrends` pull request #92](https://github.com/fvermaut/ivtrends/pull/92).** This is in the **ivtrends** repository, not this one. It is the work that was stuck — the narrower hedge grid, the target box and the mark. It was checked, one real fault was found and fixed during the check, and the pull request was opened by hand this evening to get it unstuck. The nine blocked checks and the two accessibility scripts are written at the top of it, and two reviews found six things, none applied. `ivtrends`'s own status file has the detail.
+
+**2. Decide how [#121](https://github.com/fvermaut/timone/issues/121) gets built.** It was waiting on #123, which is now merged.
 
 That is the deeper fault behind the same day: work was cut into a piece that built the maths and a piece that built the screen, the first piece was made answerable for a requirement about the screen it did not have, and the check stamped that requirement `failed` — which is untrue and is what later work reads. You decided what the rule should be, and it is written down as [ADR-0053](doc/adr/0053-a-piece-is-a-thin-path-through-every-layer-and-names-only-what-it-finishes.md).
 
@@ -42,7 +44,7 @@ Answer on the ticket, or:
 timone takeover scratch-app#47
 ```
 
-**Be aware that command is still the broken one until #123 is merged** — and the machine now running was started before the fix existed, so it is running the old code either way. On this ticket it should still work, because the job is stopped on a question the interview step can act on, which is the case the takeover handles correctly. If it comes back with the same refusal twice, answer on the ticket instead and tell me.
+That command is no longer the broken one: #123 is merged, and the machine now running was started from it. On this ticket it was always going to work anyway, because the job is stopped on a question the interview step can act on.
 
 **What I need from you:** answer the three questions, on the ticket or in a terminal.
 
@@ -51,6 +53,12 @@ timone takeover scratch-app#47
 You asked for a way to watch all projects from one web page, without a terminal. That idea is mapped on [#92](https://github.com/fvermaut/timone/issues/92): six questions, two already answered by research. The four left are yours, each answerable with a comment or a `timone takeover` command written on the ticket. No hurry, and nothing is blocked on them.
 
 **What I need from you:** nothing until you want the page.
+
+**5. Two of the shared accessibility checks are broken, and are now written down.**
+
+They run on every project. One gives up after 400 Tab presses on a page with 547 things to Tab to, and reports everything it never reached as unreachable. The other counts text hidden on purpose for screen readers as text that has been cut off — 630 pieces of it on the `ivtrends` board. Both report the same counts whether the page is sound or deliberately broken. `ivtrends` recorded this three times — 9, 10 and 11 September — each time saying it needed raising here, and nobody had raised it. It is now [#127](https://github.com/fvermaut/timone/issues/127). Projects are covering the same ground with checks written against their own requirements, so nothing is going unchecked.
+
+**What I need from you:** nothing.
 
 **Nothing else needs you.**
 
