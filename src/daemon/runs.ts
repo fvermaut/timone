@@ -264,6 +264,31 @@ const runSchema = z.strictObject({
    */
   consumedAnswerAt: z.string().optional(),
   /**
+   * The question the ask check has standing on this run's ticket, if any
+   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
+   *
+   * **It is here because a call to action is rewritten every cycle.** The
+   * check replaces an expensive message with a short question, and the loop
+   * comes back a minute later to reconcile the same ticket. Without a record
+   * of what was already asked, every pass would consult a model again, word
+   * the question differently, and edit the comment for ever — which is the
+   * notification storm `reconcileCtas` guards against, arriving by a new
+   * door.
+   *
+   * `for` is the composed message the question stood in front of, compared
+   * whole: when what the ticket needs changes, the question standing in front
+   * of the old need is not an answer to the new one. `askedAt` is what spends
+   * the one-question budget — a reply later than it means the check has had
+   * its turn.
+   */
+  askCheck: z
+    .strictObject({
+      for: z.string(),
+      question: z.string(),
+      askedAt: z.string(),
+    })
+    .optional(),
+  /**
    * The work branch this run owns, once it has one. Its presence is what
    * makes a parked run hold its project — see {@link RunStore}.
    */
@@ -580,6 +605,14 @@ export type Run = z.infer<typeof runSchema>;
  */
 export type RunWait = NonNullable<Run["wait"]>;
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
+
+/**
+ * What the ledger remembers about a question the ask check asked. The same
+ * shape as `AskCheckMemory` in `ask-check.ts`, derived from the schema here
+ * because the ledger is what persists it — the check itself holds no state and
+ * is handed this, never the other way round.
+ */
+export type AskCheckRecord = NonNullable<z.infer<typeof runSchema>["askCheck"]>;
 export type IntroductionRecord = z.infer<typeof introductionRecordSchema>;
 export type InitiativeRecord = z.infer<typeof initiativeRecordSchema>;
 export type DaemonRecord = z.infer<typeof daemonRecordSchema>;
@@ -1030,6 +1063,29 @@ export class RunStore {
     const run = this.mutable(id);
     run.pr = pr;
     run.updatedAt = this.now();
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Remember the question the ask check put on this run's ticket, so the next
+   * cycle reuses those words instead of consulting a model again
+   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
+   *
+   * **Writing this is not deciding anything.** The check itself is handed no
+   * store and cannot call this; the loop does, with what the check returned.
+   * The run's stage, wait and status are untouched here, which is the whole of
+   * PRD-04.R3 at this end of the seam.
+   */
+  rememberAskCheck(id: string, asked: Omit<AskCheckRecord, "askedAt">): Run {
+    const run = this.mutable(id);
+    // Stamped here rather than by the caller, like every other instant in the
+    // ledger. The one-question budget is decided by comparing this against
+    // when the person last spoke, and two clocks would make that comparison a
+    // question about which of them was right.
+    const askedAt = this.now();
+    run.askCheck = { ...asked, askedAt };
+    run.updatedAt = askedAt;
     this.persist();
     return { ...run };
   }

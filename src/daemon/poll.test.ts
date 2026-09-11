@@ -3972,6 +3972,177 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
     // comment by; the words under it are the fixed example above.
     expect(upserts[0]?.body).toBe(`${CTA_MARKER}\n\n${FAILED_CTA}`);
   });
+
+  // PRD-04: the ask check stands in front of every message that asks a person
+  // for something, and may only make that ask cheaper (ADR-0054). The fault
+  // it closes is ivtrends#90 — a reply of `aprrove` answered with a demand for
+  // a terminal session.
+  describe("and a cheaper question can stand in its place", () => {
+    const QUESTION = "You wrote `aprrove`. Did you mean approve? Reply `yes`.";
+
+    /** A model that always wants the short question asked. */
+    const wantsToAsk = async (): Promise<string> => `ASK: ${QUESTION}`;
+
+    /** What the human wrote, after the machine last spoke. */
+    function replied(body: string, at = "2026-08-03T14:00:00Z") {
+      return { author: "fvermaut", body, createdAt: at, fromTimone: false };
+    }
+
+    it("posts the question instead of sending them to a terminal", async () => {
+      const store = newStore();
+      failedRun(store);
+      const { adapter, calls } = reconcilingAdapter([ticket(7)]);
+      const { spawner } = fakeSpawner();
+
+      await pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        consultAskCheck: wantsToAsk,
+      });
+
+      const upserts = calls.filter((entry) => entry.call === "upsertComment");
+      expect(upserts).toHaveLength(1);
+      expect(upserts[0]?.body).toBe(`${CTA_MARKER}\n\n${QUESTION}`);
+      expect(upserts[0]?.body).not.toContain("timone retry");
+    });
+
+    // The hazard this whole design turns on. A call to action is rewritten
+    // every cycle, and the loop runs every minute: a check that consulted a
+    // model on each pass would word the question differently each time and
+    // edit the comment for ever, which is the notification storm the guard
+    // above exists to prevent, arriving by a new door.
+    it("says the same thing on the next cycle, and consults nothing to do it", async () => {
+      const store = newStore();
+      failedRun(store);
+      const { adapter, calls } = reconcilingAdapter([ticket(7)]);
+      const { spawner } = fakeSpawner();
+      let consulted = 0;
+      const deps = {
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        consultAskCheck: async (): Promise<string> => {
+          consulted += 1;
+          return `ASK: ${QUESTION} (asked ${consulted} times)`;
+        },
+      };
+
+      await pollOnce(deps);
+      const afterFirst = writesIn(calls).length;
+      await pollOnce(deps);
+
+      expect(consulted).toBe(1);
+      expect(writesIn(calls)).toHaveLength(afterFirst);
+    });
+
+    // PRD-04.R5. One question per ask: once they have answered, the message
+    // the machinery composed is posted as it stands.
+    it("stands aside once they have answered, and never asks twice", async () => {
+      const store = newStore();
+      failedRun(store);
+      const { adapter, calls, threadOf } = reconcilingAdapter([ticket(7)]);
+      const { spawner } = fakeSpawner();
+      const deps = {
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        consultAskCheck: wantsToAsk,
+      };
+
+      await pollOnce(deps);
+      threadOf(7).push(replied("aprrove again"));
+      await pollOnce(deps);
+
+      const upserts = calls.filter((entry) => entry.call === "upsertComment");
+      expect(upserts.at(-1)?.body).toBe(`${CTA_MARKER}\n\n${FAILED_CTA}`);
+    });
+
+    // PRD-04.R4. Whatever goes wrong, the person still gets the message the
+    // machinery wrote. An ask nobody receives is not a cheaper ask.
+    it.each([
+      ["the model cannot be reached", async () => undefined],
+      ["it answers in a shape nothing recognises", async () => "I'm not sure, maybe ask them?"],
+      ["it throws", async () => { throw new Error("the model is down"); }],
+    ])("posts the composed message when %s", async (_case, consultAskCheck) => {
+      const store = newStore();
+      failedRun(store);
+      const { adapter, calls } = reconcilingAdapter([ticket(7)]);
+      const { spawner } = fakeSpawner();
+
+      await pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        consultAskCheck: consultAskCheck as () => Promise<string | undefined>,
+      });
+
+      const upserts = calls.filter((entry) => entry.call === "upsertComment");
+      expect(upserts).toHaveLength(1);
+      expect(upserts[0]?.body).toBe(`${CTA_MARKER}\n\n${FAILED_CTA}`);
+    });
+
+    // The check obeys the rule it exists to enforce (ADR-0052): it may only
+    // ask a question the machinery can act on the answer to. A stop that no
+    // typed answer resolves is not one, until PRD-04.R7 makes it one.
+    it("says nothing on a stop that no answer resolves", async () => {
+      const store = newStore();
+      const { run } = store.register("scratch-app", 7);
+      store.activate(run.id, "session-1");
+      store.claimBranch(run.id, "timone/7-x");
+      store.park(run.id, {
+        kind: "escalation",
+        waitingOn: "a person",
+        stage: "requirements",
+      });
+      const { adapter, calls } = reconcilingAdapter([ticket(7)]);
+      const { spawner } = fakeSpawner();
+      let consulted = 0;
+
+      await pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        consultAskCheck: async (): Promise<string> => {
+          consulted += 1;
+          return `ASK: ${QUESTION}`;
+        },
+      });
+
+      expect(consulted).toBe(0);
+      const upserts = calls.filter((entry) => entry.call === "upsertComment");
+      expect(upserts.at(-1)?.body).toContain("timone takeover");
+    });
+
+    // PRD-04.R6. It speaks only where a person was already going to be asked,
+    // so it can never add a message that would not otherwise exist.
+    it("is not consulted about a ticket that is waiting on nobody", async () => {
+      const store = newStore();
+      const { run } = store.register("scratch-app", 7);
+      store.activate(run.id, "session-1");
+      const { adapter } = reconcilingAdapter([ticket(7)]);
+      const { spawner } = fakeSpawner();
+      let consulted = 0;
+
+      await pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        consultAskCheck: async (): Promise<string> => {
+          consulted += 1;
+          return `ASK: ${QUESTION}`;
+        },
+      });
+
+      expect(consulted).toBe(0);
+    });
+  });
   it("edits once when the state changes, and says nothing on the cycle after", async () => {
     const store = newStore();
     const listed = [ticket(7)];

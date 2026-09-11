@@ -13,6 +13,7 @@ import {
   type TicketingAdapter,
   type TicketingProject,
   type TicketThread,
+  type TicketComment,
 } from "../adapters/ticketing.js";
 import type {
   Preview,
@@ -25,6 +26,11 @@ import {
   readGateDecision,
   waitCursorFrom,
 } from "./gates.js";
+import {
+  askCheck,
+  planAskCheck,
+  type AskCheckDeps,
+} from "./ask-check.js";
 import { readHandback, type Handback } from "./outcomes.js";
 import { PROMPTED_STAGES } from "./prompts.js";
 import {
@@ -53,6 +59,7 @@ import {
 import {
   ctaComment,
   ctaFor,
+  type Cta,
   type InitiativeProgress,
   type TicketState,
 } from "./cta.js";
@@ -162,6 +169,19 @@ export interface PollDeps {
    * already resolved for the lock, so every real daemon has one.
    */
   statePath?: string;
+  /**
+   * How the ask check puts its question to a model
+   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
+   *
+   * **Optional, and absent means no check runs at all** — every message asking
+   * a person for something is posted exactly as it was composed, which is how
+   * the loop behaved before the check existed. That is the shape every
+   * existing test constructs, and it is also the correct behaviour for any
+   * deployment that cannot reach a model: the failure the check guards is a
+   * person being sent somewhere expensive, and posting the composed message is
+   * never worse than that.
+   */
+  consultAskCheck?: AskCheckDeps["consult"];
   /**
    * How often a cycle that is busy looks for a cancellation to carry out
    * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
@@ -1823,7 +1843,7 @@ async function reconcileCtas(
       // own thread — a handback note naming a step the machine does not know.
       // It is the same cached read the resume decision already made.
       const thread = await threads(ticket.number).ticket();
-      const body = ctaBody({
+      const cta = ctaFor({
         project: project.name,
         ticket: ticket.number,
         run: chunks.at(-1),
@@ -1836,9 +1856,16 @@ async function reconcileCtas(
           store.initiativeFor(project.name, ticket.number),
         ),
       });
-      if (saysTheSame(standingCta(thread), stampMachineComment(body))) continue;
+      const body = `${CTA_MARKER}\n\n${ctaComment(cta)}`;
+      const posted = await cheaperAsk(
+        { run: chunks.at(-1), cta, body, thread },
+        deps,
+        log,
+      );
 
-      await adapter.upsertComment(project, ticket.number, CTA_MARKER, body);
+      if (saysTheSame(standingCta(thread), stampMachineComment(posted))) continue;
+
+      await adapter.upsertComment(project, ticket.number, CTA_MARKER, posted);
       log(`cta    ${project.name}#${ticket.number}`);
     } catch (error) {
       const line = `${project.name}: could not say where #${ticket.number} stands: ${oneLine(error)}`;
@@ -1848,15 +1875,108 @@ async function reconcileCtas(
   }
 }
 
+
 /**
- * A ticket's standing statement of what it needs, under the marker that makes
- * it revisable. A renderer over a renderer: every word comes from
- * {@link ctaFor}, and the marker is prepended rather than baked into
- * {@link ctaComment} because the terminal's rendering of the same value must
- * not carry it.
+ * The message to post for this ticket: the one that was composed, or the
+ * shorter question the ask check put in its place
+ * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
+ *
+ * **Four things return the composed message before a model is ever asked**,
+ * and each is one of PRD-04's limits standing up:
+ *
+ * - The ticket is not waiting on a person (R6). The check speaks only where
+ *   somebody was already going to be interrupted, so it can never add a
+ *   message that would not otherwise exist.
+ * - Nothing was given to consult with. A deployment that cannot reach a model
+ *   behaves exactly as the loop did before this existed.
+ * - There is no run to remember a question on, so a question asked here would
+ *   be re-asked, in new words, every cycle.
+ * - The check has already had its turn on this ask (R5).
+ *
+ * **And the consult itself fails to the composed message too** (R4). Whatever
+ * goes wrong — unreachable, slow, an answer in a shape nothing recognises, a
+ * thrown error — the person still gets the message the machinery wrote. This
+ * check exists to make an ask cheaper, and an ask nobody receives is not
+ * cheaper, it is lost.
  */
-function ctaBody(state: TicketState): string {
-  return `${CTA_MARKER}\n\n${ctaComment(ctaFor(state))}`;
+async function cheaperAsk(
+  input: {
+    run: Run | undefined;
+    cta: Cta;
+    body: string;
+    thread: TicketThread;
+  },
+  deps: PollDeps,
+  log: (message: string) => void,
+): Promise<string> {
+  const { run, cta, body, thread } = input;
+  const consult = deps.consultAskCheck;
+
+  if (!asksAPerson(cta) || consult === undefined || run === undefined) return body;
+
+  // **The check obeys the rule it exists to enforce.** ADR-0052 ruled that a
+  // stage may only ask a question the machinery can act on the answer to, and
+  // that is exactly what an escalation park is not: `resolveWait` moves it on
+  // a handback the machine wrote, never on words a person typed (ADR-0033 D4).
+  // A question asked here would be answered, the answer would move nothing,
+  // and the next cycle would post the very command the question stood in front
+  // of — costing a reply and changing nothing, which is worse than the message
+  // it replaced. PRD-04.R7 is what makes this branch reachable, and until it
+  // exists the honest thing is silence.
+  if (run.wait?.kind === "escalation") return body;
+
+  const spoken = lastHumanWords(thread);
+  const plan = planAskCheck(body, run.askCheck, spoken?.createdAt);
+  if (plan.kind === "as-composed") return body;
+  if (plan.kind === "reuse") return `${CTA_MARKER}\n\n${plan.question}`;
+
+  let verdict;
+  try {
+    verdict = await askCheck(
+      { composed: ctaComment(cta), lastWords: spoken?.body },
+      { consult },
+    );
+  } catch (error) {
+    log(`ask    could not be run on #${run.ticket}: ${oneLine(error)}`);
+    return body;
+  }
+
+  if (verdict.kind === "as-composed") return body;
+
+  // Remembered *before* it is posted. The other order loses the record when
+  // the upsert fails, and a question posted with nothing remembering it is
+  // re-asked in different words on the next cycle, for ever.
+  deps.store.rememberAskCheck(run.id, { for: body, question: verdict.question });
+  log(`ask    ${run.project}#${run.ticket} — asked instead of sending them away`);
+
+  return `${CTA_MARKER}\n\n${verdict.question}`;
+}
+
+/**
+ * Whether this call to action asks a person for anything at all — which is
+ * the whole of where the ask check is allowed to speak (PRD-04.R6).
+ *
+ * **Both halves, because they are different asks and each can stand alone.**
+ * {@link Cta.waitingOnYou} is *they have to say something here*; {@link
+ * Cta.command} is *they have to go and run this*. A run that stopped badly
+ * carries the second and not the first, and it is precisely the expensive kind
+ * of ask this exists to make cheaper — so reading only `waitingOnYou` would
+ * leave the check silent at the stops that cost the most.
+ */
+function asksAPerson(cta: Cta): boolean {
+  return cta.waitingOnYou || cta.command !== undefined;
+}
+
+/**
+ * The newest thing a person said on this thread, or undefined when they have
+ * said nothing.
+ *
+ * Told by {@link TicketComment.fromTimone}, never by the author, for the
+ * reason `readGateDecision` gives: Timone posts through the human's account
+ * and the two logins are identical.
+ */
+function lastHumanWords(thread: TicketThread): TicketComment | undefined {
+  return [...thread.comments].reverse().find((comment) => !comment.fromTimone);
 }
 
 /**
