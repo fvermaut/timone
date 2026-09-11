@@ -1,6 +1,6 @@
 # PRD-04: One short question instead of a terminal session
 
-> **Status:** Draft
+> **Status:** Active
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-04-one-short-question-instead-of-a-terminal.criteria.md](prd-04-one-short-question-instead-of-a-terminal.criteria.md)
 > **Phases:** none yet
