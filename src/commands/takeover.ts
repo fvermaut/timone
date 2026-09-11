@@ -18,6 +18,7 @@ import {
   type Run,
 } from "../daemon/runs.js";
 import {
+  inBuild,
   waitFor,
   wayfinderStage,
   type PipelineStage,
@@ -259,6 +260,18 @@ export async function resolveTakeover(
     };
   }
 
+  // **A build stage is never a stage this command opens a conversation at**
+  // ([ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
+  // Nothing may park a run there any more, so reaching this line means a
+  // ledger written by older code, or a way in nobody has thought of yet.
+  // Opening the stage is what `ivtrends` #88 did: the checking step ran again
+  // from the start, could not act, and put the same question back — so the
+  // ticket offered this same command again, without limit. The refusal says
+  // what is wrong and gives a way out that is not this command again.
+  if (inBuild(run.stage)) {
+    return { kind: "nothing-to-do", message: parkedInBuild(target, run.stage) };
+  }
+
   return { kind: "converse", run, stage: run.stage };
 }
 
@@ -380,6 +393,25 @@ function cannotConverse(target: TakeoverTarget): string {
   );
 }
 
+/**
+ * What a ticket parked on a conversation inside the build is told.
+ *
+ * It names the fault rather than the stage's own question, because the
+ * question is not the human's to answer — it should never have been asked.
+ * And it ends on a command that is not this one: repeating this one is the
+ * loop the refusal exists to break.
+ */
+function parkedInBuild(target: TakeoverTarget, stage: PipelineStage): string {
+  return (
+    `${target.project} #${target.ticket} is stopped at the ${stage} step, ` +
+    "waiting on you. That should not happen: once you have approved the work, " +
+    "nothing before the pull request asks you anything. Running this command " +
+    "again will do the same thing. Throw this attempt away with " +
+    `\`timone cancel ${target.project}#${target.ticket}\` and the ticket will ` +
+    "say what to do next."
+  );
+}
+
 /** What a ticket behind another on its project is told. */
 function queuedMessage(target: TakeoverTarget): string {
   return (
@@ -497,6 +529,35 @@ export async function runTakeover(
   }
 }
 
+/**
+ * Say, on the run itself, that this conversation is the answer being read —
+ * so a conversation that changes nothing counts against ADR-0033's re-ask
+ * floor exactly as a written reply that changes nothing already does.
+ *
+ * **Why it is needed at all.** A takeover that ends without the session
+ * recording a finished step puts the run back on the wait it came from, cursor
+ * and all. Nothing distinguished that from a run nobody had ever spoken to, so
+ * the ticket went on offering `timone takeover` and each run of it cost a full
+ * session and moved nothing. `ivtrends` #88 is the sighting: same command,
+ * same stop, no bound. With the marker set, the second stuck takeover at the
+ * same stage trips `RE_ASK_LIMIT` in `applyPark` and the wait becomes an
+ * escalation — which `resolveTakeover` already opens differently.
+ *
+ * **Ordered before the claim, never after**: `repark` refuses a run that is
+ * not parked, and the claim makes it active. The same order the daemon's own
+ * resumption path uses in `poll.ts`.
+ *
+ * Silent when the run is not parked — a takeover that has just enrolled a
+ * ticket at a stage with no wait has nothing to have asked twice.
+ */
+export function markAnswerConsumed(store: RunStore, run: Run): void {
+  if (store.get(run.id)?.status !== "parked") return;
+  store.repark(run.id, {
+    ...waitOf(run),
+    consumedAnswerAt: run.wait?.opened ?? run.updatedAt,
+  });
+}
+
 /** A claimed run, or the exit code of a takeover that never started one. */
 type Claim =
   | { kind: "claimed"; run: Run; thread?: TicketThread; escalation?: true }
@@ -559,6 +620,7 @@ async function claimForTakeover(
         log(cannotConverse(target));
         return { kind: "no", code: 1 };
       }
+      markAnswerConsumed(store, resolution.run);
       return {
         kind: "claimed",
         run: store.claim(resolution.run.id, hold),

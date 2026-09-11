@@ -269,6 +269,43 @@ describe("resolveTakeover", () => {
     expect(resolution).toMatchObject({ kind: "converse", stage: "clarification" });
   });
 
+  it("refuses a ticket parked on a conversation inside the build, rather than re-opening the stage", async () => {
+    // `ivtrends` #88: the checking step parked on a question it should never
+    // have asked, and this command opened that stage again — which asked the
+    // same question, at the same price, and left the ticket offering the same
+    // command. Nothing parks a build stage like this any more (ADR-0052), so
+    // a ledger that still says so is old, and the answer is a way out that is
+    // not this command.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-message-box");
+    store.park(run.id, {
+      waitingOn: "your answer to the question in my last comment.",
+      kind: "conversation",
+      stage: "verification",
+      waitCursor: "2026-08-03T10:00:00Z",
+    });
+
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store, adapter: fakeAdapter().adapter },
+    );
+
+    expect(resolution.kind).toBe("nothing-to-do");
+    expect(resolution).toMatchObject({
+      message: expect.stringContaining("scratch-app #6"),
+    });
+    // The way out is another command, not this one again — the whole point of
+    // the refusal.
+    expect(resolution).toMatchObject({
+      message: expect.stringContaining("timone cancel scratch-app#6"),
+    });
+    expect((resolution as { message: string }).message).not.toContain(
+      "timone takeover",
+    );
+  });
+
   it("sends a ticket waiting on a gate back to the ticket, rather than opening an interview", async () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);
@@ -1015,10 +1052,6 @@ describe("a takeover that gives up leaves nothing behind", () => {
 });
 
 describe("a takeover that finishes the step it took over", () => {
-  /**
-   * `ivtrends` #58's shape: a run parked on a conversation at a **work**
-   * stage, because the building step stopped and asked for a person.
-   */
   /** A store and the path it is written to, which this command needs both of. */
   function ledger(): { store: RunStore; statePath: string } {
     const dir = mkdtempSync(join(tmpdir(), "timone-takeover-end-"));
@@ -1033,16 +1066,24 @@ describe("a takeover that finishes the step it took over", () => {
     };
   }
 
-  function handedBackAtExecution(store: RunStore): Run {
+  /**
+   * A run handed back to a person, parked on a conversation at a stage where
+   * that is still legal. It used to sit at `execution`, which is where
+   * `ivtrends` #58 was; a build stage cannot park this way any more
+   * (ADR-0052), and `resolveTakeover` now refuses one before `endTakeover` is
+   * ever reached. The stage is all that changed — what these tests check is
+   * the restoring itself, which does not care which stage it restores.
+   */
+  function handedBackAtRequirements(store: RunStore): Run {
     const { run } = store.register("scratch-app", 6);
     store.activate(run.id, "session-1");
     store.claimBranch(run.id, "timone/6-the-backfill");
     store.park(run.id, {
       waitingOn: "your answer to the question in my last comment.",
       kind: "conversation",
-      stage: "execution",
+      stage: "requirements",
       waitCursor: "2026-08-03T09:30:00Z",
-      resolvableBy: ["execution"],
+      resolvableBy: ["requirements"],
     });
     return store.get(run.id) as Run;
   }
@@ -1073,7 +1114,7 @@ describe("a takeover that finishes the step it took over", () => {
     // and all. The ticket went on asking a person for an answer they had
     // given three hours earlier by doing the work.
     const { store, statePath } = ledger();
-    handedBackAtExecution(store);
+    handedBackAtRequirements(store);
     const { launcher } = fakeLauncher();
     const said: string[] = [];
 
@@ -1095,13 +1136,13 @@ describe("a takeover that finishes the step it took over", () => {
     // its own stage on the next cycle.
     expect(after?.status).toBe("parked");
     expect(after?.wait?.kind).toBeUndefined();
-    expect(after?.stage).toBe("execution");
+    expect(after?.stage).toBe("requirements");
     expect(said.join("\n")).toContain("stops asking");
   });
 
   it("puts the run back exactly as it was when nothing was recorded", async () => {
     const { store, statePath } = ledger();
-    handedBackAtExecution(store);
+    handedBackAtRequirements(store);
     const { launcher } = fakeLauncher();
     const said: string[] = [];
 
@@ -1123,13 +1164,77 @@ describe("a takeover that finishes the step it took over", () => {
     expect(said.join("\n")).toContain("nothing was recorded");
   });
 
+  it("stops offering itself once two conversations running have moved nothing", async () => {
+    // `ivtrends` #88. The ticket said to run `timone takeover`, it was run, the
+    // stage could not act, and the run went back on exactly the wait it came
+    // from — so the ticket said to run the same command again, at the same
+    // price, without limit. A conversation is now recorded as an answer read,
+    // which is what feeds ADR-0033's floor.
+    const { store, statePath } = ledger();
+    handedBackAtRequirements(store);
+    const said: string[] = [];
+    const twice = async (): Promise<void> => {
+      await runTakeover("scratch-app#6", {
+        manifest,
+        store,
+        statePath,
+        adapter: trackerSaying([]),
+        launcher: fakeLauncher().launcher,
+        root: "/root",
+        ticker: () => ({ stop: () => {} }),
+        log: (message) => said.push(message),
+      });
+    };
+
+    await twice();
+    // Once is a stage that asked badly and may settle it next time, so the
+    // ticket may still offer the conversation.
+    expect(store.get("scratch-app#6/1")?.wait?.kind).toBe("conversation");
+
+    await twice();
+    // Twice running is proof the conversation does not reach what is blocking
+    // it. The wait becomes one no answer and no takeover resumes.
+    expect(store.get("scratch-app#6/1")?.wait?.kind).toBe("escalation");
+
+    // And that is what the ticket and the command now read: a third attempt
+    // opens the escalation, not the stage that has twice failed to move.
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store, adapter: trackerSaying([]) },
+    );
+    expect(resolution.kind).toBe("escalation");
+  });
+
+  it("leaves the floor alone when the session finished the step", async () => {
+    // The other side of the same marker: a takeover that moves the work must
+    // not spend a strike on the run it just advanced.
+    const { store, statePath } = ledger();
+    handedBackAtRequirements(store);
+
+    await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter: trackerSaying([finished]),
+      launcher: fakeLauncher().launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => {} }),
+      log: () => {},
+    });
+
+    const after = store.get("scratch-app#6/1");
+    expect(after?.wait?.kind).toBeUndefined();
+    expect(after?.consumedAnswerAt).toBeUndefined();
+    expect(after?.reAsksAfterAnswer ?? 0).toBe(0);
+  });
+
   it("says so, and writes nothing, when the run moved under it", async () => {
     // timone#63's silent early return. `releaseClaim` returned without a word
     // when the run was no longer active, so a person whose run had been
     // reclaimed, cancelled or taken by another terminal saw a conversation end
     // normally and had no way to know the ledger had gone the other way.
     const { store, statePath } = ledger();
-    handedBackAtExecution(store);
+    handedBackAtRequirements(store);
     const { launcher } = fakeLauncher({
       onRun: () => store.cancel("scratch-app#6/1", "you closed the ticket"),
     });
@@ -1157,7 +1262,7 @@ describe("a takeover that finishes the step it took over", () => {
     // or had not moved.
     for (const comments of [[finished], []]) {
       const { store, statePath } = ledger();
-      handedBackAtExecution(store);
+      handedBackAtRequirements(store);
       const { launcher } = fakeLauncher();
       const said: string[] = [];
 

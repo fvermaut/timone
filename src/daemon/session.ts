@@ -1602,6 +1602,12 @@ export class AgentSessionSpawner implements SessionSpawner {
    * comment is the report); every other combination is a wiring defect the
    * run fails loudly on, because a stage that says one thing and shows
    * another cannot be built upon in either direction.
+   *
+   * **Inside the build, a hand-back is not a stop to serve** (ADR-0052, and
+   * the escalation branch at the top of {@link afterStage} for the sibling
+   * marker). A hand-back and an escalation differ only in which sentence the
+   * session chose; neither may park a run between the approved list of pieces
+   * and the pull request, so both are filed as the fault they are.
    */
   private async afterWorkStage(
     run: Run,
@@ -1613,7 +1619,11 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { store, adapter } = this.options;
 
     if (outcome?.kind === "handed-to-human") {
-      handBack(store, run.id, stage, outcome, this.log.bind(this));
+      if (inBuild(stage)) {
+        failBuildEscalation(store, run.id, stage, outcome, this.log.bind(this));
+      } else {
+        handBack(store, run.id, stage, outcome, this.log.bind(this));
+      }
       return undefined;
     }
 
@@ -1688,6 +1698,9 @@ export class AgentSessionSpawner implements SessionSpawner {
    * exists, so the tracker is asked directly. The park's cursor sits at the
    * PR thread's newest comment: only what the human says after the park can
    * wake the run.
+   *
+   * Delivery is a build stage, so a hand-back here is filed rather than
+   * parked, for {@link afterWorkStage}'s reason (ADR-0052).
    */
   private async afterDelivery(
     run: Run,
@@ -1697,7 +1710,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { store, adapter } = this.options;
 
     if (outcome?.kind === "handed-to-human") {
-      handBack(store, run.id, "delivery", outcome, this.log.bind(this));
+      failBuildEscalation(store, run.id, "delivery", outcome, this.log.bind(this));
       return;
     }
 

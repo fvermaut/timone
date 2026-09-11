@@ -29,6 +29,7 @@ import {
   noStepWrites,
 } from "../adapters/ticketing.stubs.js";
 import type { BreakdownSource } from "./breakdown.js";
+import { BUILD_ESCALATION_PREFIX } from "./faults.js";
 import { gateCommentFor } from "./gate-comment.js";
 import {
   APPROVAL_RECORD_MODEL,
@@ -2538,9 +2539,14 @@ describe("the execution stage", () => {
     expect(run?.failure).toMatch(/outcome/i);
   });
 
-  it("waits, rather than failing, when the session handed the work to a person", async () => {
+  it("fails the run rather than parking it, when the session hands the work to a person", async () => {
+    // Under ADR-0052 a build stage may not stop on a person, and a hand-back
+    // is one of the two sentences a session can use to try. This used to
+    // assert a parked run waiting on a reply; the scenario is unchanged, only
+    // what it now means to the run — the same correction the escalation
+    // marker already had.
     const store = newStore();
-    const { adapter, comments, ticket: thread } = fakeAdapter();
+    const { adapter, comments } = fakeAdapter();
     const { runtime } = buildingRuntime(
       adapter,
       STAGE_HANDED_MARKER,
@@ -2558,23 +2564,13 @@ describe("the execution stage", () => {
     }).spawn(atExecution(store), project, { stage: "execution" });
 
     const run = store.get("scratch-app#7/1");
-    expect(run?.status).toBe("parked");
-    // A wait, not a failure (ADR-0031): the reply this session invited can now
-    // start something, and the cursor is the question's own instant so only
-    // what is said after it counts as an answer to it.
-    expect(run?.wait?.kind).toBe("conversation");
-    expect(run?.stage).toBe("execution");
-    // **And the wait says which stage can end it** (ADR-0049 D6). This is the
-    // caller the decision was written for: a handoff parks a *work* stage on
-    // a conversation wait, and until now it said `conversation` and nothing
-    // else — what could answer the question was worked out later, by a reader
-    // consulting a table this writer never looked at. `ivtrends` #58 sat
-    // finished and pushed while its ticket asked a person for an answer.
-    expect(run?.wait?.resolvableBy).toEqual(["execution"]);
-    // The handoff comment's own instant, read off the thread the session
-    // posted into — not a clock, which a second of skew would make swallow a
-    // reply typed immediately.
-    expect(run?.wait?.opened).toBe(thread.comments.at(-1)?.createdAt);
+    expect(run?.status).toBe("failed");
+    expect(run?.wait).toBeUndefined();
+    // The marker is what `ctaFor` reads to say a question was asked inside the
+    // build that had no business being asked, and the session's own words
+    // carry into the reason a human sees.
+    expect(run?.failure).toContain(BUILD_ESCALATION_PREFIX);
+    expect(run?.failure).toContain("failed twice");
     // The session's own comment is the report; the daemon adds nothing on top.
     // Asserted on the count, not just the last one: a `failedComment` saying
     // "something went wrong" underneath the session's own polite question is
@@ -2713,7 +2709,11 @@ describe("the verification stage", () => {
     expect(comments).toHaveLength(1);
   });
 
-  it("stops without advancing when the gate did not pass", async () => {
+  it("fails the run rather than parking it, when the gate did not pass", async () => {
+    // `ivtrends` #88, as a test. The checking step handed its question back
+    // and the run parked on a conversation nobody could end — the ticket then
+    // offered `timone takeover`, which re-opened this same stage, which asked
+    // the same question again. Under ADR-0052 the hand-back is the fault.
     const store = newStore();
     const { adapter, comments } = fakeAdapter();
     const { runtime } = checkingRuntime(
@@ -2734,9 +2734,12 @@ describe("the verification stage", () => {
     }).spawn(atVerification(store), project, { stage: "verification" });
 
     const run = store.get("scratch-app#7/1");
-    expect(run?.status).toBe("parked");
-    expect(run?.wait?.kind).toBe("conversation");
+    expect(run?.status).toBe("failed");
+    expect(run?.wait).toBeUndefined();
+    expect(run?.failure).toContain(BUILD_ESCALATION_PREFIX);
+    expect(run?.failure).toContain("both loops");
     // The session's own comment is R6's failure report; nothing is added.
+    expect(comments).toHaveLength(1);
     expect(comments.at(-1)?.body).toContain("both loops");
   });
 });
@@ -2847,7 +2850,9 @@ describe("the delivery stage", () => {
     expect(comments.at(-1)?.body).toMatch(/went wrong/i);
   });
 
-  it("stops quietly when the session handed the delivery to a person", async () => {
+  it("fails the run rather than parking it, when the session hands the delivery to a person", async () => {
+    // Delivery is inside the build too (ADR-0052), so the last stage before
+    // the pull request may no more stop on a person than the two before it.
     const store = newStore();
     const { adapter, comments } = adapterWithPr(undefined);
     const { runtime } = deliveringRuntime(
@@ -2866,9 +2871,11 @@ describe("the delivery stage", () => {
     }).spawn(atDelivery(store), project, { stage: "delivery" });
 
     const run = store.get("scratch-app#7/1");
-    expect(run?.status).toBe("parked");
-    expect(run?.wait?.kind).toBe("conversation");
-    expect(run?.stage).toBe("delivery");
+    expect(run?.status).toBe("failed");
+    expect(run?.wait).toBeUndefined();
+    expect(run?.failure).toContain(BUILD_ESCALATION_PREFIX);
+    expect(run?.failure).toContain("refused delivery");
+    expect(comments).toHaveLength(1);
     expect(comments.at(-1)?.body).toContain("refused delivery");
   });
 });
