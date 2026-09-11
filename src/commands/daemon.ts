@@ -1,3 +1,5 @@
+import type { AskCheckDeps } from "../daemon/ask-check.js";
+import { sdkConsult } from "../daemon/consult.js";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Command } from "commander";
@@ -359,6 +361,11 @@ export interface RunDaemonOptions {
   once: boolean;
   adapter: TicketingAdapter;
   spawner: SessionSpawner;
+  /**
+   * How the ask check puts its question to a model. The real one when absent
+   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
+   */
+  consultAskCheck?: AskCheckDeps["consult"];
   /** How previews are served. Absent means no project gets one. */
   previews?: PreviewAdapter;
   /**
@@ -451,6 +458,10 @@ async function poll(
       // waiting beside the ledger it is holding (ADR-0032).
       statePath: options.statePath,
       staleAfterMs: options.staleAfterMs,
+      // How a message about to be sent to a person gets a second, cheaper
+      // shape (ADR-0054). Injected so tests drive it without a model, and
+      // defaulted here so every real daemon has one.
+      consultAskCheck: options.consultAskCheck ?? sdkConsult(),
       // The cadence this loop actually keeps, so the unwitnessed-gap threshold
       // is derived from it rather than assumed (ADR-0020). A daemon told to
       // poll every five minutes must not read a four-minute gap as an absence.
