@@ -163,7 +163,10 @@ Where the clause asserts a **transformation of input** (trimming, normalization,
 
 **Only this stage writes the register's `Status` field** — once per pass, at pass conclusion, never mid-pass, in the same commit as the report and the probes: `docs: verify phase NN — <theme>` on the phase's branch. The report-flip coupling in one commit is the evidence link; the register line itself stays bare.
 
-- `draft` → `verified` on PASS.
+- `draft` → `verified` on PASS — **unless either bound of [ADR-0055](../../../doc/adr/0055-a-universal-claim-is-not-established-by-watching.md) applies, in which case it stays where it is and the report says why.**
+    - **A universal claim is not closed by watching.** When the criterion says a thing *never* or *always* happens, or holds *at no point* or *in all cases*, a `live` gate establishes the paths it walked and the claim is about every path. It reaches `verified` only with a check that **can fail by construction** — a test at a seam, a type admitting nothing else, a probe proved able to go red — named in a `- **Falsified-by:**` line on the block. Without one, report the PASS, leave the status, and say what would have to exist.
+    - **A status may not outrun the block's own notes.** If anything written on the criterion records that a clause was never triggered, never observed, or is still owed a sighting, it is not `verified` — a requirement's status is the weakest of its clauses' outcomes, and an unobserved clause is the weakest there is.
+    - Both are checked mechanically at session end and reported like any other fault. That check is a floor, not permission: it recognises a universal by the words used to write one, and a claim phrased around them is still yours to catch here.
 - `draft` → `failed` at loop exhaustion.
 - `verified` → `failed` on an unresolved REGRESSION, with a dated `✏` marker naming the report.
 - A requirement carrying an unperformed HUMAN-CHECK clause stays `draft`, with a dated partial-evidence marker linking the report and the script — a requirement's status is the weakest of its clauses' outcomes, and a script nobody has run is not evidence.

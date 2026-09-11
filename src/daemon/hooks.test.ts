@@ -19,6 +19,7 @@ import {
 import { RunStore } from "./runs.js";
 import {
   checkAll,
+  checkRegisterClaims,
   checkBranchPlacement,
   checkPathContainment,
   checkProvenance,
@@ -69,6 +70,7 @@ function quietRepo(repo: string): RepoEvidence {
 function cleanEvidence(): SessionEvidence {
   return {
     target: "scratch-app",
+    registers: [],
     workspace: quietRepo("timone"),
     projects: [
       {
@@ -480,6 +482,7 @@ describe("checkPathContainment — the harness rule's one exception", () => {
     const label = options.label ?? "timone";
     return {
       target: label,
+      registers: [],
       workspace: { ...quietRepo("timone"), originUrl: TIMONE },
       projects: [
         {
@@ -956,6 +959,7 @@ describe("checkAll — a Timone self-run that behaved", () => {
   function selfRun(): SessionEvidence {
     return {
       target: "timone",
+      registers: [],
       workspace: {
         repo: "timone",
         originUrl: TIMONE,
@@ -1039,6 +1043,54 @@ describe("checkAll — a Timone self-run that behaved", () => {
 
     expect(checkAll(evidence).map((violation) => violation.rule)).toContain(
       "branch-placement",
+    );
+  });
+});
+
+describe("a register that claims more than it established", () => {
+  // ADR-0055 D4: a repository check, not a session one. The register that
+  // cost ivtrends#90 was written four days before the session that paid for
+  // it, so a check scoped to a session's own edits would have been silent on
+  // both days.
+  function registered(source: string): SessionEvidence {
+    return {
+      ...cleanEvidence(),
+      registers: [
+        { repo: "scratch-app", path: "doc/specs/prd/prd-01-x.criteria.md", source },
+      ],
+    };
+  }
+
+  const UNIVERSAL = [
+    "## R1 — A requirement",
+    "",
+    "- **Priority:** MUST",
+    "- **Status:** verified",
+    "- **Verify-via:** live",
+    "- **Criteria:**",
+    "    - THEN at no point is the human told to run a command",
+    "",
+  ].join("\n");
+
+  it("is reported, naming the requirement and quoting the claim", () => {
+    const violations = checkRegisterClaims(registered(UNIVERSAL));
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0]?.rule).toBe("register-claims");
+    expect(violations[0]?.summary).toContain("scratch-app");
+    expect(violations[0]?.detail.join("\n")).toContain("R1");
+    expect(violations[0]?.detail.join("\n")).toContain("at no point");
+  });
+
+  it("says nothing about a register that claims only what it showed", () => {
+    expect(
+      checkRegisterClaims(registered(UNIVERSAL.replace("verified", "draft"))),
+    ).toEqual([]);
+  });
+
+  it("is one of the checks the stop actually runs", () => {
+    expect(checkAll(registered(UNIVERSAL)).map((violation) => violation.rule)).toContain(
+      "register-claims",
     );
   });
 });

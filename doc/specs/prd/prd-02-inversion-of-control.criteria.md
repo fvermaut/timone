@@ -232,8 +232,10 @@
 
 ## R13 — Harness-owned routing
 
+> ✏ 2026-09-12 ([ADR-0055](../../adr/0055-a-universal-claim-is-not-established-by-watching.md) D1, via [timone#129](https://github.com/fvermaut/timone/issues/129)): **back to `draft`.** "At no point does any surface require the human to name a stage or skill" is the same shape of claim as PRD-03.R5, which ivtrends#90 falsified after a live gate had passed it. Nothing about what this requirement asks for has changed, and no evidence recorded below is withdrawn.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** draft
     - ✏ 2026-08-19 **still untouched, and the round trip is worth one line.** The session that clears a stop names the step the work carries on at — in the plain words `timone status` already uses, never an internal name — and the human names nothing at any point. Clause 2's contract survives the one place where a session, rather than the harness, decides where work resumes.
     - ✏ 2026-08-18 **untouched by [ADR-0033](../../adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md), and the alignment is recorded rather than left to be rediscovered.** The session opened on a run the machinery cannot take further is bound to no stage: it is handed the evidence and the authority, and invokes whichever stage skill fits. That **is** clause 2's contract — a session working out which stage a thing needs, with the human naming none — applied to a stuck run instead of to a raw request. Nothing here changes, and the same known limit applies: an interactive session leaves no artifact, so what such a session does is checkable only through the record it is told to commit.
     - ✏ 2026-08-05 **second clause verified by fvermaut**, closing the requirement at [phase 12](../../plans/phases/phase-12.md)'s 12g gate. In a fresh interactive session at the timone root he stated a raw request about a managed project, naming no stage, skill or process concept; the session routed it through triage first and then invoked the stage that classification pointed at, by itself — both halves of the clause, as he confirmed when asked which he had actually watched.

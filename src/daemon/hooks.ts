@@ -10,6 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
+import { registerFaults } from "./register.js";
 import type { RunStore } from "./runs.js";
 
 const execFileAsync = promisify(execFile);
@@ -89,6 +90,15 @@ export interface RepoEvidence {
  * `collectEvidence`); deciding on it is a pure function, so every rule can
  * be shown failing on a fabricated violation.
  */
+/** One criteria register, read whole. */
+export interface RegisterFile {
+  /** The repository it belongs to, for the report's first word. */
+  repo: string;
+  /** Its path, as a reader would open it. */
+  path: string;
+  source: string;
+}
+
 export interface SessionEvidence {
   /**
    * The project the session was supposed to be working on, when one is known.
@@ -108,6 +118,17 @@ export interface SessionEvidence {
   /** The timone repo, where every session runs (ADR-0007). */
   workspace: RepoEvidence;
   /**
+   * Every criteria register in reach, so the claims they make can be judged
+   * ([ADR-0055](../../doc/adr/0055-a-universal-claim-is-not-established-by-watching.md) D4).
+   *
+   * **Not scoped to what this session touched**, unlike every other piece of
+   * evidence here. A register claiming more than it established is a standing
+   * fault, not an event: the one that cost `ivtrends` #90 was written four
+   * days before the session that paid for it, and a check that only looked at
+   * the session's own edits would have said nothing on either day.
+   */
+  registers: RegisterFile[];
+  /**
    * The managed projects' checkouts. One for a daemon session; every declared
    * project for an interactive one, because nobody said which it would touch.
    */
@@ -119,7 +140,8 @@ export type GuardrailRule =
   | "status-placement"
   | "branch-placement"
   | "path-containment"
-  | "provenance";
+  | "provenance"
+  | "register-claims";
 
 /**
  * The prefix every run's work branch carries (`workBranch` in `prompts.ts`).
@@ -504,6 +526,35 @@ export function checkProvenance(evidence: SessionEvidence): Violation[] {
   ];
 }
 
+/**
+ * **A register claiming more than it established.** ADR-0052's rules reached
+ * `process.md` and three skills and stopped short of the code, and PRD-03's
+ * register — named in that ADR as what would verify the rollout — reported it
+ * complete. This is the check that would have said otherwise
+ * ([ADR-0055](../../doc/adr/0055-a-universal-claim-is-not-established-by-watching.md)).
+ */
+export function checkRegisterClaims(evidence: SessionEvidence): Violation[] {
+  const violations: Violation[] = [];
+
+  for (const register of evidence.registers) {
+    const faults = registerFaults(register.source);
+    if (faults.length === 0) continue;
+
+    violations.push({
+      rule: "register-claims",
+      summary: `${register.repo}: ${register.path} marks ${faults.length} requirement(s) verified on more than it established`,
+      detail: [
+        "A requirement is verified when something stands behind it. These say more than that:",
+        ...faults.map((fault) => `- ${fault.detail} It says: \`${fault.quoted}\`.`),
+        "",
+        "Either put the status back to `draft`, or name what would go red if it stopped holding in a `- **Falsified-by:**` line.",
+      ],
+    });
+  }
+
+  return violations;
+}
+
 /** Every check, in the order their comments should read. */
 export function checkAll(evidence: SessionEvidence): Violation[] {
   return [
@@ -512,6 +563,7 @@ export function checkAll(evidence: SessionEvidence): Violation[] {
     ...checkUnpushed(evidence),
     ...checkStatusPlacement(evidence),
     ...checkProvenance(evidence),
+    ...checkRegisterClaims(evidence),
   ];
 }
 
@@ -938,6 +990,40 @@ function madeElsewhere(commit: CommitEvidence, sessionId: string): boolean {
 }
 
 /**
+ * Every criteria register in one checkout, read whole.
+ *
+ * **A missing directory is not a finding.** A project with no requirements
+ * written yet is the ordinary state of a young one, and a checkout that is not
+ * there at all is `workspace sync`'s business, not this check's.
+ */
+function readRegisters(dir: string, repo: string): RegisterFile[] {
+  const specs = join(dir, "doc", "specs", "prd");
+  let names: string[];
+  try {
+    names = readdirSync(specs);
+  } catch {
+    return [];
+  }
+
+  const registers: RegisterFile[] = [];
+  for (const name of names) {
+    if (!name.endsWith(".criteria.md")) continue;
+    try {
+      registers.push({
+        repo,
+        path: join("doc", "specs", "prd", name),
+        source: readFileSync(join(specs, name), "utf8"),
+      });
+    } catch {
+      // A register that cannot be read says nothing about its claims, and one
+      // unreadable file must not cost the report every other register.
+    }
+  }
+
+  return registers;
+}
+
+/**
  * Gather the evidence for one finished session.
  *
  * `target` is passed only when a run owns the session. Every project the
@@ -965,6 +1051,12 @@ export async function collectEvidence(
   return {
     ...(session.target === undefined ? {} : { target: session.target }),
     workspace: await collectRepo(root, "timone", baseline.workspace, session.sessionId),
+    registers: [
+      ...readRegisters(root, "timone"),
+      ...[...baseline.projects.keys()].flatMap((name) =>
+        readRegisters(join(root, "projects", name), name),
+      ),
+    ],
     projects,
   };
 }

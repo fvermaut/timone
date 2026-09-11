@@ -10,8 +10,10 @@
 >
 > ✏ 2026-09-07, decided by fvermaut ([timone#111](https://github.com/fvermaut/timone/issues/111)): clause 3 is **reworded to the stop-and-ask that exists**, rather than changing the code to re-enter automatically. The reworded clause matches what the gate observed, so it passes. R1 moves to `verified` on clauses 1 and 3; clause 2's own-tests-red case is the one thin spot, resting on the unit test and the partial sighting above.
 
+> ✏ 2026-09-12 ([ADR-0055](../../adr/0055-a-universal-claim-is-not-established-by-watching.md) D2, via [timone#129](https://github.com/fvermaut/timone/issues/129)): **back to `draft`.** Nothing about this requirement changed and nothing observed on 2026-09-07 is withdrawn. What changed is that a status may no longer outrun its own notes, and the note directly above says clause 2's own-tests-red case "remains owed a direct sighting". A requirement carrying a clause nobody has seen hold is not established, and reading `verified` said it was.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** draft
 - **Verify-via:** live
 - **Last live gate:** [phase-35-live-gate.md](../../plans/phases/reports/phase-35-live-gate.md) — 2026-09-07, clause 1 PASS, clause 3 PASS (reworded to observed behaviour), clause 2 mechanism unit-tested + delivery seen opening on a red suite, own-tests-red case owed a direct sighting
 - **Depends-on:** `src/daemon/, .claude/skills/timone-execute/, .claude/skills/timone-verify/, .claude/skills/timone-deliver/`
@@ -75,8 +77,10 @@
 
 ## R5 — No question without the power to act on its answer
 
+> ✏ 2026-09-12 ([ADR-0055](../../adr/0055-a-universal-claim-is-not-established-by-watching.md) D1, via [timone#129](https://github.com/fvermaut/timone/issues/129)): **back to `draft`, and this one was falsified in the field.** On [ivtrends#90](https://github.com/fvermaut/ivtrends/issues/90) a typed reply of `aprrove` was redirected to a command, which is the exact FAIL this criterion's hint names. The live gate below was not careless — it watched many rounds and every one of them held. The claim is a universal, and watching establishes the paths it walks: nobody typed a misspelling. [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md) built the repair, and this stays `draft` until a check that can go red stands behind it, per D1.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** draft
 - **Verify-via:** live
 - **Last live gate:** [phase-35-live-gate.md](../../plans/phases/reports/phase-35-live-gate.md) — 2026-09-07, PASS (watched across many rounds on scratch-app#50 and #51: every typed reply moved the work; two granted unusual answers — a scope trim and a removed behaviour — and both were acted on; no reply was redirected to a command)
 - **Depends-on:** `src/daemon/, .claude/skills/`
