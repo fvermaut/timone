@@ -2,29 +2,27 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-11.
+**Last updated:** 2026-09-12.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** Two pull requests are waiting for you — one here, one on `ivtrends`. Pull request #123 is merged. The checking step stopped and asked you a question on `ivtrends` this afternoon, which it is not allowed to do; that is fixed here and the `ivtrends` work is open for review. Two older questions are still yours to answer, at no hurry.
+> **Read this first.** One pull request is waiting for you here. The checking step stopped and asked you a question on `ivtrends` again today — twice on the same ticket — and the machine's own answer to that was to stop the job. That is what the pull request changes. Pull requests #126 and `ivtrends` #92 are both merged. Two older questions are still yours to answer, at no hurry.
 
-**1. Read and merge [pull request #126](https://github.com/fvermaut/timone/pull/126).**
+**1. Read and merge [pull request #136](https://github.com/fvermaut/timone/pull/136), then tell me to restart the machine.**
 
-The checking step is not allowed to ask you anything. Between your agreement to a piece and its pull request, nothing stops on a person. On `ivtrends` [#89](https://github.com/fvermaut/ivtrends/issues/89) it did its whole job correctly — checked the four promises, found and fixed a real fault, wrote its record, wrote down everything it could not check — and then posted "two things stop it being signed off" and stopped the job. It sat waiting on you from 13:22 until this evening.
+Yesterday's fix changed the checking step's instructions so it would stop asking you things. Today it asked anyway, on [`ivtrends` #93](https://github.com/fvermaut/ivtrends/issues/93) — and when you restarted the job, it asked the same question a second time.
 
-The two things it stopped for were nine standing checks the stale test data blocked, and two accessibility checks only a person can do. Neither is a fault in the work, and both belong at the top of the pull request.
+The instructions were never the whole problem. When a step inside the build asks you something, the machine notices, and what it does about it is **stop the job**. Stopping the job is still stopping: the work sits one step short of its pull request, the ticket asks you for a command, and the command re-runs the step that already did its job. Four of your interventions on one ticket, and none of them was a decision anybody needed.
 
-The cause was three sentences in the checking step's own instructions, left behind when [ADR-0052](doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md) was applied to that file: one said a check that cannot run means the gate stops, one said "human routed", and the sign-off rule never said what to do when it is not met. Nothing said plainly that the step may never ask. `process.md` had it right all along; the file disagreed with it. It is filed as [#125](https://github.com/fvermaut/timone/issues/125).
+So the rule moves out of the instructions and into the machine. A question asked inside the build is now read as the step having finished: the words are kept, the job carries on, and the last step puts them in the pull request. Nothing between your agreement and the pull request waits for you any more, whatever a step's instructions say or forget to say.
 
-**This is not what #123 fixed.** That one changed what the machine does *after* such a stop exists. It does not stop one being created, and it landed four hours after this one was.
+One job still stops: a step that asks a question **and** leaves nothing behind. The next step would have nothing to work on.
 
-No code changed — these are instructions an agent follows, so there is nothing to run and nothing to watch until the next checking step runs on a real piece. **Until it is merged, the machine is still running the old instructions and the same stop can happen again.**
+It is filed as [#135](https://github.com/fvermaut/timone/issues/135). 1674 automatic tests pass.
 
-**What I need from you:** read #126 and merge it.
-
-**1b. Read and merge [`ivtrends` pull request #92](https://github.com/fvermaut/ivtrends/pull/92).** This is in the **ivtrends** repository, not this one. It is the work that was stuck — the narrower hedge grid, the target box and the mark. It was checked, one real fault was found and fixed during the check, and the pull request was opened by hand this evening to get it unstuck. The nine blocked checks and the two accessibility scripts are written at the top of it, and two reviews found six things, none applied. `ivtrends`'s own status file has the detail.
+**What I need from you:** merge #136 and say the word — I will restart the machine and start `ivtrends` #93 again, which will go straight to opening its pull request instead of asking you a third time.
 
 **2. Decide how [#121](https://github.com/fvermaut/timone/issues/121) gets built.** It was waiting on #123, which is now merged.
 
@@ -109,6 +107,10 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**12 September — the checking step asked again, and the machine's own way of handling that turned out to be another stop.** On `ivtrends` [#93](https://github.com/fvermaut/ivtrends/issues/93) the checking step finished its whole job — the column now sits at the end of the board, checked twice by two readers who had not watched it being built, 22 checks pass and nothing broke — and then asked you to decide something about the practice data. Yesterday's fix was supposed to stop exactly that, and the instructions it corrected were in force. What nobody had changed is what the machine does *when* a step asks: it stops the job and asks you for a command, and the command re-runs the step, which asks again. You saw it twice on the same ticket.
+
+A terminal session moved the rule out of the instructions and into the machine, filed the fault as [#135](https://github.com/fvermaut/timone/issues/135), and opened [pull request #136](https://github.com/fvermaut/timone/pull/136). The decision is written down as [ADR-0056](doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md). Item 1 at the top has what to do, and `ivtrends` #93 is waiting on it.
 
 **11 September — the takeover fault is fixed, and Timone stopped working on itself for now.**
 
