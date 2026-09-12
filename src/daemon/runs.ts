@@ -10,7 +10,7 @@ import {
   type Holder,
   type Liveness,
 } from "./holder.js";
-import { isBuildEscalation } from "./faults.js";
+import { BUILD_ESCALATION_PREFIX, isBuildEscalation } from "./faults.js";
 import {
   PIPELINE_STAGES,
   inBuild,
@@ -1283,7 +1283,12 @@ export class RunStore {
       isBuildEscalation(run.failure) &&
       run.stage !== undefined &&
       inBuild(run.stage)
-        ? { stage: run.stage, words: run.failure }
+        ? {
+            stage: run.stage,
+            // Without the prefix: it is the daemon's own bookkeeping, and
+            // what rides to the pull request is the stage's words.
+            words: run.failure.slice(BUILD_ESCALATION_PREFIX.length),
+          }
         : undefined;
 
     return this.transition(id, "picked-up", (rearmed) => {

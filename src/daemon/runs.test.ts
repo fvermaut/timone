@@ -1088,7 +1088,9 @@ describe("retry", () => {
     expect(rearmed.stage).toBe("delivery");
     expect(rearmed.carried).toHaveLength(1);
     expect(rearmed.carried?.[0].stage).toBe("verification");
-    expect(rearmed.carried?.[0].words).toContain("eleven checks");
+    expect(rearmed.carried?.[0].words).toBe(
+      "eleven checks could not be run at all",
+    );
   });
 
   it("resumes at the stage it failed when the failure was an ordinary one", () => {
