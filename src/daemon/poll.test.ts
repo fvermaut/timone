@@ -247,15 +247,24 @@ function fakeAdapter(
 }
 
 /** A spawner that records what it was asked to run and does nothing else. */
-function fakeSpawner(): { spawner: SessionSpawner; spawned: Run[] } {
+function fakeSpawner(): {
+  spawner: SessionSpawner;
+  spawned: Run[];
+  unstuck: { run: Run; words: string }[];
+} {
   const spawned: Run[] = [];
+  const unstuck: { run: Run; words: string }[] = [];
   return {
     spawner: {
       async spawn(run) {
         spawned.push(run);
       },
+      async unstick(run, _project, words) {
+        unstuck.push({ run, words });
+      },
     },
     spawned,
+    unstuck,
   };
 }
 
@@ -4086,37 +4095,106 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
       expect(upserts[0]?.body).toBe(`${CTA_MARKER}\n\n${FAILED_CTA}`);
     });
 
-    // The check obeys the rule it exists to enforce (ADR-0052): it may only
-    // ask a question the machinery can act on the answer to. A stop that no
-    // typed answer resolves is not one, until PRD-04.R7 makes it one.
-    it("says nothing on a stop that no answer resolves", async () => {
+    // ✏ Inverted by PRD-04.R7. This asserted silence on a stop no typed
+    // answer resolves, because a question there would have been answered into
+    // nothing. The answer now has somewhere to go, so the check speaks where
+    // the most expensive asks are.
+    it("speaks on a stop that used to cost a terminal session", async () => {
       const store = newStore();
-      const { run } = store.register("scratch-app", 7);
-      store.activate(run.id, "session-1");
-      store.claimBranch(run.id, "timone/7-x");
-      store.park(run.id, {
-        kind: "escalation",
-        waitingOn: "a person",
-        stage: "requirements",
-      });
+      stuck(store);
       const { adapter, calls } = reconcilingAdapter([ticket(7)]);
       const { spawner } = fakeSpawner();
-      let consulted = 0;
 
       await pollOnce({
         manifest: manifestWith("scratch-app"),
         store,
         adapter,
         spawner,
-        consultAskCheck: async (): Promise<string> => {
-          consulted += 1;
-          return `ASK: ${QUESTION}`;
-        },
+        consultAskCheck: wantsToAsk,
       });
 
-      expect(consulted).toBe(0);
       const upserts = calls.filter((entry) => entry.call === "upsertComment");
-      expect(upserts.at(-1)?.body).toContain("timone takeover");
+      expect(upserts.at(-1)?.body).toBe(`${CTA_MARKER}\n\n${QUESTION}`);
+      expect(upserts.at(-1)?.body).not.toContain("timone takeover");
+    });
+
+    /** A run of #7 stopped on a stop no typed answer resolves. */
+    function stuck(store: RunStore): Run {
+      const { run } = store.register("scratch-app", 7);
+      store.activate(run.id, "session-1");
+      store.claimBranch(run.id, "timone/7-x");
+      return store.park(run.id, {
+        kind: "escalation",
+        waitingOn: "a person",
+        stage: "requirements",
+      });
+    }
+
+    // PRD-04.R7. Answering the machine's own question starts the session a
+    // terminal command would have started — and nothing else on the ticket
+    // does, which is what keeps ADR-0033 D4 intact.
+    describe("and answering it moves a stop that words used to not move", () => {
+      it("starts the session on what they wrote, with no command to run", async () => {
+        const store = newStore();
+        const run = stuck(store);
+        const { adapter, threadOf } = reconcilingAdapter([ticket(7)]);
+        const { spawner, unstuck } = fakeSpawner();
+        const deps = {
+          manifest: manifestWith("scratch-app"),
+          store,
+          adapter,
+          spawner,
+          consultAskCheck: wantsToAsk,
+        };
+
+        await pollOnce(deps);
+        threadOf(7).push(replied("reword the promise"));
+        await pollOnce(deps);
+
+        expect(unstuck).toHaveLength(1);
+        expect(unstuck[0]?.run.id).toBe(run.id);
+        expect(unstuck[0]?.words).toBe("reword the promise");
+      });
+
+      it("starts nothing when the machine asked nothing", async () => {
+        const store = newStore();
+        stuck(store);
+        const { adapter, threadOf } = reconcilingAdapter([ticket(7)]);
+        const { spawner, unstuck } = fakeSpawner();
+        const deps = {
+          manifest: manifestWith("scratch-app"),
+          store,
+          adapter,
+          spawner,
+        };
+
+        await pollOnce(deps);
+        threadOf(7).push(replied("please just do it"));
+        await pollOnce(deps);
+
+        expect(unstuck).toEqual([]);
+      });
+
+      it("starts one session, not one a cycle", async () => {
+        const store = newStore();
+        stuck(store);
+        const { adapter, threadOf } = reconcilingAdapter([ticket(7)]);
+        const { spawner, unstuck } = fakeSpawner();
+        const deps = {
+          manifest: manifestWith("scratch-app"),
+          store,
+          adapter,
+          spawner,
+          consultAskCheck: wantsToAsk,
+        };
+
+        await pollOnce(deps);
+        threadOf(7).push(replied("reword the promise"));
+        await pollOnce(deps);
+        await pollOnce(deps);
+
+        expect(unstuck).toHaveLength(1);
+      });
     });
 
     // PRD-04.R6. It speaks only where a person was already going to be asked,

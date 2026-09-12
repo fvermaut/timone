@@ -286,6 +286,17 @@ const runSchema = z.strictObject({
       for: z.string(),
       question: z.string(),
       askedAt: z.string(),
+      /**
+       * Set once the answer to this question has been acted on — today, by
+       * the session it started (ADR-0054 D5).
+       *
+       * **The record is marked rather than cleared**, and the difference is a
+       * bug this had: clearing it let the check ask the same question again on
+       * the next cycle, and whether that re-asked question then re-triggered
+       * on the *old* answer came down to which instant happened to be later.
+       * A spent question that stays on the run cannot do either.
+       */
+      actedOn: z.boolean().optional(),
     })
     .optional(),
   /**
@@ -1077,6 +1088,28 @@ export class RunStore {
    * The run's stage, wait and status are untouched here, which is the whole of
    * PRD-04.R3 at this end of the seam.
    */
+  /**
+   * Mark the ask check's standing question as acted on
+   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)
+   * D5).
+   *
+   * **Before the session it starts, not after**, for the reason the answer
+   * cursor is written before a spawn: the next cycle must not find the same
+   * answer outstanding and start a second session on it.
+   *
+   * **Marked, never cleared.** A cleared record let the check ask again on the
+   * next cycle, and whether that new question then re-triggered on the old
+   * answer depended on which instant happened to be later — which is not a
+   * thing correctness should rest on.
+   */
+  spendAskCheck(id: string): Run {
+    const run = this.mutable(id);
+    if (run.askCheck !== undefined) run.askCheck = { ...run.askCheck, actedOn: true };
+    run.updatedAt = this.now();
+    this.persist();
+    return { ...run };
+  }
+
   rememberAskCheck(id: string, asked: Omit<AskCheckRecord, "askedAt">): Run {
     const run = this.mutable(id);
     // Stamped here rather than by the caller, like every other instant in the

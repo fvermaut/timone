@@ -65,6 +65,7 @@ import {
   conversationSubject,
   stagePrompt,
   workBranch,
+  escalationPrompt,
 } from "./prompts.js";
 import {
   DEFAULT_PROGRESS_INTERVAL_SECONDS,
@@ -1107,6 +1108,17 @@ function isPrompted(
  * `timone.yaml` before anything is spawned (R2), and the session's working
  * directory is the timone root, never the project checkout (ADR-0007).
  */
+/**
+ * What a session is doing, for the log line it appears on.
+ *
+ * Widened past {@link PipelineStage} because not every session the daemon
+ * starts is a stage: an unsticking session is bound to none by design
+ * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)
+ * D5). The label reaches nothing but two log lines, which is why widening it
+ * is safe — every decision downstream reads the run, not this.
+ */
+export type SessionLabel = PipelineStage | "unsticking";
+
 export class AgentSessionSpawner implements SessionSpawner {
   private readonly log: (message: string) => void;
   private readonly channel: ConversationChannel;
@@ -1169,6 +1181,87 @@ export class AgentSessionSpawner implements SessionSpawner {
   /** Whether a human has cancelled this run since it was last looked at. */
   private cancelled(runId: string): boolean {
     return this.options.store.get(runId)?.status === "cancelled";
+  }
+
+  /**
+   * Start the session a `timone takeover` would have started, on the human's
+   * written answer
+   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)
+   * D5).
+   *
+   * **Bound to no stage**, which is ADR-0033 D5 unchanged: it gets the ticket
+   * thread, the run's ledger entry and the stuck stage's reason as input it
+   * may overrule, and it owes a committed record of what it did. The only
+   * thing this changes is what starts it. ADR-0033 D6 had a person type a
+   * command; ADR-0052 had already ruled that a typed reply must move the work,
+   * and those two could not both be true.
+   *
+   * **It is not a general "answer a stuck ticket" path.** The caller starts it
+   * only for an answer to a question the machine itself framed, so the session
+   * knows what the words are an answer to. Any other comment still moves
+   * nothing, and ADR-0033 D4's reason — the stuck stage cannot use them —
+   * stands untouched.
+   */
+  async unstick(
+    run: Run,
+    project: TicketingProject,
+    words: string,
+  ): Promise<void> {
+    const { adapter, root } = this.options;
+
+    // The same pin and the same refusal as an ordinary spawn: a session
+    // started on a half-edited checkout is the fault ADR-0041 D2 closes,
+    // whoever it is unsticking.
+    const checkout = await this.timoneCheckout();
+    if (checkout.uncommitted.length > 0) {
+      throw new SpawnRefusal(uncommittedRefusal(checkout.uncommitted), true);
+    }
+
+    const thread = await adapter.getTicket(project, run.ticket);
+    const prompt = [
+      escalationPrompt(project.name, run, thread),
+      "",
+      "**They have answered the question that was put to them on the ticket.**",
+      "This is what they wrote, in their words:",
+      "",
+      "--- what they wrote ---",
+      words,
+      "--- end of what they wrote ---",
+      "",
+      "Nobody is watching this run. You were started by their answer rather",
+      "than by a person opening a terminal, so there is no one here to ask a",
+      "follow-up of: act on what they wrote, and where it does not settle",
+      "something, say so on the ticket and leave the command standing.",
+    ].join("\n");
+
+    const { outcome } = await this.runSession(
+      run,
+      "unsticking",
+      sessionRequest({
+        cwd: root,
+        prompt,
+        // The heaviest setting the pipeline has, deliberately. This session is
+        // bound by nothing but the model in it — ADR-0033 D5 accepted that
+        // cost when a person was in the room, and starting it from a written
+        // answer takes the person out.
+        model: "claude-opus-5",
+        effort: "high",
+        ...workspaceFor(checkout.pin, project, run.branch),
+      }),
+    );
+
+    if (!outcome.ok) {
+      this.log(`failed ${run.id} (unsticking) — ${outcome.error}`);
+      return;
+    }
+
+    // Nothing is written to the ledger here on purpose. What ends an
+    // escalation is the handback the session commits to the ticket, which the
+    // next cycle reads exactly as it reads one a person's session wrote
+    // ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)).
+    // A session that wrote none leaves the run stopped, which is correct: it
+    // could not clear the stop either.
+    this.log(`unstuck ${run.id} — session ended, waiting for its handback`);
   }
 
   async spawn(
@@ -1469,7 +1562,7 @@ export class AgentSessionSpawner implements SessionSpawner {
    */
   private async runSession(
     run: Run,
-    stage: PipelineStage,
+    stage: SessionLabel,
     request: SessionRequest,
   ): Promise<{ outcome: SessionOutcome; attempts: number }> {
     for (let attempt = 1; ; attempt += 1) {
@@ -1509,7 +1602,7 @@ export class AgentSessionSpawner implements SessionSpawner {
   /** One attempt at a stage's session: start it, watch it, report how it ended. */
   private async attemptSession(
     run: Run,
-    stage: PipelineStage,
+    stage: SessionLabel,
     request: SessionRequest,
     attempt: number,
   ): Promise<SessionOutcome> {

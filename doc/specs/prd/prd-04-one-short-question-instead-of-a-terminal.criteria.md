@@ -25,6 +25,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** api
+- **Falsified-by:** `ask-check.test.ts` — *the limits hold by construction*: the module's import list is asserted empty, so it can reach no gate reader. A gate outcome taking a model's output as input would have to add an import, and that test goes red.
 - **Criteria:**
     - GIVEN a gate awaiting an answer
       WHEN the ask check is given a reply that it judges to mean approval but which matches no known approval word
@@ -40,6 +41,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** api
+- **Falsified-by:** `ask-check.test.ts` — the empty import list, plus `poll.test.ts` *is not consulted about a ticket that is waiting on nobody*. The check is handed no store, so a call that moved a run would not compile.
 - **Criteria:**
     - GIVEN a run at any step
       WHEN the ask check runs, whatever it concludes
@@ -52,6 +54,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** api
+- **Falsified-by:** `ask-check.test.ts` — *offers no way to say post nothing*, which asserts the verdict type's two members across every input shape, and the three *posts the composed message when …* cases.
 - **Criteria:**
     - GIVEN a message about to be sent to a person
       WHEN the ask check lets it through
@@ -81,6 +84,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** api
+- **Falsified-by:** `poll.test.ts` — *is not consulted about a ticket that is waiting on nobody*, and the single call site in `reconcileCtas`.
 - **Criteria:**
     - GIVEN any run in any state
       WHEN no message asking a person for something is about to be sent
@@ -91,10 +95,12 @@
 - **Verification hint:** the ask check is called from the one place a person-directed message is composed, and from nowhere else. Verify by call sites, plus a test over a set of run states asserting the count of person-directed messages does not rise.
 
 ## R7 — A written answer starts the unbound session, but only when it answers the ask check's own question
+> ✏ 2026-09-12 (built under [timone#132](https://github.com/fvermaut/timone/issues/132)): the machinery now exists. A stop of this kind is started by the answer to a question the check framed, and by nothing else — any other comment still moves nothing, so [ADR-0033](../../adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md) D4's reason stands. The check's silence on these stops, recorded in [the phase 39 report](../../plans/phases/reports/phase-39-complete.md), is lifted.
 
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Falsified-by:** `poll.test.ts` — *and answering it moves a stop that words used to not move*: three cases covering the answer that starts a session, the comment that starts nothing because the machine asked nothing, and the second cycle that starts no second session.
 - **Criteria:**
     - GIVEN a run the machine has given up on, where the ask check has posted a question framed to unstick it
       WHEN the human answers that question in writing

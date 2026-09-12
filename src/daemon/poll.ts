@@ -128,6 +128,17 @@ export interface SessionSpawner {
     context?: SpawnContext,
   ): Promise<void>;
   /**
+   * Start the session a `timone takeover` would have started, on the human's
+   * written answer to a question the ask check framed
+   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)
+   * D5).
+   *
+   * **Optional, and absent means the stop keeps asking for a terminal** —
+   * which is exactly how it behaved before, and what every fake in the tests
+   * that does not care about this wants.
+   */
+  unstick?(run: Run, project: TicketingProject, words: string): Promise<void>;
+  /**
    * End the session this run is in, because it has just been cancelled
    * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
    *
@@ -1914,16 +1925,12 @@ async function cheaperAsk(
 
   if (!asksAPerson(cta) || consult === undefined || run === undefined) return body;
 
-  // **The check obeys the rule it exists to enforce.** ADR-0052 ruled that a
-  // stage may only ask a question the machinery can act on the answer to, and
-  // that is exactly what an escalation park is not: `resolveWait` moves it on
-  // a handback the machine wrote, never on words a person typed (ADR-0033 D4).
-  // A question asked here would be answered, the answer would move nothing,
-  // and the next cycle would post the very command the question stood in front
-  // of — costing a reply and changing nothing, which is worse than the message
-  // it replaced. PRD-04.R7 is what makes this branch reachable, and until it
-  // exists the honest thing is silence.
-  if (run.wait?.kind === "escalation") return body;
+  // ✏ The escalation guard that stood here is gone (PRD-04.R7). It existed
+  // because a question asked on a stop no answer resolves would have been
+  // answered into nothing, and the next cycle would have posted the very
+  // command it stood in front of. `answerToOurQuestion` is what now gives that
+  // answer somewhere to go, so the check may speak here — which is where the
+  // expensive asks are.
 
   const spoken = lastHumanWords(thread);
   const plan = planAskCheck(body, run.askCheck, spoken?.createdAt);
@@ -1950,6 +1957,31 @@ async function cheaperAsk(
   log(`ask    ${run.project}#${run.ticket} — asked instead of sending them away`);
 
   return `${CTA_MARKER}\n\n${verdict.question}`;
+}
+
+/**
+ * The human's answer to a question the ask check itself put on this stop, or
+ * undefined when there is none
+ * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)
+ * D5).
+ *
+ * **Three conditions, and the third is what keeps ADR-0033 D4 intact.** The
+ * run must be parked on a stop no answer resolves; the machine must have a
+ * question standing on it; and the words must be later than that question. So
+ * this is never "any comment restarts a stuck ticket" — it is "the answer to
+ * the thing we asked", which is the only shape the session can be told what
+ * the words mean.
+ */
+function answerToOurQuestion(run: Run, thread: TicketThread): string | undefined {
+  if (run.wait?.kind !== "escalation") return undefined;
+  if (run.askCheck === undefined || run.askCheck.actedOn === true) return undefined;
+
+  const spoken = lastHumanWords(thread);
+  if (spoken === undefined) return undefined;
+  if (Date.parse(spoken.createdAt) <= Date.parse(run.askCheck.askedAt)) return undefined;
+
+  const words = spoken.body.trim();
+  return words === "" ? undefined : words;
 }
 
 /**
@@ -2188,6 +2220,23 @@ async function resumeAnswered(
       // on nothing.
       const ticket = await threads.ticket();
       if (ticket.labels.includes(HELD_LABEL)) continue;
+
+      // The one thing a written answer moves on a stop that words do not
+      // resolve (ADR-0054 D5). Read before `resolveWait`, which is about to
+      // decide this run needs a handback nobody has written — and it is
+      // right, which is the whole reason the answer needs somewhere else to
+      // go.
+      const answered = answerToOurQuestion(run, ticket);
+      if (answered !== undefined && deps.spawner.unstick !== undefined) {
+        // Forgotten before the session starts, for the reason the answer
+        // cursor is written before a spawn: the next cycle must not find the
+        // same answer outstanding and start a second session on it.
+        store.spendAskCheck(run.id);
+        await deps.spawner.unstick(run, project, answered);
+        result.resumed.push(run.id);
+        log(`unstick ${run.id} — started on what they wrote`);
+        return;
+      }
 
       resumption = await resolveWait(run, threads);
     } catch (error) {
