@@ -170,6 +170,8 @@ Only then: append the handoff section, commit, and start the next slice.
 
 A human gate written into a slice's validation block (`**Human gate:**`) is a real stop: ask, wait, and record the answer in the handoff. Never mark it satisfied by your own review.
 
+**Stopping to ask a person does not stop anything.** ✏ Added 2026-09-12 ([ADR-0056](../../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)). From the human's agreement to the pull request, the daemon reads a stage that hands its work back or asks for a decision as a stage that finished: the run carries on to the next step and your words are handed to stage 8, which puts them in the pull request. Nobody answers them on the way. The one thing that still stops a run is finishing without the artifact you owe — a phase file left unstamped — because the next step would have nothing to work on.
+
 ## The departures record
 
 ✏ Added [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md). Every departure this stage records — a plan step it could not follow as written, a requirement it amended, a check it could not run, a workaround it applied — goes to one file: `projects/<name>/doc/plans/phases/reports/phase-NN-departures.md`. Created on the phase's first departure, appended thereafter, one dated entry per departure, never rewritten — the same convention `phase-NN-handoffs.md` already uses. `timone-verify` and `timone-deliver` write to the same file for their own departures; a later piece of PRD-03 reads it to open the pull request's own account of what was bent.

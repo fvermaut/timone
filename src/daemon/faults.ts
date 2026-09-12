@@ -151,12 +151,16 @@ export function refusalClears(error: unknown): boolean {
  *
  * A stage at `execution`, `verification` or `delivery` that is handed an
  * answer it may not act on no longer parks the run on a person — the
- * question itself is the defect, so the run is filed as failed instead. This
- * is what `session.ts`'s `failBuildEscalation` writes ahead of the
- * escalation comment's own words, and what {@link isBuildEscalation} looks
- * for. It lives here, beside {@link technicalFault}, rather than in
- * `session.ts`: `ctaFor` reads it too, and `session.ts` is the one surface
- * that may load the agent runtime.
+ * question itself is the defect.
+ *
+ * ✏ **Nothing writes this any more** ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
+ * ADR-0052 filed the defect by failing the run, and failing the run is still
+ * a stop: the work sat one step short of its pull request until a person
+ * typed `timone retry`. A build stage's question is now carried to the pull
+ * request and the run walks on, so no new run is ever failed for one. This
+ * and {@link isBuildEscalation} stay because ledgers written before that
+ * change still hold runs failed this way, and their tickets must keep saying
+ * what happened to them rather than reading as a broken login.
  */
 export const BUILD_ESCALATION_PREFIX = "a build stage escalated: ";
 

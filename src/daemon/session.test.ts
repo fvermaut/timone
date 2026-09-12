@@ -2539,14 +2539,61 @@ describe("the execution stage", () => {
     expect(run?.failure).toMatch(/outcome/i);
   });
 
-  it("fails the run rather than parking it, when the session hands the work to a person", async () => {
-    // Under ADR-0052 a build stage may not stop on a person, and a hand-back
-    // is one of the two sentences a session can use to try. This used to
-    // assert a parked run waiting on a reply; the scenario is unchanged, only
-    // what it now means to the run — the same correction the escalation
-    // marker already had.
+  it("carries the question and walks on, when the session hands the work to a person", async () => {
+    // ADR-0056. A build stage may not stop on a person, and ADR-0052 had the
+    // daemon enforce that by failing the run — which is the same stop wearing
+    // a different word: the work sat one step short of its pull request until
+    // somebody typed `timone retry`. Now the question is written onto the run
+    // and the run carries on to the next stage, exactly as a clean finish
+    // would. This test used to assert a parked run, then a failed one; the
+    // scenario is unchanged both times, only what it means to the run.
     const store = newStore();
     const { adapter, comments } = fakeAdapter();
+    const { runtime, requests } = buildingRuntime(
+      adapter,
+      STAGE_HANDED_MARKER,
+      "Slice 04c failed twice; both attempts below.",
+    );
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      planStatusProbe: async () => "Complete — see reports/phase-04-complete.md",
+      verificationReportProbe: async () =>
+        "doc/plans/phases/reports/phase-04-verification.md",
+    }).spawn(atExecution(store), project, { stage: "execution" });
+
+    const run = store.get("scratch-app#7/1");
+    // The run walked past the building step rather than stopping there; what
+    // the later steps then do with this fake's material is their own business.
+    expect(run?.stage).not.toBe("execution");
+    expect(run?.wait?.kind).not.toBe("escalation");
+    expect(run?.failure ?? "").not.toContain("failed twice");
+    // The stage's own words are kept, whole, against the run — they are what
+    // the pull request owes the reader.
+    expect(run?.carried?.[0].stage).toBe("execution");
+    expect(run?.carried?.[0].words).toContain("failed twice");
+    // And the run moved on: the next session started is the checking stage,
+    // recognisable by the one prompt built without the ticket's text.
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    expect(requests[1].prompt).toMatch(/without having watched/i);
+    // The daemon posts nothing on top of the session's own comment.
+    expect(comments.at(0)?.body).toContain("failed twice");
+  });
+
+  it("still fails when the stage asked a question and never produced what it owes", async () => {
+    // The limit of ADR-0056, and the line it draws: a question is carried, a
+    // missing artifact is not. A build stage that stopped to ask *and* left
+    // the phase unstamped has not done its work, and advancing on that would
+    // hand the next stage nothing to check. The question is still recorded —
+    // it is still a defect worth seeing — but the run stops as it always did
+    // for a stage that says one thing and shows another.
+    const store = newStore();
+    const { adapter } = fakeAdapter();
     const { runtime } = buildingRuntime(
       adapter,
       STAGE_HANDED_MARKER,
@@ -2565,18 +2612,8 @@ describe("the execution stage", () => {
 
     const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
-    expect(run?.wait).toBeUndefined();
-    // The marker is what `ctaFor` reads to say a question was asked inside the
-    // build that had no business being asked, and the session's own words
-    // carry into the reason a human sees.
-    expect(run?.failure).toContain(BUILD_ESCALATION_PREFIX);
-    expect(run?.failure).toContain("failed twice");
-    // The session's own comment is the report; the daemon adds nothing on top.
-    // Asserted on the count, not just the last one: a `failedComment` saying
-    // "something went wrong" underneath the session's own polite question is
-    // half of what made #31 unreadable.
-    expect(comments).toHaveLength(1);
-    expect(comments.at(-1)?.body).toContain("failed twice");
+    expect(run?.failure).toMatch(/phase file's status/i);
+    expect(run?.carried).toHaveLength(1);
   });
 
   it("hands the session the execution prompt on the run's branch", async () => {
@@ -2673,14 +2710,16 @@ describe("the verification stage", () => {
     expect(run?.failure).toMatch(/report/i);
   });
 
-  it("fails the run rather than parking it, when it cannot use the answer it was given", async () => {
-    // ivtrends #1, as a test — but under ADR-0052 now: verification is a
-    // build stage, so an escalation inside it is a fault to file, not a wait
-    // to serve. This used to assert a parked run; the scenario itself is
-    // unchanged, only what it now means to the run.
+  it("carries the question to delivery, when it cannot use the answer it was given", async () => {
+    // ivtrends #1, as a test — and #89 and #93 after it, which is why this
+    // assertion has now moved twice. It used to be a parked run; ADR-0052
+    // made it a failed one; ADR-0056 makes it neither. The checking step has
+    // its report on the branch, so it has done its job, and a question it had
+    // no business asking does not undo that: the run walks on to the step
+    // that opens the pull request, and the question goes with it.
     const store = newStore();
     const { adapter, comments } = fakeAdapter();
-    const { runtime } = checkingRuntime(
+    const { runtime, requests } = checkingRuntime(
       adapter,
       STAGE_ESCALATED_MARKER,
       "You told me to go ahead, but two of the promises I check against " +
@@ -2700,20 +2739,33 @@ describe("the verification stage", () => {
     }).spawn(atVerification(store), project, { stage: "verification" });
 
     const run = store.get("scratch-app#7/1");
-    expect(run?.status).toBe("failed");
-    expect(run?.wait).toBeUndefined();
-    // The escalation comment's own text carries into the failure reason, so
-    // a human reading `timone status` sees what the stage could not act on.
-    expect(run?.failure).toContain("prove nothing");
-    // Nothing new is posted: the session's own comment is the whole report.
-    expect(comments).toHaveLength(1);
+    // The run walked past the checking step rather than stopping there. What
+    // it does at delivery is delivery's business — this fake has no pull
+    // request for it to find — and the point is that the question is not what
+    // stopped anything.
+    expect(run?.stage).toBe("delivery");
+    expect(run?.failure ?? "").not.toContain("prove nothing");
+    expect(run?.carried?.[0].stage).toBe("verification");
+    expect(run?.carried?.[0].words).toContain("prove nothing");
+    // The delivery session is started, and it is *told* what was asked — the
+    // words have to reach the pull request's body, and this prompt is the
+    // only way they get there.
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    expect(requests[1].prompt).toContain("prove nothing");
+    expect(requests[1].prompt).toMatch(/departures section/i);
+    // The daemon still posts nothing on top of the session's own comment.
+    expect(comments.at(0)?.body).toContain("prove nothing");
+    expect(comments.at(0)?.body).not.toMatch(/went wrong/i);
   });
 
-  it("fails the run rather than parking it, when the gate did not pass", async () => {
+  it("carries the question to delivery, when the gate did not pass", async () => {
     // `ivtrends` #88, as a test. The checking step handed its question back
     // and the run parked on a conversation nobody could end — the ticket then
     // offered `timone takeover`, which re-opened this same stage, which asked
-    // the same question again. Under ADR-0052 the hand-back is the fault.
+    // the same question again. ADR-0052 called the hand-back the fault and
+    // failed the run for it; #93 then showed that failing the run is still a
+    // stop, and asked for it twice more. Under ADR-0056 the gate's outcome
+    // rides to the pull request, which is where the person already is.
     const store = newStore();
     const { adapter, comments } = fakeAdapter();
     const { runtime } = checkingRuntime(
@@ -2734,13 +2786,13 @@ describe("the verification stage", () => {
     }).spawn(atVerification(store), project, { stage: "verification" });
 
     const run = store.get("scratch-app#7/1");
-    expect(run?.status).toBe("failed");
+    expect(run?.stage).toBe("delivery");
     expect(run?.wait).toBeUndefined();
-    expect(run?.failure).toContain(BUILD_ESCALATION_PREFIX);
-    expect(run?.failure).toContain("both loops");
+    expect(run?.failure ?? "").not.toContain("both loops");
+    expect(run?.carried?.[0].words).toContain("both loops");
     // The session's own comment is R6's failure report; nothing is added.
-    expect(comments).toHaveLength(1);
-    expect(comments.at(-1)?.body).toContain("both loops");
+    expect(comments.at(0)?.body).toContain("both loops");
+    expect(comments.at(0)?.body).not.toMatch(/went wrong/i);
   });
 });
 
@@ -2850,9 +2902,13 @@ describe("the delivery stage", () => {
     expect(comments.at(-1)?.body).toMatch(/went wrong/i);
   });
 
-  it("fails the run rather than parking it, when the session hands the delivery to a person", async () => {
-    // Delivery is inside the build too (ADR-0052), so the last stage before
-    // the pull request may no more stop on a person than the two before it.
+  it("records the question and fails on the missing pull request, when the session hands the delivery to a person", async () => {
+    // Delivery is inside the build too, so the last stage before the pull
+    // request may no more stop on a person than the two before it — and
+    // ADR-0056 carries its question like any other. What it cannot carry is
+    // the pull request: this stage *is* the pull request, so a delivery that
+    // asked instead of opening one has left the run with nothing to walk on
+    // to, and the run stops on that rather than on the question.
     const store = newStore();
     const { adapter, comments } = adapterWithPr(undefined);
     const { runtime } = deliveringRuntime(
@@ -2873,10 +2929,10 @@ describe("the delivery stage", () => {
     const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
     expect(run?.wait).toBeUndefined();
-    expect(run?.failure).toContain(BUILD_ESCALATION_PREFIX);
-    expect(run?.failure).toContain("refused delivery");
-    expect(comments).toHaveLength(1);
-    expect(comments.at(-1)?.body).toContain("refused delivery");
+    expect(run?.failure).toMatch(/pull request/i);
+    expect(run?.carried).toHaveLength(1);
+    expect(run?.carried?.[0].words).toContain("refused delivery");
+    expect(comments.at(0)?.body).toContain("refused delivery");
   });
 });
 

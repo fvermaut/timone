@@ -1042,31 +1042,65 @@ function escalate(
 }
 
 /**
- * A **build** stage — `execution`, `verification`, `delivery` — was given an
- * answer it may not act on
- * ([ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
+ * A **build** stage — `execution`, `verification`, `delivery` — asked a
+ * person for something, and the run carries the question to its pull request
+ * instead of stopping on it
+ * ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md),
+ * amending [ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
  *
  * {@link escalate}'s sibling for the one place ADR-0033's park-and-wait
- * outcome no longer applies: inside the build a run never stops between its
- * last human agreement and its pull request, so a stage stopping to ask is
- * not a wait to serve, it is the defect. The run is failed rather than
- * parked, which is what lets `timone retry` start it again exactly as any
- * other failed run — no person is waited on, because none was owed an
- * answer in the first place.
+ * outcome does not apply. Inside the build a run never stops between its last
+ * human agreement and its pull request, so a stage stopping to ask is not a
+ * wait to serve — it is the defect. ADR-0052 said so and had the daemon file
+ * the defect **by failing the run**, which still left the work one step short
+ * of the pull request and made a person type `timone retry` to start it
+ * again. That is the same stop wearing a different word, and it cost
+ * `ivtrends` #89 and #93 four interventions between them.
  *
- * The reason carries {@link BUILD_ESCALATION_PREFIX} ahead of the stage's own
- * words so `ctaFor` can tell this apart from an ordinary technical stop
- * without importing anything from this module (see `faults.ts`).
+ * So the fault is kept and the stop is dropped. The stage's own words are
+ * written onto the run, the outcome is read from here on as though the stage
+ * had said it finished, and stage 8 puts the words in the pull request's
+ * departures section. What the stage owes on the branch is still checked by
+ * the caller: a question is carried, a missing artifact is not.
+ *
+ * **Nothing is posted.** The stage already posted its own question on the
+ * ticket; the standing call to action is what corrects the impression that
+ * somebody is being waited on.
  */
-function failBuildEscalation(
+function carryToPullRequest(
   store: RunStore,
   id: string,
   stage: PipelineStage,
   outcome: { comment: TicketComment },
   log: (message: string) => void,
-): void {
-  store.fail(id, `${BUILD_ESCALATION_PREFIX}${outcome.comment.body}`);
-  log(`failed ${id} — ${stage} escalated inside the build, filed rather than parked`);
+): StageOutcome {
+  store.carry(id, stage, outcome.comment.body);
+  log(`carried ${id} — ${stage} asked a question inside the build; it rides to the pull request`);
+  return { kind: "advanced", comment: outcome.comment };
+}
+
+/**
+ * Read a stage's recorded outcome as the run should act on it.
+ *
+ * The one place ADR-0056 lives: inside the build, the two sentences a session
+ * can use to stop on a person — a hand-back and an escalation — are the same
+ * thing, and neither is a stop. Both become an ordinary advance carrying a
+ * question, and every judgement below this point sees a stage that finished.
+ * Outside the build nothing changes: ADR-0033's park-and-wait stands, and
+ * both sentences mean what they always meant.
+ */
+function asBuildOutcome(
+  store: RunStore,
+  id: string,
+  stage: PipelineStage,
+  outcome: StageOutcome | undefined,
+  log: (message: string) => void,
+): StageOutcome | undefined {
+  if (!inBuild(stage)) return outcome;
+  if (outcome?.kind !== "escalated" && outcome?.kind !== "handed-to-human") {
+    return outcome;
+  }
+  return carryToPullRequest(store, id, stage, outcome, log);
 }
 
 export function waitOf(run: Run): ParkOptions {
@@ -1350,6 +1384,12 @@ export class AgentSessionSpawner implements SessionSpawner {
       classification: classificationFromLabels(before.labels),
       feedback,
       branch: store.get(run.id)?.branch,
+      // What an earlier build stage stopped to ask and nobody answered
+      // (ADR-0056). Read fresh rather than passed down, because the stage that
+      // asked is not the stage that has to say so in the pull request.
+      ...(store.get(run.id)?.carried === undefined
+        ? {}
+        : { carried: store.get(run.id)?.carried }),
     });
 
     const branch = store.get(run.id)?.branch;
@@ -1603,11 +1643,11 @@ export class AgentSessionSpawner implements SessionSpawner {
    * run fails loudly on, because a stage that says one thing and shows
    * another cannot be built upon in either direction.
    *
-   * **Inside the build, a hand-back is not a stop to serve** (ADR-0052, and
-   * the escalation branch at the top of {@link afterStage} for the sibling
-   * marker). A hand-back and an escalation differ only in which sentence the
-   * session chose; neither may park a run between the approved list of pieces
-   * and the pull request, so both are filed as the fault they are.
+   * **A build stage never hands back here** (ADR-0056): a hand-back and an
+   * escalation differ only in which sentence the session chose, and
+   * {@link asBuildOutcome} has already turned both into an advance carrying a
+   * question. What arrives at this branch is a stage outside the build, where
+   * ADR-0033's park-and-wait stands.
    */
   private async afterWorkStage(
     run: Run,
@@ -1619,11 +1659,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     const { store, adapter } = this.options;
 
     if (outcome?.kind === "handed-to-human") {
-      if (inBuild(stage)) {
-        failBuildEscalation(store, run.id, stage, outcome, this.log.bind(this));
-      } else {
-        handBack(store, run.id, stage, outcome, this.log.bind(this));
-      }
+      handBack(store, run.id, stage, outcome, this.log.bind(this));
       return undefined;
     }
 
@@ -1699,8 +1735,10 @@ export class AgentSessionSpawner implements SessionSpawner {
    * PR thread's newest comment: only what the human says after the park can
    * wake the run.
    *
-   * Delivery is a build stage, so a hand-back here is filed rather than
-   * parked, for {@link afterWorkStage}'s reason (ADR-0052).
+   * Delivery is a build stage, so a hand-back never arrives here: it was read
+   * as an advance carrying a question (ADR-0056), and what this method then
+   * judges is the only thing that could still be wrong — whether the pull
+   * request exists.
    */
   private async afterDelivery(
     run: Run,
@@ -1708,11 +1746,6 @@ export class AgentSessionSpawner implements SessionSpawner {
     outcome: StageOutcome | undefined,
   ): Promise<void> {
     const { store, adapter } = this.options;
-
-    if (outcome?.kind === "handed-to-human") {
-      failBuildEscalation(store, run.id, "delivery", outcome, this.log.bind(this));
-      return;
-    }
 
     const branch = store.get(run.id)?.branch;
     const pr =
@@ -1842,26 +1875,34 @@ export class AgentSessionSpawner implements SessionSpawner {
     stage: PipelineStage,
     ticket: TicketThread,
     producedWork: boolean,
-    outcome: StageOutcome | undefined,
+    recorded: StageOutcome | undefined,
     cursor: string,
   ): Promise<PipelineStage | undefined> {
     const { store, adapter } = this.options;
 
-    // **Before every other ending, and for every stage** (ADR-0033 D2, with
-    // ADR-0052's carve-out for the build). A stage handed something outside
-    // what it may do is stopped whatever kind of stage it is — the gate it
-    // would have opened and the conversation it would have re-parked on are
-    // both questions, and asking another question is the loop this closes.
-    // **Inside the build** — `execution`, `verification`, `delivery` — a run
-    // never stops between its last human agreement and its pull request
-    // (ADR-0052), so the stop this branch used to park on a person is filed
-    // as a fault instead; everywhere else, ADR-0033's park-and-wait stands.
+    // **Inside the build — `execution`, `verification`, `delivery` — a run
+    // never stops on a person, and that now means it carries on rather than
+    // that it stops differently** (ADR-0056, amending ADR-0052). Both
+    // sentences a session can use to stop — a hand-back and an escalation —
+    // are recorded as questions the pull request will carry, and everything
+    // below this line judges a stage that finished. Outside the build they
+    // mean what ADR-0033 always made them mean.
+    const outcome = asBuildOutcome(
+      store,
+      run.id,
+      stage,
+      recorded,
+      this.log.bind(this),
+    );
+
+    // **Before every other ending, and for every stage** (ADR-0033 D2). A
+    // stage handed something outside what it may do is stopped whatever kind
+    // of stage it is — the gate it would have opened and the conversation it
+    // would have re-parked on are both questions, and asking another question
+    // is the loop this closes. A build stage never reaches here: the line
+    // above has already turned its escalation into an advance.
     if (outcome?.kind === "escalated") {
-      if (inBuild(stage)) {
-        failBuildEscalation(store, run.id, stage, outcome, this.log.bind(this));
-      } else {
-        escalate(store, run.id, stage, outcome, this.log.bind(this));
-      }
+      escalate(store, run.id, stage, outcome, this.log.bind(this));
       return undefined;
     }
 

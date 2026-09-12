@@ -50,6 +50,12 @@ export interface PromptContext {
   feedback?: string;
   /** The work branch this run owns, at the stages that own one. */
   branch?: string;
+  /**
+   * Questions an earlier build stage asked a person and did not get answered,
+   * carried here so the pull request can state them
+   * ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
+   */
+  carried?: readonly { stage: string; words: string }[];
   /** True when a human opened this session themselves and is waiting in it. */
   interactive?: boolean;
 }
@@ -495,6 +501,41 @@ function remediationPrompt(context: PromptContext): string {
 }
 
 /**
+ * What an earlier build stage stopped to ask, for the stage that writes the
+ * pull request ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
+ *
+ * Empty for the ordinary run, and deliberately loud when it is not: these are
+ * the words a stage put in front of a person when it had no authority to stop
+ * for an answer. The run carried on without one, so the pull request is where
+ * they have to appear — otherwise the question is lost and the only record of
+ * it is a ticket comment nobody is coming back to.
+ */
+function carriedBlock(carried: PromptContext["carried"]): string {
+  if (carried === undefined || carried.length === 0) return "";
+
+  const asked = carried
+    .map(
+      (one) =>
+        `--- asked while ${one.stage === "execution" ? "building" : one.stage === "verification" ? "checking the result" : "sending it for review"} ---\n${one.words}`,
+    )
+    .join("\n\n");
+
+  return [
+    "",
+    "**An earlier step stopped to ask a person something, and was not",
+    "allowed to.** Nobody answered it and nobody is going to: the run carried",
+    "on without an answer, and this pull request is where the question has to",
+    "land. Put every one of them in the body's departures section, first",
+    "section, in your own plain words — what was asked, and what the work did",
+    "instead. Never treat one as a reason to refuse this stage, and never ask",
+    "it again yourself.",
+    "",
+    asked,
+    "--- end ---",
+  ].join("\n");
+}
+
+/**
  * Stage 8: present the finished work for human judgement, as a pull request.
  */
 function deliveryPrompt(context: PromptContext): string {
@@ -505,6 +546,7 @@ function deliveryPrompt(context: PromptContext): string {
     "",
     ticketBlock(context),
     feedbackBlock(context.feedback),
+    carriedBlock(context.carried),
     "",
     reentryBlock(),
     "",
@@ -530,6 +572,13 @@ function deliveryPrompt(context: PromptContext): string {
       "delivery was refused — an entry gate turned it away, or the platform " +
         "would not take the pull request. Follow it with what refused and why.",
     ),
+    "",
+    "**There is no third ending, and asking a person is not one of them.**",
+    "Whatever is unfinished, unchecked, failing or unanswered goes in the",
+    "pull request's first section and the pull request opens anyway. A",
+    "question you post here instead of opening the pull request stops nothing",
+    "— it is read as the work being finished, and the reader loses the one",
+    "place they were going to see it.",
     "",
     writingBlock(),
     "",

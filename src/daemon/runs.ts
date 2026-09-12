@@ -10,9 +10,12 @@ import {
   type Holder,
   type Liveness,
 } from "./holder.js";
+import { BUILD_ESCALATION_PREFIX, isBuildEscalation } from "./faults.js";
 import {
   PIPELINE_STAGES,
+  inBuild,
   resolvableBy,
+  stageAfter,
   type PipelineStage,
   type WaitKind,
 } from "./pipeline.js";
@@ -402,6 +405,34 @@ const runSchema = z.strictObject({
     .optional(),
   /** Guardrail-hook violations recorded against this run (R15). */
   flags: z.array(z.string()),
+  /**
+   * Questions a build stage asked that it had no business asking, kept so
+   * they reach the pull request
+   * ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
+   *
+   * [ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)
+   * ruled such a question a fault to file rather than a wait to serve, and
+   * the daemon filed it by failing the run — which stopped the work one step
+   * short of the pull request and made a person type a command to start it
+   * again. ADR-0056 keeps the fault and drops the stop: the stage's own words
+   * are written here, the run carries on, and stage 8 puts them in the pull
+   * request's departures section.
+   *
+   * Optional, because every ledger written before ADR-0056 has no such field
+   * and a run that never asked anything has nothing to carry.
+   */
+  carried: z
+    .array(
+      z.strictObject({
+        /** The stage that asked. */
+        stage: z.enum([...PIPELINE_STAGES]),
+        /** When it asked. */
+        at: z.string(),
+        /** What it said, verbatim — the comment it posted on the ticket. */
+        words: z.string(),
+      }),
+    )
+    .optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -1239,10 +1270,41 @@ export class RunStore {
         `Run ${id} is ${run.status}, not failed — only a failed run can be retried`,
       );
     }
+    // **A run filed for asking a question inside the build resumes at the
+    // *next* stage, carrying what it asked**
+    // ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
+    // The stage did its work and left its artifact on the branch; only its
+    // last sentence was out of order, and re-running it buys the same
+    // sentence again — which is literally what `ivtrends` #93 did when it was
+    // retried. Nothing files a run this way any anymore, so this is the way
+    // back for the ones filed before that changed.
+    const escalated =
+      run.failure !== undefined &&
+      isBuildEscalation(run.failure) &&
+      run.stage !== undefined &&
+      inBuild(run.stage)
+        ? {
+            stage: run.stage,
+            // Without the prefix: it is the daemon's own bookkeeping, and
+            // what rides to the pull request is the stage's words.
+            words: run.failure.slice(BUILD_ESCALATION_PREFIX.length),
+          }
+        : undefined;
+
     return this.transition(id, "picked-up", (rearmed) => {
       rearmed.failure = undefined;
       rearmed.sessionId = undefined;
       rearmed.flags = [];
+      // Cleared for the flags' reason: it belongs to the attempt that died.
+      // The stage runs again and asks again if it still wants to, and a
+      // question carried twice would reach the pull request twice.
+      rearmed.carried = undefined;
+      if (escalated !== undefined) {
+        rearmed.carried = [
+          { stage: escalated.stage, at: this.now(), words: escalated.words },
+        ];
+        rearmed.stage = stageAfter(escalated.stage) ?? escalated.stage;
+      }
       // Whoever held the attempt that died is not holding this one. The
       // holder belongs to the session, as the session id beside it does.
       rearmed.holder = undefined;
@@ -1651,6 +1713,24 @@ export class RunStore {
       [key]: { project, ticket, at: this.now() },
     };
     this.persist();
+  }
+
+  /**
+   * Record a question a build stage asked and may not have asked, and which
+   * therefore rides to the pull request instead of stopping the run
+   * ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
+   *
+   * Appends rather than replaces: two stages of one run may each ask, and the
+   * pull request owes the reader both. Kept beside {@link flag} because they
+   * are the same kind of thing — something recorded against a run that does
+   * not change where the run is going.
+   */
+  carry(id: string, stage: PipelineStage, words: string): Run {
+    const run = this.mutable(id);
+    run.carried = [...(run.carried ?? []), { stage, at: this.now(), words }];
+    run.updatedAt = this.now();
+    this.persist();
+    return { ...run };
   }
 
   /** Record a guardrail violation against a run (R15). */
