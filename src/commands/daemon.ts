@@ -459,9 +459,12 @@ async function poll(
       statePath: options.statePath,
       staleAfterMs: options.staleAfterMs,
       // How a message about to be sent to a person gets a second, cheaper
-      // shape (ADR-0054). Injected so tests drive it without a model, and
-      // defaulted here so every real daemon has one.
-      consultAskCheck: options.consultAskCheck ?? sdkConsult(),
+      // shape (ADR-0054). **No default here**: this function is what the
+      // tests drive, and a default would have every one of them reach a real
+      // model the moment a fixture ticket asked a person for something — which
+      // is exactly how it was found, as a twenty-second timeout. The real one
+      // is supplied at the command, beside the other live seams.
+      consultAskCheck: options.consultAskCheck,
       // The cadence this loop actually keeps, so the unwitnessed-gap threshold
       // is derived from it rather than assumed (ADR-0020). A daemon told to
       // poll every five minutes must not read a four-minute gap as an absence.
@@ -701,6 +704,9 @@ export function registerDaemonCommand(program: Command): void {
         once: options.once === true,
         adapter,
         spawner,
+        // The ask check's model, beside the other live seams and for the same
+        // reason they are here (ADR-0054).
+        consultAskCheck: sdkConsult(),
         // What this process is running, against what the default branch has
         // moved to (timone#5). `ls-remote`, so fvermaut's own checkout is
         // read and never written (ADR-0043's spirit, in his own folder).

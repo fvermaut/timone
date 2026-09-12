@@ -45,8 +45,10 @@
 
 > ✏ Revised 2026-07-19: sessions run at the timone root, not inside `projects/<name>` ([ADR-0007](../../adr/0007-sessions-at-timone-root.md)). The criterion is now target-project resolution + clean client repos.
 
+> ✏ 2026-09-12 ([ADR-0055](../../adr/0055-a-universal-claim-is-not-established-by-watching.md) D1, via [timone#129](https://github.com/fvermaut/timone/issues/129)): **back to `draft`.** The claim is a universal — skills reach project sessions and *never* project repos — and a live gate establishes the paths it walks. This one has had no live gate at all. Nothing about what this requirement asks for has changed, and no evidence recorded below is withdrawn.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** draft
 - **Verify-via:** live
 - **Last live gate:** never
 - **Depends-on:** `.claude/skills/, src/daemon/, src/commands/`
@@ -111,8 +113,10 @@
 
 ## R9 — ADR skill
 
+> ✏ 2026-09-12 ([ADR-0055](../../adr/0055-a-universal-claim-is-not-established-by-watching.md) D1, via [timone#129](https://github.com/fvermaut/timone/issues/129)): **back to `draft`.** "Never edits history" is a claim about every supersession, closed by watching. No check stands behind it that could go red, and the gate line below says none has run. Nothing about what this requirement asks for has changed, and no evidence recorded below is withdrawn.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** draft
 - **Verify-via:** live
 - **Last live gate:** never
 - **Depends-on:** `.claude/skills/timone-adr/`
@@ -194,8 +198,10 @@
 
 ## R14 — Improve skill (feedback triage)
 
+> ✏ 2026-09-12 ([ADR-0055](../../adr/0055-a-universal-claim-is-not-established-by-watching.md) D2, via [timone#129](https://github.com/fvermaut/timone/issues/129)): **back to `draft`.** Its own evidence says the discriminating case does not exist and that the rule "was never the load-bearing reason" for the one case there is. Nothing about what this requirement asks for has changed, and no evidence recorded below is withdrawn.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** draft
     - ✏ 2026-08-02 verified by fvermaut on the `human` channel, against four real intakes on `scratch-app` and one full dispatch. Evidence, clause by clause: **classifies the layer** — `doc/feedback/001`–`004` each carry a per-item layer diagnosis, and the four land on three different layers (001 already-resolved, 002 intent, 003/004 record); **classifies the remediation** — the six classes named in this criterion proved insufficient in live use and are now **seven** (see the note below); **amends the PRD when intent moved** — PRD-01.R6 of `scratch-app` was amended in place with stable IDs, `Status: revised`, and a dated marker naming `doc/feedback/002`, in the same commit as the register's intent transition (`26aba7c`), while 001, 003 and 004 left the PRD untouched, which is the verification hint's discriminating check; **executes only after user confirmation** — every one of 002's nine items carries fvermaut's recorded confirm / decline / defer, one was declined and one deferred with a trigger, and nothing moved before the gate. **The loop was seen to close**: 002 item 1 → stage 5 plan (its own approval gate) → stage 6 → stage 7 → `scratch-app` PR #3, with stage 9 authoring no code commit.
     - ✏ 2026-08-02 **the criterion's class list is out of date and deliberately not rewritten here.** It names six remediation classes; live use added a seventh (`verification pass`, for items only observed behaviour can settle) and widened `report amendment` to `record correction` over any committed process artifact. Rewriting the clause would be an intent transition — stage 9's write, on its own record, not stage 7's — and the change is a widening that this evidence satisfies rather than contradicts. Recorded here so the gap is visible; `process.md` stage 9 is the authority on the class list.
     - ✏ 2026-08-02 **known limit of the evidence.** The register carve-out's "a `revised` criterion leaves the derived regression set" clause has a live case (`scratch-app` PRD-01.R6) but **not a discriminating one**: R6 is `browser`-channel, so the `api`-only derivation excluded it regardless of its status, and the `revised` rule was never the load-bearing reason. Discriminating evidence needs a criterion that is MUST + `api` + `verified` and then goes `revised`; none exists yet. See `scratch-app`'s `doc/plans/phases/reports/phase-03-verification.md`, which computed the exclusion and said so.
@@ -236,8 +242,10 @@
 
 ## R17 — Two-axis delivery review
 
+> ✏ 2026-09-12 ([ADR-0055](../../adr/0055-a-universal-claim-is-not-established-by-watching.md) D1, via [timone#129](https://github.com/fvermaut/timone/issues/129)): **back to `draft`.** "Never merged into one ranked list" claims every review, and what established it was reading two deliveries. Nothing about what this requirement asks for has changed, and no evidence recorded below is withdrawn.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** draft
 - **Verify-via:** live
 - **Last live gate:** never
 - **Depends-on:** `.claude/skills/timone-deliver/`
