@@ -300,6 +300,12 @@ export function ctaFor(state: TicketState): Cta {
     // — not the infrastructure breaking under it, but a stage behaving
     // wrongly — and the wording says so rather than borrowing the login/link
     // language below.
+    //
+    // ✏ Since [ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)
+    // no new run reaches this: the question rides to the pull request and the
+    // run carries on. It is kept for the runs already filed this way when the
+    // change landed — `ivtrends` #93 was one — because their tickets still
+    // have to say what stopped them.
     if (isBuildEscalation(run.failure)) {
       return {
         headline: "I asked a question inside the build that I had no business asking, so I stopped.",

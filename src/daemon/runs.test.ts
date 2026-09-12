@@ -1066,6 +1066,47 @@ describe("retry", () => {
     expect(rearmed.failure).toBeUndefined();
   });
 
+  it("resumes past the stage that asked a question inside the build, carrying what it asked", () => {
+    // ADR-0056's way back for the runs ADR-0052 filed. `ivtrends` #93 was
+    // retried and the checking step asked the same question a second time,
+    // because retrying re-ran the step that had already done its job. The
+    // step's report is on the branch; only its last sentence was out of
+    // order, so the run resumes at the step after it and the question goes
+    // with it — to the pull request, which is where it was always owed.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 93);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/93-expected-to-rank-is-drawn-last");
+    store.setStage(run.id, "verification");
+    store.fail(
+      run.id,
+      "a build stage escalated: eleven checks could not be run at all",
+    );
+
+    const rearmed = store.retry(run.id);
+
+    expect(rearmed.stage).toBe("delivery");
+    expect(rearmed.carried).toHaveLength(1);
+    expect(rearmed.carried?.[0].stage).toBe("verification");
+    expect(rearmed.carried?.[0].words).toContain("eleven checks");
+  });
+
+  it("resumes at the stage it failed when the failure was an ordinary one", () => {
+    // The bound on the rule above: only a question filed as a fault moves the
+    // run on. A stage that died has not done its work, and re-running it is
+    // the whole point of a retry.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 94);
+    store.activate(run.id, "s1");
+    store.setStage(run.id, "verification");
+    store.fail(run.id, "the machine running it stopped before the work was finished");
+
+    const rearmed = store.retry(run.id);
+
+    expect(rearmed.stage).toBe("verification");
+    expect(rearmed.carried).toBeUndefined();
+  });
+
   it("leaves the dead attempt's flags behind", () => {
     // 14g: #11 resumed still carrying `the session changed 1 file(s) outside
     // projects/scratch-app/` from its crashed attempt — a flag whose cause

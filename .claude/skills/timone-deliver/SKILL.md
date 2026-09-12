@@ -25,6 +25,8 @@ Delivery presents finished work for human judgement. It does not improve the wor
 
 Each gate stops delivery. When one fires you write **nothing** into the project, push nothing, open nothing, state which gate fired and why in one short paragraph, and name the skill or the human to route to. A stopped delivery is a valid, complete outcome of this skill.
 
+**Two things reach you from earlier steps that are not gates and must never be treated as one.** ✏ Added 2026-09-12 ([ADR-0056](../../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)). A departures record, and — new here — **a question an earlier step stopped to ask a person and never got answered**. The daemon does not let a step inside the build wait for a person, so it carries what was asked to you instead, in your own prompt. Put every one in the departures section, first section of the pull request body: what was asked, and what the work did instead. Never refuse for one, and never ask it again yourself — the reader of the pull request is the person it was for.
+
 **Their order is fixed: 1 → 2 → 3 → 4 → 5.** Gates about the work precede gates about where it goes, so a project whose phase was never verified hears *that* rather than a complaint about its git host. Fire the first one that applies and stop; do not report the others speculatively.
 
 **1 — Input gate.** A project name plus a phase reference: `phase-01`, `01`, or a path. Resolve it to exactly one file under `projects/<name>/doc/plans/phases/phase-NN.md`. Ambiguous, absent, or no phase given → say which phase files exist, and stop. **Never pick a phase for the user**: delivering the wrong branch is not a mistake a later gate catches.
