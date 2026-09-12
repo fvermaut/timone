@@ -79,6 +79,8 @@ export interface AskCheckMemory {
   question: string;
   /** When it was asked. */
   askedAt: string;
+  /** Whether the answer to it has already been acted on. */
+  actedOn?: boolean;
 }
 
 /** What to do this cycle, decided before any model is consulted. */
@@ -95,6 +97,8 @@ export type AskCheckPlan =
  * in code rather than an instruction to a model, because a budget a model is
  * merely asked to respect is not a budget.
  *
+ * - The question was answered and the answer acted on: the check is finished
+ *   with this ask for good, whatever the message says now.
  * - Nothing remembered, or remembered against a **different** message: this is
  *   an ask the check has not stood in front of, so it may consult.
  * - Remembered against this message, and the person has said nothing since:
@@ -108,6 +112,7 @@ export function planAskCheck(
   memory: AskCheckMemory | undefined,
   lastHumanWordsAt: string | undefined,
 ): AskCheckPlan {
+  if (memory?.actedOn === true) return { kind: "as-composed" };
   if (memory === undefined || memory.for !== composed) return { kind: "consult" };
 
   const answered =

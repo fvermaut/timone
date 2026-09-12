@@ -109,6 +109,16 @@ describe("the one-question budget", () => {
     });
   });
 
+  // The record is marked, never cleared. A cleared one let the check ask the
+  // same question again on the next cycle, and whether that re-asked question
+  // then re-triggered on the old answer came down to which instant happened to
+  // be later.
+  it("is finished with an ask for good once the answer has been acted on", () => {
+    expect(
+      planAskCheck(COMPOSED, remembered({ actedOn: true }), undefined),
+    ).toEqual({ kind: "as-composed" });
+  });
+
   it("stands aside once answered, so it never asks twice about one thing", () => {
     expect(planAskCheck(COMPOSED, remembered(), "2026-09-11T10:30:00Z")).toEqual({
       kind: "as-composed",
