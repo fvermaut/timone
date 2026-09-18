@@ -121,11 +121,18 @@ export interface SessionEvidence {
    * Every criteria register in reach, so the claims they make can be judged
    * ([ADR-0055](../../doc/adr/0055-a-universal-claim-is-not-established-by-watching.md) D4).
    *
-   * **Not scoped to what this session touched**, unlike every other piece of
-   * evidence here. A register claiming more than it established is a standing
-   * fault, not an event: the one that cost `ivtrends` #90 was written four
-   * days before the session that paid for it, and a check that only looked at
-   * the session's own edits would have said nothing on either day.
+   * **Gathered unscoped, judged scoped.** Every register in reach is read,
+   * because a session does not say which one it will touch until it ends;
+   * {@link checkRegisterClaims} then reports only the ones it edited.
+   *
+   * ADR-0055 D4 asked for the standing fault to be reported whoever was
+   * sitting there, on the strength of `ivtrends` #90 — a register written
+   * four days before the session that paid for it. Unscoped, that came out
+   * as the same findings handed back at the end of every session at this
+   * root, refusing the stop of sessions that had never opened the file. A
+   * check read that way stops being read, which is the outcome ADR-0055 was
+   * itself written to avoid. Catching a standing fault nobody is touching
+   * needs a sweep that runs once, not a session hook that runs always.
    */
   registers: RegisterFile[];
   /**
@@ -533,10 +540,36 @@ export function checkProvenance(evidence: SessionEvidence): Violation[] {
  * complete. This is the check that would have said otherwise
  * ([ADR-0055](../../doc/adr/0055-a-universal-claim-is-not-established-by-watching.md)).
  */
+/**
+ * Repo-relative paths this session changed, by repo label — committed and
+ * uncommitted alike, because a register edited and not yet committed is still
+ * this session's claim to answer for.
+ */
+function touchedPaths(evidence: SessionEvidence): Map<string, Set<string>> {
+  const byRepo = new Map<string, Set<string>>();
+  for (const repo of [...evidence.projects, evidence.workspace]) {
+    const paths = byRepo.get(repo.repo) ?? new Set<string>();
+    for (const commit of repo.commits) {
+      for (const file of commit.files) paths.add(file);
+    }
+    for (const file of repo.workingTree) paths.add(file);
+    byRepo.set(repo.repo, paths);
+  }
+  return byRepo;
+}
+
 export function checkRegisterClaims(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
+  const touched = touchedPaths(evidence);
 
   for (const register of evidence.registers) {
+    // Only registers this session actually edited. The check reads every
+    // register in reach — it has to, since it cannot know which one a session
+    // will touch until the session ends — but a fault in one nobody opened is
+    // not this session's to answer for, and reporting it refuses the stop of
+    // every session at this root until somebody unrelated fixes the file.
+    if (!touched.get(register.repo)?.has(register.path)) continue;
+
     const faults = registerFaults(register.source);
     if (faults.length === 0) continue;
 
