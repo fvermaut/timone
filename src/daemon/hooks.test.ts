@@ -1048,16 +1048,23 @@ describe("checkAll — a Timone self-run that behaved", () => {
 });
 
 describe("a register that claims more than it established", () => {
-  // ADR-0055 D4: a repository check, not a session one. The register that
-  // cost ivtrends#90 was written four days before the session that paid for
-  // it, so a check scoped to a session's own edits would have been silent on
-  // both days.
-  function registered(source: string): SessionEvidence {
+  // Every register in reach is read, and only the ones this session edited
+  // are judged. ADR-0055 D4 asked for the unscoped form; unscoped, it handed
+  // the same standing findings back at the end of every session at this root,
+  // including sessions that had never opened the file.
+  const REGISTER = "doc/specs/prd/prd-01-x.criteria.md";
+
+  /** Evidence for a session that edited the register it carries. */
+  function registered(source: string, touched = true): SessionEvidence {
+    const evidence = cleanEvidence();
     return {
-      ...cleanEvidence(),
-      registers: [
-        { repo: "scratch-app", path: "doc/specs/prd/prd-01-x.criteria.md", source },
-      ],
+      ...evidence,
+      registers: [{ repo: "scratch-app", path: REGISTER, source }],
+      projects: evidence.projects.map((repo) =>
+        repo.repo === "scratch-app" && touched
+          ? { ...repo, workingTree: [REGISTER] }
+          : repo,
+      ),
     };
   }
 
@@ -1086,6 +1093,32 @@ describe("a register that claims more than it established", () => {
     expect(
       checkRegisterClaims(registered(UNIVERSAL.replace("verified", "draft"))),
     ).toEqual([]);
+  });
+
+  it("says nothing about a faulty register this session never touched", () => {
+    // The finding is real and the file is in reach, but this session did not
+    // open it. Reported, it would refuse the stop of every session at this
+    // root until somebody unrelated fixed the file.
+    expect(checkRegisterClaims(registered(UNIVERSAL, false))).toEqual([]);
+  });
+
+  it("reports a register the session committed rather than left uncommitted", () => {
+    const evidence = registered(UNIVERSAL, false);
+    evidence.projects = evidence.projects.map((repo) =>
+      repo.repo === "scratch-app"
+        ? {
+            ...repo,
+            commits: repo.commits.map((commit) => ({
+              ...commit,
+              files: [...commit.files, REGISTER],
+            })),
+          }
+        : repo,
+    );
+
+    expect(checkRegisterClaims(evidence).map((v) => v.rule)).toEqual([
+      "register-claims",
+    ]);
   });
 
   it("is one of the checks the stop actually runs", () => {
