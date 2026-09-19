@@ -1,4 +1,5 @@
 import {
+  carriesMarker,
   HANDBACK_MARKER,
   HANDBACK_STEP_PREFIX,
   STAGE_DONE_MARKER,
@@ -59,13 +60,13 @@ export function readStageOutcome(
     // has additionally given up on being answered. A comment carrying both
     // must resolve as the stronger of the two, and this ordering is what
     // guarantees it — not the stage remembering to write only one.
-    if (comment.body.includes(STAGE_ESCALATED_MARKER)) {
+    if (carriesMarker(comment.body, STAGE_ESCALATED_MARKER)) {
       return { kind: "escalated", comment };
     }
-    if (comment.body.includes(STAGE_HANDED_MARKER)) {
+    if (carriesMarker(comment.body, STAGE_HANDED_MARKER)) {
       return { kind: "handed-to-human", comment };
     }
-    if (comment.body.includes(STAGE_DONE_MARKER)) {
+    if (carriesMarker(comment.body, STAGE_DONE_MARKER)) {
       return { kind: "advanced", comment };
     }
   }
@@ -120,7 +121,7 @@ export function readHandback(
     const comment = thread.comments[index];
     if (!comment.fromTimone) continue;
     if (instant(comment.createdAt) <= after) continue;
-    if (!comment.body.includes(HANDBACK_MARKER)) continue;
+    if (!carriesMarker(comment.body, HANDBACK_MARKER)) continue;
 
     const named = namedStep(comment.body);
     if (named === undefined) return { kind: "unnamed", comment };

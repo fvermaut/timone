@@ -45,6 +45,46 @@ describe("readStageOutcome", () => {
     expect(outcome?.comment.body).toContain("five slices");
   });
 
+  it("reads the marker when the session typed the picture in the wrong place", () => {
+    // ivtrends #101, 2026-09-19. The session wrote every word of the line
+    // right and put the emoji after the bold text instead of before it. The
+    // plan was written, committed and pushed; the run was failed for having
+    // recorded no outcome, and the retry that followed could not pass either.
+    const moved = STAGE_DONE_MARKER.replace(/^(\S+) (\*\*[^*]+\*\*)/u, "$2 $1");
+    expect(moved).toContain("**Step finished** 🏁");
+
+    const outcome = readStageOutcome(
+      thread(
+        comment({
+          body: `${MACHINE_MARKER}\n\n---\n\n${moved}\n\nThe plan is written.`,
+        }),
+      ),
+      cursor,
+    );
+
+    expect(outcome?.kind).toBe("advanced");
+  });
+
+  it("still tells the three markers apart once the pictures are ignored", () => {
+    // The words alone have to carry the distinction, or the tolerant read
+    // would resolve every ending as whichever one it tested for first.
+    for (const [marker, kind] of [
+      [STAGE_DONE_MARKER, "advanced"],
+      [STAGE_HANDED_MARKER, "handed-to-human"],
+      [STAGE_ESCALATED_MARKER, "escalated"],
+    ] as const) {
+      const outcome = readStageOutcome(
+        thread(
+          comment({
+            body: `${MACHINE_MARKER}\n\n---\n\n${marker.replace(/^\S+ /u, "")}\n\nSo it ended.`,
+          }),
+        ),
+        cursor,
+      );
+      expect(outcome?.kind).toBe(kind);
+    }
+  });
+
   it("reads a handed marker as the stage asking for a person", () => {
     const outcome = readStageOutcome(
       thread(

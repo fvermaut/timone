@@ -1,4 +1,5 @@
 import {
+  carriesMarker,
   CLARIFICATION_MARKER,
   CONVERSATION_RECORD_MARKER,
   type TicketComment,
@@ -90,7 +91,7 @@ export function readConversationRecord(
     (comment) =>
       comment.fromTimone &&
       instant(comment.createdAt) > after &&
-      comment.body.includes(CONVERSATION_RECORD_MARKER),
+      carriesMarker(comment.body, CONVERSATION_RECORD_MARKER),
   );
 }
 
@@ -113,7 +114,8 @@ export function readConversationRecord(
  */
 export function clarifyingRounds(thread: TicketThread): number {
   return thread.comments.filter(
-    (comment) => comment.fromTimone && comment.body.includes(CLARIFICATION_MARKER),
+    (comment) =>
+      comment.fromTimone && carriesMarker(comment.body, CLARIFICATION_MARKER),
   ).length;
 }
 

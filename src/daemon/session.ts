@@ -561,6 +561,15 @@ export interface AgentSessionSpawnerOptions {
     branch: string,
   ) => Promise<string | undefined>;
   /**
+   * Finds the phase file a branch carries and the default branch does not,
+   * returning its path or undefined. The artifact half of planning's outcome
+   * check.
+   */
+  plannedPhaseProbe?: (
+    project: TicketingProject,
+    branch: string,
+  ) => Promise<string | undefined>;
+  /**
    * Merges chunk zero's branch into the project's default branch and pushes
    * it — the daemon's one write to a branch it is not standing on, reached
    * only from the breakdown gate's approval (ADR-0030 D2). Behind a seam for
@@ -848,6 +857,41 @@ async function forgeVerificationReport(
   return (await adapter.readFile(project, branch, report)) === undefined
     ? undefined
     : report;
+}
+
+/**
+ * The newest phase file `branch` carries that the default branch does not —
+ * the plan this run wrote, or undefined when the branch carries no plan of its
+ * own.
+ *
+ * **Planning's artifact witness, and it had none until 2026-09-19.** The stage
+ * was judged by whether the branch tip moved while its session ran, which is a
+ * fact about one attempt rather than about the work. On ivtrends
+ * [#101](https://github.com/fvermaut/ivtrends/issues/101) the first attempt
+ * committed the plan and was failed over its closing line; the retry found the
+ * plan already there, had nothing left to commit, and was failed for
+ * committing nothing. Every further retry would have said the same, for ever —
+ * the tip cannot move again once the work is done, so no session could pass
+ * the check any more and a finished plan sat held.
+ *
+ * Asked of the branch instead, it answers what the stage actually owes: is
+ * there a plan here that was not here before. A retry over a finished plan
+ * passes, which is what lets a run that stumbled once still reach its build.
+ *
+ * "Newest phase" is resolved as {@link forgePlanStatus} resolves it, so all
+ * three witnesses of the back half talk about the same phase.
+ */
+async function forgePlannedPhase(
+  adapter: TicketingAdapter,
+  project: TicketingProject,
+  branch: string,
+): Promise<string | undefined> {
+  const newest = await newestPhaseFile(adapter, project, branch);
+  if (newest === undefined) return undefined;
+
+  const { defaultBranch } = await adapter.readBranches(project);
+  const base = await newestPhaseFile(adapter, project, defaultBranch);
+  return newest === base ? undefined : newest;
 }
 
 // `gitBranchHead` and `gitCurrentHead` lived here, reading a branch's tip and
@@ -1813,6 +1857,26 @@ export class AgentSessionSpawner implements SessionSpawner {
     }
   }
 
+  /**
+   * The phase file `branch` carries that the default branch does not, or
+   * undefined when it carries no new plan.
+   */
+  private async plannedPhase(
+    project: TicketingProject,
+    branch: string | undefined,
+  ): Promise<string | undefined> {
+    if (branch === undefined) return undefined;
+    const probe =
+      this.options.plannedPhaseProbe ??
+      ((target: TicketingProject, name: string) =>
+        forgePlannedPhase(this.options.adapter, target, name));
+    try {
+      return await probe(project, branch);
+    } catch {
+      return undefined;
+    }
+  }
+
   /** The verification report's path on `branch`, or undefined without one. */
   private async verificationReport(
     project: TicketingProject,
@@ -1963,19 +2027,30 @@ export class AgentSessionSpawner implements SessionSpawner {
     // on a ticket that never carried one.
     //
     // Judged exactly as the other unattended work stages are — the outcome the
-    // session recorded, over the artifact it owes. `producedWork` is that
-    // artifact's witness here: the branch tip moved, so a phase file exists.
-    // It is the branch-tip comparison R5 installed after the daemon once
-    // believed a session's exit code alone, and it is doing more work than
-    // usual at this stage, because with the gate gone nothing else stands
-    // between an empty branch and a build session.
+    // session recorded, over the artifact it owes. Nothing else stands between
+    // an empty branch and a build session, so the artifact half is doing more
+    // work at this stage than anywhere else.
+    //
+    // ✏ **The artifact, not `producedWork`.** This used to ask whether the
+    // branch tip moved while the session ran — the comparison R5 installed
+    // after the daemon once believed a session's exit code alone. That is a
+    // fact about one attempt, and {@link forgePlannedPhase} carries what it
+    // cost. The guard is unchanged in strength: a phase file the default
+    // branch does not already have.
     if (stage === "planning") {
-      return this.afterWorkStage(run, project, stage, outcome, async () => ({
-        ok: producedWork,
-        observed: producedWork
-          ? "the branch carries what it planned"
-          : "nothing was committed to the branch",
-      }));
+      return this.afterWorkStage(run, project, stage, outcome, async () => {
+        const planned = await this.plannedPhase(
+          project,
+          store.get(run.id)?.branch,
+        );
+        return {
+          ok: planned !== undefined,
+          observed:
+            planned !== undefined
+              ? `the branch carries ${planned}`
+              : "the branch carries no phase file that isn't on the default branch already",
+        };
+      });
     }
 
     // ✏ Built since phase 27, and it needs a branch here for the reason the
