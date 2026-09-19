@@ -699,3 +699,36 @@ export interface TicketingAdapter {
     reason: "completed" | "not-planned",
   ): Promise<void>;
 }
+
+/**
+ * True when `body` carries `marker`, reading the words and ignoring where the
+ * picture sits.
+ *
+ * **Every marker a session types is read through here**, and that is the whole
+ * reason it exists. The daemon judges an unattended stage partly by a line the
+ * session writes on the ticket, and the prompt hands that line over verbatim
+ * with "exactly as written" beside it. On 2026-09-19 a planning session on
+ * ivtrends [#101](https://github.com/fvermaut/ivtrends/issues/101) wrote
+ * `**Step finished** 🏁 ·` — every word right, the picture one place to the
+ * left — and a finished, committed, pushed plan was reported as a stage that
+ * had recorded no outcome. An exact match asks a language model to reproduce
+ * an emoji's position perfectly every time, and that is not something it can
+ * promise.
+ *
+ * So the pictures come out of both sides and the words are compared. The words
+ * alone still tell the three stage outcomes apart, and nothing here decides
+ * *whose* record a comment is — every caller has already checked it is
+ * Timone's.
+ */
+export function carriesMarker(body: string, marker: string): boolean {
+  return withoutPictures(body).includes(withoutPictures(marker));
+}
+
+/** `text` with the pictures dropped and the gaps they leave closed up. */
+function withoutPictures(text: string): string {
+  return text
+    .replace(/\p{Extended_Pictographic}\uFE0F?/gu, " ")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ ?\n ?/g, "\n")
+    .trim();
+}

@@ -1604,6 +1604,7 @@ describe("a finished planning session, now that planning is wait-free", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
+      plannedPhaseProbe: async () => "doc/plans/phases/phase-07.md",
     }).spawn(readyToPlan(store), project, { stage: "planning" });
 
     // Two sessions, and the second is the build — not a conversation.
@@ -1629,6 +1630,7 @@ describe("a finished planning session, now that planning is wait-free", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
+      plannedPhaseProbe: async () => "doc/plans/phases/phase-07.md",
     }).spawn(readyToPlan(store), project, { stage: "planning" });
 
     expect(requests.filter((r) => /plan the work for/i.test(r.prompt))).toHaveLength(1);
@@ -1656,15 +1658,16 @@ describe("a finished planning session, now that planning is wait-free", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
+      plannedPhaseProbe: async () => "doc/plans/phases/phase-07.md",
     }).spawn(readyToPlan(store), project, { stage: "planning" });
 
     expect(store.get("scratch-app#7/1")?.failure).not.toMatch(/classification/i);
     expect(requests[1].prompt).toMatch(/build what was planned/i);
   });
 
-  it("fails the run when the session said done but the branch never moved", async () => {
+  it("fails the run when the session said done but the branch carries no plan", async () => {
     // The artifact witness, asserted the other way. An ungated stage has no
-    // human between it and the build, so `producedWork` is the whole of what
+    // human between it and the build, so this witness is the whole of what
     // stands in for the gate's own "nothing to approve" guard — R5's history
     // is the daemon once trusting a session's word alone.
     const store = newStore();
@@ -1677,17 +1680,47 @@ describe("a finished planning session, now that planning is wait-free", () => {
       adapter,
       runtime,
       root: "/root",
-      // The branch sits on exactly the commit it started on: nothing committed.
-      repoProbe: async () => "sha-still",
-      headProbe: async () => "sha-still",
+      repoProbe: movingProbe(),
+      // The branch carries no phase file the default branch has not got
+      // already: nothing was planned here.
+      plannedPhaseProbe: async () => undefined,
     }).spawn(readyToPlan(store), project, { stage: "planning" });
 
     const run = store.get("scratch-app#7/1");
     expect(run?.status).toBe("failed");
-    expect(run?.failure).toMatch(/branch/i);
+    expect(run?.failure).toMatch(/phase file/i);
     expect(comments.at(-1)?.body).toMatch(/went wrong/i);
     // And it did not advance: no build session was ever started.
     expect(requests).toHaveLength(1);
+  });
+
+  it("advances a retry that found the plan already committed and had nothing to add", async () => {
+    // ivtrends #101, 2026-09-19. The first attempt committed the plan and was
+    // failed over its closing line; the retry found the plan already on the
+    // branch, so its session committed nothing, and the branch-tip witness
+    // failed it for producing nothing. No later retry could have passed
+    // either — the tip cannot move again once the work is done — so a
+    // finished plan sat held for good.
+    const store = newStore();
+    const { adapter } = fakeAdapter(ticketLabelled("triage:feature"));
+    const { runtime, requests } = planningRuntime(adapter);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      // Nothing moved this time round, and nothing needed to.
+      repoProbe: async () => "sha-still",
+      headProbe: async () => "sha-still",
+      plannedPhaseProbe: async () => "doc/plans/phases/phase-29.md",
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    // Planning passed on the plan already there, and the build was started.
+    // Where that build then ends is this fake's business, not this test's.
+    expect(store.get("scratch-app#7/1")?.failure).not.toMatch(/planning/i);
+    expect(requests[1]?.prompt).toMatch(/build what was planned/i);
   });
 
   it("stops quietly when the planning session handed the work to a person", async () => {
@@ -1702,6 +1735,7 @@ describe("a finished planning session, now that planning is wait-free", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
+      plannedPhaseProbe: async () => "doc/plans/phases/phase-07.md",
     }).spawn(readyToPlan(store), project, { stage: "planning" });
 
     expect(store.get("scratch-app#7/1")?.status).toBe("parked");
@@ -1815,6 +1849,9 @@ describe("a chore meets no gate on the way to its pull request", () => {
       // is why the walk stops at execution rather than running on into
       // verification. Everything this block asserts happens before that.
       planStatusProbe: async () => undefined,
+      // Planning's own witness, which that same absent checkout would
+      // otherwise answer for: the plan this walk wrote is on the branch.
+      plannedPhaseProbe: async () => "doc/plans/phases/phase-07.md",
     });
   }
 
@@ -4208,6 +4245,7 @@ describe("the version a run follows is fixed when the run starts", () => {
       runtime,
       root: "/root",
       repoProbe: movingProbe(),
+      plannedPhaseProbe: async () => "doc/plans/phases/phase-07.md",
       timoneProbe: async () => {
         reads += 1;
         return { uncommitted: [] };
