@@ -409,6 +409,20 @@ describe("the planning prompt", () => {
     // of what ADR-0030 D1 bought — a piece already agreed when the list was.
     expect(prompt).toMatch(/ask them for nothing/i);
   });
+
+  // timone#144. `ivtrends` #111: the stage posted the handed line and closed
+  // on "What I need from you: nothing right now". It stopped the work and
+  // asked for nothing, and the ticket sat still.
+  it("requires a question on the ending that stops for a person", () => {
+    expect(prompt).toMatch(/must end on one question/i);
+    expect(prompt).toMatch(/What I need from you: nothing/);
+  });
+
+  // The other half of the same stop: the ticket it was stopping on had been
+  // opened to ask for the very change it wanted permission for.
+  it("says a ticket asking for the change is the permission to make it", () => {
+    expect(prompt).toMatch(/before you stop at all, read the ticket/i);
+  });
 });
 
 describe("the execution prompt", () => {

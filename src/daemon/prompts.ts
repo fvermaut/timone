@@ -671,6 +671,19 @@ function outcomeBlock(done: string, handed: string): string {
     "That line is how the machinery knows how this ended. A session that posts",
     "neither leaves the ticket looking abandoned, and a session that posts the",
     "first without having done the work asks the machinery to build on nothing.",
+    "",
+    "**If you post the second line, the comment must end on one question they",
+    "can answer.** That question is the whole of what a person is given to act",
+    "on, and where the run does park on it, it is the words the ticket waits",
+    "on. A comment closing \"What I need from you: nothing\" stops and asks for",
+    "nothing, and it sits there until somebody notices — that is `ivtrends`",
+    "#111. Ask one thing, say what a useful answer looks like, and ask it in",
+    "this comment rather than pointing at something said earlier.",
+    "",
+    "**And before you stop at all, read the ticket again.** If the person who",
+    "opened it already asked for the very change you are about to stop and ask",
+    "permission for, you have your permission and there is nothing to ask. A",
+    "ticket written to settle something is the settling of it.",
   ].join("\n");
 }
 

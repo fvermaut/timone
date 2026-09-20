@@ -107,6 +107,21 @@ export const HANDBACK_MARKER =
 export const HANDBACK_STEP_PREFIX = "Carrying on at:";
 
 /**
+ * The line every message Timone posts ends on, and the one a reader looks at
+ * first — *"**What I need from you:** an answer here"*.
+ *
+ * A constant because it is now **read** as well as written. A stage that
+ * hands a run back is parked on what it asked for, and what it asked for is
+ * taken from this line in its own closing comment
+ * ([timone#144](https://github.com/fvermaut/timone/issues/144)). Before that
+ * the wait was a fixed sentence — *"your answer to the question in my last
+ * comment"* — written without looking at whether the comment held a question
+ * at all. On `ivtrends` #111 it did not, and the ticket asked a person for
+ * nothing while the run waited for their answer.
+ */
+export const NEEDED_FROM_YOU = "**What I need from you:**";
+
+/**
  * The line the preview comment carries, so a pull request ends up with one of
  * them rather than one per poll cycle.
  *

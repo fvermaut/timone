@@ -1928,7 +1928,7 @@ async function cheaperAsk(
   const spoken = lastHumanWords(thread);
   const plan = planAskCheck(body, run.askCheck, spoken?.createdAt);
   if (plan.kind === "as-composed") return body;
-  if (plan.kind === "reuse") return `${CTA_MARKER}\n\n${plan.question}`;
+  if (plan.kind === "reuse") return instead(plan.question, cta, spoken);
 
   let verdict;
   try {
@@ -1949,7 +1949,35 @@ async function cheaperAsk(
   deps.store.rememberAskCheck(run.id, { for: body, question: verdict.question });
   log(`ask    ${run.project}#${run.ticket} — asked instead of sending them away`);
 
-  return `${CTA_MARKER}\n\n${verdict.question}`;
+  return instead(verdict.question, cta, spoken);
+}
+
+/**
+ * The standing note as the check leaves it: its question in place of the
+ * words, and the command kept whenever nobody has spoken
+ * ([timone#145](https://github.com/fvermaut/timone/issues/145)).
+ *
+ * **Taking the command away is the point, and only for somebody who has
+ * spoken.** ADR-0054 was written for `ivtrends` #90: a reply of `aprrove`
+ * answered with a demand for a terminal session, where the expensive thing
+ * *was* the command and asking one short question instead of it is the whole
+ * saving. That case still drops it, because they replied.
+ *
+ * Nobody replying is the other case, and on `ivtrends` #111 it cost a person
+ * their only way out. The note said *"answer the question in my last
+ * comment"* on a comment holding no question (timone#144), the check saw the
+ * hole and wrote a question about it, and the note — `upsertComment`, so
+ * replaced rather than added to — lost the `timone takeover` line that frees
+ * a stuck run. A person who has said nothing has not been misread, so there
+ * is nothing to rescue them from and no reason to spend their way out on it.
+ */
+function instead(question: string, cta: Cta, spoken: TicketComment | undefined): string {
+  const keepTheWayOut = spoken === undefined && cta.command !== undefined;
+
+  return [
+    `${CTA_MARKER}\n\n${question}`,
+    ...(keepTheWayOut ? ["", "```", cta.command, "```"] : []),
+  ].join("\n");
 }
 
 /**

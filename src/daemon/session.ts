@@ -41,7 +41,12 @@ import {
 } from "./steps.js";
 import { STAGE_TRAILER } from "./hooks.js";
 import { instant, readConversationRecord, waitCursorFrom } from "./gates.js";
-import { outcomeCursorFrom, readStageOutcome, type StageOutcome } from "./outcomes.js";
+import {
+  askedFor,
+  outcomeCursorFrom,
+  readStageOutcome,
+  type StageOutcome,
+} from "./outcomes.js";
 import {
   APPROVAL_RECORD_MODEL,
   classificationFromLabels,
@@ -1040,8 +1045,24 @@ function handBack(
   // resumes where it stopped. Naming it here is what lets `releaseClaim` ask
   // whether the work it just did belongs to this wait.
   const endedBy: PipelineStage[] = [stage];
+
+  // **The wait is what the stage asked for, in the stage's own words**
+  // ([timone#144](https://github.com/fvermaut/timone/issues/144)). It used to
+  // be one fixed sentence — *"your answer to the question in my last
+  // comment"* — written without reading the comment it named. On `ivtrends`
+  // #111 that comment asked for nothing, so the ticket's standing note sent a
+  // person to a question nobody had asked, the check that stands in front of
+  // every ask saw the hole and replaced the note with a question of its own,
+  // and the one line that frees a stuck run went with it (timone#145).
+  //
+  // The fallback is the old sentence, and it is not a fix for a stage that
+  // asked nothing — `outcomeBlock` is, by requiring the question. It is here
+  // because a wait has to say something, and pointing at the comment is truer
+  // than inventing an ask the stage never made.
+  const asked = askedFor(outcome.comment.body);
+
   store.park(id, {
-    waitingOn: "your answer to the question in my last comment.",
+    waitingOn: asked ?? "your answer to the question in my last comment.",
     kind: "conversation",
     stage,
     waitCursor: outcome.comment.createdAt,

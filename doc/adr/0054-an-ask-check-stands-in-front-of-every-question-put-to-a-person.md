@@ -5,6 +5,7 @@
 - **Source:** fvermaut's rulings of 2026-09-11, in the grill session on [timone#128](https://github.com/fvermaut/timone/issues/128) — four questions, each answered against a recommendation
 - **Extends:** [ADR-0052](0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), which ruled that a typed reply always moves the work, and did not say what becomes of a reply that is neither of the two answers a gate expects
 - **Bounds:** [ADR-0033](0033-a-stage-that-cannot-act-on-an-answer-escalates.md), whose escalation machinery ADR-0052 left standing as a last-resort guard; [ADR-0022](0022-a-conversation-ticket-can-be-answered-in-writing.md), whose one clarifying round is untouched
+- **✏ Amended 2026-09-20** — D1's *replace it* takes the way out with it, and on `ivtrends` #111 that left a person with nothing to do. A replacement now keeps the command whenever nobody has spoken; see [the amendment below](#-amendment-2026-09-20--a-replacement-keeps-the-way-out-for-somebody-who-has-not-spoken) and [timone#145](https://github.com/fvermaut/timone/issues/145)
 
 ## Context
 
@@ -47,3 +48,21 @@ The same diagnosis rules out the obvious repair. ADR-0033 recorded five verifica
 - **The ask check is the rejected design wearing a leash, and the leash is prose.** D2 is a rule a model is asked to honour, and [timone#36](https://github.com/fvermaut/timone/issues/36) records what those are worth. Where the limit can be enforced by construction it must be — an ask check that is never handed the means to write a run's state cannot move one, whatever it concludes.
 - **This closes a rollout gap, not only a defect.** ADR-0052's rule reached `process.md` and the skills and did not reach `gates.ts`. Any work carrying this decision checks the rest of that ADR's sentences against the code they govern, because two instances in six days is a pattern and not bad luck.
 - **A gate that gets a third kind of answer is now a named thing.** Before this, a reply was an approval or a rejection by construction, and the register of what a human can say had no room for *I cannot tell*. Anything later reading replies inherits that third case.
+
+## ✏ Amendment 2026-09-20 — a replacement keeps the way out for somebody who has not spoken
+
+`ivtrends` [#111](https://github.com/fvermaut/ivtrends/issues/111). The planning stage stopped and the standing note composed for it read *"This one is waiting on you"*, a fenced `timone takeover ivtrends#111`, and *"What I need from you: your answer to the question in my last comment."* There was no question in that comment — [timone#144](https://github.com/fvermaut/timone/issues/144) is why.
+
+The check saw the hole and replaced the note with this:
+
+> The message says "your answer to the question in my last comment" but does not quote that question. What is the specific question you are asking them to answer? Quote it here so the message can name it.
+
+Two things were wrong, and the first is the reason the second cost anything.
+
+**The question was written to the machine.** It asks whoever composed the message to go back and quote something. There is nobody on that end: D2 is explicit that the answer is read by the ordinary machinery, and the ordinary machinery does not rewrite its own messages. So the person was shown a question no person can answer.
+
+**And the note is upserted, so the command went with it.** The standing note is the one comment on a ticket that carries the line which frees a stuck run. Replacing it removed that line. fvermaut found the ticket four hours later and read it as blocked with no way out, which it was.
+
+**D1 is unchanged in substance, and narrowed in one place.** Replacing the message — command and all — is still the right thing for somebody who has spoken, because that is `ivtrends` #90: the reply was `aprrove`, the expensive thing *was* the command, and one short question instead of it is the whole saving. But where nobody has replied, nobody has been misread. There is nothing to rescue them from, and no reason to spend their way out on it. **So a replacement keeps the composed message's command whenever the person has said nothing since the machine last spoke.** D3's limit is untouched: the check still speaks only where a person was already going to be asked.
+
+The first fault is not fixable by construction — the check's judgement is a model's — so it is closed where it happens, in the prompt: the question is written to the person and to nobody else, and a message that is itself wrong or incomplete is let through, because there is nobody there to fix it.
