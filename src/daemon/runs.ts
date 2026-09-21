@@ -221,6 +221,18 @@ const runSchema = z.strictObject({
        * the stage it was parked at.
        */
       resolvableBy: z.array(z.enum([...PIPELINE_STAGES])).optional(),
+      /**
+       * The instant of the newest comment this wait has already told the
+       * human it read ([timone#147](https://github.com/fvermaut/timone/issues/147)).
+       *
+       * **It is a receipt, not a cursor.** A review park never advances its
+       * cursor — everything written after the park is the answer, joined —
+       * so without a second field the loop cannot tell "they have just
+       * written this" from "they wrote this and I said so a cycle ago", and
+       * a run whose spawn is refused posts the same acknowledgement every
+       * sixty seconds.
+       */
+      acknowledgedAt: z.string().optional(),
     })
     .optional(),
   /**
@@ -737,6 +749,12 @@ export interface ParkOptions {
    * carrying: see {@link Run.consumedAnswerAt}.
    */
   consumedAnswerAt?: string;
+  /**
+   * The instant of the newest comment the human has already been told was
+   * read. Set only by the acknowledgement that posted it; every ordinary
+   * park leaves it out and so forgets it.
+   */
+  acknowledgedAt?: string;
 }
 
 /**
@@ -2049,6 +2067,9 @@ function applyPark(run: Run, options: ParkOptions): void {
     ...(kind === undefined ? {} : { kind }),
     ...(options.waitCursor === undefined ? {} : { opened: options.waitCursor }),
     ...(endedBy === undefined ? {} : { resolvableBy: endedBy }),
+    ...(options.acknowledgedAt === undefined
+      ? {}
+      : { acknowledgedAt: options.acknowledgedAt }),
   };
   run.consumedAnswerAt = options.consumedAnswerAt;
   run.reAsksAfterAnswer = count;

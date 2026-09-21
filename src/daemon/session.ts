@@ -1153,6 +1153,11 @@ export function waitOf(run: Run): ParkOptions {
     ...(run.wait?.kind === undefined ? {} : { kind: run.wait?.kind }),
     ...(run.stage === undefined ? {} : { stage: run.stage }),
     ...(run.wait?.opened === undefined ? {} : { waitCursor: run.wait?.opened }),
+    // Carried, unlike the consumed marker: this one says what the human has
+    // already been told, and a re-park that forgot it would say it again.
+    ...(run.wait?.acknowledgedAt === undefined
+      ? {}
+      : { acknowledgedAt: run.wait?.acknowledgedAt }),
   };
 }
 

@@ -486,6 +486,36 @@ export function pickedUpComment(): string {
 }
 
 /**
+ * The acknowledgement posted on a **pull request** when the human's review
+ * comment has been read and a session is starting on it
+ * ([timone#147](https://github.com/fvermaut/timone/issues/147)).
+ *
+ * **The one surface that said nothing.** A new ticket gets
+ * {@link pickedUpComment}; a review comment used to get silence from the
+ * moment it was written until the remediation finished — which on
+ * 2026-09-21 was long enough for fvermaut to conclude the machine was not
+ * picking it up at all, and to ask so on the ticket. Silence and "not
+ * listening" look identical, and only one of them is worth a person's
+ * attention.
+ *
+ * It is posted as a new comment rather than an edit of an older one,
+ * because the reader judges a pull request by its newest message: an
+ * acknowledgement edited into a comment from three hours ago is not one.
+ */
+export function reviewReadComment(): string {
+  return [
+    "**I've read your comment.**",
+    "",
+    "I'm working on it now. I'll change the code on this branch where your",
+    "words ask for a change, and I'll reply here when I'm done — either with",
+    "what I changed, or with a question if something isn't clear.",
+    "",
+    "**What I need from you:** nothing right now. This can take a while, and",
+    "there's nothing to see until I write back.",
+  ].join("\n");
+}
+
+/**
  * The acknowledgement posted when a ticket has to wait: this project is
  * already working something else, and it works one thing at a time.
  */
@@ -2220,6 +2250,34 @@ async function resumeAnswered(
           consumedAnswerAt: resumption.consumed,
         });
       }
+
+      // **Before the spawn, because the spawn is the long part.** A session
+      // runs inside this cycle and takes as long as the work does, so an
+      // acknowledgement posted after it would arrive with the answer it was
+      // meant to precede — which is no acknowledgement at all. Posted here,
+      // the human sees it within one cycle of writing.
+      //
+      // The receipt is written first and separately: if posting throws, the
+      // catch below leaves the run parked and the next cycle tries again,
+      // and if the *spawn* is refused the receipt is what stops this from
+      // becoming one comment a minute for as long as the refusal lasts.
+      if (
+        resumption.acknowledge !== undefined &&
+        run.pr !== undefined &&
+        run.wait?.acknowledgedAt !== resumption.acknowledge
+      ) {
+        store.repark(run.id, {
+          ...waitOf(run),
+          acknowledgedAt: resumption.acknowledge,
+        });
+        await adapter.postPullRequestComment(
+          project,
+          run.pr,
+          reviewReadComment(),
+        );
+        log(`read   ${run.id} — told PR #${run.pr} its comment was read`);
+      }
+
       await deps.spawner.spawn(run, project, resumption.context);
       deps.store.started(run.id);
       result.resumed.push(run.id);
@@ -2864,6 +2922,18 @@ interface Resumption {
    * something other than a comment the loop must not read twice.
    */
   consumed?: string;
+  /**
+   * The instant of the newest comment this resumption was decided from, when
+   * the human should be told it was read — a review park, whose answer is
+   * words they wrote on the pull request and who otherwise hear nothing
+   * until the work is finished ([timone#147](https://github.com/fvermaut/timone/issues/147)).
+   *
+   * Separate from {@link consumed} because a review park does not consume:
+   * its cursor stays put so that everything written after it keeps counting
+   * as the answer. This says only "they have been told", and is compared
+   * against the receipt on the wait.
+   */
+  acknowledge?: string;
 }
 
 /**
@@ -3034,14 +3104,20 @@ async function resolveWait(
     // Only a human wakes a parked review. The machine's own bookkeeping —
     // outcome comments, threaded replies — lands on the same surface, and a
     // loop that answered itself would remediate forever.
-    const words = pr.comments
-      .filter(
-        (comment) =>
-          !comment.fromTimone && instantOf(comment.createdAt) > instantOf(cursor),
-      )
-      .map((comment) => comment.body.trim())
-      .filter((body) => body !== "");
+    const said = pr.comments.filter(
+      (comment) =>
+        !comment.fromTimone &&
+        instantOf(comment.createdAt) > instantOf(cursor) &&
+        comment.body.trim() !== "",
+    );
+    const words = said.map((comment) => comment.body.trim());
     if (words.length === 0) return undefined;
+
+    // The newest of the comments this resumption was decided from, so the
+    // receipt names exactly what the human has been told was read. A second
+    // thought written while the session runs is newer than this, and is
+    // therefore still owed an acknowledgement of its own.
+    const newest = said[said.length - 1].createdAt;
 
     // Where it resumes is read off the wait rather than named here
     // (ADR-0049 D5): the writer recorded what could end this wait, and a
@@ -3051,6 +3127,7 @@ async function resolveWait(
     const into = run.wait?.resolvableBy?.[0] ?? "remediation";
     return {
       context: { stage: into, feedback: words.join("\n\n---\n\n") },
+      acknowledge: newest,
     };
   }
 
