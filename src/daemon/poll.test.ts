@@ -1278,10 +1278,13 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     posted: PostedComment[];
     closed: string[];
     labelled: string[];
+    /** Bodies posted on the pull request itself, in order. */
+    onPull: string[];
   } {
     const posted: PostedComment[] = [];
     const closed: string[] = [];
     const labelled: string[] = [];
+    const onPull: string[] = [];
     const base = ticket(6, { labels });
     const adapter: TicketingAdapter = {
       ...noBranches,
@@ -1322,14 +1325,16 @@ describe("pollOnce — a run parked on a pull-request review", () => {
           comments,
         };
       },
-      async postPullRequestComment(): Promise<void> {},
+      async postPullRequestComment(_project, _number, body): Promise<void> {
+        onPull.push(body);
+      },
   async upsertPullRequestComment(): Promise<void> {},
       async upsertComment(): Promise<void> {},
       async closeTicket(_project, number, reason): Promise<void> {
         closed.push(`${number}:${reason}`);
       },
     };
-    return { adapter, posted, closed, labelled };
+    return { adapter, posted, closed, labelled, onPull };
   }
 
   it("completes the run and promotes the queue when the PR merged", async () => {
@@ -1457,6 +1462,110 @@ describe("pollOnce — a run parked on a pull-request review", () => {
         feedback: expect.stringContaining("shadows the prop"),
       },
     ]);
+  });
+
+  it("tells the pull request its comment was read, before the session starts", async () => {
+    const store = newStore();
+    parkedOnReview(store);
+    const { adapter, onPull } = reviewAdapter("open", [
+      {
+        author: "fvermaut",
+        body: "The table is awkward. It should be full width.",
+        createdAt: "2026-08-06T12:00:00Z",
+        fromTimone: false,
+      },
+    ]);
+    // The acknowledgement has to be on the pull request *before* the session
+    // runs: a session takes as long as the work does, and one posted after it
+    // arrives with the answer it was meant to precede.
+    const order: string[] = [];
+
+    await pollOnce({
+      manifest: manifestWith("scratch-app"),
+      store,
+      adapter,
+      spawner: {
+        async spawn(): Promise<void> {
+          order.push(`spawn:${onPull.length}`);
+        },
+      },
+    });
+
+    expect(onPull).toHaveLength(1);
+    expect(onPull[0]).toContain("I've read your comment");
+    expect(order).toEqual(["spawn:1"]);
+  });
+
+  it("does not say it again for a comment it has already acknowledged", async () => {
+    const store = newStore();
+    parkedOnReview(store);
+    const { adapter, onPull } = reviewAdapter("open", [
+      {
+        author: "fvermaut",
+        body: "The table is awkward. It should be full width.",
+        createdAt: "2026-08-06T12:00:00Z",
+        fromTimone: false,
+      },
+    ]);
+
+    // A spawn that is refused leaves the run parked, and the next cycle reads
+    // the very same comment again. Without the receipt that is one comment on
+    // the client's pull request every sixty seconds for as long as the refusal
+    // lasts.
+    const spawner = {
+      async spawn(): Promise<void> {
+        throw new Error("timone has uncommitted changes");
+      },
+    };
+    const options = { manifest: manifestWith("scratch-app"), store, adapter, spawner };
+
+    await pollOnce(options);
+    await pollOnce(options);
+
+    expect(store.get("scratch-app#6/1")?.status).toBe("parked");
+    expect(onPull).toHaveLength(1);
+  });
+
+  it("acknowledges again when the human writes something new", async () => {
+    const store = newStore();
+    parkedOnReview(store);
+    const { adapter: first, onPull } = reviewAdapter("open", [
+      {
+        author: "fvermaut",
+        body: "The table is awkward.",
+        createdAt: "2026-08-06T12:00:00Z",
+        fromTimone: false,
+      },
+    ]);
+    const spawner = {
+      async spawn(): Promise<void> {
+        throw new Error("timone has uncommitted changes");
+      },
+    };
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter: first, spawner });
+    expect(onPull).toHaveLength(1);
+
+    // A second thought, written after the first was acknowledged. It is newer
+    // than the receipt, so it is owed an acknowledgement of its own.
+    const { adapter: second, onPull: again } = reviewAdapter("open", [
+      {
+        author: "fvermaut",
+        body: "The table is awkward.",
+        createdAt: "2026-08-06T12:00:00Z",
+        fromTimone: false,
+      },
+      {
+        author: "fvermaut",
+        body: "And the columns look broken.",
+        createdAt: "2026-08-06T13:00:00Z",
+        fromTimone: false,
+      },
+    ]);
+
+    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter: second, spawner });
+
+    expect(again).toHaveLength(1);
   });
 
   it("stays parked on machine comments and on comments before the cursor", async () => {
