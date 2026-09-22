@@ -162,6 +162,7 @@ resolve as the PRD matures.>
 - **Every `MUST` requirement needs at least one Given/When/Then criterion and a verification hint.** If you cannot write one, the requirement is not yet testable — **ask the user** to sharpen it or downgrade it to `SHOULD`. Never emit a MUST without observable criteria.
 - `SHOULD` and `NICE` requirements may use free-form prose criteria.
 - Prefer `verify-via: api` wherever a behaviour is observable at the API/DB level, even if it also has a UI — the api channel is the cheap, automated one.
+- **But a requirement that puts something new on a screen also carries at least one clause marked `(browser)`** — ✏ 2026-09-22 ([ADR-0057](../../../doc/adr/0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md)). The arithmetic stays on `api`, so it stays in the regression set. The `(browser)` clause says what the person sees and where it sits, for example: *"GIVEN the positions page WHEN a ticker's total is shown THEN it sits on the ticker's own line, labelled with the ticker's name."* The verifier checks that one clause in a real browser; the requirement keeps its channel. A text check confirmed every number on `ivtrends` phase 36's new section and could not see that half of them had no label.
 - Criteria describe **observable behaviour**, never implementation ("the endpoint returns the recalled snapshot with status 410", not "the recallSnapshot function sets the flag").
 
 ### Accessibility criteria (mandatory baseline — PRD-01.R20)
@@ -196,6 +197,7 @@ When **any requirement covers user-facing functionality**, the criteria register
 - [ ] `projects/<name>/doc/specs/prd/prd-NN-<slug>.md` written — readable standalone, no Given/When/Then blocks
 - [ ] `projects/<name>/doc/specs/prd/prd-NN-<slug>.criteria.md` written — every requirement has ID, priority, status `draft`, verify-via
 - [ ] Every MUST has at least one Given/When/Then criterion and a verification hint
+- [ ] Every requirement that puts something new on a screen has at least one clause marked `(browser)` ([ADR-0057](../../../doc/adr/0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md))
 - [ ] Every MUST ID is referenced in the narrative's In-scope section
 - [ ] Out-of-scope section is non-empty (an empty one means scope was never questioned)
 - [ ] User-facing requirements carry accessibility acceptance criteria from the baseline (PRD-01.R20)
