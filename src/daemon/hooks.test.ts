@@ -1059,7 +1059,7 @@ describe("a register that claims more than it established", () => {
     const evidence = cleanEvidence();
     return {
       ...evidence,
-      registers: [{ repo: "scratch-app", path: REGISTER, source }],
+      registers: [{ repo: "scratch-app", path: REGISTER, source, checkout: "project" }],
       projects: evidence.projects.map((repo) =>
         repo.repo === "scratch-app" && touched
           ? { ...repo, workingTree: [REGISTER] }
@@ -1125,5 +1125,41 @@ describe("a register that claims more than it established", () => {
     expect(checkAll(registered(UNIVERSAL)).map((violation) => violation.rule)).toContain(
       "register-claims",
     );
+  });
+
+  describe("when Timone is also a managed project", () => {
+    // `projects/timone/` is a second clone of this repository, and both are
+    // labelled "timone". On 2026-09-22 a session edited PRD-03's register at
+    // the root, where R1 and R5 were `draft`, and was refused its stop over
+    // the stale clone's copy of the same path, where they were still
+    // `verified`. An edit to one checkout says nothing about the other.
+    function bothCheckouts(edited: "workspace" | "project"): SessionEvidence {
+      const evidence = cleanEvidence();
+      const clone = { ...evidence.workspace, workingTree: [] as string[] };
+      return {
+        ...evidence,
+        workspace: {
+          ...evidence.workspace,
+          workingTree: edited === "workspace" ? [REGISTER] : [],
+        },
+        projects: [
+          { ...clone, workingTree: edited === "project" ? [REGISTER] : [] },
+        ],
+        registers: [
+          { repo: "timone", path: REGISTER, source: UNIVERSAL.replace("verified", "draft"), checkout: "workspace" },
+          { repo: "timone", path: REGISTER, source: UNIVERSAL, checkout: "project" },
+        ],
+      };
+    }
+
+    it("does not judge the clone's copy of a file edited at the root", () => {
+      expect(checkRegisterClaims(bothCheckouts("workspace"))).toEqual([]);
+    });
+
+    it("still judges the clone's copy when the clone's copy was edited", () => {
+      expect(checkRegisterClaims(bothCheckouts("project")).map((v) => v.rule)).toEqual([
+        "register-claims",
+      ]);
+    });
   });
 });
