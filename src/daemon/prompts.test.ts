@@ -532,6 +532,28 @@ describe("the remediation prompt", () => {
     expect(prompt).toMatch(/reply|ask/i);
   });
 
+  // ADR-0058, after ivtrends#118 on 2026-09-22: a comment with four points,
+  // one of which decided a requirement, got every point refused and a
+  // question the comment had already answered.
+  it("judges a comment point by point, never as one piece", () => {
+    expect(prompt).toMatch(/each point/i);
+    expect(prompt).not.toMatch(/exactly one of these/i);
+  });
+
+  it("never holds a clear fix back because another point needs something else", () => {
+    expect(prompt).toMatch(/never hold(s)? (a|one) clear (point|fix) back/i);
+  });
+
+  it("writes a requirement the comment itself decides, as a marked amendment", () => {
+    expect(prompt).toMatch(/the comment (itself )?(states|decides|says) what the\s+requirement/i);
+    expect(prompt).toMatch(/marked amendment/i);
+    expect(prompt).toContain("revised");
+  });
+
+  it("asks only about a point it would have to guess at", () => {
+    expect(prompt).toMatch(/ask about that point only/i);
+  });
+
   it("carries both outcome markers, verbatim", () => {
     expect(prompt).toContain(STAGE_DONE_MARKER);
     expect(prompt).toContain(STAGE_HANDED_MARKER);
