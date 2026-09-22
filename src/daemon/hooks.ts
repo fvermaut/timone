@@ -855,17 +855,29 @@ async function workingTreePaths(dir: string): Promise<string[]> {
 }
 
 /**
- * The trailer lines of a commit message: the `Key: value` lines of its final
- * paragraph. Read here rather than via `git log --format=%(trailers)` so the
- * message is parsed once, alongside the file list, from a single log call.
+ * The trailer lines of a commit message: the `Key: value` lines of its
+ * closing paragraphs. Read here rather than via `git log --format=%(trailers)`
+ * so the message is parsed once, alongside the file list, from a single log
+ * call.
+ *
+ * **Paragraphs, not the final paragraph alone** —
+ * [timone#152](https://github.com/fvermaut/timone/issues/152). GitHub's
+ * squash merge keeps the source commit's trailers and then adds its own
+ * `Co-authored-by:` in a paragraph after them. Git's own parser reads only
+ * the last paragraph and loses `Timone-Stage:`, and so did this, which
+ * reported every squash of a correctly trailered pull request as a commit
+ * with no provenance. So this walks back from the end while each paragraph
+ * is wholly trailers, and never reads the subject line.
  */
-function trailersOf(message: string): string[] {
+export function trailersOf(message: string): string[] {
   const paragraphs = message.trimEnd().split(/\n\s*\n/);
-  const last = paragraphs.at(-1) ?? "";
-  const lines = last.split("\n").map((line) => line.trim());
-  return lines.every((line) => /^[A-Za-z][A-Za-z0-9-]*:\s*\S/.test(line))
-    ? lines
-    : [];
+  const trailers: string[] = [];
+  for (let index = paragraphs.length - 1; index > 0; index--) {
+    const lines = paragraphs[index].split("\n").map((line) => line.trim());
+    if (!lines.every((line) => /^[A-Za-z][A-Za-z0-9-]*:\s*\S/.test(line))) break;
+    trailers.unshift(...lines);
+  }
+  return trailers;
 }
 
 /** One repository's tip shas, taken before the session runs. */
