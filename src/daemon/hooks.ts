@@ -97,6 +97,19 @@ export interface RegisterFile {
   /** Its path, as a reader would open it. */
   path: string;
   source: string;
+  /**
+   * Which checkout it was read from: the workspace, or a managed project's
+   * clone under `projects/`.
+   *
+   * **Not the same thing as {@link repo}.** Since ADR-0050 Timone is also a
+   * managed project, so the workspace and `projects/timone/` are both
+   * labelled "timone" and hold the same paths. Matched on the label alone, an
+   * edit to one register was judged against the other checkout's copy: on
+   * 2026-09-22 a session that edited PRD-03's register at the root was
+   * refused its stop over R1 and R5, which were `draft` there and still
+   * `verified` in the stale clone.
+   */
+  checkout: "workspace" | "project";
 }
 
 export interface SessionEvidence {
@@ -546,16 +559,26 @@ export function checkProvenance(evidence: SessionEvidence): Violation[] {
  * this session's claim to answer for.
  */
 function touchedPaths(evidence: SessionEvidence): Map<string, Set<string>> {
-  const byRepo = new Map<string, Set<string>>();
-  for (const repo of [...evidence.projects, evidence.workspace]) {
-    const paths = byRepo.get(repo.repo) ?? new Set<string>();
+  const byCheckout = new Map<string, Set<string>>();
+  const checkouts: [RegisterFile["checkout"], RepoEvidence][] = [
+    ...evidence.projects.map((repo): [RegisterFile["checkout"], RepoEvidence] => ["project", repo]),
+    ["workspace", evidence.workspace],
+  ];
+  for (const [checkout, repo] of checkouts) {
+    const key = checkoutKey(checkout, repo.repo);
+    const paths = byCheckout.get(key) ?? new Set<string>();
     for (const commit of repo.commits) {
       for (const file of commit.files) paths.add(file);
     }
     for (const file of repo.workingTree) paths.add(file);
-    byRepo.set(repo.repo, paths);
+    byCheckout.set(key, paths);
   }
-  return byRepo;
+  return byCheckout;
+}
+
+/** One checkout's key: the label alone cannot tell the workspace from `projects/timone/`. */
+function checkoutKey(checkout: RegisterFile["checkout"], repo: string): string {
+  return `${checkout}:${repo}`;
 }
 
 export function checkRegisterClaims(evidence: SessionEvidence): Violation[] {
@@ -568,7 +591,7 @@ export function checkRegisterClaims(evidence: SessionEvidence): Violation[] {
     // will touch until the session ends — but a fault in one nobody opened is
     // not this session's to answer for, and reporting it refuses the stop of
     // every session at this root until somebody unrelated fixes the file.
-    if (!touched.get(register.repo)?.has(register.path)) continue;
+    if (!touched.get(checkoutKey(register.checkout, register.repo))?.has(register.path)) continue;
 
     const faults = registerFaults(register.source);
     if (faults.length === 0) continue;
@@ -1029,7 +1052,11 @@ function madeElsewhere(commit: CommitEvidence, sessionId: string): boolean {
  * written yet is the ordinary state of a young one, and a checkout that is not
  * there at all is `workspace sync`'s business, not this check's.
  */
-function readRegisters(dir: string, repo: string): RegisterFile[] {
+function readRegisters(
+  dir: string,
+  repo: string,
+  checkout: RegisterFile["checkout"],
+): RegisterFile[] {
   const specs = join(dir, "doc", "specs", "prd");
   let names: string[];
   try {
@@ -1046,6 +1073,7 @@ function readRegisters(dir: string, repo: string): RegisterFile[] {
         repo,
         path: join("doc", "specs", "prd", name),
         source: readFileSync(join(specs, name), "utf8"),
+        checkout,
       });
     } catch {
       // A register that cannot be read says nothing about its claims, and one
@@ -1085,9 +1113,9 @@ export async function collectEvidence(
     ...(session.target === undefined ? {} : { target: session.target }),
     workspace: await collectRepo(root, "timone", baseline.workspace, session.sessionId),
     registers: [
-      ...readRegisters(root, "timone"),
+      ...readRegisters(root, "timone", "workspace"),
       ...[...baseline.projects.keys()].flatMap((name) =>
-        readRegisters(join(root, "projects", name), name),
+        readRegisters(join(root, "projects", name), name, "project"),
       ),
     ],
     projects,
