@@ -27,6 +27,7 @@ import {
   checkUnpushed,
   disposeViolations,
   reportGuardrails,
+  trailersOf,
   type RepoEvidence,
   type SessionEvidence,
   type Violation,
@@ -1161,5 +1162,49 @@ describe("a register that claims more than it established", () => {
         "register-claims",
       ]);
     });
+  });
+});
+
+describe("trailersOf", () => {
+  // timone#152. GitHub's squash merge keeps the source commit's trailers but
+  // puts its own `Co-authored-by:` in a paragraph after them, so the final
+  // paragraph alone no longer holds `Timone-Stage:`. This is 80a6e1c's
+  // message, the squash of #150, cut to its shape.
+  const SQUASHED = [
+    "Every screen a phase changes is looked at (ADR-0057) (#150)",
+    "",
+    "ivtrends#118 passed 38 of 38 checks.",
+    "",
+    "",
+    "Timone-Stage: interactive",
+    "Timone-Session: bef7c92f-7690-481c-81e3-a1b3effc7c90",
+    "",
+    "Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>",
+    "",
+  ].join("\n");
+
+  it("reads the trailers GitHub's squash split into two paragraphs", () => {
+    expect(trailersOf(SQUASHED)).toEqual([
+      "Timone-Stage: interactive",
+      "Timone-Session: bef7c92f-7690-481c-81e3-a1b3effc7c90",
+      "Co-authored-by: Claude Opus 5.5 (1M context) <noreply@anthropic.com>",
+    ]);
+  });
+
+  it("reads a single closing trailer paragraph as before", () => {
+    expect(trailersOf("fix: x\n\nbody\n\nTimone-Stage: execution\n")).toEqual([
+      "Timone-Stage: execution",
+    ]);
+  });
+
+  it("stops at the first paragraph that is not all trailers", () => {
+    // A `Key: value` line inside the body is prose, not provenance.
+    expect(
+      trailersOf("fix: x\n\nTimone-Stage: execution\nand some prose\n\nCo-authored-by: a <a@b>"),
+    ).toEqual(["Co-authored-by: a <a@b>"]);
+  });
+
+  it("never reads the subject line as a trailer", () => {
+    expect(trailersOf("Timone-Stage: interactive")).toEqual([]);
   });
 });
