@@ -152,7 +152,26 @@ The loop the spec mandates, restated with no variants:
 
 **Every difference is fixed, or written down with its reason.** The reflow and accessibility adaptations [ADR-0037](../../../doc/adr/0037-a-prototype-that-settles-a-look-is-kept-and-only-its-presentation-crosses.md) requires are the expected content of that list — a prototype normally fails the baseline, so a clean comparison with an empty list is the suspicious outcome, not the good one. The list goes in the slice's handoff note and is carried into the completion report, because it is what the human actually approves at stage 8's look gate.
 
+**The same comparison runs again at the end of the phase, on every screen the phase changed** — see *The phase's look check* below. The shell slice's check does not replace it, and it does not replace the shell slice's check.
+
 **An unexplained difference fails the slice's validation** like any other failing check, under the bounded retries below. ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), an unresolved difference after those retries funnels into the same updated failure handling as any other exhausted retry: recorded in the departures record and carried forward, never escalated to a stop. A builder that writes a long enough reason list can pass this gate by construction; that is deliberate — the alternative is a machine judging taste — and it is why the list, not the verdict, is the artifact.
+
+## The phase's look check
+
+✏ 2026-09-22 ([ADR-0057](../../../doc/adr/0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md)). The shell slice's check runs only when a phase builds a screen or changes its layout. `ivtrends` phase 36 added a whole section to the positions screen, had no shell slice, and nothing looked at it: the section's cards had their text pushed right, its totals had no label, and the table above it was cut off.
+
+**When the phase file's `Screens changed` line names any screen, the phase does not close without this check.** It runs after every prior slice's validation has been re-run (see *Closing the phase*), and before the completion report is written.
+
+1. **Load the preview's sample data** — the project's compose `seed` service when it declares one, otherwise the seed command its README names — and stand the app up in its production form.
+2. **Spawn a fresh context that did not build any slice of this phase.** Give it each screen's address, the reference the line names (the kept prototype, or `doc/design.md`), and the window size that reference uses. It opens each screen, takes one full-page screenshot, and reports differences. It does not fix them and it does not judge taste.
+3. **The comparison is the shell slice's named list above, plus three items:**
+   - every figure has a label a reader can see beside it
+   - nothing is cut off at the window edge, and nothing needs a sideways scroll the reference does not have
+   - new content is set the same way as the content already on the screen: the same alignment, the same spacing, the same type sizes
+4. **Every difference is fixed, or written down with its reason.** A fix is a slice's work: send it to a fresh fix context with the difference, the screenshot and the files the phase granted, then run the check again. An unexplained difference fails the close under the two attempts in *The transition gate and escalation*, and after them is recorded in the departures record and carried on — never a stop.
+5. **Commit the screenshots** under `doc/plans/phases/reports/phase-NN-screens/`, and put the difference list, per screen, into the completion report's **Screen comparison** section.
+
+When the line says *none*, write that in the completion report's section and skip the check. When the line is missing, the plan is defective: look at the phase's diff, name the screens it changes yourself, amend the phase file with a marked amendment, and run the check.
 
 ## The transition gate and escalation
 
@@ -230,7 +249,7 @@ $ <command>
 
 **A slice that passes its own block while breaking an earlier one still gets committed** — its work is sound and validated, and withholding the commit would misrepresent it as failed. Commit it, then report the phase-level inconsistency and stop. What must not happen is closing the phase over the top of it.
 
-When the last sub-phase's validation has passed, its commit is in, and every prior slice's validation still passes:
+When the last sub-phase's validation has passed, its commit is in, every prior slice's validation still passes, and the phase's look check has run (see *The phase's look check* above):
 
 1. Write `projects/<name>/doc/plans/phases/reports/phase-NN-complete.md` from the template below.
 2. Flip the phase file's `Status` line — replacing it, since the line has one state at a time:
@@ -259,6 +278,10 @@ When the last sub-phase's validation has passed, its commit is in, and every pri
 | --- | --- | --- |
 | NNa — <deliverable> | <what landed; retries or human gates if any> | `<sha>` |
 
+## Screen comparison
+
+<Per screen named in the phase file's `Screens changed` line: its address, the reference it was compared with, the window size, the screenshot's path under `phase-NN-screens/`, and every difference — fixed (with the commit) or kept (with its reason). "None — the phase changes no screen." when the line says none: stated, never omitted. When the phase had a shell slice, its own difference list goes here too, under its own heading.>
+
 ## Deviations from the plan
 
 <Every amendment made mid-phase, with its `✏ Refined <date>` marker and the reason; anything the plan called for that did not land, and why. "None — the phase executed as planned." when there were none: stated, never omitted.>
@@ -277,10 +300,11 @@ Requirement statuses in the register stay untouched: execution delivers the beha
 3. Check gate 1 (approval). If it fires, stop, route, and write nothing. Then check gate 2 (declared seams, across every sub-phase): where it fires, amend the phase file in place and record the departure — see gate 2 — and carry on; nothing here stops the run.
 4. Set up the work branch — or confirm the resume case against `git log` and the handoff file.
 5. For each sub-phase in dependency order: hand the contract's inputs to a fresh context, run the TDD loop, gate on the validation block, append the handoff section, commit.
-6. Close the phase: completion report, `Status` flip, commit.
-7. Report per Closing below.
+6. Run the phase's look check on every screen the phase file's `Screens changed` line names, on the preview's sample data, from a fresh context; fix or record each difference; commit the screenshots.
+7. Close the phase: completion report (with its **Screen comparison** section), `Status` flip, commit.
+8. Report per Closing below.
 
-Gate 3 sits over steps 4–6: the moment reality contradicts the plan, amend it in place and record the departure — see gate 3 — and carry on; nothing here stops the run.
+Gate 3 sits over steps 4–7: the moment reality contradicts the plan, amend it in place and record the departure — see gate 3 — and carry on; nothing here stops the run.
 
 
 ## Commit provenance
@@ -306,7 +330,7 @@ Report to the user, in this order:
 1. The gate outcome, if gate 1 fired: why, the repository state it leaves behind, and the exact next invocation — then stop, nothing below applies. ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), gate 2 and gate 3 no longer produce this outcome — they show up in the departures record instead, covered by item 3 below.
 2. The phase number and the branch name.
 3. The per-sub-phase outcomes, each with its commit SHA — including any recorded in the departures record.
-4. The completion report's path.
+4. The completion report's path, and per changed screen whether its look check found differences left unfixed.
 5. The next invocation: `/timone-verify <project> <phase-NN>` — naming the phase just executed. Verification refuses to pick a phase for the user, so a handover that omits it strands any project with more than one phase.
 
 Execution implements. It never verifies its own work and never opens a PR. Stop here.

@@ -4,6 +4,7 @@
 - **Date:** 2026-08-19
 - **Source:** fvermaut's ruling of 2026-08-19, selecting both blocking checks and declining the two non-blocking ones
 - **Occasioned by:** `ivtrends` [#22](https://github.com/fvermaut/ivtrends/pull/22) — three verification passes, two review axes, eight standing findings, and a screen its owner rejected on sight
+- **Amended by:** [ADR-0057](0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md), 2026-09-22 — check 1 also runs at the end of every phase that changes a screen, not only on a shell slice
 - **Standing:** [ADR-0037](0037-a-prototype-that-settles-a-look-is-kept-and-only-its-presentation-crosses.md), [ADR-0038](0038-a-screens-shell-is-built-before-its-behaviours.md), [ADR-0016](0016-review-remediation-rides-the-verify-fix-shape.md), [ADR-0014](0014-artifact-first-gates.md)
 
 ## Context

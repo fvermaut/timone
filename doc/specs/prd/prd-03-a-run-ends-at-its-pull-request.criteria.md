@@ -31,6 +31,8 @@
 
 ## R2 — The pull request opens on what was bent
 
+> ✏ Revised 2026-09-22 by fvermaut (interactive session, [ADR-0057](../../adr/0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md), after [ivtrends#118](https://github.com/fvermaut/ivtrends/pull/118)): a pull request may now open on a **Questions for you** section — figures on a changed screen that no requirement decides — placed before the departures. Both clauses' "the body's first section" now read "the body's first section after any questions for the human". Original wording: "THEN the body's first section lists every departure" and "THEN the body's first section after any questions for the human says so explicitly rather than being absent".
+
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
@@ -39,7 +41,7 @@
 - **Criteria:**
     - GIVEN a run in which anything departed from what was agreed — a plan amendment, a requirement amendment, a check not run, a workaround, a failing state
       WHEN its pull request opens
-      THEN the body's first section lists every departure, each naming what was agreed, what was done instead, and why
+      THEN the body's first section after any questions for the human lists every departure, each naming what was agreed, what was done instead, and why
     - GIVEN a run in which nothing departed
       WHEN its pull request opens
       THEN the body's first section says so explicitly rather than being absent
@@ -63,6 +65,8 @@
 - **Verification hint:** inspect the work branch after a driven amendment: the plan or register diff must show a dated marker naming the run. Diff the default branch before and after a rejected PR: requirement files identical.
 
 ## R4 — A screen is shown at the pull request, not before
+
+> ✏ Revised 2026-09-22 by fvermaut (interactive session, [ADR-0057](../../adr/0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md), after [ivtrends#118](https://github.com/fvermaut/ivtrends/pull/118)): the GIVEN widens from a run that "built or substantially changed a user-facing screen" to a run that changed anything a person sees on a screen, and the comparison is the one made at the end of the build on every changed screen, with its screenshot. `ivtrends` phase 36 added a whole section to an existing screen, was judged not to have "substantially changed" it, and nothing looked at it. Original wording: "GIVEN a completed run that changed anything a person sees on a screen" and "the preview address and, per changed screen, the built-versus-reference comparison made at the end of the build, with its screenshot".
 
 - **Priority:** MUST
 - **Status:** draft

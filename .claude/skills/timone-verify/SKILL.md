@@ -33,7 +33,7 @@ Your independence is a **closed allowed list**; anything not on it is not read, 
 
 - **The criteria register(s)** (`doc/specs/prd/*.criteria.md`) for the requirement IDs in scope — the behaviour the app owes, clause by clause. This is the whole of your expectation.
 - **The PRD narrative** the register belongs to — for the domain framing the criteria assume, not for extra requirements.
-- **The phase file's `Status` line and requirements header** — the stamp is the entry gate, the header (its requirement IDs, or its un-anchored stamp) is the claimed scope. **Never the sub-phase bodies**: they describe how the thing was built, which is exactly what you must not know.
+- **The phase file's `Status` line, requirements header and `Screens changed` line** — the stamp is the entry gate, the header (its requirement IDs, or its un-anchored stamp) is the claimed scope, and the screens line names the screens whose figures you read on the preview's data (below). **Never the sub-phase bodies**: they describe how the thing was built, which is exactly what you must not know.
 - **The completion report, whole** (`doc/plans/phases/reports/phase-NN-complete.md`) — it is the stage-6→7 interface, and its "context for the next agent" section was written for you: run instructions, suite commands, HUMAN-CHECK items carried forward, known-open observations, state left behind. Obey its stated gotchas rather than rediscovering them.
 - **A prior verification report's `## HUMAN-CHECK scripts` section, and nothing else of it** (`doc/plans/phases/reports/phase-MM-verification.md`) — when the completion report carries a HUMAN-CHECK forward, it names where the script lives rather than restating it, and this stage is required to re-issue such scripts **verbatim**. Without this the obligation could not be discharged from the allowed list at all. It is safe because a verification report is a stage-7 artifact written under these same rules: it carries evidence and scripts, never build knowledge. **Read that section alone** — the rest of the file holds another pass's verdicts and probe design, and reading them is how a verifier starts confirming its predecessor instead of the running app. Declare the line range you opened.
 - **`README.md`, `CONTEXT.md`, `doc/standards.md`, `STATUS.md`** in the target project — operational instructions, the domain's canonical terms, the conventions record (whose open non-conformances may already predict a failure), and the status file you are obliged to update at the end.
@@ -101,6 +101,8 @@ Stand the app up **in its production form** where the stack distinguishes one �
 
 Each criterion carries a `Verify-via` channel; each of its clauses gets its own outcome.
 
+**A clause marked `(browser)` is checked in a real browser, whatever its requirement's channel** — ✏ 2026-09-22 ([ADR-0057](../../../doc/adr/0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md)). It says what the person sees and where it sits. Drive the page, assert the position and the label the clause names, and put a screenshot of the region in the report beside the clause's outcome. The requirement keeps its channel and its place in the regression set; its `(browser)` clauses are re-run with it. A text check that finds the right number somewhere in the page does not discharge a `(browser)` clause.
+
 - **`api`** — terminal-checkable. HTTP against the running app, direct database readback through the project's own client tooling. Run the criterion's committed probe when one exists; author it from the clause alone when it does not. This channel forms the standing regression suite, and it is the one the saved probes pay off on.
 - **`browser`** — driven UI checks (Playwright, or the playwright MCP tools). For **user-facing deliverables the baseline leg is unconditional**: the automated accessibility scan (violations are failures — the baseline's rule, enforced here), a keyboard-only pass in which focus assertions are mechanical (where `document.activeElement` lands after each action is a fact, not a judgement), and the baseline's reflow checks. **Do not write these yourself** — they are Timone's, at `standards/baseline/probes/`, they take a page address, and they are the same for every project. Write a project probe only for what the project's own criteria assert. Where tooling cannot reach a baseline requirement, that clause becomes a HUMAN-CHECK with a precise script — never a silent skip, never an assumed pass.
 - **`human`** — reported as **HUMAN-CHECK** with a precise manual script in the template below: setup, numbered steps, the expected observation, where to record the result. Emitting the script *is* this channel's deliverable; performing it is the human's act, on the human's schedule. Never simulate one, never mark one performed on your own authority. **An unperformed script stops nothing** — not this pass, not delivery: stage 8 carries it into the pull request as an unticked item, which is where the person who can perform it already is. A HUMAN-CHECK verdict is a clean outcome of this channel, never an open question you hold the run for.
@@ -136,6 +138,29 @@ Where the clause asserts a **transformation of input** (trimming, normalization,
 **The baseline probes are Timone's, not the project's.** The accessibility and UI/UX checks live once under `standards/baseline/probes/`, take a page address, and are run by every project's browser channel. The project's own directory holds only what is specific to its rules and data.
 
 **Run the set with one command, in parallel.** `node doc/plans/phases/probes/run.mjs --regression` against the standing app, printing a verdict table and each probe's per-clause output. The report quotes that output, so its required elements are unchanged — commands as run, per-clause outcomes.
+
+## Reading the figures on the preview's data
+
+✏ 2026-09-22 ([ADR-0057](../../../doc/adr/0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md)). Your probes build the data they need, and that is right for them. But it is not the data the human sees. On `ivtrends` phase 36 the probe's SLV bought shares and sold them, and its total came out right; the preview's SLV still held its shares, and the screen showed the purchase as a -$3,421 loss. Every probe passed.
+
+**After your probes, and whenever the phase file's `Screens changed` line names a screen:**
+
+1. **Load the preview's sample data** into a fresh database — the project's compose `seed` service when its compose file declares one (the same one Timone's preview runs), otherwise the seed command the completion report or README names. Run the command; never read the seed script. Stand the app up in production form against it.
+2. **Open every screen the line names in a browser**, at the window size the completion report's **Screen comparison** records, and take one full-page screenshot of each. Commit them under `doc/plans/phases/probes/screens/phase-NN/`.
+3. **Read every figure shown**, and for each ask only the questions on this list. A figure that fails one is a finding:
+   - a gain or a loss where nothing was closed
+   - a total of zero or blank where the data holds trades or records that should count
+   - a thing called finished, closed or past whose date is after the data's own date
+   - the same figure disagreeing between two places on the screen
+   - a figure with no label
+   - a figure the register's own arithmetic contradicts
+
+   The list is the whole of this read. It is not a review of how the screen looks — that was the build's look check — and it is not taste.
+4. **Sort each finding by whether a register clause covers it.**
+   - **A clause covers it** — the clause's own words decide what the figure should be, and the screen disagrees → **FAIL** on that clause, with the screenshot as evidence. It goes through the fix loop below like any other FAIL.
+   - **No clause covers it** — the register's words allow the figure, or say nothing about it → a **question for the human**. You cannot know which meaning is right, and neither can a fix context. Write it in the report's **Questions for the human** section: the screen, the figure as shown, which item on the list it fails, the sample data behind it in one sentence, the register clause that comes closest (quoted) and why it does not decide it. Attach the screenshot. A question consumes no fix loop, changes no register status and stops nothing; delivery puts it first in the pull request.
+
+A finding is never a note in an observations paragraph. It is a FAIL or a question, and both are read.
 
 ## The fix loop
 
@@ -238,6 +263,14 @@ Read: <the allowed-list artifacts actually read, by path>. Not read: handoffs, d
 
 <N of 2 loops consumed. Per loop: the briefs issued, the fix commits returned, the full re-verify's outcome. "0 of 2 — the initial pass was clean." when so.>
 
+## Figures on the preview's data
+
+<The seed command run, and per screen named in the phase file's `Screens changed` line: its address, the window size, the screenshot's path, and how many figures were read. Then every finding, each marked FAIL (naming the clause, and pointing at its evidence above) or QUESTION (pointing below). "No screen changed in this phase." or "N figures read on K screens; none fails the list." when so. Stated, never omitted.>
+
+## Questions for the human
+
+<✏ ADR-0057. One entry per figure no register clause decides: the screen, the figure as shown, the list item it fails, the sample data behind it in one sentence, the closest clause quoted and why it does not decide it, and the screenshot. Written in plain words for the person who will merge — delivery quotes this section first in the pull request. "None." when there are none.>
+
 ## Register changes
 
 <Every `Status` flip and marker written this pass, by ID — or "None: <why>.">
@@ -260,9 +293,10 @@ Before finishing, update the target project's `STATUS.md` — **on the project's
 5. Derive the scope: claimed set + computed regression set, narrowed by `Depends-on` against this phase's diff. List both, and list what the narrowing removed.
 6. Stand up the environment in production form (gate 3 if it will not come up — everything BLOCKED, record a departure, report, and continue rather than stop).
 7. For every in-scope criterion, run its committed probe, or author one when there is none or the criterion is `revised`. Run the shared baseline probes for the browser channel. Every probe runs its break step first: red, then green. Compare each register clause list against the labels the probe printed and close any gap. Write HUMAN-CHECK scripts where only a human can look. **For a `live` criterion, write neither probe nor script** — report its last gate and whether this phase owes a fresh one.
-8. FAILs → defect briefs → fresh fix context → full re-verify. Max 2 loops, then exhaustion protocol.
-9. Write the report, commit the probes, and flip the register — all in one `docs: verify phase NN — <theme>` commit. Update `STATUS.md`.
-10. Report per Closing below.
+8. When the phase file names a changed screen: load the preview's sample data, open each screen, screenshot it, and read every figure against the fixed list. A finding a clause covers is a FAIL; one no clause covers is a question for the human.
+9. FAILs → defect briefs → fresh fix context → full re-verify (which repeats step 8). Max 2 loops, then exhaustion protocol.
+10. Write the report, commit the probes, and flip the register — all in one `docs: verify phase NN — <theme>` commit. Update `STATUS.md`.
+11. Report per Closing below.
 
 
 ## Commit provenance
@@ -288,7 +322,7 @@ Report to the user, in this order:
 1. The gate outcome, if gate 1 or gate 2 fired: which gate, why, and the exact next invocation — then stop, nothing below applies. ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), gate 3 no longer produces this outcome — it shows up in the departures record instead, covered by item 5 below.
 2. The scope verified — claimed set, derived regression set — and the verdict table.
 3. Fix loops consumed, with the fix commit SHAs.
-4. The report's path, and every script waiting on a human.
+4. The report's path, every script waiting on a human, and every question the preview-data read raised for the human.
 5. Anything carried forward — BLOCKED or `failed` — per the report's own "Carried forward" section and the phase's departures record.
 6. The next invocation: `/timone-deliver <project> <phase-NN>` — naming the phase, because delivery refuses to pick one for the user just as you do. **This is the only ending a pass past gate 2 has.** Items 4 and 5 are things to report on the way to it, never things to wait on: a pass that ends by asking instead of by handing over has broken the rule at the top of *The gates*, whatever it found.
 

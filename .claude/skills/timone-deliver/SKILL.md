@@ -41,9 +41,9 @@ Each gate stops delivery. When one fires you write **nothing** into the project,
 
 **4 — The screen.** ✏ 2026-08-19, revised 2026-09-07 ([ADR-0039](../../../doc/adr/0039-the-look-is-gated-twice.md), [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
 
-- **Skip it entirely** when the phase built no user-facing screen. Say so in the delivery report rather than leaving its absence to inference.
-- **A phase with a screen carries exactly one refusal here: no shell-slice comparison at all.** When the phase's completion report carries no recorded difference list from the shell slice, that is a missing artifact — [ADR-0038](../../../doc/adr/0038-a-screens-shell-is-built-before-its-behaviours.md)'s shell gate either never ran or was never recorded, not a difference this process explained and accepted. Refuse, and route to **`timone-execute`**, naming the sub-phase whose validation should have produced the list.
-- **Otherwise: read, don't ask.** Take the shell slice's recorded difference list and the reference it names straight from the completion report, and carry both into the PR body's screen section (below). This gate no longer asks the human anything and no longer refuses on "no" — there is nothing left here for a human to say yes or no to before the PR opens.
+- **Skip it entirely** when the phase file's `Screens changed` line says *none*. Say so in the delivery report rather than leaving its absence to inference.
+- **A phase that changes a screen carries exactly one refusal here: a changed screen with no comparison.** ✏ Revised 2026-09-22 ([ADR-0057](../../../doc/adr/0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md)). The check is the completion report's **Screen comparison** section: every screen the `Screens changed` line names must have an entry there, and a shell slice, when the phase had one, its own list. A missing entry is a missing artifact, not a difference this process explained and accepted. Refuse, and route to **`timone-execute`**, naming the screen with no comparison. "The phase built no shell slice" is **not** a reason to skip this gate — that is how `ivtrends` #118 opened on a screen nobody had looked at. A phase file with no `Screens changed` line at all is refused the same way.
+- **Otherwise: read, don't ask.** Take each screen's difference list, its reference and its screenshot straight from the completion report, and carry them into the PR body's screen section (below). This gate no longer asks the human anything and no longer refuses on "no" — there is nothing left here for a human to say yes or no to before the PR opens.
 - **This reverses only the delivery-time half of ADR-0039.** The shell slice's own fresh-context comparison — that ADR's check 1 — is unaffected: it still runs, and still blocks, at execution time, under stage 6's bounded retries. What is gone is the second look this gate used to demand from the human before a PR could open; that judgement now happens after the PR opens, against the screen itself, with merging as the yes.
 
 **5 — Platform gate.** The pull request *is* this stage's artifact ([ADR-0004](../../../doc/adr/0004-github-first-adapter-pair.md)), so there is no fallback surface:
@@ -115,7 +115,8 @@ Silence is a valid report. An axis that always finds something is padding, not r
 - **Branch:** `phase-NN-<slug>` @ `<sha>`
 - **Base:** `<base>` — <why: the project's default branch, or "phase-MM-<slug> is complete but unmerged; this phase was stacked on it">
 - **Pull request:** <URL, added when opened — see below>
-- **Screen:** <"no user-facing screen in this phase" | "no prior viewing — the shell slice's comparison and the preview are carried in the pull request body"> — [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)
+- **Screen:** <"no user-facing screen in this phase" | "no prior viewing — each changed screen's comparison, its screenshot and the preview are carried in the pull request body"> — [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), [ADR-0057](../../../doc/adr/0057-every-screen-a-phase-changes-is-looked-at-and-its-figures-read-on-the-preview-data.md)
+- **Questions for the human:** <N, quoted from the verification report's section of that name — or "none">.
 - **Departures:** `phase-NN-departures.md` — N entries, or *none — the phase executed as planned*.
 
 ## Scope
@@ -186,17 +187,23 @@ Opened with `gh pr create` from within `projects/<name>/`, after the delivery re
 ````markdown
 Delivers **phase NN — <theme>** of [`<project>`](.).
 
+## Questions for you
+
+<✏ ADR-0057. Omit this whole section when the verification report's **Questions for the human** says none. Otherwise quote each question in plain words: what the screen shows, why it looks wrong, and the choice only the reader can make — then the screenshot, linked from the branch. These come first because they are the things the build could not decide for itself.>
+
 ## Departures
 
 <Every entry in `phase-NN-departures.md`, quoted in full — kind, agreed, did instead, why. When the file does not exist: the sentence "Nothing was bent building this phase." verbatim.>
 
 ## The screen
 
-<Omit this whole section when the phase built no user-facing screen.>
+<Omit this whole section when the phase file's `Screens changed` line says none.>
 
-Compared against <the reference the shell slice named>, recorded when that slice closed:
+<Per changed screen:> **`<address>`** — compared against <the reference>, after the build finished:
 
-<the shell slice's difference list, quoted from the completion report>
+<the screenshot, linked from the branch>
+
+<that screen's difference list, quoted from the completion report's Screen comparison section — and the shell slice's list too when the phase had one>
 
 **Preview:** <"this project has no preview configured for pull requests — see the local checkout steps below" when the project has no `bindings.preview` in `timone.yaml`, otherwise "building now — the machine posts its address in a comment on this pull request as soon as it is ready, usually within a few minutes.">
 
@@ -259,7 +266,7 @@ Before finishing, update the target project's `STATUS.md` — **on the project's
 4. Compute the diff range `<base>...<head>` once.
 5. Spawn both axes in parallel as fresh contexts, each with its own read list. Collect two reports; never merge them.
 6. Write the **How to try it** steps, lifting them from the phase file's validation commands and the verification report's HUMAN-CHECK scripts. Both halves — preview and local.
-7. Compose the **Departures** section (always) and **The screen** section (when the phase carries one) as the first content written into the PR body, reading `phase-NN-departures.md` and the completion report respectively.
+7. Compose the **Questions for you** section (when the verification report has any), the **Departures** section (always) and **The screen** section (when the phase changed one) as the first content written into the PR body, reading the verification report, `phase-NN-departures.md` and the completion report respectively.
 8. Write and commit the delivery report — `docs: deliver phase NN — <theme>` — before opening anything.
 9. Open the PR with `gh pr create --base <base>`, or refresh the existing one and append an iteration section.
 10. Update `STATUS.md`.
