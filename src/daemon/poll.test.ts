@@ -1464,6 +1464,72 @@ describe("pollOnce — a run parked on a pull-request review", () => {
     ]);
   });
 
+  describe("on a step ticket, whose hold label is the machine's own claim", () => {
+    // ivtrends#118, 2026-09-22. A step ticket gains `timone:held` the moment
+    // its run is registered — that label is the claim (ADR-0044). Phase 37's
+    // guard read the same label as "a human stopped this", so a step's review
+    // never answered a comment: the run stayed parked and nothing was posted.
+    function onAStep(store: RunStore): void {
+      store.rememberInitiative({
+        project: "scratch-app",
+        initiative: 5,
+        title: "A map",
+        steps: [6, 7],
+        done: 0,
+      });
+    }
+    const comment = {
+      author: "fvermaut",
+      body: "The totals have no label. Please fix.",
+      createdAt: "2026-08-06T12:00:00Z",
+      fromTimone: false,
+    };
+
+    it("still spawns a remediation on a review comment", async () => {
+      const store = newStore();
+      onAStep(store);
+      parkedOnReview(store);
+      const { adapter } = reviewAdapter("open", [comment], [
+        "timone",
+        HELD_LABEL,
+      ]);
+      const { spawner, spawned } = fakeSpawner();
+
+      const result = await pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+      });
+
+      expect(result.resumed).toEqual(["scratch-app#6/1"]);
+      expect(spawned).toHaveLength(1);
+    });
+
+    it("still keeps an ordinary held ticket's review parked", async () => {
+      // Timone#115's case is unchanged: a ticket that is nobody's step only
+      // carries the label because something stopped it.
+      const store = newStore();
+      parkedOnReview(store);
+      const { adapter } = reviewAdapter("open", [comment], [
+        "timone",
+        "triage:feature",
+        HELD_LABEL,
+      ]);
+      const { spawner, spawned } = fakeSpawner();
+
+      const result = await pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+      });
+
+      expect(result.resumed).toEqual([]);
+      expect(spawned).toEqual([]);
+    });
+  });
+
   it("tells the pull request its comment was read, before the session starts", async () => {
     const store = newStore();
     parkedOnReview(store);

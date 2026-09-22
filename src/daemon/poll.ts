@@ -2216,8 +2216,20 @@ async function resumeAnswered(
       // after: that call is what consumes an answer, and this run must leave
       // one unread for whenever the hold comes off, not read it now and act
       // on nothing.
+      //
+      // **Except on a step, where the label is the machine's own claim.** A
+      // step gains the hold the moment its run is registered (ADR-0044), and
+      // keeps it for the whole life of that run, so on a step the label says
+      // nothing about whether a person stopped it. A step that *was* stopped
+      // has no parked run to resume: `timone cancel` settles it, and a pull
+      // request closed unmerged completes it. Reading the claim as a stop
+      // left every step's review deaf to its comments — `ivtrends` #118 on
+      // 2026-09-22, parked on a review with a comment waiting and nothing
+      // posted back.
       const ticket = await threads.ticket();
-      if (ticket.labels.includes(HELD_LABEL)) continue;
+      const isStep =
+        store.initiativeFor(project.name, run.ticket)?.steps.includes(run.ticket) ?? false;
+      if (ticket.labels.includes(HELD_LABEL) && !isStep) continue;
 
       resumption = await resolveWait(run, threads);
     } catch (error) {
