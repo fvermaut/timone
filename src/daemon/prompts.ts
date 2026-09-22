@@ -449,9 +449,11 @@ function stageBody(
  * pull request.
  *
  * The comment is confirmed intake — the human named the change themselves —
- * and the defect brief at once. The boundary the prompt draws is the ADR's:
- * a fix that would touch the PRD pair or the criteria register is intent,
- * not remediation, and gets a reply instead of a commit.
+ * and the defect brief at once. ✏ Since
+ * [ADR-0058](../../doc/adr/0058-a-review-comment-is-judged-point-by-point-and-may-decide-a-requirement.md)
+ * it is judged point by point, and a requirement change the comment itself
+ * decides is written as a marked amendment rather than refused. Only a point
+ * the comment leaves undecided gets a question, and only that point waits.
  */
 function remediationPrompt(context: PromptContext): string {
   const { ticket, branch } = context;
@@ -469,26 +471,38 @@ function remediationPrompt(context: PromptContext): string {
     "themselves, which is what authorises acting on it without asking again.",
     "",
     `**Stay on the branch \`${branch ?? "the run's work branch"}\`** — the pull`,
-    "request's head. Judge the comment first, and take exactly one of these",
-    "three paths:",
+    "request's head. **Judge each point of the comment on its own.** A comment",
+    "often carries several requests; take each point down its own path below.",
+    "**Never hold a clear point back** because another point in the same",
+    "comment needs a question or a requirement change: fix what is clear, and",
+    "deal with the rest beside it.",
     "",
     "- **A concrete change that touches neither the PRD pair nor the criteria",
-    "  register** — make it: a focused commit on that branch, messaged",
-    "  `fix: review — <slug>`, **pushed**, and a reply on the pull request's",
-    "  own thread saying what you did. Nothing else changes — the reports and",
-    "  the plan stay as they are; re-checking is the machinery's next move,",
-    "  not yours.",
-    "- **A comment that would move a requirement** — that is a change of",
-    "  intent, and it takes the full path, not a quiet fix. Reply on the pull",
-    "  request explaining that, commit nothing.",
-    "- **A comment you would have to guess at** — vague, several readings,",
-    "  scope beyond this pull request. Ask, in a reply on the pull request,",
-    "  and commit nothing.",
+    "  register** — make it.",
+    "- **A change to a requirement where the comment itself states what the",
+    "  requirement should say** — the comment is the human's decision, and it",
+    "  is all the confirmation a requirement change needs. Write it into the",
+    "  criteria register as a **marked amendment**: a dated `✏` note above the",
+    "  requirement quoting the comment and keeping the old wording readable,",
+    "  the clause changed to match, and the requirement's `Status` set to",
+    "  `revised` so the next check writes a fresh probe for it. Then make the",
+    "  code change it asks for.",
+    "- **A change to a requirement the comment does not decide**, or **a point",
+    "  you would have to guess at** — vague, several readings, scope beyond",
+    "  this pull request — ask about that point only, in your reply. Commit",
+    "  nothing for it; everything else in the comment still gets done.",
+    "",
+    "Commit on that branch — one focused commit per point, messaged",
+    "`fix: review — <slug>`, and **push**. Then post **one** reply on the pull",
+    "request's own thread that takes the points in order: what you changed for",
+    "each, and the question for any point you could not act on. The reports",
+    "and the plan stay as they are; re-checking is the machinery's next move,",
+    "not yours.",
     "",
     outcomeBlock(
-      "you took one of the three paths to its end — the fix committed and " +
-        "pushed with the reply posted, or the reply posted with nothing " +
-        "committed. Follow it with which path and why, in one plain sentence.",
+      "every point was acted on or asked about — the fixes committed and " +
+        "pushed, and the one reply posted. Follow it with what you did for " +
+        "each point, in one plain sentence each.",
       "you could not take any path — the branch is gone, the pull request is " +
         "not what the ticket says, something structural. Follow it with what " +
         "you found.",

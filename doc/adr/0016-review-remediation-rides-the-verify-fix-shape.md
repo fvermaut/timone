@@ -2,6 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-08-05
+- **Amended by:** [ADR-0058](0058-a-review-comment-is-judged-point-by-point-and-may-decide-a-requirement.md), 2026-09-22 — a comment is judged point by point, and a requirement change the comment itself decides is made as a marked amendment
 - **Source:** grill session of 2026-08-05, prompted by a contradiction the [phase 13](../plans/phases/phase-13.md) plan flagged before requesting approval
 
 ## Context
