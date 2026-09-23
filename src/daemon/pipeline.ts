@@ -221,6 +221,12 @@ export const APPROVAL_RECORD_MODEL = "claude-haiku-4-5";
  * repeats: the specification, the cut of the initiative, and the check of
  * what was built. The two `xhigh` rows came down to `high`. Nothing came
  * down two notches, and nothing moved to Haiku.
+ *
+ * ✏ On 2026-09-23 fvermaut asked to try Opus 5.5 on every stage that ran on
+ * Sonnet. Every row below now runs on `claude-opus-5-5`; the efforts are
+ * unchanged, and the approval record stays on Haiku. The dated Sonnet notes
+ * on each row say why that row was stepped down, which is the case to read
+ * if the cost is too high again.
  */
 const STAGES: Record<PipelineStage, StageSpec> = {
   triage: {
@@ -233,7 +239,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // silently. A `triage:chore` label goes straight to planning while
     // `triage:feature` opens a human interview first, so a misclassification
     // skips a gate and nobody is told a gate was skipped.
-    model: "claude-sonnet-5",
+    model: "claude-opus-5-5",
     effort: "medium",
     inBuild: false,
     // What follows depends on the classification: see `routeAfterTriage`.
@@ -253,7 +259,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // ✏ Sonnet since 2026-08-30. The work is reading one written answer
     // and deciding whether it settles the question. The effort stays `high`,
     // because that judgement is the whole of the session.
-    model: "claude-sonnet-5",
+    model: "claude-opus-5-5",
     effort: "high",
     inBuild: false,
     next: "requirements",
@@ -271,7 +277,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // The same pair as `clarification`, for the same reason and read on the
     // same occasion: the daemon-spawned session that ingests a written answer.
     // ✏ Down to Sonnet on 2026-08-30, with `clarification`.
-    model: "claude-sonnet-5",
+    model: "claude-opus-5-5",
     effort: "high",
     inBuild: false,
     // **Nothing follows, on purpose.** A decision ticket's answer resolves
@@ -327,7 +333,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // not find out. Judging what a source is worth is the work here.
     // ✏ Sonnet since 2026-08-30. Still not the cheapest model, and the
     // effort stays `high`: what came down is the model, not the care.
-    model: "claude-sonnet-5",
+    model: "claude-opus-5-5",
     effort: "high",
     inBuild: false,
     // **Nothing follows, on purpose** — `wayfinding`'s reasoning exactly. A
@@ -387,7 +393,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // ✏ Sonnet since 2026-08-30. This stage writes one chunk's phase file
     // from a cut the human has already approved, so the hard judgement was
     // made upstream at `breakdown`, which stayed on Opus.
-    model: "claude-sonnet-5",
+    model: "claude-opus-5-5",
     effort: "high",
     inBuild: false,
     next: "execution",
@@ -404,7 +410,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // is multiplied by every sub-agent. Sonnet at `high` writes code against
     // a phase file that already says what to build, and what judges the
     // result is `verification`, which stayed on Opus.
-    model: "claude-sonnet-5",
+    model: "claude-opus-5-5",
     effort: "high",
     inBuild: true,
     next: "verification",
@@ -433,7 +439,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // ✏ Sonnet at `medium` since 2026-08-30. Both axes read a build that
     // `verification` has already checked, and a human reads the pull request
     // after them.
-    model: "claude-sonnet-5",
+    model: "claude-opus-5-5",
     effort: "medium",
     inBuild: true,
     // Nothing follows in the graph: the run ends at the pull request, whose
@@ -451,7 +457,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // Coding, on a live pull request.
     // ✏ Sonnet since 2026-08-30, with `execution`, which it is a small
     // version of. A full verification runs after it either way.
-    model: "claude-sonnet-5",
+    model: "claude-opus-5-5",
     effort: "high",
     // `inBuild` is false here on purpose: remediation acts on a pull request
     // a human already reviewed, and its escalation path is ADR-0033's, not

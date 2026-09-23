@@ -360,7 +360,7 @@ describe("the model and effort each stage runs on", () => {
   it("declares the table settled at the grill, stage by stage", () => {
     // Written out rather than looped, because the point of the table is the
     // specific choice per stage — a loop would pass against any table at all.
-    expect(modelFor("triage")).toBe("claude-sonnet-5");
+    expect(modelFor("triage")).toBe("claude-opus-5-5");
     expect(effortFor("triage")).toBe("medium");
 
     expect(modelFor("requirements")).toBe("claude-opus-5-5");
@@ -373,19 +373,19 @@ describe("the model and effort each stage runs on", () => {
     expect(modelFor("breakdown")).toBe("claude-opus-5-5");
     expect(effortFor("breakdown")).toBe("high");
 
-    expect(modelFor("planning")).toBe("claude-sonnet-5");
+    expect(modelFor("planning")).toBe("claude-opus-5-5");
     expect(effortFor("planning")).toBe("high");
 
-    expect(modelFor("execution")).toBe("claude-sonnet-5");
+    expect(modelFor("execution")).toBe("claude-opus-5-5");
     expect(effortFor("execution")).toBe("high");
 
     expect(modelFor("verification")).toBe("claude-opus-5-5");
     expect(effortFor("verification")).toBe("high");
 
-    expect(modelFor("delivery")).toBe("claude-sonnet-5");
+    expect(modelFor("delivery")).toBe("claude-opus-5-5");
     expect(effortFor("delivery")).toBe("medium");
 
-    expect(modelFor("remediation")).toBe("claude-sonnet-5");
+    expect(modelFor("remediation")).toBe("claude-opus-5-5");
     expect(effortFor("remediation")).toBe("high");
   });
 
@@ -425,10 +425,10 @@ describe("the model and effort each stage runs on", () => {
     // ✏ Both moved to Sonnet with planning on 2026-08-30. The effort stays
     // `high`, because judging whether an answer settles a question is the
     // whole of what these sessions do.
-    expect(modelFor("clarification")).toBe("claude-sonnet-5");
+    expect(modelFor("clarification")).toBe("claude-opus-5-5");
     expect(effortFor("clarification")).toBe("high");
 
-    expect(modelFor("wayfinding")).toBe("claude-sonnet-5");
+    expect(modelFor("wayfinding")).toBe("claude-opus-5-5");
     expect(effortFor("wayfinding")).toBe("high");
   });
 
