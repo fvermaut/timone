@@ -343,7 +343,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // The PRD everything downstream is built and verified against.
     // ✏ Kept on Opus at the 2026-08-30 step down: nothing later rewrites
     // this artifact, and every phase is planned and verified against it.
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     effort: "high",
     inBuild: false,
     next: "breakdown",
@@ -367,7 +367,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // approval standing between a specification and every pull request that
     // follows it. A bad cut is not a bad phase, it is a bad five phases.
     // ✏ Kept on Opus at the 2026-08-30 step down, for that reason.
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     effort: "high",
     inBuild: false,
     next: "planning",
@@ -418,7 +418,7 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // The check nobody else performs — correctness over cost.
     // ✏ Kept on Opus on 2026-08-30, and now the only check standing over
     // a build Sonnet wrote. The effort came down from `xhigh` to `high`.
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     effort: "high",
     inBuild: true,
     next: "delivery",

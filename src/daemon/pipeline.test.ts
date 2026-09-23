@@ -363,14 +363,14 @@ describe("the model and effort each stage runs on", () => {
     expect(modelFor("triage")).toBe("claude-sonnet-5");
     expect(effortFor("triage")).toBe("medium");
 
-    expect(modelFor("requirements")).toBe("claude-opus-5");
+    expect(modelFor("requirements")).toBe("claude-opus-5-5");
     expect(effortFor("requirements")).toBe("high");
 
     // ✏ The breakdown's pair, added with the stage (ADR-0030 D1). The same as
     // planning's, and for a stronger version of planning's reason: this is the
     // cut of a whole initiative, approved once, and every pull request that
     // follows is shaped by it.
-    expect(modelFor("breakdown")).toBe("claude-opus-5");
+    expect(modelFor("breakdown")).toBe("claude-opus-5-5");
     expect(effortFor("breakdown")).toBe("high");
 
     expect(modelFor("planning")).toBe("claude-sonnet-5");
@@ -379,7 +379,7 @@ describe("the model and effort each stage runs on", () => {
     expect(modelFor("execution")).toBe("claude-sonnet-5");
     expect(effortFor("execution")).toBe("high");
 
-    expect(modelFor("verification")).toBe("claude-opus-5");
+    expect(modelFor("verification")).toBe("claude-opus-5-5");
     expect(effortFor("verification")).toBe("high");
 
     expect(modelFor("delivery")).toBe("claude-sonnet-5");
@@ -400,9 +400,9 @@ describe("the model and effort each stage runs on", () => {
     // - `breakdown` is the one cut of a whole initiative the human approves.
     // - `verification` is now the only check standing over a build Sonnet
     //   wrote.
-    expect(modelFor("requirements")).toBe("claude-opus-5");
-    expect(modelFor("breakdown")).toBe("claude-opus-5");
-    expect(modelFor("verification")).toBe("claude-opus-5");
+    expect(modelFor("requirements")).toBe("claude-opus-5-5");
+    expect(modelFor("breakdown")).toBe("claude-opus-5-5");
+    expect(modelFor("verification")).toBe("claude-opus-5-5");
   });
 
   it("sends no stage a reasoning effort above high", () => {
