@@ -202,7 +202,7 @@ A finding is never a note in an observations paragraph. It is a FAIL or a questi
 
 ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), **a gate this pass does not meet is a fact it reports, never a reason to stop.** You state the outcome in the report's verdict table, record what is outstanding in the departures record, and hand to delivery exactly as a clean pass does — stage 8 no longer refuses a `failed` line, a BLOCKED verdict or an unresolved regression, and the pull request opens carrying them. There is no path from here to a person and no path from here to a halt; a pass whose gate is unmet is still a finished pass.
 
-**A phase that owes a fresh live gate is the one exception**, and the refusal is not yours: say in the report which criteria owe one, and delivery routes it. That is the one way a LIVE-GATE line stops a phase, and it stops it at stage 8, not here.
+~~**A phase that owes a fresh live gate is the one exception**~~ ✏ Since [ADR-0059](../../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md) there is no exception: say in the report which criteria owe a live gate, and delivery carries them onto the pull request as items to tick. A LIVE-GATE line no longer stops a phase anywhere.
 
 ## The verification report
 

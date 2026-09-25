@@ -6216,6 +6216,44 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     expect(after?.stage).toBe("clarification");
   });
 
+  it("hands a failed run to the terminal too, parked on a person when it comes back", async () => {
+    // ADR-0059. `ivtrends` #126 failed at delivery and its ticket offered
+    // `timone takeover`; while the daemon was up, this request was refused.
+    const { store, statePath } = newStoreAt();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-message-box");
+    store.setStage(run.id, "delivery");
+    store.fail(run.id, "no open pull request exists for the branch");
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(6)] });
+    const { spawner, spawned } = fakeSpawner();
+    const deps = { manifest: manifestWith("scratch-app"), store, adapter, spawner, statePath };
+
+    const claiming = await pollOnce(deps);
+
+    expect(claiming.applied).toEqual(["claim-takeover scratch-app#6"]);
+    expect(store.get(run.id)).toMatchObject({
+      status: "active",
+      wait: { kind: "escalation" },
+    });
+    expect(spawned).toEqual([]);
+
+    enqueue(statePath, {
+      kind: "release-takeover",
+      project: "scratch-app",
+      ticket: 6,
+      outcome: "ended",
+    });
+    await pollOnce(deps);
+
+    expect(store.get(run.id)).toMatchObject({
+      status: "parked",
+      stage: "delivery",
+      wait: { kind: "escalation" },
+    });
+  });
+
   it("records the conversation as the answer being read, before it hands the run over", async () => {
     // The daemon-mediated half of the same marking the command does under the
     // lock itself. A takeover claimed this way and ending in the same stop

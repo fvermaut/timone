@@ -191,12 +191,13 @@ export async function resolveTakeover(
         message: `${target.project} #${target.ticket} is finished — see the ticket.`,
       };
     case "failed":
-      return {
-        kind: "nothing-to-do",
-        message:
-          `${target.project} #${target.ticket} stopped early: ` +
-          `${run.failure ?? "no reason recorded"}. Re-mark the ticket to try again.`,
-      };
+      // **A failed run opens the session bound to no stage**
+      // ([ADR-0059](../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md)).
+      // This used to answer "Re-mark the ticket to try again", on a ticket
+      // whose own comment offered this command — and `timone retry` ran the
+      // same step into the same stop (`ivtrends` #126). Nothing is written
+      // here: {@link reopenIfFailed} does that, just before the claim.
+      return { kind: "escalation", run };
     case "cancelled": {
       // Abandoned, not broken — so the words say what `timone retry`'s own
       // refusal says (`RunStore.retry`), and never that something went wrong.
@@ -558,6 +559,17 @@ export function markAnswerConsumed(store: RunStore, run: Run): void {
   });
 }
 
+/**
+ * Park a failed run on a person before it is claimed, so it can be claimed at
+ * all ([ADR-0059](../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md)).
+ * `failed` may not go straight to `active`, and a run with no wait would have
+ * nothing to go back to when the session ends. Silent on any other run.
+ */
+export function reopenIfFailed(store: RunStore, run: Run): void {
+  if (store.get(run.id)?.status !== "failed") return;
+  store.reopenForTakeover(run.id);
+}
+
 /** A claimed run, or the exit code of a takeover that never started one. */
 type Claim =
   | { kind: "claimed"; run: Run; thread?: TicketThread; escalation?: true }
@@ -606,6 +618,7 @@ async function claimForTakeover(
     try {
       const resolution = await resolveTakeover(target, deps);
       if (resolution.kind === "escalation") {
+        reopenIfFailed(store, resolution.run);
         return {
           kind: "claimed",
           run: store.claim(resolution.run.id, hold),
@@ -1064,7 +1077,9 @@ async function takeover(
 
   const resolution = await resolveTakeover(target, deps);
   if (resolution.kind === "escalation") {
-    return escalate(target, resolution.run, resolution.thread, deps, log);
+    reopenIfFailed(deps.store, resolution.run);
+    const run = deps.store.get(resolution.run.id) ?? resolution.run;
+    return escalate(target, run, resolution.thread, deps, log);
   }
   if (resolution.kind !== "converse") {
     log(resolution.message);

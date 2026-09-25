@@ -132,7 +132,12 @@ const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   //
   // `done` stays a dead end: finished work is history, and a new ticket — not
   // an abandonment — is how it is reopened.
-  failed: ["picked-up", "cancelled"],
+  //
+  // ✏ `parked` is the third road, and only `timone takeover` takes it
+  // ([ADR-0059](../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md)):
+  // a failed run a person opens with the machine becomes a run waiting on
+  // that person, so the session opened on it can hand it back like any other.
+  failed: ["picked-up", "parked", "cancelled"],
 };
 
 const runSchema = z.strictObject({
@@ -1326,6 +1331,38 @@ export class RunStore {
       // Whoever held the attempt that died is not holding this one. The
       // holder belongs to the session, as the session id beside it does.
       rearmed.holder = undefined;
+    });
+  }
+
+  /**
+   * Turn a failed run into one waiting on a person, so `timone takeover` can
+   * open it
+   * ([ADR-0059](../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md)).
+   *
+   * Until this a failed run refused the takeover its own ticket offered, and
+   * `timone retry` ran the same step into the same stop: `ivtrends` #126,
+   * twice in one day. The run keeps its branch, stage and what earlier steps
+   * asked; the failure becomes what it waits on, and the wait is the kind a
+   * session bound to no stage opens on (ADR-0033). Its cursor is now: the
+   * session's hand-back is read from here on.
+   */
+  reopenForTakeover(id: string): Run {
+    const run = this.mutable(id);
+    if (run.status !== "failed") {
+      throw new Error(
+        `Run ${id} is ${run.status}, not failed — only a failed run is reopened for a takeover`,
+      );
+    }
+    const failure = run.failure ?? "no reason recorded";
+    return this.transition(id, "parked", (reopened) => {
+      reopened.failure = undefined;
+      reopened.sessionId = undefined;
+      reopened.flags = [];
+      applyPark(reopened, {
+        waitingOn: `a person, because the run stopped: ${failure}`,
+        kind: "escalation",
+        waitCursor: this.now(),
+      });
     });
   }
 
