@@ -35,7 +35,7 @@ Each gate stops delivery. When one fires you write **nothing** into the project,
 
 **3 — Verification gate.** Read the verification report at `doc/plans/phases/reports/phase-NN-verification.md`, latest iteration.
 - **No report at all** → route to **`timone-verify`**. A `Complete` stamp is stage 6 vouching for its own work; stage 7 is what makes it presentable.
-- **A live gate the phase owes and has not run** ([ADR-0051](../../../doc/adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D3: owed when the diff touches what a `live` criterion declares it depends on, and the gate's report must be committed) → route to **the human**, naming which criteria's live gate is owed. ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), this is the one refusal this gate still carries besides a missing report — its own consequences name only the failed-verification and unviewed-screen refusals as lost, and a live gate nobody has run is not evidence a pull request can open on.
+- ✏ Since [ADR-0059](../../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md), **a live gate the phase owes and has not run no longer refuses.** (Owed as [ADR-0051](../../../doc/adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D3 says: the diff touches what a `live` criterion declares it depends on.) A live gate needs a person watching, often with their own login, so refusing only sent the run back to the same stop: `ivtrends` #126, twice in one day. Open the pull request and carry each owed live gate as an unticked item under "Outstanding for the human", naming the criterion and where its steps are written. The criterion stays `draft`.
 - ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), **a stage-7 gate that otherwise did not pass no longer refuses** — any MUST criterion neither PASS, HUMAN-CHECK nor LIVE-GATE, any unresolved regression, any register line reading `failed`, any BLOCKED verdict. Delivery proceeds regardless, drawing the verdict table and the outstanding-items list straight from the verification report exactly as the "Verification outcome" and "Outstanding for the human" sections already do; the pull request opens on it.
 - **An unperformed HUMAN-CHECK is not this gate firing.** See below.
 
@@ -144,6 +144,7 @@ Silence is a valid report. An axis that always finds something is padding, not r
 ### Outstanding for the human
 
 - [ ] <criterion ID> — <clause>: HUMAN-CHECK script in [phase-NN-verification.md](phase-NN-verification.md) § HUMAN-CHECK scripts
+- [ ] <criterion ID> — live gate owed: run it as <where its steps are written>, and commit its report, before merging
 
 <Omit the section when nothing is outstanding.>
 
@@ -234,6 +235,7 @@ Verified in [`phase-NN-verification.md`](<link>) — <N> of 2 fix loops consumed
 **Waiting on a human reviewer:**
 
 - [ ] <criterion ID> — <clause>: run the HUMAN-CHECK script in the verification report before merging
+- [ ] <criterion ID> — run the owed live gate before merging
 
 ## Standards review
 
@@ -297,7 +299,7 @@ Report to the user, in this order:
 2. The PR URL, and the base branch with its reason when it is not the default.
 3. Both axes' finding counts, **stated separately** — never a combined total.
 4. The delivery report's path.
-5. Every outstanding HUMAN-CHECK now carried in the PR.
+5. Every outstanding HUMAN-CHECK and owed live gate now carried in the PR.
 6. The next invocation, for anything the human wants acted on: file it as a ticket and let stage 1 read it — ✏ 2026-08-19, [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired stage 9. Triage names the source it is given and never hunts for one, so name the findings or the report.
 
 Delivery presents and records. It never fixes with its own hands, never merges, and never writes the criteria register. Stop here.

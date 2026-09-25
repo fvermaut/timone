@@ -1162,6 +1162,36 @@ describe("retry", () => {
   });
 });
 
+describe("reopenForTakeover", () => {
+  it("parks a failed run on a person, keeping its branch and stage, and forgets the failure", () => {
+    // ADR-0059. The one road from `failed` that is not a retry: a person
+    // opening the ticket with the machine.
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    store.claimBranch(run.id, "timone/6-fiddly-box");
+    store.setStage(run.id, "delivery");
+    store.fail(run.id, "no open pull request exists for the branch");
+
+    const reopened = store.reopenForTakeover(run.id);
+
+    expect(reopened.status).toBe("parked");
+    expect(reopened.stage).toBe("delivery");
+    expect(reopened.branch).toBe("timone/6-fiddly-box");
+    expect(reopened.failure).toBeUndefined();
+    expect(reopened.wait?.kind).toBe("escalation");
+    expect(reopened.wait?.on).toContain("no open pull request exists for the branch");
+  });
+
+  it("refuses a run that has not failed", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+
+    expect(() => store.reopenForTakeover(run.id)).toThrow(/not failed/);
+  });
+});
+
 describe("cancelling a run", () => {
   it("cancels a queued run, recording why", () => {
     const store = newStore();

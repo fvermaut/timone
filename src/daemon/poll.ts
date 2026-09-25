@@ -70,7 +70,11 @@ import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 // at the terminal (ADR-0032).
 import { runRetry } from "../commands/retry.js";
 import { runCancel } from "../commands/cancel.js";
-import { markAnswerConsumed, resolveTakeover } from "../commands/takeover.js";
+import {
+  markAnswerConsumed,
+  reopenIfFailed,
+  resolveTakeover,
+} from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
 import {
   type InitiativeRecord, type Run, type RunStore, type Witness } from "./runs.js";
@@ -1001,6 +1005,8 @@ async function applyRequest(
       // refuses a run that is not parked.
       if (resolution.kind === "converse") {
         markAnswerConsumed(store, resolution.run);
+      } else {
+        reopenIfFailed(store, resolution.run);
       }
       // On the asking terminal's behalf, never on the daemon's (ADR-0049 D1).
       // A run the daemon recorded itself as holding is one its own sweep will

@@ -677,6 +677,73 @@ describe("a run the machine stopped and cannot take further", () => {
     expect(logged.join("\n")).not.toMatch(/can't hold a conversation/);
   });
 
+  /** A run the daemon failed at delivery, as `ivtrends` #126 was. */
+  function failed(store: RunStore): RunStore {
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.claimBranch(run.id, "timone/6-message-box");
+    store.setStage(run.id, "delivery");
+    store.fail(
+      run.id,
+      "the delivery stage said it finished, but no open pull request exists for the branch",
+    );
+    return store;
+  }
+
+  it("resolves a failed run the same way, rather than telling the person to re-mark the ticket", async () => {
+    // ADR-0059. The ticket's own comment hands the person this command. On
+    // `ivtrends` #126 it answered "Re-mark the ticket to try again", and a
+    // retry ran the same step into the same stop.
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store: failed(newStore()), adapter: fakeAdapter().adapter },
+    );
+
+    expect(resolution.kind).toBe("escalation");
+    expect(resolution).not.toHaveProperty("stage");
+  });
+
+  it("opens the unbound session on a failed run, and leaves it parked on a person afterwards", async () => {
+    // Through the ledger file, as the command runs it: the claim is where a
+    // failed run used to be refused, because `failed` may not go to `active`.
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-failed-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    let tick = 0;
+    const store = failed(
+      RunStore.open(statePath, {
+        now: () => `2026-08-03T10:${String(tick++).padStart(2, "0")}:00Z`,
+      }),
+    );
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: "/root",
+      log: () => {},
+    });
+
+    expect(code).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args[0]).toContain("scratch-app#6/1");
+    // What stopped it reaches the session as what the run waits on.
+    expect(calls[0].args[0]).toContain("no open pull request exists");
+
+    const after = store.runsForTicket("scratch-app", 6).at(-1);
+    expect(after).toMatchObject({
+      status: "parked",
+      stage: "delivery",
+      branch: "timone/6-message-box",
+      wait: { kind: "escalation" },
+    });
+    expect(after?.failure).toBeUndefined();
+  });
+
   it("refuses today, because nothing creates such a park yet", async () => {
     // The same command over the parks that do exist: each keeps its own
     // sentence, and none of them opens an unbound session.
