@@ -1555,6 +1555,13 @@ export class AgentSessionSpawner implements SessionSpawner {
    * puts a parked run back on its wait before rethrowing and the poll loop
    * reports it. From the second the run is active and claimed, so a throw
    * escaping here would leave it that way with nobody to release it.
+   *
+   * ✏ **The first attempt of a later stage is active too**
+   * ([timone#161](https://github.com/fvermaut/timone/issues/161)). A run
+   * that finished verification and moves on to delivery is still active when
+   * delivery starts, so a throw there left it active and held by a daemon
+   * running nothing for it. {@link attemptSession} now puts such a run back
+   * to picked-up before rethrowing, and the next cycle starts it again.
    */
   private async runSession(
     run: Run,
@@ -1606,7 +1613,18 @@ export class AgentSessionSpawner implements SessionSpawner {
     try {
       started = await this.startClaimed(run, request);
     } catch (error) {
-      if (attempt === 1) throw error;
+      if (attempt === 1) {
+        // Still active here means a later stage of the walk: a parked run
+        // was put back on its wait and a picked-up one was never claimed.
+        // Picked-up is what the poll loop starts again on its next cycle,
+        // and what it counts and tells the human about if it keeps failing
+        // (ADR-0049 D4) — timone#161, where the run stayed active instead
+        // and nothing ever looked at it again.
+        if (this.options.store.get(run.id)?.status === "active") {
+          this.options.store.unstarted(run.id);
+        }
+        throw error;
+      }
       return { sessionId: "unknown", ok: false, error: oneLine(error) };
     }
 

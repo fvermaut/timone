@@ -254,6 +254,43 @@ describe("timone retry", async () => {
     expect(store.get("scratch-app#6/1")?.status).not.toBe("failed");
   });
 
+  it("says the daemon refused, when it refused a run that is not failed", async () => {
+    // timone#161: ivtrends #136 was active and going nowhere. The daemon
+    // refused the retry, and this command still printed "re-armed".
+    const dir = mkdtempSync(join(tmpdir(), "timone-retry-refused-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-06T10:00:00Z" });
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    const { log, lines } = collect();
+    const daemonCycle = async (): Promise<void> => {
+      for (const request of pending(statePath).requests) {
+        await runRetry("scratch-app#6", { manifest, store, log: () => {} });
+        settle(request.path);
+      }
+    };
+
+    const code = await runRetry("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      log,
+      wait: { intervalMs: 1, boundMs: 100, sleep: daemonCycle },
+    });
+
+    expect(code).toBe(1);
+    expect(lines.join("\n")).not.toContain("re-armed");
+    expect(lines.join("\n")).toContain("did not retry scratch-app #6");
+    expect(lines.join("\n")).toContain("being worked on right now");
+  });
+
   /**
    * Only a refusal that *names a holder* is a live daemon. A lock nobody can
    * read names nobody, and asking a daemon that may not exist to do something
