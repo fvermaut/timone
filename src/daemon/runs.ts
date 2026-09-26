@@ -109,11 +109,19 @@ function isSettled(status: RunStatus): boolean {
  * daemon at all. Routing it through `active` first would mint an id for a
  * session nobody started, and `timone status` would call the run running for
  * as long as the human took to answer.
+ *
+ * `active → picked-up` is the run's next stage failing to start
+ * ([timone#161](https://github.com/fvermaut/timone/issues/161)). One stage
+ * finished and the session for the next one never began, so no session is
+ * running and nothing broke: the run is back to waiting for the daemon to
+ * start it, exactly as a run fresh from `timone retry` is. Left `active`, it
+ * was held by a daemon that was not running anything for it, and nothing ever
+ * started it again.
  */
 const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   queued: ["picked-up", "cancelled"],
   "picked-up": ["active", "parked", "failed", "cancelled"],
-  active: ["active", "parked", "done", "failed", "cancelled"],
+  active: ["active", "picked-up", "parked", "done", "failed", "cancelled"],
   parked: ["active", "done", "failed", "cancelled"],
   done: [],
   // Abandoned, and abandoned for good. An empty list here is the whole of
@@ -1398,6 +1406,25 @@ export class RunStore {
     run.refusal = undefined;
     this.persist();
     return { ...run };
+  }
+
+  /**
+   * Put a run back to waiting for its next session, because that session
+   * never started ([timone#161](https://github.com/fvermaut/timone/issues/161)).
+   *
+   * This is for a run that is `active` between two stages: the last session
+   * ended well, and starting the next one threw. The session id and the
+   * holder belong to the session that ended, so both go. The stage stays,
+   * so the next cycle starts the stage that failed to start and not the one
+   * that finished. What the run carries — its flags, its questions for the
+   * pull request — stays too, because none of it belonged to a session that
+   * died.
+   */
+  unstarted(id: string): Run {
+    return this.transition(id, "picked-up", (run) => {
+      run.sessionId = undefined;
+      run.holder = undefined;
+    });
   }
 
   /**

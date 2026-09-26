@@ -107,6 +107,10 @@ async function askForRetry(
   }
 
   const name = `${target.project} #${target.ticket}`;
+  // Read before asking, so what the daemon did can be told from what it
+  // refused: a retry it carries out always writes the run, and a refusal
+  // leaves it exactly as it was.
+  const before = store.runsForTicket(target.project, target.ticket).at(-1);
   const path = enqueue(statePath, {
     kind: "retry",
     project: target.project,
@@ -126,15 +130,60 @@ async function askForRetry(
   }
 
   const run = store.runsForTicket(target.project, target.ticket).at(-1);
-  if (run === undefined || run.status === "failed") {
+  // ✏ Unchanged is a refusal, whatever the status
+  // ([timone#161](https://github.com/fvermaut/timone/issues/161)). This used
+  // to test only for `failed`, so a run the daemon refused because it was
+  // `active` was reported here as re-armed — on ivtrends #136, which was
+  // stuck, and which that sentence then said was moving.
+  const moved =
+    run !== undefined &&
+    run.status !== "failed" &&
+    (before === undefined || retryMark(run) !== retryMark(before));
+  if (!moved) {
     log(
-      `The daemon read the request and did not re-arm ${name} — it is still ` +
-        `${run?.status ?? "unknown"}. Its log says why.`,
+      `The daemon read the request and did not retry ${name}. ` +
+        (run === undefined
+          ? "It has no run for that ticket."
+          : (refusalFor(run, name) ??
+            `It is still ${run.status}, and the daemon's log says why.`)),
     );
     return 1;
   }
-  log(`${name} is re-armed at the point it stopped (${run.stage ?? "the start"}).`);
+  log(
+    run.status === "parked"
+      ? `${name} is wound back to before the answer you wrote on the ticket, ` +
+          "so the daemon reads that answer again."
+      : `${name} is re-armed at the point it stopped (${run.stage ?? "the start"}).`,
+  );
   return 0;
+}
+
+/**
+ * The part of a run a retry changes: a re-arm moves its status, and a rewind
+ * moves the cursor of its wait. Not `updatedAt`, which two writes within one
+ * clock tick share.
+ */
+function retryMark(run: Run): string {
+  return JSON.stringify([run.status, run.wait?.opened]);
+}
+
+/**
+ * What `retry` says about a run it will not touch, or undefined when it would
+ * act on it. The same words on both paths, so a refusal reads the same
+ * whether this process or the daemon made it.
+ */
+function refusalFor(run: Run, name: string): string | undefined {
+  switch (run.status) {
+    case "queued":
+      return `${name} hasn't started — it's in the queue, and needs no retry.`;
+    case "picked-up":
+    case "active":
+      return `${name} is being worked on right now. There is nothing to retry.`;
+    case "done":
+      return `${name} is finished. Retry can't reopen it — file a new ticket instead.`;
+    default:
+      return undefined;
+  }
 }
 
 /** The retry itself, once this process is the ledger's only writer. */
@@ -171,22 +220,12 @@ function retry(
     return 1;
   }
 
-  switch (run.status) {
-    case "queued":
-      log(`${name} hasn't started — it's in the queue, and needs no retry.`);
-      return 1;
-    case "picked-up":
-    case "active":
-      log(`${name} is being worked on right now. There is nothing to retry.`);
-      return 1;
-    case "parked":
-      return rewind(run, name, store, log);
-    case "done":
-      log(`${name} is finished. Retry can't reopen it — file a new ticket instead.`);
-      return 1;
-    case "failed":
-      break;
+  const refused = refusalFor(run, name);
+  if (refused !== undefined) {
+    log(refused);
+    return 1;
   }
+  if (run.status === "parked") return rewind(run, name, store, log);
 
   try {
     const rearmed = store.retry(run.id);

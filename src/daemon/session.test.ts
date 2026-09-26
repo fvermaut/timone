@@ -2727,6 +2727,43 @@ describe("the verification stage", () => {
     expect(store.get("scratch-app#7/1")?.stage).toBe("delivery");
   });
 
+  it("puts the run back to picked-up at delivery when delivery fails to start", async () => {
+    // timone#161, as ivtrends #136 met it: verification passed, and the
+    // delivery session never began because the clone before it hung. The
+    // run stayed active, held by a daemon running nothing for it, and no
+    // cycle ever started it again.
+    const store = newStore();
+    const { adapter } = fakeAdapter();
+    const checking = checkingRuntime(adapter, STAGE_DONE_MARKER, "All pass.");
+    let starts = 0;
+    const runtime: SessionRuntime = {
+      async start(request) {
+        if (starts++ === 0) return checking.runtime.start(request);
+        throw new Error("git clone failed after 3 attempts");
+      },
+    };
+
+    await expect(
+      new AgentSessionSpawner({
+        manifest,
+        store,
+        adapter,
+        runtime,
+        root: "/root",
+        repoProbe: movingProbe(),
+        verificationReportProbe: async () =>
+          "doc/plans/phases/reports/phase-04-verification.md",
+      }).spawn(atVerification(store), project, { stage: "verification" }),
+    ).rejects.toThrow(/git clone failed/);
+
+    const run = store.get("scratch-app#7/1")!;
+    expect(run.status).toBe("picked-up");
+    expect(run.stage).toBe("delivery");
+    expect(run.holder).toBeUndefined();
+    expect(run.sessionId).toBeUndefined();
+    expect(run.branch).toBe("timone/7-the-page-feels-slow");
+  });
+
   it("fails the run when the session said done but no report exists", async () => {
     const store = newStore();
     const { adapter } = fakeAdapter();
