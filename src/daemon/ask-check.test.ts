@@ -131,4 +131,17 @@ describe("what the model is told", () => {
   it("leaves out the reply block when nobody has written", () => {
     expect(askCheckPrompt({ composed: COMPOSED })).not.toContain("the last thing the person wrote");
   });
+
+  // timone#145. On `ivtrends` #111 the check answered with a question written
+  // to whoever composed the message — "quote the question here so the message
+  // can name it" — and that is what the person was shown. There is nobody on
+  // the other end of such a question, so a fault in the message is a fault to
+  // let through.
+  it("says the question is written to the person and to nobody else", () => {
+    const prompt = askCheckPrompt({ composed: COMPOSED });
+
+    expect(prompt).toContain("You cannot");
+    expect(prompt).toMatch(/only to the person/i);
+    expect(prompt).toMatch(/is not yours to fix/i);
+  });
 });

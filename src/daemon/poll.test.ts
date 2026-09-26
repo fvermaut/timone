@@ -4163,7 +4163,38 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
       return { author: "fvermaut", body, createdAt: at, fromTimone: false };
     }
 
+    // ✏ The reply is what makes this ivtrends#90 rather than a sketch of it.
+    // Dropping the command is only right for somebody who has spoken: the
+    // expensive thing *was* the command, and one short question costs them
+    // far less than a terminal session. timone#145 is the other case.
     it("posts the question instead of sending them to a terminal", async () => {
+      const store = newStore();
+      failedRun(store);
+      const { adapter, calls, threadOf } = reconcilingAdapter([ticket(7)]);
+      const { spawner } = fakeSpawner();
+      threadOf(7).push(replied("aprrove"));
+
+      await pollOnce({
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        consultAskCheck: wantsToAsk,
+      });
+
+      const upserts = calls.filter((entry) => entry.call === "upsertComment");
+      expect(upserts).toHaveLength(1);
+      expect(upserts[0]?.body).toBe(`${CTA_MARKER}\n\n${QUESTION}`);
+      expect(upserts[0]?.body).not.toContain("timone retry");
+    });
+
+    // timone#145. The standing note is upserted, so a question put in its
+    // place *replaces* it — and on `ivtrends` #111 the line that frees a
+    // stuck run went with it, leaving a person a question written to the
+    // machine and no way to act on anything. Somebody who has said nothing
+    // has not been misread, so there is nothing to rescue them from and no
+    // reason to spend their way out on it.
+    it("keeps the command when nobody has said anything yet", async () => {
       const store = newStore();
       failedRun(store);
       const { adapter, calls } = reconcilingAdapter([ticket(7)]);
@@ -4178,9 +4209,35 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
       });
 
       const upserts = calls.filter((entry) => entry.call === "upsertComment");
-      expect(upserts).toHaveLength(1);
-      expect(upserts[0]?.body).toBe(`${CTA_MARKER}\n\n${QUESTION}`);
-      expect(upserts[0]?.body).not.toContain("timone retry");
+      expect(upserts.at(-1)?.body).toContain(QUESTION);
+      expect(upserts.at(-1)?.body).toContain("timone retry scratch-app#7");
+    });
+
+    // The same on every cycle after, because the note is rewritten every
+    // cycle and the question is remembered rather than asked again.
+    it("keeps the command on the cycles after, without consulting again", async () => {
+      const store = newStore();
+      failedRun(store);
+      const { adapter, calls } = reconcilingAdapter([ticket(7)]);
+      const { spawner } = fakeSpawner();
+      let consulted = 0;
+      const deps = {
+        manifest: manifestWith("scratch-app"),
+        store,
+        adapter,
+        spawner,
+        consultAskCheck: async (): Promise<string> => {
+          consulted += 1;
+          return `ASK: ${QUESTION}`;
+        },
+      };
+
+      await pollOnce(deps);
+      await pollOnce(deps);
+
+      expect(consulted).toBe(1);
+      const upserts = calls.filter((entry) => entry.call === "upsertComment");
+      expect(upserts.at(-1)?.body).toContain("timone retry scratch-app#7");
     });
 
     // The hazard this whole design turns on. A call to action is rewritten

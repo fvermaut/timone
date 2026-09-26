@@ -1744,6 +1744,63 @@ describe("a finished planning session, now that planning is wait-free", () => {
     expect(comments.at(-1)?.body).toContain("Here is the phase.");
     expect(requests).toHaveLength(1);
   });
+
+  // timone#144. The wait used to be one fixed sentence — "your answer to the
+  // question in my last comment" — written without reading that comment. On
+  // `ivtrends` #111 the comment held no question, so the ticket's standing
+  // note sent a person to an ask nobody had made, and the whole thread then
+  // came apart around it (timone#145).
+  it("waits on what the handing-back session actually asked for", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(ticketLabelled("triage:feature"));
+    const { runtime } = fakeRuntime({
+      work: async () => {
+        await adapter.postComment(
+          project,
+          7,
+          `${STAGE_HANDED_MARKER}\n\nThe piece needs a decision nobody has made.\n\n` +
+            "**What I need from you:** say whether the nightly run keeps calls too.",
+        );
+      },
+    });
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      plannedPhaseProbe: async () => "doc/plans/phases/phase-07.md",
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    expect(store.get("scratch-app#7/1")?.wait?.on).toBe(
+      "say whether the nightly run keeps calls too.",
+    );
+  });
+
+  // A stage that asked nothing is a fault in the stage, and `outcomeBlock` is
+  // where it is closed. The wait still has to say something, and pointing at
+  // the comment is truer than inventing an ask the stage never made.
+  it("falls back to naming the comment when the session asked for nothing", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter(ticketLabelled("triage:feature"));
+    const { runtime } = planningRuntime(adapter, STAGE_HANDED_MARKER);
+
+    await new AgentSessionSpawner({
+      manifest,
+      store,
+      adapter,
+      runtime,
+      root: "/root",
+      repoProbe: movingProbe(),
+      plannedPhaseProbe: async () => "doc/plans/phases/phase-07.md",
+    }).spawn(readyToPlan(store), project, { stage: "planning" });
+
+    expect(store.get("scratch-app#7/1")?.wait?.on).toBe(
+      "your answer to the question in my last comment.",
+    );
+  });
 });
 
 describe("a chore meets no gate on the way to its pull request", () => {
