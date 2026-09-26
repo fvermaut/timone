@@ -1,6 +1,6 @@
 # PRD-05: A runner decides each step of a run
 
-> **Status:** Draft
+> **Status:** Active
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-05-a-runner-decides-each-step.criteria.md](prd-05-a-runner-decides-each-step.criteria.md)
 > **Phases:** none yet
