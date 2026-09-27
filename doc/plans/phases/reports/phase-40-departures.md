@@ -41,3 +41,13 @@
 **Did instead:** The body is written to a temporary file, passed as `gh pr edit --body-file <path>`, and the file is removed afterwards, whether the call succeeded or not. The plan is amended in place.
 
 **Why:** The `CommandRunner` the adapter runs `gh` through has no way to pass standard input (`CommandOptions` holds only `cwd`, `env`, `repository` and `timeoutMs`). Widening it would also widen the credential wrapper that every forge call goes through, for one method. A temporary file needs no change outside the adapter.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** Sub-phase 40f built the brief and the facts, and could run in parallel with 40d and 40e. Nothing in the plan said where a ticket's kind is worked out from its labels.
+
+**Did instead:** 40f also adds `ticketKindOf(labels, context)` to `src/runner/order.ts`, with a test in a new `src/runner/order.test.ts`. 40e now waits for 40f. The plan and its dependency graph are amended in place.
+
+**Why:** The brief needs the kind to show the default order, and the runner's actions need it to tell whether a step is a departure. One function beside `defaultOrder` keeps both reading the same answer.

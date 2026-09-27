@@ -196,7 +196,7 @@ printf '%s\n%s\n' \
 
 **Seams under test (TDD):** `runnerActions` over the stub adapter, a fake step starter and a temporary records directory — classical, no mocks of the unit's own collaborators. Red-green: (1) `RUNNER_TOOL_NAMES` equals the list of R2 exactly, and no name contains edit, write, shell, bash, push or merge; (2) a skip posts the departure notice before the step starts — asserted on the order of calls; (3) a skip with no reason is refused and nothing starts; (4) over the limit, `startStep` is refused twice and the limit notice is posted once; (5) `recordApproval` with a comment by a login not named is refused and records nothing; with a named login it records the approval and starts the approval step; (6) **R3 falsified**: `mergeChunkZero` with no `approval` entry refuses, and the fake forge's default branch has not moved; (7) **R4 falsified**: `endRun` with `aheadOfDefault` 2 and no open pull request is refused, and the run is not completed; with 0 it completes; (8) `post` without the call-to-action line is refused; (9) `fileTimoneIssue` creates the issue on the `timone` project with the label `bug`; (10) **R7 falsified**: no action writes an `approval` entry except `recordApproval`, and `recordApproval` writes one only for a named person's comment — asserted by driving every action once with a non-named comment in the thread and reading the record.
 
-> Sub-phases 40a, 40b, 40c and 40d must be complete before starting this sub-phase (it calls the step starter, the new adapter methods, the record and the interactive request).
+> Sub-phases 40a, 40b, 40c and 40d must be complete before starting this sub-phase (it calls the step starter, the new adapter methods, the record and the interactive request). ✏ 2026-09-27 (build, timone#165): and 40f, for `ticketKindOf`.
 
 #### Agent Validation Steps
 
@@ -215,10 +215,12 @@ npx vitest run src/runner/ src/daemon/session.test.ts src/daemon/poll.test.ts; e
 **[NEW FILE]** `src/runner/facts.ts` — `gatherFacts(adapter, project, run)`: the branch, `aheadOfDefault`, the phase files on the branch and not on the default branch with their `Status:` lines, the verification and completion reports present, the requirement files' status lines, the breakdown's stamp, and the open pull request if there is one. Any adapter error makes that fact `unknown`; it never throws.
 **[NEW FILE]** `src/runner/brief.ts` — `buildBrief(input) → { system: string; prompt: string }`. The input is the project, the run, the ticket thread, the pull-request thread, the named people, the record, the facts, the running step's activity, the events, the open Timone issues labelled `bug`, whether the ticket is held, and the limit. The **system** text is the runner's rules, in plain words: the written order is the default and may be left with a reason; a skipped step is said on the ticket; no approval is recorded that nobody gave; every message ends with the call-to-action line and follows Timone's rules for writing to a person; it acts only through its tools; a wake may end having done nothing when nothing is needed. The **prompt** lists, in this order: why it was woken, the ticket, the default order with the steps already run and their cost, the facts, the pull request, the running step, the limit, the open Timone issues.
 **[NEW FILE]** `src/runner/facts.test.ts`, `src/runner/brief.test.ts`
+**[MODIFY]** `src/runner/order.ts` — `ticketKindOf(labels, context) → TicketKind`: a ticket's kind read off its labels (`triage:<kind>`, `wayfinder:<type>`), with a step ticket and a remediation told apart by the caller's context. Its test goes in a new `src/runner/order.test.ts`.
+> ✏ 2026-09-27 (build, timone#165): `ticketKindOf` added to this slice. Both the brief and the runner's actions (40e) need the ticket's kind to find its default order, and it belongs beside `defaultOrder`. 40e therefore now waits for 40f. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
 
-**Seams under test (TDD):** `buildBrief`, pure, and `gatherFacts` over the stub adapter. Red-green: (1) **R10 falsified**: a comment by a login not named appears nowhere in the prompt — neither its text nor its author; (2) Timone's own comments appear, marked as Timone's; (3) the default order shows the steps already run, each with its cost; (4) the limit line shows spent and allowed; (5) the events come first; (6) the open Timone issues appear with their numbers; (7) `gatherFacts` lists a phase file present on the branch and absent from the default branch, with its `Status:` line; (8) an adapter that throws gives `unknown` for that fact and no throw.
+**Seams under test (TDD):** `buildBrief`, pure, and `gatherFacts` over the stub adapter. Red-green: (1) **R10 falsified**: a comment by a login not named appears nowhere in the prompt — neither its text nor its author; (2) Timone's own comments appear, marked as Timone's; (3) the default order shows the steps already run, each with its cost; (4) the limit line shows spent and allowed; (5) the events come first; (6) the open Timone issues appear with their numbers; (7) `gatherFacts` lists a phase file present on the branch and absent from the default branch, with its `Status:` line; (8) an adapter that throws gives `unknown` for that fact and no throw; (9) `ticketKindOf` reads `triage:chore` as a chore, `wayfinder:map` as a map, `wayfinder:research` as research, the other wayfinder types as a decision ticket, and a step ticket as a step whatever its labels.
 
-> Sub-phases 40b and 40c must be complete before starting this sub-phase. New files only: it may run in parallel with 40d and 40e.
+> Sub-phases 40b and 40c must be complete before starting this sub-phase. It may run in parallel with 40d. ✏ 2026-09-27 (build, timone#165): no longer in parallel with 40e, which now needs `ticketKindOf`.
 
 #### Agent Validation Steps
 
@@ -407,8 +409,8 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40b → 40a                 manifest fields and forge calls (shares test doubles with 40a)
 40c → (none)              record, default order, departures, limit — parallel with 40a/40b
 40d → 40a                 the box takes messages; activity summary
-40e → 40a, 40b, 40c, 40d  the runner's actions and the rules around them
-40f → 40b, 40c            the brief — parallel with 40d/40e
+40e → 40a, 40b, 40c, 40d, 40f  the runner's actions and the rules around them  (✏ 2026-09-27: + 40f)
+40f → 40b, 40c            the brief, and ticketKindOf — parallel with 40d
 40g → 40e, 40f            the runner session, one per wake, and its failures
 40h → 40g                 the driver in the poll cycle
 40i → 40g                 timone record — parallel with 40h/40j/40k
