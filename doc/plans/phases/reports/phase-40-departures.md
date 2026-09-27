@@ -21,3 +21,13 @@
 **Did instead:** At the limit, no step session and no runner session starts. The named person's reply is read by a one-turn check with no tools and no actions — the same kind of call as the ask check (`src/daemon/consult.ts`) — which only answers whether the reply means go on. Code then records the raise and wakes the runner.
 
 **Why:** Reading "go on" in any wording needs a model, and the runner is exactly the session R8 keeps from starting. The check costs a fraction of a cent, can do nothing but answer yes or no, and its answer is acted on by code. Recorded so the reader of R8 sees the one model call that still happens at the limit.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** Sub-phase 40d said the in-process runtime (`agentSdkRuntime`) would take messages while a step runs, through streaming input, under the same rule as the box.
+
+**Did instead:** The in-process runtime is left as it is. It starts an interactive request as it starts any other and offers no `send`; the runner's `messageStep` refuses on it. The plan is amended in place.
+
+**Why:** The plan declared no seam and no red-green case for that change, so it could not be built test-first as written. The daemon runs the container runtime unless `--runtime in-process` is given, and the steps the runner starts run in the box, where 40d does build the message mode.
