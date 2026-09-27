@@ -335,7 +335,10 @@ npx vitest run src/runner/replay/; echo "exit: $?"                 # expect 0
 npm run replay; echo "exit: $?"                                    # expect 0 — calls the real model; costs money
 ```
 
-- [ ] The replay's full output, and its total cost, are in the handoff.
+> ✏ 2026-09-27 (build, timone#165): the build's sandbox has no model login (`claude auth status` → `loggedIn: false`), so `npm run replay` cannot run there. The slice builds the harness, the cases and the harness's own tests; the replay itself is run once from the operator's logged-in terminal, before delivery, and its output is recorded in `reports/phase-40-replay.md`. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+- [ ] The replay's full output, and its total cost, are in the handoff. ✏ 2026-09-27: in `reports/phase-40-replay.md`, from the operator's run.
+- [ ] **Human gate** (✏ 2026-09-27): fvermaut runs `npm run replay` in `projects/timone` from his own terminal, or decides it rides to the pull request as owed.
 - [ ] Every fix made to pass a case is listed with the case it fixed.
 
 ---

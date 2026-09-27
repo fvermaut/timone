@@ -91,3 +91,13 @@
 **Did instead:** Those files read the wait kind with `if` chains, so the compiler named none of them. The changes were made as the plan and the orchestrator's notes ask — `status` prints "waiting: <on>", `takeover` treats `runner` as an escalation, `retry` refuses with the plan's sentence, and `cta.ts` has a `runner` arm that asks for nothing — each checked by a scratch script, not a test. Their tests move to 40h (`takeover`, `retry`) and 40i (`status`, including the side effect that the status line's last sentence does not count a runner wait). `package.json` gains `@modelcontextprotocol/sdk` 1.30.0 as a development dependency: 40g's test drives the real tool server through an MCP client, and the package was only present because the agent library depends on it.
 
 **Why:** A behaviour change with no test is a plan defect under the undeclared-seams rule. The cheapest honest fix is to give the tests to the slices that already own those files' seams, rather than let 40g edit test files it was not granted.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** check not run
+
+**Agreed:** Sub-phase 40j's validation runs `npm run replay`, which wakes the real runner on each of the nineteen recorded cases, three times each.
+
+**Did instead:** The build writes the harness, the cases and the harness's own tests. The replay itself is moved to a human gate: the operator runs it once from his own logged-in terminal before delivery, and its output goes to `reports/phase-40-replay.md`. The plan is amended in place.
+
+**Why:** The build's sandbox has no model login: `claude auth status` reports `loggedIn: false`, no `CLAUDE_CODE_OAUTH_TOKEN` or API key is set, and 40d's probe failed on login for the same reason. Every call to the real model — the replay, 40d's owed probe, the watched run — needs the operator's terminal.
