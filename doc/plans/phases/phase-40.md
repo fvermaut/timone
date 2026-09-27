@@ -385,6 +385,30 @@ npx vitest run src/runner/session.test.ts; echo "exit: $?"  # expect 0
 
 ---
 
+### Sub-phase 40o: an approval comes after what it approves, and an interrupted step gets its end
+
+> ✏ 2026-09-27 (build, timone#165): added at build, from two moments 40j's cases showed. **scratch-app#37:** once the requirements are written, `recordApproval` would accept a named person's comment written *before* them — "approve them yourself in my name" — as their approval, so R7 would rest on the runner's rules alone. **#140:** after a daemon stop, the record holds a `step-started` with no `step-ended`, so the brief shows the step "running now" while no step runs. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/actions.ts` — `recordApproval` refuses unless the comment was written after the last successful `step-ended` of the stage it approves, in this run: `requirements` for the requirements, `breakdown` for the list of pieces. With no such step, there is nothing to approve yet, and it refuses.
+**[MODIFY]** `src/runner/driver.ts` — when a run comes back after a daemon stop (`reclaimed`), each `step-started` of that run with no matching `step-ended` gets one: `ok: false`, `costUsd: 0`, `error: "the daemon stopped while this step was running"`, `stoppedBy: "daemon"`. Then the run is handed back as today.
+**[MODIFY]** `src/runner/actions.test.ts`, `src/runner/driver.test.ts` — new cases only.
+
+**Seams under test (TDD):** `runnerActions`, and `RunnerDriver.reclaimed`, the seams 40e and 40h test at. Red-green: (1) **R7**: a named person's comment written before the requirements step ended is refused as an approval of the requirements, and nothing is recorded; (2) the same person's comment written after it ends is recorded; (3) an approval of the list of pieces with no successful `breakdown` step in the run is refused; (4) after `reclaimed`, the record holds a `step-ended` with `stoppedBy: "daemon"` for the step that was running, and none is added for a step that had already ended.
+
+> Sub-phases 40h and 40j must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                                                  # expect 0
+npx vitest run src/runner/; echo "exit: $?"                                        # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"                                  # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -446,6 +470,7 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40j → 40g                 the replay of recorded failures
 40k → 40e                 the skills accept a skipped approval
 40n → 40h                 a step ticket's claim is not shown as a hold  (✏ 2026-09-27: added at build)
-40l → 40h, 40j, 40n       scratch-app moves; the watched run
+40o → 40h, 40j            an approval comes after what it approves; an interrupted step gets its end  (✏ 2026-09-27: added at build)
+40l → 40h, 40j, 40n, 40o  scratch-app moves; the watched run
 40m → 40l                 README
 ```

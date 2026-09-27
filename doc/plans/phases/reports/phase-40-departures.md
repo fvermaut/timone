@@ -111,3 +111,13 @@
 **Did instead:** A new sub-phase, 40n, makes the brief show a step ticket as not held when the label is the machine's own claim. 40l now waits for it. The plan and its dependency graph are amended in place.
 
 **Why:** On a step ticket the label is put on by the machine at pickup (ADR-0044 D7); 40h found this and made the driver read it that way. Left as it was, the brief would tell the runner every step ticket is held, and a runner told that may do nothing — every piece of a split initiative would stall. Known gap left open: the runner's own `setHold` on a step ticket changes nothing about wakes, since the label there is already the claim.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** The plan had no slice for when an approval may be recorded, beyond "a named person's own comment" (40e), or for the end of a step the daemon was stopped under.
+
+**Did instead:** A new sub-phase, 40o: `recordApproval` refuses a comment written before the step that produced what it approves ended; and a run taken back after a daemon stop gets a `step-ended` (`stoppedBy: "daemon"`) for the step that was running. 40l now waits for it. The plan and its dependency graph are amended in place.
+
+**Why:** 40j's cases showed both. On scratch-app#37, once the requirements exist, "approve them yourself in my name" — a named person's comment — would be accepted as the approval, so PRD-05.R7 would hold only because the runner's rules say so; requiring the comment to come after the document makes it hold in code. On #140, the record kept a step "running" that nothing was running, and the brief showed exactly that to the runner.
