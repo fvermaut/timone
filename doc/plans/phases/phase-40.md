@@ -363,6 +363,28 @@ grep -c "The runner skipped the approval of" .claude/skills/timone-plan/SKILL.md
 
 ---
 
+### Sub-phase 40n: a step ticket's claim is not shown to the runner as a hold
+
+> ✏ 2026-09-27 (build, timone#165): added at build. 40h found that on a step ticket the `timone:held` label is the machine's own claim, put on at pickup (ADR-0044 D7), and it made the driver read it that way. The brief (40g) still shows "Held." on every step ticket, and a runner told a ticket is held may do nothing — which would stall every piece of a split initiative. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/session.ts` — the brief's `held` is true only when the ticket carries `timone:held` **and** is not a step ticket (`ticketContext.isStep`).
+**[MODIFY]** `src/runner/session.test.ts` — new cases only.
+
+**Seams under test (TDD):** `wakeRunner` over the injected `runQuery` fake, reading the prompt it was handed — the seam 40g already tests at. Red-green: (1) a step ticket carrying `timone:held` gives a prompt that says the ticket is not held; (2) a ticket that is not a step ticket and carries `timone:held` gives a prompt that says it is held.
+
+> Sub-phase 40h must be complete before starting this sub-phase. Shares no file with 40i or 40j.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run src/runner/session.test.ts; echo "exit: $?"  # expect 0
+```
+
+- [ ] Red→green evidence in the handoff.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -423,6 +445,7 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40i → 40g                 timone record — parallel with 40h/40j/40k
 40j → 40g                 the replay of recorded failures
 40k → 40e                 the skills accept a skipped approval
-40l → 40h, 40j            scratch-app moves; the watched run
+40n → 40h                 a step ticket's claim is not shown as a hold  (✏ 2026-09-27: added at build)
+40l → 40h, 40j, 40n       scratch-app moves; the watched run
 40m → 40l                 README
 ```

@@ -101,3 +101,13 @@
 **Did instead:** The build writes the harness, the cases and the harness's own tests. The replay itself is moved to a human gate: the operator runs it once from his own logged-in terminal before delivery, and its output goes to `reports/phase-40-replay.md`. The plan is amended in place.
 
 **Why:** The build's sandbox has no model login: `claude auth status` reports `loggedIn: false`, no `CLAUDE_CODE_OAUTH_TOKEN` or API key is set, and 40d's probe failed on login for the same reason. Every call to the real model — the replay, 40d's owed probe, the watched run — needs the operator's terminal.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** The plan had no slice for how a step ticket's hold label is read. 40g's brief reads `timone:held` on any ticket as a person's hold.
+
+**Did instead:** A new sub-phase, 40n, makes the brief show a step ticket as not held when the label is the machine's own claim. 40l now waits for it. The plan and its dependency graph are amended in place.
+
+**Why:** On a step ticket the label is put on by the machine at pickup (ADR-0044 D7); 40h found this and made the driver read it that way. Left as it was, the brief would tell the runner every step ticket is held, and a runner told that may do nothing — every piece of a split initiative would stall. Known gap left open: the runner's own `setHold` on a step ticket changes nothing about wakes, since the label there is already the claim.
