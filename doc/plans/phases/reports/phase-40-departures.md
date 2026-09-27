@@ -71,3 +71,13 @@
 **Did instead:** `mergeChunkZero` takes the approval as a required argument, `{ by, at }`. The runner's path passes it only from the record's `approval` entry, and its `recordApproval` action refuses before any merge when there is none. The current daemon passes the approval it read from the person's reply. `src/daemon/session.ts` is granted to 40e for that one call site, and case (6) is reworded to test both.
 
 **Why:** The current daemon keeps no run record, so it could not supply the approval "the same way" without writing records it never reads, and `session.ts` was not in the slice's file list. A required argument makes a merge with no approval impossible to write on either path, which is what R3 asks of every merge path.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** The amended 40e granted `src/daemon/session.ts` for "one call site": `recordApproval` passing the gate's approval to `mergeChunkZero`.
+
+**Did instead:** Two call sites changed. The spawner also keeps a private `mergeChunkZero` delegator, which `session.test.ts` reaches by name; it would not compile without the approval, so it now takes the approval and passes it on. No test file changed. The plan is amended in place. `attemptMerge`, the lower-level merge the delegators use, stays exported for the same tests and takes no approval; nothing in the runner calls it. It is listed for the delivery review as the one merge path the compiler does not guard.
+
+**Why:** The plan's "one call site" counted the wrong number of callers. The second is the same spawner path and carries the same approval, so the guard is unchanged in strength.
