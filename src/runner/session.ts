@@ -470,7 +470,10 @@ async function briefFor(
     activity: activityOf(deps.running, run.id, options.checkSince),
     events,
     timoneIssues,
-    held: ticket.labels.includes(HELD_LABEL),
+    // On a step ticket the hold label is the machine's own claim, put on at
+    // pickup (ADR-0044 D7). Shown as a hold, it could lead the runner to do
+    // nothing, and every piece of a split request would wait for ever.
+    held: ticket.labels.includes(HELD_LABEL) && !deps.ticketContext.isStep,
     limitUsd,
     now: deps.clock(),
   });

@@ -791,3 +791,35 @@ $ git diff origin/main -- src/commands/retry.test.ts src/commands/takeover.test.
 - **The check at the limit** is a Haiku call with no tools. Its cost is not in the record and does not count toward the limit.
 - **A picked-up run whose record cannot be read** gives an error line each cycle; the reclaim then hands it back as a new ticket, and the runner's session writes down why it could not start (40g).
 - **For the watched run (40l):** what is not proven here is the real `query` wired as `runQuery`; a real box step ending and the description rewritten on GitHub; the 15-minute check against a real step's silence; and the daemon's `--once` drain with a real runner.
+
+## 40n — a step ticket's claim is not shown to the runner as a hold
+
+**Built.** In `wakeRunner`'s brief, `held` is true only when the ticket carries `timone:held` **and** the run's `ticketContext.isStep` is false. A step ticket, where that label is the machine's own claim put on at pickup (ADR-0044 D7), now gets `Not held.` in the runner's prompt; every other ticket with the label still gets `Held: the ticket has the label timone:held, so the machine will not take it up again until a person removes that label.`
+
+**Files touched.**
+
+- `src/runner/session.ts` — in `briefFor`, `held: ticket.labels.includes(HELD_LABEL) && !deps.ticketContext.isStep`, with a two-sentence comment citing ADR-0044 D7 (+4/−1).
+- `src/runner/session.test.ts` — two new cases at the end of "a wake of the runner" (+34, no existing line changed).
+
+**Decisions taken inside the slice.**
+
+- The flag comes from `deps.ticketContext`, the value `ticketKindOf` gets two lines above, so kind and hold are judged from one source — matching the driver's rule (`src/runner/driver.ts`, `held = labels.includes(HELD_LABEL) && !cycle.isStep(run.ticket)`).
+- `brief.ts` is unchanged; its `held` doc ("Whether the ticket carries the hold label") is now slightly loose. Left for the delivery review.
+- **Known limit, found by the orchestrator:** the driver fills each run's context on every cycle (`driver.ts`, `contexts.set` in `tick`). A wake asked for before the first cycle after a daemon restart — the reclaim of an interrupted run — gets the empty context, so that one wake can still show a step ticket as held; the next wake has it right. Carried to the completion report.
+
+**Validation evidence.**
+
+- Case (1) "tells the runner a step ticket is not held, though it carries timone:held, the machine's own claim put on at pickup" — red: `expected '## Why you were woken\n\nIt is now 20…' to contain '\nNot held.\n'` (the prompt said "Held: the ticket has the label timone:held…"); green after the one-line change.
+- Case (2) "tells the runner a ticket that is not a step ticket is held when it carries timone:held" — green on arrival, as expected; mutation `held: false && …` fails it; restored.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/runner/session.test.ts; echo "exit: $?"
+ Tests  16 passed (16)
+exit: 0
+```
+
+- [x] Red→green evidence is above.
+
+**What 40l must know.** Whatever builds `actionsFor(run)` must fill `ticketContext.isStep` for step tickets; the driver does, from the cycle's initiative survey.

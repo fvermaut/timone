@@ -505,6 +505,40 @@ describe("a wake of the runner", () => {
     expect(prompt).toContain("Commands and tools it used since the last check: none");
     expect(prompt).toContain("It has been silent since 2026-09-27T11:40:00.000Z.");
   });
+
+  it("tells the runner a step ticket is not held, though it carries timone:held, the machine's own claim put on at pickup", async () => {
+    const w = world();
+    w.forge.thread.labels = ["timone", "timone:held"];
+    const onAStep = (run: Run): RunnerActionDeps => ({
+      ...w.actionDeps(run),
+      ticketContext: { isStep: true, isRemediation: false },
+    });
+    const runner = scriptedRunner([quiet()]);
+
+    await wakeRunner({ runQuery: runner.runQuery, actionsFor: onAStep }, w.run, [
+      "The ticket was marked for the machine.",
+    ]);
+
+    const prompt = runner.started[0]!.prompt;
+    expect(prompt).toContain("\nNot held.\n");
+    expect(prompt).not.toContain("Held: the ticket has the label timone:held");
+  });
+
+  it("tells the runner a ticket that is not a step ticket is held when it carries timone:held", async () => {
+    const w = world();
+    w.forge.thread.labels = ["timone", "triage:feature", "timone:held"];
+    const runner = scriptedRunner([quiet()]);
+
+    await wakeRunner({ runQuery: runner.runQuery, actionsFor: w.actionDeps }, w.run, [
+      "fvermaut commented on the ticket at 2026-09-27T11:58:40Z.",
+    ]);
+
+    const prompt = runner.started[0]!.prompt;
+    expect(prompt).toContain(
+      "Held: the ticket has the label timone:held, so the machine will not take it up again until a person removes that label.",
+    );
+    expect(prompt).not.toContain("\nNot held.\n");
+  });
 });
 
 describe("a runner that fails", () => {
