@@ -81,3 +81,13 @@
 **Did instead:** Two call sites changed. The spawner also keeps a private `mergeChunkZero` delegator, which `session.test.ts` reaches by name; it would not compile without the approval, so it now takes the approval and passes it on. No test file changed. The plan is amended in place. `attemptMerge`, the lower-level merge the delegators use, stays exported for the same tests and takes no approval; nothing in the runner calls it. It is listed for the delivery review as the one merge path the compiler does not guard.
 
 **Why:** The plan's "one call site" counted the wrong number of callers. The second is the same spawner path and carries the same approval, so the guard is unchanged in strength.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** Sub-phase 40g added the wait kind `runner` and said "every exhaustive switch over the wait kind the compiler reports" in `cta.ts`, `status.ts`, `takeover.ts` and `retry.ts` would be changed, with no test of its own.
+
+**Did instead:** Those files read the wait kind with `if` chains, so the compiler named none of them. The changes were made as the plan and the orchestrator's notes ask — `status` prints "waiting: <on>", `takeover` treats `runner` as an escalation, `retry` refuses with the plan's sentence, and `cta.ts` has a `runner` arm that asks for nothing — each checked by a scratch script, not a test. Their tests move to 40h (`takeover`, `retry`) and 40i (`status`, including the side effect that the status line's last sentence does not count a runner wait). `package.json` gains `@modelcontextprotocol/sdk` 1.30.0 as a development dependency: 40g's test drives the real tool server through an MCP client, and the package was only present because the agent library depends on it.
+
+**Why:** A behaviour change with no test is a plan defect under the undeclared-seams rule. The cheapest honest fix is to give the tests to the slices that already own those files' seams, rather than let 40g edit test files it was not granted.
