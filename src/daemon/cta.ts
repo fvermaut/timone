@@ -18,6 +18,7 @@ import { HELD_LABEL } from "./steps.js";
 import { takeoverCommand } from "../channels/terminal.js";
 import { isBuildEscalation, technicalFault } from "./faults.js";
 import { CARRY_ON_WAIT, type Run } from "./runs.js";
+import { RUNNER_DEFAULT_WAIT } from "../runner/session.js";
 
 /**
  * Where a ticket's whole initiative stands, as a plain value.
@@ -431,17 +432,24 @@ export function ctaFor(state: TicketState): Cta {
   // **This says the least it can, on purpose.** The runner writes what the
   // ticket needs itself, in its own comments, and the daemon does not
   // compose a standing note for these projects, so the one reader of this is
-  // `timone status`. The wait holds the runner's own words, and code does not
-  // read them for meaning: they may ask the reader for something, or say
-  // "nothing". So it names them as they are, claims nobody is waited on, and
-  // offers no command — the words that follow here for other waits (a
-  // conversation to take over, an answer that resumes a stage) are about a
-  // machine these projects do not run.
+  // `timone status`. So it names the runner's words as they are and offers no
+  // command — the words that follow here for other waits (a conversation to
+  // take over, an answer that resumes a stage) are about a machine these
+  // projects do not run.
+  //
+  // ✏ 40i: **a person is waited on when the runner asked one for
+  // something.** The wait holds what the runner last asked for on the ticket,
+  // or `RUNNER_DEFAULT_WAIT` when it asked nothing. The runner is told to end
+  // every message with what it needs from the reader, "or nothing", so an ask
+  // that opens on that word asks nothing either. Everything else is an ask,
+  // and `timone status`'s closing line has to name the ticket: until 40i it
+  // said "nothing is waiting on you" under a line showing the ask.
   if (run.wait?.kind === "runner") {
+    const on = run.wait.on;
     return {
       headline: "This one is waiting.",
-      needFromYou: run.wait.on,
-      waitingOnYou: false,
+      needFromYou: on,
+      waitingOnYou: on !== RUNNER_DEFAULT_WAIT && !/^nothing\b/i.test(on.trim()),
     };
   }
 

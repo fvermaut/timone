@@ -1053,3 +1053,187 @@ describe("timone status says when the daemon is running old code", () => {
     expect(output).not.toMatch(/old copy/i);
   });
 });
+
+import { RUNNER_DEFAULT_WAIT } from "../runner/session.js";
+
+describe("renderStatus — a run the runner is waiting on", () => {
+  it("reads 'waiting:' and the runner's own words for a run on the runner's wait", () => {
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 12,
+        status: "parked",
+        stage: "requirements",
+        wait: {
+          on: 'read them and reply "approved", or say what to change.',
+          kind: "runner",
+        },
+      }),
+    ];
+    const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
+
+    expect(line).toContain('— waiting: read them and reply "approved", or say what to change.');
+  });
+
+  it("names the ticket in its closing line when the runner asked a person for something", () => {
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 12,
+        status: "parked",
+        stage: "requirements",
+        wait: {
+          on: 'read them and reply "approved", or say what to change.',
+          kind: "runner",
+        },
+      }),
+    ];
+    const output = renderStatus(manifest, runs, { stateExists: true });
+
+    expect(output.split("\n").at(-1)).toBe(
+      "**What I need from you:** answer on scratch-app #12 — each ticket says what it needs.",
+    );
+  });
+
+  it("does not name the ticket in its closing line when the runner asked nobody for anything", () => {
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 12,
+        status: "parked",
+        stage: "execution",
+        wait: { on: RUNNER_DEFAULT_WAIT, kind: "runner" },
+      }),
+    ];
+    const output = renderStatus(manifest, runs, { stateExists: true });
+
+    expect(output.split("\n").at(-1)).toBe(
+      "**What I need from you:** nothing — nothing is waiting on you right now.",
+    );
+  });
+
+  it("does not name the ticket in its closing line when the runner wrote that it needs nothing", () => {
+    // The runner is told to end every message with what it needs from the
+    // reader, "or nothing" — and the words after "nothing" are its own.
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 12,
+        status: "parked",
+        stage: "execution",
+        wait: { on: "Nothing — I will start the build next.", kind: "runner" },
+      }),
+    ];
+    const output = renderStatus(manifest, runs, { stateExists: true });
+
+    expect(output.split("\n").at(-1)).toBe(
+      "**What I need from you:** nothing — nothing is waiting on you right now.",
+    );
+  });
+});
+
+describe("renderStatus — what a ticket the runner works on has spent", () => {
+  const runnerManifest: Manifest = {
+    projects: {
+      "scratch-app": {
+        repo_url: "https://github.com/fvermaut/scratch-app.git",
+        path: "projects/scratch-app",
+        stack: [],
+        bindings: { ticketing: "github" },
+        driver: "runner",
+        ticket_limit_usd: 80,
+      },
+    },
+  };
+
+  it("shows on a runner project's line what each ticket has spent, against its limit", () => {
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 12,
+        status: "parked",
+        stage: "execution",
+        wait: { on: RUNNER_DEFAULT_WAIT, kind: "runner" },
+      }),
+    ];
+    const output = renderStatus(runnerManifest, runs, {
+      stateExists: true,
+      records: (project, ticket) =>
+        project === "scratch-app" && ticket === 12
+          ? {
+              ok: true,
+              value: [
+                {
+                  kind: "runner-ended",
+                  at: "2026-09-27T10:00:30.000Z",
+                  runId: "scratch-app#12/1",
+                  ok: true,
+                  costUsd: 2.24,
+                },
+                {
+                  kind: "step-ended",
+                  at: "2026-09-27T10:40:00.000Z",
+                  runId: "scratch-app#12/1",
+                  stage: "execution",
+                  sessionId: "s-1",
+                  ok: true,
+                  costUsd: 10.1,
+                },
+              ],
+            }
+          : { ok: true, value: [] },
+    });
+
+    // $2.24 + $10.10, worked out by hand; $80 is this project's own limit.
+    expect(lineFor(output, "scratch-app")).toBe(
+      `scratch-app  #12 (building) — waiting: ${RUNNER_DEFAULT_WAIT} — $12.34 of $80.00 spent`,
+    );
+  });
+
+  it("says the spending is unknown, and where to look, when the ticket's record cannot be read", () => {
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 12,
+        status: "parked",
+        stage: "execution",
+        wait: { on: RUNNER_DEFAULT_WAIT, kind: "runner" },
+      }),
+    ];
+    const output = renderStatus(runnerManifest, runs, {
+      stateExists: true,
+      records: () => ({
+        ok: false,
+        error: { line: 3, message: "line 3 is not JSON" },
+      }),
+    });
+
+    expect(lineFor(output, "scratch-app")).toBe(
+      `scratch-app  #12 (building) — waiting: ${RUNNER_DEFAULT_WAIT} — ` +
+        "spending unknown: its record cannot be read, see timone record scratch-app#12",
+    );
+  });
+
+  it("says nothing about spending on a project the daemon drives, and reads no record for it", () => {
+    const runs = [
+      run({
+        project: "scratch-app",
+        ticket: 7,
+        status: "parked",
+        stage: "triage",
+        wait: { on: "approval on the ticket" },
+      }),
+    ];
+    const asked: string[] = [];
+    const output = renderStatus(manifest, runs, {
+      stateExists: true,
+      records: (project, ticket) => {
+        asked.push(`${project}#${ticket}`);
+        return { ok: true, value: [] };
+      },
+    });
+
+    expect(lineFor(output, "scratch-app")).not.toMatch(/spent|spending/);
+    expect(asked).toEqual([]);
+  });
+});

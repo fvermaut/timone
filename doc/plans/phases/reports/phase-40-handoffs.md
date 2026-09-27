@@ -823,3 +823,78 @@ exit: 0
 - [x] Red→green evidence is above.
 
 **What 40l must know.** Whatever builds `actionsFor(run)` must fill `ticketContext.isStep` for step tickets; the driver does, from the cycle's initiative survey.
+
+## 40i — `timone record` — the record of a run, in plain words
+
+**Built.** `timone record <project>#<ticket>` reads the ticket's record through `readRecord` and prints each step with its start, end and cost; each decision with its reason; each step left out of the default order, with its reason; and the total spent against the limit. Read-only, no lock. The pure seam is `renderRecord({ project, ticket, record, limitUsd })` → `{ok: true, value} | {ok: false, error}`; the command prints `value`, or prints `error` to stderr and exits 1 (a ticket with no record, or a record with a broken line). `timone status`: a run waiting with kind `runner` still reads "waiting: <on>", its closing line now names the ticket when `on` asks a person for something (fixed in `cta.ts`'s `runner` arm), and a runner project's line shows ` — $X of $Y spent` for each ticket it names.
+
+**Files touched.**
+
+- `src/commands/record.ts` — new: `renderRecord`, `RecordReportInput`, `registerRecordCommand`.
+- `src/commands/record.test.ts` — new: 13 tests (5 declared, 8 extras at the render seam).
+- `src/cli.ts` — registers the command.
+- `src/commands/status.ts` — `RenderStatusOptions.records`, `spendingReader`, the spending phrase in `describeRun`; the command passes `readRecord(process.cwd(), …)`.
+- `src/commands/status.test.ts` — 7 new tests and one import line; 184 added, 0 removed.
+- `src/daemon/cta.ts` — the `runner` arm only, and the import of `RUNNER_DEFAULT_WAIT`.
+
+**Decisions taken inside the slice.**
+
+1. **Case (6)'s rule:** a runner wait counts as waiting on a person when `on !== RUNNER_DEFAULT_WAIT` and `on`, trimmed, does not start with "nothing" (any case) — because the runner ends every message with the call-to-action line and "nothing" is a common answer there. The rule sits in `ctaFor`, so there is one computation. No import cycle: nothing `session.ts` imports reaches `cta.ts`.
+2. **Departures come from the `departure` entries, not `departuresOf`:** the kind needs forge labels and the step/remediation context, and this command reads no network. `start_step` refuses a skip with no reason and records one with it, so every step left out is listed; a step skipped and run later is not called "out of order" here. The pull request's section is the full list; trust it when they differ.
+3. **No run ids are printed;** entries from every run of the ticket are listed in time order.
+4. **Layout:** headings "Steps:", "Decisions:", "Steps left out of the default order:", with "- None." under an empty list; times `YYYY-MM-DD HH:MM UTC`; costs to two decimals; a step with no end reads "no end written down yet"; a failed step adds "It failed: <error>"; a runner stop adds "The runner stopped it."; refusals print indented under the decision; action names map to plain words through a table typed over `RunnerToolName`, so a new tool without words fails `tsc`. The last line: "This ticket has spent $X of the $Y it may spend: $A on steps and $B on the runner deciding what to do next." Raises are listed.
+5. **A broken record** is re-worded: "The record of p #t cannot be read: line N of .timone/records/p/t.jsonl is broken. Fix that line, then run this again."
+6. **Manifest:** `--manifest` defaults to `timone.yaml`; a project missing from it uses `DEFAULT_LIMIT_USD`.
+7. **Spending on the status line** is read only for the runs a line names, and only on runner projects; a broken record reads "spending unknown: its record cannot be read, see timone record p#t".
+8. **Not shown:** `woke` events, a `runner-ended` error, approvals, `limit-reached`, `seen`, `notice`.
+
+**Validation evidence.** Red before green, one test at a time.
+
+- (1) "prints each step with the time it started, the time it ended, and what it cost" — red `Cannot find module './record.js'`, then an empty render; green.
+- (2) "prints each decision with the reason given for it" — red, green.
+- (3) "prints each step that was left out of the default order, with the reason given" — red, green.
+- (4) "ends with what the ticket has spent, steps and runner together, against its limit" ($10.10 + $2.24 against $80, by hand) — red, green.
+- (5) "says there is no record of a ticket nothing was written about, as a failure the command exits 1 on" — red, green.
+- Extras, each red then green: a broken line named; a step with no end; a failed step; a step stopped by the runner; a departure with no reason ("Reason: undefined" before); a refused decision; who raised the limit and when; "- None." under empty lists.
+- (6a) "reads 'waiting:' and the runner's own words" — green on arrival (40g built it); mutation removing the runner branch fails it; restored.
+- (6b) "names the ticket in its closing line when the runner asked a person for something" — red: "nothing is waiting on you right now"; green.
+- (6c) "does not name the ticket … when the runner asked nobody for anything" — green on arrival; mutation `waitingOnYou: true` fails it; restored.
+- (6d) "does not name the ticket … when the runner wrote that it needs nothing" — red, then green with the "nothing" rule.
+- Extras on `status.ts`: spending shown on a runner project's line (red, green); spending unknown when the record is broken (red, green); nothing about spending on a daemon project (green on arrival, mutation fails it, restored).
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/commands/record.test.ts src/commands/status.test.ts; echo "exit: $?"
+ Tests  66 passed (66)
+exit: 0
+$ npx tsx src/cli.ts record scratch-app#999999; echo "exit: $?"
+There is no record of scratch-app #999999: nothing has been written down about it yet. A record is kept only for tickets in projects the runner works on.
+exit: 1
+$ npx vitest run
+ Test Files  54 passed (54)
+      Tests  1876 passed (1876)
+```
+
+Sample, from a hand-written 9-line record:
+
+```
+The record of scratch-app #12.
+
+Steps:
+- Building: started 2026-09-27 10:00 UTC, ended 2026-09-27 10:31 UTC, cost $6.80.
+- Checking the result: started 2026-09-27 10:31 UTC, no end written down yet.
+
+Decisions:
+- 2026-09-27 10:00 UTC — start a step. Reason: The ticket is a one-line fix, so it can go straight to building.
+- 2026-09-27 10:31 UTC — start a step. Reason: The build is done; a fresh session checks it.
+
+Steps left out of the default order:
+- 2026-09-27 10:00 UTC — sorting the request and preparing the work. Reason: The ticket says exactly what to change.
+
+This ticket has spent $7.59 of the $150.00 it may spend: $6.80 on steps and $0.79 on the runner deciding what to do next.
+```
+
+- [x] Red→green evidence is above; all three validation commands give the expected result.
+
+**What 40l/40m must know.** `ctaFor`'s `runner` arm can now return `waitingOnYou: true` by the rule above; only `timone status` reads it for runner projects. A new runner tool needs words in `ACTION_WORDS`. Worth checking in the watched run: `timone record` on the scratch-app ticket afterwards, and `timone status` naming a ticket whose runner asked for an approval.

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
-import { loadManifest, type Manifest } from "../manifest.js";
+import { driverOf, loadManifest, ticketLimitOf, type Manifest } from "../manifest.js";
 import {
   fromDefaultBranch,
   type SyncBreakdownSource,
@@ -17,6 +17,8 @@ import {
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
 import { initiativeProgressSync, progressOf } from "../daemon/poll.js";
 import { daemonRecordNotice } from "../daemon/version.js";
+import { allowanceOf, spentOn } from "../runner/limit.js";
+import { readRecord } from "../runner/record.js";
 
 /**
  * Where a project's checkout is, under the timone root.
@@ -119,6 +121,18 @@ export interface RenderStatusOptions {
    * from the same ref.
    */
   breakdownSource?: SyncBreakdownSource;
+  /**
+   * A ticket's record, as `readRecord` gives it, so a ticket the runner works
+   * on can show what it has spent against its limit
+   * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
+   *
+   * **Read only for runs of projects the runner drives**, and only for the
+   * runs this command names: a project the daemon drives has no record, and
+   * reading a file per ticket there would cost time and say nothing.
+   *
+   * Absent means say nothing about spending, which is what a fixture wants.
+   */
+  records?: (project: string, ticket: number) => ReturnType<typeof readRecord>;
 }
 
 /**
@@ -138,6 +152,11 @@ interface RenderContext {
   progressOf: (run: Run) => InitiativeProgress | undefined;
   /** Every initiative of a project the daemon has a picture of. */
   initiativesOf: (project: string) => readonly InitiativeRecord[];
+  /**
+   * What this run's ticket has spent against its limit, as the words that
+   * end its phrase — or nothing, for a project the runner does not drive.
+   */
+  spendingOf: (run: Run) => string;
 }
 
 /**
@@ -175,6 +194,38 @@ function progressReader(
       );
     }
     return cache.get(key);
+  };
+}
+
+/**
+ * What a ticket of a project the runner drives has spent against its limit,
+ * ` — $12.34 of $150.00 spent`, from the functions that decide whether
+ * another session may start — so the number here is the number that stops
+ * the work. Nothing at all for any other project, or when no reader of
+ * records was given.
+ */
+function spendingReader(
+  manifest: Manifest,
+  records: RenderStatusOptions["records"],
+): (run: Run) => string {
+  return (run) => {
+    const config = manifest.projects[run.project];
+    if (records === undefined || config === undefined || driverOf(config) !== "runner") {
+      return "";
+    }
+    const record = records(run.project, run.ticket);
+    // Said rather than left out: a missing number would read as a ticket
+    // that has spent nothing, and the record is what the limit is counted
+    // from. `timone record` names the broken line.
+    if (!record.ok) {
+      return (
+        " — spending unknown: its record cannot be read, " +
+        `see timone record ${run.project}#${run.ticket}`
+      );
+    }
+    const spent = spentOn(record.value);
+    const allowance = allowanceOf(record.value, ticketLimitOf(config));
+    return ` — $${spent.toFixed(2)} of $${allowance.toFixed(2)} spent`;
   };
 }
 
@@ -286,7 +337,7 @@ function describeRun(run: Run, context: RenderContext): string {
       ? ""
       : ` ⚠ ${run.flags.length} automatic check(s) failed — see the ticket`;
 
-  return `#${run.ticket}${where}${stage} — ${what}${flags}`;
+  return `#${run.ticket}${where}${stage} — ${what}${context.spendingOf(run)}${flags}`;
 }
 
 /**
@@ -395,6 +446,7 @@ export function renderStatus(
     now: options.now,
     hold: (run) => (run.holder === undefined ? "none" : livenessOf(run.holder)),
     initiativesOf: (project) => options.pictures?.(project) ?? [],
+    spendingOf: spendingReader(manifest, options.records),
     progressOf: progressReader(
       options.root,
       options.breakdownSource,
@@ -521,6 +573,7 @@ export function registerStatusCommand(program: Command): void {
           now: new Date(),
           root: process.cwd(),
           pictures: (project) => store.initiativesFor(project),
+          records: (project, ticket) => readRecord(process.cwd(), project, ticket),
           // Undefined once the daemon's process is gone: nobody is running
           // old code when nothing is running.
           daemonVersion: () => store.daemonVersion(),
