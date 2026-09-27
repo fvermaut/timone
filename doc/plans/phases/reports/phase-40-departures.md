@@ -31,3 +31,13 @@
 **Did instead:** The in-process runtime is left as it is. It starts an interactive request as it starts any other and offers no `send`; the runner's `messageStep` refuses on it. The plan is amended in place.
 
 **Why:** The plan declared no seam and no red-green case for that change, so it could not be built test-first as written. The daemon runs the container runtime unless `--runtime in-process` is given, and the steps the runner starts run in the box, where 40d does build the message mode.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** Sub-phase 40b said `setPullRequestBody` passes the body on standard input, `gh pr edit --body-file -`.
+
+**Did instead:** The body is written to a temporary file, passed as `gh pr edit --body-file <path>`, and the file is removed afterwards, whether the call succeeded or not. The plan is amended in place.
+
+**Why:** The `CommandRunner` the adapter runs `gh` through has no way to pass standard input (`CommandOptions` holds only `cwd`, `env`, `repository` and `timeoutMs`). Widening it would also widen the credential wrapper that every forge call goes through, for one method. A temporary file needs no change outside the adapter.
