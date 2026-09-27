@@ -75,9 +75,10 @@ export interface StepSession {
    */
   stop(): void;
   /**
-   * Say something to the session while it runs. No runtime offers this yet,
-   * so it is always absent for now; it is here so the runner is written
-   * against the shape it will have.
+   * Say something to the session while it runs: the runtime's own
+   * {@link StartedSession.send}, passed through unchanged. Present only when
+   * the request was interactive and the runtime can deliver a message, which
+   * today means the box.
    */
   send?(text: string): void;
 }
@@ -147,6 +148,9 @@ export async function startStepSession(
     completed: watched(started, ticker, label, log),
     ...(progress === undefined ? {} : { progress }),
     stop: () => stopSession(started, runId, log),
+    ...(started.send === undefined
+      ? {}
+      : { send: (text: string) => started.send?.(text) }),
   };
 }
 

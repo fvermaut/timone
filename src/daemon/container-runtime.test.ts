@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   containerRuntime,
@@ -1456,5 +1456,330 @@ describe("the forge token a running box works on", () => {
     }).start(request());
 
     expect(clock.pending()).toBe(0);
+  });
+});
+
+/**
+ * The `docker run` arguments and the box script as the code built them on
+ * 2026-09-27, at commit 1b270ab, before a box could take a message
+ * (timone#165, sub-phase 40d). Captured by running that code, not written
+ * by hand: a request that is not interactive must still produce exactly
+ * these, and the only honest source for "exactly" is the code as it was.
+ *
+ * The request is {@link request} and the container is named
+ * `timone-scratch-app-1`; no credential, no stack, no run environment.
+ */
+const ARGS_BEFORE_40D: readonly string[] = [
+  "run",
+  "--name",
+  "timone-scratch-app-1",
+  "--init",
+  "--shm-size=1g",
+  "-e",
+  "TIMONE_REMOTE",
+  "-e",
+  "TIMONE_COMMIT",
+  "-e",
+  "PROJECT_REMOTE",
+  "-e",
+  "PROJECT_BRANCH",
+  "-e",
+  "TIMONE_PROMPT",
+  "-e",
+  "TIMONE_MODEL",
+  "-e",
+  "BASH_DEFAULT_TIMEOUT_MS",
+  "-e",
+  "BASH_MAX_TIMEOUT_MS",
+  "timone-box:test",
+  "sh",
+  "-c",
+];
+
+const SCRIPT_BEFORE_40D: string = [
+  "set -e",
+  "if [ -n \"${GH_TOKEN:-}\" ]; then",
+  "  mkdir -p \"$HOME/.timone\" \"$HOME/.local/bin\"",
+  "  ( umask 077; printf %s \"$GH_TOKEN\" > \"$HOME/.timone/gh-token\" )",
+  "  git config --global credential.helper '!f() { echo \"username=x-access-token\"; echo \"password=$(cat \"$HOME/.timone/gh-token\")\"; }; f'",
+  "  cat > \"$HOME/.local/bin/gh\" <<'TIMONE_GH_WRAPPER'",
+  "#!/bin/sh",
+  "GH_TOKEN=$(cat \"$HOME/.timone/gh-token\" 2>/dev/null)",
+  "GITHUB_TOKEN=$GH_TOKEN",
+  "export GH_TOKEN GITHUB_TOKEN",
+  "exec /usr/local/bin/gh \"$@\"",
+  "TIMONE_GH_WRAPPER",
+  "  chmod 0755 \"$HOME/.local/bin/gh\"",
+  "  export PATH=\"$HOME/.local/bin:$PATH\"",
+  "fi",
+  "git clone --quiet \"$TIMONE_REMOTE\" /workspace/timone",
+  "git -C /workspace/timone checkout --quiet \"$TIMONE_COMMIT\" 2>/dev/null || {",
+  "  echo \"the daemon is running Timone at $TIMONE_COMMIT, and that commit is not on the remote. A boxed run is built from the remotes, so it cannot follow a commit nobody has pushed. Push it, or run the daemon on a commit that is pushed.\" >&2",
+  "  exit 78",
+  "}",
+  "mkdir -p /workspace/timone/projects",
+  "git clone --quiet \"$PROJECT_REMOTE\" /workspace/timone/projects/scratch-app",
+  "git -C /workspace/timone/projects/scratch-app checkout --quiet \"$PROJECT_BRANCH\" 2>/dev/null || true",
+  "cd /workspace/timone",
+  "timone_reason() {",
+  "  sed -e 's/^npm \\(error\\|ERR!\\) *//' \"$1\" |",
+  "    grep -v '^[[:space:]]*$' |",
+  "    grep -v '^A complete log of this run' |",
+  "    head -3 | tr '\\n' ' ' | cut -c 1-300",
+  "}",
+  "npm ci --no-audit --no-fund > /tmp/timone-npm-ci.log 2>&1 || {",
+  "  echo \"could not install Timone's dependencies in the box, so its guardrail hooks would not run. Refusing to work without them. npm said: $(timone_reason /tmp/timone-npm-ci.log)\" >&2",
+  "  exit 79",
+  "}",
+  "npm run build > /tmp/timone-npm-build.log 2>&1 || {",
+  "  echo \"could not build Timone in the box, so its guardrail hooks would not run. Refusing to work without them. The build said: $(timone_reason /tmp/timone-npm-build.log)\" >&2",
+  "  exit 79",
+  "}",
+  "if [ -f \"/workspace/timone/projects/scratch-app/package.json\" ]; then",
+  "  cd /workspace/timone/projects/scratch-app",
+  "  if [ -f package-lock.json ]; then",
+  "    npm ci --no-audit --no-fund > /tmp/timone-project-install.log 2>&1 ||",
+  "      npm install --no-audit --no-fund > /tmp/timone-project-install.log 2>&1 || {",
+  "      echo \"could not install the project's dependencies in the box, so the run has to install them itself before it can validate anything. npm said: $(timone_reason /tmp/timone-project-install.log)\" >&2",
+  "    }",
+  "  else",
+  "    npm install --no-audit --no-fund > /tmp/timone-project-install.log 2>&1 || {",
+  "      echo \"could not install the project's dependencies in the box, so the run has to install them itself before it can validate anything. npm said: $(timone_reason /tmp/timone-project-install.log)\" >&2",
+  "    }",
+  "  fi",
+  "  cd /workspace/timone",
+  "fi",
+  "printf \"%s\" \"$TIMONE_PROMPT\" | exec claude -p --output-format stream-json --verbose --include-partial-messages --model \"$TIMONE_MODEL\" --permission-mode bypassPermissions ${TIMONE_EFFORT:+--effort \"$TIMONE_EFFORT\"}",
+].join("\n");
+
+/**
+ * A box the runner can speak to while a step runs (timone#165, sub-phase
+ * 40d).
+ *
+ * **Only an interactive request changes anything.** Every stage the daemon
+ * runs today sends its prompt once and waits, and that path must stay exactly
+ * as it was: the box script is the most expensive thing to get wrong in the
+ * whole daemon, and each line of it was earned by a real run failing.
+ */
+describe("a box that can take a message while a step runs", () => {
+  function interactiveRequest(): SessionRequest {
+    return sessionRequest({
+      cwd: "/root",
+      prompt: "do the thing",
+      model: "claude-opus-5",
+      interactive: true,
+      workspace: {
+        timone: { commit: TIMONE_COMMIT, remote: "https://github.com/fvermaut/timone.git" },
+        project: {
+          name: "scratch-app",
+          repoUrl: "https://github.com/fvermaut/scratch-app.git",
+        },
+        branch: "timone/7-the-page-feels-slow",
+      },
+    });
+  }
+
+  /** A user message, as the CLI prints one back when it takes it. */
+  function replayOf(text: string): string {
+    return line({
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text }] },
+      parent_tool_use_id: null,
+      session_id: "sess-1",
+      isReplay: true,
+    });
+  }
+
+  /**
+   * A box the test talks to as the CLI would: the test prints each line of
+   * its stdout, and reads what the runtime wrote to its stdin.
+   *
+   * Two things are modelled on the real CLI, because the runtime depends on
+   * both. **It says nothing until its first message arrives** — its `init`
+   * opens a turn, and there is no turn before there is a message. And **it
+   * exits once its stdin is closed and nothing is left to print**, which is
+   * how a session that takes messages ends at all.
+   *
+   * It has a stdin only when the spawn asked for one, as `docker` does.
+   */
+  function liveContainer(): {
+    spawn: ContainerSpawn;
+    calls: { args: string[]; env?: Record<string, string> }[];
+    print: (text: string) => void;
+    written: () => string[];
+    ended: () => boolean;
+  } {
+    const calls: { args: string[]; env?: Record<string, string> }[] = [];
+    const written: string[] = [];
+    const queue: string[] = [];
+    let ended = false;
+    let wake: (() => void) | undefined;
+    const nudge = () => {
+      wake?.();
+      wake = undefined;
+    };
+    const print = (text: string) => {
+      queue.push(text);
+      nudge();
+    };
+    let resolveExit!: (value: ContainerExit) => void;
+    const exit = new Promise<ContainerExit>((resolve) => {
+      resolveExit = resolve;
+    });
+
+    const spawn: ContainerSpawn = (_command, args, options) => {
+      calls.push({ args, ...(options?.env === undefined ? {} : { env: options.env }) });
+      if (args[0] !== "run") return oneShot();
+      return {
+        lines: (async function* () {
+          for (;;) {
+            const next = queue.shift();
+            if (next !== undefined) {
+              yield next;
+              continue;
+            }
+            if (ended) break;
+            await new Promise<void>((resolve) => {
+              wake = resolve;
+            });
+          }
+          resolveExit({ code: 0, signal: null, stderr: "" });
+        })(),
+        exit,
+        kill: () => resolveExit({ code: null, signal: "SIGKILL", stderr: "" }),
+        ...(options?.stdin !== "pipe"
+          ? {}
+          : {
+              stdin: {
+                write: (text: string) => {
+                  if (written.length === 0) print(started);
+                  written.push(text);
+                },
+                end: () => {
+                  ended = true;
+                  nudge();
+                },
+              },
+            }),
+      };
+    };
+
+    return {
+      spawn,
+      calls,
+      print,
+      written: () => [...written],
+      ended: () => ended,
+    };
+  }
+
+  it("hands the prompt to an interactive box as its first message, on stdin", async () => {
+    const box = liveContainer();
+
+    const session = await runtimeWith(box.spawn).start(interactiveRequest());
+
+    const run = box.calls.find((call) => call.args[0] === "run")!;
+    // `-i` is a `docker run` flag, so it has to come before the image: after
+    // it, it would be an argument to `sh`.
+    expect(run.args).toContain("-i");
+    expect(run.args.indexOf("-i")).toBeLessThan(run.args.indexOf("timone-box:test"));
+    const script = run.args.at(-1)!;
+    expect(script).toContain("--input-format stream-json");
+    expect(script).not.toContain('printf "%s" "$TIMONE_PROMPT"');
+    expect(run.env?.TIMONE_PROMPT).toBeUndefined();
+
+    const first = box.written()[0]!;
+    expect(first.endsWith("\n")).toBe(true);
+    expect(JSON.parse(first)).toEqual({
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: expect.stringMatching(/^You are running inside a container[\s\S]*\n\ndo the thing$/),
+          },
+        ],
+      },
+    });
+    expect(session.sessionId).toBe("sess-1");
+  });
+
+  it("writes a message sent to the session as another user message", async () => {
+    const box = liveContainer();
+    const session = await runtimeWith(box.spawn).start(interactiveRequest());
+
+    session.send!("x");
+
+    expect(box.written()).toHaveLength(2);
+    expect(box.written()[1]).toBe(
+      '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"x"}]}}\n',
+    );
+  });
+
+  it("closes the box's stdin once a result arrives with nothing sent since, so the session ends", async () => {
+    const box = liveContainer();
+    const session = await runtimeWith(box.spawn).start(interactiveRequest());
+
+    box.print(replayOf("the prompt"));
+    box.print(result());
+
+    await vi.waitFor(() => expect(box.ended()).toBe(true));
+    expect((await session.completed).ok).toBe(true);
+  });
+
+  it("keeps stdin open past a result while a message sent before it has not been taken", async () => {
+    const box = liveContainer();
+    const session = await runtimeWith(box.spawn).start(interactiveRequest());
+
+    box.print(replayOf("the prompt"));
+    session.send!("also check the README");
+    box.print(result());
+    // The first result has been read…
+    await vi.waitFor(() => expect(session.progress?.summary()).toBeDefined());
+    // …and the box is still listening: the CLI queued the message for a turn
+    // of its own, and closing now would end the session before that turn.
+    expect(box.ended()).toBe(false);
+
+    box.print(replayOf("also check the README"));
+    box.print(result());
+
+    await vi.waitFor(() => expect(box.ended()).toBe(true));
+    expect((await session.completed).ok).toBe(true);
+    // The CLI says which messages it has taken only when it is asked to.
+    const run = box.calls.find((call) => call.args[0] === "run")!;
+    expect(run.args.at(-1)).toContain("--replay-user-messages");
+  });
+
+  it("ends at the first result when the message sent was taken into the turn still running", async () => {
+    // The CLI adds a message that arrives mid-turn to that turn's next model
+    // call, so one result closes both messages. A box that waited for a
+    // result per message would wait here for ever.
+    const box = liveContainer();
+    const session = await runtimeWith(box.spawn).start(interactiveRequest());
+
+    box.print(replayOf("the prompt"));
+    session.send!("also check the README");
+    box.print(replayOf("also check the README"));
+    box.print(result());
+
+    await vi.waitFor(() => expect(box.ended()).toBe(true));
+    expect((await session.completed).ok).toBe(true);
+  });
+
+  it("builds exactly today's arguments and script for a request that is not interactive", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await (
+      await containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        nameFor: () => "timone-scratch-app-1",
+      }).start(request())
+    ).completed;
+
+    const run = calls.find((call) => call.args[0] === "run")!;
+    expect(run.args.slice(0, -1)).toEqual(ARGS_BEFORE_40D);
+    expect(run.args.at(-1)).toBe(SCRIPT_BEFORE_40D);
   });
 });

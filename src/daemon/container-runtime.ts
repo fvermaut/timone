@@ -51,6 +51,26 @@ export interface ContainerExit {
   stderr: string;
 }
 
+/**
+ * A container's stdin, for a box that is spoken to while it runs
+ * (timone#165).
+ *
+ * **A pair, and on the process only when the spawn asked for it.** A box that
+ * is handed its prompt once has its stdin closed to it from the start, so
+ * there is nothing to write to; putting both calls behind one optional field
+ * means a process has both or neither, and the compiler makes every caller
+ * ask which before it writes.
+ */
+export interface ContainerStdin {
+  /**
+   * Write one whole line, its newline included. The spawner adds nothing and
+   * frames nothing: what a line means is the runtime's business.
+   */
+  write(line: string): void;
+  /** Close it. The CLI inside ends its session once it has nothing left to do. */
+  end(): void;
+}
+
 /** A running container, as this module needs to see one. */
 export interface ContainerProcess {
   /** Its stdout, one line at a time, as they arrive. */
@@ -59,17 +79,22 @@ export interface ContainerProcess {
   exit: Promise<ContainerExit>;
   /** Stop it. */
   kill(): void;
+  /** Present only when the spawn asked for `stdin: "pipe"`. */
+  stdin?: ContainerStdin;
 }
 
 /**
  * How a container is started. Behind a seam so the whole runtime can be driven
  * without docker — including the paths that matter most, which are the ones
  * where something goes wrong.
+ *
+ * `stdin: "pipe"` asks for a {@link ContainerStdin}; without it the process
+ * has none, which is what every spawn but an interactive box wants.
  */
 export type ContainerSpawn = (
   command: string,
   args: string[],
-  options?: { env?: Record<string, string> },
+  options?: { env?: Record<string, string>; stdin?: "pipe" },
 ) => ContainerProcess;
 
 export interface ContainerRuntimeOptions {
@@ -310,8 +335,15 @@ export function parseSessionMessage(text: string): SDKMessage | undefined {
 const dockerSpawn: ContainerSpawn = (command, args, options) => {
   const child = spawnProcess(command, args, {
     env: options?.env === undefined ? process.env : { ...process.env, ...options.env },
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [options?.stdin === "pipe" ? "pipe" : "ignore", "pipe", "pipe"],
   });
+
+  // **A box that dies takes its end of the pipe with it**, and the next write
+  // then fails with EPIPE. Node reports that as an `error` event, and an
+  // `error` event nobody listens for ends the daemon. The box's death is
+  // already reported through `exit`, so this one is dropped.
+  const input = child.stdin;
+  input?.on("error", () => undefined);
 
   let stderr = "";
   child.stderr?.on("data", (chunk: Buffer) => {
@@ -331,6 +363,20 @@ const dockerSpawn: ContainerSpawn = (command, args, options) => {
     lines: createInterface({ input: child.stdout! }),
     exit,
     kill: () => child.kill("SIGKILL"),
+    ...(input === null
+      ? {}
+      : {
+          stdin: {
+            // A write after the end is an error event too; nothing is
+            // listening for a message sent to a session that has finished.
+            write: (line: string) => {
+              if (!input.writableEnded) input.write(line);
+            },
+            end: () => {
+              if (!input.writableEnded) input.end();
+            },
+          },
+        }),
   };
 };
 
@@ -345,12 +391,20 @@ const dockerSpawn: ContainerSpawn = (command, args, options) => {
  * The prompt travels in the environment rather than in this string. It is
  * arbitrary human and machine text, and building a shell command out of it is
  * how a ticket body ends up executed.
+ *
+ * **An interactive box gets its prompt on stdin instead**, as the first of
+ * the messages the daemon writes there (timone#165), and the CLI is told to
+ * read stream-json from it. Everything above the CLI is the same script,
+ * with one difference that matters: the box's stdin is the session's input,
+ * so no setup command may read from it. One `npm` or `git` that reads stdin
+ * would swallow the prompt before the CLI ever started.
  */
 function boxScript(
   request: SessionRequest,
   runEnv: readonly string[],
 ): string {
   const workspace = request.workspace!;
+  const interactive = request.interactive === true;
   // **Beneath the timone root, not beside it.** ADR-0007 fixes the layout as
   // `<timone root>/projects/<name>`, and every skill and prompt says
   // `projects/<name>/…` relative to where the session runs. The box put them
@@ -362,6 +416,11 @@ function boxScript(
 
   return [
     "set -e",
+    // An interactive box's stdin is the session's input: the daemon's
+    // messages, one stream-json line each. It is put aside on descriptor 3
+    // and every command below reads `/dev/null` instead, so nothing but the
+    // CLI can take a line of it. The CLI gets it back at the very end.
+    ...(interactive ? ["exec 3<&0 </dev/null"] : []),
 
     // Timone, at the exact commit the daemon is running (ADR-0041 D2). Cloned
     // whole rather than shallow: a commit is not reachable from a depth-1
@@ -544,12 +603,25 @@ function boxScript(
     `  cd ${WORKSPACE}/timone`,
     "fi",
 
-    // The prompt on stdin, so it is never a shell word.
-    'printf "%s" "$TIMONE_PROMPT" | exec claude -p' +
-      " --output-format stream-json --verbose --include-partial-messages" +
-      ' --model "$TIMONE_MODEL"' +
-      ' --permission-mode bypassPermissions' +
-      ' ${TIMONE_EFFORT:+--effort "$TIMONE_EFFORT"}',
+    interactive
+      ? // The daemon's messages, from the descriptor they were put aside on.
+        // No prompt here: the first message the daemon writes is the prompt.
+        "exec claude -p" +
+        " --input-format stream-json" +
+        " --output-format stream-json --verbose --include-partial-messages" +
+        // So the CLI says which messages it has taken, which is what tells
+        // the daemon when it may close stdin. See the read loop.
+        " --replay-user-messages" +
+        ' --model "$TIMONE_MODEL"' +
+        " --permission-mode bypassPermissions" +
+        ' ${TIMONE_EFFORT:+--effort "$TIMONE_EFFORT"}' +
+        " <&3 3<&-"
+      : // The prompt on stdin, so it is never a shell word.
+        'printf "%s" "$TIMONE_PROMPT" | exec claude -p' +
+        " --output-format stream-json --verbose --include-partial-messages" +
+        ' --model "$TIMONE_MODEL"' +
+        " --permission-mode bypassPermissions" +
+        ' ${TIMONE_EFFORT:+--effort "$TIMONE_EFFORT"}',
   ].join("\n");
 }
 
@@ -646,6 +718,7 @@ function runArgs(
   script: string,
   network: string | undefined,
   env: readonly string[],
+  interactive: boolean,
 ): string[] {
   return [
     "run",
@@ -655,6 +728,9 @@ function runArgs(
     "--name",
     name,
     "--init",
+    // Keeps the container's stdin open to the daemon, for a box that is
+    // spoken to while it runs. No `-t`: the stream is JSON, not a terminal.
+    ...(interactive ? ["-i"] : []),
     // Chromium dies on a real page with docker's 64 MiB default.
     `--shm-size=${SHM_SIZE}`,
     // The stack's own network, so the agent reaches a database by the name
@@ -867,6 +943,11 @@ export function containerRuntime(
       }
 
       const name = nameFor(request);
+      const interactive = request.interactive === true;
+      // The stage's prompt, with what the box knows about itself in front of
+      // it. A run that does not know it is in a container reports the
+      // container as the project's problem (ADR-0045).
+      const prompt = `${boxPreamble(request, stack, runEnv)}\n\n${request.prompt}`;
       const env: Record<string, string> = {
         // First, so the box's own names below always win. `run-env.ts` already
         // refuses those names; this is the second lock on the same door.
@@ -879,10 +960,9 @@ export function containerRuntime(
         ...(workspace.project.branch === undefined
           ? {}
           : { PROJECT_BRANCH: workspace.project.branch }),
-        // The stage's prompt, with what the box knows about itself in front
-        // of it. A run that does not know it is in a container reports the
-        // container as the project's problem (ADR-0045).
-        TIMONE_PROMPT: `${boxPreamble(request, stack, runEnv)}\n\n${request.prompt}`,
+        // An interactive box reads its prompt from stdin, as the first
+        // message the daemon writes there, so it carries no copy here.
+        ...(interactive ? {} : { TIMONE_PROMPT: prompt }),
         TIMONE_MODEL: request.model,
         ...(request.effort === undefined ? {} : { TIMONE_EFFORT: request.effort }),
         // So an install, a build or a test suite finishes where the agent can
@@ -912,9 +992,34 @@ export function containerRuntime(
           boxScript(request, Object.keys(runEnv?.values ?? {})),
           stack?.network,
           Object.keys(env),
+          interactive,
         ),
-        { env },
+        interactive ? { env, stdin: "pipe" } : { env },
       );
+
+      // **The prompt goes in at once, before anything waits for the box to
+      // speak.** The CLI prints its first line when a turn starts, and a turn
+      // starts when a message arrives — so waiting for the session id first
+      // would wait for ever.
+      const stdin = interactive ? container.stdin : undefined;
+      if (interactive && stdin === undefined) {
+        // A spawner that ignored `stdin: "pipe"`: a wiring fault, not
+        // anything a run did. Nothing is left running behind it.
+        destroy(spawn, name);
+        if (stack !== undefined) await stack.down().catch(() => undefined);
+        throw new Error(
+          "an interactive box was started without a stdin to write its messages to",
+        );
+      }
+      // How many messages went in, and how many the CLI has said it took.
+      // See the rule at the `result` below.
+      let written = 0;
+      let taken = 0;
+      const say = (text: string): void => {
+        stdin?.write(userMessageLine(text));
+        written += 1;
+      };
+      if (interactive) say(prompt);
 
       // Started with the container, stopped with it. Without this the token
       // the spawn just handed over is the only one the box will ever have,
@@ -979,8 +1084,24 @@ export function containerRuntime(
             if (message.type === "assistant" && message.parent_tool_use_id === null) {
               lastApiError = apiErrorFrom(message);
             }
+            if (isReplay(message)) taken += 1;
             if (message.type === "result") {
               outcome = sessionOutcomeFrom(id, message, lastApiError);
+              // **An interactive box ends when a turn ends with nothing left
+              // unanswered** (timone#165). The CLI waits for more input for as
+              // long as its stdin is open, so the daemon has to close it, and
+              // closing it too early loses a message the runner sent.
+              //
+              // A result alone cannot say whether a message sent during the
+              // turn was answered: the CLI adds a message that arrives mid-turn
+              // to the turn's next model call, so one result can close two
+              // messages, and a rule that waited for a result per message
+              // would wait for ever. What it does say, when asked with
+              // `--replay-user-messages`, is every message it takes, as a user
+              // message marked `isReplay`. So a message is answered once it
+              // has been taken and a result has followed, and the box is done
+              // when that is true of every message written.
+              if (taken >= written) stdin?.end();
             }
           }
         } catch (error) {
@@ -1026,9 +1147,31 @@ export function containerRuntime(
         // the `destroy` below, which is content to remove what is already
         // gone.
         stop: () => destroy(spawn, name),
+        ...(stdin === undefined ? {} : { send: say }),
       };
     },
   };
+}
+
+/**
+ * A user message the CLI printed back because it took it from stdin, as
+ * opposed to one carrying a tool's result, which it prints anyway.
+ */
+function isReplay(message: SDKMessage): boolean {
+  return message.type === "user" && "isReplay" in message && message.isReplay;
+}
+
+/**
+ * One message for the CLI's stream-json input: a user message holding the
+ * text, as one JSON object on one line. Built by `JSON.stringify` and never
+ * by hand, because the text is anything a prompt or a person can say.
+ */
+function userMessageLine(text: string): string {
+  const message = {
+    type: "user",
+    message: { role: "user", content: [{ type: "text", text }] },
+  };
+  return `${JSON.stringify(message)}\n`;
 }
 
 /** Remove the container, whatever state it is in. Never throws. */

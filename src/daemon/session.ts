@@ -215,6 +215,21 @@ export interface SessionRequest {
    * request without one runs exactly as it always did.
    */
   workspace?: SessionWorkspace;
+  /**
+   * The session will be spoken to while it runs, through
+   * {@link StartedSession.send} (timone#165).
+   *
+   * **Absent for every stage the daemon runs**, which send their prompt once
+   * and wait: those produce exactly the box they always did. Only the runner
+   * asks for this, because only the runner has anything to say to a step
+   * after it has started. `true` or absent, never `false`, for the reason
+   * {@link effort} is absent rather than undefined.
+   *
+   * The in-process runtime starts such a request as it starts any other and
+   * offers no `send` (phase 40, departure recorded in
+   * `phase-40-departures.md`); the box is where the runner's steps run.
+   */
+  interactive?: true;
 }
 
 /** What {@link sessionRequest} is given to assemble a request from. */
@@ -226,6 +241,8 @@ export interface SessionRequestInput {
   effort?: EffortLevel;
   /** Absent until the caller can name the versions to clone at. */
   workspace?: WorkspaceInput;
+  /** Absent for a session nobody will speak to once it has started. */
+  interactive?: true;
 }
 
 /** A git object name as `git rev-parse` reports one: 40 hexadecimal digits. */
@@ -262,6 +279,7 @@ export function sessionRequest(input: SessionRequestInput): SessionRequest {
     ...(input.workspace === undefined
       ? {}
       : { workspace: workspaceOf(input.workspace) }),
+    ...(input.interactive === undefined ? {} : { interactive: input.interactive }),
   };
 }
 
@@ -319,6 +337,16 @@ export interface StartedSession {
    * work to stop.
    */
   stop?(): void;
+  /**
+   * Say something to the session while it runs (timone#165): the text
+   * reaches it as a message from the user.
+   *
+   * Offered only for a request marked {@link SessionRequest.interactive}, and
+   * only by a runtime that can deliver it — today, the box. A message sent
+   * after the session has finished goes nowhere; how the session ended is
+   * what `completed` says.
+   */
+  send?(text: string): void;
 }
 
 /** A running ticker, stoppable. */

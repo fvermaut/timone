@@ -51,3 +51,13 @@
 **Did instead:** 40f also adds `ticketKindOf(labels, context)` to `src/runner/order.ts`, with a test in a new `src/runner/order.test.ts`. 40e now waits for 40f. The plan and its dependency graph are amended in place.
 
 **Why:** The brief needs the kind to show the default order, and the runner's actions need it to tell whether a step is a departure. One function beside `defaultOrder` keeps both reading the same answer.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** check not run
+
+**Agreed:** Sub-phase 40d's validation ran a protocol probe against the real model: two user messages into `claude -p --input-format stream-json`, two model answers out.
+
+**Did instead:** The probe ran, and gave two `result` messages, but both were login errors: the command-line tool is not logged in from the build's sandbox, and running it outside the sandbox was refused, so the build did not try again another way. The same shape in the box image, with no token, replayed both messages and gave two results. That confirms the protocol the end rule rests on, but not a model's answer, and not that a message joining a turn during a tool call is replayed. Both checks move to the watched run on scratch-app (40l), which the plan amends to say so. The slice is committed with the checkbox unmet.
+
+**Why:** The probe needs the operator's own logged-in terminal, and a second attempt from the same sandbox would fail the same way. If a message that joins a running turn were not replayed, the box would keep its stdin open after the last `result` until stopped, and the runner's `stopStep` or the ticket's limit would be the only way out — which is why it is worth watching once for real.

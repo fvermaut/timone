@@ -1,5 +1,7 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
+import { summarise } from "./transcript.js";
+
 /** Tally key for the session's own stream, as opposed to a sub-agent's. */
 const MAIN_THREAD = "main";
 
@@ -38,6 +40,26 @@ export interface ProgressSnapshot {
   outputTokens: number;
   /** Sub-agents working right now, not sub-agents ever started. */
   subAgents: number;
+}
+
+/**
+ * What a session did since a given moment: what the runner reads when it
+ * wakes, to decide whether to leave a step alone (timone#165).
+ */
+export interface Activity {
+  /**
+   * Each tool the session reached for after the moment, oldest first, named
+   * as the transcript names it: `Bash(npm test)`.
+   */
+  tools: string[];
+  /**
+   * When the session last printed anything at all, as an ISO instant, and
+   * whether or not that was after the moment: a time before it says the
+   * session has been silent since. Absent while it has printed nothing.
+   */
+  lastOutputAt?: string;
+  /** Output tokens written after the moment, sub-agents included. */
+  outputTokens: number;
 }
 
 /** What the session cost, once it has ended and can say so authoritatively. */
@@ -79,6 +101,16 @@ export class SessionProgress {
   private readonly streams = new Map<string, { committed: number; current: number }>();
   /** Tool-use ids of sub-agents that have spoken but not yet returned. */
   private readonly liveSubAgents = new Set<string>();
+  /** Every tool use seen, named, with the time it was seen. */
+  private readonly toolUses: { at: number; name: string }[] = [];
+  /** When anything at all was last seen on the stream. */
+  private lastOutput: number | undefined;
+  /**
+   * The running output total after each change, with the time of the change,
+   * so the tokens written since any moment are the total now less the total
+   * then.
+   */
+  private readonly totals: { at: number; total: number }[] = [];
   private ended: SessionSummary | undefined;
 
   constructor(options: { now?: () => number } = {}) {
@@ -88,6 +120,10 @@ export class SessionProgress {
 
   /** Read one message off the stream. Anything unrecognised is ignored. */
   observe(message: SDKMessage): void {
+    // Any message at all, recognised or not: a session that is printing is a
+    // session that is alive, whatever it is printing.
+    this.lastOutput = this.now();
+
     if (message.type === "stream_event") {
       this.observeStreamEvent(message.event, message.parent_tool_use_id);
       return;
@@ -100,6 +136,10 @@ export class SessionProgress {
       // {@link observeStreamEvent} for where the tokens actually come from.
       const parent = message.parent_tool_use_id;
       if (parent !== null) this.liveSubAgents.add(parent);
+      const at = this.now();
+      for (const name of toolUseNames(message.message.content)) {
+        this.toolUses.push({ at, name });
+      }
       return;
     }
 
@@ -161,6 +201,7 @@ export class SessionProgress {
 
     if (event.type === "message_delta" && event.usage?.output_tokens !== undefined) {
       this.streamFor(key).current = event.usage.output_tokens;
+      this.totals.push({ at: this.now(), total: this.snapshot().outputTokens });
     }
   }
 
@@ -187,6 +228,33 @@ export class SessionProgress {
   }
 
   /**
+   * What the session did after `instant`, an ISO time — typically the last
+   * time the runner looked. Strictly after, so a call made at the very moment
+   * of one look is not reported again at the next.
+   */
+  activitySince(instant: string): Activity {
+    const since = Date.parse(instant);
+    // The total as it stood at the moment: the last change at or before it.
+    // Searched from the end, because the moment asked about is nearly always
+    // recent.
+    let then = 0;
+    for (let index = this.totals.length - 1; index >= 0; index -= 1) {
+      const entry = this.totals[index]!;
+      if (entry.at <= since) {
+        then = entry.total;
+        break;
+      }
+    }
+    return {
+      tools: this.toolUses.filter((use) => use.at > since).map((use) => use.name),
+      ...(this.lastOutput === undefined
+        ? {}
+        : { lastOutputAt: new Date(this.lastOutput).toISOString() }),
+      outputTokens: this.snapshot().outputTokens - then,
+    };
+  }
+
+  /**
    * What the session cost, or undefined while it is still running. A failed
    * session has a summary too: the money was spent either way, and saying so
    * is the difference between a cost report and a success report.
@@ -194,6 +262,28 @@ export class SessionProgress {
   summary(): SessionSummary | undefined {
     return this.ended;
   }
+}
+
+/**
+ * Each tool_use block in a message's content, as `Bash(npm test)`. The
+ * content is read defensively: in a box it arrived as text, and only its
+ * `type` was checked on the way in.
+ */
+function toolUseNames(content: unknown): string[] {
+  if (!Array.isArray(content)) return [];
+  const names: string[] = [];
+  for (const block of content) {
+    if (
+      typeof block === "object" &&
+      block !== null &&
+      (block as { type?: unknown }).type === "tool_use" &&
+      typeof (block as { name?: unknown }).name === "string"
+    ) {
+      const { name, input } = block as { name: string; input?: unknown };
+      names.push(`${name}(${summarise(name, input)})`);
+    }
+  }
+  return names;
 }
 
 /** The `tool_use_id`s of any tool_result blocks in a message's content. */

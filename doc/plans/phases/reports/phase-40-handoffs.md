@@ -205,3 +205,69 @@ $ npx vitest run
 - **Any new hand-written `TicketingAdapter` double** must spread `noRunnerCalls` from `ticketing.stubs.ts`.
 - `timone.example.yaml` does not show the new keys yet. It was not in this slice's files.
 - `dist/` is an old build, so the first half of the third validation command runs old code. It passes because today's `timone.yaml` uses none of the new keys.
+
+## 40d — the box can take a message while a step runs, and a step's activity can be summarised
+
+**Built.** A request marked `interactive: true` starts the box with `docker run -i`. Every setup command in the box script reads `/dev/null`, the real stdin is kept on descriptor 3, and the script ends in `exec claude -p --input-format stream-json … --replay-user-messages … <&3 3<&-`, with no prompt pipe. The daemon writes the first user message (`boxPreamble()` + prompt) as soon as the container is spawned; `send(text)` writes another. **Stdin is closed when a `result` arrives and the CLI has replayed every message the daemon wrote.** A request that is not interactive produces exactly the arguments and script it produced before. `SessionProgress` records each tool use with its time and the time of the last message of any kind; `activitySince(instant)` returns `{ tools, lastOutputAt?, outputTokens }`. `startStepSession` passes `send` through.
+
+**Files touched.**
+
+- `src/daemon/session.ts` — `SessionRequest.interactive?: true`, carried by `sessionRequest()`; `StartedSession.send?(text)`. `agentSdkRuntime` unchanged (the recorded departure).
+- `src/daemon/container-runtime.ts` — `ContainerStdin { write(line); end() }`, `ContainerProcess.stdin?`, the spawn option `stdin: "pipe"`; `dockerSpawn` pipes stdin only when asked and ignores EPIPE and writes after the end; interactive branches in `boxScript` and `runArgs`; the first message, `send` and the end rule in `start`; helpers `isReplay`, `userMessageLine`.
+- `src/daemon/container-runtime.test.ts` — the values captured from the old code (`ARGS_BEFORE_40D`, `SCRIPT_BEFORE_40D`), a fake box driven by the test (`liveContainer`), six tests.
+- `src/daemon/progress.ts`, `src/daemon/progress.test.ts` — the `Activity` type, recorded tool uses, last output time, token totals over time, `activitySince`; three tests.
+- `src/daemon/transcript.ts` — `summarise` exported; nothing else changed.
+- `src/daemon/step-session.ts` — `send` passed through; doc comment corrected.
+
+**Decisions taken inside the slice.**
+
+1. **What the protocol probe showed** (host CLI 2.1.283, not logged in, so every turn was a login error — but the protocol was visible): two messages in give two `result`s; with `--replay-user-messages` each taken message is echoed as `{"type":"user", …, "isReplay":true}` at the start of the turn that takes it, told apart from a tool result by `isReplay` and its text content; a second message sent 4 s after the first gets its own turn; after the last `result` the CLI keeps waiting on an open stdin, so the daemon must close it. The Agent SDK docs (`agent-sdk/agent-loop`) say a message streamed mid-loop is emitted and, away from the max-turns limit, is added to the running turn — so one `result` can close two messages.
+2. **The end rule.** Count the messages written; count each `isReplay` message as taken; close stdin at a `result` when taken ≥ written. This is the plan's rule made observable, and it does not hang when one `result` closes two messages.
+3. **`stdin?: ContainerStdin`** rather than `write`/`end` on every process: a process has both calls or neither, and the compiler makes a caller check. Existing fakes needed no change.
+4. **Setup off stdin:** `exec 3<&0 </dev/null` right after `set -e`, and `<&3 3<&-` on the final `exec claude`. Checked in a real `sh`: a `cat` between them read nothing, and the final command got both lines.
+5. **An interactive box's environment has no `TIMONE_PROMPT`**; case (1) asserts it.
+6. **"No `printf`" is read as "no prompt pipe"**: the forge-token block's `printf %s "$GH_TOKEN"` stays for every request.
+7. **`-i` right after `--init`**, before the image; tested.
+8. **A spawner that ignores `stdin: "pipe"`** is a wiring fault: the container is removed, the stack taken down, and the start throws. Untested (see below).
+9. **A message sent after stdin closed goes nowhere**; `dockerSpawn` drops it and `StartedSession.send` says so.
+10. **`activitySince(instant)`** takes an ISO instant. `tools` holds the uses strictly after it, named `Name(summary)`. `lastOutputAt` is the time of the last message of any kind, not filtered — a time before the instant means the step has been silent since. `outputTokens` counts tokens written after the instant.
+
+**Validation evidence.** Red before green, one case at a time:
+
+- (5) "builds exactly today's arguments and script for a request that is not interactive" — written first against the unchanged code, from values captured at `1b270ab`; green on arrival, as a guard must be. Mutations: `-i` always added fails it; the script always interactive fails it; restored, it passes.
+- (1) "hands the prompt to an interactive box as its first message, on stdin" — red: timed out (nothing wrote a message); green.
+- (2) "writes a message sent to the session as another user message" — red `session.send is not a function`; green.
+- (3) "closes the box's stdin once a result arrives with nothing sent since" — red `expected false to be true`; green.
+- (4) "keeps stdin open past a result while a message sent before it has not been taken" (also asserts `--replay-user-messages`) — red: stdin was closed at the first result; green with the replay count.
+- Extra, same seam: "ends at the first result when the message sent was taken into the turn still running" — green on arrival; mutation (one `result` per message written) fails it; restored, it passes.
+- (6) "lists only the tool uses made after the moment, as the transcript names them" (`["Bash(npm test)"]`) — red `activitySince is not a function`; green.
+- Extra, same seam: "counts only the output tokens written after the moment" (750) — red `expected +0 to be 750`; green.
+- (7) "moves the time of the last output on every stream event" — red `expected undefined to be '1970-01-01T00:16:45.000Z'`; green.
+- The `send` pass-through in `step-session.ts` has no declared seam; a scratch script printed `{"interactiveKept":true,"heard":["look at the README"],"sendOffered":"function","sendWhenRuntimeHasNone":"undefined"}`.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/daemon/container-runtime.test.ts src/daemon/progress.test.ts src/daemon/session.test.ts; echo "exit: $?"
+ Tests  272 passed (272)
+exit: 0
+$ printf '%s\n%s\n' '<one>' '<two>' | claude -p --input-format stream-json --output-format stream-json --verbose --model claude-haiku-4-5 | grep -c '"type":"result"'
+2        # both results: "Failed to authenticate: OAuth session expired and could not be refreshed"
+$ claude --version
+2.1.283 (Claude Code)
+$ npx vitest run
+ Test Files  49 passed (49)
+      Tests  1788 passed (1788)
+```
+
+- [ ] **Not met — recorded as a departure.** The probe printed 2, but both turns were login errors, not model answers: the CLI is not logged in from the build's sandbox, and running it outside the sandbox was refused, so the build stopped there. The Docker variant with the model was not run either: `timone-agent:latest` exists but no model token was available. A check without a token in the image (CLI 2.1.280, same stdin shape, `docker run --rm --init -i`) replayed both messages with `"isReplay":true`, gave 2 results ("Not logged in"), and the `cat` took nothing — which confirms the protocol, not the model. The real-model check moves to the watched run (40l).
+- [x] Red→green evidence is above.
+
+**What 40e must know.**
+
+- A step that can be messaged: `sessionRequest({ …, interactive: true })` on the container runtime. `StepSession.send?(text)` is present only when the runtime offers it; `agentSdkRuntime` offers none.
+- The session ends by itself when a `result` arrives and every written message was taken; a message sent after that is lost. `completed` settles as before, last result wins.
+- One `result` can close several messages. Do not expect one result per message.
+- `progress.activitySince(isoInstant)` → `{ tools: string[]; lastOutputAt?: string; outputTokens: number }`. Pass the record's ISO `at` strings.
+- `summarise(name, input)` returns only the text inside the brackets; `progress.ts` adds `Name(…)`.
+- `dockerSpawn`'s stdin code and the missing-stdin guard have no unit test: they are the real docker boundary. The watched run exercises them.
