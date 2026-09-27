@@ -6,9 +6,12 @@ import { parse as parseYamlText } from "yaml";
 
 import {
   addProject,
+  driverOf,
   loadManifest,
+  namedPeople,
   parseManifest,
   serializeManifest,
+  ticketLimitOf,
   updateProject,
   type Manifest,
   type ProjectConfig,
@@ -606,5 +609,106 @@ describe("Timone is in its own manifest (ADR-0050 D1)", () => {
 
   it("declares no preview, because there is no app to serve", () => {
     expect(manifest.projects.timone.bindings.preview).toBeUndefined();
+  });
+});
+
+describe("who may instruct a project, which driver runs it, and its limit", () => {
+  const entry = {
+    repo_url: "git@github.com:fvermaut/client-alpha.git",
+    path: "projects/client-alpha",
+    stack: ["typescript"],
+    bindings: { ticketing: "github" },
+  };
+
+  it("refuses a project driven by the runner when nobody is named to instruct it", () => {
+    // The runner acts only on what named people write on a ticket. With
+    // nobody named it could take no instruction from anyone, so the file is
+    // refused where it is read, and the error names the project to fix.
+    expect(() =>
+      parseManifest({
+        projects: { "client-alpha": { ...entry, driver: "runner" } },
+      }),
+    ).toThrowError(
+      'Invalid manifest: project "client-alpha": it is driven by the runner, but names nobody who may instruct it. Add "instructors" to the project, or "operator" at the top of the manifest.',
+    );
+  });
+
+  it("reads a project that sets none of the three as daemon-driven, limited to $150, and instructed by the operator", () => {
+    // Every entry written before the runner existed is such a project, and
+    // re-reading it must change nothing about how its tickets move.
+    const manifest = parseManifest({
+      operator: "fvermaut",
+      projects: { "client-alpha": entry },
+    });
+    const project = manifest.projects["client-alpha"]!;
+
+    expect(driverOf(project)).toBe("daemon");
+    expect(ticketLimitOf(project)).toBe(150);
+    expect(namedPeople(manifest, "client-alpha")).toEqual(["fvermaut"]);
+  });
+
+  it("names only the project's own instructors when it has some, and not the operator beside them", () => {
+    const manifest = parseManifest({
+      operator: "fvermaut",
+      projects: {
+        "client-alpha": {
+          ...entry,
+          driver: "runner",
+          instructors: ["alice-client", "bob-client"],
+        },
+      },
+    });
+
+    expect(namedPeople(manifest, "client-alpha")).toEqual([
+      "alice-client",
+      "bob-client",
+    ]);
+  });
+
+  it("refuses a misspelled list of instructors rather than falling back to the operator", () => {
+    // A misspelling here is quiet in the worst way: the project would load,
+    // the operator would be named in place of the people the file meant, and
+    // their instructions would be ignored with nothing saying why.
+    expect(() =>
+      parseManifest({
+        operator: "fvermaut",
+        projects: {
+          "client-alpha": {
+            ...entry,
+            driver: "runner",
+            instructor: ["alice-client"],
+          },
+        },
+      }),
+    ).toThrowError(
+      'Invalid manifest: project "client-alpha": unknown key "instructor"',
+    );
+  });
+
+  it("uses a project's own limit of $80 in place of $150", () => {
+    const manifest = parseManifest({
+      projects: { "client-alpha": { ...entry, ticket_limit_usd: 80 } },
+    });
+
+    expect(ticketLimitOf(manifest.projects["client-alpha"]!)).toBe(80);
+  });
+
+  it("refuses a limit of $0, which would let no session start at all", () => {
+    expect(() =>
+      parseManifest({
+        projects: { "client-alpha": { ...entry, ticket_limit_usd: 0 } },
+      }),
+    ).toThrowError(/project "client-alpha": field "ticket_limit_usd"/);
+  });
+
+  it("refuses an empty list of instructors, which names nobody in place of the operator", () => {
+    expect(() =>
+      parseManifest({
+        operator: "fvermaut",
+        projects: {
+          "client-alpha": { ...entry, driver: "runner", instructors: [] },
+        },
+      }),
+    ).toThrowError(/project "client-alpha": field "instructors"/);
   });
 });

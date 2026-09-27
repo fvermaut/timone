@@ -30,6 +30,7 @@ import {
 import {
   noBranches,
   noFiles,
+  noRunnerCalls,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { HELD_LABEL, MAP_LABEL } from "./steps.js";
 import {
@@ -207,6 +208,7 @@ function fakeAdapter(
     ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {
@@ -526,6 +528,7 @@ describe("pollOnce — resuming a run whose human answered", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -1124,6 +1127,7 @@ describe("pollOnce — runs parked before the machinery existed", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -1225,6 +1229,7 @@ describe("pollOnce — a run parked at an unbuilt stage resumes at that stage", 
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -1290,6 +1295,7 @@ describe("pollOnce — a run parked on a pull-request review", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -1751,6 +1757,7 @@ describe("reclaiming a run its daemon left behind", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -2290,6 +2297,7 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
     ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
     async listMarkedTickets(): Promise<Ticket[]> {
       return [];
@@ -3438,6 +3446,7 @@ describe("pollOnce — a written answer reaches a session that ingests it", () =
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -3506,6 +3515,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -3654,6 +3664,7 @@ describe("pollOnce — reading a written answer consumes it", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
@@ -3817,6 +3828,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -3872,6 +3884,7 @@ describe("pollOnce — one read of one thread per parked run", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -4013,6 +4026,7 @@ describe("pollOnce — the call to action is reconciled each cycle", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
@@ -4638,6 +4652,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
@@ -5137,6 +5152,7 @@ describe("pollOnce — the wayfinder map is a ticket of its own", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
@@ -5419,6 +5435,7 @@ describe("pollOnce — a written go-ahead on a map starts stage 3", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [map(), ...others];
@@ -5634,6 +5651,7 @@ describe("pollOnce — a ticket's next chunk", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return tickets;
@@ -6548,6 +6566,7 @@ describe("pollOnce — a handoff waits, and the reply reaches it", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -6729,6 +6748,7 @@ describe("pollOnce — a park nothing written can end", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -6863,6 +6883,7 @@ describe("pollOnce — a park nothing written can end", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -6949,6 +6970,7 @@ describe("pollOnce — the loop that cost five passes cannot happen", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];
@@ -7230,6 +7252,7 @@ describe("pollOnce — a stop cleared in the terminal goes back to the machine",
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       async listMarkedTickets(): Promise<Ticket[]> {
         return [base];

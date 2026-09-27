@@ -24,6 +24,7 @@ import {
 import {
   noBranches,
   noFiles,
+  noRunnerCalls,
   noMerges,
   noSteps,
   noStepWrites,
@@ -179,6 +180,7 @@ function fakeAdapter(initial: TicketThread = thread): {
     ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {

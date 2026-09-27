@@ -487,6 +487,23 @@ export interface TicketingAdapter {
   ): Promise<MergeOutcome>;
 
   /**
+   * How many commits `branch` has that the default branch does not, or
+   * undefined when the forge does not know the branch.
+   *
+   * Phase 40's widening. The runner needs to know whether a branch holds work
+   * that is not yet on the default branch. A tip alone, from
+   * {@link readBranches}, cannot say it: a branch cut from the default branch
+   * and never committed to has a tip too.
+   *
+   * **An absent branch is `undefined`, and that is an answer**, for the reason
+   * `readBranches` gives. A failure to ask throws.
+   */
+  aheadOfDefault(
+    project: TicketingProject,
+    branch: string,
+  ): Promise<number | undefined>;
+
+  /**
    * One file's content on `branch`, or undefined when the branch does not
    * carry it.
    *
@@ -570,6 +587,22 @@ export interface TicketingAdapter {
   ): Promise<number>;
 
   /**
+   * Open an issue carrying exactly `labels`, and answer with its number.
+   *
+   * Phase 40's widening. {@link createStep} opens one kind of issue only: a
+   * marked child of an initiative. The runner also opens issues that are not
+   * steps, and those carry the labels the caller names and no parent.
+   *
+   * **Nothing is added to `labels`**, the mark included. An issue that should
+   * be the machine's to work gets the mark from the caller, so no issue is
+   * handed to the machine by accident.
+   */
+  createIssue(
+    project: TicketingProject,
+    issue: { title: string; body: string; labels: string[] },
+  ): Promise<number>;
+
+  /**
    * Declare that one step waits for another, as GitHub's **native** relation
    * and not as a line in a body
    * ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
@@ -650,6 +683,20 @@ export interface TicketingAdapter {
   ): Promise<void>;
 
   /**
+   * Take a label off a ticket: {@link applyLabel}'s other half.
+   *
+   * Phase 40's widening. Until the runner, a label the machine put on a ticket
+   * stayed there, because the fixed pipeline only ever moved forward. The
+   * runner can reverse an earlier decision, and a label that says something
+   * no longer true is a wrong statement on a page a person reads.
+   */
+  removeLabel(
+    project: TicketingProject,
+    number: number,
+    label: string,
+  ): Promise<void>;
+
+  /**
    * The pull request whose head is `branch`, or undefined when none exists.
    * When the branch has several, the liveliest wins: open, then merged,
    * then closed — a stale closed PR must not hide the one under review.
@@ -664,6 +711,29 @@ export interface TicketingAdapter {
     project: TicketingProject,
     number: number,
   ): Promise<PullRequestThread>;
+
+  /**
+   * A pull request's description, verbatim.
+   *
+   * Phase 40's widening. The runner keeps a block at the top of the
+   * description that lists the steps it did not take in the default order,
+   * and it has to read what is there to replace its own block and keep every
+   * other word, including what a person added.
+   */
+  getPullRequestBody(project: TicketingProject, number: number): Promise<string>;
+
+  /**
+   * Replace a pull request's description with `body`, verbatim:
+   * {@link getPullRequestBody}'s other half, for the same block.
+   *
+   * Not stamped with {@link MACHINE_MARKER}. A description is not a comment,
+   * and the block the runner writes carries its own markers.
+   */
+  setPullRequestBody(
+    project: TicketingProject,
+    number: number,
+    body: string,
+  ): Promise<void>;
 
   /**
    * Say something on a pull request, stamped with {@link MACHINE_MARKER}

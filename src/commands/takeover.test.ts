@@ -17,6 +17,7 @@ import { STAGE_DONE_MARKER } from "../adapters/ticketing.js";
 import {
   noBranches,
   noFiles,
+  noRunnerCalls,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import { RunStore, type Run } from "../daemon/runs.js";
@@ -194,6 +195,7 @@ function fakeAdapter(open: readonly Ticket[] = []): {
     ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {

@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 
+import { DEFAULT_LIMIT_USD } from "./runner/limit.js";
+
 /**
  * Schema for the `bindings` block of a project. Unknown keys are rejected.
  * For now only one implementation exists per binding kind.
@@ -10,6 +12,9 @@ const bindingsSchema = z.strictObject({
   ticketing: z.literal("github"),
   preview: z.literal("docker").optional(),
 });
+
+/** The two things that can move a project's tickets forward. */
+const driverSchema = z.enum(["daemon", "runner"]);
 
 /** Schema for a single entry under `projects`. Unknown keys are rejected. */
 const projectConfigSchema = z.strictObject({
@@ -39,6 +44,38 @@ const projectConfigSchema = z.strictObject({
    */
   introduce_unmarked: z.boolean().optional(),
   bindings: bindingsSchema,
+  /**
+   * What moves this project's tickets forward: the daemon's fixed pipeline, or
+   * the runner, which decides each step of a run
+   * ([ADR-0060](../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+   * D1).
+   *
+   * Optional, and absent means `daemon` (read through {@link driverOf}). Every
+   * entry written before the runner existed keeps the driver it has always
+   * had, and a project moves to the runner only when somebody writes so.
+   */
+  driver: driverSchema.optional(),
+  /**
+   * The forge logins whose comments the runner takes as instructions on this
+   * project (ADR-0060 D6: "only people named for the project in `timone.yaml`
+   * can instruct it, the operator by default"). When set, they **replace** the
+   * top-level `operator` rather than joining it, so a project can be steered
+   * by the people named here alone.
+   *
+   * At least one when present: an empty list would replace the operator with
+   * nobody, which is the case the manifest refuses below, written another way.
+   */
+  instructors: z
+    .array(z.string().min(1, "must not be empty"))
+    .min(1, "must name at least one person")
+    .optional(),
+  /**
+   * How many dollars one ticket of this project may spend, across all its
+   * runs, before no new session starts (ADR-0060 D5: "the amount can be
+   * changed per project"). Absent means `DEFAULT_LIMIT_USD`, read through
+   * {@link ticketLimitOf}.
+   */
+  ticket_limit_usd: z.number().positive("must be more than 0").optional(),
 });
 
 /**
@@ -93,24 +130,86 @@ const identitySchema = z.strictObject({
 });
 
 /** Schema for the whole timone.yaml manifest. Unknown keys are rejected. */
-const manifestSchema = z.strictObject({
-  /**
-   * Optional here, and refused at the daemon.
-   *
-   * `workspace sync` and `projects list` are fvermaut's own commands, run from
-   * his terminal under his own login, and a manifest that never spawns a run
-   * needs no identity. What may never borrow his login is the daemon — so
-   * `src/commands/daemon.ts` refuses to start without this block, which is
-   * where "fails loudly at spawn time, never falls back to ambient login"
-   * actually lives.
-   */
-  identity: identitySchema.optional(),
-  projects: z.record(z.string(), projectConfigSchema),
-});
+const manifestSchema = z
+  .strictObject({
+    /**
+     * Optional here, and refused at the daemon.
+     *
+     * `workspace sync` and `projects list` are fvermaut's own commands, run
+     * from his terminal under his own login, and a manifest that never spawns
+     * a run needs no identity. What may never borrow his login is the daemon —
+     * so `src/commands/daemon.ts` refuses to start without this block, which
+     * is where "fails loudly at spawn time, never falls back to ambient login"
+     * actually lives.
+     */
+    identity: identitySchema.optional(),
+    /**
+     * The operator's own forge login: the person who may instruct the runner
+     * on every project that does not name its own `instructors` (ADR-0060 D6).
+     *
+     * Top-level because it is one person across every project, and optional
+     * because a manifest with no runner project has nobody to name.
+     */
+    operator: z.string().min(1, "must not be empty").optional(),
+    projects: z.record(z.string(), projectConfigSchema),
+  })
+  .superRefine((manifest, context) => {
+    // Refused here, where the file is read, rather than when the runner first
+    // reads a comment. A runner project with nobody named could take no
+    // instruction from anyone, and an error at load names the project to fix.
+    for (const [name, project] of Object.entries(manifest.projects)) {
+      if (
+        project.driver === "runner" &&
+        project.instructors === undefined &&
+        manifest.operator === undefined
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["projects", name],
+          message:
+            "it is driven by the runner, but names nobody who may instruct it. " +
+            'Add "instructors" to the project, or "operator" at the top of the manifest.',
+        });
+      }
+    }
+  });
 
 export type Identity = z.infer<typeof identitySchema>;
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 export type Manifest = z.infer<typeof manifestSchema>;
+export type Driver = z.infer<typeof driverSchema>;
+
+/**
+ * What moves this project's tickets forward. `daemon` when the entry does not
+ * say, which is every entry written before the runner existed.
+ */
+export function driverOf(config: ProjectConfig): Driver {
+  return config.driver ?? "daemon";
+}
+
+/**
+ * The forge logins whose comments may instruct the runner on project `name`:
+ * the project's own `instructors` when it names any, and otherwise the
+ * operator alone. Empty when the manifest names nobody, which the schema
+ * allows only for a project the daemon drives.
+ *
+ * Logins come back as written. Comparing them with a comment's author is the
+ * caller's work, because only the caller knows which surface the author came
+ * from.
+ */
+export function namedPeople(manifest: Manifest, name: string): string[] {
+  const instructors = manifest.projects[name]?.instructors;
+  if (instructors !== undefined) return [...instructors];
+  return manifest.operator === undefined ? [] : [manifest.operator];
+}
+
+/**
+ * How many dollars one ticket of this project may spend before no new
+ * session starts (ADR-0060 D5).
+ */
+export function ticketLimitOf(config: ProjectConfig): number {
+  return config.ticket_limit_usd ?? DEFAULT_LIMIT_USD;
+}
 
 /** Walk `data` along `path`, returning undefined if any step is missing. */
 function valueAt(data: unknown, path: readonly PropertyKey[]): unknown {

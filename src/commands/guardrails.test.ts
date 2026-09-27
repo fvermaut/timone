@@ -16,6 +16,7 @@ import type {
 import {
   noBranches,
   noFiles,
+  noRunnerCalls,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import type { Violation } from "../daemon/hooks.js";
@@ -308,6 +309,7 @@ describe("finding the run that drove a session", () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {

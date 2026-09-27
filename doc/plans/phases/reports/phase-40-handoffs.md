@@ -126,3 +126,82 @@ $ npx vitest run
 - `stop()` logs "cancelled, so its session is being ended" and never throws.
 - `mergeChunkZero(deps, run, project)` returns `true`, or fails the run, posts `failedComment` and returns `false`. `openStepTickets(deps, run, project)` returns a failure sentence or `undefined`; the caller fails or completes the run.
 - Do not remove the spawner's private `mergeChunkZero` and `attemptMerge` while `session.test.ts` must stay unchanged.
+
+## 40b — who may instruct, which driver, the limit — and the forge calls the runner needs
+
+**Built.** The manifest takes a top-level `operator` (the operator's forge login) and, per project, `driver` (`daemon` or `runner`), `instructors` (at least one login when present) and `ticket_limit_usd` (more than 0). A project with `driver: runner` and neither `instructors` nor `operator` is refused with `project "<name>": it is driven by the runner, but names nobody who may instruct it. Add "instructors" to the project, or "operator" at the top of the manifest.` Three helpers: `driverOf(config)` (default `daemon`), `namedPeople(manifest, name)` (the project's `instructors`, else `[operator]`, else `[]`), `ticketLimitOf(config)` (default `DEFAULT_LIMIT_USD` from `src/runner/limit.ts`). The ticketing port and the GitHub adapter gained the five planned calls: `removeLabel`, `createIssue`, `getPullRequestBody`, `setPullRequestBody`, `aheadOfDefault`. `setPullRequestBody` passes the body in a temporary file (`--body-file <path>`), not on stdin: the injected `CommandRunner` cannot pass stdin, and the orchestrator chose a file over widening it (the plan is amended under 40b, and the change is recorded in `phase-40-departures.md`).
+
+**Files touched.**
+
+- `src/manifest.ts` — the four keys, the refusal (a `superRefine` on the whole manifest), `Driver`, `driverOf`, `namedPeople`, `ticketLimitOf`.
+- `src/manifest.test.ts` — one new `describe` with seven tests.
+- `src/adapters/ticketing.ts` — five methods on `TicketingAdapter`, each with its reason.
+- `src/adapters/github-tickets.ts` — the five methods; `createStep`'s url parsing moved into a private `createdIssueNumber` that `createIssue` shares (its error text is unchanged).
+- `src/adapters/github-tickets.test.ts` — one new `describe` with nine tests; five lines added to the list in "names a repository in every argument vector it builds".
+- `src/adapters/ticketing.stubs.ts` — `noRunnerCalls`: the five methods, each throwing.
+- `src/commands/daemon.test.ts`, `guardrails.test.ts`, `retry.test.ts`, `takeover.test.ts`, `src/daemon/hooks.test.ts`, `poll.test.ts`, `session.test.ts` — only added lines: `noRunnerCalls,` in the stubs import and `...noRunnerCalls,` after each `...noMerges,` in the 29 doubles the compiler named. No line removed or changed (`git diff … | grep '^-'` is empty). `github-pulls.test.ts` needed nothing: it uses the real adapter.
+
+**Decisions taken inside the slice.**
+
+1. **`instructors: []` is refused** (`must name at least one person`), for any driver. An empty list would replace the operator with nobody, which is the refused case written another way.
+2. **The refusal lives on the whole manifest**, because it needs the top-level `operator`. Its path is `["projects", name]`, so the existing formatter prints `project "<name>": …`. `addProject` and `updateProject` go through `parseManifest`, so they refuse it too.
+3. **`ticket_limit_usd`** is any number above 0, not only whole dollars.
+4. **`namedPeople` returns logins as written, in a new array.** For a name that is not a project it falls back to the operator; it does not throw.
+5. **`createIssue` adds no label itself**, the mark included. Each label is its own `--label` argument.
+6. **`aheadOfDefault`** makes two calls: `readBranches(p)` for the default branch's name, then `gh api repos/<slug>/compare/<default>...<branch> --jq .ahead_by` with `{ repository: slug }`. The answer goes through `z.number().int().nonnegative()`. Only `(HTTP 404)` reads as undefined; any other failure is thrown. The branch name is not URL-encoded: a read-only call on 2026-09-27 showed `compare/main...timone/165-the-runner-beside-the-current-daemon` answering `4`, and a missing branch failing with `gh: Not Found (HTTP 404)`.
+7. **`noRunnerCalls` throws for the reads too**, unlike `noBranches` and `noFiles`. Nothing in the daemon calls these methods, so there is no earlier answer to keep.
+8. **`setPullRequestBody`** makes a fresh directory with `mkdtemp(join(tmpdir(), "timone-pr-body-"))`, writes the body to `body.md` in it, runs `gh pr edit <n> --repo <slug> --body-file <path>`, and removes the directory in a `finally`. The write is inside the `try`, so a failed write removes the directory too. A refusal from the forge is thrown, as in the other methods. The body is not stamped with the machine marker: a description is not a comment.
+9. **Three extra manifest tests and one extra adapter test** beyond the six cases, at the same seams, for things the plan names but no case covered: a project's own limit, a limit of 0, an empty `instructors`, and a dropped connection on the compare.
+
+**Validation evidence.** Red before green, one test at a time:
+
+- (1) "refuses a project driven by the runner when nobody is named to instruct it" — red: `Received: "Invalid manifest: project "client-alpha": unknown key "driver"`; green.
+- (2) "reads a project that sets none of the three as daemon-driven, limited to $150, and instructed by the operator" — red: `TypeError: (0 , driverOf) is not a function`; green with each helper returning only its default.
+- (3) "names only the project's own instructors when it has some, and not the operator beside them" — red: `expected [ 'fvermaut' ] to deeply equal [ 'alice-client', 'bob-client' ]`; green.
+- (4) "refuses a misspelled list of instructors rather than falling back to the operator" — green on arrival, because the project schema was already strict. Mutation: `z.strictObject` → `z.object` for the project schema fails it with `expected [Function] to throw an error`; restored, it passes.
+- Extra: "uses a project's own limit of $80 in place of $150" — red: `unknown key "ticket_limit_usd"`; green.
+- Extra: "refuses a limit of $0, which would let no session start at all" — red: `expected [Function] to throw an error`; green (`field "ticket_limit_usd": must be more than 0`).
+- Extra: "refuses an empty list of instructors, which names nobody in place of the operator" — red: `expected [Function] to throw an error`; green.
+- (5) "takes a label off an issue" — red: `removeLabel is not a function`; green.
+- (5) "opens an issue with each label as its own argument, and answers its number" — red: `createIssue is not a function`; green. `createStep`'s "refuses a create whose answer is not an issue url" still passes on the shared parser.
+- (5) "reads a pull request's body as it stands on the forge" — red: `getPullRequestBody is not a function`; green.
+- (5) "counts the commits on a branch that the default branch the forge names does not have" (default branch `trunk`) — red: `aheadOfDefault is not a function`; green.
+- (6) "answers undefined for a branch the forge does not know, and does not call that an error" — red: the 404 was thrown, `… failed: gh: Not Found (HTTP 404)`; green with a catch that returned undefined for every failure.
+- Extra: "reports a dropped connection, and never renders one as a missing branch" — red: `promise resolved "undefined" instead of rejecting`; green once only `(HTTP 404)` reads as undefined.
+- (5) "hands gh the new description in a file that holds exactly the body" (the fake runner reads the file while the command runs; the body holds `` `$(date)` ``, quotes, and about 20 KB of lines) — red: `setPullRequestBody is not a function`; green with a method that wrote the file and ran `gh`, and removed nothing.
+- (5, cleanup) "leaves no file behind once the description is replaced" — red: `expected true to be false` (the directory was still there); green with the directory removed after the call.
+- (5, cleanup) "leaves no file behind when the forge refuses the edit, and lets the refusal travel" — red: `expected true to be false` (the refusal was thrown, and the directory stayed); green once the write and the call moved into a `try` and the removal into `finally`.
+- The scoping test with the five new methods passed on arrival. Mutation: dropping `--repo` from `removeLabel` fails it with `unscoped:`; the same for `setPullRequestBody` fails it with `unscoped: pr edit 9 --body-file /var/folders/…/timone-pr-body-7mpM`; restored, it passes.
+- The red runs before the `finally` existed left three `timone-pr-body-*` directories in the system temporary folder. They were removed, and after the full suite there are none.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/manifest.test.ts src/adapters/; echo "exit: $?"
+ Test Files  7 passed (7)
+      Tests  236 passed (236)
+exit: 0
+$ node dist/cli.js projects list >/dev/null 2>&1 || npx tsx src/cli.ts projects list; echo "exit: $?"
+exit: 0
+$ npx tsx src/cli.ts projects list                      # the working tree's code, not the old dist/
+scratch-app  projects/scratch-app  …  github  docker  no
+ivtrends     projects/ivtrends     …  github  docker  no
+timone       projects/timone       typescript  github  -  no
+$ npx tsx src/cli.ts projects list --manifest /Users/fvermaut/dev/timone/timone.yaml
+(the same three rows; exit 0)
+$ npx vitest run
+ Test Files  46 passed (46)
+      Tests  1747 passed (1747)
+```
+
+- [x] The real `timone.yaml` still parses unchanged: this checkout's and the harness root's, with the working tree's code; `git diff -- timone.yaml` is empty; the four "Timone is in its own manifest" tests pass.
+- [x] Red→green evidence is above.
+
+**What 40d/40e/40f must know.**
+
+- **Manifest:** `operator?: string`; per project `driver?: "daemon" | "runner"`, `instructors?: string[]` (at least one), `ticket_limit_usd?: number` (above 0). `driverOf(config): Driver`, `namedPeople(manifest, name): string[]`, `ticketLimitOf(config): number`. Pass `ticketLimitOf(config)` as the `base` of `allowanceOf` and `isOverLimit`. `manifest.ts` now imports `DEFAULT_LIMIT_USD` from `src/runner/limit.ts`, which imports only a type.
+- **Comparing logins is still to do.** GitHub logins are case-insensitive, and an App's login comes back with or without `[bot]` depending on the surface. `ticketing.ts` already handles the second inside `isFromTimone` (`sameLogin` and `bareLogin` are private).
+- **Adapter:** `removeLabel(p, n, label)` throws on any `gh` failure (what `gh` does for a label the repository does not have was not checked). `createIssue(p, {title, body, labels}) → number` adds no label: pass `MARK_LABEL` when the issue is for the machine to work. `getPullRequestBody(p, n) → string`, verbatim. `setPullRequestBody(p, n, body)` replaces the whole description with `body`, verbatim and unstamped: read it first and keep what a person wrote. It writes one temporary file per call and always removes it. `aheadOfDefault(p, branch) → number | undefined`: `0` means the branch exists and holds nothing new; `undefined` means a 404; a dropped connection throws.
+- **Any new hand-written `TicketingAdapter` double** must spread `noRunnerCalls` from `ticketing.stubs.ts`.
+- `timone.example.yaml` does not show the new keys yet. It was not in this slice's files.
+- `dist/` is an old build, so the first half of the third validation command runs old code. It passes because today's `timone.yaml` uses none of the new keys.

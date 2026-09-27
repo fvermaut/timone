@@ -15,6 +15,7 @@ import type {
 import {
   noBranches,
   noFiles,
+  noRunnerCalls,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "./runs.js";
 import {
@@ -629,6 +630,7 @@ function fakeAdapter(): {
     ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {
