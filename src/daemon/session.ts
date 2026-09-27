@@ -76,6 +76,7 @@ import {
   attemptMerge,
   mergeChunkZero,
   openStepTickets,
+  type ChunkZeroApproval,
   type ChunkZeroDeps,
 } from "./chunk-zero.js";
 
@@ -911,7 +912,7 @@ async function forgePlannedPhase(
  * is told nothing. So the honest request is "clone the project, name no
  * branch", not "no workspace at all".
  */
-function workspaceFor(
+export function workspaceFor(
   pin: TimonePin | undefined,
   project: TicketingProject,
   branch: string | undefined,
@@ -1167,7 +1168,7 @@ function laterOf(one: string, other: string): string {
 }
 
 /** Whether `stage` is one the prompts module knows how to instruct. */
-function isPrompted(
+export function isPrompted(
   stage: PipelineStage,
 ): stage is (typeof PROMPTED_STAGES)[number] {
   return (PROMPTED_STAGES as readonly string[]).includes(stage);
@@ -2228,7 +2229,14 @@ export class AgentSessionSpawner implements SessionSpawner {
     // before its approval was recorded would be work on the default branch
     // with nothing on the branch saying what authorised it.
     if (approval.stage === "breakdown") {
-      if (!(await mergeChunkZero(this.chunkZero(), run, project))) return false;
+      if (
+        !(await mergeChunkZero(this.chunkZero(), run, project, {
+          by: approval.by,
+          at: approval.at,
+        }))
+      ) {
+        return false;
+      }
 
       // **And the run stops here, either way.** Approving a breakdown turns
       // this ticket into a *map* of its steps
@@ -2276,8 +2284,12 @@ export class AgentSessionSpawner implements SessionSpawner {
    * methods by name, and that file is the proof that moving them to
    * `chunk-zero.ts` changed nothing — so it may not change with the move.
    */
-  private mergeChunkZero(run: Run, project: TicketingProject): Promise<boolean> {
-    return mergeChunkZero(this.chunkZero(), run, project);
+  private mergeChunkZero(
+    run: Run,
+    project: TicketingProject,
+    approval: ChunkZeroApproval,
+  ): Promise<boolean> {
+    return mergeChunkZero(this.chunkZero(), run, project, approval);
   }
 
   private attemptMerge(

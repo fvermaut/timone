@@ -478,3 +478,103 @@ Spent on this ticket: $5.65 of $150.00 allowed.
 - `brief.ts`: `isNamedPerson(people, login)` compares without case and ignores a trailing `[bot]` on either side — 40e's `recordApproval` and 40h's wake filter should use it. `buildBrief(input: BriefInput)`, with `BriefInput = { project; run: Pick<Run,"id">; kind: TicketKind; ticket: TicketThread; pullRequest: PullRequestThread | undefined; namedPeople; record; facts: Facts; activity: StepActivity | undefined; events: readonly string[]; timoneIssues: readonly TimoneIssue[]; held: boolean; limitUsd: number; now: string }`. Pass `limitUsd` as `ticketLimitOf(config)` (the brief applies `allowanceOf`) and `held` as `labels.includes(HELD_LABEL)`. `events` are shown as given, so never put a non-named person's words in them. `StepActivity = { stage; startedAt; tools; lastOutputAt?; outputTokens; silentSince? }` — 40g maps 40d's `activitySince` onto it. `TimoneIssue = { number; title; url }`.
 - `facts.ts`: `gatherFacts(adapter, project, run: Pick<Run,"ticket"|"branch">): Promise<Facts>`, never throws; `Fact<T> = {kind:"known"; value} | {kind:"unknown"; why}`; `facts.branch` is `{kind:"no-branch"}` or `{kind:"branch"; name; ahead; phaseFiles; reports; pullRequest}`. For 40e's `endRun`, `facts.branch.ahead` and `facts.branch.pullRequest` hold the forge answers it needs.
 - The system text names the call-to-action line through the `NEEDED_FROM_YOU` constant, the same line 40e's `post` requires.
+
+## 40e — the runner's actions, and the rules code keeps around them
+
+**Built.** `runnerActions(deps, run)` gives the runner nine actions. Each one writes a `decision` entry with the runner's reason, and answers `{ ok: true; said } | { ok: false; refused }` in plain words. `startStep` refuses in five cases: a step of the run is running; the stage has no prompt; the ticket's record cannot be read; the ticket is over its limit (the limit notice is posted once, and `limit-reached` and `notice {about: "limit"}` are written); or the step leaves out steps of the default order with no `skipReason`. It claims the branch at the first stage that owns one; a refused claim means no step starts. When the step skips steps, it posts the departure notice, then writes `departure`, then starts the step. The request is `stagePrompt` plus `runnerInstructionsBlock` (which carries the exact sentence for each approval this run skipped), `interactive: true`. The step is recorded `step-started` and counted in a `RunningSteps` registry. When the step ends, the machine writes `step-ended` (cost from the summary, `stoppedBy: "runner"` when the runner stopped it), removes it from the registry, and calls the driver's `stepEnded`. `recordApproval` accepts only a comment at `commentAt` by a named person, and needs a branch, no running step, and room under the limit. It then writes `approval` and starts the approval-record session as a step. When that step succeeds for the list of pieces, the merge takes its approval only from the record's `approval` entry of this run. It merges chunk zero, opens the step tickets, writes code's own `chunk-zero-merged` decision, completes the run, and says so on the ticket. With no such entry in the record, nothing is merged. `mergeChunkZero` now requires the approval `{ by, at }` as an argument. `runnerToolServer` offers exactly the nine tools, each with a zod input shape; a refusal comes back as `isError: true`, starting "Refused: ".
+
+**Files touched.**
+
+- `src/runner/actions.ts` — new: `runnerActions`, `RunnerActionDeps`, `RunnerActions`, `ActionResult`, `RunningSteps`, `RunningStep`, `STOPPED_BY_RUNNER`.
+- `src/runner/tools.ts` — new: `runnerToolServer`, `runnerTools`, `RUNNER_TOOL_NAMES`, `RunnerToolName`, `RUNNER_SERVER_NAME`, `qualifiedRunnerToolNames`, and the nine input types derived from the zod shapes.
+- `src/runner/comments.ts` — new: `departureNotice`, `limitNotice`, `piecesApprovedNotice`, `joined`.
+- `src/runner/actions.test.ts` (22 tests), `src/runner/tools.test.ts` (2 tests) — new.
+- `src/daemon/prompts.ts` — `runnerInstructionsBlock`, `SKIPPED_REQUIREMENTS_APPROVAL`, `SKIPPED_PIECES_APPROVAL` added; nothing else changed.
+- `src/daemon/chunk-zero.ts` — `ChunkZeroApproval`; `mergeChunkZero` takes it as a required fourth argument; doc comments.
+- `src/daemon/session.ts` — `export` on `workspaceFor` and `isPrompted`; `recordApproval` passes `{ by: approval.by, at: approval.at }`; **and the private delegator `mergeChunkZero(run, project)` became `mergeChunkZero(run, project, approval)`, forwarding it** (see decision 2).
+
+**Decisions taken inside the slice.**
+
+1. **The approval is required by the compiler, and not read at runtime.** `mergeChunkZero(deps, run, project, _approval)` does not look at it. A runtime check would fail the three `session.test.ts` tests that call the spawner's delegator through a cast with two arguments ("does not fail a run whose merge had already happened", "says a conflict is a conflict…", "stops the run when the merge was refused…"), and that file may not change. The plan's case (6) names the compiler as the check.
+2. **`session.ts` had two call sites, not one.** The private delegator that `session.test.ts` reaches by name also calls `mergeChunkZero`, and does not compile without the approval. It now takes the approval and passes it on. That is outside the letter of the grant ("the one call site"). No test file changed, and the three tests above pass unchanged, because the approval is not read. **Orchestrator: please confirm or amend the plan.**
+3. **`attemptMerge` still merges with no approval.** It stays exported only for the spawner's other delegator, which `session.test.ts` also reaches. Nothing in the runner calls it. Closing it would change that delegator too. Left for the delivery review; its doc comment now says so.
+4. **The Timone pin is a seam: `timonePin: () => Promise<TimonePin | undefined>`.** Importing `checkoutVersion` from `git.ts` failed the checkout guard (`src/guards/checkouts.test.ts`: `expected [ 'runner/actions.ts' ] to deeply equal []`). That guard allows git only in named files, and the runner's actions have no business running git. The driver passes `async () => (await readTimoneCheckout(root)).pin`, and the tests spawn no git.
+5. **A step already skipped is not skipped again.** Following note 3 to the letter, a step left out once (say the interview) would count again at every later step. The runner would be asked for a reason, and the person told, each time. So steps already named in a `departure` entry of this run do not count. As in note 3, a stage not in the order, or one already started (going back, running again), is not a skip.
+6. **`endRun` accepts a merged pull request as well as an open one.** After a squash merge the branch still holds commits the default branch lacks, so "ahead with no open pull request" would stop such a run from ever ending. Tested (red with the clause removed).
+7. **The approval-record session is recorded as a step at the stage of its file**: `requirements`, or `breakdown` for the pieces, with the instructions "Record the approval <by> gave at <at>." The record schema has no other place for it, and its cost must count toward the limit. So the brief shows that stage as run once more.
+8. **Decisions are written after the action**, with `detail: "Refused: …"` for a refusal. An action that throws (a forge failure, or a bug) is written with `detail: "Failed: <first line>"`, and the error is thrown again, so the tool server hands it to the runner as an error. Decision actions are the tool names, plus code's own `chunk-zero-merged` and `chunk-zero-not-merged`.
+9. **The input types are the zod shapes'.** They are defined in `tools.ts`, derived with `z.infer`, and imported by `actions.ts` with `import type`, so the modules do not load each other at runtime. The tool server checks every input against its shape before an action sees it.
+10. **What `recordApproval` checks, in order:** the comment exists and is not the machine's; its author is named; the run has a branch; no step is running; the ticket is under its limit. Only then is the approval written. If the session then fails to start, the approval stays written, and the refusal says so.
+11. **A failed approval step for the pieces merges nothing** and leaves the run to the runner. If opening the step tickets fails after the merge, the run fails and `failedComment` is posted, as the daemon does. A third notice, `piecesApprovedNotice`, lives in `comments.ts`.
+12. **`closeChunkZero` never keeps the driver waiting.** A throw inside it is logged, and `stepEnded` is still called.
+13. **`messageStep` refuses a step whose session has no `send`** (the in-process runtime), and says to stop the step and start it again.
+
+**Validation evidence.** Red before green, one test at a time, at the declared seams (`runnerActions` over an in-memory forge built on the port, a fake step starter, a temporary root; `runnerTools` over real actions):
+
+- (1) `tools.test.ts` "offers exactly the nine actions of R2, and none that edits, writes, runs a shell, pushes or merges" — red `Failed to load url ./actions.js … Does the file exist?`, then green. It also checks that the tools the server builds carry exactly those names.
+- `tools.test.ts` "hands a refused action back to the runner as an error, saying it was refused" — red `expected undefined to be true`, then green. When the skeleton was changed to throw for unbuilt actions, it went red again (`not built`), and back to green with `messageStep`'s refusal when no step runs.
+- (2) "tells the ticket a step is being skipped before the step that skips it starts" — red `not built`, then green. It asserts the exact order of calls: `["comment **I am skipping a step.** I am going straight to writing down what it needs, without asking what you need. Reason: …", "start scratch-app#12/1 (requirements)"]`.
+- (3) "refuses a step that leaves out a step of the default order when no reason is given, and starts nothing" — red `not built`, then green.
+- (4) "refuses every step once the ticket has spent its limit, and says so on the ticket only once" ($150.40 spent, $150 limit) — red `expected true to be false` (the step started), then green. Mutation (the ticket never counted as told): `expected [ …(2) ] to deeply equal [ Array(1) ]`; restored.
+- (5) "refuses an approval given in a comment by someone who is not named, and records none" — red `not built`, then green. "records a named person's approval, and starts the step that writes it into the file" — red `not built`, then green (label `scratch-app#12/1 (recording the approval)`, model `claude-haiku-4-5`).
+- (6) **R3.** "merges nothing into the default branch when no approval of the pieces is in the record" — `tsc` red: `src/runner/actions.test.ts(571,7): error TS2578: Unused '@ts-expect-error' directive.` Green once `mergeChunkZero` required the approval. The runtime half (refused, no approval entry, default branch still at `4f2a9c1`) was already green from case (5). "merges nothing when the record no longer holds the approval of the pieces by the time its step ends" — red `expected 'merge of timone/12-a-due-date-on-each…' to be '4f2a9c1'` against the first merge code, which passed the approval it held in memory. Green once the merge read the record.
+- (7) **R4.** "refuses to end a run whose branch has two commits the default branch lacks and no pull request, and leaves it running" — red `not built`, then green. "ends a run whose branch holds nothing the default branch lacks" — red `not built`, then green.
+- (8) "refuses a post with no line saying what the reader must do, and posts nothing" — red `not built`, then green.
+- (9) "files a Timone issue on the timone project, labelled bug" — red `not built`, then green.
+- (10) **R7.** "writes no approval, whatever the runner does, when only someone not named has said approved" — every action driven once (12 decisions, to show none was skipped). Green on arrival, as a guard must be. Mutations: no check that the author is named → `expected [ { kind: 'approval', …(5) } ] to deeply equal []`; `post` writing an approval entry → `expected [ { kind: 'approval', …(5) }, …(1) ] to deeply equal []`. Restored.
+- Extras at the same seam, each for something the plan or the design notes name that no case covered, each red then green: "ends a run whose pull request was merged, though a squash merge left its branch ahead" (the clause was written with (7) before its test, so it was removed, the test went red `expected false to be true`, and the clause was put back); "writes down how a step ended and what it cost, then hands the run back to the driver" (red: timed out, the driver was never told); "does not ask again for the reason of a step it already skipped with one" (red `expected false to be true`); "merges the requirements and the pieces … opens a ticket per piece, and ends the run" (red `expected '4f2a9c1' to be 'merge of …'`, and red again for the `chunk-zero-merged` decision); "writes down each thing the runner tried, with its reason, a refusal included" (red `expected [] to deeply equal [ { kind: 'decision', …(5) }, …(1) ]`); "tells a step, in the words the skills read, that the runner skipped the approval of the requirements" (red `expected 'Break the work for ticket #12 on **sc…' to contain 'The runner skipped the approval of th…'`); "starts no second step while a step of the run is running" (red `expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }`); "passes the runner's message to the step that is running", "stops the running step, and writes down that the runner stopped it", "puts the hold on the ticket and takes it off again" (each red `not built`).
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/runner/ src/daemon/session.test.ts src/daemon/poll.test.ts; echo "exit: $?"
+ Test Files  10 passed (10)
+      Tests  445 passed (445)
+exit: 0
+$ git diff --stat -- src/daemon/session.test.ts src/daemon/poll.test.ts src/guards/
+(no output)
+$ npx vitest run
+ Test Files  51 passed (51)
+      Tests  1816 passed (1816)
+```
+
+- [x] **The two notices, as posted** (the machine marker is added by the adapter):
+
+```
+**I am skipping a step.** I am going straight to writing down what it needs, without asking what you need. Reason: The ticket already says what the list must show.
+
+**What I need from you:** nothing. If you want the skipped step done after all, say so here.
+```
+
+```
+**I am skipping 2 steps.** I am going straight to preparing the work, without your approval of the requirements and working out the pieces. Reason: fvermaut said on the ticket to go straight to building.
+
+**What I need from you:** nothing. If you want the skipped steps done after all, say so here.
+```
+
+```
+**This ticket has reached its spending limit.** It has cost $150.40, and the limit is $150.00. I will not start any more work on it for now.
+
+**What I need from you:** reply "continue" to allow another $150.00, or say nothing and it stays stopped.
+```
+
+And the third, after the list of pieces is merged:
+
+```
+**The list of pieces is approved.** fvermaut approved it. I added the requirements and the list to the project's default branch, and each piece now has its own ticket, listed at the top of this one.
+
+**What I need from you:** nothing.
+```
+
+- [x] Red→green evidence for the ten cases is above.
+
+**What 40g/40h must know.**
+
+- **Deps:** `{ store, adapter, manifest, root, timonePin, project, ticketContext, startStep, running, stepEnded, clock, log }`. `root` is the Timone root: the sessions' `cwd`, and where `.timone/records/` lives. `timonePin` is `async () => (await readTimoneCheckout(root)).pin`. The actions do not refuse on uncommitted changes in Timone's folder, as the spawner does; if the driver wants that, it checks before waking. `startStep` is `(input) => startStepSession({ store, runtime, progressIntervalMs, ticker, log }, input)`. `ticketContext` is the same value given to `ticketKindOf` for the brief.
+- **`RunningSteps`:** the driver owns one instance for the daemon's life and passes it to every wake's actions. `get(runId)` gives `{ stage, session, startedAt, stopRequested? }`: 40g's `StepActivity` reads `stage` and `startedAt` from it, and `session.progress` for `activitySince`.
+- **The `stepEnded(runId, stage, result)` contract:** called once for every step, the approval-record session included (its `stage` is `requirements` or `breakdown`). By then `step-ended` is written and the step is gone from `running`. For a successful approval step for the pieces, it is called after chunk zero was closed, so **the run may already be `done` (merged) or `failed`**: check the status before parking the run or waking the runner. The actions never park or activate a run; `startStepSession` activates it when a step starts.
+- **`endRun` calls `store.complete`**, which the ledger allows only from `active` or `parked`. On a `picked-up` run it throws. The action writes `Failed: Run … cannot go from picked-up to done` and throws again. 40g must make sure the run is active or parked whenever the runner can end it, or add the transition.
+- **Nothing here writes `limit-raised`.** The limit notice promises that a named person's "continue" allows another full limit, so the wake filter (40h) must write `limit-raised {by, commentAt}` for it. After that, a later limit posts a new notice.
+- **Tools:** give the session `mcpServers: { [RUNNER_SERVER_NAME]: runnerToolServer(actions) }` and `allowedTools: qualifiedRunnerToolNames()`. The server sets `alwaysLoad: true`. A refusal comes back as `isError: true`, with text starting "Refused: "; a thrown error comes back as the tool server's own error result.
+- **`post` to the pull request** uses `run.pr` when the ledger has it, whatever its state, else the forge's open pull request for the branch.
+- **Two exported sentences for 40k:** `SKIPPED_REQUIREMENTS_APPROVAL` and `SKIPPED_PIECES_APPROVAL` in `prompts.ts`. A step gets one for each approval that a `departure` entry of its run names and that no `approval` entry gives.

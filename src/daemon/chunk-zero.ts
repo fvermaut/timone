@@ -50,6 +50,15 @@ export interface ChunkZeroDeps {
 }
 
 /**
+ * A named person's approval of the list of pieces: who gave it, and when
+ * their comment says they did.
+ */
+export interface ChunkZeroApproval {
+  by: string;
+  at: string;
+}
+
+/**
  * Merge chunk zero — the branch carrying the specification and the approved
  * breakdown — into the project's default branch, with no pull request
  * (ADR-0030 D2). Returns false when it did not happen, having failed the run
@@ -57,11 +66,26 @@ export interface ChunkZeroDeps {
  * chunk 1 cuts from the default branch, so a silently failed merge would
  * have it build against a default branch that does not carry the
  * specification, and nothing downstream would notice.
+ *
+ * **`approval` is required, so no caller can merge without one** (PRD-05 R3:
+ * only a named person's yes lets work reach a default branch with no pull
+ * request). Both paths that close chunk zero merge through here, and each
+ * must name the approval that allows it: the runner's path takes it only
+ * from the run record's `approval` entry, and the daemon's from the person's
+ * reply it has just read. The check is the compiler's — a call without an
+ * approval does not build — so nothing here reads it again.
+ *
+ * {@link attemptMerge} below takes no approval. It is exported only for the
+ * spawner's delegator of the same name, which its tests reach; nothing else
+ * may call it.
  */
 export async function mergeChunkZero(
   deps: ChunkZeroDeps,
   run: Run,
   project: TicketingProject,
+  // Required and not read: see above. Named with an underscore only so a
+  // reader does not look for where it is used.
+  _approval: ChunkZeroApproval,
 ): Promise<boolean> {
   const { store, adapter } = deps;
   const branch = store.get(run.id)?.branch;

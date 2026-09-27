@@ -1,0 +1,100 @@
+import { NEEDED_FROM_YOU } from "../adapters/ticketing.js";
+
+/**
+ * What the machine itself says on a ticket when the runner acts
+ * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md),
+ * PRD-05).
+ *
+ * **Written by code, not by the runner.** A skipped step and a reached limit
+ * are the two things a person must always be told, so the words are fixed
+ * here rather than left to a model that might forget them or soften them.
+ *
+ * Every notice is read by a person who does not know how Timone works, and
+ * who may not read English as a first language: short sentences, common
+ * words, no words from Timone's own process, and a last line saying what is
+ * needed from them.
+ */
+
+/** What a departure notice is made from. */
+export interface DepartureNoticeInput {
+  /** What a person calls each step left out, in the order they come. */
+  skippedLabels: readonly string[];
+  /** The runner's reason, in its own words. */
+  reason: string;
+  /** What a person calls the step that is starting instead. */
+  nextLabel: string;
+}
+
+/**
+ * The comment that says the runner is leaving out steps of the default
+ * order, posted before the step that leaves them out starts.
+ */
+export function departureNotice(input: DepartureNoticeInput): string {
+  const one = input.skippedLabels.length === 1;
+  return [
+    `**I am skipping ${one ? "a step" : `${input.skippedLabels.length} steps`}.** ` +
+      `I am going straight to ${input.nextLabel}, without ${joined(input.skippedLabels)}. ` +
+      `Reason: ${sentence(input.reason)}`,
+    "",
+    `${NEEDED_FROM_YOU} nothing. If you want ${one ? "the skipped step" : "the skipped steps"} ` +
+      "done after all, say so here.",
+  ].join("\n");
+}
+
+/** What a limit notice is made from, in dollars. */
+export interface LimitNoticeInput {
+  /** What every session of the ticket has cost so far. */
+  spentUsd: number;
+  /** What the ticket may spend now, raises included. */
+  allowanceUsd: number;
+  /** What one "continue" from a named person adds: the project's limit. */
+  raiseUsd: number;
+}
+
+/**
+ * The comment that says the ticket has spent what it may, so no new step
+ * starts until a named person allows more (ADR-0060 D5). Posted once each
+ * time the limit is reached, not once for every step that is refused.
+ */
+export function limitNotice(input: LimitNoticeInput): string {
+  return [
+    `**This ticket has reached its spending limit.** It has cost ${usd(input.spentUsd)}, ` +
+      `and the limit is ${usd(input.allowanceUsd)}. I will not start any more work on it for now.`,
+    "",
+    `${NEEDED_FROM_YOU} reply "continue" to allow another ${usd(input.raiseUsd)}, ` +
+      "or say nothing and it stays stopped.",
+  ].join("\n");
+}
+
+/**
+ * The comment that says the list of pieces was approved, the requirements
+ * and the list are on the default branch, and the pieces have their tickets.
+ * Posted once all three are true, and not before: until then the approval is
+ * written down but not acted on.
+ */
+export function piecesApprovedNotice(by: string): string {
+  return [
+    `**The list of pieces is approved.** ${by} approved it. I added the requirements and the ` +
+      "list to the project's default branch, and each piece now has its own ticket, listed at " +
+      "the top of this one.",
+    "",
+    `${NEEDED_FROM_YOU} nothing.`,
+  ].join("\n");
+}
+
+/** Dollars as a person reads them: `$150.40`. */
+function usd(amount: number): string {
+  return `$${amount.toFixed(2)}`;
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+export function joined(items: readonly string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+/** The text, trimmed, with a full stop added when it ends without one. */
+function sentence(text: string): string {
+  const trimmed = text.trim();
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
