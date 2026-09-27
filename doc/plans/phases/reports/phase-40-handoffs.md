@@ -69,3 +69,60 @@ The full suite showed 6 failures, all in `src/daemon/session.test.ts`, which 40a
 - `order.ts`: `TICKET_KINDS`, `TicketKind`, `Approval = "requirements" | "pieces"`, `OrderStep`, `defaultOrder(kind)`. The ids a `departure.skipped` must use are the stage names plus `"requirements-approval"` and `"pieces-approval"`.
 - `departures.ts`: `DEPARTURES_START`, `DEPARTURES_END`, `Departure`, `departuresOf(entries, runId, order)` (judges only steps before the furthest reached), `departureSection(departures)` (no trailing newline; must sit at the top of a body to be its first line).
 - `limit.ts`: `DEFAULT_LIMIT_USD = 150`, `spentOn`, `allowanceOf(entries, base)`, `isOverLimit(entries, base)`. The manifest's per-project limit is 40b's.
+
+## 40a — one step session, started and watched outside the spawner
+
+**Built.** `startStepSession(deps, input)` in `src/daemon/step-session.ts` is now the one place a session is started and watched. It takes a hold, claims the run if it is parked, calls `runtime.start`, activates the run with the session id and holder, logs the "session started" line, then starts the ticker; each tick stamps the heartbeat and logs a progress line; when the session ends the ticker stops and the cost line is logged. A start that throws on a parked run puts it back on its wait and rethrows. It returns `StepSession { sessionId; completed: Promise<StepResult>; progress?; stop(); send? }` with `StepResult = { outcome; summary? }`. `mergeChunkZero`, `openStepTickets` and their helpers moved to `src/daemon/chunk-zero.ts` with explicit dependencies and unchanged behaviour. `AgentSessionSpawner` calls both modules, and the daemon's log output is identical, line order included.
+
+**Files touched.**
+
+- `src/daemon/step-session.ts` — created.
+- `src/daemon/step-session.test.ts` — created, the five declared cases.
+- `src/daemon/chunk-zero.ts` — created: `mergeChunkZero`, `attemptMerge`, `openStepTickets`, and the helpers `stepTitle`, `stepBody`, `initiativeMap`, moved word for word with `this.options`/`this.log` turned into `deps`.
+- `src/daemon/session.ts` — `startClaimed` calls `startStepSession`; `watch` only keeps the `running` map; `stop(runId)` is `this.running.get(runId)?.stop()`; `recordApproval` calls the chunk-zero functions; the moved code and its unused imports are gone.
+
+**Decisions taken inside the slice.**
+
+1. **`announce?: (sessionId) => string` on the input.** The "session started" line (and the approval path's `record … approved …` line) must be logged after activation and before the first tick, or the real ticker, which ticks at once, prints a `work` line first. A scratch script run against `HEAD` and against the working tree gave identical output on both paths. No existing test guards this line.
+2. **`stop()` is always present**, and the three stop log lines moved into it with the same text and order, so the spawner still tells a runtime that cannot stop from one that can.
+3. **`ticker`, `progressIntervalMs` and `log` are required deps**, so `step-session.ts` does not import `intervalTicker` from `session.ts`. The holder command stays `timone daemon <runId>`.
+4. **`send?` is declared and no runtime provides it yet** (40d's).
+5. **Chunk-zero contracts are unchanged.** `attemptMerge(deps, project, branch)` is exported too, because `session.test.ts` reaches the spawner's private `mergeChunkZero` and `attemptMerge` by name; those two stay as one-line private delegators.
+6. **Two import cycles, the first in the codebase:** `session.ts` ↔ `step-session.ts` (for `waitOf`) and `session.ts` ↔ `chunk-zero.ts` (for `failedComment`, `mergeMessage`). Safe, because no name is read while the modules load; each new module was loaded first and called to check. To remove them later: move `waitOf` and `mergeMessage` out of `session.ts` with re-exports. Left for the delivery review, as refactoring is.
+7. **One difference not reachable in practice:** a throw from the first tick now surfaces inside the start, where the spawner's first-attempt catch would put an active run back to picked-up. `heartbeat` throws only for an unknown run id, and the run was activated just before.
+
+**Validation evidence.** The five cases, each red first:
+
+1. "activates the run with the runtime's session id, held by this process" — red `Error: not built`, then green.
+2. "stamps the run's heartbeat on every tick of the ticker it was given" — red `the ticker was never started`, then green.
+3. "finishes with how the session ended and what it cost" — red: summary with `costUsd: 1.87` missing; then green.
+4. "ends the runtime's session when it is told to stop" — red `expected +0 to be 1`, then green.
+5. "puts a parked run back on the same wait when its session fails to start" — also reads the status while the start is in flight. Red `expected 'parked' to be 'active'` (no claim), then red `expected 'active' to be 'parked'` (claim alone), then green with the re-park.
+
+The delegation turned six existing `session.test.ts` tests red (tick lines, cost line, ticker stop, heartbeat during a wait, cancel with a runtime that cannot stop); all six went green once the tick lines, cost line, ticker stop and stop lines moved. The chunk-zero move cannot go red first, so it was mutated and restored: dropping `store.fail` in `mergeChunkZero` failed 3 tests; dropping the map label in `openStepTickets` failed 1; bypassing the adapter in `attemptMerge` failed 1; restored, 161/161 pass and the diff is clean.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/daemon/step-session.test.ts
+ Tests  5 passed (5)
+$ npx vitest run src/daemon/session.test.ts src/daemon/poll.test.ts
+ Tests  372 passed (372)
+$ git diff --stat origin/main -- src/daemon/session.test.ts src/daemon/poll.test.ts
+(no output)
+$ npx vitest run
+ Test Files  46 passed (46)
+      Tests  1731 passed (1731)
+```
+
+- [x] `session.test.ts` and `poll.test.ts` pass with no line changed.
+- [x] Red→green evidence for the five cases is above.
+
+**What 40b must know.**
+
+- `startStepSession` needs `{ store, runtime, progressIntervalMs, ticker, log }`, all required: pass `intervalTicker` from `session.ts` and `DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000`. Input `{ runId, request, label, announce? }`.
+- Only a parked run is re-parked on a start failure; a picked-up or active run is left for the caller.
+- `completed` settles after the ticker has stopped and the cost line is logged.
+- `stop()` logs "cancelled, so its session is being ended" and never throws.
+- `mergeChunkZero(deps, run, project)` returns `true`, or fails the run, posts `failedComment` and returns `false`. `openStepTickets(deps, run, project)` returns a failure sentence or `undefined`; the caller fails or completes the run.
+- Do not remove the spawner's private `mergeChunkZero` and `attemptMerge` while `session.test.ts` must stay unchanged.
