@@ -3,7 +3,7 @@
 > **Status:** Active
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-05-a-runner-decides-each-step.criteria.md](prd-05-a-runner-decides-each-step.criteria.md)
-> **Phases:** none yet
+> **Phases:** [phase 40](../../plans/phases/phase-40.md) (piece 1, #165)
 
 ## Problem
 

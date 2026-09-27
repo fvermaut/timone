@@ -212,8 +212,10 @@
       THEN the runner wakes within one polling cycle
     - GIVEN a step that has been running for 15 minutes since it started or since the last check
       WHEN the check falls due
-      THEN the runner wakes with a summary written by code: the commands the step ran since the last check, the time taken and the cost
+      THEN the runner wakes with a summary written by code: the commands the step ran since the last check, the time taken, and the output so far
       AND the summary is short enough to read in one page, and is not the step's full session
+      AND the step's cost is recorded when the step ends
+    > ✏ 2026-09-27 — amended at planning, phase 40: a running session reports its cost only in its final message, so a summary taken while it runs cannot hold the cost. See [phase-40-departures.md](../../plans/phases/reports/phase-40-departures.md).
 - **Verification hint:** the step's output is already read live (`src/daemon/progress.ts`, `src/daemon/transcript.ts`). The summary can be built from the same stream. The api part of this (the summary is built correctly from a recorded stream) can be tested on a stored session from `.timone/sessions/`.
 
 ## R13 — The runner can send a running step a message, or stop it
