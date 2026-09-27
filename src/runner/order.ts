@@ -1,4 +1,9 @@
-import { stageLabel, type PipelineStage } from "../daemon/pipeline.js";
+import {
+  classificationFromLabels,
+  stageLabel,
+  type PipelineStage,
+  wayfinderStage,
+} from "../daemon/pipeline.js";
 
 /**
  * The default order: the steps written down for each kind of ticket, in the
@@ -135,4 +140,51 @@ export function defaultOrder(kind: TicketKind): readonly OrderStep[] {
     default:
       return kind satisfies never;
   }
+}
+
+/**
+ * What the caller knows about a ticket that its labels do not say.
+ *
+ * `isStep` is true for a step ticket of an initiative, and `isRemediation`
+ * for a run answering a review of its pull request. Neither is written on the
+ * ticket as a label: a step ticket carries the labels its initiative gave it,
+ * and a review is on the pull request. So the caller, which knows where the
+ * run came from, says so.
+ */
+export interface TicketContext {
+  isStep: boolean;
+  isRemediation: boolean;
+}
+
+/**
+ * The kind of a ticket, so its written order can be found with
+ * {@link defaultOrder}. The brief and the runner's actions both read it here,
+ * so the order the runner is shown is the order its skips are judged against.
+ *
+ * **The caller's context comes first, then the labels.** A remediation wins
+ * over everything, because the work it answers is already at a pull request
+ * whatever kind of ticket started it. A step ticket is a step whatever its
+ * labels say: it can carry `wayfinder:map` or `triage:feature` from the
+ * initiative it came from, and neither order is the one its run follows.
+ *
+ * Then `wayfinder:<type>`, read as {@link wayfinderStage} reads it — `map` is
+ * the map, `research` is research, and the other types are decisions settled
+ * with a person — then `triage:<kind>`.
+ *
+ * **A ticket with neither label is a feature.** That is the longest order, so
+ * a ticket read wrongly here has steps shown to the runner that it may leave
+ * out with a reason, rather than steps missing that it would never be told
+ * about. A ticket not yet sorted also starts at sorting, as a feature does.
+ */
+export function ticketKindOf(
+  labels: readonly string[],
+  context: TicketContext,
+): TicketKind {
+  if (context.isRemediation) return "remediation";
+  if (context.isStep) return "step";
+  const wayfinder = wayfinderStage(labels);
+  if (wayfinder === "charting") return "map";
+  if (wayfinder === "research") return "research";
+  if (wayfinder === "wayfinding") return "decision";
+  return classificationFromLabels(labels) ?? "feature";
 }
