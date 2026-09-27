@@ -371,6 +371,7 @@ The watched run needs the operator to start the daemon from his own terminal, wh
 - **R13** — the runner sends a running step a message, and the step's next turn shows it;
 - **R15** — while a step runs on scratch-app, `observedAt` in `.timone/state.json` keeps moving, and a comment on an ivtrends ticket is read in that time;
 - **R5, R6** — a departure is posted on the ticket when it happens and listed on the pull request.
+- ✏ 2026-09-27 (build, timone#165) — **40d's owed probe**: from the operator's logged-in terminal, two stream-json messages into `claude -p --input-format stream-json --replay-user-messages` give two model answers; and during the watched run, a message the runner sends while the step is in a tool call is replayed (`"isReplay":true` in the step's transcript) and the step then ends by itself. See [phase-40-departures.md](reports/phase-40-departures.md).
 
 If it cannot be run before the pull request, the pull request lists it as owed (ADR-0059 D1), the four criteria stay `draft`, and ivtrends does not move until it has been run.
 
