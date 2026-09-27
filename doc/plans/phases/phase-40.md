@@ -192,7 +192,7 @@ printf '%s\n%s\n' \
 **[NEW FILE]** `src/runner/comments.ts` — the departure notice and the limit notice, in plain words, each ending with the call-to-action line.
 **[MODIFY]** `src/daemon/chunk-zero.ts` — ~~`mergeChunkZero` refuses unless the ticket's record holds an `approval` entry for `pieces`. The current daemon's path supplies its approval the same way, so its behaviour does not change.~~
 > ✏ 2026-09-27 (build, timone#165): `mergeChunkZero` takes the approval as a required argument, `{ by, at }`, and does nothing without it. The runner's path passes it only from the record's `approval` entry for `pieces`, and `recordApproval` refuses before any merge when there is none. The current daemon keeps no record, so it passes the approval it read from the person's reply — the one it already has. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
-**[MODIFY]** `src/daemon/session.ts` — ✏ 2026-09-27 (build, timone#165): `recordApproval` passes the gate's approval to `mergeChunkZero` (one call site). Nothing else in the file changes.
+**[MODIFY]** `src/daemon/session.ts` — ✏ 2026-09-27 (build, timone#165): `recordApproval` passes the gate's approval to `mergeChunkZero` (one call site), and `workspaceFor` and `isPrompted` gain `export` so the runner's actions build a step's request the way the spawner does. Nothing else in the file changes.
 **[MODIFY]** `src/daemon/prompts.ts` — `runnerInstructionsBlock(instructions, skipped)`: the runner's instructions under their own heading, and — when an approval was skipped — the exact sentence *"The runner skipped the approval of <what>, and recorded that it did."* that 40k teaches the skills to read.
 **[NEW FILE]** `src/runner/actions.test.ts`, `src/runner/tools.test.ts`
 
