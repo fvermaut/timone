@@ -1620,3 +1620,26 @@ describe("takeover claims through the run, not the lock", () => {
     ).toEqual(["release-takeover"]);
   });
 });
+
+describe("a run the runner waits on", () => {
+  // ADR-0060 and PRD-05 R11: `timone takeover` stays. What a run of the
+  // runner does next is the runner's to decide, not a stage's, so the
+  // session that opens is the one bound to no stage.
+  it("resolves to the session bound to no stage", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
+
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store, adapter: fakeAdapter().adapter },
+    );
+
+    expect(resolution.kind).toBe("escalation");
+    expect(resolution).not.toHaveProperty("stage");
+  });
+});

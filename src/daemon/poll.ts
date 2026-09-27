@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
-import type { Manifest, ProjectConfig } from "../manifest.js";
+import { driverOf, type Manifest, type ProjectConfig } from "../manifest.js";
+import type { RunnerDriver } from "../runner/driver.js";
 import {
   CTA_MARKER,
   MARK_LABEL,
@@ -226,6 +227,20 @@ export interface PollDeps {
    * last session happened to leave checked out.
    */
   breakdownSource?: BreakdownSource;
+  /**
+   * ✏ The runner, which drives every project whose entry says `driver:
+   * runner` ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+   * D9, PRD-05 R19). Such a project is handed to it after the registration
+   * loop, and nothing below that loop touches it: no resume, no spawn, no
+   * call to action.
+   *
+   * **Optional, and absent means a runner project is left alone**, with a
+   * line in the log. It is never handed to the spawner instead: one project
+   * driven two ways at once is the fault R19 exists to avoid. Every existing
+   * test constructs the loop without one, and none of them names a runner
+   * project.
+   */
+  runner?: RunnerDriver;
   /** Progress sink; defaults to silence (the command wires stdout). */
   log?: (message: string) => void;
 }
@@ -978,7 +993,14 @@ async function applyRequest(
       // has stopped nothing and must not kill a session that is fine.
       if (code === 0) {
         const cancelled = store.runsForTicket(body.project, body.ticket).at(-1);
-        if (cancelled !== undefined) deps.spawner.stop?.(cancelled.id);
+        if (cancelled !== undefined) {
+          deps.spawner.stop?.(cancelled.id);
+          // ✏ And the runner's work, on a project it drives: the step's box
+          // and the runner's own session (PRD-05 R11). Nothing of it runs
+          // for a project the current daemon drives, so this stops nothing
+          // there.
+          deps.runner?.stop(cancelled.id);
+        }
       }
       return code;
     }
@@ -1020,6 +1042,15 @@ async function applyRequest(
       if (run === undefined || run.status !== "active") {
         log(`${target} is not out at the terminal — nothing to take back.`);
         return 1;
+      }
+      // ✏ On a project the runner drives, it goes back to the runner, which
+      // is woken to read what the terminal session left (PRD-05 R11). Not to
+      // the wait it had before: a failed run taken over was parked on a
+      // person (ADR-0059), and on such a project only the runner moves a run.
+      if (drivenByRunner(manifest, body.project) && deps.runner !== undefined) {
+        deps.runner.terminalEnded(run);
+        log(`${target} is back with the runner (${body.outcome}).`);
+        return 0;
       }
       // What it goes back to is read off the run: `claim` leaves the wait in
       // place precisely so a claim can be undone by whoever finds it.
@@ -1089,6 +1120,15 @@ async function boundRefusal(
     run.ticket,
     refusedComment(reason, refused.count),
   );
+}
+
+/**
+ * Whether the runner drives `project` (ADR-0060 D9, PRD-05 R19). A project
+ * the manifest does not name is driven by nobody, so it is not.
+ */
+function drivenByRunner(manifest: Manifest, project: string): boolean {
+  const config = manifest.projects[project];
+  return config !== undefined && driverOf(config) === "runner";
 }
 
 /** Who is holding a run, as a log line names them. */
@@ -1212,6 +1252,24 @@ async function reclaimStale(
       continue;
     }
     if (held !== "gone" && !witness.mayJudge) continue;
+
+    // ✏ A run of a project the runner drives is never failed or re-armed
+    // here (ADR-0060 D9, PRD-05 R16). What to do with work a stopped daemon
+    // left half done is the runner's to decide, and a failed run would need
+    // a person to start it again. So it goes back on the runner's wait, and
+    // the runner is woken and told why — whatever its pull request says,
+    // which the runner reads for itself.
+    if (drivenByRunner(deps.manifest, project.name)) {
+      if (deps.runner === undefined) {
+        log(`runner ${run.id} — no runner is wired into this daemon, so it is left as it is`);
+        continue;
+      }
+      deps.runner.reclaimed(run);
+      result.reclaimed.push(run.id);
+      const why = held === "gone" ? `${heldBy(run)} is gone` : "it went silent while the daemon watched";
+      log(`reclaim ${run.id} — ${why}, so it goes back to the runner`);
+      continue;
+    }
 
     // The verdict on the branch is asked for before the verdict on the
     // session, and it overrules it. A session can die *after* its pull request
@@ -1581,6 +1639,28 @@ async function pollProject(
       log(`pickup ${run.id}`);
       await adapter.postComment(project, ticket.number, pickedUpComment());
     }
+  }
+
+  // ✏ A project the runner drives leaves the old path here (ADR-0060 D9,
+  // PRD-05 R19). What happens next to each of its runs is the runner's to
+  // decide, so nothing below may decide it: no go-ahead, no resume, no spawn,
+  // no call to action. The queue is still promoted — one run per project at
+  // a time is kept for these projects too (R15) — and the introduction is
+  // still owed. The driver returns once it has asked for its wakes; it never
+  // waits for one, so this project's work does not hold up the next (R15).
+  if (driverOf(config) === "runner") {
+    store.promoteQueue(project.name);
+    if (deps.runner === undefined) {
+      log(`runner ${project.name} — no runner is wired into this daemon, so its runs are left as they are`);
+    } else {
+      const cycle = { tickets, isStep: frontier.isStep, threads };
+      for (const line of await deps.runner.tick(project, config, cycle)) {
+        result.errors.push(line);
+        log(`error  ${line}`);
+      }
+    }
+    await introduceUnmarked(project, config, deps, result, log);
+    return;
   }
 
   // Before anything is resumed: a map whose frontier emptied since the last

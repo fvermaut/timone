@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import type { Command } from "commander";
 
-import { loadManifest, type Manifest } from "../manifest.js";
+import { driverOf, loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock, type LockHolder } from "../daemon/lock.js";
@@ -105,6 +105,13 @@ async function askForRetry(
     log(`I don't know a project called "${target.project}". I look after: ${known}.`);
     return 1;
   }
+  // Before asking, not after: the daemon would refuse it the same way, and a
+  // request it can only refuse would cost the person a wait for nothing.
+  const refused = runnerRefusal(manifest, target.project);
+  if (refused !== undefined) {
+    log(refused);
+    return 1;
+  }
 
   const name = `${target.project} #${target.ticket}`;
   // Read before asking, so what the daemon did can be told from what it
@@ -186,6 +193,26 @@ function refusalFor(run: Run, name: string): string | undefined {
   }
 }
 
+/**
+ * What `retry` says on a project the runner drives, where it is removed
+ * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+ * D6, which amends ADR-0032; PRD-05 R11). The runner reads the ticket every
+ * time it wakes, so writing there is how to ask it for anything.
+ */
+export const RUNNER_RETRY_REFUSAL =
+  "This project is run by the runner. Write on the ticket instead: say what you want done.";
+
+/**
+ * The refusal for `project`, when the runner drives it, or undefined when
+ * `retry` still applies there. Asked before the store is touched, on every
+ * path, so no run of such a project is ever re-armed or rewound — whatever
+ * state it is in.
+ */
+function runnerRefusal(manifest: Manifest, project: string): string | undefined {
+  const config = manifest.projects[project];
+  return config !== undefined && driverOf(config) === "runner" ? RUNNER_RETRY_REFUSAL : undefined;
+}
+
 /** The retry itself, once this process is the ledger's only writer. */
 function retry(
   raw: string,
@@ -210,6 +237,12 @@ function retry(
     return 1;
   }
 
+  const refused = runnerRefusal(manifest, target.project);
+  if (refused !== undefined) {
+    log(refused);
+    return 1;
+  }
+
   const run = store.runsForTicket(target.project, target.ticket).at(-1);
   const name = `${target.project} #${target.ticket}`;
   if (run === undefined) {
@@ -220,9 +253,9 @@ function retry(
     return 1;
   }
 
-  const refused = refusalFor(run, name);
-  if (refused !== undefined) {
-    log(refused);
+  const notFailed = refusalFor(run, name);
+  if (notFailed !== undefined) {
+    log(notFailed);
     return 1;
   }
   if (run.status === "parked") return rewind(run, name, store, log);
@@ -302,7 +335,7 @@ function rewind(
   // projects). The runner reads the ticket every time it wakes, so writing
   // there is how to ask it for anything.
   if (run.wait?.kind === "runner") {
-    log("This project is run by the runner. Write on the ticket instead: say what you want done.");
+    log(RUNNER_RETRY_REFUSAL);
     return 1;
   }
 

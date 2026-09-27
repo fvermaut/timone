@@ -72,6 +72,10 @@ import {
 import { SpawnRefusal } from "./faults.js";
 import { processStage, stageLabel } from "./pipeline.js";
 import { AgentSessionSpawner } from "./session.js";
+import { RunnerDriver, type RunnerDriverDeps } from "../runner/driver.js";
+import { RunningSteps } from "../runner/actions.js";
+import type { WakeOptions } from "../runner/session.js";
+import { appendEntry, readRecord, type RecordEntry } from "../runner/record.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
 const tempDirs: string[] = [];
@@ -8253,5 +8257,771 @@ describe("a project called `timone` is a project like any other", () => {
     await pollOnce({ manifest: manifestWith("timone"), store, adapter, spawner });
 
     expect(store.get("timone#39/1")?.stage).toBe("triage");
+  });
+});
+
+/**
+ * The same manifest, with each project in `names` driven by the runner and
+ * fvermaut the one person who may instruct it (ADR-0060 D9, PRD-05 R19). A
+ * transformer, as {@link introducing} is, so `manifestWith` keeps meaning
+ * what every other test in this file reads it as: the current daemon.
+ */
+function drivenByRunner(manifest: Manifest, ...names: string[]): Manifest {
+  return {
+    projects: Object.fromEntries(
+      Object.entries(manifest.projects).map(([name, config]) => [
+        name,
+        names.includes(name)
+          ? { ...config, driver: "runner" as const, instructors: ["fvermaut"] }
+          : config,
+      ]),
+    ),
+  };
+}
+
+/** One wake the cycle asked the runner for. */
+interface AskedWake {
+  runId: string;
+  events: string[];
+  options: WakeOptions;
+}
+
+/**
+ * A stand-in for the runner's sessions: it writes down every wake and every
+ * stop it is asked for, and does nothing else. `never` makes each wake a
+ * promise that never settles — a runner whose session, or the step it
+ * started, goes on for ever.
+ */
+function fakeWakes(settles: "at-once" | "never" = "at-once"): {
+  sessions: ReturnType<RunnerDriverDeps["sessionsFor"]>;
+  wakes: AskedWake[];
+  stops: string[];
+} {
+  const wakes: AskedWake[] = [];
+  const stops: string[] = [];
+  return {
+    sessions: {
+      wake(run, events, options = {}) {
+        wakes.push({ runId: run.id, events: [...events], options });
+        return settles === "never" ? new Promise<void>(() => {}) : Promise.resolve();
+      },
+      stop(runId) {
+        stops.push(runId);
+      },
+    },
+    wakes,
+    stops,
+  };
+}
+
+/**
+ * The real driver over the test's store and forge, with its record kept in a
+ * fresh folder, and a runner that is never really started.
+ */
+function runnerFor(
+  deps: Pick<RunnerDriverDeps, "store" | "adapter" | "manifest"> &
+    Partial<Pick<RunnerDriverDeps, "running" | "consult" | "clock">> & {
+      sessions: ReturnType<RunnerDriverDeps["sessionsFor"]>;
+    },
+): { runner: RunnerDriver; root: string } {
+  const root = mkdtempSync(join(tmpdir(), "timone-runner-"));
+  tempDirs.push(root);
+  const runner = new RunnerDriver({
+    store: deps.store,
+    adapter: deps.adapter,
+    manifest: deps.manifest,
+    root,
+    sessionsFor: () => deps.sessions,
+    running: deps.running ?? new RunningSteps(),
+    consult: deps.consult ?? (async () => undefined),
+    startStep: async () => {
+      throw new Error("no step starts in this test");
+    },
+    timonePin: async () => undefined,
+    clock: deps.clock ?? (() => "2026-09-27T12:00:00Z"),
+    log: () => {},
+  });
+  return { runner, root };
+}
+
+/**
+ * A forge for the runner's tests: the project's marked tickets, each with the
+ * comments the test gives it, and the pull requests it gives. Built on
+ * {@link fakeAdapter}, so every call no test here is about behaves as there.
+ */
+function runnerAdapter(
+  tickets: Ticket[],
+  given: {
+    comments?: Record<number, TicketThread["comments"]>;
+    pulls?: Record<number, PullRequestThread>;
+  } = {},
+): { adapter: TicketingAdapter; comments: PostedComment[] } {
+  const base = fakeAdapter({ "scratch-app": tickets });
+  return {
+    comments: base.comments,
+    adapter: {
+      ...base.adapter,
+      async getTicket(_project, number): Promise<TicketThread> {
+        const found = tickets.find((candidate) => candidate.number === number);
+        if (found === undefined) throw new Error(`no ticket ${number}`);
+        return { ...found, comments: given.comments?.[number] ?? [] };
+      },
+      async getPullRequestThread(_project, number): Promise<PullRequestThread> {
+        const found = given.pulls?.[number];
+        if (found === undefined) throw new Error(`no pull request ${number}`);
+        return found;
+      },
+    },
+  };
+}
+
+/** A comment by a person, as the forge hands it over. */
+function personSaid(author: string, body: string, createdAt: string): TicketThread["comments"][number] {
+  return { author, body, createdAt, fromTimone: false };
+}
+
+/** A run of ticket `number` waiting for the runner, as a wake leaves it. */
+function waitingForRunner(store: RunStore, number: number, project = "scratch-app"): Run {
+  const { run } = store.register(project, number);
+  return store.park(run.id, {
+    waitingOn: "the next thing that happens on this ticket",
+    kind: "runner",
+    resolvableBy: ["triage"],
+  });
+}
+
+/** Pull request #19 of ticket 7's run, in `state`, with what was said on it. */
+function pullRequest19(
+  state: "open" | "merged" | "closed",
+  comments: PullRequestThread["comments"] = [],
+): PullRequestThread {
+  return {
+    number: 19,
+    title: "A due date on each task",
+    url: "https://github.com/fvermaut/scratch-app/pull/19",
+    state,
+    headSha: "aaaaaaa",
+    comments,
+  };
+}
+
+/** A run of ticket 7 that opened pull request #19, and now waits for the runner. */
+function waitingWithPullRequest(store: RunStore): Run {
+  const { run } = store.register("scratch-app", 7);
+  store.claimBranch(run.id, "timone/7-due-dates");
+  store.recordPullRequest(run.id, 19);
+  return store.park(run.id, {
+    waitingOn: "your review of pull request #19",
+    kind: "runner",
+    resolvableBy: ["delivery"],
+  });
+}
+
+/** Every entry of ticket 7's record on scratch-app, or the test fails. */
+function recordOf7(root: string): RecordEntry[] {
+  const read = readRecord(root, "scratch-app", 7);
+  if (!read.ok) throw new Error(read.error.message);
+  return read.value;
+}
+
+/**
+ * Leave ticket 7's record where a step that cost $150.40 left it: over the
+ * $150 limit, and the ticket told so at 11:00:02.
+ */
+function spentItsLimit(root: string, runId: string): void {
+  const entries: RecordEntry[] = [
+    {
+      kind: "step-ended",
+      at: "2026-08-02T11:00:00Z",
+      runId,
+      stage: "execution",
+      sessionId: "step-session-1",
+      ok: true,
+      costUsd: 150.4,
+    },
+    { kind: "limit-reached", at: "2026-08-02T11:00:01Z", spentUsd: 150.4 },
+    { kind: "notice", at: "2026-08-02T11:00:02Z", about: "limit" },
+  ];
+  for (const entry of entries) appendEntry(root, "scratch-app", 7, entry);
+}
+
+describe("the runner drives its projects in the poll cycle", () => {
+  it("asks the runner to wake for a new ticket, and never hands it to the old spawner", async () => {
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner, spawned } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([
+      {
+        runId: "scratch-app#7/1",
+        events: ["A new ticket was picked up. Nothing has been done on it yet."],
+        options: {},
+      },
+    ]);
+    expect(spawned).toEqual([]);
+  });
+
+  it("asks the runner to wake for a named person's comment, with their words", async () => {
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingForRunner(store, 7);
+    const { adapter } = runnerAdapter([ticket(7)], {
+      comments: {
+        7: [personSaid("fvermaut", "skip the interview, go straight to planning", "2026-08-03T09:00:00Z")],
+      },
+    });
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([
+      {
+        runId: run.id,
+        events: [
+          'fvermaut commented on the ticket at 2026-08-03T09:00:00Z: "skip the interview, go straight to planning"',
+        ],
+        options: {},
+      },
+    ]);
+  });
+
+  it("asks for no wake for a comment by someone who is not named for the project", async () => {
+    // R10, falsified at the seam that wakes the runner: a public repository
+    // lets anyone comment, and a stranger's "approved" must move nothing.
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    waitingForRunner(store, 7);
+    const { adapter } = runnerAdapter([ticket(7)], {
+      comments: {
+        7: [personSaid("drive-by-dave", "approved, merge it", "2026-08-03T09:00:00Z")],
+      },
+    });
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([]);
+  });
+
+  it("reaches a second project's named comment in the same cycle while the first project's step never ends (R15)", async () => {
+    // #148: the old daemon awaited a session, so a project building for an
+    // hour held every other project for that hour. Here the first project's
+    // step never ends and the wake asked for it never settles, and the cycle
+    // must still reach the second project, and still return.
+    const store = newStore();
+    const manifest = drivenByRunner(
+      manifestWith("scratch-app", "ivtrends"),
+      "scratch-app",
+      "ivtrends",
+    );
+    const { run: building } = store.register("scratch-app", 7);
+    store.activate(building.id, "step-session-1");
+    const running = new RunningSteps();
+    running.set(building.id, {
+      stage: "execution",
+      session: { sessionId: "step-session-1", completed: new Promise(() => {}), stop() {} },
+      startedAt: "2026-09-27T12:00:00Z",
+    });
+    const waiting = waitingForRunner(store, 3, "ivtrends");
+    const said: Record<string, TicketThread["comments"]> = {
+      "scratch-app": [personSaid("fvermaut", "how far has it got?", "2026-08-03T09:00:00Z")],
+      ivtrends: [personSaid("fvermaut", "try again", "2026-08-03T09:05:00Z")],
+    };
+    const base = fakeAdapter({ "scratch-app": [ticket(7)], ivtrends: [ticket(3)] });
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async getTicket(project, number): Promise<TicketThread> {
+        return { ...ticket(number), comments: said[project.name] ?? [] };
+      },
+    };
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes("never");
+    const { runner } = runnerFor({ store, adapter, manifest, sessions, running });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+
+    expect(wakes.map((wake) => wake.runId)).toEqual([building.id, waiting.id]);
+    expect(wakes[1]?.events).toEqual([
+      'fvermaut commented on the ticket at 2026-08-03T09:05:00Z: "try again"',
+    ]);
+  });
+
+  it("asks the runner to wake when the run's pull request was merged, saying so", async () => {
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingWithPullRequest(store);
+    const { adapter } = runnerAdapter([ticket(7)], { pulls: { 19: pullRequest19("merged") } });
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([
+      { runId: run.id, events: ["Pull request #19 was merged."], options: {} },
+    ]);
+  });
+
+  it("asks for no wake on a held ticket when only its pull request moved", async () => {
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    waitingWithPullRequest(store);
+    const held = ticket(7, { labels: ["timone", HELD_LABEL] });
+    const { adapter } = runnerAdapter([held], { pulls: { 19: pullRequest19("merged") } });
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([]);
+  });
+
+  it("wakes the runner on a held ticket for a named person's comment, and tells it only that", async () => {
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingWithPullRequest(store);
+    const held = ticket(7, { labels: ["timone", HELD_LABEL] });
+    const { adapter } = runnerAdapter([held], {
+      comments: { 7: [personSaid("fvermaut", "ok, carry on", "2026-08-03T09:00:00Z")] },
+      pulls: { 19: pullRequest19("merged") },
+    });
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([
+      {
+        runId: run.id,
+        events: ['fvermaut commented on the ticket at 2026-08-03T09:00:00Z: "ok, carry on"'],
+        options: {},
+      },
+    ]);
+  });
+
+  it("allows another limit and wakes the runner when a named person's reply to the limit means go on", async () => {
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingForRunner(store, 7);
+    const { adapter } = runnerAdapter([ticket(7)], {
+      comments: {
+        7: [personSaid("fvermaut", "yes keep going, it is worth it", "2026-08-03T09:00:00Z")],
+      },
+    });
+    const asked: string[] = [];
+    const consult = async (prompt: string): Promise<string | undefined> => {
+      asked.push(prompt);
+      return "YES";
+    };
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner, root } = runnerFor({ store, adapter, manifest, sessions, consult });
+    spentItsLimit(root, run.id);
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(asked).toEqual([
+      "A ticket reached its spending limit, and the machine asked whether to go on. " +
+        "A person replied: yes keep going, it is worth it. " +
+        "Does this reply mean they want the work to go on? Answer with one word: YES or NO.",
+    ]);
+    expect(recordOf7(root).filter((entry) => entry.kind === "limit-raised")).toEqual([
+      {
+        kind: "limit-raised",
+        at: "2026-09-27T12:00:00Z",
+        by: "fvermaut",
+        commentAt: "2026-08-03T09:00:00Z",
+      },
+    ]);
+    expect(wakes).toEqual([
+      {
+        runId: run.id,
+        events: [
+          'fvermaut commented on the ticket at 2026-08-03T09:00:00Z: "yes keep going, it is worth it"',
+        ],
+        options: {},
+      },
+    ]);
+  });
+
+  it("changes nothing at the limit when the check does not answer yes to a named person's reply", async () => {
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingForRunner(store, 7);
+    const { adapter } = runnerAdapter([ticket(7)], {
+      comments: {
+        7: [personSaid("fvermaut", "hmm, why did it cost so much?", "2026-08-03T09:00:00Z")],
+      },
+    });
+    const consult = async (): Promise<string | undefined> => "NO. They are asking a question.";
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner, root } = runnerFor({ store, adapter, manifest, sessions, consult });
+    spentItsLimit(root, run.id);
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(recordOf7(root).filter((entry) => entry.kind === "limit-raised")).toEqual([]);
+    expect(wakes).toEqual([]);
+  });
+
+  it("tells the ticket once that it spent its limit, frees the project, and wakes nothing, for a new run of a ticket over its limit", async () => {
+    // R8: at the limit no session starts, the runner's included, and the
+    // ticket says what was spent. With no runner session to say it, the
+    // machine does, once. A new run left picked up would hold the project
+    // with nothing working on it (R16), so it is put on the runner's wait.
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const { run: earlier } = store.register("scratch-app", 7);
+    store.activate(earlier.id, "step-session-1");
+    store.complete(earlier.id);
+    const { run } = store.register("scratch-app", 7);
+    const { adapter, comments } = runnerAdapter([ticket(7)]);
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner, root } = runnerFor({ store, adapter, manifest, sessions });
+    appendEntry(root, "scratch-app", 7, {
+      kind: "step-ended",
+      at: "2026-08-02T11:00:00Z",
+      runId: earlier.id,
+      stage: "execution",
+      sessionId: "step-session-1",
+      ok: true,
+      costUsd: 150.4,
+    });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([]);
+    expect(comments.map((comment) => comment.body)).toEqual([
+      "**This ticket has reached its spending limit.** It has cost $150.40, and the limit is $150.00. " +
+        "I will not start any more work on it for now.\n\n" +
+        '**What I need from you:** reply "continue" to allow another $150.00, or say nothing and it stays stopped.',
+    ]);
+    expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
+    expect(store.occupyingRun("scratch-app")).toBeUndefined();
+  });
+
+  it("settles a retry asked of a runner project with the refusal, and leaves the run as it was", async () => {
+    // ADR-0060 D6 removes `timone retry` for these projects: the runner reads
+    // the ticket each time it wakes, so writing there is the way to ask.
+    const { store, statePath } = newStoreAt();
+    const run = failedRun(store);
+    enqueue(statePath, { kind: "retry", project: "scratch-app", ticket: 31 }, { by: "fvermaut" });
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(31)] });
+    const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, spawner, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual([]);
+    expect(result.errors).toEqual([
+      "could not apply retry scratch-app#31 asked by fvermaut: " +
+        "This project is run by the runner. Write on the ticket instead: say what you want done.",
+    ]);
+    expect(pending(statePath).requests).toEqual([]);
+    expect(store.get(run.id)).toEqual(run);
+  });
+
+  it("stops the running step and the runner's session when a runner project's run is cancelled", async () => {
+    // PRD-05 R11: `timone cancel` stays, and stops any running session.
+    const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "step-session-1");
+    const running = new RunningSteps();
+    let stepStops = 0;
+    running.set(run.id, {
+      stage: "execution",
+      session: {
+        sessionId: "step-session-1",
+        completed: new Promise(() => {}),
+        stop() {
+          stepStops += 1;
+        },
+      },
+      startedAt: "2026-09-27T12:00:00Z",
+    });
+    enqueue(statePath, {
+      kind: "cancel",
+      project: "scratch-app",
+      ticket: 7,
+      reason: "not needed any more",
+    });
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    const { sessions, stops } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions, running });
+
+    const result = await pollOnce({ manifest, store, adapter, spawner, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual(["cancel scratch-app#7"]);
+    expect(store.get(run.id)?.status).toBe("cancelled");
+    expect(stops).toEqual([run.id]);
+    expect(stepStops).toBe(1);
+  });
+
+  it("puts a runner project's run back on the runner's wait when the daemon stopped while its step ran, and wakes the runner", async () => {
+    // R16's third clause: the run is not failed for a machine stopping, and
+    // it is not left holding the project with nothing working on it.
+    const dir = mkdtempSync(join(tmpdir(), "timone-runner-reclaim-"));
+    tempDirs.push(dir);
+    let instant = "2026-09-04T10:00:00Z";
+    const store = RunStore.open(join(dir, ".timone", "state.json"), {
+      now: () => instant,
+      livenessOf: () => "gone",
+    });
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "step-session-1", {
+      token: "token-4213",
+      command: `timone daemon ${run.id}`,
+      pid: 4213,
+      since: "2026-09-04T10:00:00Z",
+      observedAt: "2026-09-04T10:00:00Z",
+      host: "fvermaut-mac",
+    });
+    instant = "2026-09-04T10:09:00Z";
+    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner, spawned } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner, staleAfterMs: 4 * 30 * 1000 });
+    await runner.drain();
+
+    expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
+    expect(wakes).toEqual([
+      { runId: run.id, events: ["The daemon stopped while a step was running."], options: {} },
+    ]);
+    expect(comments).toEqual([]);
+    expect(spawned).toEqual([]);
+  });
+
+  it("hands a run the runner waits on to the terminal, and wakes the runner once the terminal gives it back", async () => {
+    // PRD-05 R11: when a takeover's session ends, the runner wakes and reads
+    // what it left. While the terminal holds the run, nothing wakes it.
+    const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingForRunner(store, 6);
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = runnerAdapter([ticket(6)], {
+      comments: { 6: [personSaid("fvermaut", "I am looking at it myself", "2026-08-17T09:00:00Z")] },
+    });
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, statePath, runner };
+
+    const claiming = await pollOnce(deps);
+    await runner.drain();
+
+    expect(claiming.applied).toEqual(["claim-takeover scratch-app#6"]);
+    expect(store.get(run.id)?.status).toBe("active");
+    expect(wakes).toEqual([]);
+
+    enqueue(statePath, {
+      kind: "release-takeover",
+      project: "scratch-app",
+      ticket: 6,
+      outcome: "ended",
+    });
+    const releasing = await pollOnce(deps);
+    await runner.drain();
+
+    expect(releasing.applied).toEqual(["release-takeover scratch-app#6"]);
+    expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
+    expect(wakes[0]).toEqual({
+      runId: run.id,
+      events: ["The terminal session ended."],
+      options: {},
+    });
+  });
+
+  it("checks on a running step every 15 minutes, with what it did since the last check (R12)", async () => {
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "step-session-1");
+    const running = new RunningSteps();
+    running.set(run.id, {
+      stage: "execution",
+      session: { sessionId: "step-session-1", completed: new Promise(() => {}), stop() {} },
+      startedAt: "2026-09-27T12:00:00Z",
+    });
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    let now = "2026-09-27T12:14:59Z";
+    const { runner } = runnerFor({ store, adapter, manifest, sessions, running, clock: () => now });
+    const deps = { manifest, store, adapter, spawner, runner };
+
+    await pollOnce(deps);
+    now = "2026-09-27T12:15:00Z";
+    await pollOnce(deps);
+    now = "2026-09-27T12:29:59Z";
+    await pollOnce(deps);
+    now = "2026-09-27T12:30:00Z";
+    await pollOnce(deps);
+    await runner.drain();
+
+    expect(wakes).toEqual([
+      {
+        runId: run.id,
+        events: ["A 15-minute check on the running step."],
+        options: { checkSince: "2026-09-27T12:00:00Z" },
+      },
+      {
+        runId: run.id,
+        events: ["A 15-minute check on the running step."],
+        options: { checkSince: "2026-09-27T12:15:00Z" },
+      },
+    ]);
+  });
+
+  it("tells the runner once that its run's ticket was closed, or its mark removed", async () => {
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingForRunner(store, 7);
+    // The listing no longer holds #7; the ticket itself can still be read.
+    const base = fakeAdapter({ "scratch-app": [] });
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async getTicket(): Promise<TicketThread> {
+        return { ...ticket(7), comments: [] };
+      },
+    };
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([
+      { runId: run.id, events: ["The ticket was closed, or its mark was removed."], options: {} },
+    ]);
+  });
+
+  it("wakes the runner for a new step ticket, though the ticket carries the label that claims it", async () => {
+    // On a step ticket the hold label is the machine's own claim, applied at
+    // pickup (ADR-0044 D7), not a person's or the runner's hold. Read as a
+    // hold, it would keep every new step's run from ever being woken.
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const { run } = store.register("scratch-app", 20);
+    const map = ticket(19, { labels: ["timone", MAP_LABEL] });
+    const claimed = ticket(20, { labels: ["timone", HELD_LABEL] });
+    const base = fakeAdapter({ "scratch-app": [map, claimed] });
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async listSteps(): Promise<Step[]> {
+        return [
+          {
+            number: 20,
+            title: claimed.title,
+            state: "open",
+            labels: claimed.labels,
+            assignees: [],
+            blockedBy: [],
+            dependenciesIncomplete: false,
+          },
+        ];
+      },
+    };
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([
+      {
+        runId: run.id,
+        events: ["A new ticket was picked up. Nothing has been done on it yet."],
+        options: {},
+      },
+    ]);
+  });
+
+  it("asks the runner to wake for a named person's comment on the run's pull request", async () => {
+    // R9 and #147: a change asked for on the pull request reaches the runner,
+    // which replies there before the step that makes it starts.
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingWithPullRequest(store);
+    const { adapter } = runnerAdapter([ticket(7)], {
+      pulls: {
+        19: pullRequest19("open", [
+          personSaid("fvermaut", "please show late tasks in red, not orange", "2026-08-03T09:00:00Z"),
+        ]),
+      },
+    });
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([
+      {
+        runId: run.id,
+        events: [
+          'fvermaut commented on the pull request at 2026-08-03T09:00:00Z: "please show late tasks in red, not orange"',
+        ],
+        options: {},
+      },
+    ]);
+  });
+
+  it("asks for one wake for a named person's comment, however many cycles read it", async () => {
+    // Each wake is a runner session, and each session costs money: a comment
+    // read again every minute would spend the ticket's limit on one sentence.
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    waitingForRunner(store, 7);
+    const { adapter } = runnerAdapter([ticket(7)], {
+      comments: { 7: [personSaid("fvermaut", "go back to planning", "2026-08-03T09:00:00Z")] },
+    });
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, runner };
+
+    await pollOnce(deps);
+    await pollOnce(deps);
+    await pollOnce(deps);
+    await runner.drain();
+
+    expect(wakes).toHaveLength(1);
   });
 });
