@@ -675,3 +675,41 @@ A scratch script printed the options one wake hands `runQuery` (the server insta
 - **Log lines** start with `runner <runId> — …` (and `runner — …` for the Timone issue listing).
 - **The four old-daemon files** now know `runner` (decision 1): `timone takeover` opens a runner wait as an escalation. `timone retry` refuses it in this process; the daemon's own path for a queued retry request (`requests.ts`) was not changed. `timone status` prints `waiting: <on>` and does not count it on its last line (decision 2).
 - **Not done here:** a `ProgressReader` type that declares `activitySince` (decision 15); `@modelcontextprotocol/sdk` as a declared dev dependency (decision 16).
+
+## 40k — the step skills accept an approval the runner skipped
+
+**Built.** When the runner skips an approval, the step skills now accept it. Each new clause applies only when the prompt's section *The runner's instructions for this step* holds one of the two sentences from `src/daemon/prompts.ts`, word for word; without it, each gate reads as before. **Planning:** with the requirements sentence, a `Draft` requirements file does not stop planning; the planner plans against it and says in the Goal Description that the requirements were not approved, and why that is allowed. **Execution:** with the pieces sentence, an initiative with no approved breakdown builds, as one piece on the ticket's own branch, and the completion report's Plan line says the approval was skipped. **Delivery:** the block between the two departure markers at the top of the pull request's body belongs to code; delivery keeps it first and unchanged and writes below it.
+
+**Files touched.**
+
+- `.claude/skills/timone-plan/SKILL.md` — a nested bullet under the anchoring gate's "PRD exists but is not `Active`" case; a paragraph after "Two shapes of work have no breakdown, by design" (the pieces sentence makes the initiative one piece and one phase file, and opens no step tickets).
+- `.claude/skills/timone-execute/SKILL.md` — one paragraph in gate 1, after "What still refuses is an initiative that *has* a driving ticket and no approved breakdown…".
+- `.claude/skills/timone-deliver/SKILL.md` — one bullet under "The pull request".
+
+**Decisions taken inside the slice.**
+
+- **A second clause in timone-plan**, beyond the plan's letter: without it, a planner given the pieces sentence would still read "Each approved piece then gets a phase file of its own", plan only the first piece, and execution would build only that. One short paragraph, conditional on the sentence.
+- **Where the check looks:** every clause names the section *The runner's instructions for this step* — the exact heading `runnerInstructionsBlock` writes.
+- **No requirements clause in timone-execute:** nothing there refuses over a `Draft` requirements file (its only `Draft` is `doc/standards.md`, which it uses and reports).
+- **timone-deliver:** read the current body first (`gh pr view --json body`), because `gh pr edit --body` replaces all of it; "first section" elsewhere in the skill means first below the code's block. Delivery's own Departures section is unchanged.
+- **Links** to ADR-0060 use `../../../doc/adr/…`, the depth the files already use; checked to resolve.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based. The test suite was not run by the slice (40h was mid-change); the orchestrator's full run after 40h covers it.
+
+```
+$ grep -c "The runner skipped the approval of" .claude/skills/timone-plan/SKILL.md .claude/skills/timone-execute/SKILL.md src/daemon/prompts.ts
+.claude/skills/timone-plan/SKILL.md:2
+.claude/skills/timone-execute/SKILL.md:1
+src/daemon/prompts.ts:2
+```
+
+Also checked: `grep -cF` on each full sentence finds it in `prompts.ts` and in each skill that uses it; the heading `## The runner's instructions for this step` is in `prompts.ts` and named by the skills; both markers match `src/runner/departures.ts`. Six lines added, none removed.
+
+- [x] **Each skill's clause applies only when the sentence is present.** The plan and execute clauses open with "When the prompt's section *The runner's instructions for this step* carries the sentence … word for word" and close with "Without that exact sentence, … reads as above"; the current daemon never builds that block. The deliver clause applies only to a body that already carries the marker block, which only the runner's driver writes, and ends with "A body without the block is written exactly as below."
+
+**What 40l must know.**
+
+- Rewording `SKIPPED_REQUIREMENTS_APPROVAL`, `SKIPPED_PIECES_APPROVAL` or the heading in `prompts.ts` means changing timone-plan and timone-execute in the same commit.
+- The two markers in timone-deliver must stay identical to `DEPARTURES_START` and `DEPARTURES_END`.
+- The completion report template's Plan line was not edited; the skipped-approval wording is given only in the gate-1 paragraph.
+- `process.md` still says nothing about the runner (#166).
