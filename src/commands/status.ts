@@ -234,6 +234,10 @@ function ctaOf(run: Run, context: RenderContext): Cta {
  * way out to guess at.
  */
 function describeWait(run: Run, context: RenderContext): string {
+  // ✏ The runner's wait is named in its own words, and says only that the
+  // run waits (ADR-0060): whether a person is being waited on is the
+  // runner's to say on the ticket, and the shared calculation claims neither.
+  if (run.wait?.kind === "runner") return `waiting: ${run.wait.on}`;
   const cta = ctaOf(run, context);
   const how = cta.command === undefined ? "" : ` — ${cta.command}`;
   // **The words follow the answer rather than being printed over it**

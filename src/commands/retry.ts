@@ -297,6 +297,15 @@ function rewind(
     return 1;
   }
 
+  // ✏ A run of a project the runner drives is never failed and never
+  // rewound (ADR-0060 amends ADR-0032: `retry` is removed for these
+  // projects). The runner reads the ticket every time it wakes, so writing
+  // there is how to ask it for anything.
+  if (run.wait?.kind === "runner") {
+    log("This project is run by the runner. Write on the ticket instead: say what you want done.");
+    return 1;
+  }
+
   if (run.wait?.kind !== "conversation" || at === undefined) {
     log(
       `${name} didn't fail — it's waiting on you: ${run.wait?.on ?? "an answer"}. ` +

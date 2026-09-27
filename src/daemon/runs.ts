@@ -208,11 +208,17 @@ const runSchema = z.strictObject({
        * no written answer can help, waiting on a person to pick it up
        * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
        *
+       * `runner` is a run of a project the runner drives, waiting for the
+       * next thing that happens on its ticket
+       * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
+       * No answer resumes it the way one resumes a gate or a conversation:
+       * whatever happens wakes the runner, and the runner decides.
+       *
        * **Optional, and its absence is its own state**: a run parked at a
        * stage whose machinery does not exist has words for the human and no
        * kind of answer that would end the wait.
        */
-      kind: z.enum(["gate", "conversation", "review", "escalation"]).optional(),
+      kind: z.enum(["gate", "conversation", "review", "escalation", "runner"]).optional(),
       /**
        * The instant the wait was opened — the gate comment, or the invitation
        * to a conversation. Anything at or before it belongs to an earlier
@@ -741,9 +747,10 @@ export interface ParkOptions {
   waitingOn: string;
   /**
    * Which kind of wait it is, when the daemon will resume it from an answer —
-   * or `escalation`, the wait no answer resumes (ADR-0033).
+   * or `escalation`, the wait no answer resumes (ADR-0033), or `runner`, the
+   * wait of a run the runner drives (ADR-0060).
    */
-  kind?: "gate" | "conversation" | "review" | "escalation";
+  kind?: "gate" | "conversation" | "review" | "escalation" | "runner";
   /** The stage it parked at, when parking moves it. */
   stage?: PipelineStage;
   /** The instant the wait was opened; answers before it are not answers to it. */

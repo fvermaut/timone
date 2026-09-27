@@ -578,3 +578,100 @@ And the third, after the list of pieces is merged:
 - **Tools:** give the session `mcpServers: { [RUNNER_SERVER_NAME]: runnerToolServer(actions) }` and `allowedTools: qualifiedRunnerToolNames()`. The server sets `alwaysLoad: true`. A refusal comes back as `isError: true`, with text starting "Refused: "; a thrown error comes back as the tool server's own error result.
 - **`post` to the pull request** uses `run.pr` when the ledger has it, whatever its state, else the forge's open pull request for the branch.
 - **Two exported sentences for 40k:** `SKIPPED_REQUIREMENTS_APPROVAL` and `SKIPPED_PIECES_APPROVAL` in `prompts.ts`. A step gets one for each approval that a `departure` entry of its run names and that no `approval` entry gives.
+
+## 40g — the runner session — one fresh session per wake, and what happens when it fails
+
+**Built.** `wakeRunner(deps, run, events, options?, signal?)` in `src/runner/session.ts` wakes the runner once. It reads the run again from the store; a run that is `done`, `failed`, `cancelled` or `queued` is not woken, and nothing is written. A `picked-up` run is parked on the new wait kind `runner` first, so the runner can end it and a step can claim it. It then writes `woke`, builds the brief (ticket, pull request, record, facts, running step, open Timone issues, hold, limit), and starts one session through the injected `runQuery` with: model `claude-opus-5-5`, effort `medium`, `systemPrompt` = the brief's system text, `tools: []`, one MCP server `runner`, `allowedTools` = the nine qualified runner names, `settingSources: []`, `cwd` = `<root>/.timone/runner` (created when missing), `maxTurns: 40`, `maxBudgetUsd: 5`, and an `abortController` that fires after 10 minutes. It reads the SDK's messages through zod, writes `runner-ended` with the cost, and returns how the wake ended (`WakeEnd`). After a session that ran to its end, a run that is parked or picked up, with no step running, is put on the `runner` wait: `on` is what the runner last asked for on the ticket. `RunnerSessions` owns the rest: one wake per run at a time, with the wakes asked for meanwhile merged into one; after a failure that trying again can help, a new try after 60 s and then after 5 min, with nothing posted; after the third, one notice on the ticket and a new try every 15 min; and `stop(runId)`. A failure never changes the run's status or wait. The run schema, `ParkOptions` and `resolvableBy` accept the kind `runner`. `cta.ts`, `status.ts`, `takeover.ts` and `retry.ts` handle it.
+
+**Files touched.**
+
+- `src/runner/session.ts` — new: `wakeRunner`, `RunnerSessions`, `WakeEnd`, `RunQuery`, `RunnerSessionDeps`, `WakeOptions`, `modelUnreachableNotice`, and the constants `RUNNER_MODEL`, `RUNNER_EFFORT`, `RUNNER_MAX_TURNS`, `RUNNER_MAX_BUDGET_USD`, `RUNNER_TIMEOUT_MS`, `RUNNER_RETRY_WAITS_MS`, `RUNNER_UNREACHABLE_RETRY_MS`, `RUNNER_DEFAULT_WAIT`.
+- `src/runner/session.test.ts` — new: 14 tests, 5 declared cases (case 5 as two tests) and 8 extras at the same seam.
+- `src/daemon/runs.ts` — `"runner"` in the wait's `kind` enum and in `ParkOptions.kind`, with doc comments. Nothing else.
+- `src/daemon/pipeline.ts` — `resolvableBy(kind: WaitKind | "runner" | undefined, stage)`. The body is unchanged: `runner` gets `[stage]`, as every kind but `review` does.
+- `src/daemon/cta.ts` — a `runner` arm after the `parked` assertion.
+- `src/commands/status.ts` — `describeWait` prints `waiting: <on>` for a `runner` wait.
+- `src/commands/takeover.ts` — a `runner` wait is treated as an escalation, in all three places that read the kind: `resolveTakeover`, and the two places that choose the session after the daemon hands the run over.
+- `src/commands/retry.ts` — `rewind` refuses a `runner` wait with the plan's sentence.
+
+**Decisions taken inside the slice.**
+
+1. **`tsc` reported no switch in the four files.** Adding `runner` to the schema gave one compile error, in `runs.ts` (`applyPark` passing the kind to `resolvableBy`). The waits in `cta.ts`, `status.ts`, `takeover.ts` and `retry.ts` are `if` chains, not exhaustive switches, so the compiler cannot name them. I made the changes that the plan (takeover) and the design notes (all four) ask for. **These are behaviour changes with no test**: no declared seam covers them, and their test files may not change. A scratch script run against the working tree printed: `cta: {"headline":"This one is waiting.","needFromYou":"read them and reply \"approved\", or say what to change.","waitingOnYou":false}`; `status: scratch-app  #12 — waiting: read them and reply "approved", or say what to change.`; `takeover: escalation`; `retry: 1 ["This project is run by the runner. Write on the ticket instead: say what you want done."]`. **Orchestrator: please confirm or amend.**
+2. **The `cta.ts` arm says the least.** Headline "This one is waiting.", `needFromYou` = the wait's words as they are, `waitingOnYou: false`, no command. Code does not read the runner's words for meaning: they may ask for something, or say "nothing". One effect: `timone status`'s last line does not count a runner wait ("nothing is waiting on you right now"), even when the line above shows an ask. 40i's command may want to decide this.
+3. **`resolvableBy` takes `WaitKind | "runner"`.** `runner` was not added to `WaitKind`, because `WaitKind` is also the type of the stage table's `waits`, and no stage waits for the runner.
+4. **What is tried again soon.** `runQuery` throwing is tried again unless its text reads as `credentials`. A forge read that throws while the brief is built counts the same, because it is inside the same `try`. A result is tried again only when its error text reads as `link` or `expired`. Never tried again: a refused login; a session that reached its turn or spending cap (`error_max_turns`, `error_max_budget_usd`, by rule, whatever the text); the 10-minute timeout (the session reached the model); a session that ended with no result; a record that cannot be read. Each of those is written as `runner-ended {ok: false, error}` and waits for the next event.
+5. **A `success` after an API error is a failure**, as `sessionOutcomeFrom` treats it (the 2026-08-07 case). The main thread's last assistant message is read with `apiErrorFrom` from `daemon/session.ts`, and the error text is `the session stopped on an API error (<code>: <text>)`. A result that is not `success` gives `<subtype>: <errors joined by "; ">`.
+6. **A record that cannot be read starts no session.** A brief built on an empty record would tell the runner that nothing ran and nothing was spent. `woke` and `runner-ended {ok: false, error: <the record's message>}` are still appended.
+7. **`on` after a wake.** The body of the last successful `post` to the ticket in this wake, through `askedFor`. When this wake posted nothing, the `on` of the run's existing `runner` wait stays. Otherwise `RUNNER_DEFAULT_WAIT` ("the next thing that happens on this ticket"). This goes one step past note 5 ("None → default"), because the plan says "what the runner last asked for on the ticket", and a wake that posts nothing should not erase an ask still open on the ticket. An ask of "nothing." is kept as it is, not treated in any special way.
+8. **The runner's post is watched at the action.** `wakeRunner` wraps the actions' `post` before it builds the tool server, so `on` is what was really posted.
+9. **Every park sets `waitCursor`** (the wait's `opened`) to the time of the park, and `resolvableBy: [run.stage ?? "triage"]`.
+10. **An `active` run is woken** (for a step's check, with `checkSince`), and is left `active` afterwards, as note 6 says. A `queued` run is not woken: it waits for its project, and parking it would throw.
+11. **Case (4) as read here.** The first wake runs with its own events. Two wakes asked for while it runs are merged into one, which runs after it, with both of their event lists, oldest first. The test also counts sessions running at once (at most 1).
+12. **A wake asked for during the 60 s / 5 min waits is queued**, and runs once the tries are over. After the third failure, the next new wake takes over from the 15-minute try: the timer is cleared, and its events are added in front of the new ones, because nobody has answered them.
+13. **`stop(runId)`** aborts the session in flight (its `runner-ended` says `the session was stopped`), cancels a 60 s / 5 min wait and the 15-minute try, drops the queued wake and resolves the promises of its callers, and forgets the run. A later `wake` starts fresh.
+14. **The notice is posted once.** It is skipped when the record holds `notice {about: "model"}` after the last `runner-ended {ok: true}` of the ticket. A post that throws is logged and not written down, so the next 15-minute try posts it.
+15. **The running step's activity.** `ProgressReader`, the type of `StepSession.progress`, does not declare `activitySince`; 40d added it to the `SessionProgress` class only. So the session narrows with `instanceof SessionProgress`. Both runtimes build one. Any other progress shows no tools and 0 tokens.
+16. **The test drives the real tool server through the MCP SDK's own client** (`Client` and `InMemoryTransport` from `@modelcontextprotocol/sdk` 1.30.0). That package comes with the Agent SDK and is not in `package.json`, which is not in this slice's files. `tsc` and vitest both resolve it.
+17. **The notice** lives in `session.ts` (`modelUnreachableNotice`), because `comments.ts` was not in this slice's files.
+
+**Validation evidence.** Red before green, one test at a time, at the declared seam (`wakeRunner` and `RunnerSessions` over a scripted `runQuery` that plays its tool calls through an MCP client against the real tool server, an in-memory forge, a temporary root):
+
+- (1) **R2 falsified.** "starts the runner with no built-in tool and one tool server, allowed only the nine actions (R2)". It checks `tools: []`, `Object.keys(mcpServers)` = `["runner"]`, `allowedTools` = the nine names written out in the test, and the names the server lists over MCP. Red first `Cannot find module './session.js'`, then, with a skeleton passing `options: {}`, `Error: the runner was given no tool server of its own`; green.
+- (2) "parks a run whose wake started no step on the runner's wait, waiting for what the runner asked for on the ticket" — red `expected 'picked-up' to be 'parked'`; green (`on` = `read them and reply "approved", or say what to change.`).
+- Extra (note 2): "lets the runner end a run it is woken on as soon as the run is picked up" — red: the tool answered `Run scratch-app#12/1 cannot go from picked-up to done (allowed: active, parked, failed, cancelled)` with `isError: true`; green once a picked-up run is parked first.
+- Extra (note 2): "starts no session for a run that ended before its wake came round, and writes nothing about it" — red `expected [ { …(2) } ] to deeply equal []`; green.
+- (3) "writes down that the runner woke, with its events, and what its session cost when it ended" ($0.42) — red `expected [] to deeply equal [ { kind: 'woke', …(3) }, …(1) ]`; green.
+- (4) "runs a wake asked for while one is running after it, with the events of every wake asked for meanwhile" — red `RunnerSessions is not a constructor`, then, with a class that did not queue, `expected [ … ] to have a length of 1 but got 3`; green.
+- (5, first half) **R16.** "is tried again after 60 seconds and then 5 minutes, with nothing posted on the ticket meanwhile (R16)", on fake timers, checked at 59 999 ms, 60 000 ms, 299 999 ms and 300 000 ms — red `expected [ { …(2) } ] to have a length of 2 but got 1`, with the throw escaping as an unhandled rejection; green. Mutation (first wait 30 s) fails it; restored.
+- (5, second half) **R16.** "says once, after the third failure, that the machine cannot reach its model, leaves the run as it was, and tries again 15 minutes later (R16)". The run's status and wait are compared before and after; tries 4 and 5 come at +15 min and +30 min, and there is still one notice. Red `expected [] to deeply equal [ Array(1) ]`; green. Mutation (no check of the record before posting) gives `expected [ …(3) ] to have a length of 1 but got 3`; restored.
+- Extra (note 1): "is tried no more once the run's wakes are stopped" — red with an empty `stop`: `expected [ … ] to have a length of 1 but got 5`; green.
+- Extra (note 1): "ends the session in flight when the run's wakes are stopped, and writes down that it was stopped" — green on arrival, because the link from `stop` to the session's abort controller was written with the timeout. Mutation (the link removed) gives `Test timed out in 3000ms`; restored.
+- Extra (note 7): "is tried again when its session stopped on a broken link, though the SDK called that a success" — red `expected [ { …(2) } ] to have a length of 2 but got 1`; green.
+- Extra (note 7): "writes down a session that reached its spending cap as failed, and neither tries it again nor posts anything" — green on arrival, because it was written with the previous one. Mutation (every failure tried again) gives `expected [ { …(2) }, { …(2) } ] to have a length of 1 but got 2`; restored.
+- Extra (decision 6): "starts no session when the ticket's record cannot be read, and writes down why" — red `expected [ { …(2) } ] to deeply equal []`; green.
+- Extra (note 3): "tells the runner what the running step did since the last check, and since when it has been silent" — the first run failed because the test named a stage that does not exist. Once that was corrected, it was green on arrival: the activity code was written with case (1). Mutation (activity always read from the step's start) gives `expected '## Why you were woken…' to contain 'Commands and tools it used since the …'`; restored.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/runner/ src/daemon/ src/commands/; echo "exit: $?"
+ Test Files  41 passed (41)
+      Tests  1554 passed (1554)
+exit: 0
+$ npx vitest run
+ Test Files  52 passed (52)
+      Tests  1830 passed (1830)
+$ git status --short
+ M src/commands/retry.ts
+ M src/commands/status.ts
+ M src/commands/takeover.ts
+ M src/daemon/cta.ts
+ M src/daemon/pipeline.ts
+ M src/daemon/runs.ts
+?? src/runner/session.test.ts
+?? src/runner/session.ts
+```
+
+A scratch script printed the options one wake hands `runQuery` (the server instance and the controller shortened): `{"model":"claude-opus-5-5","effort":"medium","tools":[],"allowedTools":["mcp__runner__start_step", … ,"mcp__runner__end_run"],"settingSources":[],"cwd":"<root>/.timone/runner","maxTurns":40,"maxBudgetUsd":5,"mcpServers":["runner"],"abortController":true,"systemPrompt":"You are the runner. Timone is a machine …"}`. The run was then `parked` on `{"on":"the next thing that happens on this ticket","kind":"runner","opened":"…","resolvableBy":["triage"]}`.
+
+- [x] **The unreachable-model notice, as posted** (the adapter adds the machine marker):
+
+```
+**I cannot reach the model I use to decide what to do next.** I tried three times. Nothing on this ticket changed, and nothing you did caused this. I will keep trying every 15 minutes.
+
+**What I need from you:** nothing.
+```
+
+- [x] Red→green evidence is above.
+
+**What 40h must know.**
+
+- **Build one `RunnerSessions` for the daemon's life**, as with `RunningSteps`: `new RunnerSessions({ runQuery: query, actionsFor: (run) => RunnerActionDeps })`. The SDK's `query` fits `RunQuery` as it is. `actionsFor` gives the deps of the actions for that run. The session reads the store, forge, manifest, root, running steps, clock and log from the same object, so pass the shared `RunningSteps`.
+- **`wake(run, events, { checkSince? })`** returns a promise. It settles when that wake has run, including its tries, up to the notice after the third failure. It does not wait for the 15-minute tries. Wakes asked for while one of the same run is running are merged, and their promises settle together after the merged wake. `events` are shown to the runner as they are: never put the words of someone who is not named in them. Only a named person's words or the machine's own sentences go there.
+- **`stop(runId)`** is for cancel. It aborts the session in flight, cancels the waits and the 15-minute try, and drops queued wakes (their promises resolve).
+- **What it parks.** Before the session: `picked-up` → `parked` on `runner` / `RUNNER_DEFAULT_WAIT`. After a session that ran to its end: a run that is `parked` or `picked-up`, with no step in `RunningSteps`, is parked or reparked on `runner`, with `on` as in decision 7, `opened` = now and `resolvableBy: [run.stage ?? "triage"]`. **An `active` run is left `active`.** So 40h's `stepEnded` must move the run off `active` (park it on `runner`, `repark` if already parked) before it wakes the runner. It must also check first that the run is not already `done` or `failed` (40e: chunk zero). A failed or stopped wake changes neither status nor wait.
+- **Waking an ended or queued run is safe**: it returns `{ kind: "not-woken" }` and writes nothing.
+- **Record entries written:** `woke {runId, events}` and `runner-ended {runId, ok, costUsd, error?}` on every try; `notice {about: "model"}` once per outage. The record's `runner-ended` error words are the ones 40i can print.
+- **Log lines** start with `runner <runId> — …` (and `runner — …` for the Timone issue listing).
+- **The four old-daemon files** now know `runner` (decision 1): `timone takeover` opens a runner wait as an escalation. `timone retry` refuses it in this process; the daemon's own path for a queued retry request (`requests.ts`) was not changed. `timone status` prints `waiting: <on>` and does not count it on its last line (decision 2).
+- **Not done here:** a `ProgressReader` type that declares `activitySince` (decision 15); `@modelcontextprotocol/sdk` as a declared dev dependency (decision 16).

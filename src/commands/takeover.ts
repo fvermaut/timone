@@ -248,7 +248,11 @@ export async function resolveTakeover(
   // cannot hold a conversation for. That refusal, on the one park whose CTA
   // hands the human this very command, is the wedged project ADR-0033's
   // ordering exists to prevent.
-  if (run.wait?.kind === "escalation") {
+  // ✏ The runner's wait opens the same way (ADR-0060). What a run of the
+  // runner does next is the runner's to decide, not a stage's, so there is
+  // no stage to open a conversation at; the session bound to no stage is
+  // the one that fits.
+  if (run.wait?.kind === "escalation" || run.wait?.kind === "runner") {
     return { kind: "escalation", run };
   }
 
@@ -711,7 +715,7 @@ async function claimForTakeover(
   // The claim cleared nothing about what the run was waiting on
   // (`RunStore.claim` keeps the wait deliberately), so which session to open
   // is still readable off the run the daemon handed back.
-  return run.wait?.kind === "escalation"
+  return run.wait?.kind === "escalation" || run.wait?.kind === "runner"
     ? { kind: "claimed", run, escalation: true }
     : { kind: "claimed", run };
 }
@@ -916,7 +920,7 @@ async function withdraw(
       return {
         kind: "applied",
         claim:
-          run.wait?.kind === "escalation"
+          run.wait?.kind === "escalation" || run.wait?.kind === "runner"
             ? { kind: "claimed", run, escalation: true }
             : { kind: "claimed", run },
       };

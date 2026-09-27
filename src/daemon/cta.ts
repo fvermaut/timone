@@ -425,6 +425,26 @@ export function ctaFor(state: TicketState): Cta {
   // falling into the wait below.
   run.status satisfies "parked";
 
+  // ✏ A run of a project the runner drives, waiting for the next thing that
+  // happens on its ticket
+  // ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
+  // **This says the least it can, on purpose.** The runner writes what the
+  // ticket needs itself, in its own comments, and the daemon does not
+  // compose a standing note for these projects, so the one reader of this is
+  // `timone status`. The wait holds the runner's own words, and code does not
+  // read them for meaning: they may ask the reader for something, or say
+  // "nothing". So it names them as they are, claims nobody is waited on, and
+  // offers no command — the words that follow here for other waits (a
+  // conversation to take over, an answer that resumes a stage) are about a
+  // machine these projects do not run.
+  if (run.wait?.kind === "runner") {
+    return {
+      headline: "This one is waiting.",
+      needFromYou: run.wait.on,
+      waitingOnYou: false,
+    };
+  }
+
   // The stop no answer reaches
   // ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
   //
