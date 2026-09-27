@@ -92,8 +92,10 @@
 
 ## R7 — A written answer starts the unbound session, but only when it answers the ask check's own question
 
+> ✏ Deprecated 2026-09-26: taken over by [PRD-05.R9](prd-05-a-runner-decides-each-step.criteria.md) — the runner reads plain words on any ticket, so this narrower way out will not be built ([ADR-0060](../../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
+
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** deprecated
 - **Verify-via:** live
 - **Criteria:**
     - GIVEN a run the machine has given up on, where the ask check has posted a question framed to unstick it
