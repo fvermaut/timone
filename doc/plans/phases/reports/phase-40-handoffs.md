@@ -898,3 +898,53 @@ This ticket has spent $7.59 of the $150.00 it may spend: $6.80 on steps and $0.7
 - [x] Red→green evidence is above; all three validation commands give the expected result.
 
 **What 40l/40m must know.** `ctaFor`'s `runner` arm can now return `waitingOnYou: true` by the rule above; only `timone status` reads it for runner projects. A new runner tool needs words in `ACTION_WORDS`. Worth checking in the watched run: `timone record` on the scratch-app ticket afterwards, and `timone status` naming a ticket whose runner asked for an approval.
+
+## 40j — the replay of the recorded failures
+
+**Built.** `npm run replay` runs each case of PRD-05.R18's table three times through the real `wakeRunner` — the real `buildBrief`, rules, session options, tool server and nine actions. Only the outside world is fake: a temporary root and `RunStore` with the case's run as it stood (picked up, parked, or active with a step running); the case's record entries; a forge that serves the case's ticket, pull request, files and open Timone issues and records every write; a step starter that records the start and hands back a session that never ends and records `send` and `stop`; a fixed Timone pin; a clock stopped at the case's moment. What is judged is what reached those stand-ins plus what the machine wrote in the record — never the model's own words. One line per case (PASS/FAIL, issue numbers, and for a failure what each try did and what was wanted), then the cases passed and the total of the `runner-ended` costs; exit 1 on any failure. `--case N` runs one case (repeatable); `--dry` plays each case's right calls through the real tool server over MCP, with no model and no cost. Only the real mode calls the SDK's `query`.
+
+**Files touched.**
+
+- `src/runner/replay/harness.ts` — new: `judgeCase`, `replay(argv, print)`, `scriptedRunner`, `TRIES`, the entry point.
+- `src/runner/replay/recording.ts` — new: the stand-ins, `runTry(moment, runQuery)`, types `Call`, `Seen`, `Verdict`, `Try`.
+- `src/runner/replay/cases.ts` — new: `CASES` (19), `REPLAY_MANIFEST`, types `ReplayCase`, `Moment`, `RunAtMoment`, `ToolCall`.
+- `src/runner/replay/harness.test.ts` — new: the 3 declared tests.
+- `package.json` — the `replay` script.
+
+**Decisions taken inside the slice.**
+
+1. The stand-ins live in `recording.ts`; `session.ts` took every stand-in through `actionsFor` unchanged.
+2. Event sentences come from `driver.ts`'s exported constants and builders, so the cases use the driver's exact words.
+3. A case's three tries run side by side, each with its own folder, ledger and forge, removed afterwards; nothing touches the real `.timone/` or a real forge.
+4. A try "errored" when the wake ends failed, stopped or not woken, or throws; it counts as a failed try.
+5. Step tickets (#125/#135, #110) carry `timone:held`, as a real step ticket does; since 40n the brief shows them "Not held."
+6. #143/#161 fails the first start inside the wake (the clone timeout), so the runner reads the refusal.
+
+**How each matcher decides.** #139, #140: the first step started is `execution`. #144: any step started. #143/#161: a step started at `delivery` after the failed start (a comment allowed). #99: the run's status is `done`. #115: no step started, no comment asks for anything, the hold not taken off. #142: the hold taken off before the first step starts. #108: the first step started is `requirements`. #111: a step started at requirements, breakdown, planning, execution or remediation, and no comment asks for anything. #159: a step started at `delivery`. #117: `delivery` started and no comment asks for anything (the skipped watched run is the delivery step's to list, ADR-0059 D1). #120: a ticket comment asks for something, and none contains `timone takeover`. #125/#135: a step started at `delivery`. #132: an `approval` entry for the requirements by fvermaut, from the "aproved" comment's time. #147: a pull-request comment before a `remediation` or `execution` step. #104: `planning` started, a `departure` names `clarification`, a ticket comment before the step. scratch-app#37: `requirements` started, no `approval` entry, a ticket comment matching `/approv/i`. ivtrends#1: `execution` started again and nothing posted on the ticket. #110: a message sent to the running step, and the step not stopped. "Asks for something" reads the call-to-action line with the machine's own `askedFor`.
+
+**Validation evidence.**
+
+- (1) "passes a case only when all three tries chose the expected action" — red `Cannot find module './harness.js'`, then green.
+- (2) "counts a try that errored as a failed try" — red `TypeError: Cannot read properties of undefined (reading 'calls')`; green with the `errored` variant.
+- (3) "names the case's issue number in the line it prints" — red (no line yet), then green.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/runner/replay/; echo "exit: $?"
+ Tests  3 passed (3)
+exit: 0
+$ npm run replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+… (19 lines, all PASS)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+Also: `--case 999` lists the cases and exits 2; a scratch runner that does nothing fails 18 of 19 (it passes only #115, where starting nothing is right); historic wrong answers fail with a clear line (e.g. `FAIL #139 … Try 1: started preparing the work (planning) … — wanted: building (execution) started first.`).
+
+- [ ] **The replay's output and total cost in `reports/phase-40-replay.md`** — not done here: the build's sandbox has no model login. The run is fvermaut's (human gate below).
+- [ ] **Human gate:** fvermaut runs `npm run replay`, or decides it rides to the pull request as owed.
+
+**What 40l must know.** From a terminal where `claude auth status` says logged in, in `projects/timone`: `npm run --silent replay -- --dry` checks the wiring for free; `npm run --silent replay | tee /tmp/phase-40-replay.txt` is the real run (57 sessions on `claude-opus-5-5`, each capped at $5, so at most $285; a wake that reads one brief and makes one to three calls should cost far less — the first run is the measurement). Two moments may fail for reasons in the brief rather than the case: #140 (after a daemon stop the record shows planning "running now" while no step runs — 40o closes it) and scratch-app#37 (once the requirements exist, only the runner's rules stop it recording "approve them yourself in my name" — 40o closes it in code).
