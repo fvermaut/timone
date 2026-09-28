@@ -1,6 +1,6 @@
 # Phase 40 — Watched run on scratch-app
 
-> **Status:** not run yet. Owed before ivtrends moves to the runner (PRD-05.R19).
+> **Status:** run twice on 2026-09-28. The first attempt found four faults (fixed in 40r); the second passed, with R9's pull-request clause unseen. See Result.
 > **Plan:** [phase-40.md](../phase-40.md), sub-phase 40l. **Ticket:** [timone#165](https://github.com/fvermaut/timone/issues/165).
 
 ## What it checks
@@ -120,6 +120,34 @@ fvermaut started the daemon from `projects/timone` at 08:57 UTC (its first line:
 
 The fixes are slice 40r. A second attempt, on a fresh ticket, follows them.
 
-### The watched run — second attempt
+### The watched run — second attempt, 2026-09-28, [scratch-app#62](https://github.com/fvermaut/scratch-app/issues/62) and its piece [#63](https://github.com/fvermaut/scratch-app/issues/63): passed, with two things unseen
 
-Not run yet.
+fvermaut restarted the daemon on the code with 40r at 12:37 UTC. The machine opened #62 with the label `timone` only and no invitation to skip anything. The run cost about $25: the initiative's own steps about $4 (#62), the piece about $19 (#63: planning $1.82, building $8.67, checking $5.80, delivering $2.42), and runner wakes at about $0.05 each.
+
+| Time (UTC) | What happened | Shows |
+| --- | --- | --- |
+| 12:39:26 | Sorting started, as the default order says; `timone status` read "#62 (sorting the request) — working on it now … — $0.07 of $150.00 spent". | R1, 40r (the ledger knows the step), 40i |
+| 12:41:38 | The questions step asked four questions, each with a suggested answer. | R1 |
+| 12:42:30 → 12:43:49 | The machine answered, as fvermaut, "yes to al"; the runner woke 34 s later, read it as agreement to all four, and started writing the requirements. | **R9** (plain words with a spelling mistake) |
+| 12:47:39 | The runner asked for the approval of the requirements. | R1 |
+| 12:53:25 → 12:54:44 | **fvermaut himself** replied "approve"; the runner recorded the approval citing that comment, and the step that writes it into the file ran. | **R7** |
+| 12:55:53 → 12:57:16 | The list of pieces was written (one piece), and its approval asked for. | R1 |
+| 13:00:32 → 13:03:08 | **fvermaut himself** replied "approve"; after the recording step, code merged the requirements and the list into scratch-app's `main` (`70c43c2`), recording "the list of pieces was approved by fvermaut, in the comment at 2026-09-28T13:00:32Z", and opened the piece as #63. #62 became its map; no run was opened on it again. | **R3** |
+| 13:04:37 | On #63 the runner started preparing the work; it did not read the machine's own `timone:held` claim as a hold. | 40n |
+| 13:26:01 | **A 15-minute check** woke the runner, 15 min 41 s into the build. It sent the build a message: run only the related tests while working (it had run whole suites more than twice). | **R12**, **R13**, 40p's rule |
+| 13:41:33, 14:06:49, 14:22:03 | Further 15-minute checks; the runner rightly did nothing. | **R12** |
+| 13:50:42 | The build ended by itself, the runner's message taken (`"isReplay":true`). | **R13** |
+| 14:25:29 → 14:30:35 | Delivering opened pull request [#64](https://github.com/fvermaut/scratch-app/pull/64). **The runner kept the run open**, waiting on it. | 40r |
+| 14:39:38 → 14:39:58 | **fvermaut merged #64.** The driver saw it 4 s later; the runner replaced the ticket's stale "please review" note, ended the run, and #63 was closed. | 40r, R4 |
+
+**Seen working live across the two attempts:** R3, R5, R6, R7, R9 (plain words, with a spelling mistake, on the ticket), R12, R13, R15, and 40r's fix.
+
+**Not seen live:** R9's clause about a change asked for **on the pull request** — the first attempt's run had ended, and on the second the pull request was merged before one was written. It rests on 40h's test and the replay's #147 case (three tries of three).
+
+**Found:**
+
+1. **The map ticket stays open after its last piece merges.** #62 is still open. The current daemon closes an initiative when its last step closes (`concludeStep` in `poll.ts`); the runner's path does not.
+2. **The ledger's wait can be stale.** After the questions step posted its questions and the runner posted nothing, the run waited on "the runner to look at what the step did" instead of on the person's answer, so `timone status` would say the wrong thing.
+3. **The whole-suite rule is blunt.** At the 15-minute check the runner messaged the build for running whole suites more than twice, which the rule says; but one of those runs was a baseline before any change, which is good practice.
+
+The first two are small fixes; the third is a judgement worth watching.
