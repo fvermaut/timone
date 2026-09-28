@@ -493,3 +493,43 @@ describe("the runner's rules for when work stops, as the written process says th
     expect(rule).toContain("the whole suite once at the end");
   });
 });
+
+const ACT_RULES = "## How you act";
+
+/**
+ * The lines of the runner's rules under {@link ACT_RULES}, up to the next
+ * heading; none when the heading is missing. Each rule is one line.
+ */
+function actRules(): string[] {
+  const lines = buildBrief(briefInput()).system.split("\n");
+  const start = lines.indexOf(ACT_RULES);
+  if (start === -1) return [];
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("## "));
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** The one rule under {@link ACT_RULES} that holds `words`, or "" when none does. */
+function actRule(words: string): string {
+  return actRules().find((line) => line.includes(words)) ?? "";
+}
+
+describe("the runner's rule that the ticket's newest comment says what the ticket needs now", () => {
+  it("has the machine's newest comment replaced when it is no longer true, even when there is nothing else to do", () => {
+    const rule = actRule("The newest comment on the ticket must say");
+
+    expect(rule).toContain("truthfully what the ticket needs now");
+    expect(rule).toContain("is the machine's and is no longer true");
+    expect(rule).toContain("asks for something that is not needed");
+    expect(rule).toContain("offers a command that will not help");
+    expect(rule).toContain("post a new comment that is true");
+    expect(rule).toContain("even when there is nothing else to do");
+  });
+
+  it("ends a wake with nothing done only when the newest comment on the ticket is still true", () => {
+    const rule = actRule("A wake may end with nothing done");
+
+    expect(rule).toContain("the newest comment on the ticket is still true");
+    expect(rule).toContain("do nothing");
+  });
+});

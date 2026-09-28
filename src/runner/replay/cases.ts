@@ -1835,18 +1835,41 @@ function aTerminalSessionThatClearedNothing(): ReplayCase {
       events: [TAKEOVER_ENDED_EVENT],
       now: "2026-09-10T12:25:30Z",
     },
-    // "The same command" is the one thing checked by its words: a comment
-    // that offers `timone takeover` again is this defect whatever else it
-    // says. What is actually needed is read from the line that says what the
-    // reader must do.
-    judge: (seen) =>
-      allOf(
-        when(postsOn(seen, "ticket").some(asksSomething), "a comment on the ticket that asks for what is needed"),
+    // The ticket's newest comment must say truthfully what the ticket needs
+    // now (ADR-0024). Here it is the machine's pointer to `timone takeover`,
+    // which cannot help: that session already ran, and could not add the
+    // key. So a try must post a new comment on the ticket, and no comment
+    // may offer the command again. "The same command" is the one thing
+    // checked by its words: a comment that offers `timone takeover` again is
+    // this defect whatever else it says.
+    //
+    // The new comment may do one of two things (replay run 3). It may ask
+    // for what is needed, the key, read from the line that says what the
+    // reader must do. Or it may go with a step the try starts, to carry on
+    // without the key. Carrying on is right by the written process: once
+    // building has started, a problem a step finds goes to the pull request
+    // and does not stop the run (ADR-0056), and a check only a person can
+    // run is listed there as not run (ADR-0059 D1). The step's own
+    // instructions are not read: the brief's rules tell it where the check
+    // goes. A comment the machine posts when the step skips one of the order
+    // counts as the new comment: it says truthfully what happens next.
+    //
+    // Doing nothing fails: it leaves the pointer as the newest comment, the
+    // real #120 fault. So does starting a step with no comment (run 1).
+    judge: (seen) => {
+      const onTicket = postsOn(seen, "ticket");
+      return allOf(
+        when(onTicket.length > 0, "a new comment on the ticket that says what it needs now"),
         when(
-          ![...postsOn(seen, "ticket"), ...postsOn(seen, "pull-request")].some((body) => body.includes("timone takeover")),
+          ![...onTicket, ...postsOn(seen, "pull-request")].some((body) => body.includes("timone takeover")),
           "no comment that offers the takeover command again",
         ),
-      ),
+        when(
+          onTicket.length === 0 || onTicket.some(asksSomething) || stepsStarted(seen).length > 0,
+          "the new comment asks for what is needed, or goes with a step started to carry on",
+        ),
+      );
+    },
     rightCalls: [
       postCall(
         "ticket",

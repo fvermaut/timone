@@ -1198,3 +1198,99 @@ $ npx vitest run
 **Follow-up after run 2 (✏ 2026-09-28, plan amendment).** Run 2 passed 18 of 19. #120 failed because the note written above (decision 9) already asked for the key: the ticket's newest message said what was needed, so doing nothing was right, and the case tested nothing. The note is rewritten to match the real #120. It says the terminal session could not clear the stop: the box still has no `POLYGON_API_KEY`, and nothing written in the session added it. Its last line asks for `timone takeover ivtrends#97` to be run again, as the real note did. Its time (12:25:00, before the wake at 12:25:30) stayed the same. So did the case's run, record, events, judge and right calls. The code comment and the case's doc comment say why.
 
 After the change: `npm run --silent replay -- --dry` passes 19 of 19 (exit 0), `npx tsc --noEmit` exits 0, and `npx vitest run src/runner/` passes 104 of 104 (exit 0). The note's new wording is judged by run 3, `npm run --silent replay -- --case 120`, from the operator's terminal.
+
+## 40q — the ticket's newest message says what it needs now
+
+**Built.** The runner's rules gain the rule ADR-0024 holds: the newest comment on the ticket must say truthfully what the ticket needs now. When that comment is the machine's and is no longer true, the runner posts one that is, even when there is nothing else to do. The rule "When nothing is needed, do nothing" now says "and the newest comment on the ticket is still true", so the two rules agree. #120's matcher now accepts either right answer from run 3: a new comment that asks for the key, or a new comment that goes with a step started to carry on without it. Doing nothing still fails, and so does offering the command again.
+
+**Files touched.**
+
+- `src/runner/brief.ts` — in `SYSTEM`, under "How you act": the "do nothing" line refined, and one new line after it. No other line changed.
+- `src/runner/brief.test.ts` — one new `describe` at the end, with two cases, two small helpers (`actRules`, `actRule`) and the constant `ACT_RULES`. They copy 40p's `stopRules` and `stopRule` for the "How you act" section. No existing line changed.
+- `src/runner/replay/cases.ts` — #120's `judge` and its comment. The moment, the right calls, `happened` and `mustDo` did not change. No other case changed.
+
+**Decisions taken inside the slice.**
+
+1. **The rule sits in "How you act", on the line after "A wake may end with nothing done".** That line is the one it must agree with, so they are read together. It is not a rule about work that stops, so it is not in 40p's section.
+2. **"The newest comment on the ticket", not "the newest message".** The brief shows the ticket's comments, and uses "message" also for what the runner sends a running step. "Comment" cannot be read as that.
+3. **The rule names only two ways a comment stops being true**, as the plan does: it asks for something that is not needed, or it offers a command that will not help. It says "because", so it does not reach a machine comment that asks for nothing. The planned, built and checked comments in the other cases all ask for nothing, so the rule does not make the runner post there. That matters for ivtrends#1, whose matcher fails any comment on the ticket.
+4. **One reason is given: "A person reads that comment first."** The brief's rules give a short reason where one helps.
+5. **The new comment says "what is needed now, or what the run does next".** That covers both answers from run 3: asking for the key, and carrying on with the key listed for the pull request.
+6. **The test was written with the plan's words, and the rule was fitted to it.** The first draft said "asks the reader for something". The test wanted "asks for something that is not needed", so the draft was changed, not the test.
+7. **#120's matcher has three conditions.** (a) A comment was posted on the ticket. (b) No comment on the ticket or the pull request contains `timone takeover`. (c) When a comment was posted, it asks for something (its last line, read with `asksSomething`), or a step was started in the same try (`stepsStarted`). The order of the comment and the step does not matter: run 3's try 1 posted first, and try 2 started first. (c) is written so that a try with no comment fails only on (a), and its line says one thing.
+8. **The step's instructions are not read.** The plan's "with the key listed for the pull request" is what the brief's rules tell the runner. Reading it from the model's own words would go against the case file's rule to judge actions, not words.
+9. **The comment the machine posts when a step skips a step of the order counts as the new comment.** If the runner carries on to delivering and skips checking, the machine posts "I am skipping a step … Reason: …" on the ticket. That comment says truthfully what happens next, so it meets the rule. The scratch run below shows this passes.
+
+**Validation evidence.**
+
+Case (1), at `buildBrief` (pure). Both tests were written first and run red before the rule was added.
+
+| Test | Red (trimmed) | Green |
+| --- | --- | --- |
+| "has the machine's newest comment replaced when it is no longer true, even when there is nothing else to do" | `AssertionError: expected '' to contain 'truthfully what the ticket needs now'` (no such line) | 26 of 26 |
+| "ends a wake with nothing done only when the newest comment on the ticket is still true" | `AssertionError: expected '- A wake may end with nothing done. W…' to contain 'the newest comment on the ticket is s…'` — received `"- A wake may end with nothing done. When nothing is needed, do nothing."` | 26 of 26 |
+
+Between red and green, one more red: the first draft said "asks the reader for something", and the first test failed with `expected '- The newest comment on the ticket mu…' to contain 'asks for something that is not needed'`. The draft was changed (decision 6).
+
+The two lines as written:
+
+> - A wake may end with nothing done. When nothing is needed, and the newest comment on the ticket is still true, do nothing.
+> - The newest comment on the ticket must say truthfully what the ticket needs now. A person reads that comment first. When it is the machine's and is no longer true, because it asks for something that is not needed, or offers a command that will not help, post a new comment that is true. Say what is needed now, or what the run does next. Do this even when there is nothing else to do.
+
+The matcher, proven by hand. A scratch script outside the repo played chosen calls for #120 through the real `runTry`, `scriptedRunner` and `judgeCase`, three tries each, and printed the line the harness prints. It was run once before the matcher changed and once after.
+
+| Calls played | Old matcher | New matcher |
+| --- | --- | --- |
+| The case's right calls (ask for the key) | PASS | PASS |
+| Nothing | FAIL | FAIL |
+| A comment that offers `timone takeover ivtrends#97` again | FAIL | FAIL |
+| A comment that offers the command, then start building | FAIL | FAIL |
+| Run 3 try 1: a comment that asks for nothing, then start building | FAIL | PASS |
+| Run 3 try 2: start building, then that comment | FAIL | PASS |
+| Run 1: start building, no comment | FAIL | FAIL |
+| A comment that asks for nothing, and no step | FAIL | FAIL |
+| That comment, then start delivering with the check listed as not run (the machine's skip comment follows) | FAIL | PASS |
+
+The do-nothing line, new matcher:
+
+```
+FAIL #120 — Not offer the same command again. Say what is actually needed. 0 of 3 tries chose it. Try 1: did nothing — wanted: a new comment on the ticket that says what it needs now. Try 2: did nothing — wanted: a new comment on the ticket that says what it needs now. Try 3: did nothing — wanted: a new comment on the ticket that says what it needs now.
+```
+
+The offer-the-command line, new matcher (the comment's first line is shown; its last line was `` What I need from you: run `timone takeover ivtrends#97` in your terminal again. ``):
+
+```
+FAIL #120 — Not offer the same command again. Say what is actually needed. 0 of 3 tries chose it. Try 1: posted on the ticket: "**The build is still stopped.** The box still has no `POLYGON_API_KEY`." — wanted: no comment that offers the takeover command again. Try 2: posted on the ticket: "**The build is still stopped.** The box still has no `POLYGON_API_KEY`." — wanted: no comment that offers the takeover command again. Try 3: posted on the ticket: "**The build is still stopped.** The box still has no `POLYGON_API_KEY`." — wanted: no comment that offers the takeover command again.
+```
+
+The three commands:
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/runner/; echo "exit: $?"
+ Test Files  11 passed (11)
+      Tests  106 passed (106)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+… (19 lines, all PASS)
+PASS #120 — Not offer the same command again. Say what is actually needed. 3 of 3 tries.
+…
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+$ npx vitest run
+ Test Files  55 passed (55)
+      Tests  1891 passed (1891)
+```
+
+- [x] Red→green evidence in the handoff: both tests went red, then green (table above).
+- [ ] **Human gate:** fvermaut runs `npm run --silent replay -- --case 120` from his own terminal (run 4), and its output is added to `reports/phase-40-replay.md`. Not done here: the build's sandbox has no model login. The run is his.
+
+**What run 4 must know.**
+
+- Run it in `projects/timone`, from a terminal where `claude auth status` says logged in: `npm run --silent replay -- --case 120`. Run 3 cost $0.15.
+- **A pass is either answer from run 3.** A new ticket comment that asks for the key passes. So does a new ticket comment together with a step started to carry on, such as building without a live call, or delivering with the live check listed as not run. The order of the two does not matter.
+- **A fail points at one of three things, named in the "wanted" words.** "a new comment on the ticket that says what it needs now": the try posted nothing, as run 3's try 3 did, so the runner did not follow the new rule. "no comment that offers the takeover command again": the try offered the command. "the new comment asks for what is needed, or goes with a step started to carry on": the try posted a comment that asks for nothing, and started no step.
+- The rule is in "How you act", which every case reads. A full replay after run 4 should watch ivtrends#1, whose matcher fails any comment on the ticket. Its newest comment asks for nothing, so the rule should not make the runner post there. #159 and #125/#135 have a newest machine comment that asks for something that is no longer needed. The runner may now also post there. Their matchers read only the step started, so a post does not fail them.
