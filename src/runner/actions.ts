@@ -1,5 +1,6 @@
 import {
   NEEDED_FROM_YOU,
+  type TicketComment,
   type TicketingAdapter,
   type TicketingProject,
   type TicketThread,
@@ -77,10 +78,11 @@ import type {
  *
  * **The runner decides; code keeps the rules.** Each action checks what must
  * hold before it acts — a named person's approval, the spending limit, a
- * reason for every skipped step, a pull request merged or closed before a
- * run that changed files may end — and refuses in plain words when it does
- * not. The runner reads the refusal and decides again. A rule written only
- * in the runner's instructions is a request; a rule here is a fact.
+ * reason for every skipped step, a pull request merged or closed (or a named
+ * person's comment asking to stop) before a run that changed files may end —
+ * and refuses in plain words when it does not. The runner reads the refusal
+ * and decides again. A rule written only in the runner's instructions is a
+ * request; a rule here is a fact.
  */
 
 /**
@@ -466,6 +468,46 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
   };
 
   /**
+   * The comment at `commentAt` on the run's ticket, with the ticket it is on,
+   * when a named person wrote it — or why it cannot count.
+   *
+   * **Code checks only that the comment is there and whose it is**, never
+   * what it says: the runner judges the words. A comment the machine posted
+   * never counts, even under a named person's login: it is a record of what
+   * the machine did. `onlyNamed` ends the refusal of a comment by someone
+   * who is not named, and says what only a named person can do.
+   *
+   * One lookup for an approval and for a request to stop the work (40t), so
+   * the two cannot come to disagree on whose comment counts.
+   */
+  const namedPersonsComment = async (
+    commentAt: string,
+    onlyNamed: string,
+  ): Promise<
+    { ok: true; comment: TicketComment; ticket: TicketThread } | { ok: false; refused: string }
+  > => {
+    const ticket = await deps.adapter.getTicket(deps.project, run.ticket);
+    const comment = ticket.comments.find(
+      (each) => each.createdAt === commentAt && !each.fromTimone,
+    );
+    if (comment === undefined) {
+      return {
+        ok: false,
+        refused: `There is no comment by a person at ${commentAt} on ticket #${run.ticket}.`,
+      };
+    }
+    if (!isNamedPerson(namedPeople(deps.manifest, deps.project.name), comment.author)) {
+      return {
+        ok: false,
+        refused:
+          `The comment at ${commentAt} is by ${comment.author}, who is not named for this ` +
+          `project. ${onlyNamed}`,
+      };
+    }
+    return { ok: true, comment, ticket };
+  };
+
+  /**
    * The approval of the list of pieces this run's record holds — the latest,
    * when there are several — or undefined when it holds none.
    *
@@ -792,24 +834,9 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       return { ok: true, said: `Ticket #${run.ticket} is no longer on hold.` };
     }),
     recordApproval: decided("record_approval", async ({ what, commentAt }) => {
-      const ticket = await deps.adapter.getTicket(deps.project, run.ticket);
-      const comment = ticket.comments.find(
-        (each) => each.createdAt === commentAt && !each.fromTimone,
-      );
-      if (comment === undefined) {
-        return {
-          ok: false,
-          refused: `There is no comment by a person at ${commentAt} on ticket #${run.ticket}.`,
-        };
-      }
-      if (!isNamedPerson(namedPeople(deps.manifest, deps.project.name), comment.author)) {
-        return {
-          ok: false,
-          refused:
-            `The comment at ${commentAt} is by ${comment.author}, who is not named for this ` +
-            "project. Only a named person can approve.",
-        };
-      }
+      const found = await namedPersonsComment(commentAt, "Only a named person can approve.");
+      if (!found.ok) return found;
+      const { comment, ticket } = found;
       const { branch } = current();
       if (branch === undefined) {
         return {
@@ -920,7 +947,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       await deps.adapter.postComment(timone, number, body);
       return { ok: true, said: `Added a comment to Timone issue #${number}.` };
     }),
-    endRun: decided("end_run", async ({ closeTicket }) => {
+    endRun: decided("end_run", async ({ closeTicket, stopCommentAt }) => {
       if (deps.running.has(run.id)) {
         return {
           ok: false,
@@ -938,8 +965,19 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       // squash merge leaves the branch ahead, so the count alone would keep
       // it from ever ending. A closed one may end it too: the person said no,
       // and the runner reads why in its comments and decides.
+      //
+      // **A named person's plain "stop" ends a run with no pull request**
+      // (40t, PRD-05.R4). On #115 the operator finished the work by hand and
+      // said so, and the run could not end: only `timone cancel`, a terminal
+      // command, ended a run whose branch held commits and no pull request.
+      // The runner judges whether the words ask to stop for good, and names
+      // the comment; code checks only that the comment is there and is a
+      // named person's, as it does for an approval. The run is then
+      // cancelled, not done: nothing it made was taken. An open pull request
+      // still refuses, above: the run waits on it, whatever was said.
       const { branch } = current();
       let merged = false;
+      let stoppedBy: TicketComment | undefined;
       if (branch !== undefined) {
         const found = await deps.adapter.findPullRequest(deps.project, branch);
         merged = found?.state === "merged";
@@ -953,15 +991,34 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         }
         const ahead = await deps.adapter.aheadOfDefault(deps.project, branch);
         if (ahead !== undefined && ahead > 0 && found === undefined) {
-          return {
-            ok: false,
-            refused:
-              `This run changed files on ${branch}, and they have no pull request yet. ` +
-              "The run waits on one, and ends when it is merged or closed.",
-          };
+          if (stopCommentAt === undefined) {
+            return {
+              ok: false,
+              refused:
+                `This run changed files on ${branch}, and they have no pull request yet. ` +
+                "The run waits on one, and ends when it is merged or closed.",
+            };
+          }
+          const stop = await namedPersonsComment(
+            stopCommentAt,
+            "Only a named person can stop the work.",
+          );
+          if (!stop.ok) return stop;
+          stoppedBy = stop.comment;
         }
       }
-      deps.store.complete(run.id);
+      if (stoppedBy === undefined) {
+        deps.store.complete(run.id);
+      } else {
+        // The reason is what `timone status` shows after "was cancelled:".
+        deps.store.cancel(
+          run.id,
+          `${stoppedBy.author} asked to stop the work, in the comment at ${stoppedBy.createdAt}`,
+        );
+      }
+      // The ticket is closed only when the runner asks, on a stop too: a
+      // person who stopped the work may want the ticket kept, as on #115
+      // ("Leave this one on hold").
       if (closeTicket) {
         await deps.adapter.closeTicket(deps.project, run.ticket, "completed");
       }
@@ -976,9 +1033,14 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       if (merged && map !== undefined && map.steps.includes(run.ticket)) {
         await closeInitiativeIfDone(deps, deps.project, map.initiative, deps.log);
       }
+      const ended =
+        stoppedBy === undefined
+          ? "The run is ended"
+          : `The run is ended without a pull request, as ${stoppedBy.author} asked in the ` +
+            `comment at ${stoppedBy.createdAt}`;
       return closeTicket
-        ? { ok: true, said: `The run is ended, and ticket #${run.ticket} is closed.` }
-        : { ok: true, said: "The run is ended." };
+        ? { ok: true, said: `${ended}, and ticket #${run.ticket} is closed.` }
+        : { ok: true, said: `${ended}.` };
     }),
   };
 }

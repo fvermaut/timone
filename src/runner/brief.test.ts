@@ -572,3 +572,29 @@ describe("the runner's rule for a key missing where a step runs", () => {
     expect(rule).toContain("Name the key and the file");
   });
 });
+
+describe("the runner's rule for a named person who asks to stop the work for good", () => {
+  it("has the run ended with their comment named by its time, without a pull request, and never asks them to run a command", () => {
+    const rule = actRule("stop the work for good");
+
+    expect(rule).toContain("When a named person asks you to stop the work for good, for example because they did it themselves");
+    expect(rule).toContain("and the run has no open pull request, end the run.");
+    expect(rule).toContain("Name their comment by its time, exactly as shown.");
+    expect(rule).toContain("The machine checks the comment, and ends the run without a pull request.");
+    expect(rule).toContain("Do not ask them to run a command.");
+    expect(rule).toContain("Close the ticket too only when they want it closed.");
+    expect(rule).toContain("When they want it kept open, put the hold on it if it is not on already.");
+    expect(rule).toContain("Otherwise it is picked up again as new work.");
+  });
+
+  it("sits with the rules on ending a run, after the rule that a run waits on its pull request", () => {
+    const rules = actRules();
+
+    expect(rules.indexOf(actRule("stop the work for good"))).toBe(
+      rules.indexOf(actRule("picked up again as new work. So when")) + 1,
+    );
+    expect(rules.indexOf(actRule("waits on its pull request"))).toBeLessThan(
+      rules.indexOf(actRule("stop the work for good")),
+    );
+  });
+});

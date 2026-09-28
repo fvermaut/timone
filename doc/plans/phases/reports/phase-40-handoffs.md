@@ -1511,3 +1511,89 @@ The suite had 1905 tests before the slice and has 1910 now: 2 new in `actions.te
 - **The other two fixes are code, and the replay does not show them.** Every try goes through the new `settle`, but the judges read the calls and the status, not the wait. The replay's forge lists no pieces and its ledger holds no map, so the map-closing code is never reached. The unit tests above are what show them. Live, the wait shows on any run: when a step asks a question and the runner posts nothing, `timone status` shows the question's own words. The map closing shows only on a run that has a map: when the last piece's run ends after its merge, the map gets "Done — this ticket is finished." and closes.
 - **A map with one piece gets "All 1 pieces were built."** That is the daemon's own wording, in `initiativeClosedComment`, which this slice may not change. #62 had one piece, so the same case will come up again.
 - **scratch-app#62 is still open.** This slice does not close it: the code runs only when a run ends. It can be closed by hand.
+
+## 40t — a named person's plain "stop" can end a run that has no pull request
+
+**Built.** `endRun` takes an optional `stopCommentAt`. The comment matters only in the case that was refused before: the branch holds commits and has no pull request. There, when the runner names a comment, code looks it up on the ticket. The comment must be there, must not be the machine's, and must be by a named person. The run is then cancelled with `store.cancel`, and the reason is "<author> asked to stop the work, in the comment at <time>". The runner is told: "The run is ended without a pull request, as <author> asked in the comment at <time>." An open pull request still refuses, and it is checked before the comment is read. With no comment named, the refusal is the same as before. The lookup is the one `recordApproval` used. It is now one helper, `namedPersonsComment`, and both actions call it. `end_run`'s input gains `stopCommentAt`, and the tool's description says when to use it. The runner's rules gain one line under "How you act", after the two 40r lines on ending a run.
+
+**Files touched.**
+
+- `src/runner/actions.ts` — new private helper `namedPersonsComment(commentAt, onlyNamed)`: the lookup moved out of `recordApproval`, with the same checks and the same words. `onlyNamed` is the last sentence of the refusal for someone not named ("Only a named person can approve." / "Only a named person can stop the work."). `recordApproval` calls it. `endRun` reads `stopCommentAt`. It cancels the run instead of completing it when a stop comment passed the checks, and it says so in its answer. The module comment names the new way a run may end. `TicketComment` is imported as a type.
+- `src/runner/tools.ts` — `endRunInput` gains `stopCommentAt`: optional, trimmed, not empty, with a description. The `end_run` description gains one sentence.
+- `src/runner/brief.ts` — one line in `SYSTEM`, under "How you act", after the line on a ticket being picked up again.
+- `src/runner/actions.test.ts` — a constant `STOP_ASKED` (machine-typed, not copied from #115), and one new `describe` with six cases. No existing line changed.
+- `src/runner/tools.test.ts` — one new case. No existing line changed.
+- `src/runner/brief.test.ts` — one new `describe` with two cases, using 40q's `actRule` and `actRules`. No existing line changed.
+
+**Decisions taken inside the slice.**
+
+1. **The field is called `stopCommentAt`, not `stop_comment_at`.** The plan uses both names: `stopCommentAt` for `endRun`, and `stop_comment_at` for the tool. The action's input type is the tool's zod shape, through `z.infer`. A snake_case field in the tool with a camelCase input to the action would need a second, hand-written type or a mapping, and `standards/typescript.md` says the schema is the type. Every other tool input is camelCase too: `closeTicket` in the same tool, `commentAt`, `skipReason`. So one name serves both. **Orchestrator: please confirm or amend the plan.**
+2. **The comment is read only where it is needed.** That is a branch ahead of the default branch with no pull request. On a run that may end anyway (nothing changed, a merged pull request, a closed one), a named comment is not read. The run ends as done, as before. A wrong time given there is not refused. The plan's words: the comment lets the run end "when … no pull request would otherwise refuse".
+3. **The run is cancelled, not done.** Nothing it made was taken. `timone cancel` also does only `store.cancel` (`src/commands/cancel.ts`, line 227), so the result is the same as the terminal command. **The status was checked.** The wake puts a picked-up run on the runner's wait before the runner sees it (`src/runner/session.ts`, line 214). So `endRun` finds the run `parked` or `active`, and the ledger allows `cancelled` from both, and from `picked-up` too (`src/daemon/runs.ts`, lines 123–125). #115's run in the replay is `parked`. A cancelled run is not woken again: `WAKEABLE` is picked-up, parked and active. `settle` leaves it alone. The runner's session is not stopped from outside: only a cancel request does that (`poll.ts`, line 1002). No step can be running, because `endRun` refuses while one runs.
+4. **The ticket is closed only when `closeTicket` is true, on a stop as well**, with the reason "completed", as before. A person who stopped the work may want the ticket kept (#115: "Leave this one on hold").
+5. **The rule also says what to do with the ticket.** "Close the ticket too only when they want it closed. When they want it kept open, put the hold on it if it is not on already. Otherwise it is picked up again as new work." A cancelled run settles its chunk. So an open ticket with the `timone` label and no hold gets a fresh run on the next cycle. That is the same as after `timone cancel`, whose own answer says so. Without the hold sentence, a runner that keeps the ticket open would start again the work the person finished by hand.
+6. **The rule applies only when "the run has no open pull request".** So it does not contradict the 40r line "While the pull request is open, answer its review, and do not end the run". A stop asked for while a pull request is open falls under the existing rules: the runner says why it does not end the run, and code refuses as well.
+7. **The refusal with no comment is unchanged.** It does not mention `stopCommentAt`. The tool's description does, and the plan says "refused as before".
+8. **No decision entry of code's own is written for a stop.** `timone record` turns decision actions into words from a fixed list (`src/commands/record.ts`, line 138), and that file is outside this slice. A new action name would be printed raw. The runner's own `end_run` decision is written with its reason, as for every action. `timone record` shows it as "end the work".
+9. **The rule's words.** "Stop the work for good" is the plan's phrase, and also `timone cancel`'s own description ("Stop the work in progress on a ticket, for good"). "Name their comment by its time, exactly as shown" is the approvals rule's wording. The rule does not name the field; the tool's description does.
+
+**Validation evidence.** The seams were `runnerActions` (the 40e world), `runnerTools` and `buildBrief`. Each case was written first and run red, then made green, one at a time. A case marked *guard* passed on its first run. For a guard, a temporary break in the code was run to show that the test catches it. The break was then undone, and `grep -c MUTATION src/runner/actions.ts` gave 0 each time.
+
+| Plan case | Test | Red (trimmed) | Green |
+| --- | --- | --- | --- |
+| (1) | "ends a run whose branch holds commits and no pull request when it names a named person's comment, and cancels it with a reason naming that comment" | `expected false to be true` at `result.ok` | 33 of 33, with the smallest change (find the comment by its time, then cancel) |
+| (2) | "refuses to end it when the comment at that time is the machine's, though posted under a named person's login, and leaves the run as it was" | `expected true to be false` | 34 of 34 (the machine's comments are skipped) |
+| (2) | "refuses to end it when the comment at that time is by someone who is not named, and leaves the run as it was" | `expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }`, received `"said": "The run is ended, and ticket #12 is closed."` | 35 of 35, with the shared lookup; `recordApproval` now calls it, and its existing tests pass unchanged |
+| (3) | "refuses as before when it names no comment, though a named person asked on the ticket to stop, and leaves the run as it was" — *guard* | break: the refusal for no comment switched off → received `"There is no comment by a person at undefined on ticket #12."`. The 40e test "refuses to end a run whose branch has two commits the default branch lacks and no pull request, and leaves it running" failed too | 36 of 36 |
+| (4) | "still refuses to end it while its pull request is open, though it names a named person's comment, and leaves the run as it was" — *guard* | break: the open check skipped when a comment is named → `expected { ok: true, said: 'The run is ended.' } to deeply equal { ok: false, …(1) }` | 37 of 37 |
+| (1) | the same test as the first row, with one added assertion on what the runner is told | `- "said": "The run is ended without a pull request, as fvermaut asked in the comment at 2026-09-27T11:58:40Z."` / `+ "said": "The run is ended."` | 37 of 37 |
+| — | "closes the ticket too, when asked, after a named person asked to stop" — *guard*, for the note on `closeTicket` | break: no close on a stop → `expected [] to deeply equal [ { number: 12, reason: 'completed' } ]` | 38 of 38 |
+| tool | "lets end_run carry the time of a named person's comment that asked to stop the work for good, and does not need it" | `expected undefined to match object { success: true, …(1) }` | 3 of 3 |
+| (5) | "has the run ended with their comment named by its time, without a pull request, and never asks them to run a command" | `expected '' to contain 'When a named person asks you to stop …'` | 32 of 32 |
+| (5) | "sits with the rules on ending a run, after the rule that a run waits on its pull request" | `expected +0 to be 10` | 32 of 32 |
+
+The two (5) cases were written together as one case, the rule and its place, and went red together. One edit made both green.
+
+The rule as written, under "How you act", right after the line on a ticket being picked up again:
+
+> - When a named person asks you to stop the work for good, for example because they did it themselves, and the run has no open pull request, end the run. Name their comment by its time, exactly as shown. The machine checks the comment, and ends the run without a pull request. Do not ask them to run a command. Close the ticket too only when they want it closed. When they want it kept open, put the hold on it if it is not on already. Otherwise it is picked up again as new work.
+
+The `end_run` tool's description as written:
+
+> End this run. A run that changed files waits while its pull request is open. End it when the pull request is merged, and close the ticket then, or when it is closed. A run that changed nothing can end at any time. A run that changed files and has no pull request can also end when a named person asked in their own comment to stop the work for good: give the time of that comment in stopCommentAt.
+
+The `stopCommentAt` field's description:
+
+> Only when a named person asked in their own comment to stop the work for good: the time of that comment, exactly as shown. The run then ends without a pull request.
+
+**A check beyond the plan, on #115's moment.** A scratch script outside the repo played the replay case through `runTry` and `scriptedRunner` with one `end_run` call. The call went through the real tool server and its zod shape. With `stopCommentAt: "2026-09-07T11:02:00Z"` (fvermaut's comment "Fixed by hand in pull request #55…"), the run became `cancelled` and the case's judge said ok. Without the field, the run stayed `parked`, and the decision reads "Refused: This run changed files on timone/40-the-task-list-flickers-when-a-task-is-ti, and they have no pull request yet. …", which is the refusal replay run 5 saw. The dry replay's #115 case has no right calls, so it does not use `end_run`. No case's right calls changed.
+
+The three commands, after the last edit:
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  55 passed (55)
+      Tests  1919 passed (1919)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+… (19 lines, all PASS; #115 — Start nothing on it. 3 of 3 tries.)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+The suite had 1910 tests before the slice and has 1919 now: 6 new in `actions.test.ts`, 1 in `tools.test.ts`, and 2 in `brief.test.ts`.
+
+- [x] Red→green evidence in the handoff: every new case is in the table above, with its red output or, for a guard, the break it caught.
+- [ ] **Human gate:** fvermaut runs the full replay once more (run 6), or it goes to the pull request as still owed. Not done here: the build's sandbox has no model login. The run is his.
+
+**What delivery must know.**
+
+- **The field name departs from the plan's wording** (decision 1). It needs a yes, or a change of the plan's text.
+- **The replay's summary line does not say a stopped run ended.** `didText` in `src/runner/replay/harness.ts` (line 108) adds "ended the run" only for the status `done`. A try that ends #115's run by a stop shows only its other calls, or "did nothing". The judge is still right, because it reads the calls and not that line. A one-line change there (for example "stopped the run" for `cancelled`) is outside this slice.
+- **In run 6, look at #115.** The model may now end the run and name fvermaut's comment: 11:02:00Z, or the older 11:40:00Z, which are both his. The judge allows it. `closeTicket` should be false, because he wrote "Leave this one on hold". The hold must stay on, and the judge checks that.
+- **A stop leaves the ticket to the runner's judgement.** A stopped run on a ticket that stays open, keeps the `timone` label and has no hold is picked up again on the next cycle, the same as after `timone cancel`. The rule tells the runner to put the hold on in that case. Code does not do it.
+- **Where a stop shows.** `timone status` lists it as "<project> #<n> was cancelled: <author> asked to stop the work, in the comment at <time>". `timone retry` refuses a cancelled run and gives that reason. `timone record` shows the runner's `end_run` decision as "end the work", with the runner's reason. It does not say that the run was cancelled rather than done.

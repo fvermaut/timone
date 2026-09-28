@@ -135,6 +135,15 @@ const commentTimoneIssueInput = z.object({
 const endRunInput = z.object({
   reason,
   closeTicket: z.boolean().describe("true also closes the ticket, as done."),
+  stopCommentAt: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      "Only when a named person asked in their own comment to stop the work for good: " +
+        "the time of that comment, exactly as shown. The run then ends without a pull request.",
+    ),
 });
 
 export type StartStepInput = z.infer<typeof startStepInput>;
@@ -221,7 +230,9 @@ export function runnerTools(actions: RunnerActions): SdkMcpToolDefinition<any>[]
       "end_run",
       "End this run. A run that changed files waits while its pull request is open. " +
         "End it when the pull request is merged, and close the ticket then, or when it is closed. " +
-        "A run that changed nothing can end at any time.",
+        "A run that changed nothing can end at any time. " +
+        "A run that changed files and has no pull request can also end when a named person asked " +
+        "in their own comment to stop the work for good: give the time of that comment in stopCommentAt.",
       endRunInput.shape,
       async (args) => answer(await actions.endRun(args)),
     ),

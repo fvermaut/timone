@@ -1173,3 +1173,154 @@ describe("the end of a run on a piece of a map", () => {
     expect(forge.comments).toEqual([]);
   });
 });
+
+/**
+ * fvermaut's comment on ticket 12, asking the machine to stop for good, as
+ * the operator did on #115: the work was finished by hand. Machine-typed,
+ * not copied from #115.
+ */
+const STOP_ASKED = "Fixed by hand in pull request #55, which is merged. Leave this one on hold.";
+
+describe("the end of a run that a named person asked to stop", () => {
+  it("ends a run whose branch holds commits and no pull request when it names a named person's comment, and cancels it with a reason naming that comment", async () => {
+    const { actions, store, run, forge } = world(
+      featureTicket([personSaid("fvermaut", "2026-09-27T11:58:40Z", STOP_ASKED)]),
+    );
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 1;
+    forge.pullRequest = undefined;
+
+    const result = await actions.endRun({
+      reason: "fvermaut finished the work by hand, and asked me to stop.",
+      closeTicket: false,
+      stopCommentAt: "2026-09-27T11:58:40Z",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      said: "The run is ended without a pull request, as fvermaut asked in the comment at 2026-09-27T11:58:40Z.",
+    });
+    const ended = store.get(run.id);
+    expect(ended?.status).toBe("cancelled");
+    expect(ended?.cancellation).toContain("fvermaut");
+    expect(ended?.cancellation).toContain("2026-09-27T11:58:40Z");
+    expect(forge.closed).toEqual([]);
+  });
+
+  it("closes the ticket too, when asked, after a named person asked to stop", async () => {
+    const { actions, store, run, forge } = world(
+      featureTicket([personSaid("fvermaut", "2026-09-27T11:58:40Z", "I did this myself in #55. Stop, and close this one.")]),
+    );
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 1;
+    forge.pullRequest = undefined;
+
+    const result = await actions.endRun({
+      reason: "fvermaut did the work and asked me to stop and close the ticket.",
+      closeTicket: true,
+      stopCommentAt: "2026-09-27T11:58:40Z",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      said:
+        "The run is ended without a pull request, as fvermaut asked in the comment at 2026-09-27T11:58:40Z, " +
+        "and ticket #12 is closed.",
+    });
+    expect(store.get(run.id)?.status).toBe("cancelled");
+    expect(forge.closed).toEqual([{ number: 12, reason: "completed" }]);
+  });
+
+  it("refuses to end it when the comment at that time is the machine's, though posted under a named person's login, and leaves the run as it was", async () => {
+    const machineSaid: TicketComment = {
+      author: "fvermaut",
+      body: "**I put this ticket on hold.** I will not start any more work on it.\n\n**What I need from you:** nothing.",
+      createdAt: "2026-09-27T11:58:40Z",
+      fromTimone: true,
+    };
+    const { actions, store, run, forge } = world(featureTicket([machineSaid]));
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 1;
+    forge.pullRequest = undefined;
+    const before = store.get(run.id);
+
+    const result = await actions.endRun({
+      reason: "The ticket says the work is on hold.",
+      closeTicket: false,
+      stopCommentAt: "2026-09-27T11:58:40Z",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(store.get(run.id)).toEqual(before);
+    expect(store.get(run.id)?.status).toBe("active");
+    expect(forge.closed).toEqual([]);
+  });
+
+  it("refuses to end it when the comment at that time is by someone who is not named, and leaves the run as it was", async () => {
+    const { actions, store, run, forge } = world(
+      featureTicket([personSaid("passer-by-99", "2026-09-27T11:58:40Z", "Stop this, I did it myself.")]),
+    );
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 1;
+    forge.pullRequest = undefined;
+    const before = store.get(run.id);
+
+    const result = await actions.endRun({
+      reason: "passer-by-99 said the work was done by hand.",
+      closeTicket: true,
+      stopCommentAt: "2026-09-27T11:58:40Z",
+    });
+
+    expect(result).toEqual({ ok: false, refused: expect.stringContaining("passer-by-99, who is not named") });
+    expect(store.get(run.id)).toEqual(before);
+    expect(forge.closed).toEqual([]);
+  });
+
+  it("refuses as before when it names no comment, though a named person asked on the ticket to stop, and leaves the run as it was", async () => {
+    const { actions, store, run, forge } = world(
+      featureTicket([personSaid("fvermaut", "2026-09-27T11:58:40Z", STOP_ASKED)]),
+    );
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 1;
+    forge.pullRequest = undefined;
+    const before = store.get(run.id);
+
+    const result = await actions.endRun({
+      reason: "fvermaut finished the work by hand.",
+      closeTicket: false,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      refused: expect.stringContaining(`This run changed files on ${BRANCH}, and they have no pull request yet.`),
+    });
+    expect(store.get(run.id)).toEqual(before);
+    expect(forge.closed).toEqual([]);
+  });
+
+  it("still refuses to end it while its pull request is open, though it names a named person's comment, and leaves the run as it was", async () => {
+    const { actions, store, run, forge } = world(
+      featureTicket([personSaid("fvermaut", "2026-09-27T11:58:40Z", STOP_ASKED)]),
+    );
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 1;
+    forge.pullRequest = {
+      number: 31,
+      title: "A due date on each task",
+      url: "https://github.com/fvermaut/scratch-app/pull/31",
+      state: "open",
+      headSha: "9e1d0b7",
+    };
+    const before = store.get(run.id);
+
+    const result = await actions.endRun({
+      reason: "fvermaut finished the work by hand, and asked me to stop.",
+      closeTicket: false,
+      stopCommentAt: "2026-09-27T11:58:40Z",
+    });
+
+    expect(result).toEqual({ ok: false, refused: expect.stringContaining("Pull request #31 is open") });
+    expect(store.get(run.id)).toEqual(before);
+    expect(forge.closed).toEqual([]);
+  });
+});

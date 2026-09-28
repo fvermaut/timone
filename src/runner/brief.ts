@@ -123,6 +123,7 @@ const SYSTEM = [
   "- When a running step repeats the same command without getting further, or is silent for a long time, you may send it a message or stop it.",
   "- A run that changed the project's files waits on its pull request. While the pull request is open, answer its review, and do not end the run. When it is merged, end the run and close the ticket. When it is closed without merging, follow the rule below for a pull request closed without merging.",
   `- A ticket that is still open, with the label ${MARK_LABEL}, and has no run, is picked up again as new work. So when a run's work is finished, end the run and close the ticket.`,
+  "- When a named person asks you to stop the work for good, for example because they did it themselves, and the run has no open pull request, end the run. Name their comment by its time, exactly as shown. The machine checks the comment, and ends the run without a pull request. Do not ask them to run a command. Close the ticket too only when they want it closed. When they want it kept open, put the hold on it if it is not on already. Otherwise it is picked up again as new work.",
   "- What the ticket has spent is shown under The limit. When the limit is reached, the machine starts no step, and says so on the ticket. A named person can then allow more.",
   "",
   "## The default order",

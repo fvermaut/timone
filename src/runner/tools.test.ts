@@ -108,4 +108,16 @@ describe("the tools the runner is given", () => {
     expect(answer.isError).toBe(true);
     expect(answer.content[0]).toMatchObject({ type: "text", text: expect.stringMatching(/^Refused: /) });
   });
+
+  it("lets end_run carry the time of a named person's comment that asked to stop the work for good, and does not need it", () => {
+    const endRun = runnerTools(actionsOnAFreshTicket()).find((tool) => tool.name === "end_run");
+    const field = endRun!.inputSchema["stopCommentAt"];
+
+    expect(field?.safeParse("2026-09-27T11:58:40Z")).toMatchObject({ success: true, data: "2026-09-27T11:58:40Z" });
+    expect(field?.safeParse(undefined).success).toBe(true);
+    expect(field?.description).toContain("named person");
+    expect(field?.description).toContain("exactly as shown");
+    expect(endRun!.description).toContain("stop the work for good");
+    expect(endRun!.description).toContain("stopCommentAt");
+  });
 });
