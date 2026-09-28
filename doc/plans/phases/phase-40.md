@@ -410,6 +410,37 @@ npm run --silent replay -- --dry; echo "exit: $?"                               
 
 ---
 
+### Sub-phase 40p: the runner's rules carry what the replay showed missing
+
+> ✏ 2026-09-28 (build, timone#165): added at build, from the first real replay (13 of 19, [phase-40-replay.md](reports/phase-40-replay.md)). Four failures were rules the written process holds and the runner's brief did not; one was a fixture that left out part of its moment; one was a matcher that read the table more narrowly than the process. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/brief.ts` — the system text gains a short section, *What the written process says when work stops*, in the brief's own plain words, each rule with the reason a person would give:
+  - A step stopped because a written requirement is wrong, or contradicts another: start the step that writes the requirements, with the line and the fix in its instructions, then run the check again. Ask a person only when the right answer is a choice only they can make. (#108)
+  - A pull request closed without merging, whose discussion says what was wrong: do the work again from that discussion, starting at the step it points to. Do not ask. (PRD-03.R1, #111)
+  - A check only the operator can run does not stop delivery: start delivery again, and tell it to open the pull request and list the check as not run. (ADR-0059 D1, #159)
+  - A question a step asked after the list of pieces was agreed rides to the pull request: carry on, and tell delivery to put the question there. (ADR-0056)
+  - Do not put the hold on to wait for a person: after you ask, the run waits by itself. Put the hold on only when a named person asks you to stop the work. (#108, #159)
+  - At a check, when the step has run the whole test suite more than twice since the last check, send it a message: run only the tests of what it changes while it works, and the whole suite once at the end. (process.md stage 6, #110)
+**[MODIFY]** `src/runner/replay/cases.ts` — #120's ticket gains the note the terminal session left when it ended without clearing the stop (the box still has no key; only fvermaut can add it). #104's matcher accepts `breakdown` or `planning` as the start of planning. No other case changes.
+**[MODIFY]** `src/runner/brief.test.ts` — new cases only.
+
+**Seams under test (TDD):** `buildBrief`, pure — the system text states each rule. Red-green: one case per rule above, each asserting the rule's key words appear in `system`, red before the text is added. The behaviour itself is judged by the replay, which the operator runs again (human gate below).
+
+> Sub-phase 40o must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run src/runner/; echo "exit: $?"                 # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+- [ ] **Human gate:** fvermaut runs `npm run --silent replay` again from his own terminal; its output is added to `reports/phase-40-replay.md` as run 2.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -472,6 +503,7 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40k → 40e                 the skills accept a skipped approval
 40n → 40h                 a step ticket's claim is not shown as a hold  (✏ 2026-09-27: added at build)
 40o → 40h, 40j            an approval comes after what it approves; an interrupted step gets its end  (✏ 2026-09-27: added at build)
+40p → 40o                 the runner's rules carry what the replay showed missing  (✏ 2026-09-28: added at build)
 40l → 40h, 40j, 40n, 40o  scratch-app moves; the watched run
 40m → 40l                 README
 ```

@@ -131,3 +131,13 @@
 **Did instead:** Three cases 40e wrote earlier in this phase — they record an approval of the list of pieces — have fixtures with no `breakdown` step at all, and the new rule rightly refuses an approval of something the run never produced. Their fixtures gain one earlier successful `breakdown` `step-ended` entry. No assertion of theirs changes. The plan is amended in place.
 
 **Why:** The rule is the point of the slice (an approval must come after what it approves), and those fixtures described a situation the rule now forbids. They are this phase's own tests, written two slices earlier, not tests the rest of the daemon relies on. The alternative — accept an approval when no step of that stage exists — would let a comment written before any requirements existed be recorded as their approval.
+
+## 2026-09-28 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** Sub-phase 40j: "The cases themselves are the specification: when a case fails, the runner's brief or rules are what change, never the case."
+
+**Did instead:** The first real replay passed 13 of 19. A new sub-phase, 40p, changes the runner's rules for four of the six failures (#108, #111, #159, #110). For the other two it changes a case: #120's fixture gains the note the terminal session left when it ended without clearing the stop, and #104's matcher accepts `breakdown` as well as `planning`. No case's expected action is weakened.
+
+**Why:** #120's fixture left out a fact of the moment it names — in the real incident the terminal session ended with a note saying it could not clear the stop — so the runner could not know the key was still missing, and trying the build again was a fair reading of what it was shown. #104's table row says "start planning", and for a feature, planning begins with the list of pieces (`process.md` stage 5); the runner went there, posted the departure, and the matcher read "planning" as the `planning` step only. Changing the rules to make the runner jump past the list of pieces would have taught it to break the written order.
