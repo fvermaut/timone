@@ -72,6 +72,37 @@ Only one daemon works at a time; a second one exits saying who holds the lock. R
 
 Two credentials keep a boxed run alive, and neither is yours to manage after setup. The model login comes from the token above. The GitHub token is minted per run, scoped to the one repository, and refreshed into the running container every twenty minutes — a minted token dies after an hour and runs last longer than that. [manual/how-the-daemon-works.md](manual/how-the-daemon-works.md) has both in full.
 
+## Projects run by the runner
+
+By default, the daemon moves a ticket through the stages in a fixed order. On a **runner project**, the runner decides each step instead. The runner is an agent. It reads the ticket and the work so far, and chooses what to do next. The order in [process.md](process.md) is its default. It may leave that order when it has a reason. Each time it does, it says so on the ticket, with the reason, and the pull request lists each change to the order in its first lines. It never merges a pull request. The decision is [ADR-0060](doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md).
+
+To switch a project, add `driver: runner` to its entry in `timone.yaml`. Without it, the project keeps the fixed order. The same `timone daemon` runs both kinds. scratch-app is a runner project. ivtrends stays on the fixed order until a watched run on scratch-app has passed ([what that run checks](doc/plans/phases/reports/phase-40-live-gate.md)).
+
+```yaml
+operator: your-login           # may instruct every runner project
+projects:
+  scratch-app:
+    # … repo_url, path, stack, bindings, as before
+    driver: runner
+    instructors: [your-login]  # optional: these people instead of the operator
+    ticket_limit_usd: 150      # optional: what one ticket may spend, in dollars
+```
+
+**Who may instruct it.** The people in `instructors` on the project, or the `operator` when the project names nobody. The runner sees only their comments; anyone else's are left out. If a runner project has no `instructors` and there is no `operator`, `timone.yaml` is refused when it is read, and the error names the project.
+
+**How you talk to it.** Write in plain words on the ticket or the pull request. `timone takeover` still opens a terminal session; when it ends, the runner reads what it left. `timone cancel` stops the run and any step still running, even when the runner cannot start. `timone retry` refuses on a runner project and tells you to write on the ticket instead.
+
+**The limit.** One ticket may spend $150 across all its runs, the runner's own sessions included. `ticket_limit_usd` on the project changes it. At the limit, no new session starts, and the ticket says so. Reply "continue", or any words that mean it, to allow the same amount again.
+
+```bash
+timone record <project>#<n>    # each step with its times and cost, each decision with its reason,
+                               # the steps left out, and the spending against the limit
+npm run replay                 # check the runner against nineteen recorded failures
+npm run replay -- --dry        # the same cases with a script in place of the model; costs nothing
+```
+
+The real replay calls the model, so it costs money and needs a terminal where you are logged in to Claude.
+
 ## The stages
 
 Name one yourself when you want to (`/timone-<stage> <project> …`); otherwise the daemon routes for you.

@@ -1030,3 +1030,90 @@ $ npx vitest run
 - **The approval-record session counts as such a step.** It is recorded at the stage of its file (40e decision 7). Once it succeeds, its end becomes the latest end for that stage. So a comment older than a recorded approval cannot be recorded a second time. That is harmless: there is no reason to record the same approval twice.
 - **The replay's #140 case now holds the end `reclaimed` writes** (granted to 40o after the build): in `src/runner/replay/cases.ts`, its record gains one `step-ended` for the interrupted planning step (run `scratch-app#48/1`, session `5be90d77-planning`, `ok: false`, `costUsd: 0`, `error: "the daemon stopped while this step was running"`, `stoppedBy: "daemon"`, at `2026-09-21T10:42:00Z`, before the wake at 10:42:05). Its matcher and nothing else changed. The brief there now reads planning "ran once, cost $0.00; the last try failed: the daemon stopped while this step was running". `npm run --silent replay -- --dry` after the change: `PASS #140 … 3 of 3 tries`, 19 of 19, exit 0. The doc comment above the case was corrected to match (also granted): planning started, the daemon that took the run back wrote its end as stopped by the daemon, and the plan is on the branch. scratch-app#37 needs nothing further: the replay runs the real `recordApproval`, and the rule applies there.
 - **`timone record` (40i) shows the new end as a failure**, since its `stoppedBy` is `"daemon"`, not `"runner"`. That is what the plan wanted.
+
+## 40m — the README says what a runner project is
+
+**Built.** A new section in `README.md`, "Projects run by the runner", placed after "Everyday commands" and before "The stages". It says what a runner project is, how to switch a project, who may instruct the runner, how to talk to it, the limit and how to go on past it, `timone record`, and `npm run replay`. It describes how the runner works. It does not say the runner was watched working: the watched run (40l) is still owed, and the section says ivtrends moves only after it has passed.
+
+**Files touched.**
+
+- `README.md` — one new `##` section (31 lines added, about 340 words of prose plus two short code blocks). Nothing else in the file changed.
+
+**Decisions taken inside the slice.**
+
+1. **Placed after "Everyday commands".** That section names the daemon and the commands, and the new section changes what two of those commands do on a runner project.
+2. **The "Everyday commands" list was left as it was.** Its `timone retry` line is still true for projects on the fixed order, and the new section says `retry` refuses on a runner project. `timone record` is listed in the new section's own code block, not in the general list, because it only has something to show on a runner project.
+3. **A short `timone.yaml` example.** It shows the three keys (`driver`, `instructors`, `ticket_limit_usd`) and `operator` in place. The other keys of an entry are shown as a comment ("as before"), so the example is not a complete entry and says so.
+4. **"Never merges a pull request", not "never merges".** The code still merges the requirements and the list of pieces into the default branch once a named person's approval is on record (`mergeChunkZero` in `src/runner/actions.ts`, ADR-0060 D2). "Never merges a pull request" is true without exception; "never merges" would not be.
+5. **"departure" is not used.** It is a word from the ADR. The section says "leave that order", "each change to the order" and "the steps left out".
+6. **`--dry` is described as "the same cases with a script in place of the model"**, not as checking "the wiring", which is an image.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+The section as written:
+
+> ## Projects run by the runner
+>
+> By default, the daemon moves a ticket through the stages in a fixed order. On a **runner project**, the runner decides each step instead. The runner is an agent. It reads the ticket and the work so far, and chooses what to do next. The order in [process.md](process.md) is its default. It may leave that order when it has a reason. Each time it does, it says so on the ticket, with the reason, and the pull request lists each change to the order in its first lines. It never merges a pull request. The decision is [ADR-0060](doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md).
+>
+> To switch a project, add `driver: runner` to its entry in `timone.yaml`. Without it, the project keeps the fixed order. The same `timone daemon` runs both kinds. scratch-app is a runner project. ivtrends stays on the fixed order until a watched run on scratch-app has passed ([what that run checks](doc/plans/phases/reports/phase-40-live-gate.md)).
+>
+> ```yaml
+> operator: your-login           # may instruct every runner project
+> projects:
+>   scratch-app:
+>     # … repo_url, path, stack, bindings, as before
+>     driver: runner
+>     instructors: [your-login]  # optional: these people instead of the operator
+>     ticket_limit_usd: 150      # optional: what one ticket may spend, in dollars
+> ```
+>
+> **Who may instruct it.** The people in `instructors` on the project, or the `operator` when the project names nobody. The runner sees only their comments; anyone else's are left out. If a runner project has no `instructors` and there is no `operator`, `timone.yaml` is refused when it is read, and the error names the project.
+>
+> **How you talk to it.** Write in plain words on the ticket or the pull request. `timone takeover` still opens a terminal session; when it ends, the runner reads what it left. `timone cancel` stops the run and any step still running, even when the runner cannot start. `timone retry` refuses on a runner project and tells you to write on the ticket instead.
+>
+> **The limit.** One ticket may spend $150 across all its runs, the runner's own sessions included. `ticket_limit_usd` on the project changes it. At the limit, no new session starts, and the ticket says so. Reply "continue", or any words that mean it, to allow the same amount again.
+>
+> ```bash
+> timone record <project>#<n>    # each step with its times and cost, each decision with its reason,
+>                                # the steps left out, and the spending against the limit
+> npm run replay                 # check the runner against nineteen recorded failures
+> npm run replay -- --dry        # the same cases with a script in place of the model; costs nothing
+> ```
+>
+> The real replay calls the model, so it costs money and needs a terminal where you are logged in to Claude.
+
+Each claim, and what it was checked against:
+
+| Claim | Checked against |
+| --- | --- |
+| The daemon's fixed order is the default; a runner project is the other driver | `src/manifest.ts`: `driverSchema` is `daemon` or `runner`; `driverOf` returns `daemon` when the entry says nothing |
+| The runner decides each step; the written order is its default; it may leave it with a reason | ADR-0060 D1; `src/runner/order.ts` (`defaultOrder`); the rule that refuses a skip with no reason, `src/runner/actions.ts` around the `departure` entry |
+| Each change to the order is said on the ticket, with the reason, when it happens | `src/runner/actions.ts`: `departureNotice` is posted before the step's session is requested; text in `src/runner/comments.ts` |
+| The pull request lists each change in its first lines | `src/runner/driver.ts`: `withDepartures` puts the section first; `departureSection` in `src/runner/departures.ts` |
+| It never merges a pull request | ADR-0060 D2; no pull-request merge call in `src/`; the only merge is `mergeChunkZero` (the default-branch merge of the requirements and the list of pieces, on a recorded approval) |
+| `driver: runner` switches a project; absent keeps the fixed order | `src/manifest.ts`: `driver` optional, `driverOf` |
+| The same `timone daemon` runs both kinds | `src/daemon/poll.ts`: `driverOf(config) === "runner"` routes a project to the runner inside the poll cycle |
+| scratch-app is a runner project; ivtrends stays until a watched run on scratch-app has passed | `timone.yaml` (scratch-app has `driver: runner`, ivtrends has none); PRD-05 R19; `doc/plans/phases/reports/phase-40-live-gate.md` ("not run yet, owed before ivtrends moves") |
+| `instructors` on the project, else `operator`; `instructors` replaces the operator | `src/manifest.ts`: `namedPeople`, and the doc comment on `instructors` ("replace the top-level operator rather than joining it") |
+| Only their comments reach the runner; anyone else's are left out | `src/runner/driver.ts` `newComments`: a comment from Timone or from someone not in `namedPeople` is marked seen and dropped |
+| A runner project with nobody named makes `timone.yaml` refused on read, naming the project | `src/manifest.ts`: the `superRefine` on `manifestSchema`, issued at path `projects.<name>`; `formatIssue` prefixes `project "<name>"` |
+| `timone takeover` opens a terminal session; when it ends the runner reads what it left | `src/commands/takeover.ts`: a run on the runner's wait opens the session bound to no stage; `src/runner/driver.ts` `terminalEnded` wakes the runner with `TAKEOVER_ENDED_EVENT` |
+| `timone cancel` stops the run and any running step, even when the runner cannot start | `src/daemon/poll.ts` cancel request: `runCancel`, then `deps.runner?.stop`; `src/runner/driver.ts` `stop` ends the step's session and the runner's sessions; `src/commands/cancel.ts` never starts or waits for a runner (PRD-05 R11) |
+| `timone retry` refuses on a runner project and says to write on the ticket | `src/commands/retry.ts`: `runnerRefusal` on both paths, `RUNNER_RETRY_REFUSAL` ("This project is run by the runner. Write on the ticket instead: say what you want done.") |
+| $150 per ticket, across all runs, runner sessions included | `src/runner/limit.ts`: `DEFAULT_LIMIT_USD = 150`; `spentOn` sums `step-ended` and `runner-ended` over the ticket's whole record |
+| `ticket_limit_usd` on the project changes it | `src/manifest.ts`: `ticket_limit_usd`, `ticketLimitOf` |
+| At the limit no new session starts, and the ticket says so | `src/runner/limit.ts` `isOverLimit`; `limitNotice` posted from `src/runner/driver.ts` and `src/runner/actions.ts` |
+| "continue", or any words that mean it, allows the same amount again | `src/runner/driver.ts` `askToGoOn`: each named person's reply is put to the model (`limitQuestion`) and a YES writes `limit-raised`; `allowanceOf` adds the project's limit once per raise |
+| `timone record` shows steps with times and cost, decisions with reasons, steps left out, spending against the limit | `src/commands/record.ts`: `stepLines`, `decisionLines`, `departureLines`, `spendingLines` |
+| `npm run replay` checks nineteen recorded failures | `package.json` `replay` script; `src/runner/replay/cases.ts` (19 cases); `src/runner/replay/harness.ts` |
+| `--dry` uses a script in place of the model and costs nothing | `src/runner/replay/harness.ts`: `scriptedRunner`, which ends each session at a cost of 0 |
+| The real replay costs money and needs a logged-in terminal | `src/runner/replay/harness.ts` doc comment ("on the real model; costs money") and its use of the SDK's `query`; `phase-40-live-gate.md` ("every model call needs the operator's own logged-in terminal") |
+
+- [x] The section follows Timone's rules for writing to a person: short sentences, plain words, no process vocabulary. No stage numbers, no skill names, and no ADR words ("departure", "chunk zero", "named person") in the text; the one new word, "runner project", is defined in the sentence that uses it. No images: "the wiring" was replaced. About 340 words of prose, inside the brief's limit.
+
+**What delivery must know.**
+
+- The section describes the runner as built, not as watched. When the watched run (40l) passes and ivtrends moves to the runner, the sentence "ivtrends stays on the fixed order until a watched run on scratch-app has passed" must change in the same change that edits `timone.yaml`.
+- The "Everyday commands" list still describes `timone retry` as re-arming a failed run. That stays true for projects on the fixed order. Once every project is on the runner (PRD-05 R20), that line and the fixed-order sentences in this section go.
+- The link to `phase-40-live-gate.md` points at a report that today says "Not run yet". That is the intended reading: it is what the watched run checks.
