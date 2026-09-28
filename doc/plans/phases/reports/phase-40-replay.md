@@ -92,3 +92,17 @@ PASS #125, #135 … PASS #110 (7 cases, as in run 2)
 ```
 
 (Passing lines shortened here; each read "3 of 3 tries", exactly as in run 2.) The new rule changed no other case. #120 passes two tries of three; the third did nothing and left the ticket pointing at the takeover command. Likely cause: the runner does not know where a missing key goes, so it cannot rule out that a terminal session is how the person adds one — Timone does know (ADR-0045: a boxed run's environment comes from a file the daemon owns). Owed after the watched run: that one line in the runner's rules, and `--case 120` again. Until then PRD-05.R18 is not met for #120 (it asks for three tries of three).
+
+## Run 5 — 2026-09-28, after 40s: 18 of 19 passed, $2.55
+
+```
+Replaying 19 cases, 3 tries each, on claude-opus-5-5.
+PASS #139 … PASS #99 (5 cases, 3 of 3 each)
+FAIL #115 — Start nothing on it. 2 of 3 tries chose it. Try 1: chose it (posted on the ticket: "This ticket stays on hold. I am ending my work on it now, and I will not close it."; posted on the ticket: "My last comment was wrong. The machine did not let me end my work on this ticket. The branch has a …"; filed a Timone issue: "A run cannot end when the work was done by hand and its branch has only a plan commit"; end_run was not done: "Refused: This run changed files on timone/40-the-task-list-flickers-when-a-task-is-ti, and they hav…"). Try 2: chose it (posted on the ticket: "Thank you. I have stopped my work on this ticket for good. The ticket stays open and on hold. I hav…"; filed a Timone issue: "A run cannot end when its branch has commits but no pull request, and a person did the work by hand"; end_run was not done: "Refused: This run changed files on timone/40-the-task-list-flickers-when-a-task-is-ti, and they hav…"). Try 3: posted on the ticket: "Thank you. I will do no more work on this ticket, and the hold stays on. I am ending my work here n…"; posted on the ticket: "A correction to my last comment: I could not end my work on this ticket. The machine will not end i…"; filed a Timone issue: "A run cannot end when a person fixed the ticket by hand and the branch has commits but no pull requ…"; end_run was not done: "Refused: This run changed files on timone/40-the-task-list-flickers-when-a-task-is-ti, and they hav…" — wanted: no comment that asks fvermaut for something.
+PASS #142 … PASS #117 (5 cases, 3 of 3 each)
+PASS #120 — Not offer the same command again. Say what is actually needed. 3 of 3 tries.
+PASS #125, #135 … PASS #110 (7 cases, 3 of 3 each)
+18 of 19 cases passed. The runner's sessions cost $2.55 in all.
+```
+
+(Passing lines shortened.) **#120 passes three tries of three**: 40s's rule on where a key goes settled it. **#115 fell to two of three.** In every try the runner started nothing, then tried to end the run — and code refused, because the branch holds a commit with no pull request, and until now only `timone cancel` could end such a run. In one try the runner then asked the person for something. All three tries also judged it a Timone fault and filed an issue about it, which is right: a finished-by-hand ticket whose run only a terminal command can free is the way out R9 exists to remove. Slice 40t lets a named person's plain-words "stop" end such a run, with code checking the comment. The replay is then owed once more (run 6).

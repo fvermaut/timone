@@ -520,6 +520,32 @@ npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
 
 ---
 
+### Sub-phase 40t: a named person's plain "stop" can end a run that has no pull request
+
+> ✏ 2026-09-28 (build, timone#165): added at build, from replay run 5 ([phase-40-replay.md](reports/phase-40-replay.md)): on #115 the runner was told the work was done by hand, tried to end the run, and was refused — only `timone cancel`, a terminal command, could end a run whose branch holds commits and no pull request. PRD-05.R4 is amended to allow a named person's plain words too. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/actions.ts` — `endRun` takes an optional `stopCommentAt`. When the branch holds commits and no pull request would otherwise refuse, a comment at that time on the ticket, written by a named person (not the machine), lets the run end without a pull request: code checks the comment, then cancels the run with a reason naming the comment. The runner judges whether the words ask to stop for good; code checks only that the comment exists and is theirs, as it does for approvals. An open pull request still refuses (40r).
+**[MODIFY]** `src/runner/tools.ts` — `end_run`'s input gains `stop_comment_at`, described in plain words.
+**[MODIFY]** `src/runner/brief.ts` — one rule: when a named person asks you to stop the work for good (for example because they did it themselves), end the run and name their comment by its time; the machine then ends it without a pull request. Do not ask them to run a command.
+**[MODIFY]** `src/runner/actions.test.ts`, `src/runner/tools.test.ts`, `src/runner/brief.test.ts` — new cases only.
+
+**Seams under test (TDD):** `runnerActions`, `buildBrief`. Red-green: (1) a run whose branch holds commits and no pull request ends when `endRun` cites a named person's comment, and the run is cancelled with a reason naming it; (2) the same with a comment by someone not named, or by the machine, is refused and the run is unchanged; (3) without a comment it is refused as before; (4) with the run's pull request open it is still refused; (5) the system text states the rule.
+
+> Sub-phase 40s must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run; echo "exit: $?"                             # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+- [ ] **Human gate:** fvermaut runs the full replay once more (run 6), or it rides to the pull request as owed.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -586,6 +612,7 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40q → 40p                 the ticket's newest message says what it needs now  (✏ 2026-09-28: added at build)
 40r → 40q                 a run waits on its pull request; the ledger knows the step; a shared reason once  (✏ 2026-09-28: added at build)
 40s → 40r                 a map closes with its last piece; the wait says what it waits on; where a key goes  (✏ 2026-09-28: added at build)
+40t → 40s                 a named person's plain "stop" can end a run with no pull request  (✏ 2026-09-28: added at build)
 40l → 40h, 40j, 40n, 40o, 40q, 40r  scratch-app moves; the watched run
 40m → 40l                 README
 ```

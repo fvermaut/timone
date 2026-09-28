@@ -74,6 +74,10 @@
     - GIVEN the same run
       WHEN a named person cancels it with `timone cancel`
       THEN the run ends, and no pull request is required
+    - GIVEN the same run
+      WHEN a named person asks on the ticket, in plain words, for the work to stop for good
+      THEN the runner may end the run citing that comment, and code ends it with no pull request, once it has checked the comment exists and is theirs
+    > ✏ 2026-09-28 — amended at build, phase 40 (40t): replay run 5 showed a finished-by-hand ticket whose run only `timone cancel` could end, which is the terminal-only way out R9 exists to remove. See [phase-40-departures.md](../../plans/phases/reports/phase-40-departures.md).
     - GIVEN a run that changed no files, such as a question or a decision ticket
       WHEN the runner ends it
       THEN it ends on the ticket, with no pull request

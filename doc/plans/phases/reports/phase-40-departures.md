@@ -191,3 +191,13 @@
 **Did instead:** The map-closing half of `concludeStep` was moved, unchanged, into a new exported function, `closeInitiativeIfDone`, which `concludeStep` now calls and the runner's `endRun` calls too. `poll.test.ts` passes unchanged (230 of 230). The import it needs makes a third import cycle (poll → cta → runner/session → runner/actions → poll); no module in it reads another's names while loading, checked by loading each of the six first.
 
 **Why:** Exporting `concludeStep` as it stood would also have posted "Merged — this step is done." on the piece and closed it, which the runner already does itself. Splitting it was the only way to reuse the map-closing code without a second copy of it, which the plan forbade.
+
+## 2026-09-28 — timone#165, execution
+
+**Kind:** requirement amended
+
+**Agreed:** [PRD-05.R4](../../../specs/prd/prd-05-a-runner-decides-each-step.criteria.md): a run whose branch holds commits not on the default branch ends at a pull request; the one exception is a named person's `timone cancel`.
+
+**Did instead:** R4 gains a second exception: a named person's plain-words request on the ticket to stop the work for good, cited by the runner and checked by code. A new sub-phase, 40t, builds it. The criterion is amended in place with a dated marker.
+
+**Why:** Replay run 5, case #115: the person had written "Stop working on this one. I will fix it by hand." and later "Fixed by hand in pull request #55, which is merged." The runner started nothing and tried to end the run, and code refused, because only a terminal command could end it. That is the terminal-only way out PRD-05.R9 was written to remove — R9 lists "stop" among the plain words that must move a run — and the run would have held its project, blocking every other ticket, until someone typed the command.
