@@ -260,6 +260,36 @@ const APPROVAL_WORDS: Record<Approval, string> = {
   pieces: "the list of pieces",
 };
 
+/** The stage whose step writes each thing a named person approves. */
+const APPROVED_STAGE = {
+  requirements: "requirements",
+  pieces: "breakdown",
+} as const satisfies Record<Approval, PipelineStage>;
+
+/**
+ * Why a comment cannot approve something that was finished after it. One
+ * sentence for each thing approved, so the words agree: the requirements
+ * are many, the list of pieces is one.
+ */
+const WRITTEN_BEFORE: Record<Approval, string> = {
+  requirements:
+    "That comment was written before the requirements were finished, so it cannot approve them. " +
+    "Ask the person to approve the requirements now that they are written.",
+  pieces:
+    "That comment was written before the list of pieces was finished, so it cannot approve it. " +
+    "Ask the person to approve the list of pieces now that it is written.",
+};
+
+/** Why there is nothing to approve yet: no step of the run has written the thing. */
+const NOT_WRITTEN: Record<Approval, string> = {
+  requirements:
+    "No step of this run has finished writing the requirements, so there is nothing to approve yet. " +
+    "Start the step that writes them first.",
+  pieces:
+    "No step of this run has finished writing the list of pieces, so there is nothing to approve yet. " +
+    "Start the step that writes it first.",
+};
+
 /** What a `notice` entry says the ticket was told when it reached its limit. */
 const LIMIT_NOTICE = "limit";
 
@@ -786,6 +816,32 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       }
       const record = readTicketRecord();
       if (!record.ok) return record;
+      // An approval is a comment written after the thing it approves was
+      // finished (PRD-05.R7). A named person's comment from before — "approve
+      // them yourself in my name", written while the requirements did not
+      // exist yet (scratch-app#37) — would otherwise count as their approval,
+      // and R7 would rest only on the runner choosing not to ask for it. The
+      // end of the last step that wrote the thing, in this run, is when it
+      // was finished; with no such step there is nothing to approve yet.
+      // Compared as instants, not as text.
+      const finished = record.entries
+        .filter(
+          (entry) =>
+            entry.kind === "step-ended" &&
+            entry.runId === run.id &&
+            entry.stage === APPROVED_STAGE[what] &&
+            entry.ok,
+        )
+        .at(-1);
+      if (finished === undefined) return { ok: false, refused: NOT_WRITTEN[what] };
+      if (Date.parse(commentAt) <= Date.parse(finished.at)) {
+        return {
+          ok: false,
+          refused:
+            `${WRITTEN_BEFORE[what]} The comment is from ${commentAt}, and the step that wrote ` +
+            `${APPROVAL_WORDS[what]} ended at ${finished.at}.`,
+        };
+      }
       const blocked = await stepBlocked(record.entries);
       if (blocked !== undefined) return blocked;
 
@@ -802,7 +858,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       // its own on the run's branch: the file is the record the next steps
       // read (ADR-0006), and the ticket is not. It is a step like any other,
       // so it is counted as running and its cost counts toward the limit.
-      const stage = what === "requirements" ? "requirements" : "breakdown";
+      const stage = APPROVED_STAGE[what];
       const request = sessionRequest({
         cwd: deps.root,
         prompt: approvalRecordPrompt(

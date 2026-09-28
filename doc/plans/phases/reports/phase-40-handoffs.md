@@ -948,3 +948,85 @@ Also: `--case 999` lists the cases and exits 2; a scratch runner that does nothi
 - [ ] **Human gate:** fvermaut runs `npm run replay`, or decides it rides to the pull request as owed.
 
 **What 40l must know.** From a terminal where `claude auth status` says logged in, in `projects/timone`: `npm run --silent replay -- --dry` checks the wiring for free; `npm run --silent replay | tee /tmp/phase-40-replay.txt` is the real run (57 sessions on `claude-opus-5-5`, each capped at $5, so at most $285; a wake that reads one brief and makes one to three calls should cost far less — the first run is the measurement). Two moments may fail for reasons in the brief rather than the case: #140 (after a daemon stop the record shows planning "running now" while no step runs — 40o closes it) and scratch-app#37 (once the requirements exist, only the runner's rules stop it recording "approve them yourself in my name" — 40o closes it in code).
+
+## 40o — an approval comes after what it approves, and an interrupted step gets its end
+
+**Built.** `recordApproval` now finds the last `step-ended` of this run with `ok: true` at the stage that writes what is approved (`requirements` for the requirements, `breakdown` for the list of pieces). With no such step, it refuses: there is nothing to approve yet. When the comment was written at or before that step's end, it refuses too. The two times are compared with `Date.parse`, not as text. Both checks come after the record is read, and before the running-step and limit checks. Nothing is written and no session starts when either one refuses. `RunnerDriver.reclaimed` now first writes an end for each `step-started` of the run that has no `step-ended` with the same run id and session id. The end is `ok: false`, `costUsd: 0`, `error: "the daemon stopped while this step was running"`, `stoppedBy: "daemon"`, at the driver's clock. Then it hands the run back as before.
+
+**Files touched.**
+
+- `src/runner/actions.ts` — the check in `recordApproval`; three new constants: `APPROVED_STAGE` (the stage for each approval), `WRITTEN_BEFORE` and `NOT_WRITTEN` (the refusal words, one sentence per approval so the grammar agrees). The approval-record step's stage now reads from `APPROVED_STAGE` instead of repeating the ternary. The behaviour is the same.
+- `src/runner/driver.ts` — `reclaimed` calls the new private `endInterruptedSteps`; two new constants, `STOPPED_BY_DAEMON` and `INTERRUPTED_STEP_ERROR`, not exported.
+- `src/runner/actions.test.ts` — three new cases at the end, a new fixture function, and the three 40e fixture additions listed below.
+- `src/runner/driver.test.ts` — one new `describe` with one case at the end. No existing line changed.
+
+**The lines added to the three 40e cases** (plan amendment ✏ 2026-09-27; line numbers as the file stands now):
+
+- New fixture function `breakdownEnded(runId)` at lines 217–231: a `step-ended` for `breakdown`, run `runId`, session `e3f8b1a6-breakdown`, `ok: true`, `costUsd: 1.6`, at `2026-09-27T11:50:00Z`. That is before fvermaut's approving comment at 11:58:40.
+- "records a named person's approval, and starts the step that writes it into the file": line 579 added, `wrote(breakdownEnded(run.id));`.
+- "merges the requirements and the pieces into the default branch once the approval is in the file, …": line 628 added, `wrote(breakdownEnded(run.id));`.
+- "merges nothing when the record no longer holds the approval of the pieces by the time its step ends": line 661 added, `appendEntry(root, PROJECT.name, 12, breakdownEnded(run.id));`. This test already had `root`, so it needed no other change.
+- **One change beyond one added line, in two cases.** In the first two cases above, the existing destructuring line had to gain `wrote` (lines 577 and 626), because nothing else in those tests reaches the record. Nothing else in them changed. No assertion changed in any of the three.
+
+**Decisions taken inside the slice.**
+
+1. **The refusal words.** Too early: "That comment was written before the requirements were finished, so it cannot approve them. Ask the person to approve the requirements now that they are written. The comment is from <commentAt>, and the step that wrote the requirements ended at <end>." For the list of pieces, the same with "was finished … approve it … now that it is written". Nothing written yet: "No step of this run has finished writing the requirements, so there is nothing to approve yet. Start the step that writes them first." (or the list of pieces, "… writes it first").
+2. **A comment written at the same second as the end is refused** (`<=`). A comment cannot approve something that did not exist before the comment was written.
+3. **The order of checks in `recordApproval`** is now: the comment exists and is not the machine's; its author is named; the run has a branch; the record can be read; a successful step of that stage exists in this run; the comment is later than that step's end; no step is running; the ticket is under its limit.
+4. **`reclaimed` writes the ends for any reclaimed run, active or only picked up.** A picked-up run has no `step-started`, so nothing is written for it. No guard was added for a step this daemon is still running. `startStepSession` holds the run with the daemon's own process (`step-session.ts:119`), and `reclaimStale` skips a run whose holder is alive, so a reclaimed run has no step running here.
+5. **A record that cannot be read gets no ends written**: the driver logs the error and still hands the run back. This matches `ask()`: the runner reads the record too, and says why it cannot (40g).
+6. **Calling `reclaimed` again writes nothing more.** A second call finds the ends already written.
+
+**Validation evidence.** Red before green, one case at a time, at `runnerActions` (the 40e world) and at `RunnerDriver.reclaimed` (the 40h world).
+
+- Before the cases: the three 40e fixture lines were added first, against the old code. The suite stayed green (22 of 22), so the lines change nothing on their own.
+- (1) **R7.** "refuses a named person's comment written before the requirements step ended as their approval, and records none". The requirements step ended at 11:59:30, and the comment is from 11:58:40. Red:
+  ```
+  AssertionError: expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }
+  -   "ok": false,
+  -   "refused": StringContaining "before the requirements were finished",
+  +   "ok": true,
+  +   "said": "Recorded fvermaut's approval of the requirements, and started the step that writes it into the file. You are woken when it ends."
+  ```
+  (The same red was first seen in the stopped attempt earlier.) Green with the too-early check: 23 of 23.
+- (2) "records a named person's comment written after the requirements step ended as their approval". The step ended at 11:58:00, and the comment is from 11:58:40. **Green on arrival**, as expected: the old code accepted every named comment, and the check from (1) refuses only earlier ones. A temporary mutation that refused once any successful step existed gave `AssertionError: expected false to be true`. The mutation was then undone: 24 of 24.
+- (3) "refuses an approval of the list of pieces when no step of the run has written the list, and records none". The only `breakdown` step in the record ended with `ok: false`. Red:
+  ```
+  AssertionError: expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }
+  -   "refused": StringContaining "nothing to approve",
+  +   "said": "Recorded fvermaut's approval of the list of pieces, and started the step that writes it into the file. You are woken when it ends."
+  ```
+  Green with the no-step refusal: 25 of 25, the three 40e cases included.
+- (4) `driver.test.ts` "writes the end of the step that was running, and none for the steps that had already ended". The record holds three steps that ended, plus `delivery` (`step-session-4`) started with no end, and the run is active. Red: the `step-ended` entries were only sessions 1–3, and the expected fourth was missing:
+  ```
+  AssertionError: expected [ { kind: 'step-ended', …(6) }, …(2) ] to deeply equal [ ObjectContaining{…}, …(3) ]
+  -   { "at": "2026-09-27T14:05:00Z", "costUsd": 0, "error": "the daemon stopped while this step was running",
+  -     "kind": "step-ended", "ok": false, "runId": "scratch-app#12/1", "sessionId": "step-session-4",
+  -     "stage": "delivery", "stoppedBy": "daemon" },
+  ```
+  Green with `endInterruptedSteps`: 3 of 3. The test also checks that sessions 1–3 each still have exactly one end.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/runner/; echo "exit: $?"
+ Test Files  11 passed (11)
+      Tests  98 passed (98)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+… (19 lines, all PASS)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+$ npx vitest run
+ Test Files  55 passed (55)
+      Tests  1883 passed (1883)
+```
+
+- [x] Red→green evidence in the handoff: cases (1), (3) and (4) above went red then green; case (2) was green on arrival, and a mutation showed it can fail.
+
+**What 40l must know.**
+
+- **An approval now needs a successful step of its stage in the same run, ended before the comment.** An approval of requirements written in an earlier run of the ticket cannot be recorded in a new run. That run has to write them again, or skip the approval with a reason.
+- **The approval-record session counts as such a step.** It is recorded at the stage of its file (40e decision 7). Once it succeeds, its end becomes the latest end for that stage. So a comment older than a recorded approval cannot be recorded a second time. That is harmless: there is no reason to record the same approval twice.
+- **The replay's #140 case now holds the end `reclaimed` writes** (granted to 40o after the build): in `src/runner/replay/cases.ts`, its record gains one `step-ended` for the interrupted planning step (run `scratch-app#48/1`, session `5be90d77-planning`, `ok: false`, `costUsd: 0`, `error: "the daemon stopped while this step was running"`, `stoppedBy: "daemon"`, at `2026-09-21T10:42:00Z`, before the wake at 10:42:05). Its matcher and nothing else changed. The brief there now reads planning "ran once, cost $0.00; the last try failed: the daemon stopped while this step was running". `npm run --silent replay -- --dry` after the change: `PASS #140 … 3 of 3 tries`, 19 of 19, exit 0. The doc comment above the case was corrected to match (also granted): planning started, the daemon that took the run back wrote its end as stopped by the daemon, and the plan is on the branch. scratch-app#37 needs nothing further: the replay runs the real `recordApproval`, and the rule applies there.
+- **`timone record` (40i) shows the new end as a failure**, since its `stoppedBy` is `"daemon"`, not `"runner"`. That is what the plan wanted.

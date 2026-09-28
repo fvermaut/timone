@@ -603,8 +603,10 @@ function planningFinishedWithTheEmojiMisplaced(): ReplayCase {
 /**
  * #140. Planning was started a second time although its plan was already on
  * the branch. Here the daemon stopped after planning had pushed its plan and
- * said so, and before the step's end was written: the record shows a planning
- * step that started and never ended.
+ * said so, and before the step's end was written. The daemon that took the
+ * run back then wrote that end, as stopped by the daemon: the record shows a
+ * planning step that started and was stopped by the daemon, and the plan is
+ * on the branch.
  */
 function planningAgainWithThePlanOnTheBranch(): ReplayCase {
   const project = "scratch-app";
@@ -656,6 +658,19 @@ function planningAgainWithThePlanOnTheBranch(): ReplayCase {
           instructions: "Prepare the work for moving the date helpers into src/lib/dates.ts.",
           reason: "The request is sorted as a chore. Preparing the work is next in its order.",
         }),
+        // The daemon that took the run back wrote the end the stopped one
+        // never wrote (40o, `reclaimed`), before it woke the runner.
+        {
+          kind: "step-ended",
+          at: "2026-09-21T10:42:00Z",
+          runId: run,
+          stage: "planning",
+          sessionId: "5be90d77-planning",
+          ok: false,
+          costUsd: 0,
+          error: "the daemon stopped while this step was running",
+          stoppedBy: "daemon",
+        },
       ],
       files: {
         main: { "doc/plans/phases/phase-08.md": phaseFile("08", "Tasks have a due date", "Complete") },

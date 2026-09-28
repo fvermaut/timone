@@ -214,6 +214,22 @@ function triageRan(runId: string): RecordEntry {
   };
 }
 
+/**
+ * The record's entry for the step that wrote ticket 12's list of pieces on
+ * run `runId`, ending well at 11:50, before fvermaut approved it at 11:58:40.
+ */
+function breakdownEnded(runId: string): RecordEntry {
+  return {
+    kind: "step-ended",
+    at: "2026-09-27T11:50:00Z",
+    runId,
+    stage: "breakdown",
+    sessionId: "e3f8b1a6-breakdown",
+    ok: true,
+    costUsd: 1.6,
+  };
+}
+
 /** One step the fake starter started, and the handles a test drives it by. */
 interface FakeStep {
   input: StepSessionInput;
@@ -558,8 +574,9 @@ describe("the runner's actions", () => {
   });
 
   it("records a named person's approval, and starts the step that writes it into the file", async () => {
-    const { actions, store, run, steps, record } = world(featureTicket(APPROVAL_THREAD));
+    const { actions, store, run, steps, record, wrote } = world(featureTicket(APPROVAL_THREAD));
     store.claimBranch(run.id, BRANCH);
+    wrote(breakdownEnded(run.id));
 
     const result = await actions.recordApproval({
       what: "pieces",
@@ -606,8 +623,9 @@ describe("the runner's actions", () => {
   });
 
   it("merges the requirements and the pieces into the default branch once the approval is in the file, opens a ticket per piece, and ends the run", async () => {
-    const { actions, store, run, forge, steps, endAndWait, record } = world(featureTicket(APPROVAL_THREAD));
+    const { actions, store, run, forge, steps, endAndWait, record, wrote } = world(featureTicket(APPROVAL_THREAD));
     store.claimBranch(run.id, BRANCH);
+    wrote(breakdownEnded(run.id));
     forge.files.set(breakdownPath(12), TWO_PIECES);
     await actions.recordApproval({
       what: "pieces",
@@ -640,6 +658,7 @@ describe("the runner's actions", () => {
   it("merges nothing when the record no longer holds the approval of the pieces by the time its step ends", async () => {
     const { actions, root, store, run, forge, steps, endAndWait } = world(featureTicket(APPROVAL_THREAD));
     store.claimBranch(run.id, BRANCH);
+    appendEntry(root, PROJECT.name, 12, breakdownEnded(run.id));
     forge.files.set(breakdownPath(12), TWO_PIECES);
     await actions.recordApproval({
       what: "pieces",
@@ -804,5 +823,100 @@ describe("the runner's actions", () => {
         reason: "The failure came from Timone's own code.",
       },
     ]);
+  });
+
+  it("refuses a named person's comment written before the requirements step ended as their approval, and records none", async () => {
+    const { actions, store, run, wrote, steps, record } = world(featureTicket(APPROVAL_THREAD));
+    store.claimBranch(run.id, BRANCH);
+    wrote({
+      kind: "step-started",
+      at: "2026-09-27T11:20:00Z",
+      runId: run.id,
+      stage: "requirements",
+      sessionId: "c9d2-requirements",
+    });
+    wrote({
+      kind: "step-ended",
+      at: "2026-09-27T11:59:30Z",
+      runId: run.id,
+      stage: "requirements",
+      sessionId: "c9d2-requirements",
+      ok: true,
+      costUsd: 2.4,
+    });
+
+    const result = await actions.recordApproval({
+      what: "requirements",
+      commentAt: "2026-09-27T11:58:40Z",
+      reason: "fvermaut said to go ahead.",
+    });
+
+    expect(result).toEqual({ ok: false, refused: expect.stringContaining("before the requirements were finished") });
+    expect(record().filter((entry) => entry.kind === "approval")).toEqual([]);
+    expect(steps).toEqual([]);
+  });
+
+  it("records a named person's comment written after the requirements step ended as their approval", async () => {
+    const { actions, store, run, wrote, record } = world(featureTicket(APPROVAL_THREAD));
+    store.claimBranch(run.id, BRANCH);
+    wrote({
+      kind: "step-started",
+      at: "2026-09-27T11:20:00Z",
+      runId: run.id,
+      stage: "requirements",
+      sessionId: "c9d2-requirements",
+    });
+    wrote({
+      kind: "step-ended",
+      at: "2026-09-27T11:58:00Z",
+      runId: run.id,
+      stage: "requirements",
+      sessionId: "c9d2-requirements",
+      ok: true,
+      costUsd: 2.4,
+    });
+
+    const result = await actions.recordApproval({
+      what: "requirements",
+      commentAt: "2026-09-27T11:58:40Z",
+      reason: "fvermaut approved the requirements.",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(record().filter((entry) => entry.kind === "approval")).toEqual([
+      {
+        kind: "approval",
+        at: "2026-09-27T12:00:00.000Z",
+        runId: run.id,
+        what: "requirements",
+        by: "fvermaut",
+        commentAt: "2026-09-27T11:58:40Z",
+      },
+    ]);
+  });
+
+  it("refuses an approval of the list of pieces when no step of the run has written the list, and records none", async () => {
+    const { actions, store, run, wrote, steps, record } = world(featureTicket(APPROVAL_THREAD));
+    store.claimBranch(run.id, BRANCH);
+    wrote({
+      kind: "step-ended",
+      at: "2026-09-27T11:40:00Z",
+      runId: run.id,
+      stage: "breakdown",
+      sessionId: "d17a-breakdown",
+      ok: false,
+      costUsd: 0.9,
+      error: "The requirements file was not found on the branch.",
+    });
+
+    const result = await actions.recordApproval({
+      what: "pieces",
+      commentAt: "2026-09-27T11:58:40Z",
+      reason: "fvermaut said to go ahead with the pieces.",
+    });
+
+    expect(result).toEqual({ ok: false, refused: expect.stringContaining("nothing to approve") });
+    expect(record().filter((entry) => entry.kind === "approval")).toEqual([]);
+    expect(steps).toEqual([]);
   });
 });

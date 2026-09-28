@@ -179,6 +179,16 @@ function meansGoOn(answer: string | undefined): boolean {
  */
 export const DAEMON_STOPPED_EVENT = "The daemon stopped while a step was running.";
 
+/**
+ * What a `step-ended` entry says ended a step the stopped daemon took with
+ * it, so a reader of the record can tell it from one the runner stopped
+ * ({@link STOPPED_BY_RUNNER}) or one that failed by itself.
+ */
+const STOPPED_BY_DAEMON = "daemon";
+
+/** The error a step the stopped daemon took with it ends on, in the record. */
+const INTERRUPTED_STEP_ERROR = "the daemon stopped while this step was running";
+
 /** What the runner is told when a person's terminal session on the run ended (R11). */
 export const TAKEOVER_ENDED_EVENT = "The terminal session ended.";
 
@@ -640,7 +650,51 @@ export class RunnerDriver {
    * the runner, so for the runner it is still a new ticket.
    */
   reclaimed(run: Run): void {
+    this.endInterruptedSteps(run);
     this.handBack(run, run.status === "active" ? DAEMON_STOPPED_EVENT : NEW_TICKET_EVENT);
+  }
+
+  /**
+   * Write the end of each step of `run` that the record shows started and
+   * never shows ended: a step the stopped daemon took with it. Without it the
+   * brief shows the step running now while nothing runs, and the runner waits
+   * for an end that never comes (#140).
+   *
+   * Nothing of this daemon is still running such a step. A step's session is
+   * held by the daemon process that started it, and a run whose holder is
+   * alive is never reclaimed.
+   *
+   * A record that cannot be read gets nothing written: the runner reads it
+   * too, and says why it cannot (40g).
+   */
+  private endInterruptedSteps(run: Run): void {
+    const read = readRecord(this.deps.root, run.project, run.ticket);
+    if (!read.ok) {
+      this.deps.log(`runner ${run.id} — ${read.error.message}`);
+      return;
+    }
+    const entries = read.value;
+    for (const started of entries) {
+      if (started.kind !== "step-started" || started.runId !== run.id) continue;
+      const ended = entries.some(
+        (entry) =>
+          entry.kind === "step-ended" &&
+          entry.runId === run.id &&
+          entry.sessionId === started.sessionId,
+      );
+      if (ended) continue;
+      appendEntry(this.deps.root, run.project, run.ticket, {
+        kind: "step-ended",
+        at: this.deps.clock(),
+        runId: run.id,
+        stage: started.stage,
+        sessionId: started.sessionId,
+        ok: false,
+        costUsd: 0,
+        error: INTERRUPTED_STEP_ERROR,
+        stoppedBy: STOPPED_BY_DAEMON,
+      });
+    }
   }
 
   /**

@@ -341,3 +341,60 @@ describe("RunnerDriver — when a step ends", () => {
     expect(logged).toEqual([]);
   });
 });
+
+describe("RunnerDriver — when a run comes back after a daemon stop", () => {
+  it("writes the end of the step that was running, and none for the steps that had already ended", async () => {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-"));
+    tempDirs.push(root);
+    const store = RunStore.open(join(root, ".timone", "state.json"), {
+      now: () => "2026-09-27T14:00:00Z",
+    });
+    const built = builtChore(store, root);
+    appendEntry(root, "scratch-app", 12, {
+      kind: "step-started",
+      at: "2026-09-27T13:00:00Z",
+      runId: built.id,
+      stage: "delivery",
+      sessionId: "step-session-4",
+    });
+    store.claim(built.id);
+    const active = store.activate(built.id, "step-session-4");
+    const { adapter } = forge("");
+    const { sessions } = fakeWakes();
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: async () => {
+        throw new Error("no step starts in this test");
+      },
+      timonePin: async () => undefined,
+      clock: () => "2026-09-27T14:05:00Z",
+      log: () => {},
+    });
+
+    driver.reclaimed(active);
+    await driver.drain();
+
+    expect(recordOf(root).filter((entry) => entry.kind === "step-ended")).toEqual([
+      expect.objectContaining({ sessionId: "step-session-1", ok: true }),
+      expect.objectContaining({ sessionId: "step-session-2", ok: true }),
+      expect.objectContaining({ sessionId: "step-session-3", ok: true }),
+      {
+        kind: "step-ended",
+        at: "2026-09-27T14:05:00Z",
+        runId: built.id,
+        stage: "delivery",
+        sessionId: "step-session-4",
+        ok: false,
+        costUsd: 0,
+        error: "the daemon stopped while this step was running",
+        stoppedBy: "daemon",
+      },
+    ]);
+  });
+});
