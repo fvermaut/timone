@@ -494,6 +494,32 @@ npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
 
 ---
 
+### Sub-phase 40s: a map closes with its last piece, the wait says what it waits on, and the runner knows where a key goes
+
+> ✏ 2026-09-28 (build, timone#165): added at build, from the watched run's second attempt and replay run 4 ([phase-40-live-gate.md](reports/phase-40-live-gate.md), [phase-40-replay.md](reports/phase-40-replay.md)). Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/actions.ts` (or `src/runner/driver.ts`, whichever holds the end of a step ticket's run most simply) — when a step ticket's run ends because its pull request merged, and no step of its map is open any more, the map is closed with the same comment the current daemon posts (`initiativeClosedComment`), as `concludeStep` in `src/daemon/poll.ts` does. Reuse that code; do not write a second version of it.
+**[MODIFY]** `src/runner/session.ts` — after a wake in which the runner posted nothing, the run's wait says what the ticket's newest machine comment asks for (`askedFor`), not "the runner to look at what the step did".
+**[MODIFY]** `src/runner/brief.ts` — one rule: a key or secret missing in the box is added by the operator to the project's environment file beside the daemon (`.timone/env/<project>.env`), and the next step picks it up; a terminal session cannot add it. Ask for that, naming the key and the file.
+**[MODIFY]** the matching test files — new cases only; `src/daemon/poll.ts` only to export what the map-closing code needs.
+
+**Seams under test (TDD):** `runnerActions` or `RunnerDriver` (map closing), `wakeRunner` (the wait), `buildBrief` (the rule). Red-green: (1) the last open piece of a map ends after its merge, and the map is closed with the initiative-closed comment; a map with another piece still open is left open; (2) a wake that posts nothing, after a step whose comment asks a question, leaves the run waiting on that question's words; (3) the system text states where a missing key goes and that a terminal session cannot add it.
+
+> Sub-phase 40r must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run; echo "exit: $?"                             # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+- [ ] **Human gate:** fvermaut runs the full replay once more (run 5); its output is added to `reports/phase-40-replay.md`.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -559,6 +585,7 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40p → 40o                 the runner's rules carry what the replay showed missing  (✏ 2026-09-28: added at build)
 40q → 40p                 the ticket's newest message says what it needs now  (✏ 2026-09-28: added at build)
 40r → 40q                 a run waits on its pull request; the ledger knows the step; a shared reason once  (✏ 2026-09-28: added at build)
+40s → 40r                 a map closes with its last piece; the wait says what it waits on; where a key goes  (✏ 2026-09-28: added at build)
 40l → 40h, 40j, 40n, 40o, 40q, 40r  scratch-app moves; the watched run
 40m → 40l                 README
 ```

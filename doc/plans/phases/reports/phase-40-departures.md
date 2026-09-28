@@ -171,3 +171,13 @@
 **Did instead:** A new sub-phase, 40r: `endRun` refuses while the run's pull request is open; the brief says a run waits on its pull request and ends when it is merged or closed; `startStep` records the step in the ledger; the departure list says a shared reason once.
 
 **Why:** The watched run's first attempt, on scratch-app#60: the runner ended the run as soon as pull request #61 opened, exactly as the rule allowed. A change asked for on the pull request would then have reached nobody, and the ticket — still open and marked — was picked up again as new work on the next cycle, and would have been every cycle after without the hold the machine put on it. R4's "ends at a pull request" was meant as *reaches* one; the rule and the check read it as *may stop at* one. The two smaller faults were seen on the same run.
+
+## 2026-09-28 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** The plan had no slice for closing an initiative's map when its last piece merges on a runner project, for the wait text after a wake that posts nothing, or for what the runner knows about a key missing in the box.
+
+**Did instead:** A new sub-phase, 40s, covers all three. The operator runs the full replay once more after it (run 5).
+
+**Why:** The watched run's second attempt left map #62 open after its only piece merged — the current daemon closes a map in `concludeStep`, and the runner's path never reaches that code — and showed a run waiting on "the runner to look at what the step did" while it really waited on the person's answer. Replay run 4 passed #120 two tries of three; the likely reason is that the runner cannot rule out a terminal session as the way a key is added, and Timone knows it is not (ADR-0045). Without the map fix, every split feature on ivtrends would leave its map open.
