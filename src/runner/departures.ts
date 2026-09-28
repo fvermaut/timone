@@ -1,3 +1,4 @@
+import { joined } from "./comments.js";
 import type { OrderStep } from "./order.js";
 import type { RecordEntry } from "./record.js";
 
@@ -122,14 +123,54 @@ export function departureSection(departures: readonly Departure[]): string {
   if (others.length > 0) {
     if (check !== undefined) lines.push("");
     lines.push("**Steps that did not follow the default order:**");
-    for (const departure of others) {
+    for (const group of sharingAReason(others)) {
       lines.push(
-        `- ${capitalised(departure.step.label)}: ${whatHappened(departure)} ${reasonText(departure.reason)}`,
+        `- ${capitalised(joined(group.labels))}: ${whatHappened(group.first)} ${reasonText(group.first.reason)}`,
       );
     }
   }
   lines.push(DEPARTURES_END);
   return lines.join("\n");
+}
+
+/** Departures listed on one line: the first of them, and the labels of all of them. */
+interface Group {
+  first: Departure;
+  labels: string[];
+}
+
+/**
+ * `departures` gathered by what happened to them and their reason, each
+ * group where its first departure was.
+ *
+ * **One reason is said once** (40r). The runner often leaves out several
+ * steps with one reason, and scratch-app#61's list said the same reason
+ * seven times, once under each step. A person reads one line that names the
+ * steps, and the reason after them.
+ *
+ * **A step that ran out of order is never on a line with one that did not
+ * run.** The line says one thing happened to every step it names.
+ */
+function sharingAReason(departures: readonly Departure[]): Group[] {
+  const groups: Group[] = [];
+  for (const departure of departures) {
+    const group = groups.find(
+      (each) =>
+        each.first.kind === departure.kind &&
+        reasonKey(each.first.reason) === reasonKey(departure.reason),
+    );
+    if (group === undefined) groups.push({ first: departure, labels: [departure.step.label] });
+    else group.labels.push(departure.step.label);
+  }
+  return groups;
+}
+
+/**
+ * The reason as departures are grouped by it: trimmed, and one value for
+ * every reason that {@link reasonText} shows as missing.
+ */
+function reasonKey(reason: string | undefined): string {
+  return (reason ?? "").trim();
 }
 
 /** What happened to a departed step, in the words the list uses. */

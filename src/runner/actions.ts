@@ -76,10 +76,10 @@ import type {
  *
  * **The runner decides; code keeps the rules.** Each action checks what must
  * hold before it acts — a named person's approval, the spending limit, a
- * reason for every skipped step, a pull request before a run that changed
- * files may end — and refuses in plain words when it does not. The runner
- * reads the refusal and decides again. A rule written only in the runner's
- * instructions is a request; a rule here is a fact.
+ * reason for every skipped step, a pull request merged or closed before a
+ * run that changed files may end — and refuses in plain words when it does
+ * not. The runner reads the refusal and decides again. A rule written only
+ * in the runner's instructions is a request; a rule here is a fact.
  */
 
 /**
@@ -374,18 +374,6 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
     if (branch === undefined) return undefined;
     const found = await deps.adapter.findPullRequest(deps.project, branch);
     return found?.state === "open" ? found.number : undefined;
-  };
-
-  /**
-   * Whether the work on `branch` has reached a pull request: one is open, or
-   * one was merged. A merged one counts because a person has already taken
-   * the work — and after a squash merge the branch still holds commits the
-   * default branch does not, so the count alone would keep such a run from
-   * ever ending.
-   */
-  const reachedPullRequest = async (branch: string): Promise<boolean> => {
-    const found = await deps.adapter.findPullRequest(deps.project, branch);
-    return found?.state === "open" || found?.state === "merged";
   };
 
   /**
@@ -715,6 +703,19 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         interactive: true,
       });
 
+      // **The ledger learns the step before the step starts** (40r), as the
+      // daemon's own runs do, so `timone status` says what is running: on
+      // scratch-app#60 the ledger read "stage: null" for the whole build.
+      // Written after every rule above, so a refused step changes nothing.
+      // A session that does not start puts the stage back as it was. A run
+      // with no stage yet keeps the new one: the ledger has no way to clear
+      // it, and it names the step the runner is trying to start.
+      //
+      // `setStage` also clears `consumedAnswerAt` and `reAsksAfterAnswer`
+      // when the stage changes. The runner's runs never set either — both
+      // belong to the daemon's conversation waits — so nothing is lost.
+      const stageBefore = current().stage;
+      deps.store.setStage(run.id, stage);
       let session: StepSession;
       try {
         session = await deps.startStep({
@@ -725,6 +726,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
             `session ${sessionId} started for ${run.id} (${stage}, ${model}) — by the runner`,
         });
       } catch (error) {
+        if (stageBefore !== undefined) deps.store.setStage(run.id, stageBefore);
         return { ok: false, refused: `The step did not start: ${oneLine(error)}` };
       }
       watchStep(stage, session, instructions);
@@ -924,15 +926,35 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
           refused: "A step of this run is still running. Stop it, or wait for it to end.",
         };
       }
+      // **A run waits on its open pull request** (40r). A person may still
+      // ask for a change there, and only a live run answers it. A run ended
+      // with its ticket still open and marked is picked up again as new
+      // work, which is what scratch-app#60 did at 09:30:59. The forge's
+      // answer for the branch is read, not the ledger's number: it holds the
+      // state, and it names the open one when an older one was closed.
+      //
+      // A merged pull request ends the run: a person took the work, and a
+      // squash merge leaves the branch ahead, so the count alone would keep
+      // it from ever ending. A closed one may end it too: the person said no,
+      // and the runner reads why in its comments and decides.
       const { branch } = current();
       if (branch !== undefined) {
-        const ahead = await deps.adapter.aheadOfDefault(deps.project, branch);
-        if (ahead !== undefined && ahead > 0 && !(await reachedPullRequest(branch))) {
+        const found = await deps.adapter.findPullRequest(deps.project, branch);
+        if (found?.state === "open") {
           return {
             ok: false,
             refused:
-              `This run changed files on ${branch}. It ends at a pull request, ` +
-              "and there is none yet.",
+              `Pull request #${found.number} is open. The run waits on it: answer its review, ` +
+              "and end the run when it is merged or closed.",
+          };
+        }
+        const ahead = await deps.adapter.aheadOfDefault(deps.project, branch);
+        if (ahead !== undefined && ahead > 0 && found === undefined) {
+          return {
+            ok: false,
+            refused:
+              `This run changed files on ${branch}, and they have no pull request yet. ` +
+              "The run waits on one, and ends when it is merged or closed.",
           };
         }
       }

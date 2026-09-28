@@ -300,6 +300,64 @@ describe("RunnerDriver — when a step ends", () => {
     ]);
   });
 
+  it("points the ledger at the branch's new open pull request when the one it holds was closed and the redone work opened another", async () => {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-"));
+    tempDirs.push(root);
+    const store = RunStore.open(join(root, ".timone", "state.json"), {
+      now: () => "2026-09-27T16:00:00Z",
+    });
+    const run = builtChore(store, root);
+    // #21 was closed without merging. The work was done again, and delivering
+    // opened #22 on the same branch.
+    store.recordPullRequest(run.id, 21);
+    const pullRequest22: PullRequest = {
+      number: 22,
+      title: "Fix the README spelling",
+      url: "https://github.com/fvermaut/scratch-app/pull/22",
+      state: "open",
+      headSha: "ccccccc",
+    };
+    let description22 = "## What changed\n\nThe README now says \"receive\".";
+    const adapter: TicketingAdapter = {
+      ...forge("").adapter,
+      async findPullRequest(_project, branch) {
+        return branch === BRANCH ? pullRequest22 : undefined;
+      },
+      async getPullRequestBody(_project, number) {
+        if (number !== 22) throw new Error(`no open pull request ${number}`);
+        return description22;
+      },
+      async setPullRequestBody(_project, number, next) {
+        if (number !== 22) throw new Error(`no open pull request ${number}`);
+        description22 = next;
+      },
+    };
+    const { sessions, wakes } = fakeWakes();
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: async () => {
+        throw new Error("no step starts in this test");
+      },
+      timonePin: async () => undefined,
+      clock: () => "2026-09-27T16:00:00Z",
+      log: () => {},
+    });
+
+    await driver.stepEnded(run.id, "delivery", {
+      outcome: { sessionId: "step-session-6", ok: true },
+    });
+    await driver.drain();
+
+    expect(store.get(run.id)?.pr).toBe(22);
+    expect(wakes).toHaveLength(1);
+  });
+
   it("wakes nobody, and touches nothing, when the step's end already ended the run", async () => {
     // 40e: the step that records the approval of the list of pieces merges it
     // and ends the run before the driver is told the step ended.

@@ -219,7 +219,9 @@ export function runnerTools(actions: RunnerActions): SdkMcpToolDefinition<any>[]
     ),
     tool(
       "end_run",
-      "End this run. A run that changed files can end only once its pull request is open.",
+      "End this run. A run that changed files waits while its pull request is open. " +
+        "End it when the pull request is merged, and close the ticket then, or when it is closed. " +
+        "A run that changed nothing can end at any time.",
       endRunInput.shape,
       async (args) => answer(await actions.endRun(args)),
     ),

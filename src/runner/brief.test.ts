@@ -533,3 +533,28 @@ describe("the runner's rule that the ticket's newest comment says what the ticke
     expect(rule).toContain("do nothing");
   });
 });
+
+describe("the runner's rule that a run waits on its pull request", () => {
+  it("has a run that changed files wait on its open pull request, answer its review, and end it when the pull request is merged or closed", () => {
+    const rule = actRule("waits on its pull request");
+
+    expect(rule).toContain("A run that changed the project's files waits on its pull request.");
+    expect(rule).toContain("While the pull request is open, answer its review, and do not end the run.");
+    expect(rule).toContain("When it is merged, end the run and close the ticket.");
+    expect(rule).toContain("When it is closed without merging, follow the rule below for a pull request closed without merging.");
+  });
+
+  it("no longer lets a run end because its pull request is open", () => {
+    const { system } = buildBrief(briefInput());
+
+    expect(system).not.toContain("End a run only when its pull request is open");
+    expect(system).not.toContain("ends at a pull request");
+  });
+
+  it("says a ticket left open with the timone label and no run is picked up again, so a finished run ends with the ticket closed", () => {
+    const rule = actRule("picked up again as new work");
+
+    expect(rule).toContain("A ticket that is still open, with the label timone, and has no run, is picked up again as new work.");
+    expect(rule).toContain("So when a run's work is finished, end the run and close the ticket.");
+  });
+});

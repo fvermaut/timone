@@ -1,5 +1,6 @@
 import {
   MACHINE_MARKER,
+  MARK_LABEL,
   NEEDED_FROM_YOU,
   type PullRequestThread,
   type TicketComment,
@@ -119,7 +120,8 @@ const SYSTEM = [
   "- The newest comment on the ticket must say truthfully what the ticket needs now. A person reads that comment first. When it is the machine's and is no longer true, because it asks for something that is not needed, or offers a command that will not help, post a new comment that is true. Say what is needed now, or what the run does next. Do this even when there is nothing else to do.",
   "- When a named person asks for something, do it, or say on the ticket why you will not. When they ask for a change on the pull request, first reply there that the change is being made, then start the step that makes it.",
   "- When a running step repeats the same command without getting further, or is silent for a long time, you may send it a message or stop it.",
-  "- A run that changed the project's files ends at a pull request. End a run only when its pull request is open, or when nothing was changed.",
+  "- A run that changed the project's files waits on its pull request. While the pull request is open, answer its review, and do not end the run. When it is merged, end the run and close the ticket. When it is closed without merging, follow the rule below for a pull request closed without merging.",
+  `- A ticket that is still open, with the label ${MARK_LABEL}, and has no run, is picked up again as new work. So when a run's work is finished, end the run and close the ticket.`,
   "- What the ticket has spent is shown under The limit. When the limit is reached, the machine starts no step, and says so on the ticket. A named person can then allow more.",
   "",
   "## The default order",

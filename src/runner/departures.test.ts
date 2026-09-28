@@ -166,4 +166,169 @@ describe("the departures a pull request lists", () => {
 
     expect(departuresOf(entries, RUN, defaultOrder("chore"))).toEqual([]);
   });
+
+  it("lists three steps that did not run for one reason as one line naming the three, with the reason once", () => {
+    const entries: RecordEntry[] = [
+      started("triage", "2026-09-28T09:00:00.000Z"),
+      {
+        kind: "departure",
+        at: "2026-09-28T09:05:00.000Z",
+        runId: RUN,
+        skipped: ["clarification", "requirements", "requirements-approval"],
+        reason: "fvermaut wrote on the ticket that this is a small change and can go straight to the pieces.",
+      },
+      started("breakdown", "2026-09-28T09:06:00.000Z"),
+      {
+        kind: "approval",
+        at: "2026-09-28T09:30:00.000Z",
+        runId: RUN,
+        what: "pieces",
+        by: "fvermaut",
+        commentAt: "2026-09-28T09:29:00.000Z",
+      },
+      started("planning", "2026-09-28T09:31:00.000Z"),
+      started("execution", "2026-09-28T09:50:00.000Z"),
+      started("verification", "2026-09-28T10:20:00.000Z"),
+      started("delivery", "2026-09-28T10:40:00.000Z"),
+    ];
+
+    expect(departureSection(departuresOf(entries, RUN, defaultOrder("feature")))).toBe(
+      [
+        "<!-- timone:departures -->",
+        "**Steps that did not follow the default order:**",
+        "- Asking what you need, writing down what it needs and your approval of the requirements: did not run. " +
+          "Reason: fvermaut wrote on the ticket that this is a small change and can go straight to the pieces.",
+        "<!-- /timone:departures -->",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps a skipped check as its own first line when it shares its reason with the steps grouped below it", () => {
+    const reason = "fvermaut wrote on the ticket that this is a small change and can go straight to the pieces.";
+    const entries: RecordEntry[] = [
+      started("triage", "2026-09-28T09:00:00.000Z"),
+      {
+        kind: "departure",
+        at: "2026-09-28T09:05:00.000Z",
+        runId: RUN,
+        skipped: ["clarification", "requirements", "requirements-approval"],
+        reason,
+      },
+      started("breakdown", "2026-09-28T09:06:00.000Z"),
+      {
+        kind: "approval",
+        at: "2026-09-28T09:30:00.000Z",
+        runId: RUN,
+        what: "pieces",
+        by: "fvermaut",
+        commentAt: "2026-09-28T09:29:00.000Z",
+      },
+      started("planning", "2026-09-28T09:31:00.000Z"),
+      started("execution", "2026-09-28T09:50:00.000Z"),
+      {
+        kind: "departure",
+        at: "2026-09-28T10:19:00.000Z",
+        runId: RUN,
+        skipped: ["verification"],
+        reason,
+      },
+      started("delivery", "2026-09-28T10:20:00.000Z"),
+    ];
+
+    expect(departureSection(departuresOf(entries, RUN, defaultOrder("feature")))).toBe(
+      [
+        "<!-- timone:departures -->",
+        "**Not checked.** No session other than the one that built this work checked it. " +
+          "Reason: fvermaut wrote on the ticket that this is a small change and can go straight to the pieces.",
+        "",
+        "**Steps that did not follow the default order:**",
+        "- Asking what you need, writing down what it needs and your approval of the requirements: did not run. " +
+          "Reason: fvermaut wrote on the ticket that this is a small change and can go straight to the pieces.",
+        "<!-- /timone:departures -->",
+      ].join("\n"),
+    );
+  });
+
+  it("does not put a step that ran out of order on one line with a step that did not run, though they share a reason", () => {
+    const entries: RecordEntry[] = [
+      {
+        kind: "departure",
+        at: "2026-09-28T09:00:00.000Z",
+        runId: RUN,
+        skipped: ["triage", "planning"],
+        reason: "The ticket says it is a small change that can go straight to building.",
+      },
+      started("execution", "2026-09-28T09:01:00.000Z"),
+      started("planning", "2026-09-28T09:20:00.000Z"),
+      started("verification", "2026-09-28T09:30:00.000Z"),
+      started("delivery", "2026-09-28T09:45:00.000Z"),
+    ];
+
+    expect(departureSection(departuresOf(entries, RUN, defaultOrder("chore")))).toBe(
+      [
+        "<!-- timone:departures -->",
+        "**Steps that did not follow the default order:**",
+        "- Sorting the request: did not run. Reason: The ticket says it is a small change that can go straight to building.",
+        "- Preparing the work: ran out of order. Reason: The ticket says it is a small change that can go straight to building.",
+        "<!-- /timone:departures -->",
+      ].join("\n"),
+    );
+  });
+
+  it("lists steps with no reason given on one line, a reason of only spaces counted as none", () => {
+    const entries: RecordEntry[] = [
+      { kind: "departure", at: "2026-09-28T09:00:00.000Z", runId: RUN, skipped: ["triage"] },
+      { kind: "departure", at: "2026-09-28T09:00:30.000Z", runId: RUN, skipped: ["planning"], reason: "   " },
+      started("execution", "2026-09-28T09:01:00.000Z"),
+      started("verification", "2026-09-28T09:30:00.000Z"),
+      started("delivery", "2026-09-28T09:45:00.000Z"),
+    ];
+
+    expect(departureSection(departuresOf(entries, RUN, defaultOrder("chore")))).toBe(
+      [
+        "<!-- timone:departures -->",
+        "**Steps that did not follow the default order:**",
+        "- Sorting the request and preparing the work: did not run. No reason given.",
+        "<!-- /timone:departures -->",
+      ].join("\n"),
+    );
+  });
+
+  it("puts each line where the first step it names was, when steps with one reason are not next to each other", () => {
+    const goAhead = "fvermaut wrote on the ticket to go ahead without waiting for him.";
+    const entries: RecordEntry[] = [
+      started("triage", "2026-09-28T09:00:00.000Z"),
+      { kind: "departure", at: "2026-09-28T09:05:00.000Z", runId: RUN, skipped: ["clarification"], reason: goAhead },
+      started("requirements", "2026-09-28T09:06:00.000Z"),
+      {
+        kind: "departure",
+        at: "2026-09-28T09:30:00.000Z",
+        runId: RUN,
+        skipped: ["requirements-approval"],
+        reason: "The requirements only say again what the ticket says.",
+      },
+      started("breakdown", "2026-09-28T09:31:00.000Z"),
+      {
+        kind: "departure",
+        at: "2026-09-28T09:50:00.000Z",
+        runId: RUN,
+        skipped: ["pieces-approval", "planning"],
+        reason: goAhead,
+      },
+      started("execution", "2026-09-28T09:51:00.000Z"),
+      started("verification", "2026-09-28T10:20:00.000Z"),
+      started("delivery", "2026-09-28T10:40:00.000Z"),
+    ];
+
+    expect(departureSection(departuresOf(entries, RUN, defaultOrder("feature")))).toBe(
+      [
+        "<!-- timone:departures -->",
+        "**Steps that did not follow the default order:**",
+        "- Asking what you need, your approval of the list of pieces and preparing the work: did not run. " +
+          "Reason: fvermaut wrote on the ticket to go ahead without waiting for him.",
+        "- Your approval of the requirements: did not run. Reason: The requirements only say again what the ticket says.",
+        "<!-- /timone:departures -->",
+      ].join("\n"),
+    );
+  });
 });

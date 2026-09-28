@@ -351,6 +351,51 @@ function world(ticket: TicketThread = featureTicket()): World {
   };
 }
 
+/**
+ * The runner's actions on run `scratch-app#12/1`, as {@link world} builds
+ * them, with a step starter that writes down the run's stage in the ledger at
+ * the moment it is called. With `start: "fails"`, it then throws, as a box
+ * that cannot start does.
+ */
+function stageWatchingWorld(start: "starts" | "fails") {
+  const root = mkdtempSync(join(tmpdir(), "timone-actions-"));
+  tempDirs.push(root);
+  const store = RunStore.open(join(root, ".timone", "state.json"));
+  const { run: registered } = store.register(PROJECT.name, 12);
+  const run = store.activate(registered.id, "runner-session-1");
+  const { adapter } = fakeForge(featureTicket(), []);
+  const stagesAtStart: (string | undefined)[] = [];
+  const startStep = async (): Promise<StepSession> => {
+    stagesAtStart.push(store.get(run.id)?.stage);
+    if (start === "fails") throw new Error("the box did not start: no space left on the disk");
+    return { sessionId: "session-1", completed: new Promise<StepResult>(() => {}), stop: () => {} };
+  };
+  const actions = runnerActions(
+    {
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      timonePin: async () => undefined,
+      project: PROJECT,
+      ticketContext: { isStep: false, isRemediation: false },
+      startStep,
+      running: new RunningSteps(),
+      stepEnded: async () => {},
+      clock: () => "2026-09-27T12:00:00.000Z",
+      log: () => {},
+    },
+    run,
+  );
+  return {
+    store,
+    run,
+    actions,
+    stagesAtStart,
+    wrote: (entry: RecordEntry) => appendEntry(root, PROJECT.name, 12, entry),
+  };
+}
+
 /** A step that finished its work, having cost `costUsd`. */
 function finished(sessionId: string, costUsd: number): StepResult {
   return {
@@ -442,6 +487,95 @@ describe("the runner's actions", () => {
 
     expect(result.ok).toBe(true);
     expect(store.get(run.id)?.status).toBe("done");
+  });
+
+  it("refuses to end a run while its pull request is open, leaves it running, and closes no ticket", async () => {
+    const { actions, store, run, forge } = world();
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 2;
+    forge.pullRequest = {
+      number: 31,
+      title: "A due date on each task",
+      url: "https://github.com/fvermaut/scratch-app/pull/31",
+      state: "open",
+      headSha: "9e1d0b7",
+    };
+
+    const result = await actions.endRun({
+      reason: "The pull request is open, so the work is delivered.",
+      closeTicket: true,
+    });
+
+    expect(result).toEqual({ ok: false, refused: expect.stringContaining("Pull request #31 is open") });
+    expect(store.get(run.id)?.status).toBe("active");
+    expect(forge.closed).toEqual([]);
+  });
+
+  it("ends a run whose pull request was closed without merging, though its branch is still ahead", async () => {
+    const { actions, store, run, forge } = world();
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 2;
+    forge.pullRequest = {
+      number: 31,
+      title: "A due date on each task",
+      url: "https://github.com/fvermaut/scratch-app/pull/31",
+      state: "closed",
+      headSha: "9e1d0b7",
+    };
+
+    const result = await actions.endRun({
+      reason: "fvermaut closed the pull request and wrote that the feature is not wanted.",
+      closeTicket: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(store.get(run.id)?.status).toBe("done");
+    expect(forge.closed).toEqual([{ number: 12, reason: "completed" }]);
+  });
+
+  it("records the step's stage in the ledger before its session starts, and leaves it there while the step runs", async () => {
+    const { actions, store, run, stagesAtStart } = stageWatchingWorld("starts");
+
+    const result = await actions.startStep({
+      stage: "triage",
+      instructions: "Sort this request.",
+      reason: "A new ticket.",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(stagesAtStart).toEqual(["triage"]);
+    expect(store.get(run.id)?.stage).toBe("triage");
+  });
+
+  it("puts the ledger's stage back as it was when the step's session does not start", async () => {
+    const { actions, store, run, wrote } = stageWatchingWorld("fails");
+    wrote(triageRan(run.id));
+    store.setStage(run.id, "triage");
+
+    const result = await actions.startStep({
+      stage: "clarification",
+      instructions: "Ask fvermaut what a late task is.",
+      reason: "The ticket is sorted. Asking what is needed is next.",
+    });
+
+    expect(result).toEqual({ ok: false, refused: expect.stringContaining("no space left on the disk") });
+    expect(store.get(run.id)?.stage).toBe("triage");
+  });
+
+  it("leaves the ledger's stage as it was when a step is refused", async () => {
+    const { actions, store, run, wrote, stagesAtStart } = stageWatchingWorld("starts");
+    wrote(triageRan(run.id));
+    store.setStage(run.id, "triage");
+
+    const result = await actions.startStep({
+      stage: "requirements",
+      instructions: "Write the requirements for due dates.",
+      reason: "The ticket is clear.",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(stagesAtStart).toEqual([]);
+    expect(store.get(run.id)?.stage).toBe("triage");
   });
 
   it("refuses a step that leaves out a step of the default order when no reason is given, and starts nothing", async () => {

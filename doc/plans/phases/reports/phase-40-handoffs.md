@@ -1294,3 +1294,131 @@ $ npx vitest run
 - **A pass is either answer from run 3.** A new ticket comment that asks for the key passes. So does a new ticket comment together with a step started to carry on, such as building without a live call, or delivering with the live check listed as not run. The order of the two does not matter.
 - **A fail points at one of three things, named in the "wanted" words.** "a new comment on the ticket that says what it needs now": the try posted nothing, as run 3's try 3 did, so the runner did not follow the new rule. "no comment that offers the takeover command again": the try offered the command. "the new comment asks for what is needed, or goes with a step started to carry on": the try posted a comment that asks for nothing, and started no step.
 - The rule is in "How you act", which every case reads. A full replay after run 4 should watch ivtrends#1, whose matcher fails any comment on the ticket. Its newest comment asks for nothing, so the rule should not make the runner post there. #159 and #125/#135 have a newest machine comment that asks for something that is no longer needed. The runner may now also post there. Their matchers read only the step started, so a post does not fail them.
+
+## 40r — a run waits on its pull request, the ledger knows the step, and a shared reason is said once
+
+**Built.** Three faults from the watched run's first attempt on scratch-app#60 are fixed in code.
+
+1. `endRun` refuses while the run's pull request is open: "Pull request #N is open. The run waits on it: answer its review, and end the run when it is merged or closed." A merged pull request ends the run, as before. A pull request closed without merging now also lets the run end. Before, a closed one was refused as "there is none yet". A run that changed nothing still ends.
+2. `startStep` writes the step's stage into the ledger (`store.setStage`) just before the step's session starts, after every rule check. A refused step leaves the stage as it was. A session that fails to start puts the stage back.
+3. `departureSection` puts departures that share one reason on one line, which names the steps and gives the reason once. A skipped check is still the first line on its own. A step that ran out of order is never on a line with steps that did not run.
+
+In the runner's rules, the line that let a run end once its pull request was open is replaced by two lines. The first says the run waits on its pull request. The second says an open ticket with the `timone` label and no run is picked up again.
+
+**Files touched.**
+
+- `src/runner/actions.ts` — `endRun`: one `findPullRequest` call for the branch. It refuses when the pull request is `open`. When the branch is ahead, it refuses only when there is no pull request at all. The refusal for "changed files, no pull request" is reworded to match the new rule; the check itself is unchanged. The helper `reachedPullRequest` is removed, since it is no longer used. `startStep`: `setStage` before `deps.startStep`, and the old stage put back if the start throws. The module comment now says "merged or closed".
+- `src/runner/brief.ts` — in `SYSTEM`, under "How you act", one line replaced by two. `MARK_LABEL` is imported so the label's name comes from the code.
+- `src/runner/departures.ts` — `departureSection` lists groups. New private `sharingAReason` and `reasonKey`. `joined` is imported from `comments.ts`.
+- `src/runner/actions.test.ts` — five new cases, and a new helper `stageWatchingWorld`. The helper is a copy of `world`, with a step starter that writes down the ledger's stage when it is called, and can fail. No existing line changed.
+- `src/runner/brief.test.ts` — one new `describe` with three cases. They use 40q's `actRule`. No existing line changed.
+- `src/runner/departures.test.ts` — five new cases. **No existing `departureSection` case's expected text changed.** Every existing case has either one departure or departures with different reasons, so grouping does not change its text.
+
+**Decisions taken inside the slice.**
+
+1. **The open pull request is read from the forge, by the branch, not from `run.pr`.** The ledger's number holds no state, and it stays set after a merge. It also stays on an old pull request when a newer one opens (see the last point below). `findPullRequest` gives the state, and returns the open pull request first when a branch has several.
+2. **The open check comes before the "ahead" check, and does not depend on it.** An open pull request means the run waits, whatever the commit count says.
+3. **A closed pull request lets the run end.** The plan says "A merged or closed pull request … may end". The runner still reads the 40p rule and does the work again when the comments say what was wrong. The code no longer stops a run whose pull request a person closed because the work is not wanted.
+4. **`setStage` sits after every refusal and after the notice that says a step was skipped, just before `deps.startStep`.** So nothing that refuses can leave a changed stage. A mutation test shows this (below).
+5. **If the session does not start, the old stage is put back, when there was one.** The ledger has no way to clear a stage. A run that had no stage keeps the new one after a failed first start, and the refusal tells the runner the step did not start. This one case goes against "a refused start changes nothing". Clearing a stage would need a change to `runs.ts`, which this slice may not touch.
+6. **`setStage`'s side effects are harmless here.** A real change of stage clears `consumedAnswerAt` and `reAsksAfterAnswer`. The runner never sets either. `consumedAnswerAt` is written only by the daemon's resume path (`poll.ts`). `reAsksAfterAnswer` counts only for a `conversation` wait, and the runner parks with the wait kind `runner`. The driver's `parkForRunner` already writes the ended step's stage when a step ends. So now the ledger shows the step while it runs, and it still shows it afterwards.
+7. **Grouping is by what happened to the step and by the reason, trimmed.** A missing reason and a reason of only spaces group together, as "No reason given." Each line sits where its first step was in the order. A group of one reads exactly as before.
+8. **The brief's own list of departures ("Departures so far, which the pull request will list") is not grouped.** The plan names only `departureSection`. The runner still sees one line per step, with the same content as the pull request but a different layout.
+9. **The rule about a closed pull request is named by what it says:** "follow the rule below for a pull request closed without merging". That rule opens "When a pull request was closed without merging…". The label is written as `${MARK_LABEL}`, the same way the brief already writes `${HELD_LABEL}`.
+
+**Validation evidence.**
+
+The seams were `runnerActions`, `buildBrief` and `departureSection`. Each case was written first and run red, then made green. A case marked *guard* passed on its first run, because the code for an earlier case already covered it. For a guard, a temporary one-line break in the code was run to show the test catches it, and then the break was undone (`grep -c MUTATION` gave 0 after each).
+
+| Plan case | Test | Red (trimmed) | Green |
+| --- | --- | --- | --- |
+| (1) | "refuses to end a run while its pull request is open, leaves it running, and closes no ticket" | `expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }`; received `"said": "The run is ended, and ticket #12 is closed."` | 26 of 26 |
+| (1) | "ends a run whose pull request was merged, though a squash merge left its branch ahead" (existing, 40e) | not new; green before and after | — |
+| (1) | "ends a run whose pull request was closed without merging, though its branch is still ahead" | `expected false to be true` at `expect(result.ok).toBe(true)` | 27 of 27 |
+| (2) | "records the step's stage in the ledger before its session starts, and leaves it there while the step runs" | `expected [ undefined ] to deeply equal [ 'triage' ]` | 28 of 28 |
+| (2) | "puts the ledger's stage back as it was when the step's session does not start" | `expected 'clarification' to be 'triage'` | 29 of 29 |
+| (2) | "leaves the ledger's stage as it was when a step is refused" — *guard* | break: `setStage` moved to the top of `startStep` → `expected 'requirements' to be 'triage'` | 30 of 30 |
+| (3) | "has a run that changed files wait on its open pull request, answer its review, and end it when the pull request is merged or closed" | `expected '' to contain 'A run that changed the project\'s fil…'` | 29 of 29 |
+| (3) | "no longer lets a run end because its pull request is open" | `expected 'You are the runner. Timone is a machi…' not to contain 'End a run only when its pull request …'` | 29 of 29 |
+| (3) | "says a ticket left open with the timone label and no run is picked up again, so a finished run ends with the ticket closed" | `expected '' to contain 'A ticket that is still open, with the…'` | 29 of 29 |
+| (4) | "lists three steps that did not run for one reason as one line naming the three, with the reason once" | received three lines, `- Asking what you need: did not run. Reason: …`, `- Writing down what it needs: …`, `- Your approval of the requirements: …`, each with the same reason | 7 of 7 |
+| (4) | "keeps a skipped check as its own first line when it shares its reason with the steps grouped below it" — *guard* | break: check left in the groups → the group line ended `… your approval of the requirements and checking the result: did not run.` | 8 of 8 |
+| (4) | "does not put a step that ran out of order on one line with a step that did not run, though they share a reason" | received `- Sorting the request and preparing the work: did not run.`, so preparing the work was called "did not run" when it ran out of order | 9 of 9 |
+| (4) | "lists steps with no reason given on one line, a reason of only spaces counted as none" — *guard* | break: reason not trimmed → two lines, `- Sorting the request: … No reason given.` and `- Preparing the work: … No reason given.` | 11 of 11 |
+| (4) | "puts each line where the first step it names was, when steps with one reason are not next to each other" — *guard* | passed on its first run; no break was tried | 11 of 11 |
+
+The three case (3) tests were added together as one case, the rule and its two sentences, and went red together. One edit made all three green.
+
+The brief's line, before:
+
+> - A run that changed the project's files ends at a pull request. End a run only when its pull request is open, or when nothing was changed.
+
+After:
+
+> - A run that changed the project's files waits on its pull request. While the pull request is open, answer its review, and do not end the run. When it is merged, end the run and close the ticket. When it is closed without merging, follow the rule below for a pull request closed without merging.
+> - A ticket that is still open, with the label timone, and has no run, is picked up again as new work. So when a run's work is finished, end the run and close the ticket.
+
+A grouped departure section, built through the real `departuresOf` and `departureSection` by a scratch script outside the repo. The record has the same shape as #60's: seven steps skipped in one departure, then building, checking and delivering. The reason is typed by the machine; #60's real reason was not copied:
+
+```
+<!-- timone:departures -->
+**Steps that did not follow the default order:**
+- Sorting the request, asking what you need, writing down what it needs, your approval of the requirements, working out the pieces, your approval of the list of pieces and preparing the work: did not run. Reason: The ticket says this is a small change that can go straight to building, with no separate plan.
+<!-- /timone:departures -->
+```
+
+With a skipped check that has the same reason (test (4b) above), the section opens with `**Not checked.** No session other than the one that built this work checked it. Reason: …`, then a blank line, the heading, and the grouped line without the check.
+
+The dry replay's one `end_run` right call is #99's, and its pull request is `merged`, so the new refusal does not touch it. No other case's right calls end a run.
+
+The three commands, after the last edit:
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  55 passed (55)
+      Tests  1904 passed (1904)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+… (19 lines, all PASS; #99 — End the run, and free the project. 3 of 3 tries.)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+The suite had 1891 tests before the slice and has 1904 now: 5 new in `actions.test.ts`, 3 in `brief.test.ts`, and 5 in `departures.test.ts`.
+
+- [x] Red→green evidence in the handoff: every new case is in the table above, with its red output or, for a guard, the break it caught.
+
+**What the second watched run must know.**
+
+- **The `end_run` tool's own description still gives the old rule.** It reads: "End this run. A run that changed files can end only once its pull request is open." (`src/runner/tools.ts`, line 222). This slice may not change that file. The runner reads the description at every wake, and it contradicts the new rule in the brief. The code refuses anyway, so the worst case is an `end_run` call that is refused in plain words. It should still be changed to match the brief before the second attempt, for example "End this run. A run that changed files ends only once its pull request is merged or closed." No test pins its text.
+- **After delivery, the run should now stay open.** Expected in the ledger: the run is `parked`, waiting for the runner, with `stage: delivery` and `pr` set. On the ticket, no second "Picked this up" note. The runner is woken by a named person's comment on the pull request (R9's second half), and by the merge ("Pull request #N was merged."). It should then end the run with the ticket closed.
+- **While a step runs, `timone status` should name the step,** because the ledger's `stage` is written before the session starts.
+- **The departure list on the pull request should show one line for the skipped steps,** if they share a reason, and one "Not checked" line first if checking was skipped.
+- **One gap is left, and this slice cannot close it.** The driver records `run.pr` only once, the first time a pull request is open (`rewriteDepartures`), and it watches only that pull request. The case: a pull request is closed, the work is done again, and a new pull request opens on the same branch. The runner is then never told when the new one is merged or commented on, and `endRun` refuses while the new one is open, so the run waits until a person comments on the ticket. Before this slice the run had already ended when a pull request opened, so the gap could not show. The second attempt's plan (one pull request, a change asked for on it, then a merge) does not reach it. A driver fix would update `run.pr` when the branch's open pull request is a different one.
+
+**Follow-up, granted after the first handoff (see the ✏ note under 40r's file list).** Both open points above are now done in this slice.
+
+- `src/runner/tools.ts` — the `end_run` description now reads: "End this run. A run that changed files waits while its pull request is open. End it when the pull request is merged, and close the ticket then, or when it is closed. A run that changed nothing can end at any time." No test pins it.
+- `src/runner/driver.ts` — in `rewriteDepartures`, which runs after every step, the ledger's pull request is set to the branch's open one whenever the two numbers differ, not only when the ledger has none. `store.recordPullRequest` overwrites a value already there without refusing, so `runs.ts` needed no change. The "noticed" marks for a merge or close carry the pull request's number (`pull request #N merged`), so a new pull request's merge is told to the runner even after the old one's close was told.
+- `src/runner/driver.test.ts` — one new case. No existing line changed.
+
+Case (5), at `RunnerDriver.stepEnded`: "points the ledger at the branch's new open pull request when the one it holds was closed and the redone work opened another". The ledger holds #21, the branch's open pull request is #22, and a delivering step ends. Red: `AssertionError: expected 21 to be 22`. Green after the change: 4 of 4 in `driver.test.ts`.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  55 passed (55)
+      Tests  1905 passed (1905)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+… (19 lines, all PASS)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+So the first and last points under "What the second watched run must know" no longer apply. The other three still do.

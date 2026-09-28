@@ -818,10 +818,11 @@ export class RunnerDriver {
   }
 
   /**
-   * Record the run's pull request once one is open for its branch, and put
-   * the list of departures at the top of its description (R5), in place of
-   * the list written after the step before. The rest of the description —
-   * what the step wrote, and anything a person added — is kept as it was.
+   * Record the run's pull request whenever the branch's open one is not the
+   * one the ledger holds, and put the list of departures at the top of its
+   * description (R5), in place of the list written after the step before.
+   * The rest of the description — what the step wrote, and anything a person
+   * added — is kept as it was.
    *
    * Worked out from the record, which only the machine writes, and never
    * from what the runner says of itself.
@@ -833,7 +834,12 @@ export class RunnerDriver {
     const { adapter } = this.deps;
     const found = await adapter.findPullRequest(project, run.branch);
     if (found?.state !== "open") return;
-    if (run.pr === undefined) this.deps.store.recordPullRequest(run.id, found.number);
+    // **The ledger follows the branch's open pull request** (40r). A run now
+    // waits on its pull request, and the poll reads only the one the ledger
+    // names. When that one was closed and the redone work opened another,
+    // the new one's comments and its merge would otherwise never reach the
+    // runner, and the run would wait with nothing to wake it.
+    if (run.pr !== found.number) this.deps.store.recordPullRequest(run.id, found.number);
     const ticket = await adapter.getTicket(project, run.ticket);
     const kind = ticketKindOf(ticket.labels, this.contexts.get(run.id) ?? NO_CONTEXT);
     const section = departureSection(departuresOf(entries, run.id, defaultOrder(kind)));
