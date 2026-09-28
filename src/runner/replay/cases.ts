@@ -1724,7 +1724,8 @@ function goAheadWithoutTheWatchedRun(): ReplayCase {
 
 /**
  * #120. A takeover session ended without clearing the stop, and the ticket
- * offered the same command again, for ever.
+ * offered the same command again, for ever. The ticket ends with the note
+ * the session left when it ended, which offers that command again.
  */
 function aTerminalSessionThatClearedNothing(): ReplayCase {
   const project = "ivtrends";
@@ -1772,16 +1773,20 @@ function aTerminalSessionThatClearedNothing(): ReplayCase {
             ].join("\n"),
           ),
           // The note the terminal session left when it ended, as the real
-          // one did on #120: without it, nothing the runner is shown says the
-          // key is still missing, and building again would be a fair reading.
+          // one on #120 did: it could not clear the stop, and it offered the
+          // same command again. Without the note, nothing the runner is shown
+          // says the key is still missing, and building again would be a fair
+          // reading. Its last line must point at the command, as the real one
+          // did, and not at the key: a note that already asks for the key
+          // makes doing nothing the right answer (replay run 2).
           byMachine(
             "2026-09-10T12:25:00Z",
             [
               "**The terminal session ended, and the build is still stopped.** I could not clear the stop: the box " +
-                "still has no `POLYGON_API_KEY`, so the prices cannot be fetched. Only fvermaut can add the key, in " +
-                "the box's secrets.",
+                "still has no `POLYGON_API_KEY`, and nothing written in the session added it. The prices still cannot " +
+                "be fetched.",
               "",
-              `${NEEDED_FROM_YOU} add \`POLYGON_API_KEY\` to the box's secrets.`,
+              `${NEEDED_FROM_YOU} run \`timone takeover ivtrends#97\` in your terminal again.`,
             ].join("\n"),
           ),
         ],
