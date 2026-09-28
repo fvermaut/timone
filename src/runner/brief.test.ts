@@ -417,3 +417,79 @@ describe("the brief the runner is given each time it wakes", () => {
     );
   });
 });
+
+const STOP_RULES = "## What the written process says when work stops";
+
+/**
+ * The lines of the runner's rules under {@link STOP_RULES}, up to the next
+ * heading; none when the heading is missing. Each rule is one line.
+ */
+function stopRules(): string[] {
+  const lines = buildBrief(briefInput()).system.split("\n");
+  const start = lines.indexOf(STOP_RULES);
+  if (start === -1) return [];
+  const rest = lines.slice(start + 1);
+  const end = rest.findIndex((line) => line.startsWith("## "));
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** The one rule under {@link STOP_RULES} that holds `words`, or "" when none does. */
+function stopRule(words: string): string {
+  return stopRules().find((line) => line.includes(words)) ?? "";
+}
+
+describe("the runner's rules for when work stops, as the written process says them", () => {
+  it("has a wrong line of the requirements corrected by the step that writes them, then checked again, and asks only for a choice", () => {
+    const rule = stopRule("a line of the requirements is wrong");
+
+    expect(rule).toContain("says the opposite of another line");
+    expect(rule).toContain("start writing down what it needs");
+    expect(rule).toContain("which line to change");
+    expect(rule).toContain("start checking the result again");
+    expect(rule).toContain("Ask a person only when the right answer is a choice that only they can make");
+  });
+
+  it("has a pull request closed without merging done again from its comments, without asking", () => {
+    const rule = stopRule("closed without merging");
+
+    expect(rule).toContain("its comments say what was wrong");
+    expect(rule).toContain("do the work again from those comments");
+    expect(rule).toContain("Start at the step they point to");
+    expect(rule).toContain("Do not ask");
+  });
+
+  it("does not let a check only a person can run stop delivering, and has it listed as not run on the pull request", () => {
+    const rule = stopRule("only a person can run");
+
+    expect(rule).toContain("does not stop delivering");
+    expect(rule).toContain("Start delivering again");
+    expect(rule).toContain("open the pull request");
+    expect(rule).toContain("list that check as not run");
+  });
+
+  it("carries a question a step asks after the list of pieces is agreed to the pull request, and does not stop for it", () => {
+    const rule = stopRule("a question a step asks");
+
+    expect(rule).toContain("After the list of pieces is agreed");
+    expect(rule).toContain("does not stop the run");
+    expect(rule).toContain("Carry on");
+    expect(rule).toContain("put the question on the pull request");
+  });
+
+  it("does not use the hold to wait for a person, only to stop the work when a named person asks", () => {
+    const rule = stopRule("Do not put the hold on to wait for a person");
+
+    expect(rule).toContain("the run waits by itself");
+    expect(rule).toContain("Put the hold on only when a named person asks you to stop the work");
+  });
+
+  it("at a 15-minute check, messages a step that ran the whole test suite more than twice to run only the tests of what it changes", () => {
+    const rule = stopRule("At a 15-minute check");
+
+    expect(rule).toContain("the whole test suite");
+    expect(rule).toContain("more than twice since the last check");
+    expect(rule).toContain("send it a message");
+    expect(rule).toContain("run only the tests of what it changes while it works");
+    expect(rule).toContain("the whole suite once at the end");
+  });
+});

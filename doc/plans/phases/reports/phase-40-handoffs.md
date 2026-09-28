@@ -1117,3 +1117,80 @@ Each claim, and what it was checked against:
 - The section describes the runner as built, not as watched. When the watched run (40l) passes and ivtrends moves to the runner, the sentence "ivtrends stays on the fixed order until a watched run on scratch-app has passed" must change in the same change that edits `timone.yaml`.
 - The "Everyday commands" list still describes `timone retry` as re-arming a failed run. That stays true for projects on the fixed order. Once every project is on the runner (PRD-05 R20), that line and the fixed-order sentences in this section go.
 - The link to `phase-40-live-gate.md` points at a report that today says "Not run yet". That is the intended reading: it is what the watched run checks.
+
+## 40p — the runner's rules carry what the replay showed missing
+
+**Built.** The runner's rules gain a section, *What the written process says when work stops*, with six rules. It sits after "The default order" and before "Who may instruct you". Each rule is one line of the system text and says what to do and why. The six rules cover: a wrong line in the requirements (#108); a pull request closed without merging, whose comments say what was wrong (#111); a check that only a person can run (#159); a question asked once building has started (ADR-0056); the hold (#108, #159); and the whole test suite run again and again (#110). In the replay, #120's ticket gains the note the terminal session left when it ended. #104's matcher now accepts a start at `breakdown` or at `planning`.
+
+**Files touched.**
+
+- `src/runner/brief.ts` — the new section in `SYSTEM`: a heading and six bullets. No other line changed.
+- `src/runner/brief.test.ts` — one new `describe` at the end, with six cases and two small helpers (`stopRules`, `stopRule`) and the constant `STOP_RULES`. No existing line changed.
+- `src/runner/replay/cases.ts` — #120: one machine comment added to the ticket's thread, with a code comment saying why. #104: the matcher's first condition, its `wanted` words, and its comment. No other case, and nothing else in these two, changed. The right calls did not change.
+
+**Decisions taken inside the slice.**
+
+1. **Steps are named by the labels the brief already uses**: "writing down what it needs", "checking the result", "delivering", "building", "preparing the work". Stage ids are not used in the system text. #108 is a chore, and a chore's order does not show "writing down what it needs". So the rule adds "the step that writes the requirements", to let the runner match it to `requirements` in `start_step`'s list. `start_step` accepts a stage outside the order with no reason needed (`skippedBy` returns nothing for it), and the dry run's #108 pass shows this.
+2. **"The step that writes the requirements", not "the one step that may change them".** Process.md stage 6 lets building change a contradicted requirement too, so "the one step" would be false.
+3. **The hold rule gives one reason, not two.** An earlier draft ended "With the hold on, a person must take the label off before the work goes on." That is not true: in #142 the runner takes the hold off itself when a named person asks, and `start_step` does not refuse on a held ticket. The reason kept is "After you ask, the run waits by itself, and their answer wakes you." This was checked against `settle` in `session.ts` (after a wake, the run is left waiting on what the runner asked) and against `driver.ts` (a named person's comment wakes the run, even on a held ticket).
+4. **"A person", not "the operator".** The brief never uses "operator". The rule says "a check that only a person can run", and gives a watched run against a real service with their own key as the example. ADR-0059 D1 says every live check needs a person watching it.
+5. **The question rule covers chores too.** The plan says "after the list of pieces was agreed". A chore has no list of pieces, so the rule adds "and always once building has started". ADR-0056 names building, checking and delivering.
+6. **#110 says what "the whole test suite" looks like**: "(a test command that names no test file)". The runner sees the step's commands as `Bash(npx playwright test)`, and needs to tell that from a run of one file. The rule says to send a message. It does not forbid stopping the step: the existing rule ("you may send it a message or stop it") stays as it was.
+7. **No existing rule changed, and none contradicts the new ones.** "When a named person asks for something, do it…" stays; the hold rule agrees with it. "Skipping the check of the work…" stays. The check rule is about one check inside the checking step's report, not about skipping the step. No sentence in the system text, the prompt, or the tool descriptions tells the runner to use the hold to wait. One place outside this slice's files does describe the hold that way: the code comment in `driver.ts` (around line 417) says "The hold is how the runner, or a person, says 'wait for someone'". It is not shown to the runner, and it was not changed here.
+8. **Each test finds its rule by one phrase, then checks the key words on that same line.** So the words must all be in one rule, not spread over the text. When the rule is missing, the helper gives "", and the test fails with `expected '' to contain '…'`.
+9. **#120's note** is dated `2026-09-10T12:25:00Z`, 30 seconds before the wake (`now` is 12:25:30). It is a plain machine comment (`byMachine`) with no step marker, because the terminal session is not a step. It says the stop could not be cleared, that the box still has no `POLYGON_API_KEY`, and that only fvermaut can add it. It ends with the `NEEDED_FROM_YOU` line asking for the key. It does not contain `timone takeover`. The right call, the `run`, the `record`, the `events` and the `judge` did not change.
+10. **#104's matcher** now accepts the first step started at `breakdown` or at `planning`. Its other two conditions did not change: a departure naming `clarification`, and a ticket comment before that step. The comment explains why: for a feature, planning begins with the list of pieces (process.md stage 5). The `wanted` words now name both steps.
+
+**Validation evidence.** Red before green, one rule at a time, at `buildBrief` (pure). Each red was run and seen before its text was added.
+
+| # | Test | Red (trimmed) | Green |
+| --- | --- | --- | --- |
+| 1 (#108) | "has a wrong line of the requirements corrected by the step that writes them, then checked again, and asks only for a choice" | `AssertionError: expected '' to contain 'says the opposite of another line'` (the section did not exist) | 19 of 19 |
+| 2 (#111) | "has a pull request closed without merging done again from its comments, without asking" | `AssertionError: expected '' to contain 'its comments say what was wrong'` | 20 of 20 |
+| 3 (#159) | "does not let a check only a person can run stop delivering, and has it listed as not run on the pull request" | `AssertionError: expected '' to contain 'does not stop delivering'` | 21 of 21 |
+| 4 (ADR-0056) | "carries a question a step asks after the list of pieces is agreed to the pull request, and does not stop for it" | `AssertionError: expected '' to contain 'After the list of pieces is agreed'` | 22 of 22 |
+| 5 (hold) | "does not use the hold to wait for a person, only to stop the work when a named person asks" | `AssertionError: expected '' to contain 'the run waits by itself'` | 23 of 23 |
+| 6 (#110) | "at a 15-minute check, messages a step that ran the whole test suite more than twice to run only the tests of what it changes" | `AssertionError: expected '' to contain 'the whole test suite'` | 24 of 24 |
+
+After the six were green, two sentences were corrected (decisions 2 and 3). The tests stayed green at 24 of 24, because neither change removed a key phrase.
+
+The section as written:
+
+> ## What the written process says when work stops
+>
+> - When a step stops because a line of the requirements is wrong, or says the opposite of another line, start writing down what it needs, the step that writes the requirements. Say in its instructions which line to change, and to what. Then start checking the result again. Ask a person only when the right answer is a choice that only they can make.
+> - When a pull request was closed without merging, and its comments say what was wrong, do the work again from those comments. Start at the step they point to, such as preparing the work when only the work was wrong. Do not ask what to do: the comments already say it.
+> - A check that only a person can run, such as a watched run against a real service with their own key, does not stop delivering. Start delivering again, and tell it to open the pull request and list that check as not run. The person sees it there before they merge.
+> - After the list of pieces is agreed, and always once building has started, a question a step asks does not stop the run. Carry on, and when you start delivering, tell it to put the question on the pull request. The person answers it there, when they review.
+> - Do not put the hold on to wait for a person. After you ask, the run waits by itself, and their answer wakes you. Put the hold on only when a named person asks you to stop the work.
+> - At a 15-minute check, when the step has run the whole test suite (a test command that names no test file) more than twice since the last check, send it a message: run only the tests of what it changes while it works, and the whole suite once at the end. The whole suite is slow, and once at the end is enough.
+
+The #104 matcher was also checked by hand, with a script that was then deleted. It was given sample calls: the call the real runner made in run 1 (a ticket comment, then a start at `breakdown`, with the departure) gives `{"ok":true}`, and so does a start at `planning`. A start at `requirements` gives `wanted: "working out the pieces (breakdown) or preparing the work (planning) started"`. A comment posted after the step gives `wanted: "a comment on the ticket before the step started"`.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/runner/; echo "exit: $?"
+ Test Files  11 passed (11)
+      Tests  104 passed (104)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+… (19 lines, all PASS, #108 #111 #159 #120 #104 #110 among them)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+$ npx vitest run
+ Test Files  55 passed (55)
+      Tests  1889 passed (1889)
+```
+
+- [x] Red→green evidence in the handoff: all six rules went red, then green, one at a time (table above).
+- [ ] **Human gate:** fvermaut runs `npm run --silent replay` again from his own terminal, and its output is added to `reports/phase-40-replay.md` as run 2. Not done here: the build's sandbox has no model login. The run is his.
+
+**What the operator's second replay must know.**
+
+- Run it from a terminal where `claude auth status` says logged in, in `projects/timone`: `npm run --silent replay | tee /tmp/phase-40-replay-2.txt`. Run 1 cost $2.42 for all nineteen cases. `npm run --silent replay -- --case 108` runs only the case named (`--case` can be given more than once), which helps when checking one rule again.
+- **What each of the six failures now meets.** #108, #111, #159 and #110 meet a new rule. #120 meets a ticket that now says the key is still missing: the right answer is to ask for the key, not to start the build or offer the terminal session again. #104 now passes when the runner starts working out the pieces, as it did three times in run 1. That call was right by the written order.
+- **Where a failure would point.** On #108, if the runner starts `requirements` but also puts the hold on, the matcher still passes: it reads only the first step. The hold would then go against the new rule, so it is worth reading the try's calls. On #110, the matcher also fails a try that stops the step. The new rule says to send a message, but it does not forbid a stop. A try that stops the step would point at that gap, not at the case.
+- The thirteen cases that passed in run 1 read the same rules, plus the new section. The ones closest to the new text are #142 (take the hold off, then start: the hold rule does not forbid taking it off) and #115 (start nothing on a ticket finished by hand: the new rules start nothing there). Neither case changed.

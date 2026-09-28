@@ -1771,6 +1771,19 @@ function aTerminalSessionThatClearedNothing(): ReplayCase {
               `${NEEDED_FROM_YOU} ${takeover}`,
             ].join("\n"),
           ),
+          // The note the terminal session left when it ended, as the real
+          // one did on #120: without it, nothing the runner is shown says the
+          // key is still missing, and building again would be a fair reading.
+          byMachine(
+            "2026-09-10T12:25:00Z",
+            [
+              "**The terminal session ended, and the build is still stopped.** I could not clear the stop: the box " +
+                "still has no `POLYGON_API_KEY`, so the prices cannot be fetched. Only fvermaut can add the key, in " +
+                "the box's secrets.",
+              "",
+              `${NEEDED_FROM_YOU} add \`POLYGON_API_KEY\` to the box's secrets.`,
+            ].join("\n"),
+          ),
         ],
       }),
       run: { status: "parked", stage: "execution", waitingOn: takeover, branch },
@@ -2282,11 +2295,20 @@ function requirementsAlreadyApproved(): ReplayCase {
     // The departure is the machine's to post and record: it does both when a
     // step that leaves steps out is started with a reason, before the step
     // starts. So the three calls are read in the order they happened.
+    //
+    // "Start planning" is met at either of its two steps. For a feature,
+    // planning begins with the list of pieces (process.md stage 5), so a
+    // runner that starts working out the pieces has started planning; one
+    // that starts preparing the work has skipped the list as well, with a
+    // reason.
     judge: (seen) => {
-      const planning = firstIndex(seen, (call) => call.kind === "step-started" && call.stage === "planning");
+      const planning = firstIndex(
+        seen,
+        (call) => call.kind === "step-started" && (call.stage === "breakdown" || call.stage === "planning"),
+      );
       const told = firstIndex(seen, (call) => call.kind === "posted" && call.where === "ticket");
       return allOf(
-        when(planning !== -1, `${named("planning")} started`),
+        when(planning !== -1, `${named("breakdown")} or ${named("planning")} started`),
         when(
           seen.entries.some((entry) => entry.kind === "departure" && entry.skipped.includes("clarification")),
           "a departure recorded that names the interview (clarification)",
