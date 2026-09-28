@@ -1422,3 +1422,92 @@ exit: 0
 ```
 
 So the first and last points under "What the second watched run must know" no longer apply. The other three still do.
+
+## 40s — a map closes with its last piece, the wait says what it waits on, and the runner knows where a key goes
+
+**Built.** Three fixes from the watched run's second attempt (scratch-app#62 and its piece #63).
+
+1. When the runner ends a run with `end_run`, the run's pull request was merged, and the ticket is a piece of a map, the map is closed once no piece of it is open. It gets the comment the current daemon posts (`initiativeClosedComment`). The code is the daemon's own: the part of `concludeStep` that closes the map is now an exported function in `poll.ts`, `closeInitiativeIfDone`, and both paths call it.
+2. After a wake in which the runner posted nothing on the ticket, the run waits on what the ticket's newest machine comment asks for (`askedFor`). Before, it kept "the runner to look at what the step did".
+3. The runner's rules gain one line. A key or secret missing where a step runs is added to the project's environment file, in the folder the daemon runs from (`.timone/env/<project>.env`). The next step reads it. A terminal session cannot add it. The runner asks for that, and names the key and the file.
+
+**Files touched.**
+
+- `src/daemon/poll.ts` — the second half of `concludeStep` moved, unchanged, into `closeInitiativeIfDone(deps, project, initiative, log)`, which is exported. `concludeStep` calls it after it closes the step. It takes `Pick<PollDeps, "store" | "adapter">`, so the runner can pass its own deps. No behaviour change: `poll.test.ts` passes unchanged, 230 of 230.
+- `src/runner/actions.ts` — `endRun` keeps whether the branch's pull request is merged. After the run is completed and the ticket closed, it calls `closeInitiativeIfDone` when the pull request was merged and the ledger's picture lists the ticket as a piece of a map. What `endRun` says to the runner did not change.
+- `src/runner/session.ts` — `settle` is now async, and `wakeRunner` awaits it. When the runner posted nothing, it reads the ticket once more and takes the newest comment with `fromTimone`. Two new private helpers: `waitingRun` (the old early returns, asked before and after the read) and `newestMachineComment` (a forge failure is logged and gives undefined).
+- `src/runner/brief.ts` — one line in `SYSTEM`, in "What the written process says when work stops", after the rule on a check only a person can run. `RUN_ENV_DIR` is imported from `run-env.ts`.
+- `src/runner/actions.test.ts` — a new helper, `pieceOfAMap`, and one new `describe` with two cases. No existing line changed.
+- `src/runner/session.test.ts` — one new `describe` with two cases. No existing line changed.
+- `src/runner/brief.test.ts` — one new `describe` with one case, using 40p's `stopRule`. No existing line changed.
+
+**Decisions taken inside the slice.**
+
+1. **The map closes in `endRun`, not in the driver.** When the driver sees the merge, the piece's ticket is still open: the runner closes it later, in `end_run`. The map can only close after that, so the driver would need a second place to watch for it. `endRun` already reads the pull request's state from the forge and closes the ticket, so one call there is all the new wiring.
+2. **Facts decide, never the runner's words.** Three facts: the forge says the branch's pull request is merged (the `findPullRequest` answer `endRun` already reads); the ledger's picture (`store.initiativeFor`, written by each cycle's survey from the forge) lists the ticket as a piece of the map; and the forge says no piece is open (`listSteps`, inside the shared code). The runner's reason plays no part. If the runner ends the run and leaves the ticket open (`closeTicket: false`), that piece is still open, so the map stays open.
+3. **`poll.ts` gained a function, not only an export.** `concludeStep` also posts "Merged — this step is done." on the piece and closes it. The runner already closes the piece itself, and writes its own last comment there. Calling `concludeStep` whole would post a second comment and close the ticket twice. So the part that closes the map was moved out as it was, and `concludeStep` calls it. Its log lines, and their order, are the same. This is the smallest change that lets both paths use one copy.
+4. **Only a piece of a map counts.** `initiativeFor` also matches a map's own number. `endRun` checks `map.steps.includes(run.ticket)`, so a run on the map ticket itself never reaches this code.
+5. **Only a merge closes a map, as in the daemon.** Suppose a piece's pull request is closed without merging, and the runner then closes the piece's ticket. The map stays open, as it would under `concludeStep`, which runs only on a merge. No test pins this.
+6. **The newest machine comment is read from the forge after the session, not from the brief's copy.** The actions may have posted in between: the limit notice, for one. This is one more forge call for each wake that posts nothing. A forge that fails there is logged, the wait that stood stays, and the wake still ends as `ended`.
+7. **Any "What I need from you" line counts, "nothing" included.** The runner's own post is already read this way (`askedFor(asked)`, with no filter), so the two cases read the same. A step comment that asks for "nothing — the check starts next" then gives that wait, and not the stale "the runner to look at what the step did". `timone status` already treats a wait that starts with "nothing" as not waiting on the person (`cta.ts`). A comment with no such line leaves the wait as it was.
+8. **"Newest" is by time.** On a tie, the later comment in the list wins. Every machine comment counts, the step's and the runner's alike. When the newest is the runner's own earlier post, the wait is the same as before.
+9. **The rule's words.** It names the place, not a person: "the operator" is not used, as the brief never uses it (40p decision 4), and "the box" is not used either ("where it runs"). The path is built from `RUN_ENV_DIR`, the constant the step's own instructions use: `container-runtime.ts` tells a step to name a missing value and say it belongs in `${RUN_ENV_DIR}/${project}.env`. So the step's words and the runner's agree. The system text is the same for every project, so it says `<project>` and tells the runner to put the project's name there. The prompt names the project under "The ticket".
+10. **The rule sits after the rule on a check only a person can run,** since both are about a key the machine does not have.
+11. **The new import makes a cycle**: `poll.ts` → `cta.ts` → `runner/session.ts` → `runner/actions.ts` → `poll.ts`. No module uses a binding from the cycle while it loads: `actions.ts` calls `closeInitiativeIfDone` only inside `endRun`. Each of `poll.ts`, `cta.ts`, `runner/session.ts`, `runner/actions.ts`, `runner/driver.ts` and `commands/daemon.ts` was loaded first on its own, with `tsx`, and each loaded.
+
+**Validation evidence.** The seams were `runnerActions`, `wakeRunner` and `buildBrief`. Each case was written first and run red, then made green. A case marked *guard* passed on its first run. For a guard, a temporary break in the code was run to show the test catches it, and then undone (`grep -c MUTATION` gave 0 after each).
+
+| Plan case | Test | Red (trimmed) | Green |
+| --- | --- | --- | --- |
+| (1) | "closes the map with the comment that says what was built, once its last open piece ends after its merge" | `expected [ { number: 12, reason: 'completed' } ] to deeply equal [ { number: 12, …(1) }, …(1) ]` | 31 of 31 |
+| (1) | "leaves the map open, with nothing posted on it, when another of its pieces is still open" — *guard* | break: the open-piece check in `closeInitiativeIfDone` made `false && …` → `expected [ { number: 12, …(1) }, …(1) ] to deeply equal [ { number: 12, reason: 'completed' } ]` | 32 of 32 |
+| (2) | "waits on what the ticket's newest machine comment asks for, after a step whose comment asked a question" | `expected { …(4) } to match object { kind: 'runner', …(1) }`, received `"on": "the runner to look at what the step did"` | 17 of 17 |
+| (2) | "keeps the wait it had, and still ends the wake, when the ticket cannot be read once the session has ended" — *guard* | break: the `catch` in `newestMachineComment` rethrows → `Error: GitHub answered 502 Bad Gateway` | 18 of 18 |
+| (3) | "says a missing key is added to the project's environment file beside the daemon, that the next step reads it, and that a terminal session cannot add it" | `expected '' to contain 'the project\'s environment file'` (no such rule) | 30 of 30 |
+
+Case (1)'s map is #10, with two pieces: #11, built earlier with pull request #29, and #12, this run's, with pull request #31. The comment the test expects on #10 is written out by hand in the test, not built by the code:
+
+```
+**Done — this ticket is finished.**
+
+All 2 pieces were built.
+The work went in with pull requests #29 and #31.
+
+**What I need from you:** nothing — file a new ticket for anything else.
+```
+
+The order of the forge calls is `close 12`, then that comment on #10, then `close 10`.
+
+The rule as written:
+
+> - When a step stops because a key or secret is missing where it runs, ask for the key to be added to the project's environment file, in the folder the daemon runs from: `.timone/env/<project>.env`, with this project's name in place of `<project>`. The next step reads that file when it starts. A terminal session cannot add it. Name the key and the file in your comment.
+
+The three commands, after the last edit:
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  55 passed (55)
+      Tests  1910 passed (1910)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+… (19 lines, all PASS; #120 — Not offer the same command again. Say what is actually needed. 3 of 3 tries.)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+The suite had 1905 tests before the slice and has 1910 now: 2 new in `actions.test.ts`, 2 in `session.test.ts`, and 1 in `brief.test.ts`.
+
+- [x] Red→green evidence in the handoff: every new case is in the table above, with its red output or, for a guard, the break it caught.
+- [ ] **Human gate:** fvermaut runs the full replay once more (run 5), and its output is added to `reports/phase-40-replay.md`. Not done here: the build's sandbox has no model login. The run is his.
+
+**What the operator's run 5 must know.**
+
+- Run it in `projects/timone`, from a terminal where `claude auth status` says logged in: `npm run --silent replay | tee /tmp/phase-40-replay-5.txt`.
+- **Only the rule can change what the model does.** Every case reads it, because it is in the system text. The case closest to it is #120 (the missing `POLYGON_API_KEY`). Its matcher passes a new comment that asks for something, or a new comment together with a step started to carry on. It fails a comment that offers `timone takeover`. The rule should make the comment ask for `POLYGON_API_KEY` in `.timone/env/ivtrends.env`. The matcher does not read the words, so a comment that names another file would still pass. Read the tries' comments on #120 to see whether the rule was followed.
+- **The other two fixes are code, and the replay does not show them.** Every try goes through the new `settle`, but the judges read the calls and the status, not the wait. The replay's forge lists no pieces and its ledger holds no map, so the map-closing code is never reached. The unit tests above are what show them. Live, the wait shows on any run: when a step asks a question and the runner posts nothing, `timone status` shows the question's own words. The map closing shows only on a run that has a map: when the last piece's run ends after its merge, the map gets "Done — this ticket is finished." and closes.
+- **A map with one piece gets "All 1 pieces were built."** That is the daemon's own wording, in `initiativeClosedComment`, which this slice may not change. #62 had one piece, so the same case will come up again.
+- **scratch-app#62 is still open.** This slice does not close it: the code runs only when a run ends. It can be closed by hand.

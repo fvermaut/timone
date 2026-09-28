@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   NEEDED_FROM_YOU,
   type PullRequestThread,
+  type TicketComment,
   type TicketingAdapter,
   type TicketingProject,
 } from "../adapters/ticketing.js";
@@ -253,7 +254,7 @@ export async function wakeRunner(
           error: end.kind === "failed" ? end.error : STOPPED,
         },
   );
-  if (end.kind === "ended") settle(actionDeps, run.id, asked);
+  if (end.kind === "ended") await settle(actionDeps, run.id, asked);
   return end;
 }
 
@@ -427,18 +428,71 @@ type ResultMessage = z.infer<typeof resultMessage>;
  * An `active` run is left alone: a step's session made it active, and when
  * that step ends the driver puts the run back on the runner's wait.
  *
- * The wait names what the runner last asked for on the ticket. When it asked
- * nothing in this wake, what it asked before still stands.
+ * The wait names what the runner last asked for on the ticket. When it
+ * posted nothing in this wake, the wait names what the ticket's newest
+ * machine comment asks for (40s): a step's question, which the runner
+ * judged still true. On scratch-app#62 the questions step asked four
+ * questions, the runner posted nothing, and the run went on waiting on "the
+ * runner to look at what the step did", so `timone status` said the wrong
+ * thing. When that comment asks nothing either, what was asked before still
+ * stands.
  */
-function settle(deps: RunnerActionDeps, runId: string, asked: string | undefined): void {
-  const run = deps.store.get(runId);
+async function settle(
+  deps: RunnerActionDeps,
+  runId: string,
+  asked: string | undefined,
+): Promise<void> {
+  if (waitingRun(deps, runId) === undefined) return;
+  const said = asked ?? (await newestMachineComment(deps, runId));
+  // Read again: the forge was asked in between.
+  const run = waitingRun(deps, runId);
   if (run === undefined) return;
-  if (deps.running.has(runId)) return;
-  if (run.status !== "picked-up" && run.status !== "parked") return;
   const standing = run.wait?.kind === "runner" ? run.wait.on : undefined;
   const waitingOn =
-    (asked === undefined ? undefined : askedFor(asked)) ?? standing ?? RUNNER_DEFAULT_WAIT;
+    (said === undefined ? undefined : askedFor(said)) ?? standing ?? RUNNER_DEFAULT_WAIT;
   putOnRunnersWait(deps, run, waitingOn);
+}
+
+/**
+ * The run, when nothing else holds it now: no step of it is running, and it
+ * has not ended. Otherwise undefined, and {@link settle} leaves it alone.
+ */
+function waitingRun(deps: RunnerActionDeps, runId: string): Run | undefined {
+  const run = deps.store.get(runId);
+  if (run === undefined) return undefined;
+  if (deps.running.has(runId)) return undefined;
+  if (run.status !== "picked-up" && run.status !== "parked") return undefined;
+  return run;
+}
+
+/**
+ * The words of the newest comment the machine wrote on the run's ticket, or
+ * undefined when it wrote none.
+ *
+ * **Never a reason for the wake to fail.** A forge that does not answer
+ * gives undefined, and the wait that stood before stays: the session has
+ * already run, and what it did is in the record.
+ */
+async function newestMachineComment(
+  deps: RunnerActionDeps,
+  runId: string,
+): Promise<string | undefined> {
+  const run = deps.store.get(runId);
+  if (run === undefined) return undefined;
+  try {
+    const ticket = await deps.adapter.getTicket(deps.project, run.ticket);
+    let newest: TicketComment | undefined;
+    for (const comment of ticket.comments) {
+      if (!comment.fromTimone) continue;
+      if (newest === undefined || Date.parse(comment.createdAt) >= Date.parse(newest.createdAt)) {
+        newest = comment;
+      }
+    }
+    return newest?.body;
+  } catch (error) {
+    deps.log(`runner ${runId} — the ticket could not be read to say what the run waits on: ${oneLine(error)}`);
+    return undefined;
+  }
 }
 
 /**

@@ -28,6 +28,7 @@ import {
   type ChunkZeroApproval,
   type ChunkZeroDeps,
 } from "../daemon/chunk-zero.js";
+import { closeInitiativeIfDone } from "../daemon/poll.js";
 import {
   failedComment,
   isPrompted,
@@ -938,8 +939,10 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       // it from ever ending. A closed one may end it too: the person said no,
       // and the runner reads why in its comments and decides.
       const { branch } = current();
+      let merged = false;
       if (branch !== undefined) {
         const found = await deps.adapter.findPullRequest(deps.project, branch);
+        merged = found?.state === "merged";
         if (found?.state === "open") {
           return {
             ok: false,
@@ -961,9 +964,21 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       deps.store.complete(run.id);
       if (closeTicket) {
         await deps.adapter.closeTicket(deps.project, run.ticket, "completed");
-        return { ok: true, said: `The run is ended, and ticket #${run.ticket} is closed.` };
       }
-      return { ok: true, said: "The run is ended." };
+      // **A map closes with its last piece** (40s), as the daemon closes one
+      // in `concludeStep`, and with the same code. On scratch-app#62 the map
+      // stayed open after its one piece, #63, merged and closed. Facts
+      // decide it, never the runner's words: the forge says the pull
+      // request merged, the ledger's picture says the ticket is a piece of
+      // a map, and the forge says whether any piece is still open. A piece
+      // the runner leaves open keeps the map open.
+      const map = deps.store.initiativeFor(deps.project.name, run.ticket);
+      if (merged && map !== undefined && map.steps.includes(run.ticket)) {
+        await closeInitiativeIfDone(deps, deps.project, map.initiative, deps.log);
+      }
+      return closeTicket
+        ? { ok: true, said: `The run is ended, and ticket #${run.ticket} is closed.` }
+        : { ok: true, said: "The run is ended." };
     }),
   };
 }

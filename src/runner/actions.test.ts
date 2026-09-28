@@ -1054,3 +1054,122 @@ describe("the runner's actions", () => {
     expect(steps).toEqual([]);
   });
 });
+
+/**
+ * The runner's actions on run `scratch-app#12/1`, whose ticket is a piece of
+ * the map #10, and whose pull request #31 was merged. The map's other piece,
+ * #11, was built first by a run of its own, whose pull request #29 was
+ * merged; `otherPiece` says whether its ticket is closed or still open. The
+ * forge lists the map's pieces with the state each ticket has now, so a
+ * ticket closed by the actions reads as closed.
+ */
+function pieceOfAMap(otherPiece: "closed" | "open") {
+  const root = mkdtempSync(join(tmpdir(), "timone-actions-"));
+  tempDirs.push(root);
+  const store = RunStore.open(join(root, ".timone", "state.json"));
+  const { run: earlier } = store.register(PROJECT.name, 11);
+  store.activate(earlier.id, "step-session-11");
+  store.recordPullRequest(earlier.id, 29);
+  store.complete(earlier.id);
+  const { run: registered } = store.register(PROJECT.name, 12);
+  const run = store.activate(registered.id, "runner-session-1");
+  store.claimBranch(run.id, BRANCH);
+  store.recordPullRequest(run.id, 31);
+  store.rememberInitiative({
+    project: PROJECT.name,
+    initiative: 10,
+    title: "Due dates on tasks",
+    steps: [11, 12],
+    done: otherPiece === "closed" ? 1 : 0,
+  });
+  const calls: string[] = [];
+  const { adapter, state } = fakeForge(featureTicket(), calls);
+  state.ahead = 3;
+  state.pullRequest = {
+    number: 31,
+    title: "A due date on each task",
+    url: "https://github.com/fvermaut/scratch-app/pull/31",
+    state: "merged",
+    headSha: "9e1d0b7",
+  };
+  const closedBefore = otherPiece === "closed" ? [11] : [];
+  const listSteps: TicketingAdapter["listSteps"] = async () =>
+    [11, 12].map((number) => ({
+      number,
+      title: `Piece #${number}`,
+      state:
+        closedBefore.includes(number) || state.closed.some((closed) => closed.number === number)
+          ? ("closed" as const)
+          : ("open" as const),
+      labels: [],
+      assignees: [],
+      blockedBy: [],
+      dependenciesIncomplete: false,
+    }));
+  const actions = runnerActions(
+    {
+      store,
+      adapter: { ...adapter, listSteps },
+      manifest: MANIFEST,
+      root,
+      timonePin: async () => undefined,
+      project: PROJECT,
+      ticketContext: { isStep: true, isRemediation: false },
+      startStep: async () => {
+        throw new Error("no test here starts a step");
+      },
+      running: new RunningSteps(),
+      stepEnded: async () => {},
+      clock: () => "2026-09-27T12:00:00.000Z",
+      log: () => {},
+    },
+    run,
+  );
+  return { store, run, forge: state, calls, actions };
+}
+
+describe("the end of a run on a piece of a map", () => {
+  it("closes the map with the comment that says what was built, once its last open piece ends after its merge", async () => {
+    const { actions, store, run, forge, calls } = pieceOfAMap("closed");
+
+    const result = await actions.endRun({
+      reason: "fvermaut merged pull request #31.",
+      closeTicket: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(store.get(run.id)?.status).toBe("done");
+    expect(forge.closed).toEqual([
+      { number: 12, reason: "completed" },
+      { number: 10, reason: "completed" },
+    ]);
+    expect(forge.comments).toEqual([
+      {
+        number: 10,
+        body: [
+          "**Done — this ticket is finished.**",
+          "",
+          "All 2 pieces were built.",
+          "The work went in with pull requests #29 and #31.",
+          "",
+          "**What I need from you:** nothing — file a new ticket for anything else.",
+        ].join("\n"),
+      },
+    ]);
+    expect(calls).toEqual(["close 12", "comment **Done — this ticket is finished.**", "close 10"]);
+  });
+
+  it("leaves the map open, with nothing posted on it, when another of its pieces is still open", async () => {
+    const { actions, store, run, forge } = pieceOfAMap("open");
+
+    const result = await actions.endRun({
+      reason: "fvermaut merged pull request #31.",
+      closeTicket: true,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(store.get(run.id)?.status).toBe("done");
+    expect(forge.closed).toEqual([{ number: 12, reason: "completed" }]);
+    expect(forge.comments).toEqual([]);
+  });
+});

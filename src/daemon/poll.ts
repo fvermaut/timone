@@ -2703,11 +2703,31 @@ async function concludeStep(
   deps: PollDeps,
   log: (message: string) => void,
 ): Promise<void> {
-  const { store, adapter } = deps;
+  const { adapter } = deps;
 
   await adapter.postComment(project, run.ticket, stepMergedComment(pr));
   await adapter.closeTicket(project, run.ticket, "completed");
   log(`closed ${run.id} — step #${run.ticket} of #${initiative}`);
+
+  await closeInitiativeIfDone(deps, project, initiative, log);
+}
+
+/**
+ * Close an initiative when no step of it is open, with the comment that says
+ * what was built and what was dropped ({@link initiativeClosedComment}).
+ *
+ * ✏ 40s: taken out of {@link concludeStep} unchanged, and exported, so the
+ * runner's `endRun` closes a map with this same code when its last piece's
+ * run ends after a merge. Two copies of it would drift. It needs only the
+ * ledger and the forge, so that is all it asks for.
+ */
+export async function closeInitiativeIfDone(
+  deps: Pick<PollDeps, "store" | "adapter">,
+  project: TicketingProject,
+  initiative: number,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
 
   const steps = await adapter.listSteps(project, initiative);
   if (steps.some((step) => step.state === "open")) {

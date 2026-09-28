@@ -730,3 +730,83 @@ describe("a runner that fails", () => {
     });
   });
 });
+
+describe("what a run waits on after a wake in which the runner posted nothing", () => {
+  it("waits on what the ticket's newest machine comment asks for, after a step whose comment asked a question", async () => {
+    const w = world();
+    // The step that asks what the ticket needs has ended, and the driver put
+    // the run back on the runner's wait, as it does after every step.
+    w.store.park(w.run.id, {
+      waitingOn: "the runner to look at what the step did",
+      kind: "runner",
+      stage: "clarification",
+      waitCursor: "2026-09-27T11:59:30Z",
+      resolvableBy: ["clarification"],
+    });
+    w.forge.thread.comments.push({
+      author: "timone-agent",
+      body:
+        "**I have two questions before I write down what you need.**\n\n" +
+        "1. Should a task with no due date go last in the list? I suggest yes.\n" +
+        "2. Should a late task show its date in red, or only its title? I suggest the date.\n\n" +
+        '**What I need from you:** answer the two questions, or reply "yes to all" to take my suggestions.',
+      createdAt: "2026-09-27T11:59:10Z",
+      fromTimone: true,
+    });
+    const runner = scriptedRunner([quiet(0.05)]);
+
+    await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+      w.store.get(w.run.id)!,
+      ["The step asking what you need ended: it succeeded."],
+    );
+
+    expect(w.forge.posted).toEqual([]);
+    const parked = w.store.get(w.run.id);
+    expect(parked?.status).toBe("parked");
+    expect(parked?.wait).toMatchObject({
+      kind: "runner",
+      on: 'answer the two questions, or reply "yes to all" to take my suggestions.',
+    });
+  });
+
+  it("keeps the wait it had, and still ends the wake, when the ticket cannot be read once the session has ended", async () => {
+    const w = world();
+    w.store.park(w.run.id, {
+      waitingOn: 'read them and reply "approved", or say what to change.',
+      kind: "runner",
+      waitCursor: "2026-09-27T11:59:30Z",
+      resolvableBy: ["requirements"],
+    });
+    // The forge answers while the brief is built, and stops answering once
+    // the session has ended.
+    const actionsFor = (run: Run): RunnerActionDeps => {
+      const deps = w.actionDeps(run);
+      const adapter = new Proxy(deps.adapter, {
+        get(target, name) {
+          if (name !== "getTicket") return Reflect.get(target, name);
+          return async (...args: Parameters<TicketingAdapter["getTicket"]>) => {
+            if (w.record().some((entry) => entry.kind === "runner-ended")) {
+              throw new Error("GitHub answered 502 Bad Gateway");
+            }
+            return target.getTicket(...args);
+          };
+        },
+      });
+      return { ...deps, adapter };
+    };
+    const runner = scriptedRunner([quiet(0.05)]);
+
+    const end = await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor },
+      w.store.get(w.run.id)!,
+      ["fvermaut commented on the ticket at 2026-09-27T11:58:40Z."],
+    );
+
+    expect(end).toEqual({ kind: "ended", costUsd: 0.05 });
+    expect(w.store.get(w.run.id)?.wait).toMatchObject({
+      kind: "runner",
+      on: 'read them and reply "approved", or say what to change.',
+    });
+  });
+});

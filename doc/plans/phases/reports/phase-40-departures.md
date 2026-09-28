@@ -181,3 +181,13 @@
 **Did instead:** A new sub-phase, 40s, covers all three. The operator runs the full replay once more after it (run 5).
 
 **Why:** The watched run's second attempt left map #62 open after its only piece merged — the current daemon closes a map in `concludeStep`, and the runner's path never reaches that code — and showed a run waiting on "the runner to look at what the step did" while it really waited on the person's answer. Replay run 4 passed #120 two tries of three; the likely reason is that the runner cannot rule out a terminal session as the way a key is added, and Timone knows it is not (ADR-0045). Without the map fix, every split feature on ivtrends would leave its map open.
+
+## 2026-09-28 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** Sub-phase 40s granted `src/daemon/poll.ts` "only to export what the map-closing code needs".
+
+**Did instead:** The map-closing half of `concludeStep` was moved, unchanged, into a new exported function, `closeInitiativeIfDone`, which `concludeStep` now calls and the runner's `endRun` calls too. `poll.test.ts` passes unchanged (230 of 230). The import it needs makes a third import cycle (poll → cta → runner/session → runner/actions → poll); no module in it reads another's names while loading, checked by loading each of the six first.
+
+**Why:** Exporting `concludeStep` as it stood would also have posted "Merged — this step is done." on the piece and closed it, which the runner already does itself. Splitting it was the only way to reuse the map-closing code without a second copy of it, which the plan forbade.

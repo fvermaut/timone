@@ -558,3 +558,17 @@ describe("the runner's rule that a run waits on its pull request", () => {
     expect(rule).toContain("So when a run's work is finished, end the run and close the ticket.");
   });
 });
+
+describe("the runner's rule for a key missing where a step runs", () => {
+  it("says a missing key is added to the project's environment file beside the daemon, that the next step reads it, and that a terminal session cannot add it", () => {
+    const rule = stopRule("a key or secret is missing");
+
+    expect(rule).toContain("the project's environment file");
+    expect(rule).toContain("in the folder the daemon runs from");
+    expect(rule).toContain("`.timone/env/<project>.env`");
+    expect(rule).toContain("with this project's name in place of `<project>`");
+    expect(rule).toContain("The next step reads that file when it starts.");
+    expect(rule).toContain("A terminal session cannot add it.");
+    expect(rule).toContain("Name the key and the file");
+  });
+});
