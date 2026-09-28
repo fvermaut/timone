@@ -66,4 +66,22 @@ Every model call needs the operator's own logged-in terminal: the build's sandbo
 
 ## Result
 
+### 40d's probe — passed, 2026-09-28
+
+Run by fvermaut from his own terminal, in `~/dev/timone`, with the command in step 2 above writing to `/tmp/probe.jsonl`. The first attempt printed only the start of the first answer, because the command given cut the output at 600 characters; the second attempt printed:
+
+```
+$ grep -c '"isReplay":true' /tmp/probe.jsonl
+2
+$ grep '"type":"result"' /tmp/probe.jsonl | grep -o '"is_error":[a-z]*\|"result":"[^"]*"'
+"is_error":false
+"result":"one"
+"is_error":false
+"result":"two"
+```
+
+Both messages were taken and replayed, and each got its own answer from the model. The first attempt's result line showed a real turn (`"stop_reason":"end_turn"`, 44 output tokens, $0.0233). This settles what 40d could not check from the build's sandbox: the operator's login reaches the model, and the CLI takes stream-json messages on its input, replays each one, and answers each. Still owed, and part of the watched run: a message sent while a step is inside a tool call is replayed, and the step then ends by itself (R13).
+
+### The watched run
+
 Not run yet.
