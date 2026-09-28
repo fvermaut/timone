@@ -80,3 +80,15 @@ FAIL #120 — Not offer the same command again. Say what is actually needed. 0 o
 ```
 
 Tries 1 and 2 replaced the pointer to the command and carried on without the key, testing without a live call: the written process since ADR-0056 (a question found once building has started rides to the pull request) and ADR-0059 D1 (a check only a person can run is listed there as not run). The case read the table's "say what is actually needed" as *stop and ask*, which the process no longer does. Try 3 did nothing, and left the ticket pointing at a command that cannot help — the real #120 fault. Slice 40q gives the runner ADR-0024's rule (the ticket's newest message says truthfully what it needs now) and lets the case accept either answer that replaces the pointer.
+
+## Run 4 — 2026-09-28, after 40q: 18 of 19 passed, $2.54
+
+```
+Replaying 19 cases, 3 tries each, on claude-opus-5-5.
+PASS #139 … PASS #117 (11 cases, as in run 2)
+FAIL #120 — Not offer the same command again. Say what is actually needed. 2 of 3 tries chose it. Try 1: chose it (started building (execution): "Finish the plan in doc/plans/phases/phase-09.md on branch timone/97-show-daily-closing-prices-on-th…"; posted on the ticket: "**You do not need to open a session again.** The code that fetches the prices can be written and te…"). Try 2: chose it (posted on the ticket: "**You do not need to open a session.** The missing `POLYGON_API_KEY` only blocks a live test agains…"; started building (execution): "Finish slice 1 of doc/plans/phases/phase-09.md: the code that fetches daily closing prices from Pol…"). Try 3: did nothing — wanted: a new comment on the ticket that says what it needs now.
+PASS #125, #135 … PASS #110 (7 cases, as in run 2)
+18 of 19 cases passed. The runner's sessions cost $2.54 in all.
+```
+
+(Passing lines shortened here; each read "3 of 3 tries", exactly as in run 2.) The new rule changed no other case. #120 passes two tries of three; the third did nothing and left the ticket pointing at the takeover command. Likely cause: the runner does not know where a missing key goes, so it cannot rule out that a terminal session is how the person adds one — Timone does know (ADR-0045: a boxed run's environment comes from a file the daemon owns). Owed after the watched run: that one line in the runner's rules, and `--case 120` again. Until then PRD-05.R18 is not met for #120 (it asks for three tries of three).
