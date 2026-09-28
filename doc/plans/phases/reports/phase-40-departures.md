@@ -141,3 +141,13 @@
 **Did instead:** The first real replay passed 13 of 19. A new sub-phase, 40p, changes the runner's rules for four of the six failures (#108, #111, #159, #110). For the other two it changes a case: #120's fixture gains the note the terminal session left when it ended without clearing the stop, and #104's matcher accepts `breakdown` as well as `planning`. No case's expected action is weakened.
 
 **Why:** #120's fixture left out a fact of the moment it names — in the real incident the terminal session ended with a note saying it could not clear the stop — so the runner could not know the key was still missing, and trying the build again was a fair reading of what it was shown. #104's table row says "start planning", and for a feature, planning begins with the list of pieces (`process.md` stage 5); the runner went there, posted the departure, and the matcher read "planning" as the `planning` step only. Changing the rules to make the runner jump past the list of pieces would have taught it to break the written order.
+
+## 2026-09-28 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** 40p gave #120's ticket "the note the terminal session left when it ended without clearing the stop (the box still has no key; only fvermaut can add it)".
+
+**Did instead:** The note is rewritten. It now says the terminal session could not clear the stop, and — as the real #120's ticket did — it points at the same `timone takeover` command again. The case's matcher, run, record and events do not change. The case is replayed alone from the operator's terminal (run 3).
+
+**Why:** The note as 40p wrote it asked for the key itself. The ticket's newest message then already said what was needed, the runner rightly did nothing (run 2, three tries of three), and the case tested nothing. The real #120's fault was a ticket whose newest word pointed at a command that could not help; the runner has to replace that with what is actually needed, and the case must show it that state.

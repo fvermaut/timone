@@ -40,3 +40,33 @@ FAIL #110 — Send the step a message to run only the tests its change affects. 
 | #110 | Did nothing at the check. | The rule says the runner *may* message a step that repeats a command "without getting further", and the edits between the six suite runs looked like progress. The written process is plainer: single test files while working, the whole suite once at the end (process.md stage 6). | The rules (40p). |
 
 Two of the six changes touch a case, against the plan's rule that a failing case changes the brief and not the case. Both are recorded in [phase-40-departures.md](phase-40-departures.md) with the reason: one fixture left out a fact of the moment it names, and one matcher read the table more narrowly than the process does. No case's expected action was weakened to make the runner pass.
+
+## Run 2 — 2026-09-28, after 40p: 18 of 19 passed, $2.33
+
+```
+Replaying 19 cases, 3 tries each, on claude-opus-5-5.
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+PASS #140 — Read planning as done, and start the build. 3 of 3 tries.
+PASS #144 — Not wait on the person. Choose the next step. 3 of 3 tries.
+PASS #143, #161 — Try the start again. If it keeps failing, say so on the ticket. 3 of 3 tries.
+PASS #99 — End the run, and free the project. 3 of 3 tries.
+PASS #115 — Start nothing on it. 3 of 3 tries.
+PASS #142 — Clear the hold, then start the work. 3 of 3 tries.
+PASS #108 — Start a session that corrects the requirements, then check again. 3 of 3 tries.
+PASS #111 — Start again from that discussion, as PRD-03.R1 says. Do not ask. 3 of 3 tries.
+PASS #159 — Open the pull request with that check listed as not run. 3 of 3 tries.
+PASS #117 — List the skip as a departure, and carry on to the pull request. 3 of 3 tries.
+FAIL #120 — Not offer the same command again. Say what is actually needed. 0 of 3 tries chose it. Try 1: did nothing — wanted: a comment on the ticket that asks for what is needed. Try 2: did nothing — wanted: a comment on the ticket that asks for what is needed. Try 3: did nothing — wanted: a comment on the ticket that asks for what is needed.
+PASS #125, #135 — Carry the question to the pull request, and open it. 3 of 3 tries.
+PASS #132 — Act on the word. 3 of 3 tries.
+PASS #147 — Say on the pull request that the change is being made, then start it. 3 of 3 tries.
+PASS #104 — Skip the interview and start planning. Post the departure on the ticket. 3 of 3 tries.
+PASS scratch-app#37 — Write the requirements. Record no approval. Post that the approval was skipped, and carry on. 3 of 3 tries.
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+18 of 19 cases passed. The runner's sessions cost $2.33 in all.
+```
+
+The four cases whose rules 40p added (#108, #111, #159, #110) and the case whose matcher it corrected (#104) all pass, three tries of three.
+
+**#120 failed because of the case, and the case is changed again.** The note 40p added for the terminal session already asked for the key, so the ticket's newest message said what was needed, and the runner rightly did nothing: repeating the question would add nothing. That made the case test nothing. The real #120 ended differently: the terminal session posted that it could not clear the stop, and the ticket still pointed at the same `timone takeover` command. The note is rewritten to say that, so the runner must replace the pointer to the command with what is actually needed. Recorded in [phase-40-departures.md](phase-40-departures.md).

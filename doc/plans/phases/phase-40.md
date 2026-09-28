@@ -439,6 +439,8 @@ npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
 - [ ] Red→green evidence in the handoff.
 - [ ] **Human gate:** fvermaut runs `npm run --silent replay` again from his own terminal; its output is added to `reports/phase-40-replay.md` as run 2.
 
+> ✏ 2026-09-28 (build, timone#165): run 2 passed 18 of 19. #120's note, as 40p wrote it, asked for the key itself, which made doing nothing the right answer. The note is rewritten to match the real #120 — the terminal session could not clear the stop, and the note points at the same `timone takeover` command — and `npm run --silent replay -- --case 120` is run again from the operator's terminal as run 3.
+
 ---
 
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
