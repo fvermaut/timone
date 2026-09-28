@@ -4,6 +4,9 @@ identity:
   private_key_path: .timone/timone-agent.2026-08-21.private-key.pem
   login: timone-agent[bot]
   commit_email: 319428833+timone-agent[bot]@users.noreply.github.com
+# The operator's own forge login. Only named people may instruct the runner;
+# a runner project that names no instructors is instructed by the operator.
+operator: fvermaut
 projects:
   scratch-app:
     repo_url: https://github.com/fvermaut/scratch-app.git
@@ -17,6 +20,9 @@ projects:
     bindings:
       ticketing: github
       preview: docker
+    # Driven by the runner since phase 40 (ADR-0060, PRD-05.R19). ivtrends
+    # moves only after a watched run here has passed R9, R12, R13 and R15.
+    driver: runner
   ivtrends:
     repo_url: https://github.com/fvermaut/ivtrends.git
     path: projects/ivtrends
