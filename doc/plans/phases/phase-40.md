@@ -468,6 +468,31 @@ npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
 
 ---
 
+### Sub-phase 40r: a run waits on its pull request, the ledger knows the step, and a shared reason is said once
+
+> ✏ 2026-09-28 (build, timone#165): added at build, from the watched run's first attempt ([phase-40-live-gate.md](reports/phase-40-live-gate.md)). The runner ended the run when its pull request opened, so a change asked for there would have gone unanswered, and the still-open ticket was picked up again as new work. The ledger showed no step while the build ran. The departure list repeated one reason seven times. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/actions.ts` — `endRun` refuses while the run's pull request is open: the run waits on it, answers its review, and ends when it is merged or closed. A merged or closed pull request, or a run that changed nothing, may end. `startStep` records the step in the ledger (`store.setStage`) before the step starts.
+**[MODIFY]** `src/runner/brief.ts` — the rule "A run that changed the project's files ends at a pull request. End a run only when its pull request is open, or when nothing was changed." becomes: a run that changed files waits on its pull request; while it is open, answer its review and do not end the run; when it is merged, end the run and close the ticket; when it is closed without merging, follow the rule for that. A ticket left open and marked with no run is picked up again as new work, so end a finished run with the ticket closed.
+**[MODIFY]** `src/runner/departures.ts` — departures that share one reason are listed as one line naming their steps, with the reason once. A skipped check stays the first line on its own.
+**[MODIFY]** `src/runner/actions.test.ts`, `src/runner/brief.test.ts`, `src/runner/departures.test.ts` — new cases, and the existing `departureSection` cases' expected text where the grouping changes it.
+
+**Seams under test (TDD):** `runnerActions`, `buildBrief`, `departureSection`. Red-green: (1) `endRun` with the run's pull request open is refused, and the run is not completed; with it merged, the run ends; (2) `startStep` leaves the ledger's `stage` set to the step's stage; (3) the system text says a run waits on its open pull request and ends when it is merged or closed, and no longer says a run may end when its pull request is open; (4) three departures sharing one reason give one line naming the three, with the reason once; a skipped check with the same reason is still its own first line.
+
+> Sub-phase 40q must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run; echo "exit: $?"                             # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -532,6 +557,7 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40o → 40h, 40j            an approval comes after what it approves; an interrupted step gets its end  (✏ 2026-09-27: added at build)
 40p → 40o                 the runner's rules carry what the replay showed missing  (✏ 2026-09-28: added at build)
 40q → 40p                 the ticket's newest message says what it needs now  (✏ 2026-09-28: added at build)
-40l → 40h, 40j, 40n, 40o, 40q  scratch-app moves; the watched run
+40r → 40q                 a run waits on its pull request; the ledger knows the step; a shared reason once  (✏ 2026-09-28: added at build)
+40l → 40h, 40j, 40n, 40o, 40q, 40r  scratch-app moves; the watched run
 40m → 40l                 README
 ```

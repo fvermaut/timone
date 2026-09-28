@@ -161,3 +161,13 @@
 **Did instead:** A new sub-phase, 40q. The runner's rules gain ADR-0024's rule — the ticket's newest message says truthfully what it needs now, and a stale one is replaced. The #120 matcher passes a new comment that does not offer the command and either asks for what is needed or goes with a step the runner starts. Doing nothing, or offering the command again, still fails.
 
 **Why:** Replay run 3 showed two tries carrying on without the missing key and listing the live check for the pull request — which is what ADR-0056 and ADR-0059 D1 say, and what 40p's own rule taught. A matcher that demands a stop contradicts the process the runner follows. The third try did nothing, which is the real #120 fault, and nothing in the runner's rules forbade it; ADR-0024's rule does. This is the third change to #120's case in this phase. Each one is recorded with its reason, and none of them lets doing nothing pass.
+
+## 2026-09-28 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** The plan had the runner end a run through `endRun`, refused only when the branch held commits and no open pull request existed (PRD-05.R4, 40e), and a brief rule reading "End a run only when its pull request is open, or when nothing was changed."
+
+**Did instead:** A new sub-phase, 40r: `endRun` refuses while the run's pull request is open; the brief says a run waits on its pull request and ends when it is merged or closed; `startStep` records the step in the ledger; the departure list says a shared reason once.
+
+**Why:** The watched run's first attempt, on scratch-app#60: the runner ended the run as soon as pull request #61 opened, exactly as the rule allowed. A change asked for on the pull request would then have reached nobody, and the ticket — still open and marked — was picked up again as new work on the next cycle, and would have been every cycle after without the hold the machine put on it. R4's "ends at a pull request" was meant as *reaches* one; the rule and the check read it as *may stop at* one. The two smaller faults were seen on the same run.
