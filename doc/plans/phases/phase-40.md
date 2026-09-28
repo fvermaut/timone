@@ -443,6 +443,31 @@ npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
 
 ---
 
+### Sub-phase 40q: the ticket's newest message says what it needs now
+
+> ✏ 2026-09-28 (build, timone#165): added at build, from replay run 3 ([phase-40-replay.md](reports/phase-40-replay.md)). On #120, two tries of three replaced the ticket's pointer to a useless command and carried on without the missing key, as ADR-0056 and ADR-0059 D1 say; one try did nothing and left the ticket pointing at the command — the real #120 fault. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/brief.ts` — the system text gains the rule [ADR-0024](../../adr/0024-every-open-ticket-answers-for-itself.md) holds and the brief did not: the ticket's newest message must say truthfully what the ticket needs now. When the newest message is the machine's and is no longer true — it asks for something that is not needed, or offers a command that will not help — post one that is, even when there is nothing else to do.
+**[MODIFY]** `src/runner/replay/cases.ts` — #120's matcher passes when the runner posts a new ticket comment that does not offer `timone takeover`, and that either asks for what is needed, or goes with a step it starts (carrying on, with the key listed for the pull request). Doing nothing still fails, and so does offering the command again. No other case changes.
+**[MODIFY]** `src/runner/brief.test.ts` — new cases only.
+
+**Seams under test (TDD):** `buildBrief`, pure — (1) the system text states the rule, red before it is added. The matcher change is proven on the dry run: the case's scripted right call still passes, and a scripted *do nothing* fails (run it once by hand and quote it in the handoff).
+
+> Sub-phase 40p must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run src/runner/; echo "exit: $?"                 # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+- [ ] **Human gate:** fvermaut runs `npm run --silent replay -- --case 120` from his own terminal (run 4); its output is added to `reports/phase-40-replay.md`.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -506,6 +531,7 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40n → 40h                 a step ticket's claim is not shown as a hold  (✏ 2026-09-27: added at build)
 40o → 40h, 40j            an approval comes after what it approves; an interrupted step gets its end  (✏ 2026-09-27: added at build)
 40p → 40o                 the runner's rules carry what the replay showed missing  (✏ 2026-09-28: added at build)
-40l → 40h, 40j, 40n, 40o  scratch-app moves; the watched run
+40q → 40p                 the ticket's newest message says what it needs now  (✏ 2026-09-28: added at build)
+40l → 40h, 40j, 40n, 40o, 40q  scratch-app moves; the watched run
 40m → 40l                 README
 ```

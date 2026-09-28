@@ -70,3 +70,13 @@ PASS #110 — Send the step a message to run only the tests its change affects. 
 The four cases whose rules 40p added (#108, #111, #159, #110) and the case whose matcher it corrected (#104) all pass, three tries of three.
 
 **#120 failed because of the case, and the case is changed again.** The note 40p added for the terminal session already asked for the key, so the ticket's newest message said what was needed, and the runner rightly did nothing: repeating the question would add nothing. That made the case test nothing. The real #120 ended differently: the terminal session posted that it could not clear the stop, and the ticket still pointed at the same `timone takeover` command. The note is rewritten to say that, so the runner must replace the pointer to the command with what is actually needed. Recorded in [phase-40-departures.md](phase-40-departures.md).
+
+## Run 3 — 2026-09-28, #120 alone: 0 of 1, $0.15
+
+```
+Replaying 1 cases, 3 tries each, on claude-opus-5-5.
+FAIL #120 — Not offer the same command again. Say what is actually needed. 0 of 3 tries chose it. Try 1: posted on the ticket: "**You do not need to run the command.** I will finish the build without the key. The code will read…"; started building (execution): "Finish slice 1 of doc/plans/phases/phase-09.md: fetch daily closing prices from Polygon. The box ha…" — wanted: a comment on the ticket that asks for what is needed. Try 2: started building (execution): "Finish slice 1 of doc/plans/phases/phase-09.md on branch timone/97-show-daily-closing-prices-on-the…"; posted on the ticket: "**I am going on without the key.** I will write the code that fetches the prices and test it withou…" — wanted: a comment on the ticket that asks for what is needed. Try 3: did nothing — wanted: a comment on the ticket that asks for what is needed.
+0 of 1 cases passed. The runner's sessions cost $0.15 in all.
+```
+
+Tries 1 and 2 replaced the pointer to the command and carried on without the key, testing without a live call: the written process since ADR-0056 (a question found once building has started rides to the pull request) and ADR-0059 D1 (a check only a person can run is listed there as not run). The case read the table's "say what is actually needed" as *stop and ask*, which the process no longer does. Try 3 did nothing, and left the ticket pointing at a command that cannot help — the real #120 fault. Slice 40q gives the runner ADR-0024's rule (the ticket's newest message says truthfully what it needs now) and lets the case accept either answer that replaces the pointer.

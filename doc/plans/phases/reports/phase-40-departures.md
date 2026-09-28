@@ -151,3 +151,13 @@
 **Did instead:** The note is rewritten. It now says the terminal session could not clear the stop, and — as the real #120's ticket did — it points at the same `timone takeover` command again. The case's matcher, run, record and events do not change. The case is replayed alone from the operator's terminal (run 3).
 
 **Why:** The note as 40p wrote it asked for the key itself. The ticket's newest message then already said what was needed, the runner rightly did nothing (run 2, three tries of three), and the case tested nothing. The real #120's fault was a ticket whose newest word pointed at a command that could not help; the runner has to replace that with what is actually needed, and the case must show it that state.
+
+## 2026-09-28 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** PRD-05.R18's row for #120: "Not offer the same command again. Say what is actually needed." The case's matcher read it as: post a comment that asks the person for something.
+
+**Did instead:** A new sub-phase, 40q. The runner's rules gain ADR-0024's rule — the ticket's newest message says truthfully what it needs now, and a stale one is replaced. The #120 matcher passes a new comment that does not offer the command and either asks for what is needed or goes with a step the runner starts. Doing nothing, or offering the command again, still fails.
+
+**Why:** Replay run 3 showed two tries carrying on without the missing key and listing the live check for the pull request — which is what ADR-0056 and ADR-0059 D1 say, and what 40p's own rule taught. A matcher that demands a stop contradicts the process the runner follows. The third try did nothing, which is the real #120 fault, and nothing in the runner's rules forbade it; ADR-0024's rule does. This is the third change to #120's case in this phase. Each one is recorded with its reason, and none of them lets doing nothing pass.
