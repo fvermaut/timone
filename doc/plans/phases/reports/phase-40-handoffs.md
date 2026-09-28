@@ -1597,3 +1597,35 @@ The suite had 1910 tests before the slice and has 1919 now: 6 new in `actions.te
 - **In run 6, look at #115.** The model may now end the run and name fvermaut's comment: 11:02:00Z, or the older 11:40:00Z, which are both his. The judge allows it. `closeTicket` should be false, because he wrote "Leave this one on hold". The hold must stay on, and the judge checks that.
 - **A stop leaves the ticket to the runner's judgement.** A stopped run on a ticket that stays open, keeps the `timone` label and has no hold is picked up again on the next cycle, the same as after `timone cancel`. The rule tells the runner to put the hold on in that case. Code does not do it.
 - **Where a stop shows.** `timone status` lists it as "<project> #<n> was cancelled: <author> asked to stop the work, in the comment at <time>". `timone retry` refuses a cancelled run and gives that reason. `timone record` shows the runner's `end_run` decision as "end the work", with the runner's reason. It does not say that the run was cancelled rather than done.
+
+## 40l — scratch-app moves to the runner, and one watched run
+
+**Built.** `timone.yaml` names the operator (`operator: fvermaut`) and drives scratch-app with the runner (`driver: runner`); ivtrends and timone stay on the current daemon. The watched run was run twice on 2026-09-28 from `projects/timone`, with its own settings file (`.timone/live-gate.yaml`, scratch-app only) and its own ledger, by the operator starting the daemon from his own terminal. The full account is [phase-40-live-gate.md](phase-40-live-gate.md).
+
+**Files touched.**
+
+- `timone.yaml` — `operator: fvermaut`; scratch-app `driver: runner`.
+- `doc/plans/phases/reports/phase-40-live-gate.md` — what the run checks, the steps for the operator, the machine-typed test tickets, and both attempts' results.
+
+**Decisions taken inside the slice.**
+
+- **R15's second project** is scratch-app itself: `scratch-app-2` is a local fixture with no GitHub tickets, ivtrends is a live project, and a second ticket on one project waits in the queue. R15 was watched as the ledger's `observedAt` moving and a comment read while a step ran; the two-project form rests on 40h's test.
+- **Approvals were the operator's own.** The machine typed answers to questions and test comments as fvermaut, marked as machine-typed; it never typed an approval, because that is what R7 forbids the runner to accept.
+- **The first attempt's loop was stopped** by putting `timone:held` on scratch-app#60 once a second run had been picked up.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is the watched run.
+
+```
+$ npx tsx src/cli.ts projects list
+scratch-app  projects/scratch-app  typescript,nextjs,prisma,postgresql  github  docker
+ivtrends     projects/ivtrends     …                                    github  docker
+timone       projects/timone       typescript                           github  -
+$ grep -n "driver: runner" timone.yaml
+25:    driver: runner
+```
+
+- [x] **Human gate:** fvermaut started the daemon for both attempts (08:57 and 12:37 UTC), approved the requirements and the list of pieces himself on scratch-app#62, and merged scratch-app#64.
+- [x] **The live-gate report records each check** with its ticket comment or record line: R3, R5, R6, R7, R9 (plain words, with a spelling mistake, on the ticket), R12, R13 and R15 seen live; 40d's owed probe passed from his terminal. **Not seen live:** R9's clause about a change asked for on the pull request (the first attempt's run had ended; on the second, the pull request was merged before one was written).
+- The first attempt found four faults (fixed in 40r), the second two more (fixed in 40s).
+
+**What delivery must know.** Test leftovers on scratch-app: pull request #61 and its held ticket #60 (first attempt), and map #62 (open because of the fault 40s fixed). Their closing waits on the operator's word.
