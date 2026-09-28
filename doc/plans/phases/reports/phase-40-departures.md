@@ -121,3 +121,13 @@
 **Did instead:** A new sub-phase, 40o: `recordApproval` refuses a comment written before the step that produced what it approves ended; and a run taken back after a daemon stop gets a `step-ended` (`stoppedBy: "daemon"`) for the step that was running. 40l now waits for it. The plan and its dependency graph are amended in place.
 
 **Why:** 40j's cases showed both. On scratch-app#37, once the requirements exist, "approve them yourself in my name" — a named person's comment — would be accepted as the approval, so PRD-05.R7 would hold only because the runner's rules say so; requiring the comment to come after the document makes it hold in code. On #140, the record kept a step "running" that nothing was running, and the brief showed exactly that to the runner.
+
+## 2026-09-27 — timone#165, execution
+
+**Kind:** plan step
+
+**Agreed:** Sub-phase 40o's tests were to be new cases only.
+
+**Did instead:** Three cases 40e wrote earlier in this phase — they record an approval of the list of pieces — have fixtures with no `breakdown` step at all, and the new rule rightly refuses an approval of something the run never produced. Their fixtures gain one earlier successful `breakdown` `step-ended` entry. No assertion of theirs changes. The plan is amended in place.
+
+**Why:** The rule is the point of the slice (an approval must come after what it approves), and those fixtures described a situation the rule now forbids. They are this phase's own tests, written two slices earlier, not tests the rest of the daemon relies on. The alternative — accept an approval when no step of that stage exists — would let a comment written before any requirements existed be recorded as their approval.
