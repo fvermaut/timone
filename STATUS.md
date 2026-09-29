@@ -8,20 +8,25 @@
 
 ## Waiting on you
 
-> **Read this first.** The runner is open for review as [pull request #173](https://github.com/fvermaut/timone/pull/173), in the Timone repository. Two code reviews read it. One of them found four faults that matter. Three things are owed before a merge. Pull request #136 from the last update is merged.
+> **Read this first.** The runner, [pull request #173](https://github.com/fvermaut/timone/pull/173) in the Timone repository, has its four worst faults fixed, as you asked. A fresh check saw each fix work, and both code reviews were run again. Three things are still owed before a merge. The scratch-app test leftovers are closed.
 
-**1. Decide on [pull request #173](https://github.com/fvermaut/timone/pull/173): fix first, or merge as it is.**
+**1. Review and merge [pull request #173](https://github.com/fvermaut/timone/pull/173), after the owed checks.**
 
-On scratch-app, an agent now decides each step of a ticket, instead of the fixed order. ivtrends and Timone stay on the fixed order. 1,950 automatic tests pass. It was checked twice by sessions that did not build it.
+On scratch-app, an agent now decides each step of a ticket, instead of the fixed order. ivtrends and Timone stay on the fixed order. 1,977 automatic tests pass. Three sessions that did not build it have checked it; the last one checked the four fixes.
 
-Two code reviews read the pull request, each on its own:
+The four fixes:
 
-- **Standards review: 16 findings.** They are about how the code is written: repeated code, two import cycles, one very long function, and some types that should be stricter. None changes what the runner does today.
-- **Spec review: 10 findings.** Four of them matter most:
-  - a run that records your approval shows "ran out of order" on its pull request, which is not true;
-  - a run that fails on a runner project has no way out except a terminal command;
-  - while ivtrends runs a step on the fixed order, scratch-app's runner waits for it to end;
-  - a pull request closed without merging lets the run end with its work unmerged.
+- a run that records your approval no longer shows "ran out of order";
+- a failed merge on a runner project no longer fails the run: it waits, says so on the ticket, and the runner is woken;
+- a step on ivtrends no longer holds up scratch-app's runner (a comment was acted on after 2 seconds, against 87 before);
+- a pull request closed without merging no longer lets the run drop its work.
+
+The code reviews, run again:
+
+- **Standards: 22 findings.** They are about how the code is written. None changes what the runner does.
+- **Spec: 9 findings.** Two are new, and worth knowing before you merge:
+  - after a failed merge of the list of pieces, trying again needs you to approve the same list a second time;
+  - `timone takeover` on scratch-app still waits while an ivtrends step runs. Only a comment gets through at once.
 
 Owed before a merge, all listed on the pull request:
 
@@ -29,15 +34,9 @@ Owed before a merge, all listed on the pull request:
 - a new watched run on scratch-app;
 - your yes to one change in the requirements: the runner has an eighth action, recording an approval.
 
-**What I need from you:** say "fix first" or "merge as it is".
+**What I need from you:** run replay run 6 and paste me its last lines, then say when you can start the daemon for the watched run. Or tell me to fix the two new findings first.
 
-**2. May I close the test leftovers on scratch-app?**
-
-The first watched run left [pull request #61](https://github.com/fvermaut/scratch-app/pull/61), [ticket #60](https://github.com/fvermaut/scratch-app/issues/60) (held) and [map #62](https://github.com/fvermaut/scratch-app/issues/62) open. They are test material, and nothing needs them.
-
-**What I need from you:** say yes, and I close all three.
-
-**3. Older questions, no hurry.**
+**2. Older questions, no hurry.**
 
 - [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal. It has never been marked, so nothing starts it.
 - [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47): three questions about moving a row. Step 1, [#46](https://github.com/fvermaut/scratch-app/issues/46), is held for the same reason.
@@ -95,6 +94,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**29 September, evening — the four worst faults are fixed, and the leftovers closed.** You said "fix first" and "close leftovers". Four fixes were built one after another, each test first, then checked by a session that built none of them: all 16 checks pass, and each fix was seen working. Both code reviews were run again, and the pull request describes the new state first. The scratch-app test leftovers (#61, #60, #62) are closed. One small fault in the new `timone stage` command was filed as [#174](https://github.com/fvermaut/timone/issues/174).
 
 **29 September — the runner is open for review.** On 26 September you decided that an agent, the runner, decides each step of a ticket. The written order is its default. It may leave that order, but only if it says so on the ticket, and nothing merges without your yes. That is [ADR-0060](doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), with its requirements in PRD-05, merged in [#163](https://github.com/fvermaut/timone/pull/163). The first of two pieces, [#165](https://github.com/fvermaut/timone/issues/165), was built in 21 slices from 27 to 29 September. Five replays of past failures on the real model and two watched runs on scratch-app found faults, and each was fixed in its own slice. Two sessions that did not build it then checked it. The approval prompts you kept getting on the checking files were [#169](https://github.com/fvermaut/timone/issues/169), fixed in [#170](https://github.com/fvermaut/timone/pull/170), which you merged. The pull request is [#173](https://github.com/fvermaut/timone/pull/173), item 1 at the top. The second piece, [#166](https://github.com/fvermaut/timone/issues/166), removes the fixed order once ivtrends has moved.
 
