@@ -69,3 +69,7 @@ Twenty, each in [phase-40-departures.md](phase-40-departures.md) and each marked
 - `timone record` does not say a run stopped by a named person's comment was cancelled; the replay's summary line does not call a cancelled run ended (40t).
 - A comment in `driver.ts` still describes the hold as a way to wait for someone (40p).
 - Test leftovers on scratch-app: pull request #61, ticket #60 (held), map #62 — their closing waits on the operator's word.
+
+## Reopened after verification — 2026-09-29
+
+The check ([phase-40-verification.md](phase-40-verification.md), at `0f433ef`) ran two fix loops of its own (`a113151`–`55a617a`) and listed nine things found outside its verdicts. fvermaut chose to fix the worst before the pull request. **Sub-phase 40u** (`ddb95ed`) fixed items 1–5: a run refused as busy is woken when the project frees; a cancel on a runner project holds the ticket and reports its success truly; the brief finds `ticket-NN.md`; the one-turn check at the limit has no tools; no departures before any step ran — fixed at its source in `departuresOf`. Items 7 and 8 are filed as [timone#171](https://github.com/fvermaut/timone/issues/171) and [timone#172](https://github.com/fvermaut/timone/issues/172). After 40u: 1,950 tests pass, the dry replay passes 19 of 19. A fresh check re-runs the probes next.
