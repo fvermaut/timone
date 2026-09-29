@@ -35,8 +35,9 @@
 - **Criteria:**
     - GIVEN a runner session
       WHEN its tools are listed
-      THEN they are exactly: start a step session with instructions, send a running step a message, stop a step, post on the ticket or the pull request, set or clear the hold on a ticket, file or update a Timone issue, and end the run
+      THEN they are exactly: start a step session with instructions, send a running step a message, stop a step, post on the ticket or the pull request, set or clear the hold on a ticket, record a named person's approval by naming the comment that gave it, file or update a Timone issue, and end the run
       AND none of them edits a file, runs a shell command, pushes, or merges
+    > ✏ 2026-09-29 — amended at verification, phase 40: the list gains the action that records a named person's approval. R3's third clause and R7's second clause need an approval recorded with the comment it came from, and no other action records one. See [phase-40-departures.md](../../plans/phases/reports/phase-40-departures.md).
     - GIVEN the runner decides that something in the project must be fixed
       WHEN it acts
       THEN it starts a step session with instructions, and every commit that follows carries that session's `Timone-Stage` trailer

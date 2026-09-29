@@ -201,3 +201,13 @@
 **Did instead:** R4 gains a second exception: a named person's plain-words request on the ticket to stop the work for good, cited by the runner and checked by code. A new sub-phase, 40t, builds it. The criterion is amended in place with a dated marker.
 
 **Why:** Replay run 5, case #115: the person had written "Stop working on this one. I will fix it by hand." and later "Fixed by hand in pull request #55, which is merged." The runner started nothing and tried to end the run, and code refused, because only a terminal command could end it. That is the terminal-only way out PRD-05.R9 was written to remove — R9 lists "stop" among the plain words that must move a run — and the run would have held its project, blocking every other ticket, until someone typed the command.
+
+## 2026-09-29 — timone#165, verification
+
+**Kind:** requirement amended
+
+**Agreed:** [PRD-05.R2](../../../specs/prd/prd-05-a-runner-decides-each-step.criteria.md) said the runner's tools are exactly seven actions: start a step, send a running step a message, stop a step, post on the ticket or the pull request, set or clear the hold, file or update a Timone issue, and end the run.
+
+**Did instead:** The runner also has `record_approval`. It records that a named person approved the requirements or the list of pieces, and names that person's comment. R2 is amended in place with a dated marker. ADR-0060 D4 lists the same seven actions and is not changed here.
+
+**Why:** Verification found this tool on the runner's list, and R2 did not name it. R3's third clause merges chunk zero once a named person's approval is recorded, and the record must name the comment it came from. R7's second clause asks the same of every approval. Only the runner can judge that the words of a comment are an approval. Code checks the rest: the comment exists, a named person wrote it, and it was written after the thing it approves. Without this action no approval could be recorded, and chunk zero could never be merged on a project the runner drives. The action edits no file, runs no command and pushes nothing. The one merge that can follow it, of chunk zero, is done by code, and only from the approval in the record (R3).
