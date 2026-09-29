@@ -20,6 +20,7 @@ import {
 import type { Manifest } from "../manifest.js";
 import type { Violation } from "../daemon/hooks.js";
 import { RunStore } from "../daemon/runs.js";
+import { declareStage } from "../daemon/declared-stage.js";
 import {
   AgentSessionSpawner,
   type SessionRuntime,
@@ -267,6 +268,82 @@ describe("guarding the verifier's probes", () => {
 
     expect(JSON.parse(reply ?? "{}").hookSpecificOutput.permissionDecision).toBe(
       "ask",
+    );
+  });
+});
+
+describe("guarding the probes in a session run by hand (#169)", () => {
+  // A session run by hand has no run in the ledger. It says which step it is
+  // running instead, and the guard treats it as a daemon run of that step.
+  const probe = { file_path: "doc/plans/phases/probes/PRD-01.R3.mjs" };
+
+  it("lets a session that declared the checking step through", () => {
+    const { root } = workspace();
+    declareStage(root, "session-hand", "verification");
+
+    const reply = runGuard({
+      root,
+      store: newStore(root),
+      sessionId: "session-hand",
+      toolInput: probe,
+    });
+
+    expect(JSON.parse(reply ?? "{}").hookSpecificOutput.permissionDecision).toBe(
+      "allow",
+    );
+  });
+
+  it("refuses the probes to a session that declared a building step", () => {
+    const { root } = workspace();
+    declareStage(root, "session-hand", "execution");
+
+    const reply = runGuard({
+      root,
+      store: newStore(root),
+      sessionId: "session-hand",
+      toolInput: probe,
+    });
+
+    expect(JSON.parse(reply ?? "{}").hookSpecificOutput.permissionDecision).toBe(
+      "deny",
+    );
+  });
+
+  it("still asks when the session has no run and declared no step", () => {
+    const { root } = workspace();
+    // Another session's declaration is in the file, and must not leak across.
+    declareStage(root, "session-other", "verification");
+
+    const reply = runGuard({
+      root,
+      store: newStore(root),
+      sessionId: "session-hand",
+      toolInput: probe,
+    });
+
+    expect(JSON.parse(reply ?? "{}").hookSpecificOutput.permissionDecision).toBe(
+      "ask",
+    );
+  });
+
+  it("goes by the ledger when the session has a run, whatever it declared", () => {
+    // A daemon builder must not be able to declare itself the checker.
+    const { root } = workspace();
+    const store = newStore(root);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-daemon");
+    store.setStage(run.id, "execution");
+    declareStage(root, "session-daemon", "verification");
+
+    const reply = runGuard({
+      root,
+      store,
+      sessionId: "session-daemon",
+      toolInput: probe,
+    });
+
+    expect(JSON.parse(reply ?? "{}").hookSpecificOutput.permissionDecision).toBe(
+      "deny",
     );
   });
 });
