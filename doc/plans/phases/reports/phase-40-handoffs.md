@@ -2019,3 +2019,55 @@ The suite had 1970 tests before the slice (40x's count) and has 1977 now: the 7 
 - **A turn costs the same forge calls as a runner project's turn in a cycle that is not held up**: the marked tickets, the initiative survey, the runner's reads, and the open tickets when `introduce_unmarked` is on. So a runner project's forge use per minute is the same as when no daemon project is busy.
 - **The seam checked is the cycle with a fake spawner.** That the real spawner (`AgentSessionSpawner`) waits for the whole run was taken from the plan, not tested here; the existing `session.test.ts` cases are about that.
 - **About the tests.** Vitest's `advanceTimersByTimeAsync` lets the real event loop run once after each timer. A turn over the in-memory forge finishes in that time, so the check right after an advance sees the look. If a later change makes that turn wait on real I/O in these tests, those checks could run before the look.
+
+## 40z — a comment about a missing key never writes the takeover command
+
+**Built.** The runner's rule for a key or secret missing where a step runs gains two sentences, at its end: "Do not write the takeover command in that comment, not even to say that it will not help. A person who reads a command runs it." (Replay run 6: case #120 passed two tries of three. One try wrote `timone takeover` in its new comment.) The replay case was not changed.
+
+**Files touched.**
+
+- `src/runner/brief.ts` — the two sentences, on the same line as the rule, after "Name the key and the file in your comment."
+- `src/runner/brief.test.ts` — one new case in the existing `describe` "the runner's rule for a key missing where a step runs". No existing line changed.
+
+**Decisions taken inside the slice.**
+
+1. **The new sentences come last in the rule**, after "Name the key and the file in your comment.", so "that comment" points at the comment the rule has just asked for. The case checks this order.
+2. **The rule names the command in words, never as it is typed.** Before this slice the word "takeover" was nowhere in the runner's rules. Writing the command out in full in the rules would put the exact words the case forbids into the text the runner reads. The runner can still tell which command is meant: the ticket's comments show it as `timone takeover <project>#<n>`. The case checks that the rule does not hold "timone takeover".
+3. **The words are the plan's**, with "Do not" in place of "do not" to start a sentence. The last sentence gives the reason, as the other rules do ("The whole suite is slow, and once at the end is enough.").
+
+**Validation evidence.** The seam was `buildBrief`, read through the existing `stopRule` helper. The case was written first and run red, then made green. Then a temporary break in the code was run for each of its two other checks, to show that the test catches it. Each break was undone, and `git diff` then showed only the change above.
+
+| Plan case | Test | Red (trimmed) | Green |
+| --- | --- | --- | --- |
+| (1) | `brief.test.ts` › the runner's rule for a key missing where a step runs › does not have the takeover command written in that comment, not even to say that it will not help (40z) | `expected -1 to be greater than 328` (the sentence is not in the rule) | 38 of 38 |
+| (1), order | the same case | break: the new sentence moved before "Name the key and the file in your comment." → `expected 328 to be greater than 418` | 38 of 38 |
+| (1), the command not written out | the same case | break: "That command is timone takeover." added after the new sentences → `expected '- When a step stops because a key or …' not to contain 'timone takeover'` | 38 of 38 |
+
+The rule as written, under "What the written process says when work stops":
+
+> - When a step stops because a key or secret is missing where it runs, ask for the key to be added to the project's environment file, in the folder the daemon runs from: `.timone/env/<project>.env`, with this project's name in place of `<project>`. The next step reads that file when it starts. A terminal session cannot add it. Name the key and the file in your comment. Do not write the takeover command in that comment, not even to say that it will not help. A person who reads a command runs it.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  57 passed (57)
+      Tests  1978 passed (1978)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+… (19 lines, all PASS; #120 — Not offer the same command again. Say what is actually needed. 3 of 3 tries.)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+The suite had 1977 tests before the slice (40y's count; no file under `src/` changed since 40y) and has 1978 now: the 1 new case above, in `brief.test.ts` (37 before, 38 now).
+
+- [x] Red→green evidence in the handoff: the table above.
+- [ ] **Human gate:** fvermaut runs `npm run --silent replay` from his own terminal (run 7), and its output is added to `reports/phase-40-replay.md`. Not done here: it is his.
+
+**What the re-check must know.**
+
+- **The dry replay cannot show the effect.** Its scripted runner makes the case's right calls and does not read the brief. Only the model replay (run 7) shows whether #120 now passes three tries of three.
+- **The rule covers only the comment that asks for the key.** The case also fails a try that writes the command in any other comment on the ticket or on the pull request. The rule on the ticket's newest comment ("offers a command that will not help") is the one that covers those. It was not changed.
+- **"A terminal session cannot add it." is kept.** It may be the sentence that led the model to explain that a terminal session will not help, and to write the command while doing so. The plan keeps it, and the new sentences now forbid writing the command.

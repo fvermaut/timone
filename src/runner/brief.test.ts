@@ -571,6 +571,17 @@ describe("the runner's rule for a key missing where a step runs", () => {
     expect(rule).toContain("A terminal session cannot add it.");
     expect(rule).toContain("Name the key and the file");
   });
+
+  it("does not have the takeover command written in that comment, not even to say that it will not help (40z)", () => {
+    const rule = stopRule("a key or secret is missing");
+    const askForTheKey = rule.indexOf("Name the key and the file in your comment.");
+    const noCommand = rule.indexOf("Do not write the takeover command in that comment, not even to say that it will not help.");
+
+    expect(askForTheKey).toBeGreaterThan(-1);
+    expect(noCommand).toBeGreaterThan(askForTheKey);
+    expect(rule).toContain("A person who reads a command runs it.");
+    expect(rule).not.toContain("timone takeover");
+  });
 });
 
 describe("the runner's rule for a named person who asks to stop the work for good", () => {
