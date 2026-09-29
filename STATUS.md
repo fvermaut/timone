@@ -2,61 +2,49 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-12.
+**Last updated:** 2026-09-29.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** One pull request is waiting for you here. The checking step stopped and asked you a question on `ivtrends` again today — twice on the same ticket — and the machine's own answer to that was to stop the job. That is what the pull request changes. Pull requests #126 and `ivtrends` #92 are both merged. Two older questions are still yours to answer, at no hurry.
+> **Read this first.** The runner is open for review as [pull request #173](https://github.com/fvermaut/timone/pull/173), in the Timone repository. Two code reviews read it. One of them found four faults that matter. Three things are owed before a merge. Pull request #136 from the last update is merged.
 
-**1. Read and merge [pull request #136](https://github.com/fvermaut/timone/pull/136), then tell me to restart the machine.**
+**1. Decide on [pull request #173](https://github.com/fvermaut/timone/pull/173): fix first, or merge as it is.**
 
-Yesterday's fix changed the checking step's instructions so it would stop asking you things. Today it asked anyway, on [`ivtrends` #93](https://github.com/fvermaut/ivtrends/issues/93) — and when you restarted the job, it asked the same question a second time.
+On scratch-app, an agent now decides each step of a ticket, instead of the fixed order. ivtrends and Timone stay on the fixed order. 1,950 automatic tests pass. It was checked twice by sessions that did not build it.
 
-The instructions were never the whole problem. When a step inside the build asks you something, the machine notices, and what it does about it is **stop the job**. Stopping the job is still stopping: the work sits one step short of its pull request, the ticket asks you for a command, and the command re-runs the step that already did its job. Four of your interventions on one ticket, and none of them was a decision anybody needed.
+Two code reviews read the pull request, each on its own:
 
-So the rule moves out of the instructions and into the machine. A question asked inside the build is now read as the step having finished: the words are kept, the job carries on, and the last step puts them in the pull request. Nothing between your agreement and the pull request waits for you any more, whatever a step's instructions say or forget to say.
+- **Standards review: 16 findings.** They are about how the code is written: repeated code, two import cycles, one very long function, and some types that should be stricter. None changes what the runner does today.
+- **Spec review: 10 findings.** Four of them matter most:
+  - a run that records your approval shows "ran out of order" on its pull request, which is not true;
+  - a run that fails on a runner project has no way out except a terminal command;
+  - while ivtrends runs a step on the fixed order, scratch-app's runner waits for it to end;
+  - a pull request closed without merging lets the run end with its work unmerged.
 
-One job still stops: a step that asks a question **and** leaves nothing behind. The next step would have nothing to work on.
+Owed before a merge, all listed on the pull request:
 
-It is filed as [#135](https://github.com/fvermaut/timone/issues/135). 1674 automatic tests pass.
+- replay run 6: `npm run --silent replay` in `~/dev/timone/projects/timone`, from your terminal, about $2.50;
+- a new watched run on scratch-app;
+- your yes to one change in the requirements: the runner has an eighth action, recording an approval.
 
-**What I need from you:** merge #136 and say the word — I will restart the machine and start `ivtrends` #93 again, which will go straight to opening its pull request instead of asking you a third time.
+**What I need from you:** say "fix first" or "merge as it is".
 
-**2. Decide how [#121](https://github.com/fvermaut/timone/issues/121) gets built.** It was waiting on #123, which is now merged.
+**2. May I close the test leftovers on scratch-app?**
 
-That is the deeper fault behind the same day: work was cut into a piece that built the maths and a piece that built the screen, the first piece was made answerable for a requirement about the screen it did not have, and the check stamped that requirement `failed` — which is untrue and is what later work reads. You decided what the rule should be, and it is written down as [ADR-0053](doc/adr/0053-a-piece-is-a-thin-path-through-every-layer-and-names-only-what-it-finishes.md).
+The first watched run left [pull request #61](https://github.com/fvermaut/scratch-app/pull/61), [ticket #60](https://github.com/fvermaut/scratch-app/issues/60) (held) and [map #62](https://github.com/fvermaut/scratch-app/issues/62) open. They are test material, and nothing needs them.
 
-It was held back until #122 was in, because it changes the format of the list of pieces you approve. That much has happened. What has changed is who builds it: marking it for the machine was the plan, and you have just decided to stop the machine working on Timone itself.
+**What I need from you:** say yes, and I close all three.
 
-**What I need from you:** say whether #121 is built by hand in a terminal, like #122 was, or whether the machine goes back to working on Timone. It has never been marked, so nothing starts it by itself.
+**3. Older questions, no hurry.**
 
-**3. The to-do app's step 2 is still stopped and it is still a real question for you.**
+- [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal. It has never been marked, so nothing starts it.
+- [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47): three questions about moving a row. Step 1, [#46](https://github.com/fvermaut/scratch-app/issues/46), is held for the same reason.
+- [#92](https://github.com/fvermaut/timone/issues/92): the page to watch the work has four questions for you.
+- [#127](https://github.com/fvermaut/timone/issues/127): two shared accessibility checks are broken. Nothing is blocked on it.
 
-[scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47) asks you to drop the old "no reordering" rule and answer three questions about how moving a row should behave. It cannot be planned until you do, and step 1 ([#46](https://github.com/fvermaut/scratch-app/issues/46)) is stopped for the same reason.
-
-Answer on the ticket, or:
-
-```
-timone takeover scratch-app#47
-```
-
-That command is no longer the broken one: #123 is merged, and the machine now running was started from it. On this ticket it was always going to work anyway, because the job is stopped on a question the interview step can act on.
-
-**What I need from you:** answer the three questions, on the ticket or in a terminal.
-
-**4. The dashboard idea is a list of questions, and four are yours.**
-
-You asked for a way to watch all projects from one web page, without a terminal. That idea is mapped on [#92](https://github.com/fvermaut/timone/issues/92): six questions, two already answered by research. The four left are yours, each answerable with a comment or a `timone takeover` command written on the ticket. No hurry, and nothing is blocked on them.
-
-**What I need from you:** nothing until you want the page.
-
-**5. Two of the shared accessibility checks are broken, and are now written down.**
-
-They run on every project. One gives up after 400 Tab presses on a page with 547 things to Tab to, and reports everything it never reached as unreachable. The other counts text hidden on purpose for screen readers as text that has been cut off — 630 pieces of it on the `ivtrends` board. Both report the same counts whether the page is sound or deliberately broken. `ivtrends` recorded this three times — 9, 10 and 11 September — each time saying it needed raising here, and nobody had raised it. It is now [#127](https://github.com/fvermaut/timone/issues/127). Projects are covering the same ground with checks written against their own requirements, so nothing is going unchecked.
-
-**What I need from you:** nothing.
+**What I need from you:** nothing until you want one of them.
 
 **Nothing else needs you.**
 
@@ -107,6 +95,10 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**29 September — the runner is open for review.** On 26 September you decided that an agent, the runner, decides each step of a ticket. The written order is its default. It may leave that order, but only if it says so on the ticket, and nothing merges without your yes. That is [ADR-0060](doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), with its requirements in PRD-05, merged in [#163](https://github.com/fvermaut/timone/pull/163). The first of two pieces, [#165](https://github.com/fvermaut/timone/issues/165), was built in 21 slices from 27 to 29 September. Five replays of past failures on the real model and two watched runs on scratch-app found faults, and each was fixed in its own slice. Two sessions that did not build it then checked it. The approval prompts you kept getting on the checking files were [#169](https://github.com/fvermaut/timone/issues/169), fixed in [#170](https://github.com/fvermaut/timone/pull/170), which you merged. The pull request is [#173](https://github.com/fvermaut/timone/pull/173), item 1 at the top. The second piece, [#166](https://github.com/fvermaut/timone/issues/166), removes the fixed order once ivtrends has moved.
+
+This file was not updated between 12 and 29 September. The pull requests and git history of that time have the detail.
 
 **12 September — the checking step asked again, and the machine's own way of handling that turned out to be another stop.** On `ivtrends` [#93](https://github.com/fvermaut/ivtrends/issues/93) the checking step finished its whole job — the column now sits at the end of the board, checked twice by two readers who had not watched it being built, 22 checks pass and nothing broke — and then asked you to decide something about the practice data. Yesterday's fix was supposed to stop exactly that, and the instructions it corrected were in force. What nobody had changed is what the machine does *when* a step asks: it stops the job and asks you for a command, and the command re-runs the step, which asks again. You saw it twice on the same ticket.
 
