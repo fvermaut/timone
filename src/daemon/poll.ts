@@ -1058,6 +1058,24 @@ async function applyRequest(
       log(`${target} is back on its wait (${body.outcome}).`);
       return 0;
     }
+    case "takeover-ended": {
+      // ✏ A terminal session ended while no daemon ran (PRD-05 R11). The
+      // takeover already put the run back on its wait; the runner is woken
+      // now to read what the session left, as it is when a daemon takes the
+      // run back itself. A run that moved on since is left alone.
+      const run = store.runsForTicket(body.project, body.ticket).at(-1);
+      if (!drivenByRunner(manifest, body.project) || deps.runner === undefined) {
+        log(`${target} is not driven by a runner here — nothing to wake.`);
+        return 1;
+      }
+      if (run === undefined || run.status !== "parked") {
+        log(`${target} is ${run?.status ?? "not in the ledger"} now — nothing to wake.`);
+        return 1;
+      }
+      deps.runner.terminalEnded(run);
+      log(`${target} is back with the runner (the terminal session ended while no daemon ran).`);
+      return 0;
+    }
   }
 }
 

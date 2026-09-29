@@ -68,6 +68,18 @@ const bodySchema = z.discriminatedUnion("kind", [
      */
     outcome: z.enum(["ended", "abandoned"]),
   }),
+  /**
+   * A terminal session on a run of a project the runner drives ended while
+   * no daemon held the ledger (PRD-05 R11). The takeover gave the run back
+   * itself; what is left is to wake the runner so it reads what the session
+   * left, and only a daemon can do that. The next daemon does it on its
+   * first cycle.
+   */
+  z.object({
+    kind: z.literal("takeover-ended"),
+    project: z.string().min(1),
+    ticket: z.number().int().positive(),
+  }),
 ]);
 
 /** The errand itself, without the envelope that says who asked for it. */

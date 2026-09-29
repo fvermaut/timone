@@ -10,7 +10,7 @@ import type {
   TicketingProject,
   TicketThread,
 } from "../adapters/ticketing.js";
-import { loadManifest, type Manifest } from "../manifest.js";
+import { driverOf, loadManifest, type Manifest } from "../manifest.js";
 import {
   CARRY_ON_WAIT,
   RunStore,
@@ -770,6 +770,16 @@ async function endTakeover(
     return;
   }
 
+  // ✏ **On a project the runner drives, the runner reads what the session
+  // left** (PRD-05 R11), in plain words, from the ticket. So nothing here
+  // reads the session's outcome: the run goes back, and the runner is woken
+  // — now by a daemon that is running, or by the next one to start.
+  if (drivenByRunner(deps.manifest, target.project)) {
+    releaseClaim(target, run, deps, log);
+    log(`${name} goes back to the runner. It reads what the session left as soon as the daemon runs.`);
+    return;
+  }
+
   const cursor = run.wait?.opened;
   const stage = run.stage;
   if (cursor === undefined || stage === undefined) {
@@ -983,12 +993,24 @@ function releaseClaim(
     staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
   });
   if (acquired.ok) {
+    let parked = false;
     try {
       store.park(run.id, waitOf(run));
+      parked = true;
     } catch (error) {
       log(error instanceof Error ? error.message : String(error));
     } finally {
       acquired.lock.release();
+    }
+    // ✏ No daemon is running, so nothing can wake the runner now, and the
+    // session's closing comment is the machine's own, which never wakes it
+    // (PRD-05 R10). The next daemon is asked to, on its first cycle (R11).
+    if (parked && drivenByRunner(deps.manifest, target.project)) {
+      enqueue(statePath, {
+        kind: "takeover-ended",
+        project: target.project,
+        ticket: target.ticket,
+      });
     }
     return;
   }
@@ -1000,6 +1022,15 @@ function releaseClaim(
     ticket: target.ticket,
     outcome: "ended",
   });
+}
+
+/**
+ * Whether the runner drives `project` (ADR-0060 D9, PRD-05 R19). A project
+ * the manifest does not name is driven by nobody, so it is not.
+ */
+function drivenByRunner(manifest: Manifest, project: string): boolean {
+  const config = manifest.projects[project];
+  return config !== undefined && driverOf(config) === "runner";
 }
 
 /**

@@ -8902,6 +8902,27 @@ describe("the runner drives its projects in the poll cycle", () => {
     });
   });
 
+  it("wakes the runner on its first cycle when a terminal session ended while no daemon was running", async () => {
+    // PRD-05 R11: the takeover gave the run back itself, since nothing held
+    // the ledger, and left this request so the runner still reads what the
+    // session left.
+    const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingForRunner(store, 6);
+    enqueue(statePath, { kind: "takeover-ended", project: "scratch-app", ticket: 6 });
+    const { adapter } = runnerAdapter([ticket(6)]);
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, spawner, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual(["takeover-ended scratch-app#6"]);
+    expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
+    expect(wakes).toEqual([{ runId: run.id, events: ["The terminal session ended."], options: {} }]);
+  });
+
   it("checks on a running step every 15 minutes, with what it did since the last check (R12)", async () => {
     const store = newStore();
     const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");

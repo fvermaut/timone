@@ -1642,4 +1642,48 @@ describe("a run the runner waits on", () => {
     expect(resolution.kind).toBe("escalation");
     expect(resolution).not.toHaveProperty("stage");
   });
+
+  it("gives the run back to the runner when no daemon is running, and leaves the daemon a request to wake it", async () => {
+    // PRD-05 R11: when the terminal session ends, the runner wakes and reads
+    // what it left. With no daemon running, nothing can wake it now, so the
+    // next daemon is asked to.
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-runner-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath);
+    const onRunner: Manifest = {
+      projects: {
+        "scratch-app": { ...manifest.projects["scratch-app"]!, driver: "runner" },
+      },
+    };
+    const { run } = store.register("scratch-app", 6);
+    store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
+    const { launcher, calls } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest: onRunner,
+      store,
+      statePath,
+      adapter: fakeAdapter().adapter,
+      launcher,
+      root: dir,
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
+    expect(pending(statePath).requests.map((request) => request.body)).toEqual([
+      { kind: "takeover-ended", project: "scratch-app", ticket: 6 },
+    ]);
+    expect(said.at(-1)).toBe(
+      "scratch-app #6 goes back to the runner. It reads what the session left as soon as the daemon runs.",
+    );
+  });
 });
