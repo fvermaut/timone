@@ -282,3 +282,148 @@ Earlier findings that also break one of `typescript.md` or `testing.md`:
 - **Known limits, from the completion report:** three import cycles in `src/daemon/` and `src/runner/`, safe because no module reads another's names while loading; `attemptMerge` in `src/daemon/chunk-zero.ts` stays exported and takes no approval, for the spawner's tests, and nothing in the runner calls it; a ticket's own text reaches the runner whoever wrote it; one wake right after a daemon restart can still show a step ticket as held; the whole-suite rule at a 15-minute check counts a first baseline run; `timone record` does not say a run stopped by a person's comment was cancelled; a comment in `src/runner/driver.ts` still describes the hold as a way to wait.
 - **Test leftovers on scratch-app:** pull request #61, ticket #60 (held), and map #62. They are closed only on the operator's word.
 - **Next:** #166 deletes the current daemon's fixed order and `timone retry`, once ivtrends has moved.
+
+## Delivered again — 2026-09-29, iteration 2
+
+- **Branch:** `timone/165-the-runner-beside-the-current-daemon` @ `adde9f4`
+- **Pull request:** [#173](https://github.com/fvermaut/timone/pull/173), the same one. Its description is refreshed.
+- **Departures:** [phase-40-departures.md](phase-40-departures.md) — 26 entries now. The two new ones are the four fixes, and one file added to the second fix.
+
+### What changed since the first delivery
+
+The first delivery was at `865fb36`. fvermaut chose to fix the worst review findings before merging. Four sub-phases fixed them, each built test first by a session that saw only its part of the plan:
+
+- **40v** (`320a331`) — the session that records an approval no longer makes the pull request say a step "ran out of order" (Spec finding 1). A record that cannot be read no longer makes it say "The default order was followed." (Standards finding 1).
+- **40w** (`68b08b9`, `3dee1dc`) — a pull request closed without merging no longer lets a run end while its branch holds work. It ends on a merge, or on a named person's stop on the ticket (Spec finding 6). The `end_run` description was brought in line (plan amended, `c319cd1`).
+- **40x** (`dd7e5c9`) — on a runner project, a failed merge of the list of pieces, or step tickets that do not open, no longer fail the run. The run waits, one plain comment is posted, and the runner is woken (Spec finding 2).
+- **40y** (`47f1332`) — the runner's projects are polled first, and on a clock of their own while a current-daemon project's session runs (Spec finding 3).
+
+Plan amendments: `40690aa`, `c319cd1`. Completion report updated: `f94081f`. Checks after the fixes: `npx tsc --noEmit` exit 0; `npx vitest run` 1,977 of 1,977 in 57 files; `npm run --silent replay -- --dry` 19 of 19.
+
+**The code changed, so both reviews were run again,** each in a fresh session, each reading only its own earlier findings. Standards: 22 findings stand — the 16 earlier ones (4 of them changed) and 6 new. Spec: 9 stand — of the 10 earlier ones, 2 are gone (2 and 6), 2 changed (1 and 3), 6 stand, and there are 2 new.
+
+### Verification outcome after the fixes
+
+A third check ran after 40y, at `f94081f`, by a session that watched none of the building ([phase-40-verification.md](phase-40-verification.md) § Re-check after 40y, commit `adde9f4`). All 16 probes pass, each proven able to fail. It added one label to the R4 probe (a pull request closed without merging) and one to the R5 probe (a feature with both approvals recorded). Each of the four fixes behaves differently on the build before it and on the current build. For example, a runner project's comment was acted on 2.1 seconds after it was written while a current-daemon step ran, against 87.3 seconds before. No verdict changed, and the register did not change. The verdict table above stands.
+
+### Outstanding for the human, now
+
+- [ ] PRD-05.R18 — replay run 6 owed, now on `47f1332` or later: 40w changed the runner's rules again. The runner's own choices in R1, R6, R7 and R17, and the wording check in R8, rest on it too.
+- [ ] PRD-05.R9, R12, R13, R15 — live gate owed, on `f94081f` or later, as [phase-40-live-gate.md](phase-40-live-gate.md) § How it runs says. For R15 it should include two tickets on one project, and a comment on scratch-app while an ivtrends step runs. **R15's hint measures the `observedAt` stamp, which still stands still while a current-daemon step runs.** Time the runner's wake instead, or the check will call R15 failed when it is not. Both the Spec review (finding 12) and the check found this.
+- [ ] PRD-05.R2 — the eighth action, `record_approval`, needs your yes.
+- [ ] PRD-05.R8 — the narrow reading (a one-turn check with no tools reads your reply at the limit) needs your confirmation.
+- [ ] PRD-05.R4 and R12 — the amendments made during the build, in the departures.
+
+### Worth knowing before you merge
+
+- **After a failed merge of the list of pieces, trying again needs a second approval** (Spec finding 11). The run no longer fails, but the runner cannot name the first approval again, so it has to ask you to approve the same list once more.
+- **`timone takeover` on a runner project still waits for a current-daemon step to end** (Spec finding 12). Only a comment gets through at once.
+- **A plain "stop for good" that leaves the ticket open is taken up again as a new run a second later,** unless the runner puts the hold on it, as its rules tell it to. A cancel holds the ticket by itself (the check, found outside the verdicts, item 1).
+- **When the run record cannot be read, nothing on the ticket or the pull request says so,** and the daemon logs the same error every cycle (the check, item 3).
+- When the step tickets cannot be opened, the comment quotes the failed `gh` command, and the runner's event line reads badly (the check, item 2).
+- When a session that records an approval ends, the runner is told "The step writing down what it needs ended" (40v's handoff; Spec finding 1, what is left).
+- A session run by hand that marks itself as a step with `timone stage` from a project's copy writes the mark where the guard never reads it. Filed as [timone#174](https://github.com/fvermaut/timone/issues/174).
+
+### Standards review — phase 40 (second delivery)
+
+- **Read:** the diff `origin/main...f94081f` for the non-process files, and the fixes diff `a21ac5f...f94081f`. The current content of the files involved: `src/runner/{actions,driver,record,brief,departures,order,comments,tools,session,session.test}.ts`, `src/daemon/{poll,chunk-zero,chunk-zero.test,session,session.test,step-session,progress,runs,pipeline,cta}.ts`, `src/commands/{record,takeover,cancel,status,retry}.ts` (the last three by grep only). Also `/Users/fvermaut/dev/timone/standards/code-smells.md`, `typescript.md`, `testing.md` and `README.md`, the project's `tsconfig.json` and `package.json` scripts, and my previous review. I re-ran the import-cycle check with a scratch script.
+- **Diff:** `origin/main...f94081f` — 73 files, +19634/−474
+- **Findings:** 22 (all 16 earlier findings are carried, 4 of them changed, plus 6 new)
+
+#### Earlier findings
+
+- 1. changed — The driver part is fixed: an unread record no longer rewrites the description (`driver.ts:941–989`). The `actions.ts` part still stands: in `actions.ts:594–605` and `633–642`, a failed read still turns into "the run record holds no approval of the list of pieces". Also `driver.ts:951` and `957` still pass `entries ?? []`. So after a failed read, the runner is not told of a pieces failure, and the log line only mentions the departures.
+- 2. still stands — I re-ran the check and found the same two runtime cycles. The first: `cta.ts:21` → `runner/session.ts` → `runner/actions.ts:33` → `daemon/poll.ts` → `cta.ts`. The second: `daemon/session.ts:74–81` ↔ `step-session.ts:4–14` and ↔ `chunk-zero.ts:13–15`.
+- 3. still stands — `driver.ts:147`, `330–337`, `610–637` and `645–654`; `actions.ts:324`, `340–346` and `514–536`; `session.ts:148–157`.
+- 4. changed (smaller) — 40v added one named query, `startsAStep` (`record.ts:159–163`), and uses it in five places. Two other queries are still written out inline. "This run's entries" is at `actions.ts:258` and `400`, `departures.ts:118`, `order.ts:178` and `brief.ts:237–239`. "The run left this step out" is at `actions.ts:264`, `281` and `404`, `departures.ts:133` and `order.ts:193`.
+- 5. still stands, with more copies — `poll.ts:801–802` adds two more inline `driverOf(config) === "runner"` tests, beside the two `drivenByRunner` copies (`poll.ts:1258`, `takeover.ts:1031`). `record.ts:40` now names the approval enum once inside that file. But `order.ts:35` `Approval` is still a hand-written twin, and 40v's `records?: Approval` (`actions.ts:724`) passes one into the other.
+- 6. still stands — `order.ts:205–213` and `240`; `driver.ts:235` and `424`.
+- 7. still stands, and grew — `runnerActions` is now `actions.ts:425–1168`, about 745 lines. `startStep` is at `776–886`, `recordApproval` at `942–1041` and `endRun` at `1058–1166`.
+- 8. changed — The unused `_approval` parameter moved to `tryMergeChunkZero` (`chunk-zero.ts:121–128`). `mergeChunkZero` now passes it on without reading it. A new `@ts-expect-error` test (`chunk-zero.test.ts:207–216`) shows that the parameter is required. Three parts are unchanged. `session.test.ts:4993–5063` still calls the private `mergeChunkZero(run, project)` with two arguments, through `as unknown as`. The pass-through methods are still at `session.ts:2282–2300`. `attemptMerge` is still exported (`chunk-zero.ts:147–150`).
+- 9. still stands — `brief.ts:264–290` (`departedHow` at 276); `departures.ts:235–261`; `commands/record.ts:207`.
+- 10. still stands — `oneLine`: `actions.ts:419`, `driver.ts:290`, `session.ts:630`, `chunk-zero.ts:305` and `step-session.ts:204`, plus `brief.ts:467` doing a different job. `capitalised`: `actions.ts:414`, `departures.ts:247` and `commands/record.ts:273`. `usd`: `comments.ts:147`, `brief.ts:472` and `commands/record.ts:268`. The record path: `record.ts:166–167` and `commands/record.ts:53`.
+- 11. still stands — `step-session.ts:66–76` and `194`.
+- 12. still stands — `record.ts:89–98` and `57–63`; `actions.ts:196`; `driver.ts:193` and `202–215`.
+- 13. still stands — `runs.ts:221` and `753`; `pipeline.ts:655`; `driver.ts:202–206`.
+- 14. still stands — `progress.ts:272–287`.
+- 15. still stands — `driver.ts:454`, caught at `425–429`.
+- 16. still stands — `runner/session.test.ts:421`.
+
+#### New findings
+
+#### 17. The pieces failure is stored as free text in a notice's `about` field, and read back by matching the start of the text — primitive obsession
+
+- **Where:** `src/runner/actions.ts:349–388` and `613–616`; `src/runner/driver.ts:358–376`; `src/runner/record.ts:141–145`.
+- **What:** `piecesFailedAbout` writes `` `${PIECES_FAILED_NOTICE}, run ${runId}: ${piecesFailureText(failure)}` ``. `piecesFailureIn` reads it back with `about.startsWith(start) ? about.slice(start.length) : undefined`, and the driver calls it for every notice. The run id, the kind of failure and the error text all go into one string. The typed `PiecesFailure` union exists, but it is turned into a string before it is stored. The `notice` schema has only `about: z.string()`.
+- **Why it matters:** Primitive obsession: a string carries a domain meaning (which run, and what failed). It also goes against typescript.md, *Boundaries*: "The schema is the type". The record is a lasting file, and its schema cannot check this entry. The driver depends on the exact wording of a start text defined in another module.
+- **Suggested remediation:** Add a record entry kind, for example `{ kind: "pieces-not-acted-on", runId, failed: "merge" | "tickets", conflict?, said }`, and derive its type from the zod schema. The driver matches on the kind, and turns it into words only when it tells the runner. — not applied here
+
+#### 18. A session that records an approval is marked by an optional field on `step-started`, not by its own kind — type design
+
+- **Where:** `src/runner/record.ts:73–86` and `150–163`; `src/runner/brief.ts:307–319`; `src/commands/record.ts:105–115`; `src/runner/departures.ts:70`; `src/runner/driver.ts:798`.
+- **What:** `step-started` now means two things, told apart by whether `records` is present. The matching `step-ended` entry has no mark. So `brief.ts` joins back by session id: `entry.kind === "step-started" && entry.records !== undefined ? [entry.sessionId] : []`, then `!recording.has(entry.sessionId)`. The same test is written three ways: `startsAStep`, `entry.records !== undefined` (`brief.ts:309`) and `started.records === undefined` (`commands/record.ts:113`). `departures.ts:70` and `driver.ts:798` still test `kind === "step-started"` directly. They are right today, but only because a recording session never has a building stage. The 40v fix had to change seven places that read the record.
+- **Why it matters:** typescript.md, *Type design*: "States are discriminated unions, never flag combinations." When an optional field is the tag, a reader that forgets it is wrong with no warning. That is the fault 40v fixed. The fix was also many one-line edits on one theme, which is shotgun surgery.
+- **Suggested remediation:** Give the recording session its own entry kinds, so the compiler makes every reader decide. Or at least put `records` on the end entry as well, and export one `recordingSessions(entries)` query from `record.ts`. — not applied here
+
+#### 19. `watchStep` now takes five positional parameters, and only one caller sets the last two, always together — long parameter list
+
+- **Where:** `src/runner/actions.ts:719–725`; calls at `881` and `1024–1033`.
+- **What:** `(stage, session, instructions, afterwards?, records?)`. `recordApproval` passes `what === "pieces" ? async (result) => {…} : undefined, what`. `startStep` passes the first three only.
+- **Why it matters:** Long parameter list: "Four or more parameters". The two optional parameters at the end belong to one case, recording an approval, so they are one concept with no name (a data clump). `records` also changes what the written entry means, which makes it a flag parameter.
+- **Suggested remediation:** Pass an options object `{ afterwards, records }`. Or add a `watchRecording(what, session, …)` that calls a shared core. — not applied here
+
+#### 20. The runner projects' timer is a copy of the cancellation watch — duplicated code (second copy)
+
+- **Where:** `src/daemon/poll.ts:813–890` (`RunnerTurns`, `turnRunnerProjects`), compared with `poll.ts:974–1056` (`CancelWatch`, `watchForCancellations`). The per-project body is at `771–792` and `855–866`.
+- **What:** Both functions have the same parts: a guard so only one run happens at a time, an async block that runs at once, `try { await turning } finally { turning = undefined }`, `setInterval` with `handle.unref?.()`, and a `stop()` that clears the timer and awaits. The comment says "Built as {@link watchForCancellations} is". `interface RunnerTurns { stop(): Promise<void> }` is a copy of `CancelWatch`. The turn body also repeats three things: building `{ name, repoUrl: config.repo_url }`, the `` `${name}: ${oneLine(error)}` `` error line from `turn` a few lines above, and `deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_SECONDS * 1000`, which `pollProjects` has already worked out.
+- **Why it matters:** Duplicated code. The reference calls a second copy tolerable, so this is a suspicion only. But the parts that must stay the same in both (never reject, `unref`, await on stop) are kept in line only by a comment.
+- **Suggested remediation:** Write one `everyInterval(ms, job): { stop(): Promise<void> }` helper and use it in both places. Pass in the interval that `pollProjects` already worked out. — not applied here
+
+#### 21. `rewriteDepartures` does two jobs, and an `undefined` record turns one of them off — flag parameter
+
+- **Where:** `src/runner/driver.ts:961–1000` (in particular `973–976` and `989`); caller at `934–958`.
+- **What:** The parameter is `entries: readonly RecordEntry[] | undefined`. When it is undefined, the function only records the pull request number in the ledger, then stops at `if (entries === undefined) return;`. Its name says it rewrites the departures, and the doc comment has to explain what undefined does. The caller then uses `entries ?? []` twice more.
+- **Why it matters:** Flag parameter: "two functions wearing one name". Here undefined is the switch.
+- **Suggested remediation:** Split it into `followPullRequest(run)` and `rewriteDepartures(run, entries)`, and call the second only when the read succeeded. — not applied here
+
+#### 22. `tryMergeChunkZero` returns the refusal, or undefined when it succeeds — errors and results
+
+- **Where:** `src/daemon/chunk-zero.ts:113–142`; callers at `chunk-zero.ts:104–105` and `src/runner/actions.ts:645–653`.
+- **What:** It returns `Promise<ChunkZeroRefusal | undefined>`, and the doc says "Returns the refusal, or undefined when the branch is on the default branch now". Callers write `if (refusal === undefined) return true;`. `openStepTickets` beside it has the same shape, with a failure string or undefined.
+- **Why it matters:** typescript.md, *Errors and results*: a fallible external call "returns `{ ok: true, value } | { ok: false, error }`". Here success is the lack of a value. That reads backwards, and it differs from `readRecord` in the same diff.
+- **Suggested remediation:** Return `{ ok: true } | { ok: false, error: ChunkZeroRefusal }`, and change `openStepTickets` the same way. — not applied here
+
+### Spec review — phase 40 (second delivery)
+
+- **Read:** my previous review; `doc/specs/prd/prd-05-a-runner-decides-each-step.md` and `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` at f94081f (neither changed since a21ac5f); `doc/plans/phases/phase-40.md` from the top through the end of "## Requirements"; the non-process diff `origin/main...f94081f` (stat) and `a21ac5f...f94081f` (in full). I also read the current content of the files the fixes touch or call, all of which are in the diff: `src/runner/{actions,driver,brief,record,departures,order,comments,tools}.ts`, `src/commands/{record,takeover}.ts`, `src/daemon/{chunk-zero,poll}.ts`, and short parts of `src/daemon/runs.ts` (witness), `src/daemon/requests.ts` (wait limit) and `src/daemon/pipeline.ts` (stage labels).
+- **Diff:** `origin/main...f94081f`: 73 files, +19634/−474
+- **Findings:** 9 standing (7 carried, 2 new). What is left of finding 3 is counted once, as finding 12.
+
+#### Earlier findings
+
+- 1. changed: the count of steps against the order, the list of departures, the brief's order section and `timone record` now all leave out the session that writes an approval into its file (40v). Two things are left. The wake after that session still tells the runner "The step <writing down what it needs> ended: it succeeded." (`src/runner/driver.ts:213–220`, `956`). And the check in `record_approval` still counts that session (see 11).
+- 2. gone: no runner path fails a run any more. A failed merge, or tickets that did not open, now leave the run on the runner's wait with a note in the record. The comment on the ticket names no command. What is left, how to try again, is finding 11.
+- 3. changed: a comment on a runner project now wakes its runner while a daemon project's session holds the cycle (40y). Left: `timone takeover` and the end of a terminal session still wait for the next cycle. See 12.
+- 4. still stands: the fixes do not touch cost recording. A stopped step still records $0, the consult at the limit is not counted, and a wake that decides nothing leaves no reason in the record.
+- 5. still stands: `mergeChunkZero` now passes its approval on to `tryMergeChunkZero`, which still does not read it. The daemon path still accepts a reply from anyone.
+- 6. gone: a pull request closed without merging, on a branch that is ahead, now makes `end_run` refuse unless a named person's stop comment is named. The tool description and the runner's instructions say the same.
+- 7. still stands: the 15-minute summary still shows no output from the step, and nothing wakes the runner when a step goes silent.
+- 8. still stands: marks and notices are still written before the wake, and the retries still live only in memory.
+- 9. still stands. 40w also changed the runner's instructions again: a new line in `SYSTEM` for a closed pull request that gives no reason, and a new `end_run` description. So R18 clause 2 applies to this pull request itself. From what I may read, I cannot tell whether the replay was run on this build.
+- 10. still stands: the hold that `timone cancel` puts on the ticket, and the consult change, are still not recorded in any requirement.
+
+#### New findings
+
+#### 11. After a failed merge of the list of pieces, the run stays open but nothing can try again with the approval already given — PRD-05.R9, PRD-05.R3
+
+- **Where:** `src/runner/actions.ts:963–971` and `304–311`; `src/runner/driver.ts:227`; `src/runner/comments.ts:127–144`; `src/runner/brief.ts:112–175`
+- **What:** After 40x, the runner is woken with "The list of pieces was approved, but … The run was not ended." The merge and the ticket opening only run after the session that `record_approval` starts. To try again, the runner would call `record_approval` again. That call refuses the original approval comment. The check takes the latest successful `step-ended` at stage `breakdown`, and that is now the approval-writing session's own end. 40v tagged that session in the record, but did not change this check. The refusal then says "Ask the person to approve the list of pieces now that it is written." No instruction, tool description, event text or replay case tells the runner that recording the approval again is how to try again. No test covers a merge that fails once and then succeeds.
+- **Why it matters:** R9 clause 2 says that when a named person writes "try again" on a stuck ticket, the runner does it or says why it will not. R3 clause 3 says that once the list is approved, chunk zero is merged as today. Here, a person who fixed the clash is asked to approve, a second time, a list they already approved. The new `approval` entry would then name their "try again" comment, not the comment that gave the approval (R7 clause 2).
+- **Suggested remediation:** leave sessions that carry `records` out of the `finished` check, as 40v does elsewhere, so the original approval can be named again. Or let code retry chunk zero on a later wake when a recorded approval has not been acted on. Say in the event text how to try again. Add a test where the merge fails and then succeeds after a named person's reply. — not applied here
+
+#### 12. While a daemon project's session runs, `timone takeover` on a runner project still waits for it — PRD-05.R15, PRD-05.R11
+
+- **Where:** `src/daemon/poll.ts:804`, `819–839` (the comment "Requests other than a cancel, such as `timone takeover`, are not read here"); `src/daemon/poll.ts:715`; `src/commands/takeover.ts:683–703`, `777–780`; `src/daemon/runs.ts:1579–1601`
+- **What:** 40y gives runner projects a turn on a clock of their own while a daemon project holds the cycle. That turn reads comments and wakes the runner. It does not read `claim-takeover` or `release-takeover` requests, which are only read at the start of a cycle. So on scratch-app, while ivtrends builds, `timone takeover` waits 150 seconds and gives up: "a cycle takes as long as whatever it is running". A terminal session that ends in that time does not wake the runner until the ivtrends session ends. Also, `observedAt` is still written only at the start of a cycle.
+- **Why it matters:** R15 clause 1, as written (a comment), now holds. But R15 says "one project's work no longer holds up the others". R11 clause 2 says a takeover opens a session and the runner wakes when it ends. In the mixed setup that R19 creates, both still wait on another project's session. R15's verification hint measures `observedAt` "while a session runs". That stamp still stops moving, so a live check done the way the register says would fail, even though comments now work.
+- **Suggested remediation:** read the takeover requests of runner projects in the same clock turn, or read all requests on the cancel clock. Change R15's hint to measure the wake itself. Or record in R15 that this phase covers only comments. — not applied here
