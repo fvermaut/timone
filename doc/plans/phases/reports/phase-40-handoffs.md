@@ -1883,3 +1883,76 @@ Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
 19 of 19 cases passed. The runner's sessions cost $0.00 in all.
 exit: 0
 ```
+
+## 40x — a runner project's run is never failed; a merge that fails wakes the runner
+
+**Built.** After a named person approves the list of pieces, the step that writes the approval into its file ends, and code merges the requirements and the list into the default branch and opens one ticket per piece. On a runner project, when the merge or the tickets fail, the run is no longer failed. It stays, and the driver puts it on the runner's wait as after any step. The record gets a `notice` naming what failed and why. The ticket gets one comment in plain words: what failed, what went wrong, and "reply here to say what to do next. I read every reply on this ticket." It names no command and no standing note. The wake after the step's end carries a second event after "The step working out the pieces ended: it succeeded.", for example: "The list of pieces was approved, but the requirements and the list of pieces were not added to the default branch, because it has changes that clash with them, and a person has to decide which side to keep (CONFLICT (content): Merge conflict in doc/specs/prd/prd-12.md). The run was not ended." The current daemon's merge still fails the run and posts `failedComment`, word for word as before. (Spec review, finding 2; PRD-05.R9, R11, R16.)
+
+**The search for other calls that fail a run.** Every call in `src/` was read. `poll.ts`'s reclaim hands a runner project's run to the runner before its fail (line 1291, 40h). A runner project leaves the poll cycle before any spawner call (line 1718), so none of the calls in `session.ts` can reach its runs. `closeChunkZero` was the only reachable place: through `mergeChunkZero`, and its own call when the tickets failed. No other call was changed.
+
+**Files touched.**
+
+- `src/daemon/chunk-zero.ts` — new `tryMergeChunkZero`: the merge, and the log line on success, as before. On a refusal it writes nothing and returns the refusal (`ChunkZeroRefusal`, the forge's `{ merged: false, reason, conflict? }`). It returns undefined when merged. It requires the approval, as `mergeChunkZero` does. `mergeChunkZero` now calls it, then builds the same reason, fails the run and posts `failedComment`, as before. Its doc comment says the runner uses the other form.
+- `src/runner/actions.ts` — `closeChunkZero` uses `tryMergeChunkZero`. On a refusal, or a failure from `openStepTickets`, it calls the new `piecesNotActedOn`, which writes the notice first and then posts the comment. The `failedComment` import is gone. New at module level: `PIECES_FAILED_NOTICE`, `piecesFailureText` (the words the notice and the event carry), `piecesFailedAbout`, and the exported `piecesFailureIn(about, runId)`, which the driver uses to read the notice back.
+- `src/runner/comments.ts` — `PiecesFailure` (`{ failed: "merge", conflict, said }` or `{ failed: "tickets", said }`) and `piecesFailedNotice`.
+- `src/runner/driver.ts` — `piecesFailedEvent`, and `piecesFailuresAfter`: the notices for this run written after its latest `step-ended` entry at the step's stage. `afterStep` adds one event for each after the step's own event. Nothing else in the driver changed.
+- Tests, new cases only: `src/runner/driver.test.ts` (2, one new `describe`) and a new `src/daemon/chunk-zero.test.ts` (2).
+
+**Decisions taken inside the slice.**
+
+1. **The event is delivered by `afterStep`, from the record.** The actions write the notice after the step's `step-ended` entry and before the driver is told. `afterStep` already reads the record to find how the step ended, so it reads the notice from the same entries. `look` does not read these notices, so the failure is told once, on the wake after the step. The notice's `about` begins "list of pieces not acted on, run <run id>: ", as the driver's own notices name their run.
+2. **The runner's form returns the forge's refusal, not the daemon's sentence.** The daemon's reason says "the approved breakdown", a word from the process. With the refusal, the runner's path writes its own plain words and still knows whether it was a conflict. The daemon's reason is built in `mergeChunkZero` exactly as before.
+3. **The notice is written before the comment.** If the forge fails on the comment, the error is logged by `watchStep` as before, and the runner is still told. For that reason the event does not claim that the ticket was told. The runner sees the machine's comment in the brief.
+4. **What went wrong is on the ticket, as the forge or git said it** ("What went wrong: CONFLICT (content): Merge conflict in doc/specs/prd/prd-12.md."). A person who has to settle a conflict needs the file's name. `failedComment` did the same.
+5. **One case beyond the three listed:** `chunk-zero.test.ts` › "cannot be written without the approval that allows the merge, as the daemon's form cannot". The 40e case that proves R3 at compile time checks only `mergeChunkZero`. The runner now merges through `tryMergeChunkZero`, so without this case nothing would fail if its approval became optional.
+6. **Cases (1) and (2) are in `driver.test.ts`.** "Parked on the runner's wait" and "the next wake's events" are the driver's work. The tests call the real `runnerActions` through `driver.actionsFor(run)` over a fake forge, as the 40u cases do, so the seam is still `runnerActions` with a fake adapter.
+7. **Case (3) is in a new `chunk-zero.test.ts`,** directly on `mergeChunkZero`. The existing tests in `session.test.ts` reach it through the spawner, and were not changed. They all pass.
+
+**Validation evidence.** Each case was written first and run red, then made green. A case marked *guard* passed on its first run. For a guard, a temporary break in the code was run to show that the test catches it. The break was then undone, and `grep -c MUTATION` on the file gave 0 each time.
+
+| Plan case | Test | Red (trimmed) | Green |
+| --- | --- | --- | --- |
+| (1) | `driver.test.ts` › RunnerDriver — when the approved list of pieces cannot be acted on (40x) › leaves the run waiting for the runner when the merge conflicts, notes why, tells the ticket once, and wakes the runner with the failure | `expected { id: 'scratch-app#12/1', …(12) } to match object { status: 'parked', …(1) }`, received `"status": "failed"`, `"wait": undefined` | pass |
+| (2) | … › leaves the run waiting for the runner when opening the pieces' tickets fails, notes why, tells the ticket once, and wakes the runner with the failure | same: `"status": "failed"` | pass |
+| (1), (2) | the same two cases, on their later assertions | break 1: the failure event taken out of `afterStep` → both fail: `expected [ { runId: 'scratch-app#12/1', …(2) } ] to deeply equal [ … ]`. Break 2: the comment's last line pointing at "the command in the standing note below" → both fail: `expected true to be false` (the check for a command or a standing note) | pass |
+| (3) | `chunk-zero.test.ts` › mergeChunkZero, as the current daemon uses it (40x) › still fails the run and posts the failure comment when the merge conflicts — *guard* | break: the run not failed in `mergeChunkZero` → `expected { id: 'ivtrends#7/1', …(9) } to match object { status: 'failed', …(1) }`. Three `session.test.ts` cases failed too ("fails the run and says why when the merge does not happen", "says a conflict is a conflict, in words the human can act on", "stops the run when the merge was refused for any other reason") | pass |
+| decision 5 | `chunk-zero.test.ts` › tryMergeChunkZero, the form the runner uses (40x) › cannot be written without the approval that allows the merge, as the daemon's form cannot — *guard* | break: `_approval?:` in `tryMergeChunkZero` → `tsc`: `src/daemon/chunk-zero.test.ts(103,7): error TS2578: Unused '@ts-expect-error' directive.` | pass |
+
+The comment as written, for a conflict:
+
+> **I could not add the requirements and the list of pieces to the project's default branch.** The approval is written down. But the default branch has changes that clash with them, so nothing was added. Someone has to decide which version to keep.
+>
+> What went wrong: CONFLICT (content): Merge conflict in doc/specs/prd/prd-12.md.
+>
+> **What I need from you:** reply here to say what to do next. I read every reply on this ticket.
+
+For another refusal, the first paragraph is "… default branch.** The approval is written down, but nothing was added." When the tickets fail, it is "**I could not open a ticket for each piece.** The approval is written down, and the requirements and the list of pieces are on the project's default branch." The other two paragraphs are the same.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  57 passed (57)
+      Tests  1970 passed (1970)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+… (19 lines, all PASS)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+$ grep -n "store.fail\|\.fail(" src/runner/*.ts | grep -v test
+(no line)
+```
+
+The suite had 1966 tests before the slice (40w's count after its follow-up) and has 1970 now: 2 new in `driver.test.ts` and 2 in the new `chunk-zero.test.ts` (57 files, one more).
+
+- [x] Red→green evidence in the handoff: the table above.
+
+**What the re-check must know.**
+
+- **The runner's rules say nothing about this event.** `brief.ts` is outside this slice. The runner reads the event and the machine's comment, and decides. What works today: after a person settles a conflict and says so, the runner can record the approval again, naming that newer comment. The session that writes it into the file runs again, and the merge and the tickets are tried again. `openStepTickets` opens only the tickets that are missing. The approval check compares the new comment with the end of the last session that wrote the approval (40v's note), so the comment must be newer than that.
+- **The run holds its project while it waits.** It is parked on its work branch, so `occupyingRun` names it, and other tickets of the project wait. That is what R16 asks: nothing is failed, and the runner decides.
+- **At the limit, the event is not told.** The session that writes the approval costs money. If that cost puts the ticket over its limit, `ask` posts the limit notice and wakes nobody, as for any step. The failure's event is then lost, and a later wake after a "continue" does not carry it. The ticket's comment and the record's notice are still there, and the runner sees the comment in the brief.
+- **`timone record` does not show notices,** so it does not show this failure. It lists the runner's `record_approval` decision and the steps. `src/commands/record.ts` is outside this slice.
+- **The event is told only on the wake that follows the step's end.** If that wake is never asked for, for example because the daemon stopped after the step ended, the failure's event is not told later. The ticket's comment and the record's notice are still there. The step's own event has the same limit today.
+- The current daemon's path is unchanged. `session.ts` still calls `mergeChunkZero`, and its delegators and tests were not touched.

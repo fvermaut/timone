@@ -17,7 +17,12 @@ import type {
   StepSessionInput,
 } from "../daemon/step-session.js";
 import { namedPeople, ticketLimitOf, type Manifest, type ProjectConfig } from "../manifest.js";
-import { STOPPED_BY_RUNNER, type RunnerActionDeps, type RunningSteps } from "./actions.js";
+import {
+  piecesFailureIn,
+  STOPPED_BY_RUNNER,
+  type RunnerActionDeps,
+  type RunningSteps,
+} from "./actions.js";
 import { isNamedPerson } from "./brief.js";
 import { limitNotice } from "./comments.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
@@ -214,6 +219,15 @@ export function stepEndedEvent(stage: PipelineStage, ended: StepEnding): string 
   return `${step} it failed: ${why}${/[.!?]$/.test(why) ? "" : "."}`;
 }
 
+/**
+ * What the runner is told when the approved list of pieces was not acted on
+ * after the step that writes the approval into its file (40x): what failed,
+ * with what the forge or git said, and that the run goes on.
+ */
+export function piecesFailedEvent(failure: string): string {
+  return `The list of pieces was approved, but ${failure}. The run was not ended.`;
+}
+
 /** What a run waits for once its step has ended and the runner is being woken. */
 const AFTER_STEP_WAIT = "the runner to look at what the step did";
 
@@ -339,6 +353,28 @@ function lastStepEnded(
     }
   }
   return ended;
+}
+
+/**
+ * What failed after the latest step of run `runId` at `stage` ended, from the
+ * notes the runner's actions wrote after that step's end (40x). Only the step
+ * that writes the approval of the list of pieces into its file leaves one.
+ */
+function piecesFailuresAfter(
+  entries: readonly RecordEntry[],
+  runId: string,
+  stage: PipelineStage,
+): string[] {
+  let failures: string[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "step-ended" && entry.runId === runId && entry.stage === stage) {
+      failures = [];
+    } else if (entry.kind === "notice") {
+      const failure = piecesFailureIn(entry.about, runId);
+      if (failure !== undefined) failures.push(failure);
+    }
+  }
+  return failures;
 }
 
 /** Whether the runner has ever been woken for run `runId`. */
@@ -882,7 +918,9 @@ export class RunnerDriver {
    * **The run may already be over.** The step that records the approval of
    * the list of pieces ends by merging it and ending the run (40e), so a run
    * that is done, failed or cancelled by now is left as it is, and nobody is
-   * woken for it.
+   * woken for it. When the list could not be merged, or its tickets not
+   * opened, the run is not over (40x): the record notes why, and the wake
+   * says it after the step's end.
    *
    * **A forge that fails here does not stop the wake.** The description is
    * brought up to date again after every step; the runner not being told
@@ -914,7 +952,10 @@ export class RunnerDriver {
       ok: result.outcome.ok,
       ...(result.outcome.error === undefined ? {} : { error: result.outcome.error }),
     };
-    await this.ask(this.deps.store.get(runId) ?? run, [stepEndedEvent(stage, ended)]);
+    await this.ask(this.deps.store.get(runId) ?? run, [
+      stepEndedEvent(stage, ended),
+      ...piecesFailuresAfter(entries ?? [], runId, stage).map(piecesFailedEvent),
+    ]);
   }
 
   /**

@@ -106,6 +106,43 @@ export function piecesApprovedNotice(by: string): string {
   ].join("\n");
 }
 
+/**
+ * What went wrong after a named person approved the list of pieces (40x):
+ * the merge into the default branch, or, once that was done, opening a
+ * ticket for each piece. `said` is what the forge or git said, as it said it.
+ */
+export type PiecesFailure =
+  | { failed: "merge"; conflict: boolean; said: string }
+  | { failed: "tickets"; said: string };
+
+/**
+ * The comment that says the approved list of pieces could not be acted on
+ * (40x). Posted once, when it happens.
+ *
+ * **The run is not ended, so there is nothing to start again.** The runner
+ * is woken, and reads the replies on the ticket. So the comment names no
+ * command and no standing note: it says what failed, and that a reply here
+ * is read.
+ */
+export function piecesFailedNotice(failure: PiecesFailure): string {
+  const what =
+    failure.failed === "tickets"
+      ? "**I could not open a ticket for each piece.** The approval is written down, and the " +
+        "requirements and the list of pieces are on the project's default branch."
+      : "**I could not add the requirements and the list of pieces to the project's default branch.** " +
+        (failure.conflict
+          ? "The approval is written down. But the default branch has changes that clash with " +
+            "them, so nothing was added. Someone has to decide which version to keep."
+          : "The approval is written down, but nothing was added.");
+  return [
+    what,
+    "",
+    `What went wrong: ${sentence(failure.said)}`,
+    "",
+    `${NEEDED_FROM_YOU} reply here to say what to do next. I read every reply on this ticket.`,
+  ].join("\n");
+}
+
 /** Dollars as a person reads them: `$150.40`. */
 function usd(amount: number): string {
   return `$${amount.toFixed(2)}`;

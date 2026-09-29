@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  MergeOutcome,
   PullRequest,
   TicketingAdapter,
   TicketingProject,
@@ -17,6 +18,7 @@ import {
   noStepWrites,
 } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
+import { breakdownPath, renderBreakdown } from "../daemon/breakdown.js";
 import { RunStore, type Run } from "../daemon/runs.js";
 import type { StepResult, StepSessionInput } from "../daemon/step-session.js";
 import { RunningSteps, runnerActions } from "./actions.js";
@@ -690,5 +692,214 @@ describe("RunnerDriver — when a step ends and the ticket's record cannot be re
     expect(logged).toContainEqual(expect.stringContaining("line 7 is not JSON"));
     expect(store.get(run.id)?.pr).toBe(21);
     expect(wakes).toHaveLength(1);
+  });
+});
+
+describe("RunnerDriver — when the approved list of pieces cannot be acted on (40x)", () => {
+  // The Spec review of phase 40, finding 2 (PRD-05.R9, R11, R16): the merge
+  // after the approval, or opening the pieces' tickets, failed the run. On a
+  // runner project nothing wakes the runner for a failed run, and the
+  // comment pointed at a standing note these projects do not have.
+
+  /** A feature ticket on scratch-app, whose list of pieces fvermaut approved at 11:58:40. */
+  const FEATURE: TicketThread = {
+    number: 12,
+    title: "A due date on each task",
+    body: "Each task should have a due date.",
+    labels: ["timone", "triage:feature"],
+    url: "https://github.com/fvermaut/scratch-app/issues/12",
+    author: "fvermaut",
+    createdAt: "2026-09-27T09:00:00Z",
+    comments: [
+      {
+        author: "fvermaut",
+        body: "ok go ahead with the pieces",
+        createdAt: "2026-09-27T11:58:40Z",
+        fromTimone: false,
+      },
+    ],
+  };
+
+  /** Ticket 12's list of pieces, as the step that records the approval leaves it. */
+  const TWO_PIECES = renderBreakdown({
+    stamp: { kind: "approved", by: "fvermaut", at: "2026-09-27", pieces: 2 },
+    chunks: [
+      { title: "Due dates on tasks", delivers: "Each task can carry a due date." },
+      { title: "Late tasks first", delivers: "The list shows the late tasks first, in red." },
+    ],
+  });
+
+  /** The words git gives for a merge whose two sides changed the same lines. */
+  const GIT_CONFLICT = "CONFLICT (content): Merge conflict in doc/specs/prd/prd-12.md";
+
+  /**
+   * The forge for the feature: the merge answers `merge`, and opening a
+   * piece's ticket throws when `createStep` says so. Every comment posted on
+   * the ticket is kept in `posted`.
+   */
+  function piecesForge(merge: MergeOutcome, createStep: "opens" | "throws"): {
+    adapter: TicketingAdapter;
+    posted: string[];
+  } {
+    const posted: string[] = [];
+    const adapter: TicketingAdapter = {
+      ...forge("").adapter,
+      async getTicket() {
+        return FEATURE;
+      },
+      async postComment(_project, _number, comment) {
+        posted.push(comment);
+      },
+      async findPullRequest() {
+        return undefined;
+      },
+      async mergeIntoDefault() {
+        return merge;
+      },
+      async readFile(_project, branch, path) {
+        return branch === "main" && path === breakdownPath(12) ? TWO_PIECES : undefined;
+      },
+      async ensureLabel() {},
+      async createStep() {
+        if (createStep === "throws") throw new Error("gh: HTTP 502: Bad Gateway");
+        return 201;
+      },
+    };
+    return { adapter, posted };
+  }
+
+  /**
+   * #12's run on its branch, waiting for the runner after the step that wrote
+   * the list of pieces ended well at 11:50, and a driver over it. The runner
+   * then records fvermaut's approval, and the step that writes it into the
+   * file ends well.
+   */
+  async function approvePieces(adapter: TicketingAdapter): Promise<{
+    store: RunStore;
+    root: string;
+    run: Run;
+    wakes: AskedWake[];
+  }> {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-pieces-"));
+    tempDirs.push(root);
+    const store = RunStore.open(join(root, ".timone", "state.json"), {
+      now: () => "2026-09-27T12:00:00Z",
+    });
+    const { run: registered } = store.register("scratch-app", 12);
+    store.claimBranch(registered.id, BRANCH);
+    const run = store.park(registered.id, {
+      waitingOn: "the runner to look at what the step did",
+      kind: "runner",
+      resolvableBy: ["breakdown"],
+    });
+    appendEntry(root, "scratch-app", 12, {
+      kind: "step-started",
+      at: "2026-09-27T11:20:00Z",
+      runId: run.id,
+      stage: "breakdown",
+      sessionId: "step-session-3",
+    });
+    appendEntry(root, "scratch-app", 12, {
+      kind: "step-ended",
+      at: "2026-09-27T11:50:00Z",
+      runId: run.id,
+      stage: "breakdown",
+      sessionId: "step-session-3",
+      ok: true,
+      costUsd: 1.6,
+    });
+    const { sessions, wakes } = fakeWakes();
+    const step = fakeStep(store);
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: step.startStep,
+      timonePin: async () => undefined,
+      clock: () => "2026-09-27T12:00:00Z",
+      log: () => {},
+    });
+
+    const approved = await runnerActions(driver.actionsFor(run), run).recordApproval({
+      what: "pieces",
+      commentAt: "2026-09-27T11:58:40Z",
+      reason: "fvermaut approved the list of pieces.",
+    });
+    expect(approved.ok).toBe(true);
+    step.end({
+      outcome: { sessionId: "step-session-4", ok: true },
+      summary: { durationMs: 40_000, turns: 6, costUsd: 0.04, models: [] },
+    });
+    await vi.waitFor(() => expect(store.get(run.id)?.status).not.toBe("active"));
+    await driver.drain();
+    return { store, root, run, wakes };
+  }
+
+  /** Whether a comment asks the reader to run a command, or points at a standing note. */
+  function namesACommand(comment: string): boolean {
+    return /`|\btimone [a-z]|standing note/i.test(comment);
+  }
+
+  it("leaves the run waiting for the runner when the merge conflicts, notes why, tells the ticket once, and wakes the runner with the failure", async () => {
+    const { adapter, posted } = piecesForge(
+      { merged: false, conflict: true, reason: GIT_CONFLICT },
+      "opens",
+    );
+
+    const { store, root, run, wakes } = await approvePieces(adapter);
+
+    expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
+    expect(recordOf(root)).toContainEqual({
+      kind: "notice",
+      at: "2026-09-27T12:00:00Z",
+      about: expect.stringMatching(/clash.*CONFLICT \(content\): Merge conflict in doc\/specs\/prd\/prd-12\.md/),
+    });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toContain("clash");
+    expect(posted[0]).toContain(GIT_CONFLICT);
+    expect(posted[0]).toContain("**What I need from you:** reply here");
+    expect(namesACommand(posted[0]!)).toBe(false);
+    expect(wakes).toEqual([
+      {
+        runId: run.id,
+        events: [
+          "The step working out the pieces ended: it succeeded.",
+          expect.stringMatching(/clash.*CONFLICT \(content\): Merge conflict in doc\/specs\/prd\/prd-12\.md.*The run was not ended\.$/),
+        ],
+        options: {},
+      },
+    ]);
+  });
+
+  it("leaves the run waiting for the runner when opening the pieces' tickets fails, notes why, tells the ticket once, and wakes the runner with the failure", async () => {
+    const { adapter, posted } = piecesForge({ merged: true, into: "main" }, "throws");
+
+    const { store, root, run, wakes } = await approvePieces(adapter);
+
+    expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
+    expect(recordOf(root)).toContainEqual({
+      kind: "notice",
+      at: "2026-09-27T12:00:00Z",
+      about: expect.stringMatching(/on the default branch.*gh: HTTP 502: Bad Gateway/),
+    });
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toContain("ticket for each piece");
+    expect(posted[0]).toContain("gh: HTTP 502: Bad Gateway");
+    expect(posted[0]).toContain("**What I need from you:** reply here");
+    expect(namesACommand(posted[0]!)).toBe(false);
+    expect(wakes).toEqual([
+      {
+        runId: run.id,
+        events: [
+          "The step working out the pieces ended: it succeeded.",
+          expect.stringMatching(/on the default branch.*gh: HTTP 502: Bad Gateway.*The run was not ended\.$/),
+        ],
+        options: {},
+      },
+    ]);
   });
 });

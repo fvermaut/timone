@@ -59,6 +59,12 @@ export interface ChunkZeroApproval {
 }
 
 /**
+ * Why chunk zero was not merged: what the forge or git said, and whether the
+ * two sides clash.
+ */
+export type ChunkZeroRefusal = Extract<MergeOutcome, { merged: false }>;
+
+/**
  * Merge chunk zero — the branch carrying the specification and the approved
  * breakdown — into the project's default branch, with no pull request
  * (ADR-0030 D2). Returns false when it did not happen, having failed the run
@@ -67,13 +73,18 @@ export interface ChunkZeroApproval {
  * have it build against a default branch that does not carry the
  * specification, and nothing downstream would notice.
  *
+ * This is the current daemon's form. The runner's path merges through
+ * {@link tryMergeChunkZero}, which fails nothing (40x): on a project the
+ * runner drives, a failed run is one nothing wakes again.
+ *
  * **`approval` is required, so no caller can merge without one** (PRD-05 R3:
  * only a named person's yes lets work reach a default branch with no pull
- * request). Both paths that close chunk zero merge through here, and each
- * must name the approval that allows it: the runner's path takes it only
- * from the run record's `approval` entry, and the daemon's from the person's
- * reply it has just read. The check is the compiler's — a call without an
- * approval does not build — so nothing here reads it again.
+ * request). Both paths that close chunk zero merge through here or through
+ * {@link tryMergeChunkZero}, and each must name the approval that allows it:
+ * the runner's path takes it only from the run record's `approval` entry,
+ * and the daemon's from the person's reply it has just read. The check is
+ * the compiler's — a call without an approval does not build — so nothing
+ * here reads it again.
  *
  * {@link attemptMerge} below takes no approval. It is exported only for the
  * spawner's delegator of the same name, which its tests reach; nothing else
@@ -83,35 +94,51 @@ export async function mergeChunkZero(
   deps: ChunkZeroDeps,
   run: Run,
   project: TicketingProject,
-  // Required and not read: see above. Named with an underscore only so a
-  // reader does not look for where it is used.
-  _approval: ChunkZeroApproval,
+  approval: ChunkZeroApproval,
 ): Promise<boolean> {
-  const { store, adapter } = deps;
-  const branch = store.get(run.id)?.branch;
-  const outcome = await attemptMerge(deps, project, branch);
-
-  if (outcome.merged) {
-    // `alreadyThere` is a success and is logged as the different thing it
-    // is: a cycle retried after a merge that landed reaches here, and
-    // reporting it as a fresh merge would hide a retry nobody knew about.
-    deps.log(
-      outcome.alreadyThere === true
-        ? `merged ${run.id} — ${branch} was already on ${outcome.into}`
-        : `merged ${run.id} — ${branch} into ${outcome.into}`,
-    );
-    return true;
-  }
+  const refusal = await tryMergeChunkZero(deps, run, project, approval);
+  if (refusal === undefined) return true;
 
   const reason =
-    outcome.conflict === true
+    refusal.conflict === true
       ? "the approved breakdown and the default branch have changes that clash — " +
-        `a merge conflict, and nothing was merged (${outcome.reason}). ` +
+        `a merge conflict, and nothing was merged (${refusal.reason}). ` +
         "Somebody has to decide which side wins; trying again changes nothing."
-      : `could not merge the approved breakdown into the default branch: ${outcome.reason}`;
-  store.fail(run.id, reason);
-  await adapter.postComment(project, run.ticket, failedComment(reason));
+      : `could not merge the approved breakdown into the default branch: ${refusal.reason}`;
+  deps.store.fail(run.id, reason);
+  await deps.adapter.postComment(project, run.ticket, failedComment(reason));
   return false;
+}
+
+/**
+ * Merge chunk zero as {@link mergeChunkZero} does, and write nothing about a
+ * refusal: no run is failed and no ticket is told. Returns the refusal, or
+ * undefined when the branch is on the default branch now.
+ *
+ * The runner's form (40x). What a refusal means for the run, and what the
+ * ticket is told, is the caller's to decide.
+ */
+export async function tryMergeChunkZero(
+  deps: ChunkZeroDeps,
+  run: Run,
+  project: TicketingProject,
+  // Required and not read: see {@link mergeChunkZero}. Named with an
+  // underscore only so a reader does not look for where it is used.
+  _approval: ChunkZeroApproval,
+): Promise<ChunkZeroRefusal | undefined> {
+  const branch = deps.store.get(run.id)?.branch;
+  const outcome = await attemptMerge(deps, project, branch);
+  if (!outcome.merged) return outcome;
+
+  // `alreadyThere` is a success and is logged as the different thing it
+  // is: a cycle retried after a merge that landed reaches here, and
+  // reporting it as a fresh merge would hide a retry nobody knew about.
+  deps.log(
+    outcome.alreadyThere === true
+      ? `merged ${run.id} — ${branch} was already on ${outcome.into}`
+      : `merged ${run.id} — ${branch} into ${outcome.into}`,
+  );
+  return undefined;
 }
 
 /**

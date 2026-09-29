@@ -25,14 +25,13 @@ import {
 import type { Run, RunStore } from "../daemon/runs.js";
 import { HELD_LABEL, HELD_LABEL_DESCRIPTION } from "../daemon/steps.js";
 import {
-  mergeChunkZero,
   openStepTickets,
+  tryMergeChunkZero,
   type ChunkZeroApproval,
   type ChunkZeroDeps,
 } from "../daemon/chunk-zero.js";
 import { closeInitiativeIfDone } from "../daemon/poll.js";
 import {
-  failedComment,
   isPrompted,
   sessionRequest,
   workspaceFor,
@@ -56,6 +55,8 @@ import {
   joined,
   limitNotice,
   piecesApprovedNotice,
+  piecesFailedNotice,
+  type PiecesFailure,
 } from "./comments.js";
 import { sinceLastBuild } from "./departures.js";
 import { isNamedPerson } from "./brief.js";
@@ -345,6 +346,47 @@ function toldOfLimit(entries: readonly RecordEntry[]): boolean {
   return told;
 }
 
+/** What a `notice` entry starts with when the approved list of pieces was not acted on (40x). */
+const PIECES_FAILED_NOTICE = "list of pieces not acted on";
+
+/**
+ * What failed after the approval of the list of pieces, in the words the
+ * record's notice keeps and the runner is told: what did not happen, and
+ * what the forge or git said in brackets.
+ */
+function piecesFailureText(failure: PiecesFailure): string {
+  switch (failure.failed) {
+    case "merge":
+      return failure.conflict
+        ? "the requirements and the list of pieces were not added to the default branch, because it " +
+            "has changes that clash with them, and a person has to decide which side to keep " +
+            `(${failure.said})`
+        : `the requirements and the list of pieces were not added to the default branch (${failure.said})`;
+    case "tickets":
+      return (
+        "the requirements and the list of pieces are on the default branch, but the tickets for " +
+        `the pieces were not opened (${failure.said})`
+      );
+    default:
+      return failure satisfies never;
+  }
+}
+
+/** What the `notice` entry says: the run, then what failed and why. */
+function piecesFailedAbout(runId: string, failure: PiecesFailure): string {
+  return `${PIECES_FAILED_NOTICE}, run ${runId}: ${piecesFailureText(failure)}`;
+}
+
+/**
+ * What failed and why, when `about` is the notice {@link piecesFailedAbout}
+ * wrote for run `runId`, or undefined when it is any other notice. The
+ * driver reads it back to tell the runner on the wake after the step (40x).
+ */
+export function piecesFailureIn(about: string, runId: string): string | undefined {
+  const start = `${PIECES_FAILED_NOTICE}, run ${runId}: `;
+  return about.startsWith(start) ? about.slice(start.length) : undefined;
+}
+
 /**
  * The approvals run `runId` has gone without: named in one of its
  * `departure` entries, and never recorded as given. A step is told of each,
@@ -563,14 +605,29 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
   };
 
   /**
+   * Note in the record what failed after the approval of the list of pieces,
+   * then tell the ticket (40x). The note comes first: it is what the runner
+   * is told from, so a forge that fails on the comment still leaves the
+   * runner knowing.
+   */
+  const piecesNotActedOn = async (failure: PiecesFailure): Promise<void> => {
+    write({ kind: "notice", at: deps.clock(), about: piecesFailedAbout(run.id, failure) });
+    await deps.adapter.postComment(deps.project, run.ticket, piecesFailedNotice(failure));
+  };
+
+  /**
    * Close chunk zero once the approval of the list of pieces is in its file:
    * merge the requirements and the list into the default branch, open one
    * ticket per piece, and end this run (ADR-0030 D2, ADR-0040). The same code
    * the daemon runs, from `chunk-zero.ts`, so the two cannot drift.
    *
-   * A merge that fails has already failed the run and told the ticket. A
-   * failure to open the tickets is treated the same way, as the daemon does:
-   * an approved list with no tickets is work nothing would ever pick up.
+   * **A merge that fails, or tickets that do not open, end nothing** (40x,
+   * PRD-05 R16). The run stays, and the driver puts it back on the runner's
+   * wait once the step's end is told, as after any step. The record notes
+   * what failed and why, and the driver reads that note to tell the runner
+   * on the wake that follows. The ticket is told once, in plain words. A
+   * failed run would be one nothing wakes again, and the old comment pointed
+   * at a standing note that a project the runner drives does not have.
    */
   const closeChunkZero = async (): Promise<void> => {
     const approval = recordedApprovalOfPieces();
@@ -585,11 +642,18 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       return;
     }
     const chunkZero: ChunkZeroDeps = { store: deps.store, adapter: deps.adapter, log: deps.log };
-    if (!(await mergeChunkZero(chunkZero, current(), deps.project, approval))) return;
+    const refusal = await tryMergeChunkZero(chunkZero, current(), deps.project, approval);
+    if (refusal !== undefined) {
+      await piecesNotActedOn({
+        failed: "merge",
+        conflict: refusal.conflict === true,
+        said: refusal.reason,
+      });
+      return;
+    }
     const failure = await openStepTickets(chunkZero, current(), deps.project);
     if (failure !== undefined) {
-      deps.store.fail(run.id, failure);
-      await deps.adapter.postComment(deps.project, run.ticket, failedComment(failure));
+      await piecesNotActedOn({ failed: "tickets", said: failure });
       return;
     }
     // Code's own decision, not the runner's: it is written down with the
