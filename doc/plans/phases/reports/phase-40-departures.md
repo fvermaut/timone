@@ -245,3 +245,13 @@
 **Did instead:** fvermaut chose "fix first". Four new sub-phases, 40v–40y, fix the four Spec review findings named to him as the ones that matter most (1, 2, 3 and 6), and Standards finding 1, which makes the pull request say the same untrue thing as Spec finding 1 by a second path. The other findings stay listed on the pull request. A fresh check re-runs the probes afterwards, and the pull request is delivered again.
 
 **Why:** Each of the four breaks a MUST of PRD-05 on a path the watched run did not reach: a run that records an approval is listed as out of order (R5); a failed run on a runner project has no way out except a terminal command (R9, R16); a closed pull request lets a run drop unmerged work (R4); a build on ivtrends holds up scratch-app's runner (R15).
+
+## 2026-09-29 — timone#165, execution (after delivery)
+
+**Kind:** plan step
+
+**Agreed:** Sub-phase 40w changed `src/runner/actions.ts` and `src/runner/brief.ts` so that a pull request closed without merging does not let a run end while its branch holds work.
+
+**Did instead:** `src/runner/tools.ts` is granted to 40w as a follow-up. The `end_run` action's description and its `stopCommentAt` field's description are brought in line with the code. The plan is amended in place.
+
+**Why:** The runner reads those descriptions as part of its instructions. They still said a closed pull request ends the run, and offered the stop comment only for a run with no pull request. The code refuses such a call anyway, so the cost was one refused call, but the runner's instructions must not say the opposite of what the code does.
