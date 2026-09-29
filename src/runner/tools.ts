@@ -141,8 +141,8 @@ const endRunInput = z.object({
     .min(1)
     .optional()
     .describe(
-      "Only when a named person asked in their own comment to stop the work for good: " +
-        "the time of that comment, exactly as shown. The run then ends without a pull request.",
+      "Only when a named person asked in their own comment on the ticket to stop the work for good: " +
+        "the time of that comment, exactly as shown. The run then ends without a merged pull request.",
     ),
 });
 
@@ -228,11 +228,11 @@ export function runnerTools(actions: RunnerActions): SdkMcpToolDefinition<any>[]
     ),
     tool(
       "end_run",
-      "End this run. A run that changed files waits while its pull request is open. " +
-        "End it when the pull request is merged, and close the ticket then, or when it is closed. " +
-        "A run that changed nothing can end at any time. " +
-        "A run that changed files and has no pull request can also end when a named person asked " +
-        "in their own comment to stop the work for good: give the time of that comment in stopCommentAt.",
+      "End this run. A run that changed files waits while its pull request is open, and ends when a " +
+        "pull request for the work is merged: close the ticket then. A pull request closed without merging " +
+        "does not end it. A run with no pull request, or whose pull request was closed without merging, can " +
+        "also end when a named person asked in their own comment on the ticket to stop the work for good: " +
+        "give the time of that comment in stopCommentAt. A run that changed nothing can end at any time.",
       endRunInput.shape,
       async (args) => answer(await actions.endRun(args)),
     ),

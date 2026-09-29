@@ -120,4 +120,18 @@ describe("the tools the runner is given", () => {
     expect(endRun!.description).toContain("stop the work for good");
     expect(endRun!.description).toContain("stopCommentAt");
   });
+
+  it("does not tell the runner that a pull request closed without merging ends a run that changed files, and offers a named person's stop on the ticket then (40w)", () => {
+    const endRun = runnerTools(actionsOnAFreshTicket()).find((tool) => tool.name === "end_run");
+    const field = endRun!.inputSchema["stopCommentAt"];
+
+    expect(endRun!.description).not.toContain("or when it is closed");
+    expect(endRun!.description).toContain("A pull request closed without merging does not end it.");
+    expect(endRun!.description).toContain(
+      "A run with no pull request, or whose pull request was closed without merging, can also end when a named " +
+        "person asked in their own comment on the ticket to stop the work for good",
+    );
+    expect(field?.description).toContain("in their own comment on the ticket");
+    expect(field?.description).toContain("The run then ends without a merged pull request.");
+  });
 });

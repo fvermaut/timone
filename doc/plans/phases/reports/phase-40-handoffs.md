@@ -1864,3 +1864,22 @@ No replay case contradicts the new rule. #111 is the one with a closed pull requ
 - **40t's decision 2 no longer holds for a closed pull request.** A named comment is now read on a closed pull request whose branch is ahead. It is still not read on a merged pull request or when nothing is ahead; case (4) shows the merged one.
 - **Where a stop after a closed pull request shows.** The same as a 40t stop: `timone status` shows "was cancelled: <author> asked to stop the work, in the comment at <time>". Nothing there says a pull request was closed. The runner's own answer does ("without a merged pull request").
 - **The model replay has not been run** (the build's sandbox has no model login). With the new rule, a runner on #111 that tried to end the run would now be refused; the judge already failed such a try, since it needs a step started.
+
+**Follow-up: the end_run description** (granted by the orchestrator; the plan's ✏ note under 40w).
+
+- `src/runner/tools.ts` — the `end_run` description now reads: "End this run. A run that changed files waits while its pull request is open, and ends when a pull request for the work is merged: close the ticket then. A pull request closed without merging does not end it. A run with no pull request, or whose pull request was closed without merging, can also end when a named person asked in their own comment on the ticket to stop the work for good: give the time of that comment in stopCommentAt. A run that changed nothing can end at any time." The `stopCommentAt` field's description now reads: "Only when a named person asked in their own comment on the ticket to stop the work for good: the time of that comment, exactly as shown. The run then ends without a merged pull request."
+- `src/runner/tools.test.ts` — new case: "does not tell the runner that a pull request closed without merging ends a run that changed files, and offers a named person's stop on the ticket then (40w)". Red first: `expected 'End this run. A run that changed file…' not to contain 'or when it is closed'`. Green after the change. The 40t case on `end_run` passes unchanged: the words it checks ("stop the work for good", "stopCommentAt", "named person", "exactly as shown") are kept.
+- The first point of "What the re-check must know" above, about the `end_run` description still giving the old rule, no longer holds.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  56 passed (56)
+      Tests  1966 passed (1966)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
