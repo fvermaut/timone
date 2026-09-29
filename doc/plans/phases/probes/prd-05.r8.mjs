@@ -150,7 +150,7 @@ await clause('PRD-05.R8 clause 2b', 'a reply that does not mean "continue", or o
   correct: async () => { assertNotRaised(notCont); assertNotRaised(strangerCont); assert(strangerCont.consults.length === 0, 'the stranger\'s words were read'); },
 });
 console.log(`    (the reply is read by a one-turn check; it was asked about: ${JSON.stringify([...cont.consults, ...notCont.consults])})`);
-blocked('PRD-05.R8 clause 2 (wording)', '"in any wording that means it"', 'the wording is judged by a one-turn model check; it needs a real model.');
+blocked('PRD-05.R8 clause 2 (wording)', '"in any wording that means it"', 'the wording is judged by a one-turn model check; it needs a real model. The replay (PRD-05.R18) does not run that check.');
 
 // Clause 3: a project limit replaces $150.
 const own = await spend({ sortUsd: 6, limit: 5 });

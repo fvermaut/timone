@@ -13,6 +13,7 @@
 //   3. GIVEN any run WHEN code decides which session to start
 //      THEN the choice comes from the runner's decision, and no table in code picks the next step
 import { fixture, model, daemon, act, say, clause, blocked, assert, finish } from './_rig.mjs';
+import { recordedRun, staleness, assertChosen } from './_replay.mjs';
 
 const N = 12;
 const whyOf = (q) => q.brief.split('## The ticket')[0];
@@ -45,7 +46,7 @@ await clause('PRD-05.R1 clause 1 (code)', 'after sorting, the runner is shown th
   correct: async () => assertInterviewNext(await afterSorting()),
 });
 blocked('PRD-05.R1 clause 1 (runner)', 'the real runner then starts the interview',
-  'needs a real model. Seen live on scratch-app#62 (sorting, then four questions at 12:41:38 on 2026-09-28), on the build before 40s and 40t.');
+  'needs a real model, and no case of the replay (PRD-05.R18) is a plain feature just sorted. Seen live once on scratch-app#62 (sorting, then four questions at 12:41:38 on 2026-09-28), on the build before 40s and 40t.');
 
 // Clause 2, code's part: requirements already approved on the default branch are shown to the runner.
 const APPROVED = { 'doc/specs/prd/prd-01-count.md': '# PRD-01: A count of open to-dos\n\n> **Status:** Active\n\nShow the count.\n', 'doc/specs/prd/prd-01-count.criteria.md': '# PRD-01 criteria\n\n## R1 — The count\n\n- **Priority:** MUST\n- **Status:** draft\n' };
@@ -57,8 +58,23 @@ await clause('PRD-05.R1 clause 2 (code)', 'requirements already on the default b
   broken: async () => assertApprovedShown(await afterSorting()),
   correct: async () => assertApprovedShown(await afterSorting({ files: APPROVED })),
 });
-blocked('PRD-05.R1 clause 2 (runner)', 'the real runner skips the interview and starts planning, and the skip is a departure',
-  'needs a real model. Replay case #104 passed 3 of 3 in runs 2, 4 and 5; run 6, on this build, is owed. The departure handling itself is checked by the R5 and R6 probes.');
+// Clause 2, the runner's part: replay case #104 (PRD-05.R18's table: "Skip the interview and start
+// planning. Post the departure on the ticket."), as recorded by fvermaut from his own terminal.
+// ✏ 2026-09-29 (re-check after 40z): judged on the newest recorded run when it is on this build.
+// Break leg: run 1's recorded result, in which #104 chose it 0 of 3 tries.
+{
+  const run = recordedRun();
+  const stale = staleness(run);
+  if (stale) {
+    blocked('PRD-05.R1 clause 2 (runner)', 'the real runner skips the interview and starts planning, and the skip is a departure',
+      `needs a real model: replay case #104 is its instrument, and the newest recorded replay is older than this build (${stale}).`);
+  } else {
+    await clause('PRD-05.R1 clause 2 (runner)', `the real runner skips the interview and starts planning, and posts the departure — replay case #104, run ${run.n}, on each of three tries`, {
+      broken: async () => assertChosen(recordedRun(1).result, '#104'),
+      correct: async () => assertChosen(run.result, '#104'),
+    });
+  }
+}
 
 // Clause 3: the step code starts is the one the runner chose — even one no fixed order would pick
 // first — and when the runner chooses nothing, no step starts.

@@ -70,7 +70,7 @@ await clause('PRD-05.R17 clause 1 (code)', 'the open bug issues are shown to the
   correct: async () => assertListedAndCommented(matched),
 });
 blocked('PRD-05.R17 clause 1 (runner)', 'the real runner judges the match, and its comment carries the ticket, the time and the session',
-  'needs a real model: code posts the runner\'s words as given and adds no evidence of its own.');
+  'needs a real model: code posts the runner\'s words as given and adds no evidence of its own. No case of the replay (PRD-05.R18) sets up a fault in Timone with an open issue to match.');
 
 // Clause 2, code's part.
 function assertFiledAsBug(r) {
@@ -83,7 +83,7 @@ await clause('PRD-05.R17 clause 2 (code)', 'no open issue matches: a new issue l
   correct: async () => assertFiledAsBug(filed),
 });
 blocked('PRD-05.R17 clause 2 (runner)', 'the new issue is in plain words and points at the ticket and the session',
-  'needs a real model: those words are the runner\'s.');
+  'needs a real model: those words are the runner\'s. No case of the replay (PRD-05.R18) judges them.');
 
 // Clause 3: a network failure that a retry fixed (the model service answers "overloaded" twice, then works).
 const fixedByRetry = await actOnFault([], { flaky: 2 });

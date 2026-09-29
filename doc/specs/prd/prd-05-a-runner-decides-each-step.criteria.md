@@ -24,7 +24,7 @@
     - GIVEN any run
       WHEN code decides which session to start
       THEN the choice comes from the runner's decision, and no table in code picks the next step
-- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): what code does passes: the brief shows the default order and what ran, requirements already on the default branch are shown, and the step started is the one the runner chose. The runner's own choice in clauses 1 and 2 needs a real model; replay run 6 on this build is owed.
+- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification, re-check after 40z and replay run 7 ([report](../../plans/phases/reports/phase-40-verification.md#re-check-after-40z-and-replay-run-7--2026-09-29)): what code does passes: the brief shows the default order and what ran, requirements already on the default branch are shown, and the step started is the one the runner chose. The runner's choice in clause 2 passes: replay case #104 chose it on three tries of three in run 7, on the code this branch carries. The runner's choice in clause 1 is not settled: no replay case is a plain feature just sorted, and the one live sighting (scratch-app#62, 2026-09-28) was on a build before 40s.
 - **Verification hint:** the replay set of R18 carries both cases as fixtures. For the third clause, read the seam: `stageAfter` and the `next` fields of `STAGES` in `src/daemon/pipeline.ts` are no longer called to choose a session. The default order may still exist as data given to the runner.
 
 ## R2 — The runner acts only through the actions code gives it
@@ -124,7 +124,7 @@
 ## R7 — The runner never records an approval nobody gave
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that asks every path that writes an approval to do so with no comment from a named person, and fails if any of them writes it
 - **Criteria:**
@@ -134,7 +134,7 @@
     - GIVEN any artifact that records an approval (a requirements file marked `Active`, a list of pieces marked approved)
       WHEN that approval is written
       THEN it names a comment by a named person that gave it
-- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): clause 2, and what code does in clause 1, pass. Clause 1 rests on the runner (code checks who wrote the cited comment, not what it says): replay case scratch-app#37 passed in runs 1, 2, 4 and 5; run 6 on this build is owed.
+- **Evidence:** ✏ 2026-09-29 — phase 40 verification, re-check after 40z and replay run 7 ([report](../../plans/phases/reports/phase-40-verification.md#re-check-after-40z-and-replay-run-7--2026-09-29)): both clauses pass. Clause 2, and what code does in clause 1, by the probe `prd-05.r7.mjs`, proved able to fail. The runner's part of clause 1 by replay case scratch-app#37: three tries of three in run 7, on the code this branch carries, as in every full run before it. That part is the runner's judgement: code checks who wrote the cited comment, not what it says.
 - **Verification hint:** approvals are written today by the approval-recording session (`APPROVAL_RECORD_MODEL` in `src/daemon/pipeline.ts`). The test starts that path without a comment from a named person and checks that nothing is written.
 
 ## R8 — Each ticket has a limit of $150
@@ -316,7 +316,7 @@
 ## R18 — The runner passes a replay of the recorded failures
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN each case in the table below, set up as a fixture: the ticket's comments, the branch's state and the run record at that moment
@@ -349,7 +349,7 @@
   | [ivtrends#1](https://github.com/fvermaut/ivtrends/issues/1) | A step stopped on a server error from the model service. | Start it again after a wait, and post nothing unless it keeps failing. |
   | [#110](https://github.com/fvermaut/timone/issues/110) | At a 15-minute check, the build step has run the full browser suite six times. | Send the step a message to run only the tests its change affects. |
 
-- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): BLOCKED: the verifying sandbox has no model login. The last real run on record is run 5 (18 of 19, on the build before 40t); run 6 on `55a617a` or later is owed.
+- **Evidence:** ✏ 2026-09-29 — phase 40 verification, re-check after 40z and replay run 7 ([report](../../plans/phases/reports/phase-40-verification.md#re-check-after-40z-and-replay-run-7--2026-09-29)): clause 1 passes on replay run 7, which fvermaut ran from his own terminal at `23b9186`: 19 of 19 cases, each three tries of three ([phase-40-replay.md](../../plans/phases/reports/phase-40-replay.md)). Clause 2 passes for this pull request: run 7 is on the last change to the runner's instructions, and its record is on the pull request's branch. The probe `prd-05.r18.mjs` judges the newest recorded run, and reports BLOCKED when code has changed since that run.
 - **Verification hint:** the cases are 17 of the 20 failures between steps filed from 5 to 26 September, plus four other cases: one about the order itself (#104), one about approvals (scratch-app#37), one about retries (ivtrends#1) and one about watching (#110). The other three are covered elsewhere: [#148](https://github.com/fvermaut/timone/issues/148) by R15, [#116](https://github.com/fvermaut/timone/issues/116) by R11 (no command is left that can refuse), and [#145](https://github.com/fvermaut/timone/issues/145) by the open question on the ask check. The replay calls the real model, so it costs money and its result can vary. Three tries per case is the guard against a lucky pass.
 
 ## R19 — Each project runs on the runner or on the current daemon, until every project has moved

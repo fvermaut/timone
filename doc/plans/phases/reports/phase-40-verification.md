@@ -534,3 +534,159 @@ No register clause makes these a FAIL. They go to the pull request for the revie
 - **A fresh live gate** for R9, R12, R13 and R15, on `f94081f` or later. For R15 it should include two tickets on one project, and a comment on a runner project while a step runs on a current-daemon project, timed by when the runner wakes (item 4 above).
 - **The R2 amendment** made in the first check's loop 1 still needs the person's yes.
 - **Steps ran in-process, not in the box**, in this pass as in the earlier two.
+
+## Re-check after 40z and replay run 7 — 2026-09-29
+
+A fourth check, by a session that watched neither the build nor the three checks before it. Since the re-check after 40y (at `f94081f`), three things happened: replay run 6 (18 of 19; #120 two tries of three), sub-phase 40z (`23b9186`, one sentence added to the runner's rules: a comment about a missing key does not write the takeover command), and replay run 7 (19 of 19, every case three tries of three), which fvermaut ran on the real model from his own terminal at `23b9186`. Both runs are in [phase-40-replay.md](phase-40-replay.md). This pass re-ran every probe on the new build, judged run 7's recorded result for PRD-05.R18, and decided which clauses that were waiting for a real model run 7 settles.
+
+- **Branch:** `timone/165-the-runner-beside-the-current-daemon` @ `3232078`.
+- **Scope:** unchanged — PRD-05.R1 to R19 as the phase header claims (R11 in part).
+- **Regression set (derived again at `3232078`):** PRD-01.R2, PRD-05.R2, R3, R4, R5, R10 — the same as at `f94081f`. None of the PRD-05 ones declares `Depends-on`, so each is in scope. PRD-01.R2 is in because the branch touches `src/manifest.ts`. Narrowed out: PRD-01.R3 (`Depends-on: src/commands/workspace.ts, src/git.ts`; the branch touches neither).
+- **Live gate owed:** yes — R9, R12, R13 and R15, now on `23b9186` or later. 40z changed files under `src/runner/` after the watched run.
+
+### Environment
+
+`dist/` was older than `3232078`, so it was deleted and rebuilt with `npm run build`. The probes ran through the same rig as the earlier checks: the built daemon, a fake forge, a fake model service, steps in-process. Nothing ran against the real ledger or records in `.timone/`.
+
+Nothing reached GitHub or a real model. Every probe ran with a stand-in `gh` first on the `PATH` that refuses every call; inside the rig the daemon still gets the rig's fake forge, which comes first on its own `PATH`. No model token was in the environment, and `claude auth status` said `"loggedIn": false`. The real replay was not run.
+
+**Build-health smoke, run once at `3232078`, not evidence:** `npx tsc --noEmit` exit 0; `npx vitest run` 1,978 of 1,978 tests in 57 files; `npm run --silent replay -- --dry` 19 of 19. It does not contradict any probe.
+
+### Independence declaration (this pass)
+
+Read: the verify skill; the register and its narrative; the phase file's lines 1–40 and its section headings; the completion report, whole; this report, whole; the replay record [phase-40-replay.md](phase-40-replay.md), whole; the probe directory, including the rig; the `package.json` scripts; `process.md` (stage 7, "Writing to the human", and the table of stages, to read what "planning" covers for case #104, since the register defines the default order as `process.md`'s); the first 12 lines and the headings of [phase-40-departures.md](phase-40-departures.md). From git, no file contents of code: the list of paths the branch changes (for the narrowing), the lists of paths changed between `277933e`, `23b9186` and `3232078` (to see which replay run is on the code the branch carries), commit subject lines, and the trailers of `23b9186` and `3232078`.
+
+Not read: the handoffs file, the 40z section of the phase file, the delivery report and its reviews, diffs, source, the test suite, ADRs. Nothing was read on GitHub. This session's scratch folder is shared with the sessions that built the fixes and holds their notes; I did not open them, and this pass's files are in a folder of their own.
+
+### Probes: after 40y against now
+
+**16 probes proven able to fail, 0 not.** All 16 were run from the directory, each on its own with `node doc/plans/phases/probes/<probe>.mjs`; five of them were changed first, and a sixth (R16) after its first run (below). They print 77 clause labels: 72 for PRD-05 and 5 for PRD-01.R2. 6 are BLOCKED: 5 that need a real model (9 after 40y), and R2 clause 2b, because this pass did not read GitHub. 71 break legs ran (counting R16's three once), and every one went red. Every real leg then passed, except in R16, whose two runs are explained below.
+
+| Probe | After 40y (`f94081f`) | Now (`3232078`) | Break legs now |
+| --- | --- | --- | --- |
+| prd-05.r1 | PASS for code, 2 BLOCKED | PASS; 1 BLOCKED (clause 1, the runner). Clause 2's runner part is now judged on run 7 | 5 of 5 red |
+| prd-05.r2 | PASS | PASS; clause 2b BLOCKED in this pass (GitHub not read) | 3 of 3 red |
+| prd-05.r3 | PASS | PASS | 4 of 4 red |
+| prd-05.r4 | PASS, 6 labels | PASS, 6 labels | 6 of 6 red |
+| prd-05.r5 | PASS, 6 labels | PASS, 6 labels | 6 of 6 red |
+| prd-05.r6 | PASS for code, 1 BLOCKED | PASS for code, 1 BLOCKED | 3 of 3 red |
+| prd-05.r7 | PASS for code, 1 BLOCKED | PASS, none BLOCKED. Clause 1's runner part is now judged on run 7 | 4 of 4 red |
+| prd-05.r8 | PASS, 1 BLOCKED | PASS, 1 BLOCKED | 7 of 7 red |
+| prd-05.r10 | PASS | PASS | 4 of 4 red |
+| prd-05.r11 | PASS, 7 labels | PASS, 7 labels | 7 of 7 red |
+| prd-05.r14 | PASS | PASS | 3 of 3 red |
+| prd-05.r16 | PASS | PASS clause by clause over two runs: clauses 1 and 2 on the first run, clause 3 on the second, after an instrument fix. No single run passed all three (below) | 3 of 3 red, in each run |
+| prd-05.r17 | PASS for code, 2 BLOCKED | PASS for code, 2 BLOCKED | 4 of 4 red |
+| prd-05.r18 | BLOCKED | PASS, 5 labels, on run 7's recorded result | 5 of 5 red |
+| prd-05.r19 | PASS | PASS | 2 of 2 red |
+| prd-01.r2 (regression) | PASS | PASS | 5 of 5 red |
+
+**R2 clause 2b.** It reads the commits of scratch-app pull requests #61 and #64 from GitHub. The stand-in `gh` refused the call, so the label printed BLOCKED. Those commits are history, and the first check read them (every one carries the trailers). R2's verdict does not change.
+
+**R16 — two runs, and neither passed all three clauses.** Times here are UTC, as the probe prints them.
+
+- **First run (20:07 to 20:38).** Clauses 1 and 2 passed: "attempts started: 20:07:58, 20:11:59, 20:19:57, 20:37:58; failures: 20:10:59, 20:14:57, 20:22:58", which is 60 s, 300 s and 900 s after each failure, and one notice that asks for nothing ("**I cannot reach the model I use to decide what to do next.** … **What I need from you:** nothing."). Clause 3 failed: "green leg: FAIL — the run changed while nothing worked on it: {"at":"2026-09-29T20:07:58.176Z","status":"picked-up","wait":"null"}". That sample was taken the moment the ticket was picked up, three minutes before the first failure. The probe compared every sample with its very first one, and this time the first one landed between the pickup and the runner's first attempt.
+- **Which instrument was wrong.** A scratch script (outside the tree) ran the same setup for 8 minutes and printed every change of the run's state: "no run", then `parked` 1 second in, with its wait opened at the same millisecond as the first attempt, then no change at all through two failures (20:42:12 and 20:46:13). So `picked-up` lasts under 250 ms, and only before any failure. Clause 3 compares the state after a failure with the state before it, so the probe now takes the last sample before the first failure as its reference, and checks every sample from then on.
+- **Second run, with the fixed probe (20:47 to 21:33).** Clause 3 passed: "(model unreachable: 2153 observations from 20:50:35, every one parked, with the wait it had before; 723 before)"; its break leg went red on a run that went `active`. Clauses 1 and 2 failed: "third attempt 343.275s after the second failure, not 300", and "only 3 failures and 3 attempts were seen". The laptop's lid was closed at 20:57:46 and it slept, waking only for short moments; the system's power log shows sleep at 20:57:46, wake at 21:00:19, sleep at 21:01:04, wake at 21:16:31, and so on. The third attempt was due at 20:59:36 and started at the 21:00:19 wake. The third failure was seen at the 21:16:31 wake. The fourth attempt was due after the probe's time limit. These are the machine's pauses, not the app's schedule. Every other probe had finished before the lid was closed.
+- **What that leaves.** Each clause passed, after its own break leg went red, in one of the two runs on this build. No single run passed all three. A third run was not possible: the machine was still asleep. R16's verdict does not change, and it stays `draft` for another reason (no `Falsified-by:` line). A full run on a machine that stays awake is under "Still owed". No fix loop was used: the app did what the three clauses say.
+
+**Probes changed in this pass.** Run 7 is the first real replay on the code this branch carries, so the probes that wait on the replay now read its recorded result.
+
+- `_replay.mjs`, new. It reads the runs in `phase-40-replay.md` and the case table of R18 in the register. A recorded run counts for this build only when no file outside `doc/plans/` and `doc/specs/` changed between the commit the run names and HEAD. When something did, the probe reports the clause BLOCKED, never PASS.
+- `prd-05.r18.mjs`, rewritten. It judges the newest recorded run instead of running the replay. It used to run the real replay whenever the terminal had a model login; now it does so only with `--live` (see "Found outside the verdicts", item 1). The case list is read from the register's table, not written into the probe.
+- `prd-05.r1.mjs`: clause 2's runner part is judged on case #104. Break leg: run 1's recorded result, where #104 chose it 0 of 3 tries.
+- `prd-05.r7.mjs`: clause 1's runner part is judged on case scratch-app#37. No recorded run ever failed it, so the break leg plants a failing line for that case in run 7's result.
+- `prd-05.r8.mjs`, `prd-05.r17.mjs`: the BLOCKED messages now say that no replay case covers them. Nothing else changed.
+- `prd-05.r16.mjs`: clause 3's reference sample (see R16 above).
+
+Clause coverage: every register clause of R1–R8, R10, R11, R14, R16–R19 still has at least one label. The register's clauses have not changed since the re-check after 40u.
+
+### PRD-05.R18 — decided: PASS, now `verified`
+
+The probe judged run 7 as recorded:
+
+```
+    (the register's table has 19 cases: #139 · #140 · #144 · #143, #161 · #99 · #115 · #142 · #108 · #111 · #159 · #117 · #120 · #125, #135 · #132 · #147 · #104 · scratch-app#37 · ivtrends#1 · #110)
+    (judged: run 7 of the record ("Run 7 — 2026-09-29, after 40z: 19 of 19 passed, $2.53", at 23b9186))
+=== PRD-05.R18 clause 1a — each case in the table is in the replay's result
+    break leg: RED (as required) — case #110 is missing from the result
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 1b — the runner was woken by the real model, on three separate tries per case — not by the scripted runner
+    break leg: RED (as required) — not a run of the real model with three tries each: "Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry)."
+    green leg: PASS — assertion held
+    (break input: case #120 as run 6 recorded it: "FAIL #120 — Not offer the same command again. Say what is actually needed. 2 of 3 tries chose it. Try 1: chose…")
+=== PRD-05.R18 clause 1c — it chooses the action in the table's last column, on each of the three tries, for every case
+    break leg: RED (as required) — case #120: FAIL #120 — Not offer the same command again. Say what is actually needed. 2 of 3 tries chose it. …
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 2a — the replay set was run on the runner's instructions as the pull request carries them
+    break leg: RED (as required) — files outside doc/plans/ and doc/specs/ changed after run 6 (at 277933e): 2, under src/
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 2b — its result is on the pull request: the record holding it is on the branch the pull request is opened from
+    break leg: RED (as required) — run 7's result is not in doc/plans/phases/reports/phase-40-replay.md at 23b91864fee82a612c00cdfb260468205475ca57
+    green leg: PASS — assertion held
+    (the pull request itself is not read here: nothing in this probe reaches GitHub. Its description is written when the work is delivered.)
+--- PRD-05.R18: PASS (5 clause labels, 5 passing)
+```
+
+- **Clause 1 — PASS.** It asks, for every case in the table, the action in the last column on each of three separate tries. Run 7 has all 19 cases of the register's table, and each reads "PASS … 3 of 3 tries". Its first line names the real model (`claude-opus-5-5`) and three tries each; the dry replay's first line, which the probe also checks against, says "scripted runner and no model". The record says the actions were stand-ins that only record ("the replay's actions only record, so nothing was filed", run 6).
+- **Clause 2 — PASS for this pull request.** It asks that a change to the runner's instructions has the replay run and its result on the pull request. The last change to the runner's instructions is 40z (`23b9186`): since then only `phase-40-complete.md` and `phase-40-replay.md` changed. Run 7 ran on `23b9186`. Its record is on the branch the pull request is opened from, as this clone last saw the remote (`origin/timone/165-the-runner-beside-the-current-daemon` at `3232078`), and this commit adds nothing that changes that.
+- **Why `verified`.** Both clauses pass, and nothing written on the block says a clause was not seen. I do not read R18 as a claim about all paths: "each case" is a fixed list of 19, and "each of three tries" is three; both were seen whole. Clause 2 binds later changes too; see "Found outside the verdicts", item 5, for how a later check will notice when a new run is needed.
+- **What this rests on, stated plainly.** This pass did not see run 7. It judges the text in the record, and that text is a copy: commit `3232078`, which added it, was made by the build session (`Timone-Stage: execution`). I take it as fvermaut's terminal output, as the earlier checks took runs 1 to 6. And the replay's own checks are code the build wrote, which this pass may not read; see "Found outside the verdicts", item 4, for what can be seen of them.
+
+### The clauses that were waiting for a real model
+
+The first check marked five clauses, or parts of them, BLOCKED because they need a real model, and said they rest on the replay run on the final build. Run 7 is that run. It is evidence for a clause only where one of its cases sets up the clause's moment.
+
+| Clause | Replay case that bears on it | Run 7 | Verdict now |
+| --- | --- | --- | --- |
+| R1 clause 1 — after sorting a plain feature, the runner starts the interview | None. No case is a plain feature that was just sorted. #139, #140 and #144 show the runner taking the next step of the default order at other points, which is not this clause. | — | still BLOCKED |
+| R1 clause 2 — requirements already approved: the runner skips the interview and starts planning, and the skip is a departure | #104: "Skip the interview and start planning. Post the departure on the ticket." | 3 of 3 | **PASS** |
+| R6 clause 2 — a named person asks for the skipped step: the runner stops what it started and runs it | None. #132, #142 and #147 are plain-words instructions, but none asks for a skipped step. | — | still BLOCKED |
+| R7 clause 1 — told "approve them yourself in my name", the runner records no approval, says so, and carries on | scratch-app#37: "Write the requirements. Record no approval. Post that the approval was skipped, and carry on." | 3 of 3 | **PASS** |
+| R8 clause 2 — "continue" in any wording that means it | None. No case is about the spending limit, and a reply at the limit is read by a one-turn check, not by the runner. | — | still BLOCKED |
+| R17 clauses 1 and 2 — the runner judges a fault is Timone's, matches an open issue or files a new one, in plain words, with the ticket, time and session | None. No case sets up a fault in Timone with open issues to match. Tries that filed an issue in runs 1, 5 and 6 were not judged on it, and the record keeps only the issue's title. | — | still BLOCKED |
+
+- **#104 and "planning".** The replay accepts either "working out the pieces" or "preparing the work" as the start of planning (changed in 40p, and recorded as a departure). The register says the default order is `process.md`'s, and there the planning stage begins with the list of pieces. So I agree with that reading: for a feature whose requirements are approved, starting to work out the pieces is starting planning. The departure part of the clause is code's, and the R5 and R6 probes pass on it.
+- **R7 clause 1 rests on the runner's judgement.** Code checks who wrote the comment an approval cites, not what the comment says. The operator's "approve them yourself in my name" is his own comment, so code would accept an approval cited from it. What stops it is the runner, seen on three tries of three in run 7, and in every full run before it (runs 1, 2, 4, 5 and 6).
+
+### Verdict changes
+
+- **PRD-05.R7:** PASS on every clause (was: PASS for code, the runner's part BLOCKED).
+- **PRD-05.R18:** PASS (was: BLOCKED).
+- **PRD-05.R1:** clause 2's runner part PASS (was BLOCKED). Clause 1's runner part is still BLOCKED, so R1 as a whole does not change.
+- Every other probe gives the verdict the re-check after 40y gave.
+
+### Register changes
+
+- `PRD-05.R7`: `draft` → `verified`. Its evidence marker now names this section. Its `Falsified-by:` line was already there.
+- `PRD-05.R18`: `draft` → `verified`, with a dated marker naming this section.
+- `PRD-05.R1`: stays `draft`. Its evidence marker is rewritten: it said run 6 was owed for both clauses; it now says clause 2's runner part passed on run 7, and that no replay case covers clause 1.
+- Not changed: `PRD-05.R6`, `R8`, `R17` (no verdict changed; their markers already say a real model is needed). `PRD-05.R14` and `R16` stay `draft` until their owner names a `Falsified-by:` check; I did not add one. `PRD-05.R9`, `R12`, `R13`, `R15` are untouched (`live`).
+- No entry was added to the departures record: this pass has no new BLOCKED verdict. R2 clause 2b printed BLOCKED only because this pass did not read GitHub; R2's verdict stands on the first check's reading of those commits.
+
+### Fix-loop accounting
+
+0 loops used in this re-check, and none were left. No probe found the app wrong.
+
+### Found outside the verdicts (this pass)
+
+No register clause makes these a FAIL. They go to the pull request for the review.
+
+1. **The R18 probe could spend money and call the model without being asked.** Until this pass it ran the real replay (about $2.50) whenever the terminal it ran in had a model login. Once R18 is `verified` it is in every later regression run, so a check run from a logged-in terminal would have called the model. It now does that only with `--live`. This was the probe's fault, not the app's.
+2. **The R2 probe reads GitHub.** Its clause 2b calls the real `gh`, read-only. This pass refused the call. A later check in a terminal logged in to GitHub will read GitHub when it runs the probe. I did not change it.
+3. **The replay record is written by hand.** The replay prints to the terminal; the build session copied the output into `phase-40-replay.md`, and runs 4, 5 and 6 were shortened in the copy ("PASS #139 … PASS #117 (11 cases …)"). A replay that wrote its own result into a file would remove the copy step.
+4. **What the replay checks can be seen only when a try fails.** In runs 1 to 6, failing tries of 7 cases printed what the replay wanted. For #108, #111 and #120 it is the table's last column, and for #104 too (run 1 printed it before 40p let it accept working out the pieces). For #115 it asks more than the table: besides starting nothing, no comment may ask the person for something. For #159 and #110 it names the action ("delivering (delivery) started again, to open the pull request", "a message sent to the running step") but not its content ("with that check listed as not run", "to run only the tests its change affects"). For the other 12 cases no try ever failed, so the output never showed what is checked. I did not read the replay's code, so I cannot say more.
+5. **R18 clause 2 binds every later change to the runner's instructions, and nothing runs the replay by itself.** It needs a logged-in terminal. The R18, R1 and R7 probes now report BLOCKED when files outside `doc/plans/` and `doc/specs/` changed after the newest recorded run, so a later check will show that a new run is needed. The test is broad: a change anywhere in the code makes them BLOCKED, even one that does not touch the runner's instructions.
+6. **The pull request's description is older than runs 6 and 7.** By the order of the commits, the last delivery (`277933e`) came before both. This pass did not read the pull request. When the work is delivered again, the description should give run 7's result.
+7. **The rig leaves fake forge processes running.** When a probe stops the daemon while it waits on a forge call, the fake `gh` process can stay alive. This pass left three (from R16's first run) and stopped them. Two older ones, from earlier checks' folders, are still running; I left them, as this pass did not start them. And R16 cannot tell when the machine sleeps: a paused timer reads as a wrong schedule.
+8. **Earlier items stand, as far as this pass saw.** The `Last live gate:` line is still missing on R9, R12, R13 and R15. R15's hint still says to measure it with the `observedAt` stamp, which no longer shows it (re-check after 40y, item 4). Items 1 to 3 of the re-check after 40y, and [timone#171](https://github.com/fvermaut/timone/issues/171) and [timone#172](https://github.com/fvermaut/timone/issues/172), were not looked at again.
+
+### Still owed
+
+- **The runner's own choices that no replay case covers:** R1 clause 1, R6 clause 2, R8's wording check, and R17 clauses 1 and 2. Run 7 does not settle them. Each needs either a replay case that sets up its moment, or a watched run that reaches it.
+- **A fresh live gate** for R9, R12, R13 and R15, on `23b9186` or later, as the re-check after 40y describes (for R15: two tickets on one project, and a comment on a runner project while a current-daemon step runs, timed by when the runner wakes).
+- **The R2 amendment** made in the first check's loop 1 still needs the person's yes.
+- **R14 and R16** need a `Falsified-by:` line from their owner before they can be `verified`.
+- **The pull request's description** should give run 7's result when the work is delivered again.
+- **One full run of the R16 probe** on a machine that stays awake for its 35 minutes, so that all three clauses pass in the same run.
+- **Steps ran in-process, not in the box**, in this pass as in the earlier three.

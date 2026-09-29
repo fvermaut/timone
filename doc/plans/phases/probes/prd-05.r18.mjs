@@ -1,9 +1,13 @@
 // Probe for PRD-05.R18 — The runner passes a replay of the recorded failures.
 // Stage 7 artifact, authored 2026-09-28 (phase 40) from the register alone. The replay set is the
-// criterion's own instrument (`npm run replay`, which calls the real model). This probe runs it
-// only where a model login exists, and judges its printed result against the clause: every case of
-// the register's table, three tries each, all passing. Where there is no login it says BLOCKED.
-// It costs about $2.50 a run.
+// criterion's own instrument (`npm run replay`, which calls the real model, about $2.50 a run).
+//
+// ✏ 2026-09-29 (re-check after 40z): by default this probe no longer runs the replay. It judges
+// the newest run recorded in phase-40-replay.md (see _replay.mjs), which fvermaut ran from his own
+// terminal, and it checks that the run is on the code this branch carries. It used to run the
+// real replay whenever a model login existed, which spent money and called the model unasked.
+// `--live` restores that: where a login exists, it runs the replay and judges its output instead.
+// `--run N` judges run N of the record instead of the newest.
 //
 // Register clauses (verbatim):
 //   1. GIVEN each case in the table below, set up as a fixture: the ticket's comments, the branch's
@@ -13,40 +17,100 @@
 //      AND it does so on each of three separate tries
 //   2. GIVEN a change to the runner's instructions WHEN the change is proposed
 //      THEN the replay set is run, and its result is on the pull request
+import fs from 'node:fs';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { clause, blocked, assert, finish, REPO_ROOT } from './_rig.mjs';
+import { RECORD, recordedRun, runsIn, tableCases, caseLine, withCase, assertRealModel, assertChosen, changedSince, staleness } from './_replay.mjs';
 
-// The 19 cases of the register's table, by the ticket they are named after.
-const CASES = ['#139', '#140', '#144', '#143, #161', '#99', '#115', '#142', '#108', '#111', '#159', '#117', '#120', '#125, #135', '#132', '#147', '#104', 'scratch-app#37', 'ivtrends#1', '#110'];
+const arg = (name) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1] ?? true; };
+const CASES = tableCases();
+assert(CASES.length > 0, 'no case found in the register\'s table');
+console.log(`    (the register's table has ${CASES.length} cases: ${CASES.join(' · ')})`);
 
-function judge(out) {
-  assert(!/--dry|scripted runner and no model/.test(out), 'this is the dry replay, not the model');
-  for (const c of CASES) {
-    const line = out.split('\n').find((l) => l.startsWith(`PASS ${c} — `) || l.startsWith(`FAIL ${c} — `));
-    assert(line, `case ${c} is missing from the replay`);
-    assert(line.startsWith('PASS') && /3 of 3 tries/.test(line), `case ${c}: ${line.slice(0, 160)}`);
+const run = recordedRun(arg('--run') ? Number(arg('--run')) : undefined);
+const earlier = runsIn(fs.readFileSync(path.join(REPO_ROOT, RECORD), 'utf8')).filter((r) => r.n < run.n && r.result.includes('FAIL '));
+const lastFail = earlier.at(-1);
+
+// Where the result comes from: the record, or (with --live and a login) a run made now.
+let result = run.result;
+let source = `run ${run.n} of the record ("${run.heading}", at ${run.commit})`;
+let stale = staleness(run);
+if (arg('--live')) {
+  let loggedIn = false;
+  try { loggedIn = JSON.parse(execFileSync('claude', ['auth', 'status'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).loggedIn === true; } catch {}
+  if (!loggedIn) { console.log('    --live: no model login here; judging the record instead'); }
+  else {
+    result = execFileSync('npm', ['run', '--silent', 'replay'], { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30 * 60 * 1000 });
+    source = 'a replay run now, on this build'; stale = null;
   }
-  assert(/19 of 19 cases passed/.test(out), 'not 19 of 19');
+}
+console.log(`    (judged: ${source})`);
+console.log(result.trim().split('\n').map((l) => `    | ${l}`).join('\n'));
+
+// The scripted runner's output, as a break input: it passes every case, with no model.
+function dryReplay() {
+  const env = { ...process.env, ANTHROPIC_BASE_URL: 'http://127.0.0.1:9' };
+  for (const k of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN']) delete env[k];
+  return execFileSync('npm', ['run', '--silent', 'replay', '--', '--dry'], { cwd: REPO_ROOT, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'], timeout: 5 * 60 * 1000 });
 }
 
-// Break leg: the last real run on record (run 5, 2026-09-28, on the build before 40t) — #115 two tries of three.
-const RUN5 = ['Replaying 19 cases, 3 tries each, on claude-opus-5-5.', ...CASES.map((c) => (c === '#115' ? `FAIL ${c} — Start nothing on it. 2 of 3 tries chose it.` : `PASS ${c} — x. 3 of 3 tries.`)), '18 of 19 cases passed.'].join('\n');
+const allPresent = (r) => { for (const c of CASES) assert(caseLine(r, c), `case ${c} is missing from the result`); };
+const allChosen = (r) => {
+  for (const c of CASES) assertChosen(r, c);
+  assert(new RegExp(`^${CASES.length} of ${CASES.length} cases passed\\.`, 'm').test(r), `the result does not say ${CASES.length} of ${CASES.length} cases passed`);
+};
 
-let loggedIn = false;
-try { loggedIn = JSON.parse(execFileSync('claude', ['auth', 'status'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).loggedIn === true; } catch {}
-if (loggedIn) {
-  const out = execFileSync('npm', ['run', '--silent', 'replay'], { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30 * 60 * 1000 });
-  console.log(out.trim().split('\n').map((l) => `    | ${l}`).join('\n'));
-  await clause('PRD-05.R18 clause 1', 'each of the 19 cases chooses the action in the table\'s last column, on each of three tries', {
-    broken: async () => judge(RUN5),
-    correct: async () => judge(out),
-  });
+if (stale) {
+  blocked('PRD-05.R18 clause 1', 'each case in the table chooses the action in the table\'s last column, on each of three separate tries',
+    `the recorded replay judged here is older than this build: ${stale}. A new replay on this build is owed (\`npm run --silent replay\`, from a logged-in terminal).`);
 } else {
-  try { judge(RUN5); console.log('=== PRD-05.R18 clause 1 — break leg did not go red: instrument broken'); } catch (e) { console.log(`    (break leg on run 5's recorded result: RED as required — ${e.message})`); }
-  blocked('PRD-05.R18 clause 1', 'each of the 19 cases chooses the action in the table\'s last column, on each of three tries',
-    'no model login here (`claude auth status`: not logged in). The last real run on record is run 5 (phase-40-replay.md): 18 of 19, #115 two tries of three, on the build before 40t. Run 6, on this build, is owed.');
+  await clause('PRD-05.R18 clause 1a', 'each case in the table is in the replay\'s result', {
+    broken: async () => allPresent(withCase(result, CASES.at(-1), null)),
+    correct: async () => allPresent(result),
+  });
+  await clause('PRD-05.R18 clause 1b', 'the runner was woken by the real model, on three separate tries per case — not by the scripted runner', {
+    broken: async () => assertRealModel(dryReplay(), CASES.length),
+    correct: async () => assertRealModel(result, CASES.length),
+  });
+  await clause('PRD-05.R18 clause 1c', 'it chooses the action in the table\'s last column, on each of the three tries, for every case', {
+    // Break: this result with one case put back to its last recorded failure (run 6's #120, 2 of 3).
+    broken: async () => {
+      const c = CASES.find((x) => caseLine(lastFail?.result ?? '', x)?.startsWith('FAIL ')) ?? CASES[0];
+      const bad = caseLine(lastFail?.result ?? '', c) ?? `FAIL ${c} — planted. 2 of 3 tries chose it.`;
+      console.log(`    (break input: case ${c} as run ${lastFail?.n ?? '—'} recorded it: "${bad.slice(0, 110)}…")`);
+      allChosen(withCase(result, c, bad).replace(/^\d+ of \d+ cases passed\./m, `${CASES.length - 1} of ${CASES.length} cases passed.`));
+    },
+    correct: async () => allChosen(result),
+  });
 }
-blocked('PRD-05.R18 clause 2', 'a change to the runner\'s instructions: the replay is run, and its result is on the pull request',
-  'the pull request does not exist yet; delivery must put run 6\'s result on it.');
+
+// Clause 2. The one change in scope is this pull request's; its last change to the runner's
+// instructions is the newest code commit. The run must be on that code, and its record must be
+// on the branch the pull request is opened from (as this clone last saw the remote).
+const branch = execFileSync('git', ['-C', REPO_ROOT, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
+function assertOnThisCode(r) {
+  assert(r?.commit, `run ${r?.n ?? '(none)'} does not name the commit it ran on`);
+  const changed = changedSince(r.commit);
+  assert(changed.length === 0, `files outside doc/plans/ and doc/specs/ changed after run ${r.n} (at ${r.commit}): ${changed.length}, under ${[...new Set(changed.map((f) => f.split('/')[0] + '/'))].join(', ')}`);
+}
+function assertOnTheBranch(ref, r) {
+  let text = '';
+  try { text = execFileSync('git', ['-C', REPO_ROOT, 'show', `${ref}:${RECORD}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); } catch {}
+  const there = runsIn(text).find((x) => x.n === r.n);
+  assert(there && there.result === r.result, `run ${r.n}'s result is not in ${RECORD} at ${ref}`);
+}
+const previous = runsIn(fs.readFileSync(path.join(REPO_ROOT, RECORD), 'utf8')).filter((r) => r.n < run.n && r.commit).at(-1);
+await clause('PRD-05.R18 clause 2a', 'the replay set was run on the runner\'s instructions as the pull request carries them', {
+  broken: async () => assertOnThisCode(previous),
+  correct: async () => assertOnThisCode(run),
+});
+let before = '';
+try { before = execFileSync('git', ['-C', REPO_ROOT, 'log', '-1', '--format=%H', `${run.commit}`], { encoding: 'utf8' }).trim(); } catch {}
+await clause('PRD-05.R18 clause 2b', 'its result is on the pull request: the record holding it is on the branch the pull request is opened from', {
+  broken: async () => assertOnTheBranch(before || 'HEAD~1', run),
+  correct: async () => assertOnTheBranch(`origin/${branch}`, run),
+});
+console.log(`    (the pull request itself is not read here: nothing in this probe reaches GitHub. Its description is written when the work is delivered.)`);
 
 finish('PRD-05.R18');

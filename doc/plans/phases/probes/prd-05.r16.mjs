@@ -35,6 +35,7 @@ async function watch({ reachable }) {
   if (m.stop) await m.stop();
   const rec = fx.record(N);
   const r = {
+    label: reachable ? 'model reachable' : 'model unreachable',
     wokes: rec.filter((e) => e.kind === 'woke').map((e) => e.at),
     fails: rec.filter((e) => e.kind === 'runner-ended' && !e.ok).map((e) => ({ at: e.at, error: e.error })),
     comments: fx.issue(N).comments.slice(1).map((c) => ({ at: c.createdAt, body: c.body })),
@@ -80,10 +81,23 @@ await clause('PRD-05.R16 clause 2', 'three failures in a row: the ticket says th
 });
 console.log(`    (the comment read: "${dead.comments[0]?.body.split('---\n\n')[1]?.replace(/\n+/g, ' ')}")`);
 
+// ✏ 2026-09-29 (re-check after 40z), instrument fix: the reference used to be the very first
+// sample. At pickup the run is `picked-up` for under 250 ms before the runner's first attempt, and
+// one run of this probe sampled that moment and failed on it, before any failure had happened.
+// The clause compares the state after a failure with the state before it, so the reference is now
+// the last sample before the first failure (or, when nothing failed, before the first attempt), and
+// every sample from then on must equal it.
 function assertStateKept(r) {
   assert(r.samples.length > 10, 'too few observations of the run');
-  const bad = r.samples.filter((s) => s.status !== 'parked' || s.wait !== r.firstWait);
-  assert(bad.length === 0, `the run changed while nothing worked on it: ${JSON.stringify(bad[0])}`);
+  const from = r.fails[0]?.at ?? r.wokes[0];
+  assert(from, 'the runner was never started');
+  const before = r.samples.filter((s) => s.at < from);
+  const ref = before.at(-1) ?? r.samples[0];
+  const after = r.samples.filter((s) => s.at >= from);
+  assert(after.length > 10, 'too few observations after the first failure');
+  const bad = after.filter((s) => s.status !== 'parked' || s.status !== ref.status || s.wait !== ref.wait);
+  assert(bad.length === 0, `the run changed while nothing worked on it: ${JSON.stringify(bad[0])} (before: ${JSON.stringify(ref)})`);
+  console.log(`    (${r.label}: ${after.length} observations from ${from.slice(11, 19)}, every one ${ref.status}, with the wait it had before; ${before.length} before)`);
 }
 await clause('PRD-05.R16 clause 3', 'after each failure the run is as it was before, and it is never left active with nothing working on it', {
   broken: async () => assertStateKept(alive),
