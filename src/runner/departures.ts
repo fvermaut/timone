@@ -21,7 +21,7 @@ export const DEPARTURES_END = "<!-- /timone:departures -->";
 
 /**
  * One step of the written order that did not run as written: either it never
- * ran, or it ran only after a step that comes later in the order.
+ * ran, or it ran after a step that comes later in the order had started.
  */
 export type Departure = {
   kind: "did-not-run" | "out-of-order";
@@ -92,10 +92,11 @@ function deliveredUnchecked(ofRun: readonly RecordEntry[], order: readonly Order
  * run has not got to yet is not a departure; it is work still to come. Once
  * the run has reached delivery, everything before delivery is judged.
  *
- * **Only the first time a step ran decides whether it was out of order.**
- * Going back to building after the check found a fault is how the work gets
- * fixed, not a change to the order. Listing it would add a line for every
- * round of fixes, and the real departures would be hard to find among them.
+ * **Every time a step starts after a later step, it ran out of order**
+ * (verification of phase 40). Going back to building after the check is a
+ * step that ran out of order, as the register defines a departure, so it is
+ * listed. A step that went back several times is still one line. A step
+ * started again before any later step ran is not out of order.
  *
  * **But the work that building made still needs its check.** When a step
  * after the check starts after the latest building, with no check between
@@ -118,7 +119,7 @@ export function departuresOf(
   let furthest = -1;
   for (const entry of ofRun) {
     const index = stepIndexOf(entry, order);
-    if (index === undefined || reached.has(index)) continue;
+    if (index === undefined) continue;
     if (index < furthest) late.add(index);
     reached.add(index);
     furthest = Math.max(furthest, index);

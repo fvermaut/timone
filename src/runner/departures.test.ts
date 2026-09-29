@@ -153,7 +153,7 @@ describe("the departures a pull request lists", () => {
     );
   });
 
-  it("does not list building again after the check as a departure", () => {
+  it("lists building again after the check as out of order, with no reason given when the runner gave none", () => {
     const entries: RecordEntry[] = [
       started("triage", "2026-09-27T10:00:00.000Z"),
       started("planning", "2026-09-27T10:10:00.000Z"),
@@ -162,6 +162,44 @@ describe("the departures a pull request lists", () => {
       started("execution", "2026-09-27T11:00:00.000Z"),
       started("verification", "2026-09-27T11:20:00.000Z"),
       started("delivery", "2026-09-27T11:30:00.000Z"),
+    ];
+
+    expect(departureSection(departuresOf(entries, RUN, defaultOrder("chore")))).toBe(
+      [
+        DEPARTURES_START,
+        "**Steps that did not follow the default order:**",
+        "- Building: ran out of order. No reason given.",
+        DEPARTURES_END,
+      ].join("\n"),
+    );
+  });
+
+  it("lists a step that went back more than once on one line", () => {
+    const entries: RecordEntry[] = [
+      started("triage", "2026-09-27T10:00:00.000Z"),
+      started("planning", "2026-09-27T10:10:00.000Z"),
+      started("execution", "2026-09-27T10:20:00.000Z"),
+      started("verification", "2026-09-27T10:50:00.000Z"),
+      started("execution", "2026-09-27T11:00:00.000Z"),
+      started("verification", "2026-09-27T11:20:00.000Z"),
+      started("execution", "2026-09-27T11:30:00.000Z"),
+      started("verification", "2026-09-27T11:50:00.000Z"),
+      started("delivery", "2026-09-27T12:00:00.000Z"),
+    ];
+
+    expect(departuresOf(entries, RUN, defaultOrder("chore"))).toEqual([
+      { kind: "out-of-order", step: defaultOrder("chore")[2], reason: undefined },
+    ]);
+  });
+
+  it("does not list a step started again before any later step ran", () => {
+    const entries: RecordEntry[] = [
+      started("triage", "2026-09-27T10:00:00.000Z"),
+      started("planning", "2026-09-27T10:10:00.000Z"),
+      started("execution", "2026-09-27T10:20:00.000Z"),
+      started("execution", "2026-09-27T10:30:00.000Z"),
+      started("verification", "2026-09-27T10:50:00.000Z"),
+      started("delivery", "2026-09-27T11:00:00.000Z"),
     ];
 
     expect(departuresOf(entries, RUN, defaultOrder("chore"))).toEqual([]);
@@ -184,6 +222,9 @@ describe("the departures a pull request lists", () => {
     expect(lines).toEqual([
       DEPARTURES_START,
       "**Not checked.** No session other than the one that built this work checked it. No reason given.",
+      "",
+      "**Steps that did not follow the default order:**",
+      "- Building: ran out of order. No reason given.",
       DEPARTURES_END,
     ]);
   });
