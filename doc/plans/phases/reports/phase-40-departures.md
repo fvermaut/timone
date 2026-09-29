@@ -225,3 +225,13 @@
 **Agreed:** Verification observes the deliverable in its production form: steps in the box, against the real forge, with a real model.
 **Did instead:** The probes ran the built daemon (`dist/`) with steps in-process, against a fake forge, a local stand-in for GitHub's token call, and a fake model service answered by each probe ([_rig.mjs](../probes/_rig.mjs)). The runner itself runs in the daemon process in both runtimes.
 **Why:** A boxed step clones from the real forge, GitHub must not be touched by a verification, and every session needs a model login the sandbox does not have.
+
+## 2026-09-29 — timone#165, execution (after verification)
+
+**Kind:** plan step
+
+**Agreed:** Phase 40 closed at `4cfb031` and was verified at `0f433ef`. The verification report listed nine things "found outside the verdicts" for the pull request's review.
+
+**Did instead:** fvermaut chose "fix first". A new sub-phase, 40u, fixes items 1–5: a run refused as busy is woken when the project frees; a cancel on a runner project holds the ticket and reports its success truly; the brief finds the list of pieces under its real name; the one-turn check runs with no tools; the first brief shows no departures. Items 7 and 8 are filed as Timone issues; items 6 and 9 are the verification report's own to carry. A fresh check re-runs the probes afterwards.
+
+**Why:** Items 1–3 would break the first real use on scratch-app: a second ticket stalls, a cancelled ticket starts again by itself, and tickets 1 to 9 lose their list of pieces. Items 4 and 5 cost a line each: a check handed a person's words must not hold a shell, and a brief that reports nine departures before anything ran misleads the runner's first choice.

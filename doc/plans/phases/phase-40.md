@@ -546,6 +546,34 @@ npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
 
 ---
 
+### Sub-phase 40u: five faults the check found outside its verdicts
+
+> ✏ 2026-09-29 (build, timone#165): added after verification, at fvermaut's word ("fix first"), from [phase-40-verification.md](reports/phase-40-verification.md), "Found outside the verdicts", items 1–5. The phase reopens for this slice; its completion report gains a note, and a fresh check re-runs the probes afterwards. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/driver.ts` — **(1)** a run whose `start_step` was refused because the project was busy is woken once the project is free again (its holder done, cancelled or parked without a branch), with the event "The project is free now." It is woken once per freeing, not every cycle.
+**[MODIFY]** `src/daemon/poll.ts` and `src/commands/cancel.ts` — **(2)** a `cancel` on a runner project also puts `timone:held` on the ticket, so the still-open, still-marked ticket is not taken up again as new work (the dropped-step rule, ADR-0044, applied to a runner ticket); and the command judges its success by the run it cancelled, not by whatever run the ticket holds afterwards, so it no longer says it failed when it did not.
+**[MODIFY]** `src/runner/facts.ts` — **(3)** the list of pieces is looked for under the same name the merge uses (`ticket-NN.md`, at least two digits), through the one function that builds that name.
+**[MODIFY]** `src/daemon/consult.ts` — **(4)** the one-turn check runs with no tools at all (`tools: []`) and no project settings (`settingSources: []`); it is handed a person's words and must be able to do nothing but answer.
+**[MODIFY]** `src/runner/brief.ts` — **(5)** "Departures so far" lists only departures that exist: before any step of this run has run, there are none.
+**[MODIFY]** the matching test files — new cases only.
+
+**Seams under test (TDD):** `RunnerDriver` and `pollOnce` for (1) and (2); the cancel command's report function for (2); `gatherFacts` for (3); `sdkConsult` with an injected query for (4); `buildBrief` for (5). Red-green: (1) two runs picked up together, one refused as busy; when the other ends, the refused one is woken with the event, once; (2) a cancel on a runner project leaves the ticket held and no new run registered on the next cycle, and the command reports success; on a daemon project the cancel behaves as today; (3) a ticket numbered 7 finds `doc/plans/breakdowns/ticket-07.md`; (4) the options handed to the query carry `tools: []` and `settingSources: []`; (5) a brief for a run with no step yet shows no departures.
+
+> Sub-phases 40t and the verification's fix loops must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run; echo "exit: $?"                             # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+- [ ] A fresh check re-runs the phase's probes on the result and adds a short section to the verification report.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -613,6 +641,7 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40r → 40q                 a run waits on its pull request; the ledger knows the step; a shared reason once  (✏ 2026-09-28: added at build)
 40s → 40r                 a map closes with its last piece; the wait says what it waits on; where a key goes  (✏ 2026-09-28: added at build)
 40t → 40s                 a named person's plain "stop" can end a run with no pull request  (✏ 2026-09-28: added at build)
+40u → 40t                 five faults the check found outside its verdicts  (✏ 2026-09-29: added after verification)
 40l → 40h, 40j, 40n, 40o, 40q, 40r  scratch-app moves; the watched run
 40m → 40l                 README
 ```
