@@ -73,3 +73,26 @@ Twenty, each in [phase-40-departures.md](phase-40-departures.md) and each marked
 ## Reopened after verification — 2026-09-29
 
 The check ([phase-40-verification.md](phase-40-verification.md), at `0f433ef`) ran two fix loops of its own (`a113151`–`55a617a`) and listed nine things found outside its verdicts. fvermaut chose to fix the worst before the pull request. **Sub-phase 40u** (`ddb95ed`) fixed items 1–5: a run refused as busy is woken when the project frees; a cancel on a runner project holds the ticket and reports its success truly; the brief finds `ticket-NN.md`; the one-turn check at the limit has no tools; no departures before any step ran — fixed at its source in `departuresOf`. Items 7 and 8 are filed as [timone#171](https://github.com/fvermaut/timone/issues/171) and [timone#172](https://github.com/fvermaut/timone/issues/172). After 40u: 1,950 tests pass, the dry replay passes 19 of 19. A fresh check re-runs the probes next.
+
+## Reopened after delivery — 2026-09-29
+
+Pull request [#173](https://github.com/fvermaut/timone/pull/173) opened at `865fb36`, with two code reviews in [phase-40-delivery.md](phase-40-delivery.md). fvermaut chose to fix the worst findings before merging. Four sub-phases fixed them, each in a fresh context, each test first:
+
+| Sub-phase | What it fixed | Commit |
+| --- | --- | --- |
+| 40v — recording an approval is not a step out of order | Spec finding 1 (R5): the session that writes an approval into its file made the pull request say a step "ran out of order". Also Standards finding 1: a record that could not be read made it say "The default order was followed." | `320a331` |
+| 40w — a pull request closed without merging does not let the run drop its work | Spec finding 6 (R4): the run now ends only on a merge, or on a named person's stop on the ticket. A follow-up brought the `end_run` description in line (plan amended). | `68b08b9`, `3dee1dc` |
+| 40x — a runner project's run is never failed | Spec finding 2 (R9, R16): a failed merge of the list of pieces, or failed step tickets, now leave the run waiting, post one plain comment, and wake the runner. No `store.fail` call is left in `src/runner/`. | `dd7e5c9` |
+| 40y — a current-daemon step does not hold up the runner's projects | Spec finding 3 (R15): the runner's projects are polled first, and on a clock of their own while a current-daemon project's session runs. | `47f1332` |
+
+After 40y: `npx tsc --noEmit` exits 0; `npx vitest run` passes 1,977 of 1,977 in 57 files; `npm run --silent replay -- --dry` passes 19 of 19. The runner's rules changed in 40w, so the replay run owed on the real model (run 6) must run on `47f1332` or later.
+
+**Left open, from the slices' handoffs:**
+
+- When a session that records an approval ends, the runner is told "The step writing down what it needs ended", and the brief names it the same way while it runs. Neither reaches the pull request or `timone record` (40v).
+- Records written before 40v have no `records` field, so an old run still shows that step as out of order (40v).
+- A pull request closed with no reason keeps its project busy until a named person answers on the ticket. A stop written only on the pull request is not read as a stop (40w).
+- The runner's rules say nothing about the new event for a failed merge; the runner decides for itself. `timone record` does not show notices, so it does not show this failure (40x).
+- Requests other than a cancel on a runner project, such as `timone takeover`, are still carried out at the start of the next cycle (40y).
+
+A fresh check re-runs the probes next, and the pull request is delivered again.
