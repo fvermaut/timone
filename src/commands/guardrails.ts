@@ -18,6 +18,7 @@ import {
 } from "../daemon/hooks.js";
 import { loadManifest, type Manifest } from "../manifest.js";
 import { probeGuardDecision } from "../daemon/probeGuard.js";
+import { declaredStage } from "../daemon/declared-stage.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 
 /** How long a parked baseline outlives the session that wrote it. */
@@ -122,6 +123,13 @@ export function trailerInstruction(sessionId: string): string {
 }
 
 export interface GuardDeps {
+  /**
+   * The timone root, where a session run by hand declares its step
+   * ([#169](https://github.com/fvermaut/timone/issues/169)). Absent means only
+   * the ledger is asked, which is how the guard behaved before declarations
+   * existed.
+   */
+  root?: string;
   store: RunStore;
   sessionId: string;
   toolInput: unknown;
@@ -136,12 +144,31 @@ export interface GuardDeps {
  * ledger the same way {@link runCheck} finds the run: resolved from the
  * session id, never configured, so an interactive session is recognised by
  * having no run rather than by being told it has none.
+ *
+ * **A session with no run may say which step it is running**
+ * ([#169](https://github.com/fvermaut/timone/issues/169)), with `timone
+ * stage`, and is then judged as a daemon run of that step would be. Without
+ * it, a checking step run by hand asked the person about every probe it wrote.
+ * A session with no run and no declaration is still asked about, as before.
+ *
+ * **The ledger wins whenever it has a run for the session**, even one with no
+ * stage recorded yet. A daemon builder must not be able to declare itself the
+ * checker and walk past the refusal. A session run by hand can re-declare
+ * itself, and that is accepted for the reason `mentionsProbeDirectory` in
+ * `probeGuard.ts` gives: the guard stops the accident, not a builder working
+ * to get around it.
  */
 export function runGuard(deps: GuardDeps): string | undefined {
   const run = runForSession(deps.store, deps.sessionId);
+  const stage =
+    run !== undefined
+      ? run.stage
+      : deps.root === undefined
+        ? undefined
+        : declaredStage(deps.root, deps.sessionId);
   const decision = probeGuardDecision({
     toolInput: deps.toolInput,
-    stage: run?.stage,
+    stage,
   });
   if (decision === undefined) return undefined;
   return JSON.stringify({
@@ -318,6 +345,7 @@ export function registerGuardrailsCommand(program: Command): void {
           ? defaultStatePath(root)
           : resolve(options.state);
       const reply = runGuard({
+        root,
         store: RunStore.open(statePath),
         sessionId: payload.session_id,
         toolInput: payload.tool_input,
