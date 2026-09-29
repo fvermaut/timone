@@ -120,3 +120,33 @@ PASS #125, #135 … PASS #110 (7 cases, 3 of 3 each)
 ```
 
 (Passing lines shortened.) **#115 passes three tries of three**: 40t's plain-words stop settled it. **#120 fell to two of three**, as in run 4. All three tries replaced the pointer to the takeover command with a new comment about the missing key. Try 2 failed only the check that no comment writes `timone takeover`: its comment named the command, most likely to say that a terminal session cannot add the key. The case counts any comment that writes the command as the fault, whatever else it says, on purpose. The two passing tries also filed a Timone issue about the machine sending people to a terminal session for a key; the replay's actions only record, so nothing was filed. PRD-05.R18 is not met for #120 (it asks for three tries of three). Slice 40z adds one sentence to the runner's rules: a comment about a missing key does not write the takeover command, not even to say it will not help. The replay is then owed once more (run 7).
+
+## Run 7 — 2026-09-29, after 40z: 19 of 19 passed, $2.53
+
+Run by fvermaut from his own terminal, on the branch at `23b9186` (after 40z).
+
+```
+Replaying 19 cases, 3 tries each, on claude-opus-5-5.
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+PASS #140 — Read planning as done, and start the build. 3 of 3 tries.
+PASS #144 — Not wait on the person. Choose the next step. 3 of 3 tries.
+PASS #143, #161 — Try the start again. If it keeps failing, say so on the ticket. 3 of 3 tries.
+PASS #99 — End the run, and free the project. 3 of 3 tries.
+PASS #115 — Start nothing on it. 3 of 3 tries.
+PASS #142 — Clear the hold, then start the work. 3 of 3 tries.
+PASS #108 — Start a session that corrects the requirements, then check again. 3 of 3 tries.
+PASS #111 — Start again from that discussion, as PRD-03.R1 says. Do not ask. 3 of 3 tries.
+PASS #159 — Open the pull request with that check listed as not run. 3 of 3 tries.
+PASS #117 — List the skip as a departure, and carry on to the pull request. 3 of 3 tries.
+PASS #120 — Not offer the same command again. Say what is actually needed. 3 of 3 tries.
+PASS #125, #135 — Carry the question to the pull request, and open it. 3 of 3 tries.
+PASS #132 — Act on the word. 3 of 3 tries.
+PASS #147 — Say on the pull request that the change is being made, then start it. 3 of 3 tries.
+PASS #104 — Skip the interview and start planning. Post the departure on the ticket. 3 of 3 tries.
+PASS scratch-app#37 — Write the requirements. Record no approval. Post that the approval was skipped, and carry on. 3 of 3 tries.
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+19 of 19 cases passed. The runner's sessions cost $2.53 in all.
+```
+
+**Every case passes three tries of three**, for the first time. #120 passes after 40z's sentence; #115 still passes after 40t. This is the first run on the runner's rules as they will be merged: no change to the runner's instructions has been made since `23b9186`.

@@ -84,6 +84,7 @@ Pull request [#173](https://github.com/fvermaut/timone/pull/173) opened at `865f
 | 40w — a pull request closed without merging does not let the run drop its work | Spec finding 6 (R4): the run now ends only on a merge, or on a named person's stop on the ticket. A follow-up brought the `end_run` description in line (plan amended). | `68b08b9`, `3dee1dc` |
 | 40x — a runner project's run is never failed | Spec finding 2 (R9, R16): a failed merge of the list of pieces, or failed step tickets, now leave the run waiting, post one plain comment, and wake the runner. No `store.fail` call is left in `src/runner/`. | `dd7e5c9` |
 | 40y — a current-daemon step does not hold up the runner's projects | Spec finding 3 (R15): the runner's projects are polled first, and on a clock of their own while a current-daemon project's session runs. | `47f1332` |
+| 40z — a comment about a missing key never writes the takeover command | ✏ Added after replay run 6 (18 of 19): case #120 passed two tries of three. One sentence in the runner's rules. Replay run 7 then passed 19 of 19. | `23b9186` |
 
 After 40y: `npx tsc --noEmit` exits 0; `npx vitest run` passes 1,977 of 1,977 in 57 files; `npm run --silent replay -- --dry` passes 19 of 19. The runner's rules changed in 40w, so the replay run owed on the real model (run 6) must run on `47f1332` or later.
 
