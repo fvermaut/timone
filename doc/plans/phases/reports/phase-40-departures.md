@@ -255,3 +255,13 @@
 **Did instead:** `src/runner/tools.ts` is granted to 40w as a follow-up. The `end_run` action's description and its `stopCommentAt` field's description are brought in line with the code. The plan is amended in place.
 
 **Why:** The runner reads those descriptions as part of its instructions. They still said a closed pull request ends the run, and offered the stop comment only for a run with no pull request. The code refuses such a call anyway, so the cost was one refused call, but the runner's instructions must not say the opposite of what the code does.
+
+## 2026-09-29 — timone#165, execution (after replay run 6)
+
+**Kind:** plan step
+
+**Agreed:** PRD-05.R18: the runner chooses the table's action on each of three tries, for every case. The phase's rule since 40j: when a case fails, the runner's rules change, never the case.
+
+**Did instead:** A new sub-phase, 40z, adds one sentence to the runner's rule on a missing key: its comment does not write the takeover command, not even to say that it will not help. The case is not changed. The replay is run once more (run 7).
+
+**Why:** Replay run 6 passed 18 of 19. #120 passed two tries of three: one try's new comment wrote `timone takeover`, most likely to say that a terminal session cannot add the key. The case counts any comment that writes the command as the real #120 fault, on purpose, because a person who reads a command runs it.

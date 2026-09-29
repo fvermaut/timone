@@ -106,3 +106,17 @@ PASS #125, #135 … PASS #110 (7 cases, 3 of 3 each)
 ```
 
 (Passing lines shortened.) **#120 passes three tries of three**: 40s's rule on where a key goes settled it. **#115 fell to two of three.** In every try the runner started nothing, then tried to end the run — and code refused, because the branch holds a commit with no pull request, and until now only `timone cancel` could end such a run. In one try the runner then asked the person for something. All three tries also judged it a Timone fault and filed an issue about it, which is right: a finished-by-hand ticket whose run only a terminal command can free is the way out R9 exists to remove. Slice 40t lets a named person's plain-words "stop" end such a run, with code checking the comment. The replay is then owed once more (run 6).
+
+## Run 6 — 2026-09-29, after 40y: 18 of 19 passed, $2.54
+
+Run by fvermaut from his own terminal, on the branch at `277933e` (the code of `47f1332`, after the four fixes).
+
+```
+Replaying 19 cases, 3 tries each, on claude-opus-5-5.
+PASS #139 … PASS #117 (11 cases, 3 of 3 each; #115 among them)
+FAIL #120 — Not offer the same command again. Say what is actually needed. 2 of 3 tries chose it. Try 1: chose it (posted on the ticket: "**The build is still stopped: the key `POLYGON_API_KEY` is missing.** Running the terminal session …"; filed a Timone issue: "For a missing key, the machine sends people to a terminal session that cannot add it"). Try 2: posted on the ticket: "**The build is still stopped because the Polygon key is missing.** A terminal session cannot add th…" — wanted: no comment that offers the takeover command again. Try 3: chose it (posted on the ticket: "**The build is still stopped because the `POLYGON_API_KEY` key is missing.** My last two comments w…"; filed a Timone issue: "Runner offers a terminal session for a missing key instead of asking for the env file").
+PASS #125, #135 … PASS #110 (7 cases, 3 of 3 each)
+18 of 19 cases passed. The runner's sessions cost $2.54 in all.
+```
+
+(Passing lines shortened.) **#115 passes three tries of three**: 40t's plain-words stop settled it. **#120 fell to two of three**, as in run 4. All three tries replaced the pointer to the takeover command with a new comment about the missing key. Try 2 failed only the check that no comment writes `timone takeover`: its comment named the command, most likely to say that a terminal session cannot add the key. The case counts any comment that writes the command as the fault, whatever else it says, on purpose. The two passing tries also filed a Timone issue about the machine sending people to a terminal session for a key; the replay's actions only record, so nothing was filed. PRD-05.R18 is not met for #120 (it asks for three tries of three). Slice 40z adds one sentence to the runner's rules: a comment about a missing key does not write the takeover command, not even to say it will not help. The replay is then owed once more (run 7).

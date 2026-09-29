@@ -687,6 +687,30 @@ npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
 
 ---
 
+### Sub-phase 40z: a comment about a missing key never writes the takeover command
+
+> ✏ 2026-09-29 (build, timone#165): added after replay run 6 ([phase-40-replay.md](reports/phase-40-replay.md)). Case #120 passed two tries of three: one try wrote `timone takeover` in its new comment, most likely to say it cannot add the key. The case counts that as the fault on purpose, and the rule of this phase is that the runner's rules change, never the case (40j). Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/brief.ts` — the rule for a key or secret missing where a step runs gains: do not write the takeover command in that comment, not even to say that it will not help. A person who reads a command runs it.
+**[MODIFY]** `src/runner/brief.test.ts` — new case only.
+
+**Seams under test (TDD):** `buildBrief`, for the rule text. Red-green: (1) the brief's rule on a missing key says not to write the takeover command in the comment, even to say it will not help.
+
+> Sub-phase 40y must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run; echo "exit: $?"                             # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+- [ ] **Human gate:** fvermaut runs `npm run --silent replay` from his own terminal (run 7); its output is added to `reports/phase-40-replay.md`.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -759,6 +783,7 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40w → 40v                 a pull request closed without merging does not let the run drop its work  (✏ 2026-09-29: added after delivery)
 40x → 40w                 a runner project's run is never failed; a failed merge wakes the runner  (✏ 2026-09-29: added after delivery)
 40y → 40x                 a current-daemon step does not hold up the runner's projects  (✏ 2026-09-29: added after delivery)
+40z → 40y                 a comment about a missing key never writes the takeover command  (✏ 2026-09-29: added after replay run 6)
 40l → 40h, 40j, 40n, 40o, 40q, 40r  scratch-app moves; the watched run
 40m → 40l                 README
 ```
