@@ -535,7 +535,7 @@ describe("the runner's rule that the ticket's newest comment says what the ticke
 });
 
 describe("the runner's rule that a run waits on its pull request", () => {
-  it("has a run that changed files wait on its open pull request, answer its review, and end it when the pull request is merged or closed", () => {
+  it("has a run that changed files wait on its open pull request, answer its review, end it when the pull request is merged, and follow the rule for one closed without merging", () => {
     const rule = actRule("waits on its pull request");
 
     expect(rule).toContain("A run that changed the project's files waits on its pull request.");
@@ -596,6 +596,24 @@ describe("the runner's rule for a named person who asks to stop the work for goo
     expect(rules.indexOf(actRule("waits on its pull request"))).toBeLessThan(
       rules.indexOf(actRule("stop the work for good")),
     );
+  });
+});
+
+describe("the runner's rule for a pull request closed without merging, when no comment says why (40w)", () => {
+  it("asks on the ticket whether to do the work again or to stop, and does not end the run until a named person says to stop", () => {
+    const rule = stopRule("closed without merging");
+
+    expect(rule).toContain("When no comment says why it was closed, ask on the ticket whether to do the work again or to stop.");
+    expect(rule).toContain("Do not end the run until a named person says to stop.");
+  });
+
+  it("is not contradicted by the rule that a run waits on its pull request, which ends the run only on a merge", () => {
+    const sentences = actRule("waits on its pull request").split(". ");
+
+    expect(sentences.filter((sentence) => sentence.includes("end the run"))).toEqual([
+      "While the pull request is open, answer its review, and do not end the run",
+      "When it is merged, end the run and close the ticket",
+    ]);
   });
 });
 

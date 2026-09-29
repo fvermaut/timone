@@ -511,7 +511,7 @@ describe("the runner's actions", () => {
     expect(forge.closed).toEqual([]);
   });
 
-  it("ends a run whose pull request was closed without merging, though its branch is still ahead", async () => {
+  it("refuses to end a run whose pull request was closed without merging while its branch is still ahead, names the two ways it can end, and leaves it running (40w)", async () => {
     const { actions, store, run, forge } = world();
     store.claimBranch(run.id, BRANCH);
     forge.ahead = 2;
@@ -522,15 +522,23 @@ describe("the runner's actions", () => {
       state: "closed",
       headSha: "9e1d0b7",
     };
+    const before = store.get(run.id);
 
     const result = await actions.endRun({
       reason: "fvermaut closed the pull request and wrote that the feature is not wanted.",
       closeTicket: true,
     });
 
-    expect(result.ok).toBe(true);
-    expect(store.get(run.id)?.status).toBe("done");
-    expect(forge.closed).toEqual([{ number: 12, reason: "completed" }]);
+    expect(result).toEqual({
+      ok: false,
+      refused:
+        `Pull request #31 was closed without merging, and the changes this run made on ${BRANCH} ` +
+        "are not on the default branch. The run can end in two ways: a new pull request for this work " +
+        "is merged, or a named person asks on the ticket to stop the work.",
+    });
+    expect(store.get(run.id)).toEqual(before);
+    expect(store.get(run.id)?.status).toBe("active");
+    expect(forge.closed).toEqual([]);
   });
 
   it("records the step's stage in the ledger before its session starts, and leaves it there while the step runs", async () => {
@@ -1437,6 +1445,132 @@ describe("the end of a run that a named person asked to stop", () => {
     expect(result).toEqual({ ok: false, refused: expect.stringContaining("Pull request #31 is open") });
     expect(store.get(run.id)).toEqual(before);
     expect(forge.closed).toEqual([]);
+  });
+});
+
+/** Pull request #31 for ticket 12's branch, closed by a person without merging. */
+const CLOSED_UNMERGED: PullRequest = {
+  number: 31,
+  title: "A due date on each task",
+  url: "https://github.com/fvermaut/scratch-app/pull/31",
+  state: "closed",
+  headSha: "9e1d0b7",
+};
+
+describe("the end of a run whose pull request was closed without merging (40w)", () => {
+  it("ends it when it names a named person's comment asking to stop, and cancels it with a reason naming that comment", async () => {
+    const { actions, store, run, forge } = world(
+      featureTicket([personSaid("fvermaut", "2026-09-27T11:58:40Z", "I closed #31. We do not want due dates after all. Stop this one.")]),
+    );
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 2;
+    forge.pullRequest = CLOSED_UNMERGED;
+
+    const result = await actions.endRun({
+      reason: "fvermaut closed the pull request and asked me to stop.",
+      closeTicket: false,
+      stopCommentAt: "2026-09-27T11:58:40Z",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      said: "The run is ended without a merged pull request, as fvermaut asked in the comment at 2026-09-27T11:58:40Z.",
+    });
+    const ended = store.get(run.id);
+    expect(ended?.status).toBe("cancelled");
+    expect(ended?.cancellation).toBe("fvermaut asked to stop the work, in the comment at 2026-09-27T11:58:40Z");
+    expect(forge.closed).toEqual([]);
+  });
+
+  it("refuses to end it when the comment at that time is by someone who is not named, and leaves the run as it was", async () => {
+    const { actions, store, run, forge } = world(
+      featureTicket([personSaid("passer-by-99", "2026-09-27T11:58:40Z", "The pull request is closed, so stop this.")]),
+    );
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 2;
+    forge.pullRequest = CLOSED_UNMERGED;
+    const before = store.get(run.id);
+
+    const result = await actions.endRun({
+      reason: "passer-by-99 asked to stop after the pull request was closed.",
+      closeTicket: true,
+      stopCommentAt: "2026-09-27T11:58:40Z",
+    });
+
+    expect(result).toEqual({ ok: false, refused: expect.stringContaining("passer-by-99, who is not named") });
+    expect(store.get(run.id)).toEqual(before);
+    expect(forge.closed).toEqual([]);
+  });
+
+  it("still ends a run whose pull request was merged while its branch is ahead, as done, without reading the comment it names", async () => {
+    const { actions, store, run, forge } = world(
+      featureTicket([personSaid("passer-by-99", "2026-09-27T11:58:40Z", "Merged, so stop this.")]),
+    );
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 3;
+    forge.pullRequest = { ...CLOSED_UNMERGED, state: "merged" };
+
+    const result = await actions.endRun({
+      reason: "fvermaut merged the pull request.",
+      closeTicket: true,
+      stopCommentAt: "2026-09-27T11:58:40Z",
+    });
+
+    expect(result).toEqual({ ok: true, said: "The run is ended, and ticket #12 is closed." });
+    expect(store.get(run.id)?.status).toBe("done");
+    expect(forge.closed).toEqual([{ number: 12, reason: "completed" }]);
+  });
+
+  it("ends it, as done, when its branch holds nothing the default branch lacks", async () => {
+    const { actions, store, run, forge } = world();
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 0;
+    forge.pullRequest = CLOSED_UNMERGED;
+
+    const result = await actions.endRun({
+      reason: "fvermaut closed the pull request; the same change reached the default branch another way.",
+      closeTicket: true,
+    });
+
+    expect(result).toEqual({ ok: true, said: "The run is ended, and ticket #12 is closed." });
+    expect(store.get(run.id)?.status).toBe("done");
+    expect(forge.closed).toEqual([{ number: 12, reason: "completed" }]);
+  });
+
+  it("does not tell the runner, while the pull request is open, that its close would end the run", async () => {
+    const { actions, store, run, forge } = world();
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 2;
+    forge.pullRequest = { ...CLOSED_UNMERGED, state: "open" };
+
+    const result = await actions.endRun({
+      reason: "The pull request is delivered.",
+      closeTicket: false,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      refused: "Pull request #31 is open. The run waits on it: answer its review, and end the run when it is merged.",
+    });
+  });
+
+  it("does not tell the runner, before there is a pull request, that its close would end the run", async () => {
+    const { actions, store, run, forge } = world();
+    store.claimBranch(run.id, BRANCH);
+    forge.ahead = 2;
+    forge.pullRequest = undefined;
+
+    const result = await actions.endRun({
+      reason: "The work is built.",
+      closeTicket: false,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      refused:
+        `This run changed files on ${BRANCH}, and they have no pull request yet. ` +
+        "The run waits on one, and ends when it is merged.",
+    });
   });
 });
 

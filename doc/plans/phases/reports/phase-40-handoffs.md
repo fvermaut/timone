@@ -1798,3 +1798,69 @@ The suite had 1950 tests before the slice and has 1957 now: the 7 new cases abov
 - **The end of a recording session still counts as the end of a step at its stage** in two readers that the plan did not name. `standingOf`'s "done" list counts it, but that changes nothing, since the step was already done. In `recordApproval`, a second approval of the same thing in the same run is compared with the end of the recording session, not with the end of the step that wrote the file. This was so before 40v.
 - **The brief's step line no longer includes the recording session's cost.** That cost is still in the ticket's total ("Spent on this ticket"), and `timone record` shows it on its own line.
 - **With a broken record, the runner is still woken after a step**, with the step's result from the session, as before. Only the description is left alone. The log line names the broken line and says the list was left as it is.
+
+## 40w — a pull request closed without merging does not let the run drop its work
+
+**Built.** `endRun` now treats a pull request closed without merging as it treats no pull request, when the branch has commits the default branch lacks. With no stop comment named, it refuses: "Pull request #31 was closed without merging, and the changes this run made on <branch> are not on the default branch. The run can end in two ways: a new pull request for this work is merged, or a named person asks on the ticket to stop the work." With a named person's stop comment (`stopCommentAt`, checked by the same `namedPersonsComment` as in 40t), the run is cancelled, with the 40t reason. A comment by someone who is not named, or the machine's, is refused as in 40t. A merged pull request still ends the run as done, and so does a closed one on a branch with nothing ahead. The runner's rule for a pull request closed without merging gains two sentences: when no comment says why it was closed, ask on the ticket whether to do the work again or to stop; do not end the run until a named person says to stop. (Spec review, finding 6, PRD-05.R4.)
+
+**Files touched.**
+
+- `src/runner/actions.ts` — `endRun`: the pull request the forge found is kept for the whole action (`found`), and `merged` is read from it after the checks. The check on a branch that is ahead now covers every pull request that is not merged (`found?.state !== "merged"`), so a closed one takes the path that had been only for no pull request. The refusal names which of the two it is. After a stop, the runner is told "The run is ended without a merged pull request, as <author> asked in the comment at <time>." when a pull request was closed, and the 40t words when there was none. The open refusal and the no-pull-request refusal no longer say the run ends when the pull request is closed (see decisions). The module comment and the comment above the checks say the new rule. `PullRequest` is imported as a type.
+- `src/runner/brief.ts` — the rule under "What the written process says when work stops" for a pull request closed without merging gains the two sentences, on the same line.
+- `src/runner/actions.test.ts` — **one existing case changed**: "ends a run whose pull request was closed without merging, though its branch is still ahead" is now "refuses to end a run whose pull request was closed without merging while its branch is still ahead, names the two ways it can end, and leaves it running (40w)". Same setup; it now expects the refusal, the run unchanged, and no ticket closed. One constant, `CLOSED_UNMERGED`, and one new `describe` with six cases.
+- `src/runner/brief.test.ts` — one new `describe` with two cases. **One existing title changed, its assertions not:** the 40r case "… and end it when the pull request is merged or closed" is now "… end it when the pull request is merged, and follow the rule for one closed without merging". Its old name said a closed pull request ends the run, which its assertions never checked and which is now wrong.
+
+**Decisions taken inside the slice.**
+
+1. **Two refusal texts outside the excerpt's words were changed, in `actions.ts`.** "Pull request #N is open. The run waits on it: answer its review, and end the run when it is merged or closed." and "… they have no pull request yet. The run waits on one, and ends when it is merged or closed." both lose "or closed". Each told the runner a close would end the run, which the code now refuses when the branch is ahead. This is the same fix as the brief's, in the text the runner reads from the actions. Each change has a new case, written red first. The 40t case that pins the no-pull-request refusal checks only its first sentence, which is unchanged.
+2. **What the runner is told after a stop names the closed pull request.** "The run is ended without a pull request" would not be true when there was one. The no-pull-request case keeps the 40t words, and its 40t test passes unchanged.
+3. **The check is `found?.state !== "merged"`**, not a second branch for `closed`. After the open refusal, the only states left are none, closed and merged, so this is one path for "no pull request carries this work", as the excerpt says ("exactly as when it has no pull request").
+4. **The brief's rule that a run waits on its pull request was not reworded.** It already said "When it is closed without merging, follow the rule below for a pull request closed without merging." (40r), and never that a closed one ends the run. A new guard pins this: the only sentences of that rule that say "end the run" are the open one (do not) and the merged one.
+5. **The two new sentences go on the existing line** for a pull request closed without merging, as the excerpt says ("the rule … gains"). The first half of that rule (comments say what was wrong: do the work again, do not ask) is unchanged, and so is the 40p test that pins it.
+
+**Validation evidence.** The seams were `runnerActions` over the fake forge (the 40e world) and `buildBrief`. Each case was written first and run red, then made green. A case marked *guard* passed on its first run. For a guard, a temporary break in the code was run to show that the test catches it. The break was then undone, and `grep -c MUTATION` on the file gave 0 each time.
+
+| Plan case | Test | Red (trimmed) | Green |
+| --- | --- | --- | --- |
+| (1) | `actions.test.ts` › refuses to end a run whose pull request was closed without merging while its branch is still ahead, names the two ways it can end, and leaves it running (40w) — **the changed existing case** | `expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }`, received `"said": "The run is ended, and ticket #12 is closed."` | pass, with a refusal for a closed pull request on a branch that is ahead |
+| (2) | `actions.test.ts` › the end of a run whose pull request was closed without merging (40w) › ends it when it names a named person's comment asking to stop, and cancels it with a reason naming that comment | `expected { ok: true, said: 'The run is ended.' } to deeply equal { ok: true, …(1) }`: the comment was not read, and the run was completed as done | pass, once the closed pull request took the no-pull-request path |
+| (3) | … › refuses to end it when the comment at that time is by someone who is not named, and leaves the run as it was | `expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }`, received `"said": "The run is ended, and ticket #12 is closed."` | pass, same change |
+| (4) | … › still ends a run whose pull request was merged while its branch is ahead, as done, without reading the comment it names — *guard* | break: the check on a branch that is ahead no longer left out a merged pull request → `expected { ok: false, …(1) } to deeply equal { ok: true, …(1) }` (a stranger's comment was read and refused). The 40e case "ends a run whose pull request was merged, though a squash merge left its branch ahead" and both 40s map cases failed too | pass |
+| (5) | … › ends it, as done, when its branch holds nothing the default branch lacks — *guard* | break: a closed pull request refused even with nothing ahead → `expected { ok: false, …(1) } to deeply equal { ok: true, …(1) }`. No other case failed | pass |
+| decision 1 | … › does not tell the runner, while the pull request is open, that its close would end the run | `- "refused": "Pull request #31 is open. The run waits on it: answer its review, and end the run when it is merged."` / `+ "… when it is merged or closed."` | pass |
+| decision 1 | … › does not tell the runner, before there is a pull request, that its close would end the run | `- "… The run waits on one, and ends when it is merged."` / `+ "… ends when it is merged or closed."` | pass |
+| rule | `brief.test.ts` › the runner's rule for a pull request closed without merging, when no comment says why (40w) › asks on the ticket whether to do the work again or to stop, and does not end the run until a named person says to stop | `expected '- When a pull request was closed with…' to contain 'When no comment says why it was close…'` | pass |
+| rule | … › is not contradicted by the rule that a run waits on its pull request, which ends the run only on a merge — *guard* | break 1: the closed sentence replaced by "When it is closed without merging, end the run." → this case and the 40r case failed. Break 2: "When it is closed, end the run." added after the closed sentence → only this case failed: `expected [ …(3) ] to deeply equal [ …(2) ]` | pass |
+
+The rule as written, under "What the written process says when work stops":
+
+> - When a pull request was closed without merging, and its comments say what was wrong, do the work again from those comments. Start at the step they point to, such as preparing the work when only the work was wrong. Do not ask what to do: the comments already say it. When no comment says why it was closed, ask on the ticket whether to do the work again or to stop. Do not end the run until a named person says to stop.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  56 passed (56)
+      Tests  1965 passed (1965)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+… (19 lines, all PASS; #111 — Start again from that discussion, as PRD-03.R1 says. Do not ask. 3 of 3 tries.)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+The suite had 1957 tests before the slice (40v's count; `actions.test.ts` had 43 and `brief.test.ts` 35) and has 1965 now: 6 new in `actions.test.ts` and 2 in `brief.test.ts`. The changed case in `actions.test.ts` is not counted as new.
+
+No replay case contradicts the new rule. #111 is the one with a closed pull request; its comments say what was wrong, and its right call starts planning. #99's pull request was merged.
+
+- [x] Red→green evidence in the handoff: the table above.
+
+**What the re-check must know.**
+
+- **The `end_run` tool's description still gives the old rule** (`src/runner/tools.ts`, outside this slice). It says "End it when the pull request is merged, and close the ticket then, or when it is closed." and "A run that changed files and has no pull request can also end when a named person asked in their own comment to stop the work for good: give the time of that comment in stopCommentAt." The first sentence is now wrong when the branch is ahead, and the second does not name a closed pull request. The `stopCommentAt` field's description ends "The run then ends without a pull request." The runner reads these at every wake. The code refuses, and the refusal names the two ways out, so the worst case is one refused call. The brief's 40t rule already covers a closed pull request ("the run has no open pull request"). A possible text: "End this run. A run that changed files waits while its pull request is open, and ends when it is merged; close the ticket then. A run that changed nothing can end at any time. A run whose changes no open or merged pull request carries can also end when a named person asked in their own comment on the ticket to stop the work for good: give the time of that comment in stopCommentAt."
+- **A closed pull request with no answer now holds the project.** A parked run on a work branch it owns holds its project (`occupyingRun` in `src/daemon/runs.ts`). Before this slice the runner could end such a run and free the project. Now it waits until a named person answers, or a new pull request is merged, and other tickets of the project wait behind it. This is what R4 asks, but a person who closes a pull request and says nothing now blocks the project.
+- **The stop comment must be on the ticket.** `namedPersonsComment` reads only the ticket's comments, as in 40t. A person who closes the pull request and writes "not wanted" on the pull request, not the ticket, cannot be named. The runner is refused with "There is no comment by a person at <time> on ticket #12.", and the refusal for a closed pull request says "asks on the ticket". The brief does not say this case outright: "not wanted" does say why it was closed, so the new sentence does not apply to it.
+- **40t's decision 2 no longer holds for a closed pull request.** A named comment is now read on a closed pull request whose branch is ahead. It is still not read on a merged pull request or when nothing is ahead; case (4) shows the merged one.
+- **Where a stop after a closed pull request shows.** The same as a 40t stop: `timone status` shows "was cancelled: <author> asked to stop the work, in the comment at <time>". Nothing there says a pull request was closed. The runner's own answer does ("without a merged pull request").
+- **The model replay has not been run** (the build's sandbox has no model login). With the new rule, a runner on #111 that tried to end the run would now be refused; the judge already failed such a try, since it needs a step started.

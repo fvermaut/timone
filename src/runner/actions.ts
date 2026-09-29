@@ -1,5 +1,6 @@
 import {
   NEEDED_FROM_YOU,
+  type PullRequest,
   type TicketComment,
   type TicketingAdapter,
   type TicketingProject,
@@ -80,11 +81,11 @@ import type {
  *
  * **The runner decides; code keeps the rules.** Each action checks what must
  * hold before it acts — a named person's approval, the spending limit, a
- * reason for every skipped step, a pull request merged or closed (or a named
- * person's comment asking to stop) before a run that changed files may end —
- * and refuses in plain words when it does not. The runner reads the refusal
- * and decides again. A rule written only in the runner's instructions is a
- * request; a rule here is a fact.
+ * reason for every skipped step, a pull request merged (or a named person's
+ * comment asking to stop) before a run whose branch holds commits the default
+ * branch lacks may end — and refuses in plain words when it does not. The
+ * runner reads the refusal and decides again. A rule written only in the
+ * runner's instructions is a request; a rule here is a fact.
  */
 
 /**
@@ -1006,40 +1007,51 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       //
       // A merged pull request ends the run: a person took the work, and a
       // squash merge leaves the branch ahead, so the count alone would keep
-      // it from ever ending. A closed one may end it too: the person said no,
-      // and the runner reads why in its comments and decides.
+      // it from ever ending.
+      //
+      // **A closed one does not, while the branch is ahead** (40w,
+      // PRD-05.R4). The branch still holds commits that no open pull
+      // request carries, as when there is none, and the close alone does
+      // not say whether to do the work again or to drop it. So the run ends
+      // as it would with no pull request: when a new one for the work is
+      // merged, or on a named person's stop, below. A closed one on a
+      // branch with nothing ahead ends the run: no work is left on it.
       //
       // **A named person's plain "stop" ends a run with no pull request**
-      // (40t, PRD-05.R4). On #115 the operator finished the work by hand and
-      // said so, and the run could not end: only `timone cancel`, a terminal
-      // command, ended a run whose branch held commits and no pull request.
-      // The runner judges whether the words ask to stop for good, and names
-      // the comment; code checks only that the comment is there and is a
-      // named person's, as it does for an approval. The run is then
-      // cancelled, not done: nothing it made was taken. An open pull request
-      // still refuses, above: the run waits on it, whatever was said.
+      // (40t, PRD-05.R4), or with one closed without merging (40w). On #115
+      // the operator finished the work by hand and said so, and the run
+      // could not end: only `timone cancel`, a terminal command, ended a run
+      // whose branch held commits and no pull request. The runner judges
+      // whether the words ask to stop for good, and names the comment; code
+      // checks only that the comment is there and is a named person's, as it
+      // does for an approval. The run is then cancelled, not done: nothing it
+      // made was taken. An open pull request still refuses, above: the run
+      // waits on it, whatever was said.
       const { branch } = current();
-      let merged = false;
+      let found: PullRequest | undefined;
       let stoppedBy: TicketComment | undefined;
       if (branch !== undefined) {
-        const found = await deps.adapter.findPullRequest(deps.project, branch);
-        merged = found?.state === "merged";
+        found = await deps.adapter.findPullRequest(deps.project, branch);
         if (found?.state === "open") {
           return {
             ok: false,
             refused:
               `Pull request #${found.number} is open. The run waits on it: answer its review, ` +
-              "and end the run when it is merged or closed.",
+              "and end the run when it is merged.",
           };
         }
         const ahead = await deps.adapter.aheadOfDefault(deps.project, branch);
-        if (ahead !== undefined && ahead > 0 && found === undefined) {
+        if (ahead !== undefined && ahead > 0 && found?.state !== "merged") {
           if (stopCommentAt === undefined) {
             return {
               ok: false,
               refused:
-                `This run changed files on ${branch}, and they have no pull request yet. ` +
-                "The run waits on one, and ends when it is merged or closed.",
+                found === undefined
+                  ? `This run changed files on ${branch}, and they have no pull request yet. ` +
+                    "The run waits on one, and ends when it is merged."
+                  : `Pull request #${found.number} was closed without merging, and the changes this run made ` +
+                    `on ${branch} are not on the default branch. The run can end in two ways: a new pull ` +
+                    "request for this work is merged, or a named person asks on the ticket to stop the work.",
             };
           }
           const stop = await namedPersonsComment(
@@ -1050,6 +1062,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
           stoppedBy = stop.comment;
         }
       }
+      const merged = found?.state === "merged";
       if (stoppedBy === undefined) {
         deps.store.complete(run.id);
       } else {
@@ -1076,11 +1089,13 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       if (merged && map !== undefined && map.steps.includes(run.ticket)) {
         await closeInitiativeIfDone(deps, deps.project, map.initiative, deps.log);
       }
+      // A stop comes only where no pull request is open or merged, so a pull
+      // request found here was closed without merging.
       const ended =
         stoppedBy === undefined
           ? "The run is ended"
-          : `The run is ended without a pull request, as ${stoppedBy.author} asked in the ` +
-            `comment at ${stoppedBy.createdAt}`;
+          : `The run is ended without ${found === undefined ? "a" : "a merged"} pull request, ` +
+            `as ${stoppedBy.author} asked in the comment at ${stoppedBy.createdAt}`;
       return closeTicket
         ? { ok: true, said: `${ended}, and ticket #${run.ticket} is closed.` }
         : { ok: true, said: `${ended}.` };
