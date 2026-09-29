@@ -24,12 +24,13 @@
     - GIVEN any run
       WHEN code decides which session to start
       THEN the choice comes from the runner's decision, and no table in code picks the next step
+- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): what code does passes: the brief shows the default order and what ran, requirements already on the default branch are shown, and the step started is the one the runner chose. The runner's own choice in clauses 1 and 2 needs a real model; replay run 6 on this build is owed.
 - **Verification hint:** the replay set of R18 carries both cases as fixtures. For the third clause, read the seam: `stageAfter` and the `next` fields of `STAGES` in `src/daemon/pipeline.ts` are no longer called to choose a session. The default order may still exist as data given to the runner.
 
 ## R2 — The runner acts only through the actions code gives it
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that lists the tools a runner session is started with and fails on any tool not in the list below
 - **Criteria:**
@@ -46,7 +47,7 @@
 ## R3 — Nothing reaches a default branch without a yes from a named person
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that tries each merge path in the code with no recorded approval and fails if any of them writes to the default branch
 - **Criteria:**
@@ -65,7 +66,7 @@
 ## R4 — A run that changed the project's files ends at a pull request
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that asks to end a run whose branch has commits not on the default branch and not in an open pull request, and fails if the run ends
 - **Criteria:**
@@ -87,7 +88,7 @@
 ## R5 — Code lists every departure on the pull request, and a skipped check comes first
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a run record in which the checking step did not run
@@ -117,6 +118,7 @@
     - GIVEN a named person replies to that comment asking for the skipped step
       WHEN the runner wakes
       THEN it stops what it started, if that is still running, and runs the skipped step
+- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): clause 1, and what code does in clause 2, pass. The runner's choice in clause 2 needs a real model, and no replay case covers it.
 - **Verification hint:** replay the #104 fixture of R18 with fake actions, and check that the "post on the ticket" call comes before the "start a step" call.
 
 ## R7 — The runner never records an approval nobody gave
@@ -132,6 +134,7 @@
     - GIVEN any artifact that records an approval (a requirements file marked `Active`, a list of pieces marked approved)
       WHEN that approval is written
       THEN it names a comment by a named person that gave it
+- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): clause 2, and what code does in clause 1, pass. Clause 1 rests on the runner (code checks who wrote the cited comment, not what it says): replay case scratch-app#37 passed in runs 1, 2, 4 and 5; run 6 on this build is owed.
 - **Verification hint:** approvals are written today by the approval-recording session (`APPROVAL_RECORD_MODEL` in `src/daemon/pipeline.ts`). The test starts that path without a comment from a named person and checks that nothing is written.
 
 ## R8 — Each ticket has a limit of $150
@@ -151,6 +154,7 @@
     - GIVEN a project whose entry in `timone.yaml` sets a different limit
       WHEN its tickets are counted
       THEN that limit is used instead of $150
+- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): every clause passes except the reading of "any wording that means it", which a one-turn model check does and a real model is needed to test. One such check starts at the limit for each named person's reply; the build recorded this as a narrow reading.
 - **Verification hint:** each session already reports `total_cost_usd` (`src/daemon/progress.ts`). The count belongs to the ticket, not to one run, so a ticket with several runs adds them all up.
 
 ## R9 — Plain words from a named person move the run
@@ -173,7 +177,7 @@
 ## R10 — Only named people can instruct the runner
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that gives the code that wakes the runner a comment from a login not named for the project, and fails if the comment reaches the runner or wakes it
 - **Criteria:**
@@ -204,6 +208,7 @@
     - GIVEN the command line
       WHEN `timone retry` is typed
       THEN it does not exist, and the message says to write on the ticket instead
+- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): this phase's part passes: cancel, takeover (with and without a running daemon), and retry refusing on a runner project. Clause 3 as written ("it does not exist") is #166's.
 - **Verification hint:** `src/commands/cancel.ts` must not start or wait for a runner. The takeover case replaces the handback note of ADR-0035: the runner reads the session's closing comment in plain words.
 
 ## R12 — The runner wakes on events, and checks every 15 minutes while a step runs
@@ -252,6 +257,7 @@
     - GIVEN a finished run
       WHEN the operator asks for its record from the command line
       THEN the record is shown in plain words
+- **Evidence:** ✏ 2026-09-29 — phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): all three clauses pass. It stays draft because its claim is universal ("no runner session was kept alive", "every step") and this block names no `Falsified-by` check; the probe `prd-05.r14.mjs`, proved able to fail, could be named here.
 - **Verification hint:** the record is written by code, never by the runner, because R5 and R8 are computed from it. The runner's reasons are stored as the runner gave them.
 
 ## R15 — One project's work no longer holds up the others
@@ -283,6 +289,7 @@
     - GIVEN any failure of the runner
       WHEN the run is read afterwards
       THEN its state is what it was before the failure, and the project is not held by a run that nothing is working on
+- **Evidence:** ✏ 2026-09-29 — phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): all three clauses pass (60 seconds, 5 minutes, then every 15 minutes; one notice that asks for nothing; the run's state kept). It stays draft because its claim is universal ("posts nothing … meanwhile", "any failure") and this block names no `Falsified-by` check; the probe `prd-05.r16.mjs`, proved able to fail, could be named here.
 - **Verification hint:** the classification of failures in `src/daemon/faults.ts` (`technicalFault`) can be reused for the runner's own failures. The fault of #143 and #161, a run left `active` with nothing running, is what the third clause rules out.
 
 ## R17 — A fault in Timone is filed, not fixed
@@ -303,6 +310,7 @@
     - GIVEN any run
       WHEN the runner acts on a fault in Timone
       THEN no file of Timone's is changed
+- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): clauses 3 and 4, and what code does in clauses 1 and 2, pass. The runner's judgement and its words in clauses 1 and 2 need a real model.
 - **Verification hint:** replay with a fake issue tracker that holds a few open issues, one of which matches. The fourth clause holds by R2: the runner has no action that changes a file.
 
 ## R18 — The runner passes a replay of the recorded failures
@@ -341,12 +349,13 @@
   | [ivtrends#1](https://github.com/fvermaut/ivtrends/issues/1) | A step stopped on a server error from the model service. | Start it again after a wait, and post nothing unless it keeps failing. |
   | [#110](https://github.com/fvermaut/timone/issues/110) | At a 15-minute check, the build step has run the full browser suite six times. | Send the step a message to run only the tests its change affects. |
 
+- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): BLOCKED: the verifying sandbox has no model login. The last real run on record is run 5 (18 of 19, on the build before 40t); run 6 on `55a617a` or later is owed.
 - **Verification hint:** the cases are 17 of the 20 failures between steps filed from 5 to 26 September, plus four other cases: one about the order itself (#104), one about approvals (scratch-app#37), one about retries (ivtrends#1) and one about watching (#110). The other three are covered elsewhere: [#148](https://github.com/fvermaut/timone/issues/148) by R15, [#116](https://github.com/fvermaut/timone/issues/116) by R11 (no command is left that can refuse), and [#145](https://github.com/fvermaut/timone/issues/145) by the open question on the ask check. The replay calls the real model, so it costs money and its result can vary. Three tries per case is the guard against a lucky pass.
 
 ## R19 — Each project runs on the runner or on the current daemon, until every project has moved
 
 - **Priority:** SHOULD
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:** a project's entry in `timone.yaml` says which one drives its tickets. The daemon drives each project the way its entry says, and two projects can differ. scratch-app moves first, and ivtrends moves only after a supervised run on scratch-app has passed R9, R12, R13 and R15.
 

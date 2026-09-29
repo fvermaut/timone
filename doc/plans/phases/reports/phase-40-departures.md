@@ -211,3 +211,17 @@
 **Did instead:** The runner also has `record_approval`. It records that a named person approved the requirements or the list of pieces, and names that person's comment. R2 is amended in place with a dated marker. ADR-0060 D4 lists the same seven actions and is not changed here.
 
 **Why:** Verification found this tool on the runner's list, and R2 did not name it. R3's third clause merges chunk zero once a named person's approval is recorded, and the record must name the comment it came from. R7's second clause asks the same of every approval. Only the runner can judge that the words of a comment are an approval. Code checks the rest: the comment exists, a named person wrote it, and it was written after the thing it approves. Without this action no approval could be recorded, and chunk zero could never be merged on a project the runner drives. The action edits no file, runs no command and pushes nothing. The one merge that can follow it, of chunk zero, is done by code, and only from the approval in the record (R3).
+
+## 2026-09-29 — timone#165, verification
+
+**Kind:** check not run
+**Agreed:** PRD-05.R18: the replay of the recorded failures on the real model, three tries per case. With it, the runner's own choices in R1, R6, R7 and R17, and the wording check in R8.
+**Did instead:** Not run. Reported BLOCKED in [phase-40-verification.md](phase-40-verification.md). The last real run on record is run 5 (18 of 19, on the build before 40t). Both verification fix loops changed the runner's actions and brief, so run 6 is owed on `55a617a` or later, from a logged-in terminal (`npm run --silent replay`), with its result on the pull request.
+**Why:** The verifying sandbox has no model login (`claude auth status`: not logged in). A scripted model would test the script, not the runner.
+
+## 2026-09-29 — timone#165, verification
+
+**Kind:** workaround
+**Agreed:** Verification observes the deliverable in its production form: steps in the box, against the real forge, with a real model.
+**Did instead:** The probes ran the built daemon (`dist/`) with steps in-process, against a fake forge, a local stand-in for GitHub's token call, and a fake model service answered by each probe ([_rig.mjs](../probes/_rig.mjs)). The runner itself runs in the daemon process in both runtimes.
+**Why:** A boxed step clones from the real forge, GitHub must not be touched by a verification, and every session needs a model login the sandbox does not have.
