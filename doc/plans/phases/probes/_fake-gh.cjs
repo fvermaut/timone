@@ -224,7 +224,16 @@ if (a0 === 'issue' && a1 === 'list') {
     if (!b || !h) fail(`gh: Not Found (HTTP 404) merge ${head} into ${base}`);
     let sha;
     if (tryGit('merge-base', '--is-ancestor', h, b) !== undefined) { logLine({ result: 'merge: nothing to merge' }); process.exit(0); }
-    const tree = git('merge-tree', '--write-tree', b, h).trim().split('\n')[0];
+    // A conflict is answered as GitHub answers it: HTTP 409, "Merge conflict", and nothing merged.
+    // (Added 2026-09-29, re-check after 40y: before, a conflict crashed this file with a stack trace.)
+    const mt = tryGit('merge-tree', '--write-tree', b, h);
+    if (mt === undefined) {
+      logLine({ result: `merge: CONFLICT ${head} into ${base} (409)` });
+      out({ message: 'Merge conflict', documentation_url: 'https://docs.github.com/rest/branches/branches#merge-a-branch', status: '409' });
+      process.stderr.write('gh: Merge conflict (HTTP 409)\n');
+      process.exit(1);
+    }
+    const tree = mt.trim().split('\n')[0];
     sha = execFileSync('git', ['--git-dir', remote, '-c', 'user.email=forge@example.invalid', '-c', 'user.name=forge', 'commit-tree', tree, '-p', b, '-p', h, '-m', msg], { encoding: 'utf8' }).trim();
     git('update-ref', `refs/heads/${base}`, sha, b);
     logLine({ result: `MERGED ${head} into ${base} as ${sha}` });

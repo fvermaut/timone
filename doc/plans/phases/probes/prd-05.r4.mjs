@@ -14,6 +14,11 @@
 //      once it has checked the comment exists and is theirs
 //   4. GIVEN a run that changed no files, such as a question or a decision ticket
 //      WHEN the runner ends it THEN it ends on the ticket, with no pull request
+//
+// Clause 1 (the pull request was closed without merging) added 2026-09-29 (re-check after 40y). A
+// pull request closed without merging is not an open pull request, so clause 1 applies to it: the
+// run's work is still not on the default branch. Its break step is the same run with a named person's
+// plain-words stop on the ticket, cited by the runner, which clause 3 lets end the run.
 import { fixture, model, daemon, act, say, clause, assert, finish, OPERATOR, STRANGER } from './_rig.mjs';
 
 const N = 12;
@@ -64,6 +69,60 @@ await clause('PRD-05.R4 clause 1', 'a branch with commits not on the default bra
   correct: async () => assertRefused(unmerged),
 });
 console.log(`    (the refusal read: "${unmerged.said}")`);
+
+// Clause 1 again, when the run's pull request was closed without merging. With `stop`, a named person
+// asked on the ticket to stop for good, and the runner cites that comment.
+async function closedPullRequest({ stop }) {
+  const fx = fixture({ issues: { fixture: { [N]: {} } } });
+  const T = {};
+  const m = await model({
+    runner: (c) => {
+      if (c.turn > 0) return say();
+      const w = whyOf(c);
+      if (w.includes('picked up')) return act('start_step', { stage: 'execution', instructions: 'build it', reason: 'probe', skipReason: 'probe' });
+      if (w.includes('"open the pull request"')) return act('start_step', { stage: 'delivery', instructions: 'open it', reason: 'probe', skipReason: 'probe: no check in this fixture' });
+      if (w.includes('"is it finished?"')) return act('end_run', { reason: 'probe: the pull request was closed, so the work is over', closeTicket: false });
+      if (w.includes('Please stop the work for good.')) return act('end_run', { reason: 'probe: they asked to stop for good', closeTicket: false, stopCommentAt: T.stop });
+      return say();
+    },
+    step: (c) => {
+      if (c.turn === 0 && (c.brief.match(/Timone-Stage: (\S+)/) || [])[1] === 'delivery') {
+        const br = fx.run(N).branch;
+        fx.editForge((f) => { const num = f.nextNumber++; f.prs[num] = { number: num, title: 'Probe', body: 'Delivery text.', head: br, base: 'main', state: 'OPEN', createdAt: new Date().toISOString(), comments: [] }; });
+      }
+      return say('done');
+    },
+  });
+  const quiet = () => ['runner-ended', 'seen'].includes(fx.record(N).at(-1)?.kind);
+  const run = (until) => daemon(fx, m, { until, timeoutMs: 30000, settleMs: 1500 });
+  await run(() => fx.record(N).some((e) => e.kind === 'step-ended' && e.stage === 'execution') && quiet());
+  fx.pushBranch(fx.run(N).branch, { 'src/count.ts': 'export const count = 1;\n' }, 'the build');
+  fx.comment(N, OPERATOR, 'open the pull request');
+  await run(() => fx.record(N).some((e) => e.kind === 'step-ended' && e.stage === 'delivery') && quiet() && Object.keys(fx.forge().prs).length > 0);
+  // Closed without merging, as a person on GitHub would close it.
+  fx.editForge((f) => { for (const p of Object.values(f.prs)) { p.state = 'CLOSED'; p.closedAt = new Date().toISOString(); } });
+  const w0 = m.runner().length;
+  if (stop) T.stop = fx.comment(N, OPERATOR, 'I finished this by hand. Please stop the work for good.');
+  else fx.comment(N, OPERATOR, 'is it finished?');
+  await run(() => m.runner().slice(w0).some((q) => q.turn === 1 && /end_run|Refused|ended/.test(q.last)) && quiet());
+  await m.stop();
+  const q = m.runner().slice(w0).find((x) => x.turn === 1 && /Refused|ended/.test(x.last));
+  return { said: q?.last ?? '(the runner was not answered)', run: fx.state().runs.find((x) => x.ticket === N && x.seq === 1), prs: Object.values(fx.forge().prs).map((p) => p.state), fx };
+}
+const closedNoStop = await closedPullRequest({ stop: false });
+const closedWithStop = await closedPullRequest({ stop: true });
+function assertRefusedClosed(o) {
+  assert(o.prs.length === 1 && o.prs[0] === 'CLOSED', `the pull request is not closed: ${o.prs.join(', ')}`);
+  assert(/^Refused:/.test(o.said), `the runner was not refused: "${o.said.slice(0, 300)}"`);
+  assert(/pull request/i.test(o.said) && /not on the default branch|changed files|commits/i.test(o.said), `the refusal does not say why: "${o.said}"`);
+  assert(!ENDED.has(o.run.status), `the run ended anyway: ${o.run.status}`);
+}
+await clause('PRD-05.R4 clause 1 (the pull request was closed without merging)', 'the run\'s pull request was closed without merging, so its work has no open pull request: code refuses to end the run and says why', {
+  broken: async () => assertRefusedClosed(closedWithStop),
+  correct: async () => assertRefusedClosed(closedNoStop),
+});
+console.log(`    (the refusal read: "${closedNoStop.said}")`);
+console.log(`    (with the operator's stop cited: "${closedWithStop.said}" — the run ${closedWithStop.run.status})`);
 
 // Clause 2: timone cancel ends the same run, with no pull request.
 async function cancelOf(doCancel) {
@@ -156,5 +215,5 @@ await clause('PRD-05.R4 clause 4', 'a run that changed no files ends on the tick
   correct: async () => assertEndedOnTicket(question),
 });
 
-for (const o of [unmerged, clean, cancelled, notCancelled, byOperator, byStrangerCited, byNobody, question]) o.fx.cleanup();
+for (const o of [unmerged, clean, closedNoStop, closedWithStop, cancelled, notCancelled, byOperator, byStrangerCited, byNobody, question]) o.fx.cleanup();
 finish('PRD-05.R4');

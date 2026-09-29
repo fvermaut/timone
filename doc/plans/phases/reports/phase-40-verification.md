@@ -399,3 +399,138 @@ None: no verdict changed.
 - **A fresh live gate** for R9, R12, R13 and R15, on `044231f` or later, including two tickets on one project.
 - **The R2 amendment** made in the first check's loop 1 still needs the person's yes.
 - **Steps ran in-process, not in the box**, in this pass as in the first.
+
+## Re-check after 40y — 2026-09-29
+
+A third check, by a session that watched neither the build, nor the first check, nor the re-check after 40u. Pull request [#173](https://github.com/fvermaut/timone/pull/173) was opened at `865fb36`. Then sub-phases 40v to 40y (`320a331` to `47f1332`) fixed four findings of its code review. This pass re-ran every probe on the new build, and looked at each of the four fixes from the outside.
+
+- **Branch:** `timone/165-the-runner-beside-the-current-daemon` @ `f94081f`.
+- **Scope:** unchanged — PRD-05.R1 to R19 as the phase header claims (R11 in part).
+- **Regression set (derived again at `f94081f`):** PRD-01.R2, PRD-05.R2, R3, R4, R5, R10 — the same as at `044231f`. None of the PRD-05 ones declares `Depends-on`, so each is in scope. PRD-01.R2 is in because the branch touches `src/manifest.ts`. Narrowed out: PRD-01.R3 (`Depends-on: src/commands/workspace.ts, src/git.ts`; the branch touches neither).
+- **Live gate owed:** yes — R9, R12, R13 and R15, now on `f94081f` or later. 40v to 40y changed files under `src/runner/`, `src/daemon/` and `src/commands/` after the watched run. Two of the changes are close to these criteria: 40y changed how the daemon polls its projects, which is what R15 is about; 40x changed what happens to a run, and what wakes the runner, after a failed merge (R9, R12).
+
+### Environment
+
+`dist/` was older than `f94081f`, so it was deleted and rebuilt with `npm run build`. The probes ran through the same rig as the earlier checks: the built daemon, a fake forge, a fake model service, steps in-process. Nothing reached GitHub or a real model. Nothing ran against the real ledger or records in `.timone/`.
+
+For the four fixes, the build before them was also used. It was made with `git archive 865fb36` into a scratch folder outside the clone and built there with `tsc`. `865fb36` is the delivery commit; its code is the code 40u left (`ddb95ed`), as only documents changed in between. For the comparison runs, the two probes changed in this pass and the changed fake forge were copied into that folder. The clone's branch was never switched.
+
+**One change to the rig.** The fake forge now answers a merge that conflicts as GitHub does: HTTP 409, "Merge conflict", nothing merged. Before, a conflict made the fake forge stop with a stack trace. 40x needs a merge that fails, so this was needed to see it. The R3 probe, which merges, was run again after the change: PASS, 4 of 4 break legs red.
+
+**Build-health smoke, run once at `f94081f`, not evidence:** `npx tsc --noEmit` exit 0; `npx vitest run` 1,977 of 1,977 tests in 57 files; `npm run --silent replay -- --dry` 19 of 19. It does not contradict any probe.
+
+### Independence declaration (this pass)
+
+Read: the verify skill; the register and its narrative; the phase file's lines 1–40 and its section headings; the completion report, whole, including "Reopened after delivery"; this report, whole; the probe directory, including the rig; the `package.json` scripts; `process.md` (stage 7 and "Writing to the human"); the list of paths the branch changes (for the narrowing) and the list of paths changed since `865fb36` (to know which folders 40v to 40y touched).
+
+Not read: the handoffs file, the 40v to 40y sections of the phase file, the delivery report and its two reviews, the departures record, diffs, source, the test suite, ADRs. The four fixes were checked from what the completion report's last section says they change, in terms of what the app does. Nothing was read on GitHub.
+
+### Probes: earlier checks against now
+
+**16 probes proven able to fail, 0 not.** All 16 were run from the directory, each on its own with `node doc/plans/phases/probes/<probe>.mjs`. Two labels were added: R4 clause 1 for a pull request closed without merging, and R5 clause 3 for a feature with both approvals recorded (below). The probes now print 74 clause labels: 69 for PRD-05 and 5 for PRD-01.R2. 9 are BLOCKED, as before. Every break leg that ran went red, then its real leg passed.
+
+| Probe | First check (`55a617a`) | After 40u (`044231f`) | Now (`f94081f`) | Break legs now |
+| --- | --- | --- | --- | --- |
+| prd-05.r1 | PASS for code, 2 BLOCKED | PASS for code, 2 BLOCKED | PASS for code, 2 BLOCKED | 4 of 4 red |
+| prd-05.r2 | PASS | PASS | PASS | 4 of 4 red |
+| prd-05.r3 | PASS | PASS | PASS, before and after the fake forge change | 4 of 4 red |
+| prd-05.r4 | PASS, 5 labels | PASS, 5 labels | PASS, 6 labels (clause 1 with a closed pull request added) | 6 of 6 red |
+| prd-05.r5 | PASS, 5 labels | PASS, 5 labels | PASS, 6 labels (clause 3 for a feature added) | 6 of 6 red |
+| prd-05.r6 | PASS for code, 1 BLOCKED | PASS for code, 1 BLOCKED | PASS for code, 1 BLOCKED | 3 of 3 red |
+| prd-05.r7 | PASS for code, 1 BLOCKED | PASS for code, 1 BLOCKED | PASS for code, 1 BLOCKED | 3 of 3 red |
+| prd-05.r8 | PASS, 1 BLOCKED | PASS, 1 BLOCKED, after an instrument fix | PASS, 1 BLOCKED | 7 of 7 red |
+| prd-05.r10 | PASS | PASS | PASS | 4 of 4 red |
+| prd-05.r11 | PASS, 6 labels | PASS, 7 labels | PASS, 7 labels | 7 of 7 red |
+| prd-05.r14 | PASS | PASS | PASS | 3 of 3 red |
+| prd-05.r16 | PASS | PASS | PASS — attempts 60 s, 300 s and 900 s after each failure; one notice that asks for nothing; the run stayed `parked` | 3 of 3 red |
+| prd-05.r17 | PASS for code, 2 BLOCKED | PASS for code, 2 BLOCKED | PASS for code, 2 BLOCKED | 4 of 4 red |
+| prd-05.r18 | BLOCKED | BLOCKED | BLOCKED | red on run 5's recorded result |
+| prd-05.r19 | PASS | PASS | PASS | 2 of 2 red |
+| prd-01.r2 (regression) | PASS | PASS | PASS | 5 of 5 red |
+
+One wording changed where a probe prints it. The refusal in R4 clause 1, for a branch with work and no pull request, now ends "The run waits on one, and ends when it is merged." It ended "… when it is merged or closed." before 40w.
+
+**R4 clause 1, for a pull request closed without merging — added.** Clause 1 says: a run whose branch has commits not on the default branch, which asks to end with no open pull request, is refused and told why. A pull request closed without merging is not an open one, and the old label never closed one. The new label opens the run's pull request, closes it without merging, and has the runner ask to end the run. Its break step is the same run, where the operator wrote "Please stop the work for good." on the ticket and the runner cites it, which clause 3 allows.
+
+```
+=== PRD-05.R4 clause 1 (the pull request was closed without merging) — the run's pull request was closed without merging, so its work has no open pull request: code refuses to end the run and says why
+    break leg: RED (as required) — the runner was not refused: "The run is ended without a merged pull request, as probe-operator asked in the comment at 2026-09-29T18:48:01Z."
+    green leg: PASS — assertion held
+    (the refusal read: "Refused: Pull request #100 was closed without merging, and the changes this run made on timone/12-add-a-count-of-open-to-dos are not on the default branch. The run can end in two ways: a new pull request for this work is merged, or a named person asks on the ticket to stop the work.")
+```
+
+On the build before 40w, the same label fails: "green leg: FAIL — the runner was not refused: "The run is ended.""
+
+**R5 clause 3, for a feature with both approvals recorded — added.** The existing clause 3 walk is a chore, which has no approvals. When an approval is recorded, a session writes it into its file; that session is not a step of the default order. The new label walks a feature through every step, records both approvals from the operator's comments, and delivers. A feature run reaches its own pull request with both approvals only when the merge after the approval of the list fails: when the merge works, the ticket becomes the list of its pieces' tickets and the run ends (seen on both builds). So the label puts a clashing change on main before the list is approved, then the operator writes "go on with the work". Its break step skips the interview, with a reason.
+
+```
+=== PRD-05.R5 clause 3 (a feature, both approvals recorded) — a feature that ran every step, with both approvals recorded from a named person's comments: the description says the default order was followed
+    break leg: RED (as required) — the description says: "**Steps that did not follow the default order:** - Asking what you need: did not run. Reason: PROBE-R5-F: the ticket is clear"
+    green leg: PASS — assertion held
+    (a feature, both approvals recorded: approvals ["requirements","pieces"]; steps started triage, clarification, requirements, requirements, breakdown, breakdown, planning, execution, verification, delivery; the run parked; the list on the pull request: "The default order was followed.")
+```
+
+On the build before 40v, the same label fails: "green leg: FAIL — the description says: "(no pull request)"". There, the run failed at the merge, which is 40x's fault. What 40v changed is seen on that build in the next section, case B.
+
+Clause coverage: every register clause of R1–R8, R10, R11, R14, R16–R19 still has at least one label. The register has not changed since the re-check after 40u.
+
+### The four fixes, observed
+
+Each was run on the build before 40v (`865fb36`) and on `f94081f`, in the same rig, with the same script. The scripts are scratch, outside the tree, except the two labels above.
+
+1. **40v — recording an approval is not a step out of order.**
+   - **Case A:** a feature, every step, both approvals recorded, delivered (the walk of the new R5 label).
+     - Before: no pull request. The run failed at the merge (see fix 3).
+     - Now: "The default order was followed." `timone record fixture#12` names the two sessions "Recording the approval of the requirements" and "Recording the approval of the list of pieces", and says "Steps left out of the default order: - None."
+   - **Case B:** the same walk, but the approval of the list is skipped with a reason, so the run goes on to its pull request without a failed merge.
+     - Before: the pull request lists "Writing down what it needs: ran out of order. No reason given." and then the skipped approval. The runner's brief after the approval was written already said "Departures so far, which the pull request will list: - writing down what it needs: ran out of order. No reason given."
+     - Now: the pull request lists only "Your approval of the list of pieces: did not run. Reason: …". The brief says "No departures so far."
+   - **Case C:** a record that cannot be read. A chore walked with the check skipped. While delivery ran, a line that is not JSON was added to the run's record, in the rig's throwaway folder.
+     - Before: the pull request said "The default order was followed." That is false: the check did not run.
+     - Now: the pull request gets no list. The daemon's log says "The run record .timone/records/fixture/12.jsonl cannot be read: line 21 is not JSON. The pull request's list of departures is left as it is." The same walk with the record untouched gives "**Not checked.** …" as its first line.
+   - **Fixed.** Case A is R5 clause 3, now a label in the committed probe. See "Found outside the verdicts", item 3, for what case C leaves.
+2. **40w — a pull request closed without merging does not let the run drop its work.** A run with work on its branch opened pull request #100. The pull request was then closed without merging. On both builds the runner was woken with "Pull request #100 was closed without merging."
+   - Before: the runner asked to end the run and was told "The run is ended." The run was `done`, and its work never reached main. The ticket was still open and marked, so it was taken up again as `fixture#12/2`.
+   - Now: "Refused: Pull request #100 was closed without merging, and the changes this run made on timone/12-add-a-count-of-open-to-dos are not on the default branch. The run can end in two ways: a new pull request for this work is merged, or a named person asks on the ticket to stop the work." The run stays waiting, and no second run starts.
+   - With the operator's "I finished this by hand. Please stop the work for good." cited: now "The run is ended without a merged pull request, as probe-operator asked in the comment at …", and the run is `cancelled`. Before: "The run is ended." for any request, as a closed pull request was enough.
+   - **Fixed.** R4 clause 1, now a label in the committed probe.
+3. **40x — a failed merge of the list of pieces no longer fails a runner run.** The walk of R3's clause 3, with a clashing change put on main before the operator approved the list. The fake forge answers the merge with 409.
+   - Before: the run `failed`. One comment: "**Something went wrong while I was working on this.** … **What I need from you:** the standing note below has the command that starts this again. Or leave it and tell me what looks wrong." The runner was not woken.
+   - Now: the run stays waiting (`parked`), and main did not move. One comment, with no command in it: "**I could not add the requirements and the list of pieces to the project's default branch.** The approval is written down. But the default branch has changes that clash with them, so nothing was added. Someone has to decide which version to keep. What went wrong: timone/12-add-a-count-of-open-to-dos and main disagree, and the forge will not merge them. **What I need from you:** reply here to say what to do next. I read every reply on this ticket." The runner was woken at once, and its events were "The step working out the pieces ended: it succeeded." and "The list of pieces was approved, but the requirements and the list of pieces were not added to the default branch, because it has changes that clash with them, and a person has to decide which side to keep (…). The run was not ended." After the operator wrote "go on with the work", the run went on to its pull request (case A above).
+   - A second case, the tickets for the pieces cannot be opened (a stand-in forge refuses to create issues after the merge). Before: `failed`, with the same comment pointing at the standing note's command. Now: `parked`, one comment, the runner woken with the failure in its events. But the comment quotes the failed command; see "Found outside the verdicts", item 2.
+   - **Fixed** for the merge. No register clause covers a failed merge: R16 clause 3 is about the runner's own failures.
+4. **40y — a current-daemon step does not hold up the runner's projects.** Two projects in one manifest: `legacy` on the current daemon, `fixture` on the runner. Poll interval 5 seconds. The fake model held `legacy`'s first step open for 90 seconds. Three seconds after that step started, the operator commented on `fixture#12`.
+   - Before: the runner woke 87.3 seconds after the comment, at the second the `legacy` step was answered.
+   - Now: the runner woke 2.1 seconds after the comment. In a second run, the runner started a build step on that wake: it started and ended at 18:57:05, while the `legacy` step was held until 18:58:30.
+   - On both builds, the `observedAt` stamp in `state.json` did not move while the `legacy` step ran. See "Found outside the verdicts", item 4.
+   - This is R15's first clause, which is a watched-run criterion, so no probe is committed for it. **Fixed as observed in the rig.**
+
+### Verdict changes
+
+None. Every probe gives the verdict the first check's final pass gave. The two new labels pass, and each fails on the build before its fix.
+
+### Register changes
+
+None: no verdict changed. R9, R12, R13 and R15 are untouched (`live`).
+
+### Fix-loop accounting
+
+0 loops used in this re-check, and none were left. No probe found the app wrong.
+
+### Found outside the verdicts (this pass)
+
+No register clause makes these a FAIL. They go to the pull request for the review.
+
+1. **A plain "stop" from a named person does not hold the ticket.** When the runner ends a run on the operator's "stop the work for good" and does not close the ticket, the ticket stays open and marked. One second later the daemon took it up again as a new run, `fixture#12/2`, and woke its runner with "A new ticket was picked up. Nothing has been done on it yet." With the scripted runner in the rig, a build step started on it at once. The second run was seen on both builds. Since 40u, `timone cancel` holds the ticket; this way of stopping does not. Whether the work starts again depends on the runner closing or holding the ticket.
+2. **The comment for tickets that could not be opened shows a command.** It reads "What went wrong: could not open the step tickets: gh issue create --repo probe-owner/fixture --title 1. The count above the list --body show how many to-dos are open, above the list. Delivers PRD-01.R1." That is the failed command with its arguments, not what the forge answered. The runner's event for it reads "The list of pieces was approved, but the requirements and the list of pieces are on the default branch, but the tickets for the pieces were not opened (…)".
+3. **A record that cannot be read leaves the pull request with no list, and says so nowhere.** The false "The default order was followed." is gone (40v). But the pull request then carries no list of departures, and nothing on the pull request or the ticket says the list is missing. The only trace is the daemon's log. The runner is no longer woken on that ticket, and the daemon logs "the runner could not look at #12: The run record … cannot be read: line 21 is not JSON." at every cycle.
+4. **The register's way to measure R15 no longer measures it.** R15's hint says to check that the `observedAt` stamp in `state.json` keeps moving while a session runs. After 40y, the runner's projects are served while that stamp stands still: here it stood still for the whole 90 seconds, while the runner project was served in 2.1 seconds. A watched run that follows the hint will see the stamp stop and may call R15 failed. The watched run should time when the runner wakes instead.
+5. **Earlier items stand, as far as this pass saw.** The `Last live gate:` line is still missing on R9, R12, R13 and R15. [timone#171](https://github.com/fvermaut/timone/issues/171) and [timone#172](https://github.com/fvermaut/timone/issues/172) were not looked at again. Two items of the completion report's "Left open" list were seen: when a session that records an approval ends, the runner is told "The step working out the pieces ended" (fix 3 above), and `timone record` shows no notices.
+
+### Still owed
+
+- **PRD-05.R18 — BLOCKED.** No model login here. Replay run 6 is owed, now on `47f1332` or later, as the completion report says: 40w changed the runner's rules. The entry already in [phase-40-departures.md](phase-40-departures.md) stands.
+- **The runner's own choices** in R1, R6, R7 and R17, and the wording check in R8, rest on run 6.
+- **A fresh live gate** for R9, R12, R13 and R15, on `f94081f` or later. For R15 it should include two tickets on one project, and a comment on a runner project while a step runs on a current-daemon project, timed by when the runner wakes (item 4 above).
+- **The R2 amendment** made in the first check's loop 1 still needs the person's yes.
+- **Steps ran in-process, not in the box**, in this pass as in the earlier two.
