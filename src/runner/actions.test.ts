@@ -667,6 +667,92 @@ describe("the runner's actions", () => {
     expect(forge.comments).toHaveLength(1);
   });
 
+  it("refuses delivering with no reason when building ran again after the check, and starts nothing", async () => {
+    const chore = { ...featureTicket(), labels: ["timone", "triage:chore"] };
+    const { actions, run, wrote, steps, forge, record } = world(chore);
+    for (const [stage, at] of [
+      ["triage", "2026-09-29T10:00:00Z"],
+      ["planning", "2026-09-29T10:10:00Z"],
+      ["execution", "2026-09-29T10:20:00Z"],
+      ["verification", "2026-09-29T10:50:00Z"],
+      ["execution", "2026-09-29T11:00:00Z"],
+    ] as const) {
+      wrote({ kind: "step-started", at, runId: run.id, stage, sessionId: `s-${stage}-${at}` });
+    }
+
+    const result = await actions.startStep({
+      stage: "delivery",
+      instructions: "Open the pull request.",
+      reason: "The fix is built.",
+    });
+
+    expect(result).toEqual({ ok: false, refused: expect.stringContaining("checking the result") });
+    expect(steps).toEqual([]);
+    expect(forge.comments).toEqual([]);
+    expect(record().filter((entry) => entry.kind === "departure")).toEqual([]);
+  });
+
+  it("tells the ticket the check is skipped before delivering starts, when building ran again after the check", async () => {
+    const chore = { ...featureTicket(), labels: ["timone", "triage:chore"] };
+    const { actions, run, wrote, calls, record } = world(chore);
+    for (const [stage, at] of [
+      ["triage", "2026-09-29T10:00:00Z"],
+      ["planning", "2026-09-29T10:10:00Z"],
+      ["execution", "2026-09-29T10:20:00Z"],
+      ["verification", "2026-09-29T10:50:00Z"],
+      ["execution", "2026-09-29T11:00:00Z"],
+    ] as const) {
+      wrote({ kind: "step-started", at, runId: run.id, stage, sessionId: `s-${stage}-${at}` });
+    }
+
+    const result = await actions.startStep({
+      stage: "delivery",
+      instructions: "Open the pull request.",
+      reason: "The fix is built.",
+      skipReason: "The second building only renamed one test.",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual([
+      "comment **I am skipping a step.** I am going straight to delivering, " +
+        "without checking the result. Reason: The second building only renamed one test.",
+      "start scratch-app#12/1 (delivery)",
+    ]);
+    expect(record().filter((entry) => entry.kind === "departure")).toEqual([
+      {
+        kind: "departure",
+        at: "2026-09-27T12:00:00.000Z",
+        runId: run.id,
+        skipped: ["verification"],
+        reason: "The second building only renamed one test.",
+      },
+    ]);
+  });
+
+  it("starts delivering with nothing to tell when the check ran after the second building", async () => {
+    const chore = { ...featureTicket(), labels: ["timone", "triage:chore"] };
+    const { actions, run, wrote, forge } = world(chore);
+    for (const [stage, at] of [
+      ["triage", "2026-09-29T10:00:00Z"],
+      ["planning", "2026-09-29T10:10:00Z"],
+      ["execution", "2026-09-29T10:20:00Z"],
+      ["verification", "2026-09-29T10:50:00Z"],
+      ["execution", "2026-09-29T11:00:00Z"],
+      ["verification", "2026-09-29T11:20:00Z"],
+    ] as const) {
+      wrote({ kind: "step-started", at, runId: run.id, stage, sessionId: `s-${stage}-${at}` });
+    }
+
+    const result = await actions.startStep({
+      stage: "delivery",
+      instructions: "Open the pull request.",
+      reason: "The fix is built and checked.",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(forge.comments).toEqual([]);
+  });
+
   it("refuses every step once the ticket has spent its limit, and says so on the ticket only once", async () => {
     const { actions, run, wrote, steps, forge } = world();
     wrote({

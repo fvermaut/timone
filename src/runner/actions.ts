@@ -55,6 +55,7 @@ import {
   limitNotice,
   piecesApprovedNotice,
 } from "./comments.js";
+import { sinceLastBuild } from "./departures.js";
 import { isNamedPerson } from "./brief.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
 import { appendEntry, readRecord, type RecordEntry } from "./record.js";
@@ -236,13 +237,19 @@ function asksSomething(body: string): boolean {
  * Nothing is left out by a stage the order does not hold (a remediation on a
  * feature ticket), or by a stage this run has already started once: that is
  * going back, or running a step again, and neither leaves anything out.
+ *
+ * **Except the check of the work built last** (verification of phase 40).
+ * Building again after the check is going back, but a step after the check
+ * that starts with no check since that building leaves the check out for
+ * that work, though the check ran once before — unless the run has said so
+ * since that building. `recheck` is set then.
  */
 function skippedBy(
   stage: PipelineStage,
   order: readonly OrderStep[],
   entries: readonly RecordEntry[],
   runId: string,
-): OrderStep[] {
+): { steps: OrderStep[]; recheck?: OrderStep } {
   const ofRun = entries.filter((entry) => "runId" in entry && entry.runId === runId);
   const done = (step: OrderStep): boolean =>
     step.stage !== undefined
@@ -253,8 +260,23 @@ function skippedBy(
 
   const target = order.findIndex((step) => step.stage === stage);
   const step = order[target];
-  if (step === undefined || done(step)) return [];
-  return order.slice(0, target).filter((each) => !done(each) && !departed(each));
+  if (step === undefined) return { steps: [] };
+  const before = order.slice(0, target);
+  const left = done(step) ? [] : before.filter((each) => !done(each) && !departed(each));
+
+  const since = sinceLastBuild(ofRun);
+  const recheck =
+    since === undefined
+      ? undefined
+      : before.find(
+          (each) =>
+            each.check === true &&
+            done(each) &&
+            !since.some((entry) => entry.kind === "step-started" && entry.stage === each.stage) &&
+            !since.some((entry) => entry.kind === "departure" && entry.skipped.includes(each.id)),
+        );
+  if (recheck === undefined) return { steps: left };
+  return { steps: before.filter((each) => each === recheck || left.includes(each)), recheck };
 }
 
 /** What a person calls each thing a named person approves. */
@@ -684,13 +706,16 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       if (blocked !== undefined) return blocked;
       const ticket = await deps.adapter.getTicket(deps.project, run.ticket);
       const order = defaultOrder(ticketKindOf(ticket.labels, deps.ticketContext));
-      const skipped = skippedBy(stage, order, record.entries, run.id);
+      const { steps: skipped, recheck } = skippedBy(stage, order, record.entries, run.id);
       const why = (skipReason ?? "").trim();
       if (skipped.length > 0 && why === "") {
         return {
           ok: false,
           refused:
             `Starting ${stageLabel(stage)} now leaves out ${joined(skipped.map((step) => step.label))}. ` +
+            (recheck === undefined
+              ? ""
+              : `${capitalised(recheck.label)} has not run since the work was last built. `) +
             "Give the reason in skipReason, or start the step that comes first.",
         };
       }

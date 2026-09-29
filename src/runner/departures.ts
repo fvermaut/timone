@@ -1,3 +1,4 @@
+import type { PipelineStage } from "../daemon/pipeline.js";
 import { joined } from "./comments.js";
 import type { OrderStep } from "./order.js";
 import type { RecordEntry } from "./record.js";
@@ -47,6 +48,44 @@ function stepIndexOf(entry: RecordEntry, order: readonly OrderStep[]): number | 
 }
 
 /**
+ * The stages that build the work a check looks at: building it, and acting
+ * on a review of it.
+ */
+const BUILDING_STAGES: readonly PipelineStage[] = ["execution", "remediation"];
+
+/**
+ * The entries of one run written after its latest building started, oldest
+ * first, or undefined when nothing was built. `ofRun` is one run's entries,
+ * oldest first.
+ *
+ * **A check counts only for what was built before it started.** Whatever
+ * the check once said, it said nothing about a building that came after
+ * it, so what counts for the work as it is now starts here.
+ */
+export function sinceLastBuild(ofRun: readonly RecordEntry[]): readonly RecordEntry[] | undefined {
+  let last = -1;
+  ofRun.forEach((entry, position) => {
+    if (entry.kind === "step-started" && BUILDING_STAGES.includes(entry.stage)) last = position;
+  });
+  return last === -1 ? undefined : ofRun.slice(last + 1);
+}
+
+/**
+ * Whether the work built last was taken past the check without one: a step
+ * that comes after the check in `order` started after the latest building,
+ * and the check did not start again after it.
+ */
+function deliveredUnchecked(ofRun: readonly RecordEntry[], order: readonly OrderStep[]): boolean {
+  const check = order.findIndex((step) => step.check === true);
+  const since = sinceLastBuild(ofRun);
+  if (check === -1 || since === undefined) return false;
+  const indices = since.flatMap((entry) =>
+    entry.kind === "step-started" ? [order.findIndex((step) => step.stage === entry.stage)] : [],
+  );
+  return indices.some((index) => index > check) && !indices.includes(check);
+}
+
+/**
  * The departures of run `runId` from `order`, in the order's own sequence.
  *
  * **Only the steps before the furthest one reached are judged.** A step the
@@ -57,6 +96,12 @@ function stepIndexOf(entry: RecordEntry, order: readonly OrderStep[]): number | 
  * Going back to building after the check found a fault is how the work gets
  * fixed, not a change to the order. Listing it would add a line for every
  * round of fixes, and the real departures would be hard to find among them.
+ *
+ * **But the work that building made still needs its check.** When a step
+ * after the check starts after the latest building, with no check between
+ * them, the check did not run for that work, and it is listed as not run
+ * (verification of phase 40): delivering it is a skipped check like any
+ * other, and the first line a person reads says so.
  *
  * The reason for a step is taken from the latest `departure` entry of the
  * run that names it. The runner may give a reason more than once, and the
@@ -89,8 +134,12 @@ export function departuresOf(
     return reason;
   };
 
+  const unchecked = deliveredUnchecked(ofRun, order);
+
   return order.slice(0, furthest).flatMap((step, index): Departure[] => {
-    if (!reached.has(index)) return [{ kind: "did-not-run", step, reason: reasonFor(step) }];
+    if (!reached.has(index) || (step.check === true && unchecked)) {
+      return [{ kind: "did-not-run", step, reason: reasonFor(step) }];
+    }
     if (late.has(index)) return [{ kind: "out-of-order", step, reason: reasonFor(step) }];
     return [];
   });

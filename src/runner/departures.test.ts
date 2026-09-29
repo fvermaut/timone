@@ -167,6 +167,68 @@ describe("the departures a pull request lists", () => {
     expect(departuresOf(entries, RUN, defaultOrder("chore"))).toEqual([]);
   });
 
+  it("opens with the line saying the work was not checked when building ran again after the check and delivering started with no new check", () => {
+    const entries: RecordEntry[] = [
+      started("triage", "2026-09-29T10:00:00.000Z"),
+      started("planning", "2026-09-29T10:10:00.000Z"),
+      started("execution", "2026-09-29T10:20:00.000Z"),
+      started("verification", "2026-09-29T10:50:00.000Z"),
+      started("execution", "2026-09-29T11:00:00.000Z"),
+      started("delivery", "2026-09-29T11:30:00.000Z"),
+    ];
+
+    const lines = departureSection(
+      departuresOf(entries, RUN, defaultOrder("chore")),
+    ).split("\n");
+
+    expect(lines).toEqual([
+      DEPARTURES_START,
+      "**Not checked.** No session other than the one that built this work checked it. No reason given.",
+      DEPARTURES_END,
+    ]);
+  });
+
+  it("gives the runner's reason for leaving out the check of the second building", () => {
+    const entries: RecordEntry[] = [
+      started("triage", "2026-09-29T10:00:00.000Z"),
+      started("planning", "2026-09-29T10:10:00.000Z"),
+      started("execution", "2026-09-29T10:20:00.000Z"),
+      started("verification", "2026-09-29T10:50:00.000Z"),
+      started("execution", "2026-09-29T11:00:00.000Z"),
+      {
+        kind: "departure",
+        at: "2026-09-29T11:29:00.000Z",
+        runId: RUN,
+        skipped: ["verification"],
+        reason: "The second building only renamed one test.",
+      },
+      started("delivery", "2026-09-29T11:30:00.000Z"),
+    ];
+
+    const lines = departureSection(
+      departuresOf(entries, RUN, defaultOrder("chore")),
+    ).split("\n");
+
+    expect(lines[1]).toBe(
+      "**Not checked.** No session other than the one that built this work checked it. " +
+        "Reason: The second building only renamed one test.",
+    );
+  });
+
+  it("does not say the work was not checked when the check ran after delivering, with nothing built in between", () => {
+    const entries: RecordEntry[] = [
+      started("triage", "2026-09-29T10:00:00.000Z"),
+      started("planning", "2026-09-29T10:10:00.000Z"),
+      started("execution", "2026-09-29T10:20:00.000Z"),
+      started("delivery", "2026-09-29T10:50:00.000Z"),
+      started("verification", "2026-09-29T11:00:00.000Z"),
+    ];
+
+    expect(departuresOf(entries, RUN, defaultOrder("chore"))).toEqual([
+      { kind: "out-of-order", step: defaultOrder("chore")[3], reason: undefined },
+    ]);
+  });
+
   it("lists three steps that did not run for one reason as one line naming the three, with the reason once", () => {
     const entries: RecordEntry[] = [
       started("triage", "2026-09-28T09:00:00.000Z"),
