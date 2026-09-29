@@ -13,6 +13,12 @@
 //      THEN another $150 is allowed, and the work carries on
 //   3. GIVEN a project whose entry in timone.yaml sets a different limit
 //      WHEN its tickets are counted THEN that limit is used instead of $150
+//
+// Instrument fix, 2026-09-29 (re-check after 40u): the one-turn check that reads a reply at the limit
+// used to be started with the full tool set, so the fake model filed it as a "step" and this probe
+// answered it there. It is now started with no tools, so the fake model files it as "other". The
+// probe now answers the check, and counts it, whatever tools it carries. Clause 2 says nothing about
+// the check's tools, so this changes what the probe can reach, not what it asserts.
 import { fixture, model, daemon, act, say, bash, sleep, clause, blocked, assert, finish, OPERATOR, STRANGER } from './_rig.mjs';
 
 const N = 12;
@@ -31,6 +37,7 @@ async function spend({ sortUsd, limit, reply = 'please go on', replyBy = OPERATO
       return say();
     },
     step: (c) => (isConsult(c) ? say(consult) : c.brief.includes('Timone-Stage: triage') ? { ...say('sorted'), usage: { input_tokens: Math.round((sortUsd / 4) * M) } } : say('asked')),
+    other: (c) => (isConsult(c) ? say(consult) : say()),
   });
   await daemon(fx, m, { until: () => fx.record(N).some((e) => e.kind === 'step-ended') && fx.record(N).at(-1).kind !== 'step-ended', timeoutMs: 30000, settleMs: 1500 });
   const before = { runner: m.runner().length, steps: m.steps().filter((s) => !isConsult(s)).length };
@@ -41,7 +48,7 @@ async function spend({ sortUsd, limit, reply = 'please go on', replyBy = OPERATO
     fx, replyAt,
     newRunner: m.runner().length - before.runner,
     newSteps: m.steps().filter((s) => !isConsult(s)).length - before.steps,
-    consults: m.steps().filter(isConsult).map((c) => c.brief.match(/replied: ([\s\S]*?)\. Does/)?.[1]),
+    consults: m.requests.filter(isConsult).map((c) => c.brief.match(/replied: ([\s\S]*?)\. Does/)?.[1]),
     notice: fx.issue(N).comments.find((c) => /spending limit/.test(c.body))?.body ?? '',
     raised: fx.record(N).filter((e) => e.kind === 'limit-raised'),
     reached: fx.record(N).filter((e) => e.kind === 'limit-reached'),

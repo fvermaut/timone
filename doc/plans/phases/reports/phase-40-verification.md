@@ -284,3 +284,118 @@ These were seen while probing. No register clause makes them a FAIL here, so the
 - **A fresh live gate** for R9, R12, R13 and R15, covering what was not seen (above), and ideally two tickets on one project.
 - **The register amendment to R2** made in loop 1 needs the person's agreement.
 - **Steps ran in-process, not in the box**, for the whole pass. Recorded in the departures record.
+
+## Re-check after 40u — 2026-09-29
+
+A second check, by a session that watched neither the build nor the first check. After the first check, sub-phase 40u (`ddb95ed`) fixed items 1 to 5 of "Found outside the verdicts" above. This pass re-ran every probe of the first check on the new build, and looked at each of the five fixes.
+
+- **Branch:** `timone/165-the-runner-beside-the-current-daemon` @ `044231f`.
+- **Scope:** unchanged — PRD-05.R1 to R19 as the phase header claims (R11 in part).
+- **Regression set (derived again at `044231f`):** PRD-01.R2, PRD-05.R2, R3, R4, R5, R10. PRD-05.R2 to R5 and R10 are new in the set, because the first check made them `verified`; none declares `Depends-on`, so each is in scope. PRD-01.R2 is in because the branch touches `src/manifest.ts`. Narrowed out: PRD-01.R3 (`Depends-on: src/commands/workspace.ts, src/git.ts`; the branch touches neither).
+- **Live gate owed:** yes, as before — R9, R12, R13 and R15. 40u changed files under `src/runner/`, `src/daemon/` and `src/commands/` after the watched run, so the gate owed must run on `044231f` or later.
+
+### Environment
+
+`dist/` was older than 40u, so it was deleted and rebuilt with `npm run build` at `044231f`. The probes ran through the same rig as the first check: the built daemon, a fake forge, a fake model service, steps in-process. Nothing reached GitHub or a real model.
+
+For the five fixes, the build before 40u was also used, to show each fault is visible to the check that finds it gone. It was made with `git archive 0f433ef` into a scratch folder outside the clone and built there with `tsc`. `0f433ef` is the first check's commit; its code is the code the first check ended on (`55a617a`). The clone's branch was never switched.
+
+**Build-health smoke, run once at `044231f`, not evidence:** `npx tsc --noEmit` exit 0; `npx vitest run` 1,950 of 1,950 tests in 56 files; `npm run --silent replay -- --dry` 19 of 19. It does not contradict any probe.
+
+### Independence declaration (this pass)
+
+Read: the register and its narrative; the phase file's lines 1–40 and its section headings; the completion report, whole, including "Reopened after verification"; this report's earlier sections, to compare with the first check and to append this section; the probe directory; the verify skill; the `package.json` scripts; the list of paths the branch changes (for the narrowing) and the list of paths changed since `0f433ef` (to know which folders 40u touched). On GitHub, read-only: the title and state of timone#171 and #172.
+
+Not read: the handoffs file and the 40u section of the phase file. The task pointed at both, but they describe how the fixes were built, and a check may not know that. The five fixes were checked from what the first report and the completion report say they change, in terms of what the app does. Not read either: diffs, source, the test suite, ADRs.
+
+### Probes: first check against now
+
+**16 probes proven able to fail, 0 not.** 15 were run from the directory as they stood, and one of them needed an instrument fix (R8, below). One label was added (R11 clause 1c). They print 72 clause labels: 67 for PRD-05 (66 in the first check, plus 1c) and 5 for PRD-01.R2. 9 are BLOCKED, as before. Every break leg that ran went red, then its real leg passed.
+
+| Probe | First check, final pass (`55a617a`) | Now (`044231f`) | Break legs now |
+| --- | --- | --- | --- |
+| prd-05.r1 | PASS for code, 2 BLOCKED | PASS for code, 2 BLOCKED | 4 of 4 red |
+| prd-05.r2 | PASS | PASS | 4 of 4 red |
+| prd-05.r3 | PASS | PASS | 4 of 4 red |
+| prd-05.r4 | PASS | PASS | 5 of 5 red |
+| prd-05.r5 | PASS | PASS | 5 of 5 red |
+| prd-05.r6 | PASS for code, 1 BLOCKED | PASS for code, 1 BLOCKED | 3 of 3 red |
+| prd-05.r7 | PASS for code, 1 BLOCKED | PASS for code, 1 BLOCKED | 3 of 3 red |
+| prd-05.r8 | PASS, 1 BLOCKED | first run INSTRUMENT-BROKEN; after an instrument fix, PASS, 1 BLOCKED | 7 of 7 red after the fix |
+| prd-05.r10 | PASS | PASS | 4 of 4 red |
+| prd-05.r11 | PASS, 6 labels | PASS, 7 labels (1c added) | 7 of 7 red |
+| prd-05.r14 | PASS | PASS | 3 of 3 red |
+| prd-05.r16 | PASS | PASS — attempts 60 s, 300 s and 900 s after each failure; one notice that asks for nothing; the run stayed `parked` | 3 of 3 red |
+| prd-05.r17 | PASS for code, 2 BLOCKED | PASS for code, 2 BLOCKED | 4 of 4 red |
+| prd-05.r18 | BLOCKED | BLOCKED | red on run 5's recorded result |
+| prd-05.r19 | PASS | PASS | 2 of 2 red |
+| prd-01.r2 (regression) | PASS | PASS | 5 of 5 red |
+
+`run.mjs --regression` was not used, for the reason given above: it does not apply the `Depends-on` narrowing. Each probe was run on its own with `node doc/plans/phases/probes/<probe>.mjs`.
+
+**R8 — an instrument fault, fixed on the probe side.** On its first run, clause 2a failed ("no raise from the named person's reply") and clause 2b's break leg stayed green. The cause is in the probe. The fake model files a request as a "step" when it carries the shell tool, and the R8 probe answered the check at the limit only there. After 40u the check carries no tools (see fix 4 below), so the fake model filed it as "other", and the probe gave it the default answer, "Nothing more to do.", instead of the scripted YES. The probe now answers the check, and counts it, whatever tools it carries. Clause 2 says nothing about the check's tools, so the fix changes what the probe can reach, not what it asserts. After the fix: "it was asked about: ["please keep going","what is the status?"]", clause 2a PASS, clause 2b's break leg red ("the allowance was raised"). No fix loop was used: the app did what clause 2 says.
+
+**R11 clause 1c — added.** Clause 1a closes the ticket right after the cancel, so it could not see the first check's item 2 (a cancelled ticket, still open and marked, taken up again). Clause 1c leaves the ticket as a person who only ran `timone cancel` would leave it, and checks the register's words "the run stops … and the project is free for the next ticket". Its break step removes the hold the cancel puts on the ticket.
+
+```
+=== PRD-05.R11 clause 1c — the ticket left open and marked: after timone cancel the cancelled ticket is not taken up again, and the project is free for the next ticket
+    break leg: RED (as required) — the cancelled ticket was taken up again: fixture#12/2 parked
+    green leg: PASS — assertion held
+    (the ticket's labels after the cancel: ["timone","timone:held"]; the next ticket's run: fixture#13/1 parked)
+```
+
+Run on the build before 40u, the same clause fails: "green leg: FAIL — the cancelled ticket was taken up again: fixture#12/2 parked".
+
+Clause coverage: every register clause of R1–R8, R10, R11, R14, R16–R19 still has at least one label; the register has not changed since the first check.
+
+### The five fixes, observed
+
+Each was run on the build before 40u and on `044231f`, in the same rig, with the same script. The scripts are scratch, outside the tree, except R11 clause 1c, which is in the committed probe.
+
+1. **Two tickets picked up together on one runner project: the refused one is woken when the project frees.** Tickets #12 and #13, both marked. #12's runner asked for a step first and was told: "Refused: The step did not start: Project fixture already has a session for run fixture#13/1 (picked-up) — one session per project at a time". #13 was sorted, then its run ended and its ticket closed.
+   - Before 40u: #12 was never woken again. After 90 seconds its run was still `parked` and nothing had run on it.
+   - Now: #12's runner was woken 2 seconds after #13's run ended, with the reason "The project is free now." It was sorted, and its run ended. Both tickets were done 17 seconds after the start. At no time did two steps run at once on the project.
+   - This is R15's second clause, which is a watched-run criterion, so no probe is committed for it. It is **fixed as observed in the rig**; the watched run owed for R15 should still include two tickets on one project.
+2. **`timone cancel` on a runner project reports success, and the ticket is not taken up again.** Two cases: the model service unreachable, and a step running. The ticket was left open and marked.
+   - Before 40u: exit 1, "The daemon read the request and did not stop fixture #12 — it is parked." A second run, `fixture#12/2`, was started, and "Picked this up." was posted on the ticket a second time.
+   - Now: exit 0, "Stopped work on fixture #12: obs: drop it. I won't pick this chunk up again." The ticket gains the label `timone:held`. There is no second run, and the next ticket, #13, was taken up. R11 clause 1b shows the running step's session is ended.
+   - **Fixed.** Covered by R11 clause 1c (above) for "not taken up again". The command's exit code and words are in no clause.
+3. **A ticket numbered 1 to 9 finds its list of pieces.** The list was committed on the run's branch as `doc/plans/breakdowns/ticket-03.md`, then the operator commented. Ticket #12 with `ticket-12.md` was the control.
+   - Before 40u: the brief for #3 said "List of pieces for this ticket: none". The control was found.
+   - Now: "List of pieces for this ticket: doc/plans/breakdowns/ticket-03.md (Status: Awaiting approval)". The control was found.
+   - A copy of the R3 probe run on ticket #3, with the list at `ticket-03.md`, passed all four labels on `044231f`: the approval merged chunk zero, and the list reached `main`. So the brief and the merge now use the same name.
+   - **Fixed.** No register clause says what the brief shows about the list.
+4. **The check that reads a reply at the limit is started with no tools and no settings.** A ticket went over its limit, and the operator replied. A `CLAUDE.md` with a marker, and a settings file with a hook that logs every session it runs in, were planted in the daemon's folder and in the user settings folder.
+   - Before 40u: 24 tools, among them `Bash`, `Edit`, `Write`, `WebFetch` and `WebSearch`. Both planted `CLAUDE.md` texts were in what it was sent, and both planted hooks ran in its session.
+   - Now: 0 tools. No marker in what it was sent. No hook ran in its session. In the same run, the step sessions still received both markers and ran both hooks, so the plant works.
+   - **Fixed.** No register clause covers the check's tools. The one-turn check still runs on a small model (`claude-haiku-4-5-20251001`), as before.
+5. **The first brief shows no departures.** A fresh ticket, the runner's first wake.
+   - Before 40u: "Departures so far, which the pull request will list:" followed by nine lines, from "sorting the request: did not run. No reason given." to "checking the result: did not run. No reason given."
+   - Now: "No departures so far."
+   - After the runner skipped sorting and the interview with a reason, the next brief on both builds lists exactly those two: "sorting the request: did not run. Reason: OBS5-SKIP: the request is clear" and the same for "asking what you need". So real departures are still listed. The R5 probe's clauses, which read the list on the pull request, all pass.
+   - **Fixed.** No register clause says what the brief lists before any step ran.
+
+### Verdict changes
+
+None. Every probe gives the verdict the first check's final pass gave. R8's first result was the probe's fault, not the app's. R11's new label passes, and R11 stays where it was because its clause 3 as written is #166's.
+
+### Register changes
+
+None: no verdict changed.
+
+### Fix-loop accounting
+
+0 loops used in this re-check. No probe found the app wrong.
+
+### Found outside the verdicts (this pass)
+
+1. **A cancel leaves no note on the ticket.** After `timone cancel`, the ticket gains `timone:held` and nothing is written on it. A person who opens the ticket sees the label with no reason and no way back. The command's own words say "I won't pick this chunk up again", and do not say how to start the work again. No clause covers it.
+2. **Items 6 to 9 of the first check stand.** The `Last live gate:` line is still missing on R9, R12, R13 and R15. Items 7 and 8 are filed as [timone#171](https://github.com/fvermaut/timone/issues/171) and [timone#172](https://github.com/fvermaut/timone/issues/172), both open. Item 9 is a limit of the rig.
+
+### Still owed
+
+- **PRD-05.R18 — BLOCKED.** No model login here. Replay run 6 is owed, now on `044231f` or later: 40u changed what the runner reads in its brief (the departures and the list of pieces). Recorded already in [phase-40-departures.md](phase-40-departures.md); the entry stands.
+- **The runner's own choices** in R1, R6, R7 and R17, and the wording check in R8, rest on run 6.
+- **A fresh live gate** for R9, R12, R13 and R15, on `044231f` or later, including two tickets on one project.
+- **The R2 amendment** made in the first check's loop 1 still needs the person's yes.
+- **Steps ran in-process, not in the box**, in this pass as in the first.

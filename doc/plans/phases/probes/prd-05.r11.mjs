@@ -15,6 +15,12 @@
 //      THEN it does not exist, and the message says to write on the ticket instead
 //   Phase 40's header: "In this phase retry refuses on a runner project and says to write on the
 //   ticket instead. Deleting the command is #166's, with R20."
+//
+// Clause 1c added 2026-09-29 (re-check after 40u). Clause 1a closes the ticket right after the cancel,
+// so it never saw what the first check found outside its verdicts: the cancelled ticket, still open and
+// marked, was taken up again as a new run within seconds, and held the project again. 1c leaves the
+// ticket as a person who only ran `timone cancel` would leave it. Its break step removes the hold the
+// cancel puts on the ticket, which is what a cancel that does not hold its ticket looks like.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fixture, model, daemon, act, say, sleep, clause, assert, finish, OPERATOR, MACHINE_HEADER } from './_rig.mjs';
@@ -86,6 +92,39 @@ await clause('PRD-05.R11 clause 1b', 'timone cancel stops any running session', 
 });
 console.log(`    (the stopped step was recorded as: ${JSON.stringify(stepCancelled.ended)})`);
 console.log(`    (the command said, exit ${stepCancelled.out.code}: "${(stepCancelled.out.out + stepCancelled.out.err).trim().replace(/\n/g, ' ')}")`);
+
+// Clause 1c: the ticket is left open and marked after the cancel. The cancelled ticket is not taken up
+// again, and the project is free for the next ticket.
+async function cancelLeftOpen({ unhold }) {
+  const fx = fixture({ issues: { fixture: { [N]: {} } } });
+  const dead = { port: 9 };
+  let out = null, at = 0;
+  const d = daemon(fx, dead, { until: () => out && Date.now() - at > 15000, timeoutMs: 70000 });
+  while (!fx.record(N).some((e) => e.kind === 'woke')) await sleep(200);
+  await sleep(2000);
+  out = cancel(fx);
+  at = Date.now();
+  const labels = [...fx.issue(N).labels];
+  if (unhold) fx.editForge((f) => { f.issues[N].labels = f.issues[N].labels.filter((l) => l === 'timone'); });
+  fx.editForge((f) => { f.issues[13] = { number: 13, title: 'Next ticket', body: 'x', labels: ['timone'], state: 'OPEN', author: OPERATOR, createdAt: new Date().toISOString(), comments: [] }; });
+  await d;
+  const runs = fx.state().runs;
+  return { first: runs.find((x) => x.ticket === N && x.seq === 1), again: runs.filter((x) => x.ticket === N && x.seq > 1), active: runs.filter((x) => x.status === 'active'), next: runs.find((x) => x.ticket === 13), labels, out, fx };
+}
+const leftOpen = await cancelLeftOpen({ unhold: false });
+const leftOpenUnheld = await cancelLeftOpen({ unhold: true });
+function assertNotTakenUpAgain(r) {
+  assert(r.first?.status === 'cancelled', `the run is ${r.first?.status}`);
+  assert(r.again.length === 0, `the cancelled ticket was taken up again: ${r.again.map((x) => `${x.id} ${x.status}`).join(', ')}`);
+  assert(r.active.length === 0, `left running: ${r.active.map((x) => x.id).join(', ')}`);
+  assert(r.next, 'the next ticket was not taken up');
+}
+await clause('PRD-05.R11 clause 1c', 'the ticket left open and marked: after timone cancel the cancelled ticket is not taken up again, and the project is free for the next ticket', {
+  broken: async () => assertNotTakenUpAgain(leftOpenUnheld),
+  correct: async () => assertNotTakenUpAgain(leftOpen),
+});
+console.log(`    (the command said, exit ${leftOpen.out.code}: "${(leftOpen.out.out + leftOpen.out.err).trim().replace(/\n/g, ' ')}")`);
+console.log(`    (the ticket's labels after the cancel: ${JSON.stringify(leftOpen.labels)}; the next ticket's run: ${leftOpen.next ? `${leftOpen.next.id} ${leftOpen.next.status}` : 'none'})`);
 
 // Clause 2: takeover opens a terminal session on the ticket; when it ends, the runner wakes and reads what it left.
 const CLOSING = `${MACHINE_HEADER}🔁 **Picking it back up** · written by the machine when a stop has been cleared and the work goes on without you\n\nPROBE-R11-LEFT: we agreed to build only the count.\n\nCarrying on at: building\n\n**What I need from you:** nothing.`;
@@ -166,5 +205,5 @@ await clause('PRD-05.R11 clause 3 (this phase)', 'on a runner project, timone re
 console.log(`    (retry on a runner project said: "${(retryRunner.out + retryRunner.err).trim()}")`);
 console.log('    (clause 3 as written — "it does not exist" — is not claimed by this phase: the command stays for ivtrends, and #166 deletes it)');
 
-for (const r of [cancelledDead, notCancelledDead, stepCancelled, stepNotCancelled, took, didNotTake, tookWhileDown, noTakeoverWhileDown]) r.fx.cleanup();
+for (const r of [cancelledDead, notCancelledDead, stepCancelled, stepNotCancelled, leftOpen, leftOpenUnheld, took, didNotTake, tookWhileDown, noTakeoverWhileDown]) r.fx.cleanup();
 finish('PRD-05.R11');
