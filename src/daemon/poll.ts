@@ -70,7 +70,7 @@ import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 // cancelled would be a second opinion that drifts from the one the human gets
 // at the terminal (ADR-0032).
 import { runRetry } from "../commands/retry.js";
-import { runCancel } from "../commands/cancel.js";
+import { holdCancelledTicket, runCancel } from "../commands/cancel.js";
 import {
   markAnswerConsumed,
   reopenIfFailed,
@@ -1001,6 +1001,17 @@ async function applyRequest(
           // there.
           deps.runner?.stop(cancelled.id);
         }
+        // ✏ Then, on a project the runner drives, the hold on the ticket
+        // (40u): still open and marked, it would otherwise be taken up as a
+        // new run on the next pass. After the stop, never before it: the
+        // forge can take a minute to answer, and the work must not run on
+        // meanwhile. Before this request is settled, so the pass that follows
+        // it lists the ticket held.
+        await holdCancelledTicket(
+          { manifest, store, adapter: deps.adapter },
+          { project: body.project, ticket: body.ticket },
+          log,
+        );
       }
       return code;
     }
@@ -1579,6 +1590,35 @@ async function surveyInitiatives(
   };
 }
 
+/**
+ * Whether a runner project's ticket that the listing showed free is held, or
+ * about to be, now that it would be taken up again (40u).
+ *
+ * Asked only of a ticket all of whose runs have ended — the one case where
+ * the registration opens a new run, and so the only case a cancel can reach.
+ * A cancel of its run still being carried out counts as held: its request is
+ * settled only after the hold is on. Otherwise the forge is asked for the
+ * ticket as it is now. In that order, so a carry-out that ends between the two
+ * questions has already put the hold on when the forge is asked.
+ */
+async function heldSinceListing(
+  project: TicketingProject,
+  ticket: number,
+  deps: PollDeps,
+): Promise<boolean> {
+  const { store, statePath } = deps;
+  if (store.liveRunForTicket(project.name, ticket) !== undefined) return false;
+  if (store.runsForTicket(project.name, ticket).length === 0) return false;
+  const cancelling =
+    statePath !== undefined &&
+    pending(statePath).requests.some(
+      ({ body }) =>
+        body.kind === "cancel" && body.project === project.name && body.ticket === ticket,
+    );
+  if (cancelling) return true;
+  return (await deps.adapter.getTicket(project, ticket)).labels.includes(HELD_LABEL);
+}
+
 async function pollProject(
   project: TicketingProject,
   config: ProjectConfig,
@@ -1628,6 +1668,15 @@ async function pollProject(
     // next cycle and rebuilt. Nothing here removes a hold: taking it off is
     // the human's half of the rule (ADR-0044 D7).
     if (ticket.labels.includes(HELD_LABEL)) continue;
+
+    // ✏ And a runner ticket held since the listing was read (40u). A cancel
+    // the watch carries out while this turn runs puts the hold on after its
+    // run is cancelled, so a listing read in between shows the ticket free.
+    // A run opened from it would sit on a held ticket, which nothing wakes,
+    // and hold the project for every ticket behind it.
+    if (driverOf(config) === "runner" && (await heldSinceListing(project, ticket.number, deps))) {
+      continue;
+    }
 
     const occupier = store.occupyingRun(project.name);
     const { run, created } = store.register(project.name, ticket.number);

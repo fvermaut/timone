@@ -598,3 +598,34 @@ describe("the runner's rule for a named person who asks to stop the work for goo
     );
   });
 });
+
+describe("the departures the brief lists, before the run has reached its order (40u)", () => {
+  it("lists no departures for a run with no step yet", () => {
+    // Verification of phase 40, found outside the verdicts, item 5: the first
+    // brief of a new feature ticket listed nine departures — every step but
+    // the last, "did not run. No reason given." — before anything had run.
+    const record: RecordEntry[] = [
+      { kind: "woke", at: "2026-09-27T12:00:00Z", runId: RUN_ID, events: ["a new ticket"] },
+    ];
+
+    const brief = buildBrief(briefInput({ kind: "feature", record }));
+
+    expect(brief.prompt).toContain("No departures so far.");
+    expect(brief.prompt).not.toContain("did not run.");
+  });
+
+  it("lists no departures for a new run whose ticket's earlier run left some", () => {
+    // The record holds every run of the ticket. The earlier run's steps and
+    // departure are its own, not this run's.
+    const record: RecordEntry[] = [
+      { kind: "step-started", at: "2026-09-26T09:00:00Z", runId: "scratch-app#12/0", stage: "triage", sessionId: "s0" },
+      { kind: "departure", at: "2026-09-26T09:04:00Z", runId: "scratch-app#12/0", skipped: ["clarification"], reason: "It was clear." },
+      { kind: "step-started", at: "2026-09-26T09:05:00Z", runId: "scratch-app#12/0", stage: "requirements", sessionId: "s1" },
+    ];
+
+    const brief = buildBrief(briefInput({ kind: "feature", record }));
+
+    expect(brief.prompt).toContain("No departures so far.");
+    expect(brief.prompt).not.toContain("did not run.");
+  });
+});

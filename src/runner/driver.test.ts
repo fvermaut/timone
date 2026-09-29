@@ -456,3 +456,186 @@ describe("RunnerDriver — when a run comes back after a daemon stop", () => {
     ]);
   });
 });
+
+describe("RunnerDriver — a run refused a step because its project was busy (40u)", () => {
+  // Verification of phase 40, found outside the verdicts, item 1: two tickets
+  // picked up together, one runner refused a step because the other held the
+  // project. When the other's run ended, the refused one was never woken
+  // again, and waited until a person wrote.
+
+  /** A second chore on scratch-app, picked up with #12. */
+  const SECOND: TicketThread = {
+    ...CHORE,
+    number: 13,
+    title: "Fix the licence year",
+    body: "The licence says 2025.",
+    url: "https://github.com/fvermaut/scratch-app/issues/13",
+  };
+
+  /** The forge: #12 and #13, both open and marked, with no comments. */
+  function twoChores(): TicketingAdapter {
+    return {
+      ...forge("").adapter,
+      async listMarkedTickets() {
+        return [CHORE, SECOND];
+      },
+      async getTicket(_project, number) {
+        if (number === 12) return CHORE;
+        if (number === 13) return SECOND;
+        throw new Error(`no ticket ${number}`);
+      },
+    };
+  }
+
+  /** One poll cycle's view of the project: both tickets listed, neither a step. */
+  function cycleOver(adapter: TicketingAdapter): Parameters<RunnerDriver["tick"]>[2] {
+    return {
+      tickets: [CHORE, SECOND],
+      isStep: () => false,
+      threads: (ticket) => ({
+        ticket: () => adapter.getTicket(PROJECT, ticket),
+        pullRequest: (pr) => adapter.getPullRequestThread(PROJECT, pr),
+      }),
+    };
+  }
+
+  /** The runner's wait, as a wake leaves a run it just picked up. */
+  const RUNNER_WAIT = {
+    waitingOn: "the next thing that happens on this ticket",
+    kind: "runner" as const,
+    resolvableBy: ["triage" as const],
+  };
+
+  /**
+   * #12's run waiting for the runner with no branch, and #13's run just
+   * picked up behind it, so #13 holds the project's one session. The driver
+   * over them, whose steps claim the run as `startStepSession` does.
+   */
+  function pickedUpTogether(): {
+    store: RunStore;
+    root: string;
+    first: Run;
+    second: Run;
+    driver: RunnerDriver;
+    adapter: TicketingAdapter;
+    wakes: AskedWake[];
+  } {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-busy-"));
+    tempDirs.push(root);
+    const store = RunStore.open(join(root, ".timone", "state.json"), {
+      now: () => "2026-09-29T10:00:00Z",
+    });
+    const first = store.park(store.register("scratch-app", 12).run.id, RUNNER_WAIT);
+    const second = store.register("scratch-app", 13).run;
+    const adapter = twoChores();
+    const { sessions, wakes } = fakeWakes();
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: fakeStep(store).startStep,
+      timonePin: async () => undefined,
+      clock: () => "2026-09-29T10:00:00Z",
+      log: () => {},
+    });
+    return { store, root, first, second, driver, adapter, wakes };
+  }
+
+  it("wakes it once, with the event, when the run that held the project's session ends", async () => {
+    const { store, first, second, driver, adapter, wakes } = pickedUpTogether();
+    const refused = await runnerActions(driver.actionsFor(first), first).startStep({
+      stage: "triage",
+      instructions: "Sort the request.",
+      reason: "A new ticket starts with sorting.",
+    });
+    expect(refused.ok).toBe(false);
+
+    await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
+    await driver.drain();
+    expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([]);
+
+    store.activate(second.id, "step-session-9");
+    store.complete(second.id);
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
+      await driver.drain();
+    }
+
+    expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([
+      { runId: first.id, events: ["The project is free now."], options: {} },
+    ]);
+  });
+
+  it("wakes it once, with the event, when the run that held the project parks without a branch", async () => {
+    const { store, first, second, driver, adapter, wakes } = pickedUpTogether();
+    // Preparing the work claims a branch, and #13's run holds the project.
+    const refused = await runnerActions(driver.actionsFor(first), first).startStep({
+      stage: "planning",
+      instructions: "Write the plan.",
+      skipReason: "The ticket names the one line to change.",
+      reason: "Small enough to plan at once.",
+    });
+    expect(refused.ok).toBe(false);
+
+    store.park(second.id, RUNNER_WAIT);
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
+      await driver.drain();
+    }
+
+    expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([
+      { runId: first.id, events: ["The project is free now."], options: {} },
+    ]);
+  });
+
+  it("wakes it again after a new refusal, once the project is free again", async () => {
+    const { store, first, second, driver, adapter, wakes } = pickedUpTogether();
+    const tryToSort = () =>
+      runnerActions(driver.actionsFor(first), first).startStep({
+        stage: "triage",
+        instructions: "Sort the request.",
+        reason: "A new ticket starts with sorting.",
+      });
+    expect((await tryToSort()).ok).toBe(false);
+    store.activate(second.id, "step-session-9");
+    store.complete(second.id);
+    await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
+    await driver.drain();
+
+    // Woken, the runner tries again; a third ticket's run took the project meanwhile.
+    const third = store.register("scratch-app", 14).run;
+    expect((await tryToSort()).ok).toBe(false);
+    await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
+    await driver.drain();
+    store.park(third.id, RUNNER_WAIT);
+    await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
+    await driver.drain();
+
+    expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([
+      { runId: first.id, events: ["The project is free now."], options: {} },
+      { runId: first.id, events: ["The project is free now."], options: {} },
+    ]);
+  });
+
+  it("does not wake a run refused for another reason when the project is free", async () => {
+    const { store, first, second, driver, adapter, wakes } = pickedUpTogether();
+    // Refused for a missing reason to skip sorting, not for the busy project.
+    const refused = await runnerActions(driver.actionsFor(first), first).startStep({
+      stage: "planning",
+      instructions: "Write the plan.",
+      reason: "Small enough to plan at once.",
+    });
+    expect(refused.ok).toBe(false);
+
+    store.activate(second.id, "step-session-9");
+    store.complete(second.id);
+    await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
+    await driver.drain();
+
+    expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([]);
+  });
+});

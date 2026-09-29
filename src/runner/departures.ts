@@ -135,6 +135,12 @@ export function departuresOf(
     return reason;
   };
 
+  // **No step reached, no departure** (40u). With nothing reached `furthest`
+  // stays −1, and `order.slice(0, -1)` is every step but the last: the first
+  // brief of a new feature ticket listed nine steps as "did not run" before
+  // anything had run.
+  if (furthest === -1) return [];
+
   const unchecked = deliveredUnchecked(ofRun, order);
 
   return order.slice(0, furthest).flatMap((step, index): Departure[] => {

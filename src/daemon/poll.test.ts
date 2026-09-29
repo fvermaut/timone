@@ -9084,3 +9084,210 @@ describe("the runner drives its projects in the poll cycle", () => {
     expect(wakes).toHaveLength(1);
   });
 });
+
+/**
+ * A forge whose one marked ticket, #7 on scratch-app, keeps the labels put on
+ * it: each `applyLabel` shows in the next listing, as on GitHub. Built on
+ * {@link fakeAdapter}, so every other call behaves as there.
+ */
+function labellingAdapter(): { adapter: TicketingAdapter; applied: string[] } {
+  const labels = ["timone"];
+  const applied: string[] = [];
+  const listed = (): Ticket[] => [ticket(7, { labels: [...labels] })];
+  const base = fakeAdapter({ "scratch-app": [] });
+  return {
+    applied,
+    adapter: {
+      ...base.adapter,
+      async listMarkedTickets(): Promise<Ticket[]> {
+        return listed();
+      },
+      async listOpenTickets(): Promise<Ticket[]> {
+        return listed();
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...ticket(7, { labels: [...labels] }), comments: [] };
+      },
+      async ensureLabel(): Promise<void> {},
+      async applyLabel(_project, number, label): Promise<void> {
+        applied.push(`#${number} ${label}`);
+        if (!labels.includes(label)) labels.push(label);
+      },
+    },
+  };
+}
+
+describe("a cancel on a runner project holds the ticket (40u)", () => {
+  it("puts the hold on the ticket, and takes it up as no new run on the next cycle", async () => {
+    // Verification of phase 40, found outside the verdicts, item 2: the ticket
+    // stayed open and marked after the cancel, so the daemon took it up again
+    // as a new run within seconds. The dropped-step rule (ADR-0044) applied
+    // to a runner ticket: the hold keeps it, until a person takes it off.
+    const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingForRunner(store, 7);
+    enqueue(statePath, {
+      kind: "cancel",
+      project: "scratch-app",
+      ticket: 7,
+      reason: "not needed any more",
+    });
+    const { adapter, applied } = labellingAdapter();
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, statePath, runner };
+
+    const cancelling = await pollOnce(deps);
+    await runner.drain();
+    const next = await pollOnce(deps);
+    await runner.drain();
+
+    expect(cancelling.applied).toEqual(["cancel scratch-app#7"]);
+    expect(applied).toEqual([`#7 ${HELD_LABEL}`]);
+    expect(store.runsForTicket("scratch-app", 7).map((each) => [each.id, each.status])).toEqual([
+      [run.id, "cancelled"],
+    ]);
+    expect(next.pickedUp).toEqual([]);
+    expect(wakes).toEqual([]);
+  });
+
+  it("puts no hold on a ticket of a project the current daemon drives, which takes it up afresh as today", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = manifestWith("scratch-app");
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "s1");
+    enqueue(statePath, { kind: "cancel", project: "scratch-app", ticket: 7 });
+    const { adapter, applied } = labellingAdapter();
+    const { spawner } = fakeSpawner();
+
+    const result = await pollOnce({ manifest, store, adapter, spawner, statePath });
+
+    expect(result.applied).toEqual(["cancel scratch-app#7"]);
+    expect(applied).toEqual([]);
+    expect(store.runsForTicket("scratch-app", 7).map((each) => each.status)).toEqual([
+      "cancelled",
+      "picked-up",
+    ]);
+  });
+});
+
+describe("a runner refused a step because its project was busy is woken once it is free (40u)", () => {
+  it("wakes the refused run once, when the other ticket's run has finished and its ticket closed", async () => {
+    // Verification of phase 40, found outside the verdicts, item 1, as the
+    // check saw it: two tickets picked up together, one runner refused a
+    // step, and after the other ticket's run finished and its ticket closed,
+    // the refused ticket was never woken again.
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const marked = { "scratch-app": [ticket(7), ticket(8)] };
+    const { adapter } = fakeAdapter(marked);
+    const first = waitingForRunner(store, 7);
+    const { run: second } = store.register("scratch-app", 8);
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner, root } = runnerFor({ store, adapter, manifest, sessions });
+    // The refusal as the runner's actions write it down.
+    appendEntry(root, "scratch-app", 7, {
+      kind: "decision",
+      at: "2026-09-27T11:59:00Z",
+      runId: first.id,
+      action: "start_step",
+      reason: "A new ticket starts with sorting.",
+      detail:
+        "Refused: The step did not start: Project scratch-app already has a session for run " +
+        `${second.id} (picked-up) — one session per project at a time`,
+    });
+    const deps = { manifest, store, adapter, spawner, runner };
+
+    await pollOnce(deps);
+    await runner.drain();
+    expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([]);
+
+    store.activate(second.id, "step-session-2");
+    store.complete(second.id);
+    marked["scratch-app"] = [ticket(7)];
+    await pollOnce(deps);
+    await pollOnce(deps);
+    await runner.drain();
+
+    expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([
+      { runId: first.id, events: ["The project is free now."], options: {} },
+    ]);
+  });
+});
+
+describe("a runner ticket cancelled while the cycle walks its project is not taken up from the old listing (40u)", () => {
+  /**
+   * A forge whose one marked ticket, #7, is listed as it was when the listing
+   * was read, while `during` runs: the cancel watch carrying out a cancel of
+   * its run at that moment. Every later read of the ticket sees the labels
+   * the carry-out put on it.
+   */
+  function listedBeforeTheHold(during: (labels: string[]) => void): TicketingAdapter {
+    const labels = ["timone"];
+    const base = fakeAdapter({ "scratch-app": [] });
+    return {
+      ...base.adapter,
+      async listMarkedTickets(): Promise<Ticket[]> {
+        const listed = [ticket(7, { labels: [...labels] })];
+        during(labels);
+        return listed;
+      },
+      async listOpenTickets(): Promise<Ticket[]> {
+        return [ticket(7, { labels: [...labels] })];
+      },
+      async getTicket(): Promise<TicketThread> {
+        return { ...ticket(7, { labels: [...labels] }), comments: [] };
+      },
+    };
+  }
+
+  it("opens no new run when the hold went on after the listing was read", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingForRunner(store, 7);
+    const adapter = listedBeforeTheHold((labels) => {
+      store.cancel(run.id, "not needed any more");
+      labels.push(HELD_LABEL);
+    });
+    const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, spawner, statePath, runner });
+    await runner.drain();
+
+    expect(result.pickedUp).toEqual([]);
+    expect(store.runsForTicket("scratch-app", 7).map((each) => each.status)).toEqual(["cancelled"]);
+  });
+
+  it("opens no new run while the cancel of its run is still being carried out", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const run = waitingForRunner(store, 7);
+    // The run is cancelled in the ledger, and the request is not settled yet:
+    // the hold has not gone on.
+    const adapter = listedBeforeTheHold(() => {
+      enqueue(statePath, { kind: "cancel", project: "scratch-app", ticket: 7 });
+      store.cancel(run.id, "not needed any more");
+    });
+    const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({
+      manifest,
+      store,
+      adapter,
+      spawner,
+      statePath,
+      runner,
+      cancelWatchIntervalMs: 60_000,
+    });
+    await runner.drain();
+
+    expect(result.pickedUp).toEqual([]);
+    expect(store.runsForTicket("scratch-app", 7).map((each) => each.status)).toEqual(["cancelled"]);
+  });
+});

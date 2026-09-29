@@ -8,6 +8,7 @@ import { RunStore } from "../daemon/runs.js";
 import { acquireStateLock } from "../daemon/lock.js";
 import { pending, settle } from "../daemon/requests.js";
 import { runCancel } from "./cancel.js";
+import type { TicketingAdapter } from "../adapters/ticketing.js";
 
 const tempDirs: string[] = [];
 
@@ -244,5 +245,112 @@ describe("timone cancel", async () => {
     expect(code).toBe(0);
     expect(store.get("scratch-app#6/1")?.status).toBe("cancelled");
     expect(lines.join("\n")).toContain("I have changed my mind about labels");
+  });
+});
+
+describe("timone cancel — what it reports once the daemon has acted (40u)", () => {
+  it("reports the stop by the run it cancelled, though the daemon has since taken the ticket up as a new run", async () => {
+    // Verification of phase 40, found outside the verdicts, item 2: the daemon
+    // cancelled the run, then took the still-marked ticket up afresh within
+    // seconds, and the command read that new run and said it had failed.
+    const dir = mkdtempSync(join(tmpdir(), "timone-cancel-taken-up-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-09-29T10:00:00Z" });
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    const { log, lines } = collect();
+    const daemonCycles = async (): Promise<void> => {
+      for (const request of pending(statePath).requests) {
+        store.cancel(run.id, "not needed any more");
+        settle(request.path);
+        // The next pass finds the ticket still open and marked.
+        store.register("scratch-app", 6);
+      }
+    };
+
+    const code = await runCancel("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      log,
+      wait: { intervalMs: 1, boundMs: 100, sleep: daemonCycles },
+    });
+
+    expect(code).toBe(0);
+    expect(lines.join("\n")).toContain("Stopped work on scratch-app #6: not needed any more.");
+    expect(lines.join("\n")).not.toContain("did not stop");
+  });
+});
+
+describe("timone cancel — on a project the runner drives, with no daemon running (40u)", () => {
+  /** scratch-app, driven by the runner and instructed by the operator. */
+  const runnerManifest: Manifest = {
+    operator: "fvermaut",
+    projects: {
+      "scratch-app": {
+        repo_url: "https://github.com/fvermaut/scratch-app.git",
+        path: "projects/scratch-app",
+        stack: [],
+        bindings: { ticketing: "github" },
+        driver: "runner",
+      },
+    },
+  };
+
+  /** A forge that writes down every label put on a ticket, or refuses them all. */
+  function labelForge(refuse?: string): { adapter: TicketingAdapter; applied: string[] } {
+    const applied: string[] = [];
+    const adapter = {
+      async ensureLabel(): Promise<void> {
+        if (refuse !== undefined) throw new Error(refuse);
+      },
+      async applyLabel(_project: unknown, number: number, label: string): Promise<void> {
+        if (refuse !== undefined) throw new Error(refuse);
+        applied.push(`#${number} ${label}`);
+      },
+    } as unknown as TicketingAdapter;
+    return { adapter, applied };
+  }
+
+  it("puts the hold on the ticket, and says how to hand it back", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
+    const { adapter, applied } = labelForge();
+    const { log, lines } = collect();
+
+    const code = await runCancel("scratch-app#6", { manifest: runnerManifest, store, adapter, log });
+
+    expect(code).toBe(0);
+    expect(store.get(run.id)?.status).toBe("cancelled");
+    expect(applied).toEqual(["#6 timone:held"]);
+    expect(lines.join("\n")).toContain("carries the `timone:held` label");
+    expect(lines.join("\n")).not.toContain("start it afresh");
+  });
+
+  it("stops the work all the same when the forge refuses the hold, and says the ticket will be taken up again", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "s1");
+    const { adapter } = labelForge("gh: HTTP 502");
+    const { log, lines } = collect();
+
+    const code = await runCancel("scratch-app#6", { manifest: runnerManifest, store, adapter, log });
+
+    expect(code).toBe(0);
+    expect(store.get(run.id)?.status).toBe("cancelled");
+    expect(lines.join("\n")).toContain("I could not put the `timone:held` label on the ticket: gh: HTTP 502.");
+    expect(lines.join("\n")).toContain("I'll start it afresh on my next pass");
   });
 });

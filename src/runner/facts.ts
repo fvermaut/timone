@@ -3,6 +3,7 @@ import type {
   TicketingAdapter,
   TicketingProject,
 } from "../adapters/ticketing.js";
+import { breakdownPath } from "../daemon/breakdown.js";
 import type { Run } from "../daemon/runs.js";
 
 /**
@@ -203,6 +204,11 @@ async function requirementFiles(
  * The list of pieces of ticket `ticket` on `branch`, or undefined when that
  * branch does not carry one. Its `Status:` line is what says whether a named
  * person approved it.
+ *
+ * **Looked for under the name the merge reads** (40u), through the one
+ * function that builds it. This file once spelled the path itself, as
+ * `ticket-7.md`, while the merge after the approval reads `ticket-07.md`: on
+ * tickets 1 to 9 the runner was told there was no list, while there was one.
  */
 async function breakdownOf(
   adapter: FactsAdapter,
@@ -210,7 +216,7 @@ async function breakdownOf(
   branch: string,
   ticket: number,
 ): Promise<Breakdown | undefined> {
-  const path = `doc/plans/breakdowns/ticket-${ticket}.md`;
+  const path = breakdownPath(ticket);
   const content = await adapter.readFile(project, branch, path);
   return content === undefined ? undefined : { path, status: statusOf(content) };
 }

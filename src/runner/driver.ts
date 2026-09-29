@@ -25,6 +25,7 @@ import { departureSection, departuresOf, DEPARTURES_END, DEPARTURES_START } from
 import { defaultOrder, standingOf, ticketKindOf, type TicketContext } from "./order.js";
 import { appendEntry, readRecord, type RecordEntry } from "./record.js";
 import { RUNNER_DEFAULT_WAIT, type RunnerSessions, type WakeOptions } from "./session.js";
+import type { RunnerToolName } from "./tools.js";
 
 /**
  * The runner's driver: what the poll cycle calls, once a cycle, for every
@@ -251,6 +252,23 @@ export const RUNNER_CHECK_INTERVAL_MS = 15 * 60_000;
  */
 export const CHECK_EVENT = "A 15-minute check on the running step.";
 
+/**
+ * What the runner is told when the project it was refused a step on is free
+ * again (40u): the run that held it ended, or waits with no branch.
+ */
+export const PROJECT_FREE_EVENT = "The project is free now.";
+
+/** The action a try to start a step is written down under, in the record. */
+const START_STEP: RunnerToolName = "start_step";
+
+/**
+ * The run ids a sentence names. A run id is `project#ticket/seq`: one word,
+ * with at most a full stop or a colon after it.
+ */
+function namedRunIds(text: string): Set<string> {
+  return new Set(text.split(/[\s(),;]+/).map((word) => word.replace(/[.:]+$/, "")));
+}
+
 /** The statuses of a run the driver looks at: one just picked up, one waiting, one working. */
 const UNSETTLED: readonly RunStatus[] = ["picked-up", "active", "parked"];
 
@@ -444,6 +462,18 @@ export class RunnerDriver {
           notices.push(about);
         }
       }
+      // ✏ A run refused a step because another run held the project waits
+      // for nothing a person would write (40u). It is told once the project
+      // is free — once for each refusal: the runner then decides again, and a
+      // new refusal is what makes it wait again.
+      const refusal = this.busyRefusal(run, entries);
+      if (refusal !== undefined && this.projectFreeFor(run)) {
+        const about = `project free after try ${refusal.tryNumber} to start a step, run ${run.id}`;
+        if (!noticed(entries, about)) {
+          events.push(PROJECT_FREE_EVENT);
+          notices.push(about);
+        }
+      }
       check = this.checkDue(run);
       if (check !== undefined) events.push(CHECK_EVENT);
     }
@@ -463,6 +493,50 @@ export class RunnerDriver {
     }
     if (events.length === 0) return;
     this.deliver(run, events, notices, check);
+  }
+
+  /**
+   * The refusal that left `run` waiting for its project, or undefined when it
+   * waits for none: its latest try to start a step was refused, no step of it
+   * runs, and the refusal names another run of the project. `tryNumber`
+   * counts the run's tries to start a step, the refused one included: the
+   * record is only ever added to, so it names this refusal for good, where
+   * two tries in the same instant would share a time.
+   *
+   * **Found by the holder's run id, not by the refusal's words.** The
+   * runner's actions keep the refusal in the record, as a sentence, and
+   * nowhere else. The ledger refuses a second session, a second work branch,
+   * and a branch claimed on a project another run holds; each of the three
+   * names the run that holds the project, and no other refusal names another
+   * run. A run id is the ledger's own and stays the same when a sentence is
+   * reworded. A refusal that stopped naming the holder would also leave the
+   * runner not knowing what it waits for.
+   */
+  private busyRefusal(
+    run: Run,
+    entries: readonly RecordEntry[],
+  ): { tryNumber: number } | undefined {
+    if (this.deps.running.has(run.id)) return undefined;
+    const tries = entries.flatMap((entry) =>
+      entry.kind === "decision" && entry.runId === run.id && entry.action === START_STEP
+        ? [entry]
+        : [],
+    );
+    const last = tries.at(-1);
+    if (last?.detail === undefined) return undefined;
+    const named = namedRunIds(last.detail);
+    const others = this.deps.store.runsFor(run.project).filter((other) => other.id !== run.id);
+    return others.some((other) => named.has(other.id)) ? { tryNumber: tries.length } : undefined;
+  }
+
+  /**
+   * Whether no run but `run` holds its project now: whatever held it is
+   * done, cancelled, failed or waiting with no branch. Read from the ledger's
+   * file, as every guard on the project is.
+   */
+  private projectFreeFor(run: Run): boolean {
+    const holder = this.deps.store.occupyingRun(run.project);
+    return holder === undefined || holder.id === run.id;
   }
 
   /**

@@ -1629,3 +1629,110 @@ $ grep -n "driver: runner" timone.yaml
 - The first attempt found four faults (fixed in 40r), the second two more (fixed in 40s).
 
 **What delivery must know.** Test leftovers on scratch-app: pull request #61 and its held ticket #60 (first attempt), and map #62 (open because of the fault 40s fixed). Their closing waits on the operator's word.
+
+## 40u — five faults the check found outside its verdicts
+
+**Built.** The five faults of the verification report's "Found outside the verdicts", items 1 to 5.
+
+1. A runner project's run that was refused a step because another run held the project is now woken, with the event "The project is free now.", once no other run holds the project. It is woken once for each refusal, not on every cycle.
+2. `timone cancel` on a runner project now puts `timone:held` on the ticket, so the ticket is not taken up again as new work. The daemon does it after it has stopped the work. The command does it itself when no daemon runs. A runner ticket whose hold went on after the cycle listed it is not taken up from that listing either. The command now judges its answer by the run it asked to cancel, so it reports the stop even when the daemon has since opened a new run on the ticket.
+3. The runner's facts look for the list of pieces through `breakdownPath`, the function the merge uses, so ticket 7's list is `doc/plans/breakdowns/ticket-07.md`.
+4. The one-question check (`sdkConsult`) runs with `tools: []` and `settingSources: []`. Its `query` can be injected, for the test.
+5. The brief lists no departures until the run has reached a step of its order.
+
+**Files touched.**
+
+- `src/runner/driver.ts` — `PROJECT_FREE_EVENT`; `busyRefusal` and `projectFreeFor`; the event is added in `look`, beside the other facts, with a `notice` so it is told once.
+- `src/daemon/poll.ts` — the `cancel` branch of `applyRequest` calls `holdCancelledTicket` after the stop, before the request is settled; `heldSinceListing`, asked by the registration loop before it opens a new run on a runner ticket.
+- `src/commands/cancel.ts` — `holdCancelledTicket` (exported); `CancelDeps.adapter`; `cancel()` is async and holds a runner ticket when it has the forge; `askForCancel` remembers the run before asking; the command passes a `GitHubTicketingAdapter` for the case with no daemon.
+- `src/runner/facts.ts` — `breakdownOf` uses `breakdownPath`.
+- `src/daemon/consult.ts` — `ConsultQuery`, the `query` option, `tools: []`, `settingSources: []`.
+- `src/runner/brief.ts` — `reachedTheOrder`, which decides whether departures are listed at all.
+- Tests, new cases only: `src/runner/driver.test.ts` (4), `src/daemon/poll.test.ts` (5), `src/commands/cancel.test.ts` (3), `src/runner/brief.test.ts` (2), `src/runner/facts.test.ts` (1), and a new `src/daemon/consult.test.ts` (1).
+
+**Decisions taken inside the slice.**
+
+- **How the driver knows a run waits for its project (1).** The refusal is kept only in the record's `decision` entry, which the runner's actions write as a sentence (`actions.ts`, not in this slice). The driver reads the run's latest `start_step` decision and asks whether its `detail` names another run of the project by its run id. All three refusals the ledger gives for a busy project name the holder's id: "already has a session for run X", "is held by run X", "run X … already holds it". No other refusal names another run. I chose the run id over the refusal's words because a reworded sentence keeps the id, and it covers both refusal paths: the branch claim in `actions.ts` and the claim in `startStepSession`. A notice the driver writes when it sees the refusal would need the driver to see the project busy at its next cycle. On the check's own scenario the holder freed the project within seconds, so that notice would often never be written.
+- **"Free" means that no run but this one holds the project** (`store.occupyingRun`), not only that the named holder let go. If a third run took the project meanwhile, waking would only get a second refusal.
+- **Once for each refusal.** The notice is keyed on the run's count of `start_step` tries (`project free after try N to start a step, run …`), not on the refusal's time: two tries in one instant share a time, and the record is only ever added to. Once woken, the runner decides again. A new refusal is what makes it wait again, so a runner that chose not to start a step is not woken at every later freeing.
+- **A held ticket is not told the project is free** until the hold comes off. It is the rule every other fact in `look` follows.
+- **The hold on a cancelled runner ticket goes on after the stop.** The forge can take up to 90 seconds per try, three tries, and the step must not run on meanwhile. So the daemon's `runCancel` call gets no forge, and `poll.ts` holds the ticket once the work is stopped. For a runner project, `cancel()` no longer says "I'll start it afresh"; `holdCancelledTicket` says what happens to the ticket, or, if the forge failed, says that the ticket will be taken up again and how to stop that. It never throws: the run is cancelled whatever the forge answers.
+- **With no daemon running, the command holds the ticket itself**, under the person's own `gh` login, as `timone takeover` reads the ticket under it. Without this, the next daemon start would take the ticket up again. It is used only for runner projects.
+- **A step ticket is left alone** by `holdCancelledTicket`: it has carried the hold since pickup, and `heldStepWayOut` already says how to hand it back.
+- **The listing a cycle read before the hold went on is not trusted** (added once I found the window; a test shows it). The cancel watch can carry out a cancel while a cycle walks the project. The run is cancelled first and the hold goes on a second later, so a listing read in between shows the ticket free. A run opened from it sits on a held ticket, which nothing wakes, and holds the project for every ticket behind it. That is worse than the fault being fixed. So before the registration loop opens a new run on a runner ticket whose runs have all ended, it asks two questions, in this order. Is a cancel of this ticket still being carried out (its request file not yet settled, which happens only after the hold is on)? Does the ticket, as the forge has it now, carry the hold? Either one means the ticket is not taken up. The forge is asked only when a new run would otherwise be opened. Projects the current daemon drives are not touched.
+- **(5) is fixed in `brief.ts`, as the plan says.** The cause is in `departuresOf` (`src/runner/departures.ts`, not in this slice): with no step reached, `furthest` is −1, and `order.slice(0, -1)` is every step but the last. `brief.ts` now asks first whether the run has reached any step of its order (a step started at one of its stages, or one of its approvals given). That also covers a run whose only steps are at stages outside its order.
+
+**Validation evidence.** Red before green for every case. Each red below is the failing assertion's line.
+
+| Case | Test | Red | Green |
+|---|---|---|---|
+| (3) | `facts.test.ts` › finds ticket 7's list at `doc/plans/breakdowns/ticket-07.md` | `expected { kind: 'known', value: undefined } to deeply equal { kind: 'known', value: { …(2) } }` | pass |
+| (4) | `consult.test.ts` › starts the model with no tools at all and no project settings | first `expected [] to have a length of 1 but got +0` (the query could not be injected, and the real one was started); then, with only the injection, `expected undefined to deeply equal []` | pass |
+| (5) | `brief.test.ts` › lists no departures for a run with no step yet | `expected '## Why you were woken…' to contain 'No departures so far.'`. The brief listed nine steps, from "sorting the request: did not run. No reason given." to "checking the result: did not run. No reason given." | pass |
+| (5) | `brief.test.ts` › lists no departures for a new run whose ticket's earlier run left some | same | pass |
+| (2) | `cancel.test.ts` › reports the stop by the run it cancelled, though the daemon has since taken the ticket up as a new run | `expected 1 to be +0` | pass |
+| (2) | `poll.test.ts` › puts the hold on the ticket, and takes it up as no new run on the next cycle | `expected [] to deeply equal [ '#7 timone:held' ]` (re-run once the test forge could create labels, with the hold call taken out: same red) | pass |
+| (2) | `poll.test.ts` › puts no hold on a ticket of a project the current daemon drives, which takes it up afresh as today | a guard: it passes before and after, and it fails if the hold is put on a daemon project's ticket | pass |
+| (2) | `poll.test.ts` › opens no new run when the hold went on after the listing was read | `expected [ 'scratch-app#7/2' ] to deeply equal []` | pass |
+| (2) | `poll.test.ts` › opens no new run while the cancel of its run is still being carried out | `expected [ 'scratch-app#7/2' ] to deeply equal []` | pass |
+| (2) | `cancel.test.ts` › puts the hold on the ticket, and says how to hand it back (no daemon) | with the runner branch of `cancel()` turned off: `expected [] to deeply equal [ '#6 timone:held' ]` | pass |
+| (2) | `cancel.test.ts` › stops the work all the same when the forge refuses the hold | same change: the output was only "Stopped work on scratch-app #6: you asked me to stop. …", with no sentence saying the hold could not be put on | pass |
+| (1) | `driver.test.ts` › wakes it once, with the event, when the run that held the project's session ends | `expected [] to deeply equal [ { runId: 'scratch-app#12/1', …(2) } ]` | pass |
+| (1) | `driver.test.ts` › wakes it once, with the event, when the run that held the project parks without a branch | same | pass |
+| (1) | `driver.test.ts` › wakes it again after a new refusal, once the project is free again | `expected [] to deeply equal [ { …(3) }, { …(3) } ]`; then, with the notice keyed on the refusal's time, `expected [ { runId: 'scratch-app#12/1', …(2) } ] to deeply equal [ { …(3) }, { …(3) } ]`, which moved the key to the try count | pass |
+| (1) | `driver.test.ts` › does not wake a run refused for another reason when the project is free | a guard against a false wake: it passes before and after | pass |
+| (1) | `poll.test.ts` › wakes the refused run once, when the other ticket's run has finished and its ticket closed | with the new event turned off: `expected [] to deeply equal [ { runId: 'scratch-app#7/1', …(2) } ]` | pass |
+
+The driver's cases use the real actions and the real ledger, so the refusals are the real ones:
+
+```
+Project scratch-app already has a session for run scratch-app#13/1 (picked-up) — one session per project at a time
+Run scratch-app#12/1 cannot claim a branch on scratch-app: run scratch-app#13/1 (picked-up) already holds it
+```
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  56 passed (56)
+      Tests  1949 passed (1949)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+… (19 lines, all PASS)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+The suite had 1933 tests before the slice and has 1949 now: the 16 new cases above.
+
+- [x] Red→green evidence in the handoff: the table above.
+
+**What the re-check must know.**
+
+- **(1) is seen at the driver's cycle, once a minute.** A project that is free for less than one cycle — the holder parks without a branch, and its runner starts its next step before the next cycle — is not seen free, and the refused run waits for the next freeing. Once the holder has a branch it holds the project until its run ends, so the refused run is always woken in the end. Two refused runs are both woken; one gets the project, and the other is refused again and waits again.
+- **(1) depends on the refusal naming the holder's run id.** If a later change to `runs.ts` or `actions.ts` stops naming it, the wake stops. The driver's first two cases would then fail, since they use the real refusals.
+- **(2) also changes the registration loop for runner projects** (`heldSinceListing`). Re-opening a runner ticket after its run ended now costs one extra read of the ticket, and waits one cycle while a cancel of it is still being carried out. A ticket whose run was ended by the runner's own `end_run`, with no hold, is still taken up again, as 40t says.
+- **(2) needs the person's own `gh` login when no daemon runs.** Without it, the command still cancels, and says the ticket will be taken up again and how to stop that.
+- **The cause of (5) is still in `departuresOf`.** The pull request's list after a step uses it too. That list is only written once the run's branch has an open pull request, which delivering opens, so by then the run has reached a step of its order and the list is right. A one-line guard in `departures.ts` (no step reached means no departures) would close it at the source; that file is outside this slice.
+- The command's message on success is unchanged for a runner project ("I won't pick this chunk up again."). What happens to the ticket is in the daemon's log line for the request, or, with no daemon, in the command's own output.
+
+**Follow-up: (5) fixed at its source** (granted by the coordinator; the plan's ✏ note under 40u's (5)).
+
+- `src/runner/departures.ts` — `departuresOf` returns no departures when no step of the order has been reached (`furthest` is −1), in place of `order.slice(0, -1)`. The pull request's list and the brief now share that one rule.
+- `src/runner/departures.test.ts` — new case: "lists no departures when no step of the order has been reached". Red first: `expected [ { kind: 'did-not-run', …(2) }, …(8) ] to deeply equal []` (nine steps of the feature order listed as not run). Green after the change.
+- **The `brief.ts` guard is dropped**, and `brief.ts` is back as it was before 40u. It checked the same entries `departuresOf` measures by (a step started at a stage of the order, or an approval of the order given), so it was now redundant. The two `brief.test.ts` cases from 40u stay, and pass through `departuresOf`.
+- The last point of "What the re-check must know" above, about the cause of (5) still being in `departuresOf`, no longer holds.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  56 passed (56)
+      Tests  1950 passed (1950)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```

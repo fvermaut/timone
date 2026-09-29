@@ -219,3 +219,24 @@ describe("the facts the runner is given about a run's branch", () => {
     expect(whys.some((why) => why.includes(`${call} failed: connection reset`))).toBe(true);
   });
 });
+
+describe("the list of pieces, under the name the merge reads (40u)", () => {
+  it("finds ticket 7's list at doc/plans/breakdowns/ticket-07.md, the path the merge after its approval reads", async () => {
+    // Verification of phase 40, found outside the verdicts, item 3: the brief
+    // looked for `ticket-7.md` while the merge read `ticket-07.md`, so on
+    // tickets 1 to 9 the runner was told there was no list.
+    const forge = forgeWith({
+      main: {},
+      [BRANCH]: {
+        "doc/plans/breakdowns/ticket-07.md": "# Breakdown\n\n**Status:** Awaiting approval\n",
+      },
+    });
+
+    const facts = await gatherFacts(forge, PROJECT, { ticket: 7, branch: BRANCH });
+
+    expect(facts.breakdown).toEqual({
+      kind: "known",
+      value: { path: "doc/plans/breakdowns/ticket-07.md", status: "Awaiting approval" },
+    });
+  });
+});

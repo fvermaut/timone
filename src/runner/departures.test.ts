@@ -435,3 +435,16 @@ describe("the departures a pull request lists", () => {
     );
   });
 });
+
+describe("the departures of a run that has not reached its order (40u)", () => {
+  it("lists no departures when no step of the order has been reached", () => {
+    // Verification of phase 40, found outside the verdicts, item 5: with no
+    // step reached, every step of the order but the last was listed as not
+    // run, before anything had run.
+    const entries: RecordEntry[] = [
+      { kind: "woke", at: "2026-09-27T10:00:00.000Z", runId: RUN, events: ["a new ticket"] },
+    ];
+
+    expect(departuresOf(entries, RUN, defaultOrder("feature"))).toEqual([]);
+  });
+});
