@@ -1,7 +1,7 @@
 import type { PipelineStage } from "../daemon/pipeline.js";
 import { joined } from "./comments.js";
 import type { OrderStep } from "./order.js";
-import type { RecordEntry } from "./record.js";
+import { startsAStep, type RecordEntry } from "./record.js";
 
 /**
  * The departures of a run: the steps of its written order that did not run
@@ -35,11 +35,13 @@ export type Departure = {
  * when the entry is not one of the order's steps running.
  *
  * An approval step is reached by a named person's approval, not by a
- * session; every other step by a session starting at its stage.
+ * session; every other step by a session starting at its stage. The session
+ * that writes an approval into its file reaches nothing: the approval
+ * already reached its step.
  */
 function stepIndexOf(entry: RecordEntry, order: readonly OrderStep[]): number | undefined {
   let index = -1;
-  if (entry.kind === "step-started") {
+  if (startsAStep(entry)) {
     index = order.findIndex((step) => step.stage === entry.stage);
   } else if (entry.kind === "approval") {
     index = order.findIndex((step) => step.approval === entry.what);
@@ -80,7 +82,7 @@ function deliveredUnchecked(ofRun: readonly RecordEntry[], order: readonly Order
   const since = sinceLastBuild(ofRun);
   if (check === -1 || since === undefined) return false;
   const indices = since.flatMap((entry) =>
-    entry.kind === "step-started" ? [order.findIndex((step) => step.stage === entry.stage)] : [],
+    startsAStep(entry) ? [order.findIndex((step) => step.stage === entry.stage)] : [],
   );
   return indices.some((index) => index > check) && !indices.includes(check);
 }

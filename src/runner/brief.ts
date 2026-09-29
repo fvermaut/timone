@@ -14,7 +14,7 @@ import { departuresOf, type Departure } from "./departures.js";
 import type { Fact, Facts } from "./facts.js";
 import { allowanceOf, spentOn } from "./limit.js";
 import { defaultOrder, type OrderStep, type TicketKind } from "./order.js";
-import type { RecordEntry } from "./record.js";
+import { startsAStep, type RecordEntry } from "./record.js";
 
 /**
  * The brief: the text the runner is given each time it wakes. The system
@@ -284,7 +284,15 @@ function departedHow(departure: Departure): string {
   }
 }
 
-/** What this run has done of one step of the order, from its entries in the record. */
+/**
+ * What this run has done of one step of the order, from its entries in the
+ * record.
+ *
+ * The session that writes an approval into its file is not counted, nor its
+ * end. It has the stage of the step that wrote the file, so counting it
+ * showed that step as run twice (40v). Its cost is still in what the ticket
+ * has spent.
+ */
 function stepState(step: OrderStep, ofRun: readonly RecordEntry[]): string {
   if (step.stage === undefined) {
     const approval = ofRun
@@ -296,11 +304,18 @@ function stepState(step: OrderStep, ofRun: readonly RecordEntry[]): string {
       ? "not given yet."
       : `given by ${approval.by}, in the comment at ${approval.commentAt}.`;
   }
+  const recording = new Set(
+    ofRun.flatMap((entry) =>
+      entry.kind === "step-started" && entry.records !== undefined ? [entry.sessionId] : [],
+    ),
+  );
   const started = ofRun.filter(
-    (entry) => entry.kind === "step-started" && entry.stage === step.stage,
+    (entry) => startsAStep(entry) && entry.stage === step.stage,
   );
   const ended = ofRun.flatMap((entry) =>
-    entry.kind === "step-ended" && entry.stage === step.stage ? [entry] : [],
+    entry.kind === "step-ended" && entry.stage === step.stage && !recording.has(entry.sessionId)
+      ? [entry]
+      : [],
   );
   const running = started.length > ended.length;
   if (ended.length === 0) return running ? "running now." : "not run yet.";

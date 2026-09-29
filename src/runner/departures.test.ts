@@ -448,3 +448,66 @@ describe("the departures of a run that has not reached its order (40u)", () => {
     expect(departuresOf(entries, RUN, defaultOrder("feature"))).toEqual([]);
   });
 });
+
+describe("the departures of a run whose approvals were written into their files (40v)", () => {
+  /** A named person's approval, as the machine writes it down. */
+  function approval(what: "requirements" | "pieces", at: string): RecordEntry {
+    return { kind: "approval", at, runId: RUN, what, by: "fvermaut", commentAt: at };
+  }
+
+  /**
+   * The short session that writes an approval into its file. It has the
+   * stage of the step that wrote the file, and starts after the approval.
+   */
+  function recording(stage: PipelineStage, what: "requirements" | "pieces", at: string): RecordEntry {
+    return { kind: "step-started", at, runId: RUN, stage, sessionId: `s-record-${what}`, records: what };
+  }
+
+  it("lists no departures for a feature run that followed the order, each approval followed by the session that writes it into its file", () => {
+    // The Spec review of phase 40, finding 1: this run's pull request said
+    // "writing down what it needs" and "working out the pieces" ran out of
+    // order, though every step ran as written.
+    const entries: RecordEntry[] = [
+      started("triage", "2026-09-27T10:00:00.000Z"),
+      started("clarification", "2026-09-27T10:05:00.000Z"),
+      started("requirements", "2026-09-27T10:20:00.000Z"),
+      approval("requirements", "2026-09-27T11:00:00.000Z"),
+      recording("requirements", "requirements", "2026-09-27T11:00:01.000Z"),
+      started("breakdown", "2026-09-27T11:10:00.000Z"),
+      approval("pieces", "2026-09-27T12:00:00.000Z"),
+      recording("breakdown", "pieces", "2026-09-27T12:00:01.000Z"),
+    ];
+
+    expect(departureSection(departuresOf(entries, RUN, defaultOrder("feature")))).toBe(
+      "<!-- timone:departures -->\nThe default order was followed.\n<!-- /timone:departures -->",
+    );
+  });
+
+  it("lists only sorting when the same run left sorting out", () => {
+    const entries: RecordEntry[] = [
+      {
+        kind: "departure",
+        at: "2026-09-27T10:04:00.000Z",
+        runId: RUN,
+        skipped: ["triage"],
+        reason: "fvermaut sorted the ticket as a feature by hand.",
+      },
+      started("clarification", "2026-09-27T10:05:00.000Z"),
+      started("requirements", "2026-09-27T10:20:00.000Z"),
+      approval("requirements", "2026-09-27T11:00:00.000Z"),
+      recording("requirements", "requirements", "2026-09-27T11:00:01.000Z"),
+      started("breakdown", "2026-09-27T11:10:00.000Z"),
+      approval("pieces", "2026-09-27T12:00:00.000Z"),
+      recording("breakdown", "pieces", "2026-09-27T12:00:01.000Z"),
+    ];
+
+    expect(departureSection(departuresOf(entries, RUN, defaultOrder("feature")))).toBe(
+      [
+        "<!-- timone:departures -->",
+        "**Steps that did not follow the default order:**",
+        "- Sorting the request: did not run. Reason: fvermaut sorted the ticket as a feature by hand.",
+        "<!-- /timone:departures -->",
+      ].join("\n"),
+    );
+  });
+});

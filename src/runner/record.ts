@@ -36,6 +36,9 @@ const costUsd = z.number().nonnegative();
 
 const stage = z.enum([...PIPELINE_STAGES]);
 
+/** The two things a named person approves: the requirements, or the list of pieces. */
+const approved = z.enum(["requirements", "pieces"]);
+
 /**
  * Every kind of entry the record holds. The schema is the type: nothing is
  * read from the file without passing it, and nothing is written that does
@@ -67,7 +70,11 @@ export const recordEntrySchema = z.discriminatedUnion("kind", [
     reason: z.string(),
     detail: z.string().optional(),
   }),
-  /** A session for one step of the work was started. */
+  /**
+   * A session for one step of the work was started. `records` is set on the
+   * short session that writes an approval into its file: it has the stage
+   * of the step that wrote the file, but it is not that step running again.
+   */
   z.strictObject({
     kind: z.literal("step-started"),
     at,
@@ -75,6 +82,7 @@ export const recordEntrySchema = z.discriminatedUnion("kind", [
     stage,
     sessionId: z.string(),
     instructions: z.string().optional(),
+    records: approved.optional(),
   }),
   /** That session finished, and what it cost. */
   z.strictObject({
@@ -105,7 +113,7 @@ export const recordEntrySchema = z.discriminatedUnion("kind", [
     kind: z.literal("approval"),
     at,
     runId,
-    what: z.enum(["requirements", "pieces"]),
+    what: approved,
     by: z.string(),
     commentAt: z.string(),
   }),
@@ -138,6 +146,21 @@ export const recordEntrySchema = z.discriminatedUnion("kind", [
 ]);
 
 export type RecordEntry = z.infer<typeof recordEntrySchema>;
+
+/**
+ * Whether `entry` starts a step of the written order: a session started at a
+ * stage, but not the short session that writes an approval into its file.
+ *
+ * **That session is not its stage's step running again** (40v). It has the
+ * stage of the step that wrote the file, and it starts after the approval,
+ * which comes later in the order. Counted as a step, it made every run that
+ * recorded an approval list that step as run out of order.
+ */
+export function startsAStep(
+  entry: RecordEntry,
+): entry is Extract<RecordEntry, { kind: "step-started" }> {
+  return entry.kind === "step-started" && entry.records === undefined;
+}
 
 /** Where a ticket's record lives, relative to the timone root. */
 function recordPath(project: string, ticket: number): string {

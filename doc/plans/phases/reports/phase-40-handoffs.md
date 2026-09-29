@@ -1736,3 +1736,65 @@ Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
 19 of 19 cases passed. The runner's sessions cost $0.00 in all.
 exit: 0
 ```
+
+## 40v — recording an approval is not a step out of order
+
+**Built.** The session that writes an approval into its file is now written down as recording that approval. Its `step-started` entry carries `records: "requirements"` or `records: "pieces"`. The departure list, the standing, the brief's step lines, the start-step check and `timone record` no longer read it as its stage's step running again. A feature run that followed the order, with both approvals recorded, now says "The default order was followed." Before, it listed "Writing down what it needs and working out the pieces: ran out of order. No reason given." (Spec review, finding 1.) After a step ends, a record that cannot be read now leaves the pull request's list of departures as it is, and the failure is logged. Before, it was read as an empty record, and "The default order was followed." replaced the list (Standards review, finding 1).
+
+**Files touched.**
+
+- `src/runner/record.ts` — `approved`, one list (`requirements`, `pieces`) used by the `approval` entry's `what` and by the new optional `records` field of `step-started`. New exported `startsAStep(entry)`: a `step-started` entry with no `records`.
+- `src/runner/actions.ts` — `watchStep` gains an optional last argument, `records`, and writes it on the entry. `recordApproval` passes `what`. In `skippedBy`, both checks for "a session at this stage started" use `startsAStep`. `APPROVAL_WORDS` is exported, for the record command. The comment above the recording session says how it is written down.
+- `src/runner/departures.ts` — `stepIndexOf` and `deliveredUnchecked` use `startsAStep`.
+- `src/runner/order.ts` — `standingOf` counts only `startsAStep` entries as a running step.
+- `src/runner/brief.ts` — `stepState` does not count a recording session's start, nor the `step-ended` entry with its session id.
+- `src/commands/record.ts` — a recording session's line reads "Recording the approval of the requirements" (or "of the list of pieces"), not the stage's label.
+- `src/runner/driver.ts` — `afterStep` passes no entries when the record cannot be read, and logs the reader's message followed by "The pull request's list of departures is left as it is." `rewriteDepartures` takes `entries` or `undefined`. With `undefined` it still points the ledger at the branch's open pull request (40r), then returns without touching the description.
+- Tests, new cases only: `src/runner/departures.test.ts` (2), `src/runner/order.test.ts` (1, the first test of `standingOf`), `src/runner/brief.test.ts` (1), `src/commands/record.test.ts` (1), `src/runner/driver.test.ts` (1), `src/runner/actions.test.ts` (1).
+
+**Decisions taken inside the slice.**
+
+- **One helper, `startsAStep`, in `record.ts`.** The rule "a recording session is not the start of a step of the order" is needed in six places, in four files. One function holds it, so a later reader of the record cannot forget it. It is a type guard. Where the other branch needs narrowing (the brief's set of recording session ids), the check is written out as `entry.kind === "step-started" && entry.records !== undefined`, because a type guard narrows the other branch to "not a `step-started` entry".
+- **`watchStep` gets `records` as a fifth, optional argument**, after `afterwards`, as the plan says ("gains an optional argument"). Only `recordApproval` passes it.
+- **The words come from `APPROVAL_WORDS`** in `actions.ts`, which the runner's own messages already use. So `timone record` says "the list of pieces" exactly as the runner does.
+- **One case beyond the six listed:** `actions.test.ts` › "is written down as recording that approval, so it is not read as its step running again". The six cases read hand-written records. Without this one, nothing would fail if `recordApproval` stopped writing `records`. It sits at `runnerActions`, the seam the existing tests of that file use, and reads the record file, as they do.
+- **On an unread record the ledger still follows the pull request.** Only the description is left alone. The 40r reason for following it (a new pull request's comments and merge must reach the runner) does not depend on the record.
+- **Two of the changes cannot be seen today, and no test shows them.** In `skippedBy`, `recordApproval` refuses unless a step at the approved stage ended well in this run. So a `step-started` at that stage with no `records` is always there already, and the answer does not change. In `deliveredUnchecked`, recording sessions are at `requirements` and `breakdown`, which never come after the check. Both were changed so that every reader of the record follows the same rule, as the plan asks.
+
+**Validation evidence.** Red before green for every case. Each red below is the failing assertion's line.
+
+| Case | Test | Red | Green |
+|---|---|---|---|
+| (1) | `departures.test.ts` › lists no departures for a feature run that followed the order, each approval followed by the session that writes it into its file | `expected '<!-- timone:departures -->\n**Steps t…' to be '<!-- timone:departures -->\nThe defau…'`. The section held "- Writing down what it needs and working out the pieces: ran out of order. No reason given." | pass |
+| (2) | `departures.test.ts` › lists only sorting when the same run left sorting out | `expected '<!-- timone:departures -->\n**Steps t…' to be '<!-- timone:departures -->\n**Steps t…'`. After the sorting line, the section had the same extra "ran out of order" line | pass |
+| (3) | `order.test.ts` › names no running step of the order while the session that writes an approval into its file runs (40v) | `expected { id: 'requirements', …(2) } to be undefined` | pass |
+| (4) | `brief.test.ts` › shows writing down what it needs as run once, not twice, when the session that writes its approval into the file has run | `expected '## Why you were woken\n\nIt is now 20…' to contain '3. writing down what it needs — ran o…'`. The line was "3. writing down what it needs — ran 2 times, cost $2.45." | pass |
+| (5) | `record.test.ts` (command) › names the session that writes an approval into its file as recording that approval, not as its step run again (40v) | `expected 'The record of scratch-app #12.\n\nSte…' to contain '- Recording the approval of the requi…'`. The output had two "- Writing down what it needs:" lines | pass |
+| (6) | `driver.test.ts` › leaves the pull request's description as it is, and logs why | `expected [ Array(1) ] to deeply equal []`. The description was rewritten to "The default order was followed.", in place of the "**Not checked.**" line it held | pass |
+| (1a) | `actions.test.ts` › is written down as recording that approval, so it is not read as its step running again | `expected [ { kind: 'step-started', …(5) } ] to deeply equal [ ObjectContaining{…} ]`. The entry had no `records` | pass |
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  56 passed (56)
+      Tests  1957 passed (1957)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+… (19 lines, all PASS)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+The suite had 1950 tests before the slice and has 1957 now: the 7 new cases above.
+
+- [x] Red→green evidence in the handoff: the table above.
+
+**What the re-check must know.**
+
+- **Only entries written from now on carry `records`.** A record written before this change still has a recording session with no `records`, and its run still lists the step as run out of order. Nothing rewrites old records. They are still read, since the field is optional.
+- **Two places outside this slice's list still name a recording session by its stage.** (a) When it ends, the driver wakes the runner with "The step writing down what it needs ended: it succeeded." (`stepEndedEvent` in `driver.ts` is given only the stage). (b) While it runs, the brief's "The running step" section says "A step is running: writing down what it needs." (the step's activity carries only the stage). The runner may read either one as the requirements step having run again. Neither reaches the pull request or `timone record`.
+- **The end of a recording session still counts as the end of a step at its stage** in two readers that the plan did not name. `standingOf`'s "done" list counts it, but that changes nothing, since the step was already done. In `recordApproval`, a second approval of the same thing in the same run is compared with the end of the recording session, not with the end of the step that wrote the file. This was so before 40v.
+- **The brief's step line no longer includes the recording session's cost.** That cost is still in the ticket's total ("Spent on this ticket"), and `timone record` shows it on its own line.
+- **With a broken record, the runner is still woken after a step**, with the step's result from the session, as before. Only the description is left alone. The log line names the broken line and says the list was left as it is.

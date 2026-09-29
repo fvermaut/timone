@@ -2,7 +2,7 @@ import type { Command } from "commander";
 
 import { stageLabel } from "../daemon/pipeline.js";
 import { loadManifest, ticketLimitOf, type Manifest } from "../manifest.js";
-import { STOPPED_BY_RUNNER } from "../runner/actions.js";
+import { APPROVAL_WORDS, STOPPED_BY_RUNNER } from "../runner/actions.js";
 import { joined } from "../runner/comments.js";
 import { allowanceOf, DEFAULT_LIMIT_USD, spentOn } from "../runner/limit.js";
 import { defaultOrder, TICKET_KINDS } from "../runner/order.js";
@@ -94,6 +94,10 @@ function list(heading: string, items: readonly string[]): string[] {
 /**
  * One line per step: its start, its end and its cost. A step's start and end
  * are two entries, matched by the session that ran it.
+ *
+ * The session that writes an approval into its file is named as recording
+ * that approval. It has the stage of the step that wrote the file, so naming
+ * it by its stage showed that step as run twice (40v).
  */
 function stepLines(entries: readonly RecordEntry[]): string[] {
   const lines: string[] = [];
@@ -105,7 +109,10 @@ function stepLines(entries: readonly RecordEntry[]): string[] {
         entry.runId === started.runId &&
         entry.sessionId === started.sessionId,
     );
-    const label = capitalised(stageLabel(started.stage));
+    const label =
+      started.records === undefined
+        ? capitalised(stageLabel(started.stage))
+        : `Recording the approval of ${APPROVAL_WORDS[started.records]}`;
     const start = `started ${when(started.at)}`;
     if (ended?.kind !== "step-ended") {
       // Still running, or its session died before the end was written. The

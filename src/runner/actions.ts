@@ -59,7 +59,7 @@ import {
 import { sinceLastBuild } from "./departures.js";
 import { isNamedPerson } from "./brief.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
-import { appendEntry, readRecord, type RecordEntry } from "./record.js";
+import { appendEntry, readRecord, startsAStep, type RecordEntry } from "./record.js";
 import type {
   CommentTimoneIssueInput,
   EndRunInput,
@@ -237,7 +237,9 @@ function asksSomething(body: string): boolean {
  *
  * Nothing is left out by a stage the order does not hold (a remediation on a
  * feature ticket), or by a stage this run has already started once: that is
- * going back, or running a step again, and neither leaves anything out.
+ * going back, or running a step again, and neither leaves anything out. The
+ * session that writes an approval into its file does not start its stage's
+ * step (40v).
  *
  * **Except the check of the work built last** (verification of phase 40).
  * Building again after the check is going back, but a step after the check
@@ -254,7 +256,7 @@ function skippedBy(
   const ofRun = entries.filter((entry) => "runId" in entry && entry.runId === runId);
   const done = (step: OrderStep): boolean =>
     step.stage !== undefined
-      ? ofRun.some((entry) => entry.kind === "step-started" && entry.stage === step.stage)
+      ? ofRun.some((entry) => startsAStep(entry) && entry.stage === step.stage)
       : ofRun.some((entry) => entry.kind === "approval" && entry.what === step.approval);
   const departed = (step: OrderStep): boolean =>
     ofRun.some((entry) => entry.kind === "departure" && entry.skipped.includes(step.id));
@@ -273,7 +275,7 @@ function skippedBy(
           (each) =>
             each.check === true &&
             done(each) &&
-            !since.some((entry) => entry.kind === "step-started" && entry.stage === each.stage) &&
+            !since.some((entry) => startsAStep(entry) && entry.stage === each.stage) &&
             !since.some((entry) => entry.kind === "departure" && entry.skipped.includes(each.id)),
         );
   if (recheck === undefined) return { steps: left };
@@ -281,7 +283,7 @@ function skippedBy(
 }
 
 /** What a person calls each thing a named person approves. */
-const APPROVAL_WORDS: Record<Approval, string> = {
+export const APPROVAL_WORDS: Record<Approval, string> = {
   requirements: "the requirements",
   pieces: "the list of pieces",
 };
@@ -644,12 +646,17 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
    * ends, the machine writes down how, and what it cost — the limit is counted
    * from that entry, so it cannot wait for anyone to ask — and only then tells
    * the driver, which wakes the runner.
+   *
+   * `records` is the approval the session writes into its file, when that is
+   * what it is for. It is written on the entry, so the record does not read
+   * the session as its stage's step running again (40v).
    */
   const watchStep = (
     stage: PipelineStage,
     session: StepSession,
     instructions: string,
     afterwards?: (result: StepResult) => Promise<void>,
+    records?: Approval,
   ): void => {
     write({
       kind: "step-started",
@@ -658,6 +665,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       stage,
       sessionId: session.sessionId,
       instructions,
+      ...(records === undefined ? {} : { records }),
     });
     deps.running.set(run.id, { stage, session, startedAt: deps.clock() });
 
@@ -919,8 +927,9 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
 
       // The approval goes into the file it approves, by a short session of
       // its own on the run's branch: the file is the record the next steps
-      // read (ADR-0006), and the ticket is not. It is a step like any other,
-      // so it is counted as running and its cost counts toward the limit.
+      // read (ADR-0006), and the ticket is not. It is counted as running, and
+      // its cost counts toward the limit, as a step's does. But it is written
+      // down as recording the approval, not as a step of the order (40v).
       const stage = APPROVED_STAGE[what];
       const request = sessionRequest({
         cwd: deps.root,
@@ -956,6 +965,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
               if (result.outcome.ok) await closeChunkZero();
             }
           : undefined,
+        what,
       );
       return {
         ok: true,

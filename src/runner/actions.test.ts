@@ -1439,3 +1439,21 @@ describe("the end of a run that a named person asked to stop", () => {
     expect(forge.closed).toEqual([]);
   });
 });
+
+describe("the session that writes an approval into its file (40v)", () => {
+  it("is written down as recording that approval, so it is not read as its step running again", async () => {
+    const { actions, store, run, record, wrote } = world(featureTicket(APPROVAL_THREAD));
+    store.claimBranch(run.id, BRANCH);
+    wrote(breakdownEnded(run.id));
+
+    await actions.recordApproval({
+      what: "pieces",
+      commentAt: "2026-09-27T11:58:40Z",
+      reason: "fvermaut approved the list of pieces.",
+    });
+
+    expect(record().filter((entry) => entry.kind === "step-started")).toEqual([
+      expect.objectContaining({ stage: "breakdown", records: "pieces" }),
+    ]);
+  });
+});

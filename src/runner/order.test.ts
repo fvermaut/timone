@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { ticketKindOf } from "./order.js";
+import { defaultOrder, standingOf, ticketKindOf } from "./order.js";
+import type { RecordEntry } from "./record.js";
 
 /** A ticket that is neither a step of an initiative nor a fix to a reviewed pull request. */
 const PLAIN = { isStep: false, isRemediation: false };
@@ -39,5 +40,25 @@ describe("the kind of a ticket, read off its labels", () => {
     expect(ticketKindOf(["timone"], { isStep: true, isRemediation: true })).toBe(
       "remediation",
     );
+  });
+});
+
+describe("where a run stands against its order", () => {
+  it("names no running step of the order while the session that writes an approval into its file runs (40v)", () => {
+    const run = "scratch-app#12/1";
+    const entries: RecordEntry[] = [
+      { kind: "step-started", at: "2026-09-27T10:00:00Z", runId: run, stage: "triage", sessionId: "s1" },
+      { kind: "step-ended", at: "2026-09-27T10:03:00Z", runId: run, stage: "triage", sessionId: "s1", ok: true, costUsd: 0.4 },
+      { kind: "step-started", at: "2026-09-27T10:05:00Z", runId: run, stage: "clarification", sessionId: "s2" },
+      { kind: "step-ended", at: "2026-09-27T10:15:00Z", runId: run, stage: "clarification", sessionId: "s2", ok: true, costUsd: 1.1 },
+      { kind: "step-started", at: "2026-09-27T10:20:00Z", runId: run, stage: "requirements", sessionId: "s3" },
+      { kind: "step-ended", at: "2026-09-27T10:40:00Z", runId: run, stage: "requirements", sessionId: "s3", ok: true, costUsd: 2.4 },
+      { kind: "approval", at: "2026-09-27T11:00:00Z", runId: run, what: "requirements", by: "fvermaut", commentAt: "2026-09-27T10:58:00Z" },
+      { kind: "step-started", at: "2026-09-27T11:00:01Z", runId: run, stage: "requirements", sessionId: "s4", records: "requirements" },
+    ];
+
+    const standing = standingOf(entries, run, defaultOrder("feature"));
+
+    expect(standing.running).toBeUndefined();
   });
 });

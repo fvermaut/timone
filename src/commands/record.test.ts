@@ -412,4 +412,63 @@ describe("renderRecord", () => {
     expect(text).toContain("Decisions:\n- None.");
     expect(text).toContain("Steps left out of the default order:\n- None.");
   });
+
+  it("names the session that writes an approval into its file as recording that approval, not as its step run again (40v)", () => {
+    const entries: RecordEntry[] = [
+      {
+        kind: "step-started",
+        at: "2026-09-27T10:01:00.000Z",
+        runId: "scratch-app#12/1",
+        stage: "requirements",
+        sessionId: "s-1",
+      },
+      {
+        kind: "step-ended",
+        at: "2026-09-27T10:14:00.000Z",
+        runId: "scratch-app#12/1",
+        stage: "requirements",
+        sessionId: "s-1",
+        ok: true,
+        costUsd: 1.2,
+      },
+      {
+        kind: "approval",
+        at: "2026-09-27T10:31:00.000Z",
+        runId: "scratch-app#12/1",
+        what: "requirements",
+        by: "fvermaut",
+        commentAt: "2026-09-27T10:30:00.000Z",
+      },
+      {
+        kind: "step-started",
+        at: "2026-09-27T10:31:00.000Z",
+        runId: "scratch-app#12/1",
+        stage: "requirements",
+        sessionId: "s-2",
+        records: "requirements",
+      },
+      {
+        kind: "step-ended",
+        at: "2026-09-27T10:33:00.000Z",
+        runId: "scratch-app#12/1",
+        stage: "requirements",
+        sessionId: "s-2",
+        ok: true,
+        costUsd: 0.05,
+      },
+    ];
+
+    const result = renderRecord({
+      project: "scratch-app",
+      ticket: 12,
+      record: read(entries),
+      limitUsd: 150,
+    });
+
+    const text = result.ok ? result.value : result.error;
+    expect(text).toContain(
+      "- Recording the approval of the requirements: started 2026-09-27 10:31 UTC, ended 2026-09-27 10:33 UTC, cost $0.05.",
+    );
+    expect(text.split("\n").filter((line) => line.startsWith("- Writing down what it needs:"))).toHaveLength(1);
+  });
 });

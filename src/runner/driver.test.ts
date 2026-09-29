@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -637,5 +637,58 @@ describe("RunnerDriver — a run refused a step because its project was busy (40
     await driver.drain();
 
     expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([]);
+  });
+});
+
+describe("RunnerDriver — when a step ends and the ticket's record cannot be read (40v)", () => {
+  it("leaves the pull request's description as it is, and logs why", async () => {
+    // The Standards review of phase 40, finding 1: an unread record counted
+    // as an empty one, and "The default order was followed." replaced the
+    // list of departures the pull request held.
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-"));
+    tempDirs.push(root);
+    const store = RunStore.open(join(root, ".timone", "state.json"), {
+      now: () => "2026-09-27T14:00:00Z",
+    });
+    const run = builtChore(store, root);
+    // The six entries above are lines 1 to 6; line 7 is cut short.
+    appendFileSync(join(root, ".timone", "records", "scratch-app", "12.jsonl"), '{"kind":"step-sta\n');
+    const { adapter, descriptions } = forge(
+      [
+        "<!-- timone:departures -->",
+        "**Not checked.** No session other than the one that built this work checked it. " +
+          "Reason: The change only fixes a spelling mistake in the README.",
+        "<!-- /timone:departures -->",
+        "",
+        "## What changed",
+      ].join("\n"),
+    );
+    const { sessions, wakes } = fakeWakes();
+    const logged: string[] = [];
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: async () => {
+        throw new Error("no step starts in this test");
+      },
+      timonePin: async () => undefined,
+      clock: () => "2026-09-27T14:00:00Z",
+      log: (line) => logged.push(line),
+    });
+
+    await driver.stepEnded(run.id, "delivery", {
+      outcome: { sessionId: "step-session-4", ok: true },
+    });
+    await driver.drain();
+
+    expect(descriptions).toEqual([]);
+    expect(logged).toContainEqual(expect.stringContaining("line 7 is not JSON"));
+    expect(store.get(run.id)?.pr).toBe(21);
+    expect(wakes).toHaveLength(1);
   });
 });

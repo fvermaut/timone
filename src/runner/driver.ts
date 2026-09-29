@@ -887,6 +887,11 @@ export class RunnerDriver {
    * **A forge that fails here does not stop the wake.** The description is
    * brought up to date again after every step; the runner not being told
    * that its step ended would leave the run waiting with nothing to wake it.
+   *
+   * **A record that cannot be read leaves the list of departures as it is**
+   * (40v). Reading it as an empty record put "The default order was
+   * followed." in place of the list the pull request held. The failure is
+   * logged, and the runner is still woken.
    */
   private async afterStep(runId: string, stage: PipelineStage, result: StepResult): Promise<void> {
     this.lastCheck.delete(runId);
@@ -894,14 +899,18 @@ export class RunnerDriver {
     if (run === undefined || !UNSETTLED.includes(run.status)) return;
     this.parkForRunner(run, AFTER_STEP_WAIT, stage);
     const read = readRecord(this.deps.root, run.project, run.ticket);
-    const entries = read.ok ? read.value : [];
-    if (!read.ok) this.deps.log(`runner ${runId} — ${read.error.message}`);
+    if (!read.ok) {
+      this.deps.log(
+        `runner ${runId} — ${read.error.message} The pull request's list of departures is left as it is.`,
+      );
+    }
+    const entries = read.ok ? read.value : undefined;
     try {
       await this.rewriteDepartures(runId, entries);
     } catch (error) {
       this.deps.log(`runner ${runId} — the pull request's description was not brought up to date: ${oneLine(error)}`);
     }
-    const ended = lastStepEnded(entries, runId, stage) ?? {
+    const ended = lastStepEnded(entries ?? [], runId, stage) ?? {
       ok: result.outcome.ok,
       ...(result.outcome.error === undefined ? {} : { error: result.outcome.error }),
     };
@@ -916,9 +925,14 @@ export class RunnerDriver {
    * added — is kept as it was.
    *
    * Worked out from the record, which only the machine writes, and never
-   * from what the runner says of itself.
+   * from what the runner says of itself. With no record (`entries` is
+   * undefined, because it could not be read), the ledger still follows the
+   * pull request, and the description is not touched.
    */
-  private async rewriteDepartures(runId: string, entries: readonly RecordEntry[]): Promise<void> {
+  private async rewriteDepartures(
+    runId: string,
+    entries: readonly RecordEntry[] | undefined,
+  ): Promise<void> {
     const run = this.deps.store.get(runId);
     if (run?.branch === undefined) return;
     const project = this.projectOf(run);
@@ -931,6 +945,7 @@ export class RunnerDriver {
     // the new one's comments and its merge would otherwise never reach the
     // runner, and the run would wait with nothing to wake it.
     if (run.pr !== found.number) this.deps.store.recordPullRequest(run.id, found.number);
+    if (entries === undefined) return;
     const ticket = await adapter.getTicket(project, run.ticket);
     const kind = ticketKindOf(ticket.labels, this.contexts.get(run.id) ?? NO_CONTEXT);
     const section = departureSection(departuresOf(entries, run.id, defaultOrder(kind)));

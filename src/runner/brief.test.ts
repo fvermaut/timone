@@ -629,3 +629,19 @@ describe("the departures the brief lists, before the run has reached its order (
     expect(brief.prompt).not.toContain("did not run.");
   });
 });
+
+describe("the steps the brief shows, once an approval is written into its file (40v)", () => {
+  it("shows writing down what it needs as run once, not twice, when the session that writes its approval into the file has run", () => {
+    const record: RecordEntry[] = [
+      { kind: "step-started", at: "2026-09-27T10:20:00Z", runId: RUN_ID, stage: "requirements", sessionId: "s3" },
+      { kind: "step-ended", at: "2026-09-27T10:40:00Z", runId: RUN_ID, stage: "requirements", sessionId: "s3", ok: true, costUsd: 2.4 },
+      { kind: "approval", at: "2026-09-27T11:00:00Z", runId: RUN_ID, what: "requirements", by: "fvermaut", commentAt: "2026-09-27T10:58:00Z" },
+      { kind: "step-started", at: "2026-09-27T11:00:01Z", runId: RUN_ID, stage: "requirements", sessionId: "s4", records: "requirements" },
+      { kind: "step-ended", at: "2026-09-27T11:02:00Z", runId: RUN_ID, stage: "requirements", sessionId: "s4", ok: true, costUsd: 0.05 },
+    ];
+
+    const brief = buildBrief(briefInput({ kind: "feature", record }));
+
+    expect(brief.prompt).toContain("3. writing down what it needs — ran once, cost $2.40.");
+  });
+});
