@@ -235,3 +235,13 @@
 **Did instead:** fvermaut chose "fix first". A new sub-phase, 40u, fixes items 1–5: a run refused as busy is woken when the project frees; a cancel on a runner project holds the ticket and reports its success truly; the brief finds the list of pieces under its real name; the one-turn check runs with no tools; the first brief shows no departures. Items 7 and 8 are filed as Timone issues; items 6 and 9 are the verification report's own to carry. A fresh check re-runs the probes afterwards.
 
 **Why:** Items 1–3 would break the first real use on scratch-app: a second ticket stalls, a cancelled ticket starts again by itself, and tickets 1 to 9 lose their list of pieces. Items 4 and 5 cost a line each: a check handed a person's words must not hold a shell, and a brief that reports nine departures before anything ran misleads the runner's first choice.
+
+## 2026-09-29 — timone#165, execution (after delivery)
+
+**Kind:** plan step
+
+**Agreed:** Phase 40 was delivered as pull request #173 at `865fb36`, with two code reviews listed on it for the person's judgement.
+
+**Did instead:** fvermaut chose "fix first". Four new sub-phases, 40v–40y, fix the four Spec review findings named to him as the ones that matter most (1, 2, 3 and 6), and Standards finding 1, which makes the pull request say the same untrue thing as Spec finding 1 by a second path. The other findings stay listed on the pull request. A fresh check re-runs the probes afterwards, and the pull request is delivered again.
+
+**Why:** Each of the four breaks a MUST of PRD-05 on a path the watched run did not reach: a run that records an approval is listed as out of order (R5); a failed run on a runner project has no way out except a terminal command (R9, R16); a closed pull request lets a run drop unmerged work (R4); a build on ivtrends holds up scratch-app's runner (R15).

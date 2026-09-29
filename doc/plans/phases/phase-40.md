@@ -575,6 +575,117 @@ npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
 
 ---
 
+### Sub-phase 40v: recording an approval is not a step out of order
+
+> ✏ 2026-09-29 (build, timone#165): added after delivery, at fvermaut's word ("fix first"), from the Spec review in [phase-40-delivery.md](reports/phase-40-delivery.md), finding 1, and the Standards review, finding 1. Both make the pull request say something untrue about the order. The phase reopens for 40v–40y; a fresh check re-runs the probes afterwards, and the pull request is delivered again. Recorded in [phase-40-departures.md](reports/phase-40-departures.md).
+
+**[MODIFY]** `src/runner/record.ts` — the `step-started` entry gains an optional `records` field: the approval (`requirements` or `pieces`) that the session writes into its file. The allowed values come from the same list the `approval` entry's `what` uses, not a second copy.
+**[MODIFY]** `src/runner/actions.ts` — `recordApproval` writes `records: what` on the `step-started` entry of the session that writes the approval into the file (through `watchStep`, which gains an optional argument for it). In `skippedBy`, a session with `records` is not the start of a step of the order.
+**[MODIFY]** `src/runner/departures.ts` — `stepIndexOf` and `deliveredUnchecked` ignore a `step-started` entry that has `records`. The approval step is already reached by the `approval` entry.
+**[MODIFY]** `src/runner/order.ts` — `standingOf` does not show a session with `records` as the running step of the order.
+**[MODIFY]** `src/runner/brief.ts` — a step's line ("ran once", "ran 2 times", "running now") does not count a session with `records`, nor the `step-ended` entry with the same session id.
+**[MODIFY]** `src/commands/record.ts` — a session with `records` is shown as recording that approval, not as a second run of the step whose stage it has.
+**[MODIFY]** `src/runner/driver.ts` — **(Standards finding 1)** when the ticket's record cannot be read after a step ends, the pull request's list of departures is left as it is, and the failure is logged. Today an unread record counts as an empty one, and "The default order was followed." replaces an honest list.
+**[MODIFY]** the matching test files — new cases only.
+
+**Seams under test (TDD):** `departuresOf` and `departureSection`, `standingOf`, `buildBrief`, the record command's text function, and `RunnerDriver` over a record that cannot be read — all pure or already driven with fakes. Red-green: (1) a feature run that followed the order exactly, with both approvals recorded and each followed by its recording session, has no departures, and its section says "The default order was followed."; (2) the same run with sorting left out lists sorting only; (3) while a recording session runs, `standingOf` names no running step of the order; (4) the brief shows "writing down what it needs" as run once, not twice; (5) `timone record` names the recording session as recording the approval; (6) after a step ends on a ticket whose record has a broken line, the pull request's description is not changed.
+
+> Sub-phase 40u must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run; echo "exit: $?"                             # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+
+---
+
+### Sub-phase 40w: a pull request closed without merging does not let the run drop its work
+
+> ✏ 2026-09-29 (build, timone#165): added after delivery, from the Spec review, finding 6 (PRD-05.R4). R4's first clause refuses to end a run whose branch holds work with no *open* pull request; a closed one is not open.
+
+**[MODIFY]** `src/runner/actions.ts` — `endRun` refuses when the branch has commits not on the default branch and its pull request was closed without merging, exactly as when it has no pull request: it ends only on a named person's comment asking to stop (`stopCommentAt`, checked as today). The refusal says the pull request was closed without merging, and names the two ways the run can end: a new pull request that is merged, or a named person asking on the ticket to stop. A merged pull request still ends the run. A closed one on a branch with no commits ahead still ends it.
+**[MODIFY]** `src/runner/brief.ts` — the rule for a pull request closed without merging gains: when no comment says why it was closed, ask on the ticket whether to do the work again or to stop, and do not end the run until a named person says to stop. The rule that a run waits on its pull request no longer says a closed one ends the run.
+**[MODIFY]** the matching test files — new cases only. An existing case that expects a closed pull request to end a run whose branch is ahead is changed to expect the refusal, and the handoff names it.
+
+**Seams under test (TDD):** `runnerActions` over the fake adapter, as the existing `endRun` cases are; `buildBrief` for the rule text. Red-green: (1) branch ahead, pull request closed without merging, no stop comment: refused, the run stays; (2) the same with a named person's stop comment: the run is cancelled, as with no pull request; (3) the same with a stranger's comment: refused; (4) pull request merged, branch ahead: the run ends, as today; (5) pull request closed, branch not ahead: the run ends.
+
+> Sub-phase 40v must be complete before starting this sub-phase (both change `actions.ts` and `brief.ts`).
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run; echo "exit: $?"                             # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+
+---
+
+### Sub-phase 40x: a runner project's run is never failed; a merge that fails wakes the runner
+
+> ✏ 2026-09-29 (build, timone#165): added after delivery, from the Spec review, finding 2 (PRD-05.R9, R11, R16). On a runner project nothing wakes the runner for a failed run, `timone retry` refuses there, and the failure comment points at a standing note a runner project does not have.
+
+**[MODIFY]** `src/daemon/chunk-zero.ts` — the merge of the approved list of pieces can be asked for without failing the run: a form that returns the reason it did not merge and writes nothing, beside the form the current daemon uses, which fails the run and posts `failedComment` exactly as today.
+**[MODIFY]** `src/runner/actions.ts` — `closeChunkZero` uses the form that writes nothing. When the merge, or opening the step tickets, does not succeed, the run is **not** failed: it stays on the runner's wait, the record gets a `notice` naming what failed and why, the ticket gets one comment in plain words saying what failed and that a reply on the ticket is read, and the runner is woken with an event naming the failure.
+**[MODIFY]** `src/runner/comments.ts` — that comment. It names no command and no standing note.
+**[MODIFY]** `src/runner/driver.ts` — only as needed to deliver that event on the wake that follows the step's end.
+**[MODIFY]** the matching test files — new cases only.
+
+Before building, search every `store.fail` call for one a runner project's run can reach. `src/daemon/poll.ts`'s reclaim already hands a runner run back to the runner (40h); the spawner's calls in `session.ts` are the current daemon's. If another reachable call is found, it is changed the same way in this slice, and the handoff names it.
+
+**Seams under test (TDD):** `runnerActions` with a fake adapter whose merge refuses (a conflict) and, separately, whose ticket creation throws; `mergeChunkZero`'s current-daemon form, whose existing tests must pass unchanged. Red-green: (1) on a runner project, an approval of the list of pieces whose merge conflicts leaves the run `parked` on the runner's wait, not `failed`; the record holds a notice naming the conflict; one comment is posted, with no command in it; the next wake's events name the failure; (2) the same when opening the step tickets fails; (3) the current daemon's `mergeChunkZero` still fails the run and posts `failedComment`.
+
+> Sub-phase 40w must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run; echo "exit: $?"                             # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+grep -n "store.fail\|\.fail(" src/runner/*.ts | grep -v test   # expect no line
+```
+
+- [ ] Red→green evidence in the handoff.
+
+---
+
+### Sub-phase 40y: a step running on a current-daemon project does not hold up the runner's projects
+
+> ✏ 2026-09-29 (build, timone#165): added after delivery, from the Spec review, finding 3 (PRD-05.R15). The poll cycle walks the projects one after another, and on a current-daemon project it waits for the whole session. So while ivtrends builds, scratch-app's runner is not woken. The current daemon's own path must not change: ivtrends runs on it.
+
+**[MODIFY]** `src/daemon/poll.ts` —
+- `pollProjects` walks the runner's projects first, then the current daemon's. Their turns never wait for a session, so they finish before any daemon project can block the cycle.
+- While the rest of the cycle runs, the runner's projects get a turn of their own every poll interval, on a clock of their own, built the way `watchForCancellations` is: one look at a time, errors caught and reported as lines, the timer unref'd and stopped before the cycle reports. A turn is `pollProject` for each runner project. It does not reclaim and does not release previews: those stay once per cycle.
+- A daemon project's turn is unchanged, and so is a manifest with no runner project.
+**[MODIFY]** `src/daemon/poll.test.ts` — new cases only.
+
+Human requests other than a cancel (`timone takeover`) are still carried out at the start of the next cycle. A cancel already has its own clock (ADR-0047). This limit is written in the handoff for the delivery report.
+
+**Seams under test (TDD):** `pollOnce` with a fake spawner whose `spawn` does not resolve until the test releases it, fake timers, and a stub runner driver, as the existing `pollOnce` cases are built. Red-green: (1) a daemon project whose session is running, and a runner project: within one poll interval, the runner project's turn runs again (its `tick` is called a second time) while the daemon session is still running; (2) its turns stop when the cycle ends; (3) two turns never overlap; (4) with only daemon projects, the cycle behaves as today (the existing cases pass unchanged); (5) the runner's projects are walked before the daemon's in one cycle.
+
+> Sub-phase 40x must be complete before starting this sub-phase.
+
+#### Agent Validation Steps
+
+```bash
+npx tsc --noEmit; echo "exit: $?"                          # expect 0
+npx vitest run; echo "exit: $?"                             # expect 0
+npm run --silent replay -- --dry; echo "exit: $?"           # expect 0, 19 of 19
+```
+
+- [ ] Red→green evidence in the handoff.
+- [ ] A fresh check re-runs the phase's probes on the result, after 40y, and adds a short section to the verification report.
+
+---
+
 ### Sub-phase 40l: scratch-app moves to the runner, and one watched run
 
 **[MODIFY]** `timone.yaml` — top-level `operator: fvermaut`; `scratch-app` gains `driver: runner`. ivtrends and timone stay on the current daemon.
@@ -643,6 +754,10 @@ No behaviour-carrying code in this sub-phase, so no seams are declared; validati
 40s → 40r                 a map closes with its last piece; the wait says what it waits on; where a key goes  (✏ 2026-09-28: added at build)
 40t → 40s                 a named person's plain "stop" can end a run with no pull request  (✏ 2026-09-28: added at build)
 40u → 40t                 five faults the check found outside its verdicts  (✏ 2026-09-29: added after verification)
+40v → 40u                 recording an approval is not a step out of order  (✏ 2026-09-29: added after delivery)
+40w → 40v                 a pull request closed without merging does not let the run drop its work  (✏ 2026-09-29: added after delivery)
+40x → 40w                 a runner project's run is never failed; a failed merge wakes the runner  (✏ 2026-09-29: added after delivery)
+40y → 40x                 a current-daemon step does not hold up the runner's projects  (✏ 2026-09-29: added after delivery)
 40l → 40h, 40j, 40n, 40o, 40q, 40r  scratch-app moves; the watched run
 40m → 40l                 README
 ```
