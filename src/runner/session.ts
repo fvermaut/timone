@@ -28,6 +28,7 @@ import {
 } from "./actions.js";
 import { buildBrief, type StepActivity, type TimoneIssue } from "./brief.js";
 import { gatherFacts } from "./facts.js";
+import { isOverLimit } from "./limit.js";
 import { ticketKindOf } from "./order.js";
 import { appendEntry, readRecord, type RecordEntry } from "./record.js";
 import {
@@ -158,8 +159,8 @@ function putOnRunnersWait(deps: RunnerActionDeps, run: Run, waitingOn: string): 
 /**
  * How one wake ended.
  *
- * - `not-woken` — the run had ended, or was queued, so no session started
- *   and nothing was written.
+ * - `not-woken` — the run had ended, or was queued, or its ticket has spent
+ *   its limit, so no session started and nothing was written.
  * - `ended` — the session ran to its end. What the runner did is in the
  *   record, as its actions wrote it.
  * - `failed` — the session did not run to its end. `retry` says whether
@@ -207,6 +208,13 @@ export async function wakeRunner(
       `project "${actionDeps.project.name}" is not in the manifest, so its runner cannot be woken`,
     );
   }
+  // **At the limit, no runner session starts, whoever asks** (R8). The
+  // driver asks nothing for a ticket over its limit, but a try after a
+  // failure and a wake queued behind another are asked for here, after a
+  // session that may have been the one to spend the last of it. The driver
+  // tells the ticket, once, on its next look.
+  const read = readRecord(actionDeps.root, actionDeps.project.name, run.ticket);
+  if (read.ok && isOverLimit(read.value, ticketLimitOf(config))) return { kind: "not-woken" };
   // A run just picked up is put on the runner's wait before the runner
   // sees it. The runner may decide at once that there is nothing to do, and
   // the ledger lets a run end only from `active` or `parked`; and a step it
@@ -331,8 +339,19 @@ async function converse(
     // The SDK throws when it cannot start the model's session or loses it
     // on the way: that is what trying again is for. A login that is refused
     // is refused again, so it waits for a person instead.
+    //
+    // **What the session cost is kept, whatever ended it** (R8). The SDK
+    // also throws after a last message that was an error — a request the
+    // model service refused, the session's own spending cap — and that
+    // message already holds what the session cost. The ticket's limit
+    // counts it like any other session's.
     const text = oneLine(error);
-    return { kind: "failed", retry: technicalFault(text) !== "credentials", costUsd: 0, error: text };
+    return {
+      kind: "failed",
+      retry: technicalFault(text) !== "credentials",
+      costUsd: result?.total_cost_usd ?? 0,
+      error: text,
+    };
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", stop);

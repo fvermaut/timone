@@ -15,7 +15,7 @@ import type { Manifest } from "../manifest.js";
 import { SessionProgress } from "../daemon/progress.js";
 import { RunStore, type Run } from "../daemon/runs.js";
 import { RunningSteps, type RunnerActionDeps } from "./actions.js";
-import { readRecord, type RecordEntry } from "./record.js";
+import { appendEntry, readRecord, type RecordEntry } from "./record.js";
 import { RUNNER_SERVER_NAME } from "./tools.js";
 import { RunnerSessions, wakeRunner, type RunQuery } from "./session.js";
 
@@ -106,12 +106,13 @@ interface ToolCall {
 /**
  * What the scripted runner does when it is started once: call its tools and
  * end with a cost; fail by throwing, as the SDK throws when it cannot reach
- * the model; or say exactly the SDK messages given.
+ * the model; or say exactly the SDK messages given, then throw `thenThrows`
+ * when it is set, as the SDK does after a last message that was an error.
  */
 type Play =
   | { kind: "calls"; calls: ToolCall[]; costUsd: number; until?: Promise<void> }
   | { kind: "throws"; error: string }
-  | { kind: "says"; messages: unknown[] };
+  | { kind: "says"; messages: unknown[]; thenThrows?: string };
 
 /** A session that makes no tool call and costs `costUsd`. */
 function quiet(costUsd = 0.1): Play {
@@ -145,6 +146,7 @@ function scriptedRunner(plays: Play[]) {
     if (next.kind === "throws") throw new Error(next.error);
     if (next.kind === "says") {
       yield* next.messages;
+      if (next.thenThrows !== undefined) throw new Error(next.thenThrows);
       return;
     }
     const server = options.mcpServers?.[RUNNER_SERVER_NAME];
@@ -728,6 +730,82 @@ describe("a runner that fails", () => {
       costUsd: 5.02,
       error: "error_max_budget_usd: Reached maximum budget ($5)",
     });
+  });
+});
+
+describe("what a runner session that fails costs the ticket", () => {
+  it("keeps the cost of a session the SDK ended by throwing after its last message, which was an error", async () => {
+    const w = world();
+    const runner = scriptedRunner([
+      {
+        kind: "says",
+        messages: [
+          {
+            type: "result",
+            subtype: "error_max_budget_usd",
+            is_error: true,
+            total_cost_usd: 5.02,
+            errors: ["Reached maximum budget ($5)"],
+          },
+        ],
+        thenThrows: "Claude Code returned an error result: Reached maximum budget ($5)",
+      },
+    ]);
+
+    await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+      w.run,
+      ["fvermaut commented on the ticket at 2026-09-27T11:58:40Z."],
+    );
+
+    expect(w.record().at(-1)).toMatchObject({ kind: "runner-ended", ok: false, costUsd: 5.02 });
+  });
+
+  it("starts no second session once a failed session took the ticket over its limit, though the failure is one that is tried again", async () => {
+    vi.useFakeTimers();
+    const w = world();
+    appendEntry(w.root, PROJECT.name, 12, {
+      kind: "step-ended",
+      at: "2026-09-27T11:00:00.000Z",
+      runId: w.run.id,
+      stage: "triage",
+      sessionId: "a7c0e2d4-triage",
+      ok: true,
+      costUsd: 148,
+    });
+    const runner = scriptedRunner([
+      {
+        kind: "says",
+        messages: [
+          {
+            type: "result",
+            subtype: "success",
+            is_error: true,
+            total_cost_usd: 4.002,
+            result: "API Error: 400 The request was refused.",
+          },
+        ],
+        thenThrows: "Claude Code returned an error result: API Error: 400 The request was refused.",
+      },
+      quiet(0.2),
+    ]);
+    const sessions = new RunnerSessions({ runQuery: runner.runQuery, actionsFor: w.actionDeps });
+
+    const woken = sessions.wake(w.run, ["fvermaut commented on the ticket at 2026-09-27T11:58:40Z."]);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await woken;
+
+    expect(runner.started).toHaveLength(1);
+    expect(w.record().filter((entry) => entry.kind === "runner-ended")).toEqual([
+      {
+        kind: "runner-ended",
+        at: "2026-09-27T12:00:00.000Z",
+        runId: "scratch-app#12/1",
+        ok: false,
+        costUsd: 4.002,
+        error: "Claude Code returned an error result: API Error: 400 The request was refused.",
+      },
+    ]);
   });
 });
 
