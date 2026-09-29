@@ -1956,3 +1956,66 @@ The suite had 1966 tests before the slice (40w's count after its follow-up) and 
 - **`timone record` does not show notices,** so it does not show this failure. It lists the runner's `record_approval` decision and the steps. `src/commands/record.ts` is outside this slice.
 - **The event is told only on the wake that follows the step's end.** If that wake is never asked for, for example because the daemon stopped after the step ended, the failure's event is not told later. The ticket's comment and the record's notice are still there. The step's own event has the same limit today.
 - The current daemon's path is unchanged. `session.ts` still calls `mergeChunkZero`, and its delegators and tests were not touched.
+
+## 40y — a step running on a current-daemon project does not hold up the runner's projects
+
+**Built.** The poll cycle now walks the runner's projects first, then the current daemon's. A runner project's turn never waits for a session, so these turns finish before a daemon project can hold the cycle. Then, while the daemon projects are walked, each runner project gets a turn of its own every poll interval, on a clock of its own. A turn on that clock is `pollProject` only, with a fresh thread reader: no reclaim and no previews, which stay once per cycle. It is built as `watchForCancellations` is: one turn at a time, an error is a line on the cycle's errors and in the log, the timer is unref'd, and it is stopped, waiting for a turn under way, before the cycle reports. With no runner project, nothing changes: the walk is in manifest order and no clock starts. (Spec review, finding 3; PRD-05.R15.)
+
+**Files touched.**
+
+- `src/daemon/poll.ts` — `pollProjects`: the body of the old loop is now a local `turn`, unchanged. The manifest's projects are split by `driverOf` into runner projects and daemon projects. The runner projects are walked first; then `turnRunnerProjects` is started; the daemon projects are walked inside a `try`, and the clock is stopped in its `finally`. New `turnRunnerProjects` and its return type `RunnerTurns`. Two doc comments gain a sentence: `PollDeps.pollIntervalMs` (it also sets the clock's interval) and `pollProjects` (the clock is started and stopped in there).
+- `src/daemon/poll.test.ts` — `vi` added to the `vitest` import, and one new `describe` at the end with 7 cases. No existing case changed.
+
+**Decisions taken inside the slice.**
+
+1. **The clock starts after the runner projects' own turns in the cycle, not at the start of the cycle.** So a cycle's own turn and a clock turn on the same runner project never run at the same time. Two turns at once on one project could ask the driver twice for the same run. The clock runs only while the daemon projects are walked, which is the part of the cycle that can wait for a session. Its first turn comes one poll interval after that walk begins.
+2. **No clock when the manifest names no runner project.** `turnRunnerProjects` returns a stop that does nothing, as `watchForCancellations` does with no state path. So the current daemon's cycle has no new timer at all.
+3. **Each project's turn on the clock is caught on its own**, with the same line as the cycle's (`<project>: <message>`). One project that fails does not cost the next one its turn, and the clock's promise never rejects.
+4. **`watchForCancellations` was not changed.** The two clocks have the same shape (about 25 lines). A shared helper would have meant changing the cancel watch, which is on the current daemon's path. It is the second copy, which the code-smell standard tolerates; a later tidy could share them.
+5. **The stub runner is the real `RunnerDriver` with its `tick` replaced on the instance**, built with `runnerFor` and `fakeWakes` as the 40h and 40u cases are. `RunnerDriver` has private fields, so a plain object cannot stand in for it without a cast. Only `tick` is replaced; `stop`, `reclaimed` and `terminalEnded` are the real ones.
+6. **Three cases beyond the five listed.** "lets a look already under way finish before the cycle reports" covers the `await` in `stop`. "reports a look that fails as a line on the cycle's errors" covers the catch. "gives the daemon project no look of its own on that clock" is the guard for "a daemon project's turn is unchanged" when both kinds are in the manifest. Plan case (4), with only daemon projects, is the existing 237 cases of `poll.test.ts`, which pass unchanged.
+
+**Validation evidence.** The seam is `pollOnce` with a spawner whose `spawn` does not return until the test ends the session, Vitest's fake timers, and the stub runner. Every case was written first and run red before `poll.ts` was changed. A case marked *guard* passed on that run. For each case, a temporary break was then made in the finished code to show that the case catches it. Each break was undone, and `grep -c MUTATION src/daemon/poll.ts` gave 0 each time.
+
+| Plan case | Test (in `poll.test.ts` › a session on a current-daemon project does not hold up the runner's projects (40y)) | Red before the change | Break after the change, and its red | Green |
+| --- | --- | --- | --- | --- |
+| (1) | looks at the runner's project again within one poll interval, while the daemon project's session still runs | `expected [ 'tick scratch-app', …(1) ] to deeply equal [ 'tick scratch-app', …(2) ]` (no second look at 60 s) | — | pass |
+| (2) | stops looking at it once the cycle has ended | same as (1) | `stop` does not clear the timer → `expected [ 'tick scratch-app', …(7) ] to deeply equal [ 'tick scratch-app', …(2) ]` | pass |
+| (2) | lets a look already under way finish before the cycle reports | same as (1) | `stop` does not wait for the turn → `expected true to be false` (the cycle reported while the look was held back) | pass |
+| (3) | never starts a look while the one before it is still under way | same as (1) | the one-at-a-time check taken out → `expected [ 'tick scratch-app', …(7) ] to deeply equal [ 'tick scratch-app', …(2) ]` | pass |
+| errors | reports a look that fails as a line on the cycle's errors, and still looks again an interval later | `expected [] to deeply equal [ Array(1) ]` | the catch taken out → `expected [] to deeply equal [ Array(1) ]`, and Vitest reports an unhandled rejection "the forge did not answer" | pass |
+| (4) | gives the daemon project no look of its own on that clock: its tickets are listed once, and its session started once — *guard* | passed | the clock given every project → `expected [ 'ivtrends', 'ivtrends' ] to deeply equal [ 'ivtrends' ]` (four other 40y cases failed too, with a second `spawn ivtrends#4/1`) | pass |
+| (5) | walks the runner's project before the daemon's, though the manifest lists the daemon's first | `expected [ 'spawn ivtrends#4/1' ] to deeply equal [ 'tick scratch-app', …(1) ]` | the walk put back in manifest order → the same red | pass |
+
+In cases (1) to (4) and the error case, the manifest lists the runner project first, so their red shows the missing clock and not the order. Case (5) lists the daemon project first.
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run; echo "exit: $?"
+ Test Files  57 passed (57)
+      Tests  1977 passed (1977)
+exit: 0
+$ npm run --silent replay -- --dry; echo "exit: $?"
+Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry).
+… (19 lines, all PASS)
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+The suite had 1970 tests before the slice (40x's count) and has 1977 now: the 7 new cases above, all in `poll.test.ts` (237 before, 244 now). `poll.test.ts` was run five times in a row after the change, and passed each time.
+
+- [x] Red→green evidence in the handoff: the table above.
+
+**What the re-check must know.**
+
+- **Requests other than a cancel are still carried out only at the start of the next cycle.** On a runner project, `timone takeover`, `timone retry` and the end of a takeover (the requests `claim-takeover`, `retry`, `release-takeover` and `takeover-ended`) wait until the daemon project's session ends and the next cycle begins. A cancel has its own clock (ADR-0047) and is not affected. This limit is for the delivery report.
+- **A turn on the clock does not reclaim and does not release previews.** A runner project's run left `active` by a daemon that died is reclaimed at the next cycle, not on the clock. A runner project's preview is reconciled once per cycle.
+- **The clock runs only while the daemon projects are walked.** With no daemon project in the manifest, it starts and stops at once. With no runner project, it does not start. Its first turn comes one poll interval after the daemon walk begins.
+- **A clock turn runs beside the cancel watch**, as the cycle's own runner turns already did. A cancel carried out during a turn is covered by 40u's check (`heldSinceListing`).
+- **A failing turn adds one line to the cycle's errors each time.** If the forge is down for a two-hour session, one cycle's result can carry about 120 lines for each runner project. The cancel watch has the same property.
+- **What the clock's turns do goes into the cycle's result** (`pickedUp`, `queued`, `errors`), so the daemon reports it when the cycle ends, not when the turn ran. The log lines are written when the turn runs.
+- **With no runner wired into the daemon** (only tests build it that way), each clock turn writes the line "no runner is wired into this daemon". The daemon command always wires one.
+- **A turn costs the same forge calls as a runner project's turn in a cycle that is not held up**: the marked tickets, the initiative survey, the runner's reads, and the open tickets when `introduce_unmarked` is on. So a runner project's forge use per minute is the same as when no daemon project is busy.
+- **The seam checked is the cycle with a fake spawner.** That the real spawner (`AgentSessionSpawner`) waits for the whole run was taken from the plan, not tested here; the existing `session.test.ts` cases are about that.
+- **About the tests.** Vitest's `advanceTimersByTimeAsync` lets the real event loop run once after each timer. A turn over the in-memory forge finishes in that time, so the check right after an advance sees the look. If a later change makes that turn wait on real I/O in these tests, those checks could run before the look.

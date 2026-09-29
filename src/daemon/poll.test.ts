@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Manifest } from "../manifest.js";
 import type { Preview, PreviewAdapter } from "../adapters/preview.js";
@@ -9289,5 +9289,260 @@ describe("a runner ticket cancelled while the cycle walks its project is not tak
 
     expect(result.pickedUp).toEqual([]);
     expect(store.runsForTicket("scratch-app", 7).map((each) => each.status)).toEqual(["cancelled"]);
+  });
+});
+
+/**
+ * ✏ A session on a project the current daemon drives does not hold up the
+ * projects the runner drives (40y, PRD-05 R15). The cycle waits for the whole
+ * of such a session, which can take hours. So the runner's projects are walked
+ * first, and while the session runs they get a turn of their own every poll
+ * interval.
+ */
+describe("a session on a current-daemon project does not hold up the runner's projects (40y)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const POLL_INTERVAL_MS = 60_000;
+
+  /**
+   * A spawner whose session goes on until the test ends it. `started` settles
+   * when the cycle hands it a run, which is the moment the cycle starts to
+   * wait for it.
+   */
+  function sessionThatWaits(calls: string[]): {
+    spawner: SessionSpawner;
+    started: Promise<void>;
+    end: () => void;
+  } {
+    let markStarted = (): void => {};
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let markEnded = (): void => {};
+    const ended = new Promise<void>((resolve) => {
+      markEnded = resolve;
+    });
+    return {
+      started,
+      end: () => markEnded(),
+      spawner: {
+        async spawn(run) {
+          calls.push(`spawn ${run.id}`);
+          markStarted();
+          await ended;
+        },
+      },
+    };
+  }
+
+  /**
+   * The real driver, with its look at a project replaced: each look is written
+   * down, and `during` runs before it returns. It is given the look's number,
+   * counted from 1, so a test can hold one look back or make one fail.
+   */
+  function stubbedRunner(
+    store: RunStore,
+    adapter: TicketingAdapter,
+    manifest: Manifest,
+    calls: string[],
+    during: (look: number) => Promise<void> = async () => {},
+  ): RunnerDriver {
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    let looks = 0;
+    runner.tick = async (project) => {
+      calls.push(`tick ${project.name}`);
+      looks += 1;
+      await during(looks);
+      return [];
+    };
+    return runner;
+  }
+
+  /** A promise the test settles by hand, and the function that settles it. */
+  function heldBack(): { held: Promise<void>; release: () => void } {
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { held, release };
+  }
+
+  /** scratch-app driven by the runner, ivtrends by the current daemon, in `order`. */
+  function bothDrivers(order: string[]): {
+    manifest: Manifest;
+    adapter: TicketingAdapter;
+  } {
+    const manifest = drivenByRunner(manifestWith(...order), "scratch-app");
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)], ivtrends: [ticket(4)] });
+    return { manifest, adapter };
+  }
+
+  it("looks at the runner's project again within one poll interval, while the daemon project's session still runs", async () => {
+    vi.useFakeTimers();
+    const store = newStore();
+    const { manifest, adapter } = bothDrivers(["scratch-app", "ivtrends"]);
+    const calls: string[] = [];
+    const { spawner, started, end } = sessionThatWaits(calls);
+    const runner = stubbedRunner(store, adapter, manifest, calls);
+
+    const cycle = pollOnce({ manifest, store, adapter, spawner, runner, pollIntervalMs: POLL_INTERVAL_MS });
+    await started;
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS - 1);
+    expect(calls).toEqual(["tick scratch-app", "spawn ivtrends#4/1"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls).toEqual(["tick scratch-app", "spawn ivtrends#4/1", "tick scratch-app"]);
+
+    end();
+    const result = await cycle;
+    expect(result.spawned).toEqual(["ivtrends#4/1"]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("stops looking at it once the cycle has ended", async () => {
+    vi.useFakeTimers();
+    const store = newStore();
+    const { manifest, adapter } = bothDrivers(["scratch-app", "ivtrends"]);
+    const calls: string[] = [];
+    const { spawner, started, end } = sessionThatWaits(calls);
+    const runner = stubbedRunner(store, adapter, manifest, calls);
+
+    const cycle = pollOnce({ manifest, store, adapter, spawner, runner, pollIntervalMs: POLL_INTERVAL_MS });
+    await started;
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    end();
+    await cycle;
+    await vi.advanceTimersByTimeAsync(5 * POLL_INTERVAL_MS);
+
+    expect(calls).toEqual(["tick scratch-app", "spawn ivtrends#4/1", "tick scratch-app"]);
+  });
+
+  it("lets a look already under way finish before the cycle reports", async () => {
+    vi.useFakeTimers();
+    const store = newStore();
+    const { manifest, adapter } = bothDrivers(["scratch-app", "ivtrends"]);
+    const calls: string[] = [];
+    const { spawner, started, end } = sessionThatWaits(calls);
+    const second = heldBack();
+    const runner = stubbedRunner(store, adapter, manifest, calls, async (look) => {
+      if (look === 2) await second.held;
+    });
+
+    let reported = false;
+    const cycle = pollOnce({ manifest, store, adapter, spawner, runner, pollIntervalMs: POLL_INTERVAL_MS });
+    void cycle.then(() => {
+      reported = true;
+    });
+    await started;
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    expect(calls).toEqual(["tick scratch-app", "spawn ivtrends#4/1", "tick scratch-app"]);
+    end();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reported).toBe(false);
+
+    second.release();
+    await cycle;
+    expect(reported).toBe(true);
+  });
+
+  it("never starts a look while the one before it is still under way", async () => {
+    vi.useFakeTimers();
+    const store = newStore();
+    const { manifest, adapter } = bothDrivers(["scratch-app", "ivtrends"]);
+    const calls: string[] = [];
+    const { spawner, started, end } = sessionThatWaits(calls);
+    const second = heldBack();
+    const runner = stubbedRunner(store, adapter, manifest, calls, async (look) => {
+      if (look === 2) await second.held;
+    });
+
+    const cycle = pollOnce({ manifest, store, adapter, spawner, runner, pollIntervalMs: POLL_INTERVAL_MS });
+    await started;
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    // The second look is held back for five more intervals: no third one
+    // starts beside it.
+    await vi.advanceTimersByTimeAsync(5 * POLL_INTERVAL_MS);
+    expect(calls).toEqual(["tick scratch-app", "spawn ivtrends#4/1", "tick scratch-app"]);
+
+    second.release();
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    expect(calls).toEqual([
+      "tick scratch-app",
+      "spawn ivtrends#4/1",
+      "tick scratch-app",
+      "tick scratch-app",
+    ]);
+
+    end();
+    await cycle;
+  });
+
+  it("reports a look that fails as a line on the cycle's errors, and still looks again an interval later", async () => {
+    vi.useFakeTimers();
+    const store = newStore();
+    const { manifest, adapter } = bothDrivers(["scratch-app", "ivtrends"]);
+    const calls: string[] = [];
+    const { spawner, started, end } = sessionThatWaits(calls);
+    const runner = stubbedRunner(store, adapter, manifest, calls, async (look) => {
+      if (look === 2) throw new Error("the forge did not answer");
+    });
+
+    const cycle = pollOnce({ manifest, store, adapter, spawner, runner, pollIntervalMs: POLL_INTERVAL_MS });
+    await started;
+    await vi.advanceTimersByTimeAsync(2 * POLL_INTERVAL_MS);
+    end();
+    const result = await cycle;
+
+    expect(result.errors).toEqual(["scratch-app: the forge did not answer"]);
+    expect(calls).toEqual([
+      "tick scratch-app",
+      "spawn ivtrends#4/1",
+      "tick scratch-app",
+      "tick scratch-app",
+    ]);
+  });
+
+  it("gives the daemon project no look of its own on that clock: its tickets are listed once, and its session started once", async () => {
+    vi.useFakeTimers();
+    const store = newStore();
+    const { manifest, adapter: base } = bothDrivers(["scratch-app", "ivtrends"]);
+    const listed: string[] = [];
+    const adapter: TicketingAdapter = {
+      ...base,
+      async listMarkedTickets(project): Promise<Ticket[]> {
+        listed.push(project.name);
+        return base.listMarkedTickets(project);
+      },
+    };
+    const calls: string[] = [];
+    const { spawner, started, end } = sessionThatWaits(calls);
+    const runner = stubbedRunner(store, adapter, manifest, calls);
+
+    const cycle = pollOnce({ manifest, store, adapter, spawner, runner, pollIntervalMs: POLL_INTERVAL_MS });
+    await started;
+    await vi.advanceTimersByTimeAsync(3 * POLL_INTERVAL_MS);
+    end();
+    await cycle;
+
+    expect(listed.filter((name) => name === "ivtrends")).toEqual(["ivtrends"]);
+    expect(calls.filter((call) => call.startsWith("spawn"))).toEqual(["spawn ivtrends#4/1"]);
+  });
+
+  it("walks the runner's project before the daemon's, though the manifest lists the daemon's first", async () => {
+    vi.useFakeTimers();
+    const store = newStore();
+    const { manifest, adapter } = bothDrivers(["ivtrends", "scratch-app"]);
+    const calls: string[] = [];
+    const { spawner, started, end } = sessionThatWaits(calls);
+    const runner = stubbedRunner(store, adapter, manifest, calls);
+
+    const cycle = pollOnce({ manifest, store, adapter, spawner, runner, pollIntervalMs: POLL_INTERVAL_MS });
+    await started;
+    expect(calls).toEqual(["tick scratch-app", "spawn ivtrends#4/1"]);
+
+    end();
+    await cycle;
   });
 });

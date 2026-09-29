@@ -208,6 +208,9 @@ export interface PollDeps {
    * derives from (ADR-0020): a gap longer than
    * {@link UNWITNESSED_POLL_INTERVALS} of these means no daemon was watching
    * across it. Defaults to the command's own default cadence.
+   *
+   * ✏ It is also how often the runner's projects get a turn while a project
+   * the current daemon drives holds the cycle (PRD-05 R15).
    */
   pollIntervalMs?: number;
   /**
@@ -737,7 +740,8 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
  *
  * Its own function so that {@link watchForCancellations} can wrap exactly the
  * part of a cycle that blocks, and so the watch is stopped on the way out
- * whatever happens in here.
+ * whatever happens in here. The runner's projects' own clock
+ * ({@link turnRunnerProjects}) is started and stopped in here, the same way.
  */
 async function pollProjects(
   deps: PollDeps,
@@ -763,7 +767,7 @@ async function pollProjects(
     );
   }
 
-  for (const [name, config] of Object.entries(manifest.projects)) {
+  const turn = async ([name, config]: [string, ProjectConfig]): Promise<void> => {
     const project: TicketingProject = { name, repoUrl: config.repo_url };
     // One reader per ticket for this project's whole turn in this cycle, so
     // every question asked of a ticket's thread is answered from one fetch of
@@ -786,7 +790,103 @@ async function pollProjects(
       result.errors.push(line);
       log(`error  ${line}`);
     }
+  };
+
+  // ✏ The runner's projects first, then the current daemon's (PRD-05 R15). A
+  // runner project's turn never waits for a session, and a daemon project's
+  // turn waits for the whole of one. In manifest order, a daemon project
+  // listed first held up every runner project behind it for as long as its
+  // session ran. With no runner project, this is the manifest order.
+  const projects = Object.entries(manifest.projects);
+  const runnerProjects = projects.filter(([, config]) => driverOf(config) === "runner");
+  const daemonProjects = projects.filter(([, config]) => driverOf(config) !== "runner");
+
+  for (const entry of runnerProjects) await turn(entry);
+  const runnerTurns = turnRunnerProjects(runnerProjects, deps, result, log);
+  try {
+    for (const entry of daemonProjects) await turn(entry);
+  } finally {
+    await runnerTurns.stop();
   }
+}
+
+/** The runner's projects' own clock, stoppable — and awaited when it is stopped. */
+interface RunnerTurns {
+  stop(): Promise<void>;
+}
+
+/**
+ * ✏ Give each project the runner drives a turn every poll interval, on a
+ * clock of its own, while a project the current daemon drives holds the cycle
+ * (PRD-05 R15).
+ *
+ * **Why.** On a daemon project the cycle waits for the whole session: the
+ * spawner waits for every step of the run. Without this clock, a comment on a
+ * runner project is not seen, and its runner is not woken, until that session
+ * ends — which can be hours.
+ *
+ * **A turn is {@link pollProject} and nothing else.** No reclaim and no
+ * previews: those stay once per cycle. The turn never waits for a session,
+ * since the runner's own tick never waits for a wake. It makes a fresh thread
+ * reader, so it sees what was said since the last turn.
+ *
+ * **Built as {@link watchForCancellations} is.** One turn at a time, an error
+ * is a line on this cycle's result, the timer never keeps the process alive,
+ * and a turn under way finishes before the cycle reports.
+ *
+ * Requests other than a cancel, such as `timone takeover`, are not read here.
+ * They wait for the start of the next cycle, as they did before.
+ */
+function turnRunnerProjects(
+  runnerProjects: readonly [string, ProjectConfig][],
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): RunnerTurns {
+  if (runnerProjects.length === 0) return { stop: async () => {} };
+
+  // One turn at a time. A turn that runs long — a slow forge — must not be
+  // overtaken by the next tick and look at the same runs twice at once.
+  let turning: Promise<void> | undefined;
+  const turn = async (): Promise<void> => {
+    if (turning !== undefined) return;
+    turning = (async () => {
+      for (const [name, config] of runnerProjects) {
+        const project: TicketingProject = { name, repoUrl: config.repo_url };
+        // Caught for each project, so this promise never rejects and one
+        // project that fails does not cost the next its turn.
+        try {
+          await pollProject(project, config, deps, result, log, threadReaders(project, deps.adapter));
+        } catch (error) {
+          const line = `${name}: ${oneLine(error)}`;
+          result.errors.push(line);
+          log(`error  ${line}`);
+        }
+      }
+    })();
+    try {
+      await turning;
+    } finally {
+      turning = undefined;
+    }
+  };
+
+  const handle = setInterval(
+    () => void turn(),
+    deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_SECONDS * 1000,
+  );
+  // The daemon's own loop is what keeps the process alive; this timer must
+  // never be the reason a `--once` run refuses to exit.
+  handle.unref?.();
+
+  return {
+    async stop(): Promise<void> {
+      clearInterval(handle);
+      // A turn under way finishes before the cycle reports: it writes the
+      // ledger and adds to this cycle's result.
+      await turning;
+    },
+  };
 }
 
 /**
