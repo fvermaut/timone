@@ -4,6 +4,7 @@ import {
   type PipelineStage,
   wayfinderStage,
 } from "../daemon/pipeline.js";
+import type { RecordEntry } from "./record.js";
 
 /**
  * The default order: the steps written down for each kind of ticket, in the
@@ -140,6 +141,60 @@ export function defaultOrder(kind: TicketKind): readonly OrderStep[] {
     default:
       return kind satisfies never;
   }
+}
+
+/**
+ * Where one run's work stands against its written order: the steps it has
+ * finished, the step running now, and the step that comes next.
+ */
+export interface Standing {
+  /** The steps finished well, in the order's sequence. */
+  done: OrderStep[];
+  /** The step of the order running now, when one is. */
+  running?: OrderStep;
+  /** The first step of the order that is not done, not running and not left out. */
+  next?: OrderStep;
+}
+
+/**
+ * Where run `runId` stands against `order`, read from the ticket's record.
+ *
+ * A session step is done when a session at its stage ended well in this
+ * run; an approval, when it was recorded in this run. A step is running when
+ * its session started and has not ended. A step the run left out with a
+ * reason is not next: the runner already said it would not run it.
+ *
+ * **It names what the written order puts next, and decides nothing.** The
+ * runner may still choose another step; this is only what a person is told
+ * of where the work is.
+ */
+export function standingOf(
+  entries: readonly RecordEntry[],
+  runId: string,
+  order: readonly OrderStep[],
+): Standing {
+  const ofRun = entries.filter((entry) => "runId" in entry && entry.runId === runId);
+  const done = order.filter((step) =>
+    step.stage !== undefined
+      ? ofRun.some((entry) => entry.kind === "step-ended" && entry.stage === step.stage && entry.ok)
+      : ofRun.some((entry) => entry.kind === "approval" && entry.what === step.approval),
+  );
+  const unfinished = ofRun.flatMap((entry) =>
+    entry.kind === "step-started" &&
+    !ofRun.some((other) => other.kind === "step-ended" && other.sessionId === entry.sessionId)
+      ? [entry.stage]
+      : [],
+  );
+  const runningStage = unfinished.at(-1);
+  const running = order.find((step) => step.stage !== undefined && step.stage === runningStage);
+  const departed = (step: OrderStep): boolean =>
+    ofRun.some((entry) => entry.kind === "departure" && entry.skipped.includes(step.id));
+  const next = order.find((step) => !done.includes(step) && step !== running && !departed(step));
+  return {
+    done,
+    ...(running === undefined ? {} : { running }),
+    ...(next === undefined ? {} : { next }),
+  };
 }
 
 /**

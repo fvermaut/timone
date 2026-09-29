@@ -22,7 +22,7 @@ import { isNamedPerson } from "./brief.js";
 import { limitNotice } from "./comments.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
 import { departureSection, departuresOf, DEPARTURES_END, DEPARTURES_START } from "./departures.js";
-import { defaultOrder, ticketKindOf, type TicketContext } from "./order.js";
+import { defaultOrder, standingOf, ticketKindOf, type TicketContext } from "./order.js";
 import { appendEntry, readRecord, type RecordEntry } from "./record.js";
 import { RUNNER_DEFAULT_WAIT, type RunnerSessions, type WakeOptions } from "./session.js";
 
@@ -454,7 +454,7 @@ export class RunnerDriver {
     // only its yes writes the raise and wakes the runner. Anything else
     // leaves the ticket as it is; the comment is marked read all the same.
     if (isOverLimit(entries, ticketLimitOf(config))) {
-      await this.atLimit(run, project, config, entries);
+      await this.atLimit(run, project, config, entries, async () => ticket.labels);
       const toldAt = limitNoticeAt(entries);
       const replies =
         toldAt === undefined ? [] : said.filter((comment) => ms(comment.createdAt) > ms(toldAt));
@@ -484,9 +484,12 @@ export class RunnerDriver {
 
   /**
    * What a run over its limit is owed instead of a wake: the ticket is told,
-   * once each time the limit is reached, what was spent and how to allow
-   * more (R8) — in the words the runner's own refusal posts, and noted in the
-   * record the same way, so the two never tell it twice.
+   * once each time the limit is reached, what was spent, where the work
+   * stands and how to allow more (R8) — in the words the runner's own
+   * refusal posts, and noted in the record the same way, so the two never
+   * tell it twice. `labelsOf` gives the ticket's labels, for its written
+   * order; it is asked only when the ticket is told, so a cycle that has
+   * already read the ticket reads it once.
    *
    * The run is put on the runner's wait for more spending to be allowed:
    * one just picked up, so it does not hold the project while nothing can
@@ -498,16 +501,23 @@ export class RunnerDriver {
     project: TicketingProject,
     config: ProjectConfig,
     entries: readonly RecordEntry[],
+    labelsOf: () => Promise<readonly string[]>,
   ): Promise<void> {
     const waits = run.status === "picked-up" || run.status === "parked";
     if (waits && run.wait?.on !== LIMIT_WAIT) this.parkForRunner(run, LIMIT_WAIT);
     if (toldOfLimit(entries)) return;
     const base = ticketLimitOf(config);
     const spentUsd = spentOn(entries);
+    const kind = ticketKindOf(await labelsOf(), this.contexts.get(run.id) ?? NO_CONTEXT);
     await this.deps.adapter.postComment(
       project,
       run.ticket,
-      limitNotice({ spentUsd, allowanceUsd: allowanceOf(entries, base), raiseUsd: base }),
+      limitNotice({
+        spentUsd,
+        allowanceUsd: allowanceOf(entries, base),
+        raiseUsd: base,
+        standing: standingOf(entries, run.id, defaultOrder(kind)),
+      }),
     );
     const write = (entry: RecordEntry): void => {
       appendEntry(this.deps.root, project.name, run.ticket, entry);
@@ -736,7 +746,14 @@ export class RunnerDriver {
     const config = this.configOf(run);
     const read = readRecord(this.deps.root, run.project, run.ticket);
     if (read.ok && isOverLimit(read.value, ticketLimitOf(config))) {
-      await this.atLimit(run, this.projectOf(run), config, read.value);
+      const project = this.projectOf(run);
+      await this.atLimit(
+        run,
+        project,
+        config,
+        read.value,
+        async () => (await this.deps.adapter.getTicket(project, run.ticket)).labels,
+      );
       return;
     }
     this.deliver(run, events, []);

@@ -1,4 +1,5 @@
 import { NEEDED_FROM_YOU } from "../adapters/ticketing.js";
+import type { Standing } from "./order.js";
 
 /**
  * What the machine itself says on a ticket when the runner acts
@@ -49,21 +50,44 @@ export interface LimitNoticeInput {
   allowanceUsd: number;
   /** What one "continue" from a named person adds: the project's limit. */
   raiseUsd: number;
+  /** Where the run's work stands against its written order (`standingOf`). */
+  standing: Standing;
 }
 
 /**
  * The comment that says the ticket has spent what it may, so no new step
  * starts until a named person allows more (ADR-0060 D5). Posted once each
  * time the limit is reached, not once for every step that is refused.
+ *
+ * It says where the work stands too (PRD-05 R8): what is done, what is
+ * running, and what the written order puts next. A person deciding whether
+ * to allow more needs to know what the money has bought so far.
  */
 export function limitNotice(input: LimitNoticeInput): string {
   return [
     `**This ticket has reached its spending limit.** It has cost ${usd(input.spentUsd)}, ` +
       `and the limit is ${usd(input.allowanceUsd)}. I will not start any more work on it for now.`,
     "",
+    standingText(input.standing),
+    "",
     `${NEEDED_FROM_YOU} reply "continue" to allow another ${usd(input.raiseUsd)}, ` +
       "or say nothing and it stays stopped.",
   ].join("\n");
+}
+
+/** Where the work stands, in a few short sentences. */
+function standingText(standing: Standing): string {
+  const done =
+    standing.done.length === 0
+      ? "Nothing is done yet."
+      : `Done so far: ${joined(standing.done.map((step) => step.label))}.`;
+  const running =
+    standing.running === undefined ? [] : [`Running now: ${standing.running.label}.`];
+  const next =
+    standing.next === undefined
+      ? "Every step of the usual order is done."
+      : `Next, in the usual order: ${standing.next.label}.`;
+  return [done, ...running, next].join(" ");
 }
 
 /**

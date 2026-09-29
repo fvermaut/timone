@@ -44,6 +44,7 @@ import type {
 } from "../daemon/step-session.js";
 import {
   defaultOrder,
+  standingOf,
   ticketKindOf,
   type Approval,
   type OrderStep,
@@ -473,10 +474,17 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
     const spentUsd = spentOn(entries);
     const allowanceUsd = allowanceOf(entries, base);
     if (!toldOfLimit(entries)) {
+      const ticket = await deps.adapter.getTicket(deps.project, run.ticket);
+      const order = defaultOrder(ticketKindOf(ticket.labels, deps.ticketContext));
       await deps.adapter.postComment(
         deps.project,
         run.ticket,
-        limitNotice({ spentUsd, allowanceUsd, raiseUsd: base }),
+        limitNotice({
+          spentUsd,
+          allowanceUsd,
+          raiseUsd: base,
+          standing: standingOf(entries, run.id, order),
+        }),
       );
       write({ kind: "limit-reached", at: deps.clock(), spentUsd });
       write({ kind: "notice", at: deps.clock(), about: LIMIT_NOTICE });

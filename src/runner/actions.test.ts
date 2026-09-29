@@ -778,6 +778,35 @@ describe("the runner's actions", () => {
     ]);
   });
 
+  it("says on the ticket where the work stands when the limit is reached: what is done, and what comes next", async () => {
+    const chore = { ...featureTicket(), labels: ["timone", "triage:chore"] };
+    const { actions, run, wrote, forge } = world(chore);
+    wrote(triageRan(run.id));
+    wrote({
+      kind: "step-ended",
+      at: "2026-09-27T09:06:00Z",
+      runId: run.id,
+      stage: "triage",
+      sessionId: "a7c0e2d4-triage",
+      ok: true,
+      costUsd: 160,
+    });
+
+    const result = await actions.startStep({
+      stage: "planning",
+      instructions: "Plan the rename.",
+      reason: "The ticket is sorted as a chore.",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(forge.comments.map((comment) => comment.body)).toEqual([
+      "**This ticket has reached its spending limit.** It has cost $160.00, and the limit is $150.00. " +
+        "I will not start any more work on it for now.\n\n" +
+        "Done so far: sorting the request. Next, in the usual order: preparing the work.\n\n" +
+        '**What I need from you:** reply "continue" to allow another $150.00, or say nothing and it stays stopped.',
+    ]);
+  });
+
   it("refuses an approval given in a comment by someone who is not named, and records none", async () => {
     const { actions, store, run, steps, record } = world(featureTicket(APPROVAL_THREAD));
     store.claimBranch(run.id, BRANCH);

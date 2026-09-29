@@ -8718,10 +8718,48 @@ describe("the runner drives its projects in the poll cycle", () => {
     expect(comments.map((comment) => comment.body)).toEqual([
       "**This ticket has reached its spending limit.** It has cost $150.40, and the limit is $150.00. " +
         "I will not start any more work on it for now.\n\n" +
+        "Nothing is done yet. Next, in the usual order: sorting the request.\n\n" +
         '**What I need from you:** reply "continue" to allow another $150.00, or say nothing and it stays stopped.',
     ]);
     expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
     expect(store.occupyingRun("scratch-app")).toBeUndefined();
+  });
+
+  it("says where the work stands when the runner's own session takes the ticket over its limit while a step runs", async () => {
+    // R8: the ticket says what was spent and where the work stands. Here the
+    // steps that finished, the step still running, and what comes after it.
+    const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "step-session-3");
+    const running = new RunningSteps();
+    running.set(run.id, {
+      stage: "execution",
+      session: { sessionId: "step-session-3", completed: new Promise(() => {}), stop() {} },
+      startedAt: "2026-09-27T11:40:00Z",
+    });
+    const { adapter, comments } = runnerAdapter([ticket(7, { labels: ["timone", "triage:chore"] })]);
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner, root } = runnerFor({ store, adapter, manifest, sessions, running });
+    const entries: RecordEntry[] = [
+      { kind: "step-started", at: "2026-09-27T10:00:00Z", runId: run.id, stage: "triage", sessionId: "step-session-1" },
+      { kind: "step-ended", at: "2026-09-27T10:05:00Z", runId: run.id, stage: "triage", sessionId: "step-session-1", ok: true, costUsd: 100 },
+      { kind: "step-started", at: "2026-09-27T10:10:00Z", runId: run.id, stage: "planning", sessionId: "step-session-2" },
+      { kind: "step-ended", at: "2026-09-27T11:30:00Z", runId: run.id, stage: "planning", sessionId: "step-session-2", ok: true, costUsd: 40 },
+      { kind: "step-started", at: "2026-09-27T11:40:00Z", runId: run.id, stage: "execution", sessionId: "step-session-3" },
+      { kind: "runner-ended", at: "2026-09-27T11:41:00Z", runId: run.id, ok: true, costUsd: 11 },
+    ];
+    for (const entry of entries) appendEntry(root, "scratch-app", 7, entry);
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([]);
+    expect(comments.map((comment) => comment.body.split("\n\n")[1])).toEqual([
+      "Done so far: sorting the request and preparing the work. Running now: building. " +
+        "Next, in the usual order: checking the result.",
+    ]);
   });
 
   it("settles a retry asked of a runner project with the refusal, and leaves the run as it was", async () => {
