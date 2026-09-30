@@ -346,3 +346,196 @@ timone       projects/timone       typescript                                   
 - [x] `node dist/cli.js projects list` loads the edited `timone.yaml` and lists three projects. **PASS**
 - [x] The handoff lists every function this slice left for a later slice's file, with the file. The list above is unchanged by the amendment. **PASS**
 - `npm run build && npm test` now exits 0, with 1836 tests passing. **PASS**
+
+## 41c — Runs the old code left in the ledger become runs the runner can read
+
+**Stopped, with two things that need a decision.** The conversion is built as the plan says, and six of the seven cases pass. Case (5) fails, and 39 tests that were green before now fail, 14 of them in files this slice was not given. Neither can be made to pass inside this slice's files without a choice the plan does not make. Both are below, under *What the orchestrator must decide*.
+
+**Built.** When the ledger is read, a `failed` run loads as `cancelled`, and its reason is kept in `cancellation`, after *"stopped before the old code was removed: "*. A `parked` run whose wait is a gate, a conversation, a review, an escalation, or has no kind, loads with the kind `runner`. What it waits on, when the wait opened, and every other field stay as they were. A parked run with no wait at all is left as it is. It follows `normaliseWait`: `version` stays 1, and a read writes nothing. The converted runs reach the file the next time something writes it. Nothing in the conversion asks for a wake.
+
+**Files touched.**
+
+- `src/daemon/runs.ts` — new `normaliseOldPath` and the constant `STOPPED_BEFORE_REMOVAL`, after `normaliseWait` in `normaliseSequences`.
+- `src/daemon/fixtures/ledger-before-166.json` — created. Machine-typed, not copied from the real ledger. Two projects. scratch-app: a done run, a cancelled run, a failed run on a branch (#21), a review park on a branch with a pull request (#24). ivtrends: a done run, a cancelled run, a failed run with no branch (#88), a gate (#90), a conversation (#91), an escalation (#92), a wait of no kind (#93), a run waiting for the runner (#94). Also introductions, the witness stamps and a daemon record.
+- `src/daemon/runs.test.ts` — cases (1) to (4), in the describe *runs the old code left in the ledger become runs the runner can read*.
+- `src/daemon/poll.test.ts` — cases (5) and (6), in the describe *the runs the old code left in the ledger, on the first cycle after it was removed*. New helpers `storeOnLedgerBefore166` and `forgeBefore166`.
+- `src/commands/status.test.ts` — case (7), in the describe *renderStatus — the runs the old code left in the ledger*.
+- `doc/plans/phases/reports/phase-41-handoffs.md` — this section.
+
+No existing test was changed.
+
+**Decisions taken inside the slice.**
+
+1. **`failure` stays on a converted run.** `RunStore.cancel` keeps it on a failed run it cancels, and the plan says nothing else changes. `timone status` only prints `failure` for a run whose status is `failed`, so it is not shown twice. `consumedAnswerAt` stays too, for the same reason.
+2. **A failed run with no reason** gets *"no reason recorded"* after the prefix, the words `timone status` and `reopenForTakeover` already use.
+3. **A parked run with no wait at all is not given one.** There is nothing to keep as what it waits on. The runner's `handBack` gives it `RUNNER_DEFAULT_WAIT` if it is ever handed back.
+4. **Case (5)'s forge lists the failed runs' tickets as open and marked.** The old code never took the mark off a failed run's ticket, and never held it. Leaving those tickets out of the listing would hide the one way the conversion can cause a wake. That is the fault case (5) found (below).
+5. **Case (6) asserts only the wakes of the converted run it is about** (`ivtrends#90/1`), so the fault case (5) found does not make it fail too.
+
+**Validation evidence.**
+
+Cases (1), (2), (3), (4) and (7) were written first and seen red:
+
+- *(1)* `loads each failed run as cancelled, keeping what stopped it, and leaves done and cancelled runs as they were`. Red: `expected { id: 'scratch-app#21/1', …(12) } to deeply equal { id: 'scratch-app#21/1', …(13) }`, with `- "cancellation": "stopped before the old code was removed: the execution stage finished …"`, `- "status": "cancelled"`, `+ "status": "failed"`.
+- *(2)* `loads each old kind of wait as the runner's, keeping what it waits on and when it opened`. Red: `expected { id: 'ivtrends#90/1', …(10) } to deeply equal { id: 'ivtrends#90/1', …(10) }`, with `- "kind": "runner"`, `+ "kind": "gate"`.
+- *(3)* `gives the same converted runs on a second load, and leaves the file as it was`. Red: `expected 'failed' to be 'cancelled'`.
+- *(4)* `keeps a converted run on a branch holding its project, and one without a branch not`. Red: `expected 'review' to be 'runner'`.
+- *(7)* `shows what a converted run waits on, in the words it waited on`. Red: `Expected: "scratch-app  #24 (delivering) — waiting: your review of pull request #31"`, `Received: "scratch-app  #24 (delivering) — waiting on you: your review of pull request #31"`.
+
+Green after the change, with case (5) as the one failure:
+
+```
+ ✓ … runs the old code left in the ledger become runs the runner can read > loads each failed run as cancelled, …
+ ✓ … > loads each old kind of wait as the runner's, keeping what it waits on and when it opened
+ ✓ … > gives the same converted runs on a second load, and leaves the file as it was
+ ✓ … > keeps a converted run on a branch holding its project, and one without a branch not
+ ✓ src/commands/status.test.ts > renderStatus — the runs the old code left in the ledger > shows what a converted run waits on, …
+ × src/daemon/poll.test.ts > the runs the old code left in the ledger, on the first cycle after it was removed > asks for no wake and posts nothing when nobody has written anything
+ ✓ src/daemon/poll.test.ts > … > asks for a wake when a named person writes on a converted run's ticket
+      Tests  1 failed | 6 passed | 316 skipped (323)
+```
+
+Cases (5) and (6) passed before the change, so neither could be red first.
+
+- *(5)* went red because of the change. With the whole result in one assertion:
+
+  ```
+  +   "pickedUp": [ "ivtrends#88/2" ],
+  +   "queued": [ "scratch-app#21/2" ],
+  +   "wakes": [ { "events": [ "A new ticket was picked up. Nothing has been done on it yet." ], "runId": "ivtrends#88/2" } ],
+  +   "writes": [ "comment on scratch-app#21: **This one is in the queue.** …",
+  +               "comment on ivtrends#88: **Picked this up.** …" ],
+  ```
+
+- *(6)* is not vacuous. Made the conversion turn an old park into `cancelled` instead of changing its kind: `expected [] to deeply equal [ { runId: 'ivtrends#90/1', …(2) } ]`, `Tests  1 failed | 105 skipped (106)`. Restored: `Tests  1 passed | 105 skipped (106)`.
+
+Checks that the parts of (3) and (4) the conversion cannot change are not vacuous. Each break was made in `runs.ts`, run, and undone (`diff` against a saved copy is empty after each):
+
+- *(3), the file is not written.* Made `RunStore.open` write the ledger: `expected '{\n  "version": 1, …' to be '{\n  "version": 1, …'`, `Tests  1 failed`. Restored: `1 passed`.
+- *(3), the same runs each load.* Made the conversion stamp `updatedAt` with the time of the read: `expected [ …(12) ] to deeply equal [ …(12) ]`, `- "updatedAt": "2026-09-30T17:48:20.825Z"`, `+ "updatedAt": "2026-09-30T17:48:20.826Z"`. Restored: `1 passed`. (Keying the conversion on `failure` instead of `status` does not break it: the reason is worked out again from `failure` on each read, so it is never prefixed twice.)
+- *(4), a run on a branch holds.* Made the conversion drop `branch`: `expected undefined to be 'scratch-app#24/1'`. Restored: `1 passed`.
+- *(4), a run without a branch does not hold.* Made the conversion set an old park to `picked-up`: `expected { id: 'ivtrends#90/1', …(10) } to be undefined`. Restored: `1 passed`.
+
+Validation commands, as run:
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+> timone@0.1.0 build
+> tsc
+ Test Files  6 failed | 53 passed (59)
+      Tests  40 failed | 1803 passed (1843)
+$ git status --short .timone ; echo "(expected: nothing — no test touched the real ledger)"
+(expected: nothing — no test touched the real ledger)
+```
+
+The build passes. 1843 = 1836 + 7 new tests. The 40 failures are case (5) and the 39 below.
+
+- [ ] Red-green evidence for each of the seven cases is in the handoff. **FAIL** for case (5), which is red. The other six: red then green, or passing before the change with a break that shows it can fail.
+- [ ] **Hard gate:** none of the seven tests is skipped or weakened. **PASS** as written. The gate is not met, because case (5) fails.
+- `npm test` is **not green**: 40 failures.
+- `git status --short .timone` is empty. **PASS**
+
+**What the orchestrator must decide.**
+
+1. **Case (5): a converted failed run's ticket is taken up afresh.** A `cancelled` run is settled, so on the next cycle `pollProject` opens a new run on its ticket if the ticket is still open and marked. The old code left every failed run's ticket open and marked unless a person closed it. On the first cycle, each such ticket gets a new run: a *"Picked this up"* comment and a runner wake where the project is free, a *"This one is in the queue"* comment where it is not. That breaks the plan's *"No wake is asked for because of a conversion."* On the real ledger it would post on real tickets, ivtrends included, and start paid runner sessions. `runs.ts` cannot prevent it: the ledger cannot write a label, and changing `register` goes beyond "nothing else changes". Two ways out that I can see:
+   - **Hold the ticket, as `timone cancel` does since 41b.** Needs a change in `src/daemon/poll.ts`, and a record that the hold was put on once, so that a person removing the label hands the ticket back rather than getting it held again.
+   - **Accept the new run as how a failed ticket starts again.** Then the plan's sentence and case (5) change: case (5) would list only the parked runs' tickets, and a new case would say what a failed run's still-marked ticket gets.
+2. **Converting on every read hides `failed` and the old wait kinds from every reader, not only runs the old code left.** A run failed or parked on an old kind in this process reads back converted at the next read. So `RunStore.retry` and `reopenForTakeover` can no longer succeed, a failed chunk no longer holds its ticket, and `takeover.ts` never again sees a gate, a review, a conversation or a failed run. Since 41b only `session.ts` writes `failed`, itself or through `mergeChunkZero`, and the daemon no longer builds it. `takeover.ts` still parks on `conversation` and `escalation`. 39 tests that were green assert what was removed. None was edited: part of the answer depends on decision 1 (if failed runs stop being converted, the first group goes away).
+   - *A failed run read back* — `runs.test.ts` (17): *register* › hands back a failed chunk rather than opening the next one beside it; *a ticket's chunks* › still calls a failed chunk live, because only a retry can end it; *two chunks of one ticket* › leaves a failed chunk retryable however often the poll loop re-registers, › opens the next chunk once a retried chunk finally succeeds; *the answer a run has read and not acted on* › keeps it through the transition that clears the wait, and through failure; all six of *retry*; *reopenForTakeover* › parks a failed run on a person, …; *cancelling a run* › cancels a failed run, …, › gives a run cancelled out of failure no way back, retry included, › lets a ticket move on from a failure that was abandoned rather than retried; *the heartbeat, …* › lets a reclaimed run be failed and then retried, with no new transition; *a heartbeat belongs to the session that wrote it* › does not reclaim a run that was just re-armed under an old heartbeat. `poll.test.ts` (3), where a failed run is only the starting state: *requests a human left for the daemon* › carries out a queued cancellation, in the human's own words, › serves nobody when the cycle was never told where the ledger is; *the runner drives its projects in the poll cycle* › settles a retry asked of a runner project with the refusal, and leaves the run as it was. Not granted: `src/commands/cancel.test.ts` › ends a failed run rather than sending the human via `timone retry`; `src/commands/daemon.test.ts` › carries out a request left beside the ledger; `src/commands/takeover.test.ts` › resolves a failed run the same way, …, › opens the unbound session on a failed run, and leaves it parked on a person afterwards.
+   - *An old wait kind read back* — `runs.test.ts` (5): *a run parked on something nothing written can resolve* › carries the new kind through the file, and back out of it; *persistence* › round-trips state through the file; *the pull request on a run* › persists the pull request and the review wait across a reopen; *the wait as one value* › carries all four kinds through the file and back out, › folds a real pre-collapse ledger into the new shape. Not granted: `src/daemon/session.test.ts` › leaves the run parked, and still waiting, when the spawn throws; `src/commands/takeover.test.ts` › resolves a ticket waiting on a conversation to that stage, › refuses a ticket parked on a conversation inside the build, …, › sends a ticket waiting on a gate back to the ticket, …, › does not guess at a park it cannot resume, › refuses today, because nothing creates such a park yet, › starts nothing when the ticket is waiting on a ticket reply, › stops offering itself once two conversations running have moved nothing, › redirects to the pull request instead of opening anything, › holds no lock while the conversation runs, and holds the run instead.
+
+**What the next slice must know.**
+
+- `normaliseOldPath` runs on every read, after `normaliseWait`. Anything that writes `failed` or an old wait kind reads back converted.
+- No function was deleted. The 41b list of functions with no production caller is unchanged. Decision 2 may make more of them dead in behaviour: `RunStore.fail`, `retry`, `reopenForTakeover`, `reclaim`'s re-arm, and the gate, review, conversation and failed branches of `resolveTakeover` in `src/commands/takeover.ts` (41e).
+- A converted run has no `seen` mark in a run record. Its first look reads its ticket, and its pull request, from the run's `createdAt`. A named person's comment written after that, even one the old code already read, wakes the runner once. This was already so after 41b, for every parked run; the conversion does not change it.
+- The runner looked at every parked run before this slice, whatever its kind. So a converted park is looked at exactly as before. What changes for it is how `handBack`, `timone status` and `timone takeover` read its wait.
+
+### ✏ 2026-09-30 — 41c finished under the plan's amendment
+
+**Built.** Both decisions above were made, and the plan was amended. A converted failed run whose ticket is still open and marked is picked up again as new work, like any marked ticket with no run. Converting on every read stays. `runs.ts` is unchanged since the section above. The work since is in tests only: case (5) is narrowed, case (8) is new, and the 39 tests listed above are deleted or re-based. The build and the whole suite pass.
+
+**Files touched, in addition to the list above.**
+
+- `src/daemon/poll.test.ts` — case (5) narrowed and renamed, case (8) added. `forgeBefore166` now takes `failedTickets`: `open and marked`, or `closed or not marked` (scratch-app #21 open with its mark taken off, ivtrends #88 closed). Three tests re-based. The helper `failedRun` deleted, since nothing uses it.
+- `src/daemon/runs.test.ts` — 19 tests deleted, 3 re-based.
+- `src/commands/cancel.test.ts` — 1 test deleted.
+- `src/commands/daemon.test.ts` — 1 test re-based.
+- `src/daemon/session.test.ts` — 1 test re-based.
+- `src/commands/takeover.test.ts` — 10 tests deleted, 1 re-based. The helper `failed` deleted, and the describe *a ticket waiting on a pull-request review*, left empty.
+
+The sentence "No existing test was changed" above no longer holds.
+
+**Evidence for case (5), as narrowed, and case (8).**
+
+- *(5)* `asks for no wake and posts nothing for a converted run when nobody has written anything, and no failed run's ticket is still open and marked`. The forge lists every waiting run's ticket as open and marked, and neither failed run's ticket. The test asserts no wake, no write to the forge, nothing picked up or queued, and no error. It passes with and without the conversion, so it could not be red first. Two breaks in `runs.ts` show it can fail. Each was undone, and `diff` against a saved copy is empty after each:
+  - The conversion sets an old park to `picked-up`, which is a conversion that asks for a wake: `expected [ { …(3) }, …(4) ] to deeply equal []`, `Tests  1 failed | 106 skipped (107)`.
+  - The conversion makes a failed run wait for the runner instead of cancelling it: `expected [ { runId: 'scratch-app#21/1', …(2) } ] to deeply equal []`.
+
+  Restored: `Tests  1 passed | 106 skipped (107)`.
+- *(8)* `picks a converted failed run's ticket up again as new work while it is still open and marked`. The forge lists the failed runs' tickets as open and marked. It asserts that `ivtrends#88/2` is picked up and the runner woken with the new-ticket event, and that `scratch-app#21/2` is queued behind #24. It also asserts one queue comment on scratch-app #21, one pickup comment on ivtrends #88, and no error. Red with the conversion taken out of `normaliseSequences`: `expected [] to deeply equal [ 'ivtrends#88/2' ]`, `Tests  1 failed | 2 passed | 104 skipped (107)`. Green with it: `Tests  3 passed | 104 skipped (107)`.
+- *(6)* now uses the forge with the failed tickets open and marked, and still asserts only the wake of `ivtrends#90/1`. Its break was run again on the final test: `expected [] to deeply equal [ { runId: 'ivtrends#90/1', …(2) } ]`. Restored.
+
+All eight together: `Tests  8 passed | 297 skipped (305)`.
+
+**Every test deleted or re-based because an old state became unreachable.**
+
+Deleted, because what they assert only a failed run or an old kind of wait can have (30):
+
+- `src/daemon/runs.test.ts` (19):
+  - A failed run holding its ticket: *register* › hands back a failed chunk rather than opening the next one beside it; *a ticket's chunks* › still calls a failed chunk live, because only a retry can end it.
+  - Retry: *two chunks of one ticket* › leaves a failed chunk retryable however often the poll loop re-registers, and › opens the next chunk once a retried chunk finally succeeds; *retry* › re-arms a failed run keeping its branch, stage and pull request, › resumes past the stage that asked a question inside the build, carrying what it asked, › resumes at the stage it failed when the failure was an ordinary one, › leaves the dead attempt's flags behind, › keeps the flags the fresh attempt earns for itself, and › refuses when another run has since claimed the project; *the heartbeat, and the runs that have stopped making one* › lets a reclaimed run be failed and then retried, with no new transition; *a heartbeat belongs to the session that wrote it* › does not reclaim a run that was just re-armed under an old heartbeat.
+  - The answer a failed run keeps for a retry: *the answer a run has read and not acted on* › keeps it through the transition that clears the wait, and through failure. The answer still outliving `activate` is asserted by › forgets it once the run has moved on, by a new wait or the next stage.
+  - reopenForTakeover: › parks a failed run on a person, keeping its branch and stage, and forgets the failure.
+  - Cancelling a failed run: *cancelling a run* › cancels a failed run, so work nobody will retry can be ended, › gives a run cancelled out of failure no way back, retry included, and › lets a ticket move on from a failure that was abandoned rather than retried. The same for a run that was not failed stays in › lets its ticket take a fresh chunk, because an abandoned one is settled.
+  - An old kind read back: *a run parked on something nothing written can resolve* › carries the new kind through the file, and back out of it; *the wait as one value* › carries all four kinds through the file and back out.
+- `src/commands/cancel.test.ts` (1): *timone cancel* › ends a failed run rather than sending the human via `timone retry`. Its subject is the ruling about a failed run's two ways out. A cancel of a run that is not failed stays in › ends the ticket's current chunk and says what it did.
+- `src/commands/takeover.test.ts` (10), each a takeover of a run in an old state:
+  - Conversation: *resolveTakeover* › resolves a ticket waiting on a conversation to that stage, and › refuses a ticket parked on a conversation inside the build, rather than re-opening the stage.
+  - Gate: › sends a ticket waiting on a gate back to the ticket, rather than opening an interview.
+  - No kind: › does not guess at a park it cannot resume.
+  - Failed: *a run the machine stopped and cannot take further* › resolves a failed run the same way, rather than telling the person to re-mark the ticket, and › opens the unbound session on a failed run, and leaves it parked on a person afterwards.
+  - Conversation: › refuses today, because nothing creates such a park yet.
+  - Gate: *runTakeover* › starts nothing when the ticket is waiting on a ticket reply.
+  - Conversation: *a takeover that finishes the step it took over* › stops offering itself once two conversations running have moved nothing.
+  - Review: *a ticket waiting on a pull-request review* › redirects to the pull request instead of opening anything.
+
+Re-based, because the old state was only where the test started, or because the test reads an older ledger (9):
+
+- `src/daemon/runs.test.ts` (3):
+  - *persistence* › round-trips state through the file: the parked run waits for the runner, not on a gate.
+  - *the pull request on a run* › persists the pull request and the review wait across a reopen: renamed › persists the pull request and the wait on it across a reopen. The run waits for the runner, not on a review, and the test asserts that wait and its words come back.
+  - *the wait as one value* › folds a real pre-collapse ledger into the new shape reads an older ledger. Its expected wait for `scratch-app#4/1` is now the converted shape, with `kind: "runner"`.
+- `src/daemon/poll.test.ts` (3), each now starting from a run waiting for the runner (`waitingForRunner`):
+  - *pollOnce — requests a human left for the daemon* › carries out a queued cancellation, in the human's own words.
+  - › serves nobody when the cycle was never told where the ledger is. It asserts the run is still `parked`.
+  - *the runner drives its projects in the poll cycle* › settles a retry asked of a runner project with the refusal, and leaves the run as it was.
+- `src/commands/daemon.test.ts` (1): *runDaemon — the requests waiting beside the ledger it holds* › carries out a request left beside the ledger. The run waits for the runner instead of having failed.
+- `src/daemon/session.test.ts` (1): *claiming a run before its session exists* › leaves the run parked, and still waiting, when the spawn throws. The run waits for the runner at the same stage and with the same opening instant, not on a conversation, and the test asserts that wait comes back.
+- `src/commands/takeover.test.ts` (1): *takeover claims through the run, not the lock* › holds no lock while the conversation runs, and holds the run instead. The run waits for the runner, and is given back on the runner's wait at the same stage.
+
+The unused imports `enqueue` (`takeover.test.ts`), `BUILD_ESCALATION_PREFIX` and `pollOnce` (`session.test.ts`), and `dirname` (`daemon.test.ts`) were already unused at 5044fc4. They were left alone.
+
+**Validation commands, as run.**
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+> timone@0.1.0 build
+> tsc
+ Test Files  59 passed (59)
+      Tests  1814 passed (1814)
+$ git status --short .timone ; echo "(expected: nothing — no test touched the real ledger)"
+(expected: nothing — no test touched the real ledger)
+```
+
+1814 = 1836 + 8 new tests − 30 deleted.
+
+- [x] Red-green evidence for each of the eight cases is in the handoff. Cases (1), (2), (3), (4), (7) and (8) were seen red, then green. Cases (5) and (6) pass with and without the change, and breaks that make each fail are shown. **PASS**
+- [x] Every test deleted or changed because an old state became unreachable is named in the handoff, with which of the two it was: 30 deleted, 9 re-based, listed above. **PASS**
+- [x] **Hard gate:** none of the eight tests is skipped or weakened. Case (5) asserts exactly what the amended plan says. **PASS**
+- `git status --short .timone` is empty. **PASS**
+
+**What 41d and later slices must know.**
+
+- `runs.ts` still holds the code these deletions leave with no test and no reachable use: `RunStore.fail`, `retry`, `reopenForTakeover`, the re-arm in `reclaim`, the `failed` rows of `TRANSITIONS`, and the comments that describe a failed run as waiting for `timone retry`. `takeover.ts` (41e) still has its gate, review, conversation, failed and no-kind branches in `resolveTakeover`, and `settle` still parks a new run on `conversation`. That run reads back as the runner's. `cta.ts` still has its `failed` branches, and `status.ts` still prints "stopped early" for a failed run. Neither can see one now.
+- `normaliseOldPath` runs on every read. Anything later slices leave writing `failed` or an old kind is read back converted, so no test can observe those states through the store any more.

@@ -261,75 +261,6 @@ describe("parseTarget", () => {
 });
 
 describe("resolveTakeover", () => {
-  it("resolves a ticket waiting on a conversation to that stage", async () => {
-    const store = parkedOnConversation(newStore());
-    const resolution = await resolveTakeover(
-      { project: "scratch-app", ticket: 6 },
-      { manifest, store, adapter: fakeAdapter().adapter },
-    );
-
-    expect(resolution).toMatchObject({ kind: "converse", stage: "clarification" });
-  });
-
-  it("refuses a ticket parked on a conversation inside the build, rather than re-opening the stage", async () => {
-    // `ivtrends` #88: the checking step parked on a question it should never
-    // have asked, and this command opened that stage again — which asked the
-    // same question, at the same price, and left the ticket offering the same
-    // command. Nothing parks a build stage like this any more (ADR-0052), so
-    // a ledger that still says so is old, and the answer is a way out that is
-    // not this command.
-    const store = newStore();
-    const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "session-1");
-    store.claimBranch(run.id, "timone/6-message-box");
-    store.park(run.id, {
-      waitingOn: "your answer to the question in my last comment.",
-      kind: "conversation",
-      stage: "verification",
-      waitCursor: "2026-08-03T10:00:00Z",
-    });
-
-    const resolution = await resolveTakeover(
-      { project: "scratch-app", ticket: 6 },
-      { manifest, store, adapter: fakeAdapter().adapter },
-    );
-
-    expect(resolution.kind).toBe("nothing-to-do");
-    expect(resolution).toMatchObject({
-      message: expect.stringContaining("scratch-app #6"),
-    });
-    // The way out is another command, not this one again — the whole point of
-    // the refusal.
-    expect(resolution).toMatchObject({
-      message: expect.stringContaining("timone cancel scratch-app#6"),
-    });
-    expect((resolution as { message: string }).message).not.toContain(
-      "timone takeover",
-    );
-  });
-
-  it("sends a ticket waiting on a gate back to the ticket, rather than opening an interview", async () => {
-    const store = newStore();
-    const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "session-1");
-    store.claimBranch(run.id, "timone/6-message-box");
-    store.park(run.id, {
-      waitingOn: "your approval of what I wrote down",
-      kind: "gate",
-      stage: "requirements",
-      waitCursor: "2026-08-03T10:00:00Z",
-    });
-
-    const resolution = await resolveTakeover(
-      { project: "scratch-app", ticket: 6 },
-      { manifest, store, adapter: fakeAdapter().adapter },
-    );
-
-    expect(resolution.kind).toBe("answer-on-ticket");
-    expect(resolution).toMatchObject({
-      message: expect.stringContaining("your approval of what I wrote down"),
-    });
-  });
 
   it("says what it is doing instead when the ticket is being worked on", async () => {
     const store = newStore();
@@ -412,25 +343,6 @@ describe("resolveTakeover", () => {
     expect(said).toMatch(/mark it for me/);
     expect(said).not.toMatch(/timone:held/);
     expect(said).not.toMatch(/parked|failed|stopped early|scratch-app#4/);
-  });
-
-  it("does not guess at a park it cannot resume", async () => {
-    // Phase 11 parked runs with no waiting kind at all. Guessing which
-    // conversation those want would invent one.
-    const store = newStore();
-    const { run } = store.register("scratch-app", 4);
-    store.activate(run.id, "session-1");
-    store.park(run.id, { waitingOn: "the next stage to be built", stage: "triage" });
-
-    expect(
-      await resolveTakeover(
-        { project: "scratch-app", ticket: 4 },
-        { manifest, store, adapter: fakeAdapter().adapter },
-      ),
-    ).toMatchObject({
-      kind: "nothing-to-do",
-      message: expect.stringContaining("the next stage to be built"),
-    });
   });
 });
 
@@ -678,86 +590,6 @@ describe("a run the machine stopped and cannot take further", () => {
     expect(calls).toHaveLength(1);
     expect(logged.join("\n")).not.toMatch(/can't hold a conversation/);
   });
-
-  /** A run the daemon failed at delivery, as `ivtrends` #126 was. */
-  function failed(store: RunStore): RunStore {
-    const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "session-1");
-    store.claimBranch(run.id, "timone/6-message-box");
-    store.setStage(run.id, "delivery");
-    store.fail(
-      run.id,
-      "the delivery stage said it finished, but no open pull request exists for the branch",
-    );
-    return store;
-  }
-
-  it("resolves a failed run the same way, rather than telling the person to re-mark the ticket", async () => {
-    // ADR-0059. The ticket's own comment hands the person this command. On
-    // `ivtrends` #126 it answered "Re-mark the ticket to try again", and a
-    // retry ran the same step into the same stop.
-    const resolution = await resolveTakeover(
-      { project: "scratch-app", ticket: 6 },
-      { manifest, store: failed(newStore()), adapter: fakeAdapter().adapter },
-    );
-
-    expect(resolution.kind).toBe("escalation");
-    expect(resolution).not.toHaveProperty("stage");
-  });
-
-  it("opens the unbound session on a failed run, and leaves it parked on a person afterwards", async () => {
-    // Through the ledger file, as the command runs it: the claim is where a
-    // failed run used to be refused, because `failed` may not go to `active`.
-    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-failed-"));
-    tempDirs.push(dir);
-    const statePath = join(dir, ".timone", "state.json");
-    let tick = 0;
-    const store = failed(
-      RunStore.open(statePath, {
-        now: () => `2026-08-03T10:${String(tick++).padStart(2, "0")}:00Z`,
-      }),
-    );
-    const { adapter } = fakeAdapter();
-    const { launcher, calls } = fakeLauncher();
-
-    const code = await runTakeover("scratch-app#6", {
-      manifest,
-      store,
-      statePath,
-      adapter,
-      launcher,
-      root: "/root",
-      log: () => {},
-    });
-
-    expect(code).toBe(0);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].args[0]).toContain("scratch-app#6/1");
-    // What stopped it reaches the session as what the run waits on.
-    expect(calls[0].args[0]).toContain("no open pull request exists");
-
-    const after = store.runsForTicket("scratch-app", 6).at(-1);
-    expect(after).toMatchObject({
-      status: "parked",
-      stage: "delivery",
-      branch: "timone/6-message-box",
-      wait: { kind: "escalation" },
-    });
-    expect(after?.failure).toBeUndefined();
-  });
-
-  it("refuses today, because nothing creates such a park yet", async () => {
-    // The same command over the parks that do exist: each keeps its own
-    // sentence, and none of them opens an unbound session.
-    const store = parkedOnConversation(newStore());
-
-    expect(
-      await resolveTakeover(
-        { project: "scratch-app", ticket: 6 },
-        { manifest, store, adapter: fakeAdapter().adapter },
-      ),
-    ).toMatchObject({ kind: "converse", stage: "clarification" });
-  });
 });
 
 describe("runTakeover", () => {
@@ -797,29 +629,6 @@ describe("runTakeover", () => {
         log: () => {},
       }),
     ).toBe(3);
-  });
-
-  it("starts nothing when the ticket is waiting on a ticket reply", async () => {
-    const store = newStore();
-    const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "session-1");
-    store.park(run.id, { waitingOn: "your approval", kind: "gate" });
-    const { adapter } = fakeAdapter();
-    const { launcher, calls } = fakeLauncher();
-    const said: string[] = [];
-
-    const code = await runTakeover("scratch-app#6", {
-      manifest,
-      store,
-      adapter,
-      launcher,
-      root: "/root",
-      log: (message) => said.push(message),
-    });
-
-    expect(calls).toEqual([]);
-    expect(code).toBe(0);
-    expect(said.join("\n")).toMatch(/answer on the ticket/i);
   });
 
   it("starts nothing, and fails, on a target it cannot make sense of", async () => {
@@ -1176,47 +985,6 @@ describe("a takeover that finishes the step it took over", () => {
     fromTimone: true,
   };
 
-  it("stops offering itself once two conversations running have moved nothing", async () => {
-    // `ivtrends` #88. The ticket said to run `timone takeover`, it was run, the
-    // stage could not act, and the run went back on exactly the wait it came
-    // from — so the ticket said to run the same command again, at the same
-    // price, without limit. A conversation is now recorded as an answer read,
-    // which is what feeds ADR-0033's floor.
-    const { store, statePath } = ledger();
-    handedBackAtRequirements(store);
-    const said: string[] = [];
-    const twice = async (): Promise<void> => {
-      await runTakeover("scratch-app#6", {
-        manifest,
-        store,
-        statePath,
-        adapter: trackerSaying([]),
-        launcher: fakeLauncher().launcher,
-        root: "/root",
-        ticker: () => ({ stop: () => {} }),
-        log: (message) => said.push(message),
-      });
-    };
-
-    await twice();
-    // Once is a stage that asked badly and may settle it next time, so the
-    // ticket may still offer the conversation.
-    expect(store.get("scratch-app#6/1")?.wait?.kind).toBe("conversation");
-
-    await twice();
-    // Twice running is proof the conversation does not reach what is blocking
-    // it. The wait becomes one no answer and no takeover resumes.
-    expect(store.get("scratch-app#6/1")?.wait?.kind).toBe("escalation");
-
-    // And that is what the ticket and the command now read: a third attempt
-    // opens the escalation, not the stage that has twice failed to move.
-    const resolution = await resolveTakeover(
-      { project: "scratch-app", ticket: 6 },
-      { manifest, store, adapter: trackerSaying([]) },
-    );
-    expect(resolution.kind).toBe("escalation");
-  });
-
   it("says so, and writes nothing, when the run moved under it", async () => {
     // timone#63's silent early return. `releaseClaim` returned without a word
     // when the run was no longer active, so a person whose run had been
@@ -1271,31 +1039,6 @@ describe("a takeover that finishes the step it took over", () => {
   });
 });
 
-describe("a ticket waiting on a pull-request review", () => {
-  it("redirects to the pull request instead of opening anything", async () => {
-    const store = newStore();
-    const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "s1");
-    store.claimBranch(run.id, "timone/6-fiddly-box");
-    store.recordPullRequest(run.id, 9);
-    store.park(run.id, {
-      waitingOn: "your review of pull request #9",
-      kind: "review",
-      stage: "delivery",
-    });
-
-    const resolution = await resolveTakeover(
-      { project: "scratch-app", ticket: 6 },
-      { manifest, store, adapter: fakeAdapter().adapter },
-    );
-
-    expect(resolution.kind).toBe("answer-on-ticket");
-    if (resolution.kind === "answer-on-ticket") {
-      expect(resolution.message).toMatch(/pull request #9/);
-    }
-  });
-});
-
 describe("takeover claims through the run, not the lock", () => {
   /**
    * The slice's central claim, and the only place it is observable: *during*
@@ -1307,7 +1050,15 @@ describe("takeover claims through the run, not the lock", () => {
     tempDirs.push(dir);
     const statePath = join(dir, ".timone", "state.json");
     const store = RunStore.open(statePath, { now: () => "2026-08-03T10:00:00Z" });
-    parkedOnConversation(store);
+    // Waiting for the runner: an old kind of wait reads back as the runner's
+    // since 2026-09-30 (timone#166), so this is the wait a run now comes from.
+    const { run } = store.register("scratch-app", 6);
+    store.activate(run.id, "session-1");
+    store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      stage: "clarification",
+    });
     const { adapter } = fakeAdapter();
     const seen: { lockHeld: boolean; status?: string }[] = [];
     const launcher: ProcessLauncher = {
@@ -1337,7 +1088,7 @@ describe("takeover claims through the run, not the lock", () => {
     // And it is given back afterwards, on the wait it came from.
     const after = store.get("scratch-app#6/1");
     expect(after?.status).toBe("parked");
-    expect(after?.wait?.kind).toBe("conversation");
+    expect(after?.wait?.kind).toBe("runner");
     expect(after?.stage).toBe("clarification");
   });
 

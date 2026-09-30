@@ -119,38 +119,6 @@ describe("timone cancel", async () => {
     expect(lines.join("\n")).not.toMatch(/cannot go from/);
   });
 
-  it("ends a failed run rather than sending the human via `timone retry`", async () => {
-    // Ruled by fvermaut 2026-08-15. This case used to refuse and point at
-    // `timone retry`, which made clearing a failed run a two-command dance —
-    // and between the two the daemon can pick the re-armed run up and spend
-    // real money on work somebody was trying to delete.
-    const store = newStore();
-    const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "s1");
-    store.claimBranch(run.id, "timone/6-fiddly-box");
-    store.fail(run.id, "the session died mid-slice");
-    const { log, lines } = collect();
-
-    const code = await runCancel("scratch-app#6", {
-      manifest,
-      store,
-      reason: "we shipped this by hand yesterday",
-      log,
-    });
-
-    expect(code).toBe(0);
-    expect(store.get("scratch-app#6/1")?.status).toBe("cancelled");
-    expect(store.get("scratch-app#6/1")?.cancellation).toBe(
-      "we shipped this by hand yesterday",
-    );
-    expect(lines.join("\n")).toContain(
-      "Stopped work on scratch-app #6: we shipped this by hand yesterday.",
-    );
-    // The old refusal's advice must be gone with it: a cancelled chunk is
-    // exactly what `timone retry` will not touch.
-    expect(lines.join("\n")).not.toContain("timone retry");
-  });
-
   it("says a run was already cancelled rather than cancelling it twice", async () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);

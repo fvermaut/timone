@@ -662,7 +662,17 @@ describe("claiming a run before its session exists", () => {
       ...thread,
       labels: ["timone", "triage:feature"],
     });
-    const run = parkedOnAConversation(store);
+    // Waiting for the runner: an old kind of wait reads back as the runner's
+    // since 2026-09-30 (timone#166), so this is the wait a run now comes from.
+    const waiting = pickedUpRun(store);
+    store.activate(waiting.id, "session-earlier");
+    store.park(waiting.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      stage: "clarification",
+      waitCursor: "2026-08-02T10:00:00Z",
+    });
+    const run = store.get(waiting.id)!;
     const runtime: SessionRuntime = {
       async start() {
         throw new Error("the runtime is down");
@@ -681,8 +691,8 @@ describe("claiming a run before its session exists", () => {
 
     const after = store.get(run.id)!;
     expect(after.status).toBe("parked");
-    expect(after.wait?.on).toBe("a conversation in your terminal");
-    expect(after.wait?.kind).toBe("conversation");
+    expect(after.wait?.on).toBe("the next thing that happens on this ticket");
+    expect(after.wait?.kind).toBe("runner");
     expect(after.wait?.opened).toBe("2026-08-02T10:00:00Z");
     // And the project is free for the next cycle, rather than held by a
     // session that never started.

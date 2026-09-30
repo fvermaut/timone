@@ -411,8 +411,11 @@ describe("runDaemon — the requests waiting beside the ledger it holds", () => 
   it("carries out a request left beside the ledger", async () => {
     const { store, statePath } = clockedStore();
     const { run } = store.register("scratch-app", 31);
-    store.activate(run.id, "session-1");
-    store.fail(run.id, "the execution stage stopped");
+    store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
     enqueue(statePath, { kind: "cancel", project: "scratch-app", ticket: 31 });
 
     const said: string[] = [];

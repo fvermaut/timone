@@ -1,4 +1,5 @@
 import {
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -7,6 +8,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
@@ -2050,19 +2052,12 @@ function newStoreAt(): { store: RunStore; statePath: string } {
   return { store, statePath };
 }
 
-/** A run that stopped badly, which is what `timone retry` exists for. */
-function failedRun(store: RunStore, number = 31): Run {
-  const { run } = store.register("scratch-app", number);
-  store.activate(run.id, "session-1");
-  return store.fail(run.id, "the execution stage said it finished, but nothing was committed");
-}
-
 describe("pollOnce — requests a human left for the daemon", () => {
 
   it("carries out a queued cancellation, in the human's own words", async () => {
     const { store, statePath } = newStoreAt();
     const manifest = manifestWith("scratch-app");
-    const run = failedRun(store);
+    const run = waitingForRunner(store, 31);
     enqueue(statePath, {
       kind: "cancel",
       project: "scratch-app",
@@ -2166,7 +2161,7 @@ describe("pollOnce — requests a human left for the daemon", () => {
   it("serves nobody when the cycle was never told where the ledger is", async () => {
     const { store } = newStoreAt();
     const manifest = manifestWith("scratch-app");
-    failedRun(store);
+    waitingForRunner(store, 31);
     const { adapter } = fakeAdapter({ "scratch-app": [] });
     const { sessions } = fakeWakes();
     const { runner } = runnerFor({ store, adapter, manifest, sessions });
@@ -2179,7 +2174,7 @@ describe("pollOnce — requests a human left for the daemon", () => {
     });
 
     expect(result.applied).toEqual([]);
-    expect(store.get("scratch-app#31/1")?.status).toBe("failed");
+    expect(store.get("scratch-app#31/1")?.status).toBe("parked");
   });
 });
 
@@ -3363,7 +3358,7 @@ describe("the runner drives its projects in the poll cycle", () => {
     // ADR-0060 D6 removes `timone retry` for these projects: the runner reads
     // the ticket each time it wakes, so writing there is the way to ask.
     const { store, statePath } = newStoreAt();
-    const run = failedRun(store);
+    const run = waitingForRunner(store, 31);
     enqueue(statePath, { kind: "retry", project: "scratch-app", ticket: 31 }, { by: "fvermaut" });
     const manifest = manifestWith("scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(31)] });
@@ -4189,5 +4184,187 @@ describe("a cancel left while a runner project's forge is slow to answer is carr
     expect(stops).toEqual([run.id]);
     expect(result.applied).toEqual(["cancel scratch-app#7"]);
     expect(pending(statePath).requests).toEqual([]);
+  });
+});
+
+/**
+ * The ledger typed for 41c (`fixtures/ledger-before-166.json`, described in
+ * `runs.test.ts`), copied into a throwaway directory and opened there, with a
+ * clock that starts after everything in it.
+ */
+function storeOnLedgerBefore166(): RunStore {
+  const dir = mkdtempSync(join(tmpdir(), "timone-poll-"));
+  tempDirs.push(dir);
+  const path = join(dir, ".timone", "state.json");
+  mkdirSync(dirname(path), { recursive: true });
+  copyFileSync(
+    fileURLToPath(new URL("./fixtures/ledger-before-166.json", import.meta.url)),
+    path,
+  );
+  let tick = 0;
+  return RunStore.open(path, {
+    now: () => new Date(Date.parse("2026-09-30T10:00:00Z") + tick++ * 1000).toISOString(),
+  });
+}
+
+/**
+ * The forge beside that ledger. Every ticket of a run that is waiting is open
+ * and marked, and pull request #31 is open. The done and cancelled runs'
+ * tickets are closed, so they are not listed.
+ *
+ * `failedTickets` says how the failed runs' tickets stand. `open and marked`
+ * is how the old code left them: it never took the mark off a failed run's
+ * ticket, and never held it. `closed or not marked` is scratch-app #21 open
+ * with its mark taken off, and ivtrends #88 closed.
+ *
+ * Nobody has written anything, except what `said` gives, keyed
+ * `<project>#<ticket>`. Every write to the forge is written down in `writes`.
+ */
+function forgeBefore166(given: {
+  failedTickets: "open and marked" | "closed or not marked";
+  said?: Record<string, TicketThread["comments"]>;
+}): {
+  adapter: TicketingAdapter;
+  writes: string[];
+} {
+  const said = given.said ?? {};
+  const opened = (project: string, number: number, labels = ["timone"]): Ticket =>
+    ticket(number, {
+      labels,
+      url: `https://github.com/fvermaut/${project}/issues/${number}`,
+      createdAt: "2026-09-20T09:00:00Z",
+    });
+  const failedListed = given.failedTickets === "open and marked";
+  const marked: Record<string, Ticket[]> = {
+    "scratch-app": [...(failedListed ? [21] : []), 24].map((number) =>
+      opened("scratch-app", number),
+    ),
+    ivtrends: [...(failedListed ? [88] : []), 90, 91, 92, 93, 94].map((number) =>
+      opened("ivtrends", number),
+    ),
+  };
+  const unmarked: Record<string, Ticket[]> = {
+    "scratch-app": failedListed ? [] : [opened("scratch-app", 21, [])],
+  };
+  const writes: string[] = [];
+  const { adapter } = fakeAdapter(marked);
+  return {
+    writes,
+    adapter: {
+      ...adapter,
+      async listOpenTickets(project): Promise<Ticket[]> {
+        return [...(marked[project.name] ?? []), ...(unmarked[project.name] ?? [])];
+      },
+      async getTicket(project, number): Promise<TicketThread> {
+        const found = [...(marked[project.name] ?? []), ...(unmarked[project.name] ?? [])].find(
+          (one) => one.number === number,
+        );
+        if (found === undefined) throw new Error(`no ticket ${number}`);
+        return { ...found, comments: said[`${project.name}#${number}`] ?? [] };
+      },
+      async getPullRequestThread(project, number): Promise<PullRequestThread> {
+        if (project.name !== "scratch-app" || number !== 31) {
+          throw new Error(`no pull request ${number}`);
+        }
+        return {
+          number: 31,
+          title: "Sort tasks by due date",
+          url: "https://github.com/fvermaut/scratch-app/pull/31",
+          state: "open",
+          headSha: "bbbbbbb",
+          comments: [],
+        };
+      },
+      async postComment(project, number, body): Promise<void> {
+        writes.push(`comment on ${project.name}#${number}: ${body}`);
+      },
+      async upsertComment(project, number): Promise<void> {
+        writes.push(`comment kept up to date on ${project.name}#${number}`);
+      },
+      async applyLabel(project, number, label): Promise<void> {
+        writes.push(`label ${label} on ${project.name}#${number}`);
+      },
+      async closeTicket(project, number): Promise<void> {
+        writes.push(`closed ${project.name}#${number}`);
+      },
+      async postPullRequestComment(project, number, body): Promise<void> {
+        writes.push(`comment on ${project.name} pull request #${number}: ${body}`);
+      },
+      async upsertPullRequestComment(project, number): Promise<void> {
+        writes.push(`comment kept up to date on ${project.name} pull request #${number}`);
+      },
+    },
+  };
+}
+
+describe("the runs the old code left in the ledger, on the first cycle after it was removed", () => {
+  it("asks for no wake and posts nothing for a converted run when nobody has written anything, and no failed run's ticket is still open and marked", async () => {
+    const store = storeOnLedgerBefore166();
+    const manifest = manifestWith("scratch-app", "ivtrends");
+    const { adapter, writes } = forgeBefore166({ failedTickets: "closed or not marked" });
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+    await runner.drain();
+
+    expect(wakes).toEqual([]);
+    expect(writes).toEqual([]);
+    expect(result.pickedUp).toEqual([]);
+    expect(result.queued).toEqual([]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("asks for a wake when a named person writes on a converted run's ticket", async () => {
+    const store = storeOnLedgerBefore166();
+    const manifest = manifestWith("scratch-app", "ivtrends");
+    // ivtrends #90 waited on a gate, and is now waiting for the runner.
+    const { adapter } = forgeBefore166({
+      failedTickets: "open and marked",
+      said: { "ivtrends#90": [personSaid("fvermaut", "approved", "2026-09-30T09:30:00Z")] },
+    });
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, runner });
+    await runner.drain();
+
+    expect(wakes.filter((wake) => wake.runId === "ivtrends#90/1")).toEqual([
+      {
+        runId: "ivtrends#90/1",
+        events: ['fvermaut commented on the ticket at 2026-09-30T09:30:00Z: "approved"'],
+        options: {},
+      },
+    ]);
+  });
+
+  it("picks a converted failed run's ticket up again as new work while it is still open and marked", async () => {
+    // As any marked ticket with no run is (timone#166): the failed run is
+    // cancelled now, and a cancelled run no longer holds its ticket. ivtrends
+    // is free, so its ticket is picked up and the runner woken. scratch-app is
+    // held by #24, parked on its branch, so its ticket queues behind it.
+    const store = storeOnLedgerBefore166();
+    const manifest = manifestWith("scratch-app", "ivtrends");
+    const { adapter, writes } = forgeBefore166({ failedTickets: "open and marked" });
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+    await runner.drain();
+
+    expect(result.pickedUp).toEqual(["ivtrends#88/2"]);
+    expect(result.queued).toEqual(["scratch-app#21/2"]);
+    expect(wakes).toEqual([
+      {
+        runId: "ivtrends#88/2",
+        events: ["A new ticket was picked up. Nothing has been done on it yet."],
+        options: {},
+      },
+    ]);
+    expect(writes).toEqual([
+      expect.stringMatching(/^comment on scratch-app#21: \*\*This one is in the queue\.\*\*/),
+      expect.stringMatching(/^comment on ivtrends#88: \*\*Picked this up\.\*\*/),
+    ]);
+    expect(result.errors).toEqual([]);
   });
 });

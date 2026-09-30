@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
@@ -37,6 +38,7 @@ import { progressOf } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
   CARRY_ON_WAIT,
+  RunStore,
   type DaemonRecord,
   type InitiativeRecord, runId, type Run } from "../daemon/runs.js";
 import { renderStatus } from "./status.js";
@@ -1246,6 +1248,54 @@ describe("renderStatus — what a ticket the runner works on has spent", () => {
     // $150 is the limit of a project that names none of its own.
     expect(lineFor(output, "scratch-app")).toBe(
       `scratch-app  #12 (building) — waiting: ${RUNNER_DEFAULT_WAIT} — $4.50 of $150.00 spent`,
+    );
+  });
+});
+
+describe("renderStatus — the runs the old code left in the ledger", () => {
+  it("shows what a converted run waits on, in the words it waited on", () => {
+    // The ledger typed for 41c (`src/daemon/fixtures/ledger-before-166.json`),
+    // read from a throwaway copy the way `timone status` reads the real one.
+    const root = mkdtempSync(join(tmpdir(), "timone-status-"));
+    tempDirs.push(root);
+    const path = join(root, ".timone", "state.json");
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(
+      fileURLToPath(new URL("../daemon/fixtures/ledger-before-166.json", import.meta.url)),
+      path,
+    );
+    const both: Manifest = {
+      projects: {
+        "scratch-app": {
+          repo_url: "https://github.com/fvermaut/scratch-app.git",
+          path: "projects/scratch-app",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+        ivtrends: {
+          repo_url: "https://github.com/fvermaut/ivtrends.git",
+          path: "projects/ivtrends",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+      },
+    };
+
+    const output = renderStatus(both, RunStore.open(path).all(), { stateExists: true });
+
+    // A review, then a gate, a conversation, an escalation, a wait of no kind,
+    // and a run that already waited for the runner.
+    expect(lineFor(output, "scratch-app")).toBe(
+      "scratch-app  #24 (delivering) — waiting: your review of pull request #31",
+    );
+    expect(lineFor(output, "ivtrends")).toBe(
+      [
+        "ivtrends     #90 (writing down what it needs) — waiting: your approval of the requirements I wrote down",
+        "#91 (asking what you need) — waiting: your answer to the question in my last comment.",
+        "#92 (talking a question through) — waiting: me — I can't take this one further on my own.",
+        "#93 (sorting the request) — waiting: the next stage to be built",
+        "#94 (sorting the request) — waiting: the next thing that happens on this ticket",
+      ].join("  ·  "),
     );
   });
 });

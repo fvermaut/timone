@@ -2195,7 +2195,7 @@ function normaliseSequences(data: unknown): unknown {
   if (!("runs" in data) || !Array.isArray(data.runs)) return data;
   return {
     ...data,
-    runs: data.runs.map(normaliseSequence).map(normaliseWait),
+    runs: data.runs.map(normaliseSequence).map(normaliseWait).map(normaliseOldPath),
   };
 }
 
@@ -2263,6 +2263,63 @@ function normaliseWait(run: unknown): unknown {
       ...(endedBy === undefined ? {} : { resolvableBy: endedBy }),
     },
   };
+}
+
+/**
+ * What goes in front of a failed run's reason when the ledger is read, so a
+ * person can tell it from a cancel somebody asked for. See
+ * {@link normaliseOldPath}.
+ */
+const STOPPED_BEFORE_REMOVAL = "stopped before the old code was removed: ";
+
+/**
+ * Turn a run the old code between steps left in the ledger into one the
+ * runner can read, before the schema is asked to validate it
+ * ([timone#166](https://github.com/fvermaut/timone/issues/166)).
+ *
+ * Since 2026-09-30 the runner drives every project, and two things the old
+ * code wrote mean nothing to it:
+ *
+ * - **A failed run becomes cancelled.** Nothing re-arms a failed run any
+ *   more: `timone retry` refuses on every project. What stopped it is kept
+ *   where {@link RunStore.cancel} keeps its reason, after
+ *   {@link STOPPED_BEFORE_REMOVAL}.
+ * - **A parked run's old kind of wait becomes the runner's.** A gate, a
+ *   conversation, a review, an escalation, or a wait of no kind was a
+ *   stage's own wait, and no stage waits on its own any more. What it waits
+ *   on and when the wait opened are kept, so the ticket and `timone status`
+ *   still say what it waits for.
+ *
+ * **Nothing else changes.** A parked run holds its project only while it
+ * owns a branch, exactly as before. A parked run with no wait at all is left
+ * as it is, because there is nothing to say it waits on. Nothing here asks
+ * for a wake.
+ *
+ * **It normalises rather than migrating**, as {@link normaliseWait} does:
+ * `version` stays `1` and no file is rewritten because of a read. The
+ * converted runs reach the file the next time something writes it.
+ *
+ * **Idempotent, because it runs on every read.** A cancelled run, and a run
+ * already waiting for the runner, are returned untouched, so the reason is
+ * never prefixed twice.
+ */
+function normaliseOldPath(run: unknown): unknown {
+  if (typeof run !== "object" || run === null) return run;
+  const old = run as Record<string, unknown>;
+  if (old.status === "failed") {
+    const failure =
+      typeof old.failure === "string" ? old.failure : "no reason recorded";
+    return {
+      ...old,
+      status: "cancelled",
+      cancellation: `${STOPPED_BEFORE_REMOVAL}${failure}`,
+    };
+  }
+  if (old.status !== "parked") return run;
+  const { wait } = old;
+  if (typeof wait !== "object" || wait === null) return run;
+  if ("kind" in wait && wait.kind === "runner") return run;
+  return { ...old, wait: { ...wait, kind: "runner" } };
 }
 
 /** {@link normaliseSequences} for one run: an id with no `/` is chunk 1. */
