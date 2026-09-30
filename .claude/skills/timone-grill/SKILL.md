@@ -21,7 +21,7 @@ The output of this stage is a **resolved decision tree** (in conversation) plus 
 3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
 4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
 5. From here on, every file you read or write lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `process.md`, `standards/`, and `timone.yaml`.
-6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
+6. In a session the runner started, the target project arrives in the session's prompt; the same validation applies. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md))
 
 ## Prepare: explore before you ask
 

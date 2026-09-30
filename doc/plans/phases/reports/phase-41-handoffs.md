@@ -1392,6 +1392,82 @@ Extra checks. Every relative link added in the diff was tested against the file 
 
 The *Left as written* list above is now out of date for these four places. Its other items stay open: ADR-0060 D9's "chosen per project", PRD-05's Scope sentence on R19, and the bodies of the nine superseded ADRs.
 
+## 41j — `process.md`, the step skills and the glossary describe the runner
+
+**Built.** `process.md`, the step skills and the glossary now describe the runner and what code keeps, and no longer describe the old code between steps. `process.md` says, under the table of stages, that the order is the default order and not a rule: the runner decides each step, says on the ticket when it leaves the order, code lists every departure from the default order on the pull request, and nothing reaches a default branch without a named person's yes. It also sets apart the two meanings of "departure": a departure from the default order (the glossary's **Departure**) and a departure from the plan (an entry in `phase-NN-departures.md`). Every use of the word in stages 5 to 8 now says which. The section on gates, conversations and the human is rewritten around a named person instructing the runner in plain words, `timone takeover`, `timone cancel`, the removed `timone retry`, and what code keeps (ADR-0060 D2 to D5). The *What I need from you* line stays, with what reads it. Ten skills and the README no longer say "loop mode (daemon-initiated sessions)". The wayfinding skill's templates, answer section and closing steps describe what the runner does now. The glossary marks five words as removed, brings five entries in line, and adds **Default order** and **Departures record**. Every changed passage carries a `✏ 2026-09-30 ([ADR-0060](…))` marker.
+
+**Files touched.**
+
+- `process.md` — new paragraph under the table (the default order, the runner, the named person's yes, the two kinds of departure). Stage 1: the chore's path is the default path. Stage 5: the departure is named as a departure from the plan; chunk zero merges only on a recorded approval; a skipped approval of the list of pieces makes the initiative one piece. Stage 6: "then escalate to the human" replaced; the entry gate's exception for a skipped and recorded approval; the reason a dirty tree may hold the phase's own files no longer names the escalation path; "Escalation, concretely" became "When a sub-phase still fails, concretely"; a question asked after building started does not stop the run, and the runner carries it to the pull request. Stage 7: the departure is named as one from the plan. Stage 8: the block of departures from the default order that code writes (`<!-- timone:departures -->`) comes first; the body's own section is named as departures from the plan, in stage 8 and in *How to try it*. Section *Gates, conversations and the human* rewritten; the harness-routes paragraph says a named person's comment goes to the runner; the session-boundary paragraph says the runner is a fresh session each wake; "the daemon orchestrates stage skills" became the runner. *Do not report what the human cannot act on*: whether a failed step is tried again is the runner's decision, and code restarts a runner that failed (PRD-05.R16).
+- `CONTEXT.md` — **Takeover** rewritten. **Written answer**, **Handoff**, **Escalation**, **Handback**, **Ask check**: one entry each saying it was removed on 2026-09-30 with the old code; **Handoff** also says the word still means a sub-agent's handoff notes. **Request**, **Step ticket**, **Chunk zero**, **Breakdown**, **Departure** brought in line. New: **Default order**, **Departures record**.
+- `.claude/skills/README.md` — preamble item 6; "dispatched through stages 5 → 6 → 7 → 8" is the default order.
+- `.claude/skills/timone-adr/SKILL.md`, `timone-grill/SKILL.md`, `timone-prototype/SKILL.md`, `timone-triage/SKILL.md` — preamble item 6 only.
+- `.claude/skills/timone-deliver/SKILL.md` — preamble; line 28, where a question from the build comes from (the runner's instructions for this step); "PRD-02's daemon will spawn" in runner terms.
+- `.claude/skills/timone-execute/SKILL.md` — preamble; line 49 (the probe hook reads the step of a session the runner started from the ledger); "PRD-02's daemon will spawn" in runner terms; line 196 (ADR-0056) in runner terms; the human-gate sentence at line 194 (decision 9).
+- `.claude/skills/timone-plan/SKILL.md` — preamble; line 228 in runner terms.
+- `.claude/skills/timone-prd/SKILL.md` — preamble; line 189: the approval in a runner-started session, who writes it into the file, and the runner's skip.
+- `.claude/skills/timone-verify/SKILL.md` — preamble; line 60 (ADR-0052 "is absolute there"); line 64 (ADR-0056); line 121 (the probe hook, same as execute line 49); "PRD-02's daemon will spawn"; closing item 6 (decision 10).
+- `.claude/skills/timone-wayfind/SKILL.md` — preamble; lines 62 to 143 and 196 to 203 (decisions 3 to 7).
+- `/private/tmp/…/scratchpad/41j-handoff.md` — this section. `doc/plans/phases/reports/phase-41-handoffs.md` was not written, as asked.
+
+**Decisions taken inside the slice.**
+
+1. **The preamble says "the target project arrives in the session's prompt".** Every step prompt names the project (`on the managed project **<name>**`). The meaning of the old line stays: the project comes with what started the session.
+2. **`process.md` defines the two kinds of departure once, then names the kind at each use.** "Departure from the default order" and "departure from the plan". The file name `phase-NN-departures.md` and the phrase "departures record" are left as they are, since they name the file.
+3. **`wayfinder:frontier-empty` is no longer applied.** Nothing reads it: `FRONTIER_EMPTY_LABEL` was deleted in 41h, and `wayfinderStage` ignores any `wayfinder:` label that is not a type. Step 3 of *Closing the effort* now says no label starts anything, and the *frontier reopens* paragraph says to post that a question is open again, so the map's newest comment is true (the runner's own rule). The `wayfinder:<type>` labels stay: `ticketKindOf` reads them to choose the default order.
+4. **The `research` paragraph was false, and is corrected.** It said a marked research ticket parks because no machinery exists. `research` is in `PROMPTED_STAGES`, and its default order is one research step, which asks nobody.
+5. **The call-to-action templates keep their two paths, without the old promises.** Removed: "If something is still unclear I'll ask once more here, then stop" (the clarifying round) and "I'll pick up where this ticket left off" (the takeover that resolved the ticket's wait). The takeover is kept: since 41g it tells the session to hold the conversation with `timone-wayfind` when the run's step is wayfinding or charting. The prototype block keeps the takeover alone, for the reason it gave.
+6. **"Reading a written answer" became "How a question on the map is answered".** The old step-by-step reading and the one-round bound are gone. The short shape of a comment that asks what is still open is kept, because it is a writing rule, not a mechanism, and the step prompt still sends the step here.
+7. **The `Blocked by:` sentence at line 142 was corrected.** It said the daemon reads a body line and refuses it on the ticket. No code does: `bodyDependencyLine` is set by the forge adapter and read by nothing, on this branch and on `main`. It is in the range the plan names (62 to 143), so I fixed it in one sentence rather than leave a false statement.
+8. **`timone-prd`: who writes the approval.** In a runner-started session the runner records a named person's approval and starts a short session (`approvalRecordPrompt`) that writes it into the file. The skill now says so, adds the runner's skip, and the closing sentence "stage 5 will refuse to plan" gains "unless the runner skipped the approval", which is what `timone-plan` already says.
+9. **`timone-execute`'s human-gate sentence is qualified.** It said a `**Human gate:**` in a slice is "a real stop: ask, wait". Next to the rewritten line 196 that is a contradiction in a runner-started session, where nobody can answer. It now says it is a real stop in a session run by hand, and that in a session the runner started the next paragraph applies.
+10. **`timone-verify` "lines 60 and 328".** Line 60 was changed as asked. Line 328 is closing item 5, which names no mechanism; item 6 at line 329 (the next invocation, "the only ending") is the daemon-era line, so that is the one changed: in a runner-started session the runner chooses the next step, delivery by default. Line 121, the probe-hook sentence that execute line 49 also has, was changed the same way. Every other line number in the plan matched HEAD.
+11. **The rewritten *Gates* section keeps ADR-0032's paragraph** (commands ask the daemon to act), without its ADR-0023 citation. The request mechanism still exists; ADR-0060 only removes `retry` from it.
+
+**Validation evidence.** No behaviour-carrying code, no seams, so no red-green. The checks, as run:
+
+```
+$ grep -rn "timone retry\|loop mode (daemon-initiated\|handback\|HANDBACK" process.md CONTEXT.md .claude/skills | grep -iv "removed\|was removed"
+(no output; exit 1)
+$ grep -c -i "runner" process.md
+19
+$ grep -n -i "default order" process.md | cut -c1-60
+22:✏ 2026-09-30 ([ADR-0060](doc/adr/0060-a-runner-decides-e
+48:**8 — Delivery.** Delivery presents finished work for hum
+54:**How to try it — every pull request carries it, with no 
+147:- Every departure from the default order is shown twice:
+153:**The harness routes; the human never does.** The human 
+```
+
+Line 22 reads: "**The order of these stages is the default order, not a rule.** A **runner** decides each step of a run…".
+
+For the third checkbox, every skill was searched for the words of removed mechanisms, and every changed passage was read in its section:
+
+```
+$ grep -rn -i -o "written answer\|clarifying round\|ask check\|standing call\|hand.\{0,3\}back\|frontier-empty\|loop mode\|daemon-initiated" .claude/skills | sort | uniq -c
+   1 .claude/skills/timone-wayfind/SKILL.md:136:written answer
+   1 .claude/skills/timone-wayfind/SKILL.md:195:frontier-empty
+   1 .claude/skills/timone-wayfind/SKILL.md:202:frontier-empty
+```
+
+All three are in ✏ notes that say the thing was removed. The skills still name "the daemon" only for code that exists: the introductions on unmarked tickets (`timone-onboard`), the example live criterion "the daemon picks up a marked ticket" (`timone-verify`), and the daemon picking up a marked ticket (`timone-wayfind`). "Handoff" in `timone-execute`, `timone-plan` and `timone-verify` means a sub-agent's handoff notes and was left.
+
+- [x] The first command prints nothing. **PASS**
+- [x] `process.md` names the runner (19 lines), and says the order is the default (line 22, and the chore's path in stage 1). **PASS**
+- [x] Each skill still reads as a whole from top to bottom: no sentence refers to a mechanism another sentence removed. **PASS**, by the search above and a read of each changed section. Decision 9 is the one contradiction found and fixed.
+
+**What the next reader must know.**
+
+- **Left as they were, because the plan does not name them and they are not about the removed code** (each is stale for an older reason):
+  - `.claude/skills/README.md`: "the verifier's own probes stay in scratch space and are never committed" — untrue since ADR-0048.
+  - `timone-plan`, *Immutable after approval*: "which piece is next is derived from how many have been built" — untrue since ADR-0040; the paragraph above it in the skill says the opposite.
+  - `CONTEXT.md` **Gate**: "approve a plan, confirm/decline/defer a feedback item" — there is no plan approval and no feedback stage. **Runner**: its list of actions lacks "record an approval", which PRD-05.R2 added.
+  - `timone-wayfind` Mode 2 step 3: "one of the two paths every HITL ticket offers" — the prototype block offers one.
+  - `timone-prd` step 4 says to ask for approval; the requirements step prompt says the machinery asks. Only matters in a runner-started session, and the prompt wins there.
+  - `timone-execute` keeps the heading *The transition gate and escalation*, and line 175 refers to it by name. Nothing under it escalates.
+- `process.md` stage 2 at scale still cites ADR-0022 for the rule that each wayfinding ticket carries its call to action. The rule is still true and matches the rewritten templates; ADR-0022 is now superseded, so a reader following the link finds a superseded record.
+- No file outside this slice's list was touched. `doc/adr/`, `doc/specs/`, `README.md` and `manual/` were being changed by the other two slices while this one ran; I only read ADR-0060, PRD-05 and its register.
+
 ## 41k — The README and the manual describe the runner
 
 **Built.** The README, the manual and the example manifest describe the machine as it is after 41b to 41h. The README says the runner decides each step on every project, has no `timone retry` line, and its runner section covers who may instruct it (`operator`, `instructors`), the daemon's refusal to start when a project names nobody, the limit and how to say go on, and `timone record`. It says there is no `driver` line to set. `manual/how-the-daemon-works.md` is rewritten from the code: the start-up refusals; the poll cycle in the order `pollOnce` runs it (requests, the cancellation watch, the witness, then per project the reclaim, registration, the queue, the runner's turn, introductions and previews); how a run moves (what wakes the runner, one wake, the nine actions and what code checks before each, what happens after a step ends, the merge of the approved list of pieces); the default order per kind of ticket and the step table; the one wait and its words; the run statuses; who holds the project and the reclaim; the run record; the limit; takeover and cancel; what code keeps whatever the runner decides; and what a step runs with (model login, forge token, project environment). The old state diagram and stage graph, with the retry command in them, are gone. Four new Mermaid diagrams replace them. `manual/README.md` describes the new page. `timone.example.yaml` has an `operator` line and one project's `instructors` list, each with a comment, and it loads.

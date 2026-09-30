@@ -19,7 +19,7 @@ A loose idea has arrived, too big for one grill session and wrapped in fog: the 
 3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
 4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
 5. From here on, every file you read or write lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `process.md`, `standards/`, and `timone.yaml`.
-6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
+6. In a session the runner started, the target project arrives in the session's prompt; the same validation applies. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md))
 
 ## Scaffolding, never spec
 
@@ -59,7 +59,7 @@ A single issue on the project's tracker labelled `wayfinder:map` **and `timone`*
 **What I need from you:** nothing — I'm working through the questions on this map, and I'll come back here when the last one is closed.
 ```
 
-**The map carries the `timone` mark, like every ticket on it** ([ADR-0024](../../../doc/adr/0024-every-open-ticket-answers-for-itself.md), amending ADR-0010's "never becomes a run" *for the map alone*). It is the ticket that represents the effort to the human, so it is the ticket they write on — and the one transition the process could not otherwise be given, stage 2 → stage 3, is the map's own. Marked, it becomes a run parked at a stage of its own: while the frontier is open it asks for nothing and starts nothing, and once the frontier is empty **a comment agreeing is what starts the specification**. Leave the mark off and that comment lands nowhere, which is exactly what happened to `ivtrends` #1 on 2026-08-13.
+**The map carries the `timone` mark, like every ticket on it** ([ADR-0024](../../../doc/adr/0024-every-open-ticket-answers-for-itself.md), amending ADR-0010's "never becomes a run" *for the map alone*). It is the ticket that represents the effort to the human, so it is the ticket they write on — and the one transition the process could not otherwise be given, stage 2 → stage 3, is the map's own. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). Marked, the map has a run, and the runner reads what a named person writes on it. While questions are open, the map asks for nothing. Once the route is posted, **a comment agreeing is what starts the specification**: the runner reads it and starts the step that writes it, the next step of the map's default order. Leave the mark off and that comment lands nowhere, which is exactly what happened to `ivtrends` #1 on 2026-08-13.
 
 Its closing line is the one above while questions remain, and is rewritten when the way is clear — see [Closing the effort](#closing-the-effort). Nothing else about the map changes: it is still an index, still scaffolding rather than spec, and it still holds no decision that has not been promoted into a permanent document.
 
@@ -69,11 +69,11 @@ Its closing line is the one above while questions remain, and is rewritten when 
 
 Each ticket is a child of the map, body = the question it resolves, sized to one session, labelled `wayfinder:<type>` **and `timone`**:
 
-**Both labels, every decision ticket.** `wayfinder:<type>` says what kind of question it is; `timone` is the mark the daemon watches, and it is what gives the ticket a run — which is in turn what makes its `timone takeover` line work and what lets a written answer be picked up at all. A decision ticket created without the mark is the defect [ADR-0022](../../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md) was written about: a well-formed question nothing is listening to.
+**Both labels, every decision ticket.** ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). `wayfinder:<type>` says what kind of question it is, and the runner reads it to choose the ticket's default order. `timone` is the mark the daemon watches. It gives the ticket a run, and only a ticket with a run has a runner that reads the answer a named person writes on it. A decision ticket created without the mark is the defect [ADR-0022](../../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md) was written about: a well-formed question nothing is listening to.
 
 **Mark the map as well** — `wayfinder:map` **and `timone`**, from the moment you create it. This reverses an earlier rule that said never to; the reasoning and its consequences are above, under [The map](#the-map).
 
-**`research` is the one type the daemon cannot yet resolve unattended.** It is resolved in-session by a sub-agent (Mode 1, step 5) and normally closed before the daemon would ever list it. A `research` ticket left open and marked parks with a comment saying that machinery is not built — honest, but not what its own CTA promises, so close them in the session that fired them.
+**`research` needs nobody.** It is resolved in the charting session by a sub-agent (Mode 1, step 5), and normally closed there. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). A `research` ticket left open and marked is still resolved without a person: its default order is one step, a session that answers it from sources and asks nobody. Still close each one in the session that fired it, so that no second session is started to answer it again.
 
 | Type | Mode | Resolved by |
 |---|---|---|
@@ -86,7 +86,9 @@ A HITL ticket resolves only through exchange with the human — never answer the
 
 ### Every ticket carries its own CTA
 
-A ticket body is the question **plus what the human is being asked to do about it** ([ADR-0022](../../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md)). A question with no instruction is a defect: the human is assumed to know nothing about this process, and a wall of well-phrased questions they cannot act on is worse than no ticket. Close every body with the block for its type, verbatim in shape, substituting the real project and number:
+A ticket body is the question **plus what the human is being asked to do about it** ([ADR-0022](../../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md)). A question with no instruction is a defect: the human is assumed to know nothing about this process, and a wall of well-phrased questions they cannot act on is worse than no ticket. Close every body with the block for its type, verbatim in shape, substituting the real project and number.
+
+✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). The blocks below offer only what the runner acts on now. The old ones promised one more question in writing and then a stop, and a takeover that picked the ticket up where it waited. The code that kept those promises was removed.
 
 **`grilling` and `task` — both paths:**
 
@@ -95,8 +97,8 @@ A ticket body is the question **plus what the human is being asked to do about i
 
 **Two ways to answer — pick either.**
 
-- **Write your answer here.** A comment is enough. You don't need to answer every part, and "I don't know, what do you suggest?" is a real answer. If something is still unclear I'll ask once more here, then stop.
-- **Talk it through instead.** Run this and I'll pick up where this ticket left off:
+- **Write your answer here.** A comment is enough. You don't need to answer every part, and "I don't know, what do you suggest?" is a real answer.
+- **Talk it through instead.** Run this in your terminal:
 
   ```
   timone takeover <project>#<n>
@@ -110,7 +112,7 @@ A ticket body is the question **plus what the human is being asked to do about i
 ````markdown
 ---
 
-**This one needs something to look at first.** Run this and I'll build it and show it to you:
+**This one needs something to look at first.** Run this in your terminal. A session opens with you, builds it, and shows it to you:
 
 ```
 timone takeover <project>#<n>
@@ -127,20 +129,17 @@ timone takeover <project>#<n>
 **What I need from you:** nothing — I'm resolving this one myself and will post what I find here.
 ```
 
-**The takeover line is a promise the CLI keeps, so long as the ticket carries the mark.** `timone takeover` resolves a ticket from the daemon's run ledger; the `timone` label above is what puts it there. The daemon picks a marked decision ticket up, recognises its `wayfinder:<type>`, enters at this stage rather than triaging it as a fresh request, and parks it waiting on you — which is the state the takeover resolves. Write both templates as they stand; the only way to make either line a lie is to leave the mark off.
+**The mark is what makes both paths work.** ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). The daemon picks up a marked ticket and gives it a run. The runner reads the ticket's `wayfinder:<type>` label as its kind, so the run starts at this stage and not at sorting. `timone takeover` opens a session on the ticket in the person's terminal. When the run's step is this one, that session is told to hold the conversation with this skill. When it ends, the runner reads what it left on the ticket. Write the blocks as they stand; the way to make the written path a lie is to leave the mark off.
 
-### Reading a written answer
+### How a question on the map is answered
 
-A comment on a claimed ticket, authored by the human and posted after the question, **is** the answer to it — no keyword, nothing for them to remember. When a session picks one up:
+✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). This section used to describe how the old code picked up a written answer and allowed one more question in writing. That code was removed.
 
-1. **Take it at its word and check it against the map.** A written answer is thinner than an interview by nature; it carries no hesitation you can read. Restate what you understood in the resolution comment so a misreading surfaces where the human is already looking.
-2. **If it settles the question**, resolve the ticket exactly as an interview would have: resolution comment, close, gist onto the map, ADR at decision time if it passes stage 4's test.
-3. **If it is partial or ambiguous**, post **only what is still open** — never the whole question again — and wait. Answer from the codebase anything the codebase can answer rather than asking it a second time.
+**A named person answers in plain words on the ticket.** No keyword, nothing for them to remember. Their comment wakes the runner. The runner reads it and decides the next step; the step that resolves a decision ticket is Mode 2 below. That step reads the thread before it asks anything, takes the answer at its word, and restates what it understood in the resolution comment, so a misreading shows where the human is already looking. When the answer leaves part of the question open, the step posts only what is still open and ends. The next answer wakes the runner again. A person who would rather talk it through runs `timone takeover` instead.
 
-   **This comment is where the process goes wrong most often, so it has a hard shape.** One line confirming their answers are recorded — a short list, not a restatement of each one. Then the single thing still open, in plain words. Then your recommendation, **one sentence of why and one sentence of what it costs**, and nothing more; the rest is a link to the artifact that holds it. Then the CTA. Under 150 words in total. `scratch-app` #31 is the counter-example this rule was written from: 520 words to ask one yes-or-no question, and fvermaut said he could not use it.
-4. **One clarifying round, then stop asking in writing.** If the next answer still does not settle it, say so and hand back the takeover command. The bound is the whole reason the written path is allowed; a thread that keeps going is the ping-pong [ADR-0012](../../../doc/adr/0012-conversation-channels.md) struck out.
+**A comment that asks what is still open has a hard shape.** One line confirming their answers are recorded — a short list, not a restatement of each one. Then the single thing still open, in plain words. Then your recommendation, **one sentence of why and one sentence of what it costs**, and nothing more; the rest is a link to the artifact that holds it. Then the CTA. Under 150 words in total. `scratch-app` #31 is the counter-example this rule was written from: 520 words to ask one yes-or-no question, and fvermaut said he could not use it.
 
-**Claiming:** assign the ticket to yourself **before any work** — the assignee *is* the claim; open + unassigned = unclaimed. **Blocking:** use GitHub's native dependency relationship — `gh issue edit <n> --add-blocked-by <m>` — and **nothing else**. ✏ 2026-08-21: the body line `Blocked by: #N, #M` used to be offered here as a fallback. It is no longer a fallback and is not a second format ([ADR-0044](../../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D6). The daemon **reads such a line and refuses it**: it says on the ticket that it saw the line and that the native field is what it respects. So a dependency written that way is a dependency that does not hold, and writing one here would make the machine contradict this skill in public. The **frontier** is the open, unblocked, unclaimed children. Expect other sessions to be editing the tracker concurrently.
+**Claiming:** assign the ticket to yourself **before any work** — the assignee *is* the claim; open + unassigned = unclaimed. **Blocking:** use GitHub's native dependency relationship — `gh issue edit <n> --add-blocked-by <m>` — and **nothing else**. ✏ 2026-08-21: the body line `Blocked by: #N, #M` used to be offered here as a fallback. It is no longer a fallback and is not a second format ([ADR-0044](../../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md) D6). ✏ 2026-09-30: this used to say the daemon reads such a line and says on the ticket that it refuses it. No code does that now. **The machine reads only the native field**, so a dependency written as a body line is a dependency that does not hold. The **frontier** is the open, unblocked, unclaimed children. Expect other sessions to be editing the tracker concurrently.
 
 ### Tracker binding and fallback
 
@@ -193,13 +192,13 @@ The way is clear when the frontier is empty and no fog remains. Then, **on the m
    **What I need from you:** say go ahead here, and I'll write it.
    ````
 
-3. **Apply `wayfinder:frontier-empty` to the map.** That label is what tells the daemon the frontier is empty: on its next pass it opens the map's wait, keeps the map's standing call to action in step with it, and reads the human's next comment as the go-ahead. Without the label the map goes on asking for nothing, whatever the body says. Create the label on first use, as with the other `wayfinder:*` ones.
-4. **Stop there.** The go-ahead starts stage 3 on the map's own run, with nothing run by hand — a comment agreeing is the whole mechanism ([ADR-0024](../../../doc/adr/0024-every-open-ticket-answers-for-itself.md)). Do not invoke `timone-prd` yourself off your own reading of the map; if the human is in the session with you and asks for the specification now, that is their call and it is theirs to make, not yours to assume.
-5. **From the go-ahead until the specification is committed, the map holds its whole project** — no other ticket on it moves. That is intended, and it is worth saying in the route summary so nobody wonders why the queue stopped.
+3. **No label starts anything.** ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). The old code read the `wayfinder:frontier-empty` label as the sign that the way was clear. That code was removed, and nothing reads the label now. The runner reads the route and the new closing line in the map's thread, and a named person's next comment wakes it.
+4. **Stop there.** ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). The go-ahead wakes the runner, which starts stage 3 on the map's own run, with nothing run by hand — a comment agreeing is the whole mechanism ([ADR-0024](../../../doc/adr/0024-every-open-ticket-answers-for-itself.md)). Do not invoke `timone-prd` yourself off your own reading of the map; if the human is in the session with you and asks for the specification now, that is their call and it is theirs to make, not yours to assume.
+5. **Once the specification step starts, the map holds its whole project.** ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). That step cuts a work branch for the map's run, and a run with a work branch holds its project: no other ticket on it moves. That is intended, and it is worth saying in the route summary so nobody wonders why the queue stopped.
 6. Close the map **only after the destination artifact is committed**, with a closing comment linking it.
 
-**On the markdown fallback there is no daemon and no label**, so steps 3–5 have nothing to act on: write the route and the go-ahead ask into `map.md`, say plainly that the specification needs a session started by hand, and hand back. The mechanism above is the tracker path's alone.
+**On the markdown fallback there is no ticket and no run**, so no runner ever reads the map and steps 4 and 5 have nothing to act on: write the route and the go-ahead ask into `map.md`, say plainly that the specification needs a session started by hand, and stop. The mechanism above is the tracker path's alone. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md))
 
-**If the frontier reopens** — fog graduating into fresh tickets after step 3 — remove `wayfinder:frontier-empty` and put the working line back in the body. The map's own wait is not withdrawn once opened (a question the human may be halfway through answering), but nothing will start the specification while a question is open again.
+**If the frontier reopens** — fog graduating into fresh tickets after the route is posted — put the working line back in the body, and post on the map that a question is open again, so that its newest comment is true. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): this used to say to remove `wayfinder:frontier-empty`, and that nothing would then start the specification. Nothing reads the label now; the runner reads the map's thread, and the comment is what tells it the way is no longer clear.
 
 Wayfinding produces decisions, never deliverables: no application code, no phase files, no PRDs written by this skill itself. `CONTEXT.md` (during grilling tickets), `STATUS.md`, and the fallback `doc/wayfinder/` tree are the only files it writes in the target project.
