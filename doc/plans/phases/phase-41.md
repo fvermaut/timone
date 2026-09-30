@@ -276,6 +276,7 @@ npm run --silent replay -- --dry 2>&1 | tail -3
 > - `src/git.ts` — `uncommittedFiles`, if nothing but its own test calls it.
 > - `src/channels/conversation.ts` and `src/channels/terminal.ts` — `inviteToConversation` and `TerminalChannel`, if nothing calls them. `takeoverCommand` stays: `prompts.ts` uses it.
 > - `src/daemon/step-session.ts`, `src/guards/checkouts.test.ts` — comments that name the deleted spawner, or the uncommitted files the checkout no longer lists.
+> - ✏ 2026-09-30 (build, timone#166), from 41g: `STAGE_HANDED_MARKER` in `src/adapters/ticketing.ts`, once its text is written into `src/daemon/outcomes.test.ts` and `src/runner/replay/cases.ts` as it was recorded; `upsertComment` in `src/adapters/ticketing.ts` (and its stub in `src/adapters/ticketing.stubs.ts` and forge implementation in `src/adapters/github-tickets.ts`), if nothing calls it; and in `src/commands/takeover.ts`, the line the terminal prints and the command's help text, which still describe the old stop.
 >
 > The rule is the same as for every slice: delete only what a search of `src/` shows nothing imports. Recorded in [phase-41-departures.md](reports/phase-41-departures.md).
 
