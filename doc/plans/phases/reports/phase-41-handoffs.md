@@ -1391,3 +1391,69 @@ Extra checks. Every relative link added in the diff was tested against the file 
 - [x] ADR-0060's two conditions carry the dated marker. **PASS**
 
 The *Left as written* list above is now out of date for these four places. Its other items stay open: ADR-0060 D9's "chosen per project", PRD-05's Scope sentence on R19, and the bodies of the nine superseded ADRs.
+
+## 41k — The README and the manual describe the runner
+
+**Built.** The README, the manual and the example manifest describe the machine as it is after 41b to 41h. The README says the runner decides each step on every project, has no `timone retry` line, and its runner section covers who may instruct it (`operator`, `instructors`), the daemon's refusal to start when a project names nobody, the limit and how to say go on, and `timone record`. It says there is no `driver` line to set. `manual/how-the-daemon-works.md` is rewritten from the code: the start-up refusals; the poll cycle in the order `pollOnce` runs it (requests, the cancellation watch, the witness, then per project the reclaim, registration, the queue, the runner's turn, introductions and previews); how a run moves (what wakes the runner, one wake, the nine actions and what code checks before each, what happens after a step ends, the merge of the approved list of pieces); the default order per kind of ticket and the step table; the one wait and its words; the run statuses; who holds the project and the reclaim; the run record; the limit; takeover and cancel; what code keeps whatever the runner decides; and what a step runs with (model login, forge token, project environment). The old state diagram and stage graph, with the retry command in them, are gone. Four new Mermaid diagrams replace them. `manual/README.md` describes the new page. `timone.example.yaml` has an `operator` line and one project's `instructors` list, each with a comment, and it loads.
+
+**Files touched.**
+
+- `README.md` — lines 8 to 11 and the stages line: the runner decides each step. The retry line is removed from the everyday commands, and the takeover line's comment says what the command does now. "Projects run by the runner" became "The runner", as the plan says.
+- `manual/how-the-daemon-works.md` — rewritten. The file name stays.
+- `manual/README.md` — its one line about the manual.
+- `timone.example.yaml` — `operator: fvermaut` with a comment; an `instructors` list on `pilot-app` with a comment; `instructors` added to the header's list of project keys; the two project comments say who instructs each.
+- `41k-handoff.md` in the orchestrator's scratchpad — this section. The shared handoff file was not touched, as instructed.
+
+**Decisions taken inside the slice.**
+
+1. **The takeover line in the README's everyday commands changed too**, although the plan names only the retry line there. It said "pick up a ticket that wants a conversation", which stopped being true in 41e: a takeover opens the same session for every waiting run. It now uses the command's own help text.
+2. **The manual's old section 8, "Where the model was uneven", is dropped.** It was a history of five fixes made to the old code in phase 27. Three of the five are about code that no longer exists. The old section 7, the table of what the ticket says per state, went with `ctaFor` (deleted in 41e). A short paragraph on what `timone status` says takes its place, read from `waitsOnYou` and `describeRun`.
+3. **The three sections on what a step runs with stay**, rewritten for steps. The README sends the reader to the manual for both credentials. One claim was false and is gone: the old spawner tried a run again up to three times after a login expired. That code was deleted in 41f. Now the step ends as failed and the runner is told why.
+4. **`timone.yaml` has an `operator` but no `instructors` list.** So the example's list follows the schema's shape rather than a real entry. It is on the fully-populated project, lists the operator again (because `instructors` replaces the operator), and the minimal project's comment says the operator instructs it. `ticket_limit_usd` was not added to the example: the plan does not ask for it, and the README already shows it.
+5. **Diagram syntax.** Only `flowchart TD` and `stateDiagram-v2`, the two kinds the old file used and GitHub rendered. Every flowchart label is quoted. No label has an apostrophe, a `#` or a `;`. `picked-up` keeps the old alias. Nodes of a subgraph are declared inside it before an edge from outside names them.
+6. **The retry command is named only as "the retry command" or "a request to retry"**, so the plan's grep for the two-word command finds nothing. The same for `driver`: never followed by a colon.
+7. **`picked-up → active`** is in `TRANSITIONS` but no path takes it now (the runner puts a new run on its wait before it starts a step). The manual says so rather than drawing a move nothing makes.
+
+**Validation evidence.** No behaviour-carrying code, so no seams and no red-green. The checks, as run:
+
+```
+$ grep -rn "timone retry\|driver:" README.md manual/ timone.example.yaml ; echo "exit: $? (expected 1)"
+exit: 1 (expected 1)
+$ node dist/cli.js projects list --manifest timone.example.yaml
+NAME            PATH                     STACK                      TICKETING  PREVIEW  CLONED
+pilot-app       projects/pilot-app       typescript,react,postgres  github     docker   no
+internal-tools  projects/internal-tools  -                          github     -        no
+exit: 0
+```
+
+`dist/manifest.js` is the build after 41h (it has `removedDriverLines`), and no file under `src/` changed in this slice. A further check that the reader took the two new fields, through the built `namedPeople`:
+
+```
+operator: fvermaut
+pilot-app -> fvermaut, a-colleague
+internal-tools -> fvermaut
+```
+
+Every relative link in the manual and the README was checked to point at a file that exists; one (ADR-0041) was wrong in the first draft and was fixed. No `<word>` outside a code span is left for GitHub to drop as HTML.
+
+The diagrams could not be rendered here. The Mermaid CLI is not in the npm cache, and the offline try fails at once:
+
+```
+$ npx --offline --yes @mermaid-js/mermaid-cli --version
+npm error code ENOTCACHED
+npm error request to https://registry.npmjs.org/@mermaid-js%2fmermaid-cli failed: cache mode is 'only-if-cached' but no cached response is available.
+```
+
+- [x] The example manifest loads through the real manifest reader. **PASS**
+- [ ] Every diagram in the manual renders on GitHub (look at the file on the pushed branch). **OWED.** The branch is not pushed, and no offline renderer is available. Four diagrams to look at in `manual/how-the-daemon-works.md`: *From ticket to run* (section 2), the run loop (section 3), the default order (section 4), and the run statuses (section 5).
+
+**What the orchestrator and verification must know.**
+
+- **The render check above is still owed**, on the pushed branch.
+- **Two README passages outside the plan's line list still say "run" where a step is meant**: line 32 ("The daemon runs each ticket in a container") and line 72 ("keep a boxed run alive", "minted per run"). Each step runs in a container; the runner itself runs on the host. Left as they were.
+- **Things the manual had to describe that look like faults or dead code**, found while reading the code, not changed:
+  - `src/runner/order.ts` has a `remediation` order, but nothing sets `isRemediation: true` (the driver always passes `false`), so no ticket is ever of that kind. The manual's table leaves it out.
+  - A map's default order starts with `charting`, which has no session, and `start_step` refuses it. So on a map the runner must always leave that step out with a reason, and every map's pull request lists it as a departure.
+  - The reclaim wakes the runner with "The daemon stopped while a step was running." also for an `active` run a terminal held whose process died. The words are wrong for a terminal.
+  - Between two cycles the daemon sleeps for the poll interval, and the cancellation watch runs only during a cycle. So a `timone cancel` left while the daemon sleeps waits up to 60 seconds. The command's own words say "within a few seconds". It waits 150 seconds, so it does not fail, but the words are not exact.
+- **Refactoring I would do but did not:** none in these files.
