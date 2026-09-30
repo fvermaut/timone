@@ -1,6 +1,6 @@
 # Phase 40 — Watched run on scratch-app
 
-> **Status:** run twice on 2026-09-28. The first attempt found four faults (fixed in 40r); the second passed, with R9's pull-request clause unseen. See Result.
+> **Status:** run twice on 2026-09-28. The first attempt found four faults (fixed in 40r); the second passed, with R9's pull-request clause unseen. See Result. A third attempt, on the code after 40z, is planned at the end; fvermaut chose to merge first and run it after, before ivtrends moves.
 > **Plan:** [phase-40.md](../phase-40.md), sub-phase 40l. **Ticket:** [timone#165](https://github.com/fvermaut/timone/issues/165).
 
 ## What it checks
@@ -151,3 +151,52 @@ fvermaut restarted the daemon on the code with 40r at 12:37 UTC. The machine ope
 3. **The whole-suite rule is blunt.** At the 15-minute check the runner messaged the build for running whole suites more than twice, which the rule says; but one of those runs was a baseline before any change, which is good practice.
 
 The first two are small fixes; the third is a judgement worth watching.
+
+### The watched run — third attempt, planned 2026-09-29, on the code after 40z
+
+The first two attempts ran before 40s–40z changed the runner. This attempt runs on `23b9186` or later, and aims at what the first two did not see.
+
+| Criterion | What this attempt watches | How |
+| --- | --- | --- |
+| PRD-05.R15, clause 2 | Two tickets on scratch-app, marked together: only one runs at a time, and the second starts when the first frees the project ("The project is free now."). | Tickets A and B below, opened within one minute. |
+| PRD-05.R13, clause 2 | The runner stops a running step: the box session ends, its pushed commits stay on the branch, and the record says who stopped it and why. | The first comment on A, written while A's build runs. |
+| PRD-05.R9, clause 2 | "go back to planning", with a spelling mistake, is done. | The same comment. |
+| PRD-05.R9, clause 3 | A change asked for on the pull request gets a reply there before the session that makes it starts. | The comment on A's pull request. |
+| PRD-05.R12, clause 2 | A 15-minute check with a summary written by code. | Seen when a step runs longer than 15 minutes; `timone record` shows the check. |
+| PRD-05.R12, clause 1; R9, clause 1 | A comment wakes the runner within one polling cycle. | Every comment above; the daemon's log gives the times. |
+
+**Not watched in this attempt, and why:**
+
+- **R15, clause 1** (a comment on another project while a step runs) needs a second project with GitHub tickets. The only other one is ivtrends, which is a live project and is not used for tests. It rests on the check after 40y, which timed it in the rig (2.1 seconds, against 87.3 before 40y).
+- **R12, clause 1, "a step fails" and "a step is silent past its limit".** A failing step cannot be caused on purpose without breaking something real. The silence limit is not built (Spec review, finding 7).
+
+**Steps for fvermaut, in `~/dev/timone/projects/timone`, from your own terminal:**
+
+1. Check that no other Timone daemon is running. The one run from `main` also reads scratch-app's tickets.
+2. `npm run build && node dist/cli.js daemon --manifest .timone/live-gate.yaml`. Leave it running and say so. Check its first line: the model login it names must be the lasting token.
+3. The machine then opens tickets A and B on scratch-app and writes the comments, as fvermaut, each marked as machine-typed.
+4. When the machine says the run is over, stop the daemon (Ctrl-C).
+
+**Cost.** Two small changes, each capped at $150 by its ticket's limit. A build session has cost $9 to $36.
+
+#### The test tickets (machine-typed)
+
+**Ticket A — title:** Trim the spaces around a to-do's title when it is edited
+
+> A to-do's title is trimmed when it is added, but not when it is edited. When I edit a title and leave spaces before or after it, the spaces are kept. Trim them when an edited title is saved. A title that is only spaces should be refused, as it is when adding.
+>
+> *Machine-typed on fvermaut's behalf, for the third watched run of Timone phase 40.*
+
+**Ticket B — title:** Show how many to-dos are left
+
+> Under the list, show how many to-dos are not done yet, for example "3 left". When none are left, show "Nothing left".
+>
+> *Machine-typed on fvermaut's behalf, for the third watched run of Timone phase 40.*
+
+**Labels on both:** `timone`, `triage:chore`.
+
+**Comments the machine writes, as fvermaut, at the moments named:**
+
+- On A, a few minutes after its build starts: *"stop the build and go bakc to planning: an edited title must also keep its old value when it is refused, not become empty"* — the runner should stop the build step (R13) and start preparing the work again (R9).
+- On A's pull request, once it is open: *"plase also add a test for an edited title that is only spaces"* — the runner should reply on the pull request first, then start the change (R9).
+- B needs no comment. It should start only after A's run has ended or freed the project (R15).

@@ -427,3 +427,72 @@ A third check ran after 40y, at `f94081f`, by a session that watched none of the
 - **What:** 40y gives runner projects a turn on a clock of their own while a daemon project holds the cycle. That turn reads comments and wakes the runner. It does not read `claim-takeover` or `release-takeover` requests, which are only read at the start of a cycle. So on scratch-app, while ivtrends builds, `timone takeover` waits 150 seconds and gives up: "a cycle takes as long as whatever it is running". A terminal session that ends in that time does not wake the runner until the ivtrends session ends. Also, `observedAt` is still written only at the start of a cycle.
 - **Why it matters:** R15 clause 1, as written (a comment), now holds. But R15 says "one project's work no longer holds up the others". R11 clause 2 says a takeover opens a session and the runner wakes when it ends. In the mixed setup that R19 creates, both still wait on another project's session. R15's verification hint measures `observedAt` "while a session runs". That stamp still stops moving, so a live check done the way the register says would fail, even though comments now work.
 - **Suggested remediation:** read the takeover requests of runner projects in the same clock turn, or read all requests on the cancel clock. Change R15's hint to measure the wake itself. Or record in R15 that this phase covers only comments. — not applied here
+
+## Delivered again — 2026-09-30, iteration 3
+
+- **Branch:** `timone/165-the-runner-beside-the-current-daemon` @ the commit that adds this section (code as at `23b9186`)
+- **Pull request:** [#173](https://github.com/fvermaut/timone/pull/173), the same one. Its description is refreshed.
+- **Departures:** 27 entries now. The new one is 40z.
+
+### What changed since iteration 2
+
+- **Replay run 6** (fvermaut, at `277933e`): 18 of 19. #120 passed two tries of three: one try's comment wrote the takeover command.
+- **40z** (`23b9186`): one sentence in the runner's rules — a comment about a missing key does not write the takeover command, not even to say it will not help. Planned and recorded as the other fixes were (`60f49ee`).
+- **Replay run 7** (fvermaut, at `23b9186`): **19 of 19, every case three tries of three**, for the first time. No change to the runner's instructions since.
+- **A fourth check** ([phase-40-verification.md](phase-40-verification.md) § Re-check after 40z and replay run 7, `82cb99c`): all 16 probes pass, each proven able to fail. It found no fault in the app.
+
+**Both reviews were run again on 40z,** because the code changed. Standards: no new finding; the 22 stand as they were. Spec: no new finding; finding 9 changed — the replay was run on the final build, so R18 is met. 9 findings stand.
+
+### Verification outcome now
+
+Changed rows of the verdict table above:
+
+| ID | Priority | Channel | Verdict | Loop |
+| --- | --- | --- | --- | --- |
+| PRD-05.R1 | MUST | api | PASS (code); clause 2's runner part PASS on run 7 (case #104); clause 1's runner part BLOCKED — no replay case covers it | 0 |
+| PRD-05.R7 | MUST | api | PASS — every clause; the runner's part on run 7 (case scratch-app#37). Now `verified` | 0 |
+| PRD-05.R18 | MUST | api | PASS on run 7. Now `verified` | — |
+
+R16 passed each of its three clauses, but over two runs: the laptop slept during the second. One full run on a machine that stays awake is owed. Every other row stands.
+
+### Outstanding for the human, now
+
+- [ ] PRD-05.R9, R12, R13, R15 — the watched run, owed on `23b9186` or later. Planned in [phase-40-live-gate.md](phase-40-live-gate.md) § The watched run — third attempt. fvermaut chose to merge first and run it after, before ivtrends moves (ADR-0059 D1). The four criteria stay `draft` until then.
+- [ ] PRD-05.R2 — the eighth action, `record_approval`, needs your yes.
+- [ ] PRD-05.R8 — the narrow reading at the limit needs your confirmation.
+- [ ] PRD-05.R14, R16 — each needs a `Falsified-by:` line from you before it can be `verified`.
+- [ ] Still not covered by any replay case: the runner's choice in R1 clause 1, R6 clause 2, R8's wording, R17 clauses 1 and 2.
+
+### Standards review — phase 40 (third delivery, 40z only)
+
+- **Read:** the diff `47f1332...23b9186` (outside `doc/`); the current `src/runner/brief.ts` (the `SYSTEM` rules, lines 100–150) and `src/runner/brief.test.ts` (the setup helpers, `stopRules`/`stopRule` at 420–439, and the tests at 520–620); `/Users/fvermaut/dev/timone/standards/code-smells.md`, `typescript.md` and `testing.md`; my previous findings. I also checked that `f94081f...47f1332` changes no code outside `doc/`.
+- **Diff:** `47f1332...23b9186` — 2 files, +12/−1; whole range `origin/main...23b9186` — 73 files, +19645/−474
+- **Findings:** 22
+
+None of the 22 earlier findings changed. In `brief.ts`, 40z replaces one line with one line and the file is still 541 lines long, so every line reference in findings 4, 9, 10 and 18 still points to the right place. No earlier finding cites `brief.test.ts`.
+
+#### New findings
+
+None.
+
+The 40z change follows the conventions:
+- The rule stays one line in the `SYSTEM` list, like the rules around it.
+- The new test uses the existing `stopRule` helper, and its name says what the rule does, like the tests beside it. Its "(40z)" tag matches the "(40w)" tag nearby.
+- The test compares against literal sentences, not against text the code builds, so the expected values do not come from the code under test.
+- The order check (`indexOf`) is part of what the rule means: "that comment" refers back to "your comment", so the order is not an internal detail.
+- Part of one `toContain` repeats a line from the test above. testing.md prefers repetition you can see in tests, so this is not a finding.
+
+### Spec review — phase 40 (third delivery, 40z only)
+
+- **Read:** the diff `47f1332...23b9186 -- . ':!doc'`. `src/runner/brief.ts` at `23b9186`, in full. `src/runner/brief.test.ts` at `23b9186`, lines 420–630 and its test helpers. `doc/specs/prd/prd-05-a-runner-decides-each-step.md` and `.criteria.md`. My earlier review. `doc/plans/phases/reports/phase-40-replay.md`, as committed at `3232078`. To check that `3232078` has no code in it, I also ran `git show 3232078`. That output showed the one line it adds to `phase-40-complete.md`. I did not read the rest of that report. That line changed no finding.
+- **Diff:** `47f1332...23b9186`: 2 files, +12/−1. Whole range `origin/main...23b9186`: 73 files, +19645/−474.
+- **Findings:** 9 standing. Finding 9 changed. The other eight are unchanged.
+
+The 40z change serves PRD-05.R18 as the requirement is written. The #120 row asks the runner to "Not offer the same command again. Say what is actually needed." The new sentence stops the runner from writing the takeover command in a comment about a missing key, even to say that it will not help. It agrees with the rule that the newest comment must be true (PRD-05.R9). It agrees with "Do not ask them to run a command". It does not touch PRD-05.R11: `timone takeover` still exists and still works. The new test checks that the sentence comes after "Name the key and the file in your comment." Without the change, the test fails.
+
+- 9. changed: I can now tell. Replay run 7 ran on `23b9186` and passed 19 of 19 cases, each three tries of three. PRD-05.R18 clause 1 is met, including #120. Run 7 is recorded on the pull request's branch in `phase-40-replay.md`, at commit `3232078`, so clause 2 is met too. That commit changes only two reports, and `git diff 23b9186 3232078 -- src` is empty, so the build that was replayed is the build that will merge. Left: the register at the branch head still says the replay is owed. R18's Evidence line says "BLOCKED … run 6 on `55a617a` or later is owed". R1 and R7 still say "run 6 on this build is owed". Suggested fix, not applied here: the next verification updates the Evidence lines of R1, R7 and R18 to name run 7.
+- 1, 4, 5, 7, 8, 10, 11 and 12 still stand. 40z changes only one line of the runner's instructions, and none of these findings is about that line.
+
+#### New findings
+
+None.
