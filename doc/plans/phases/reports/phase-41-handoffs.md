@@ -685,3 +685,122 @@ src/cli.test.ts:44:      "`timone retry` was removed. Write on the ticket instea
 - **`dist/commands/retry.js`** and its test build stay in `dist/` until it is cleaned. `tsc` does not delete output for a deleted source. Nothing imports them, and `vitest` does not read `dist/`.
 - **The CLI test runs the built file.** `src/cli.test.ts` runs `dist/cli.js`, so `npm test` alone after a change to `src/cli.ts` tests the last build. `npm run build && npm test` is the order the plan uses.
 - **Refactoring I would do but did not:** case (4) repeats the fixture copy and the two-project manifest of 41c's test above it. A small helper in `status.test.ts` could build both.
+
+## 41e — Takeover, the status report and the call to action know only the runner's wait
+
+**Built.** `timone takeover` now opens one kind of session: the session bound to no step. A parked run always gets it, because every parked run waits for the runner. A queued run, a running run, a finished run and a cancelled run get the same sentences as before. A failed run gets the cancelled run's sentence, since none can be read any more. A takeover of a ticket with no run registers the run the way the runner holds one: parked, waiting for the runner on `RUNNER_DEFAULT_WAIT`, with no step chosen. It is held for the terminal, and when the session ends it goes back to the runner with a request to wake it, as any run does. The answers for a gate and a review, the conversation at a stage, and the refusals that came with it are gone. `timone status` names every parked run's wait in its own words (`waiting: …`), and names a ticket in its closing line only when the runner asked for something, or when a done run's initiative needs the reader. `src/daemon/cta.ts` is deleted: what the status report still needed from it is now two small functions in `status.ts`.
+
+**Files touched.**
+
+- `src/commands/takeover.ts` — `TakeoverResolution` is `escalation` or `nothing-to-do`. `resolveTakeover` answers `parked` with the unbound session and `failed` with the cancelled sentence. `enrolFromTracker` parks the new run on the runner's wait and returns the unbound session. `claimForTakeover`, `withdraw` and the no-lock `takeover` lost their conversation paths; `Claim` lost `thread` and `escalation`. `escalate` reads the ticket itself. Deleted: `converse`, `markAnswerConsumed`, `reopenIfFailed`, `settle`, `entryStage`, `isPrompted`, `cannotConverse`, `parkedInBuild`, and the gate, review, conversation, no-kind and build-stage branches. Of the plan's `endTakeover`, `release` and `settle`: `settle` is deleted here; `release` and the old `endTakeover` went in 41b, and the runner's `endTakeover` stays.
+- `src/commands/takeover.test.ts` — cases (1), (2), (3). 10 tests deleted, 17 re-based (below).
+- `src/commands/status.ts` — new `waitsOnYou` (the closing line's rule) and a one-line `describeWait`. `ctaOf` and the import of `cta.ts` gone.
+- `src/commands/status.test.ts` — case (4). 10 tests deleted, 7 re-based, one empty describe removed, one describe renamed (below).
+- `src/daemon/cta.ts`, `src/daemon/cta.test.ts` — deleted (56 tests).
+- `src/daemon/poll.ts` — `InitiativeProgress` moved here from `cta.ts`, beside the functions that produce it. The `claim-takeover` request refuses only on `nothing-to-do`. One comment no longer names the call to action.
+- `src/daemon/poll.test.ts` — not changed.
+- `doc/plans/phases/reports/phase-41-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **`cta.ts` is deleted, not trimmed.** For the runs that can still exist, the status report used only `waitingOnYou`, for its closing line. The headlines, the words and the command were read only by the ticket's standing note, which went in 41b. The rule left is ten lines. `InitiativeProgress` went to `poll.ts`, not `status.ts`, because `poll.ts` produces it and already imported it; `status.ts` now imports it from there with the two functions it already imported.
+2. **Every parked run opens the unbound session, whatever its wait says.** The ledger reads each old kind as the runner's, so checking `kind === "runner"` would only add a refusal for runs nothing can produce. A parked run with no wait at all (41c leaves it as it is) also opens it. In `timone status` such a run reads `waiting: the next thing that happens on this ticket` and is not named in the closing line; before, it read as waiting on the reader.
+3. **The refusal of a map went.** It existed because the map's stage started no conversation. The runner has its own order for a map (`ticketKindOf` answers `map` for `wayfinder:map`), and the poll loop registers a marked `wayfinder:map` ticket like any other (it skips only `timone:map`). So a map with no run is enrolled like any ticket.
+4. **The enrolled run's wait is the one `putOnRunnersWait` writes** in `src/runner/session.ts`: `RUNNER_DEFAULT_WAIT`, kind `runner`, `resolvableBy: ["triage"]`, no stage, opened at the instant the run was registered. It is written out in `takeover.ts`, because `putOnRunnersWait` is private to a file this slice was not given.
+5. **The ticket is read once, for the prompt.** Enrolment no longer needs the thread (the runner reads no cursor), so it is not fetched there. The resolution and the claim lost their `thread` field.
+6. **`failed` shares the cancelled answer**, as it does in 41d's `ctaFor`. `RunStatus` still has `failed`, and the switch has to cover it.
+7. **The terminal's line when the session opens is unchanged** ("I couldn't take this one further myself. Over to you."), and so is the prompt. 41g rewrites the prompt; case (2) says "as today".
+
+Tests deleted, because the branch they test is deleted:
+
+- `takeover.test.ts` (10): *a ticket the ledger has never heard of* › resolves an open wayfinder ticket from the tracker, at its own stage; › creates the run, parked on the conversation, at the stage the labels say; › enters a ticket nobody has classified at triage, and leaves it picked up; › refuses a map, and opens no wait on it. *runTakeover* › opens the session for a ticket the ledger had never heard of, reading it once (case (1) replaces it, and still asserts one read). *the prompt a takeover starts from* › is the stage's own prompt, for the stage the ticket is waiting at; › copes with a ticket nobody has replied to (the command no longer uses `takeoverPrompt`; `prompts.test.ts` keeps its own tests of it). *a run the machine stopped and cannot take further* › resolves to a session bound to no stage; › opens a session whose prompt is not the stuck stage's own; › opens it at a stage no conversation exists for, which is the point (a wait of kind `escalation`; case (2) covers the same session for the runner's wait).
+- `status.test.ts` (10): *renderStatus* › names who is waited on, and what for, when a run is parked (a wait of no kind read as "waiting on you"). *the back half of the pipeline* › names the pull request a review wait is waiting on. *what the terminal can ask without a daemon* › stops saying 'waiting on you' about a ticket that needs nothing (the map's words); › still says it about a ticket that does need something (gate); › does not say a person is waited on about a run handed back to the machine (`CARRY_ON_WAIT`). *a ticket built in pieces* › names which piece of an initiative is waiting on a review; › says a project with no breakdown anywhere exactly what it always said (review); the describe, left empty, is removed. *one computation, two renderers* › says the same thing on the ticket and on the status line, from one call; › agrees about a run nothing written can restart, and shows the way out; › resolves an initiative's progress the same way for the ticket and the terminal (all three on `ctaFor` and `ctaComment`).
+- `cta.test.ts` — all 56, with the file.
+
+Tests re-based, because an old kind of wait was only where they started:
+
+- `takeover.test.ts` (17): the helper `parkedOnConversation` became `waitingForRunner` (same stage, kind `runner`). It sets up *runTakeover* › execs the session at the timone root (renamed from "execs the conversation session …") and › returns the session's own exit code; *takeover and the ledger's one writer* › asks the daemon holding the ledger, names it, and gives up saying so; the three tests on `heldLedger` in *a takeover that gives up leaves nothing behind*; and five in *takeover claims through the run, not the lock* (throws, signal, heartbeat, beat stopped on a signal, daemon hands the run over). `handedBackAtRequirements` waits for the runner instead of a conversation (*a takeover that finishes the step it took over*, 2 tests). The occupier waits for the runner instead of a gate in *resolveTakeover* › explains a queued ticket … and *a ticket the ledger has never heard of* › queues a ticket behind the run holding its project …. Two tests compare the kind with `escalation` or `nothing-to-do` instead of `converse`: › says a cancelled chunk was abandoned …, › answers neither refusal with the sentence ADR-0024 retired.
+- `status.test.ts` (7): the wait is the runner's in *renderStatus* › shows every waiting ticket, not just the first; › shows the running ticket alongside the ones that are waiting (now expects `#6.*waiting: an answer`); › names every waiting ticket in the closing line; › marks a run whose automatic checks failed; › ends with a line saying what is being asked of the reader; *what a run is costing right now* › says nothing about a model for a run that is waiting, not working; and the renamed describe *who the closing line names* › names in its closing line exactly the tickets that are waiting on the reader (was "… the computation is waiting on").
+
+**Validation evidence.**
+
+*(1) A takeover of a ticket with no run* (`takeover.test.ts` › *a takeover of a ticket with no run*, two tests). Written first and seen red:
+
+```
+× … > registers a run waiting for the runner, and resolves to the session bound to no step
+  → expected 'converse' to be 'escalation' // Object.is equality
+× … > holds the new run for the terminal, then gives it back to the runner and asks for a wake
+  → expected { id: 'scratch-app#12/1', …(11) } to match object { status: 'active', …(2) }
+    -     "on": "the next thing that happens on this ticket",
+    +     "on": "a conversation in your terminal",
+Tests  2 failed | 45 skipped (47)
+```
+
+Green after the change: `Tests  2 passed | 45 skipped (47)`. The second test also asserts the prompt is `escalationPrompt` for the held run, the ticket is read once, the run is parked on the runner's wait afterwards, and one `takeover-ended` request is left.
+
+Cases (2) to (5) describe behaviour that must not change, so none could be red. Each passes on the old code and fails when the code it watches is broken. Every break was undone (`diff` against a saved copy empty each time).
+
+*(2) A run waiting for the runner* (`takeover.test.ts` › *a run the runner waits on* › opens the session bound to no step, even for a run that stopped at a step). It compares the whole prompt with `escalationPrompt` for the held run. On the old `takeover.ts` (`git show HEAD:…` put in place, then restored): `✓ … opens the session bound to no step, even for a run that stopped at a step`. Breaks:
+
+- The parked case returns `nothing-to-do`: `→ expected 1 to be +0`, `Tests  1 failed | 39 skipped (40)`.
+- The prompt is built for the run with its step left out: `→ expected 'You are picking up **scratch-app #6**…' to be 'You are picking up **scratch-app #6**…'`, `Tests  1 failed | 39 skipped (40)`.
+
+*(3) A queued or running run* (`takeover.test.ts` › *a takeover of a run that is queued or running*, two tests, through `runTakeover` with the lock). Each asserts exit code 1, nothing launched, the exact sentence, the status unchanged, no request and no lock left. On the old `takeover.ts`: both `✓`. Breaks:
+
+- `queued` answers with the unbound session: `→ Run scratch-app#6/1 cannot go from queued to active (allowed: picked-up, cancelled)`, `Tests  1 failed | 1 passed | 38 skipped (40)`.
+- `picked-up` answers with the unbound session: `→ expected +0 to be 1`, `Tests  1 failed | 1 passed | 38 skipped (40)`.
+
+*(4) The status report on 41c's ledger* (`status.test.ts` › *the runs the old code left in the ledger* › says where each kind of run stands, and names no command). The whole output is written out by hand from the fixture: the parked runs on their projects' lines, the four cancelled runs with their reasons, and a closing line naming #24, #90, #91, #92 and #93 but not #94. It also asserts no `timone <word>` anywhere. On the old `status.ts` and `cta.ts`: `Tests  1 passed | 52 skipped (53)`. Breaks:
+
+- The runner's own words for asking nobody count as an ask:
+
+  ```
+  - **What I need from you:** answer on scratch-app #24, ivtrends #90, ivtrends #91, ivtrends #92, ivtrends #93 — each ticket says what it needs.
+  + **What I need from you:** answer on scratch-app #24, ivtrends #90, ivtrends #91, ivtrends #92, ivtrends #93, ivtrends #94 — each ticket says what it needs.
+  Tests  2 failed | 3 passed | 38 skipped (43)
+  ```
+
+- A parked run's line says `waiting on you:`: `× … says where each kind of run stands, and names no command`, `Tests  2 failed | 3 passed | 38 skipped (43)`.
+
+*(5) The closing line for a run waiting for the runner* is held by the four tests already in *renderStatus — a run the runner is waiting on*, unchanged, and by case (4). All passed at a3bcb32 and pass now. Breaks on the moved rule in `waitsOnYou`:
+
+- The runner's default words count as an ask: `× … does not name the ticket in its closing line when the runner asked nobody for anything`.
+- An ask opening on "nothing" counts as an ask: `× … does not name the ticket in its closing line when the runner wrote that it needs nothing`, `Tests  1 failed | 3 passed | 39 skipped (43)`.
+- No parked run is ever waiting on the reader: `× … names the ticket in its closing line when the runner asked a person for something`, `Tests  1 failed | 3 passed | 39 skipped (43)`.
+- A parked run's line says `waiting on you:`: `× … reads 'waiting:' and the runner's own words for a run on the runner's wait`.
+
+Green, the five cases together, after the change: `takeover.test.ts` `Tests  40 passed (40)`; `status.test.ts` `Tests  43 passed (43)`.
+
+Validation commands, as run:
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+> timone@0.1.0 build
+> tsc
+ Test Files  58 passed (58)
+      Tests  1728 passed (1728)
+$ grep -rnw "converse\|markAnswerConsumed\|reopenIfFailed\|CARRY_ON_WAIT" src --include='*.ts' | grep -v '^src/daemon/session\.ts\|^src/daemon/runs\.ts' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' ; echo "exit: $? …"
+src/runner/session.ts:244:  const end = await converse(deps, {
+src/runner/session.ts:286:async function converse(
+exit: 0 (expected 1; session.ts and runs.ts are 41f's and 41h's)
+```
+
+1728 = 1798 − 56 (`cta.test.ts`) − 10 (`takeover.test.ts`) − 10 (`status.test.ts`) + 5 (cases (1) to (3)) + 1 (case (4)). Test files: 58, one fewer.
+
+The grep exits 0, not 1. Both lines are in `src/runner/session.ts`: the runner's own function that runs one session of the runner, also called `converse`. It was there at a3bcb32, it has nothing to do with the takeover, and the check's exclusion names `src/daemon/session.ts`, not this file. The file is not in this slice's list, so it was not renamed. With `src/runner/session.ts` also left out, the same command gives `exit: 1`.
+
+- [x] Red-green evidence for each of the five cases is in the handoff. Case (1) was seen red, then green. Cases (2) to (5) describe behaviour that must not change: each passes on the old code, and the breaks above make each fail. **PASS**
+- `npm run build && npm test`: 1728 passed. **PASS**
+- The grep check: **not met as written**, only because of the unrelated `converse` in `src/runner/session.ts` (above). No hit is left for the takeover's `converse`, `markAnswerConsumed`, `reopenIfFailed` or `CARRY_ON_WAIT`.
+
+**What 41f, 41g and 41h must know.**
+
+- **`src/daemon/session.ts` (41f):** `takeover.ts` still imports `intervalTicker`, `waitOf` and the type `Ticker` from it. If 41f deletes the file, these three must move somewhere `takeover.ts` can import them. `outcomeCursorFrom` (`src/daemon/outcomes.ts`) is no longer called by the takeover; `session.ts` is its last production caller.
+- **`src/daemon/prompts.ts` (41g):** `takeoverPrompt` has no production caller now. `prompts.test.ts` still tests it and compares `escalationPrompt` against it. `PROMPTED_STAGES` is left with `session.ts` as its only production caller. `escalationPrompt` is the only prompt the takeover uses, for every run it opens, including a ticket it has just enrolled; it still says the machinery "stopped on" the ticket, and `escalate`'s line at the terminal says "I couldn't take this one further myself".
+- **`src/daemon/runs.ts` (41h):** `CARRY_ON_WAIT` has no reader (it was `cta.ts`). `RunStore.reopenForTakeover` has no caller (it was `reopenIfFailed`). The comments at lines 1183 and 1963 still name `ctaFor`, and 1963 says `timone takeover` writes `CARRY_ON_WAIT`, which it does not. `inBuild` and `waitFor` (`src/daemon/pipeline.ts`) are no longer called by the takeover; `session.ts` is their last production caller.
+- **Deleted with `cta.ts`:** `ctaFor`, `ctaComment` (on 41b's list), `Cta`, `TicketState`. `takeoverCommand` in `src/channels/terminal.ts` keeps a caller in `prompts.ts`.
+- **`dist/daemon/cta.*`** stay in `dist/` until it is cleaned; `tsc` does not delete output for a deleted source. Nothing imports them.
+- **Not tested, before or after:** a done run whose initiative has pieces left and none can start is named in the closing line. `cta.test.ts` only asserted that case's headline. The rule is unchanged.
+- **Nothing reads `InitiativeProgress.next`'s `index` or `title` any more.** `timone status` only asks whether `next` exists.
+- **Left as they were:** `takeover.ts` imports `HELD_LABEL` and does not use it (already so at a3bcb32). `poll.test.ts` has two unused helpers, `parkedOnConversation` and `parkedOnGate`, in *pollOnce — resuming a run whose human answered* (already unused at a3bcb32). The ADRs that name `cta.ts` and `ctaFor` (0030, 0031, 0033, 0034, 0049) are records and were not edited. The command's help still says "Pick up a ticket that is waiting to talk something through".
+- **Refactoring I would do but did not:** export the runner's first wait from `src/runner/session.ts`, so `enrolFromTracker` does not write the same shape a second time. Rename the resolution kind `escalation`, now that it is the only session. Case (2) and › resolves to the session bound to no stage say part of the same thing, and case (4) repeats the fixture set-up of the two 41c and 41d tests above it; a helper in `status.test.ts` could build the ledger and the manifest once.

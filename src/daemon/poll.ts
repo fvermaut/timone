@@ -26,7 +26,6 @@ import {
   type SyncBreakdownSource,
   type BreakdownSource,
 } from "./breakdown.js";
-import type { InitiativeProgress } from "./cta.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 // The commands themselves, called with no state path so they take no lock:
 // the daemon already holds it, and re-implementing what may be cancelled or
@@ -747,11 +746,10 @@ async function applyRequest(
         { project: body.project, ticket: body.ticket },
         { manifest, store, adapter: deps.adapter },
       );
-      // A run the machinery stopped on is handed over like any other
-      // (ADR-0033). Refusing here would mean the one command the ticket
-      // hands the human works while the daemon is down and not while it is
-      // up — which is every time it matters.
-      if (resolution.kind !== "converse" && resolution.kind !== "escalation") {
+      // A run waiting for the runner is handed over, and so is the one the
+      // command has just enrolled: the terminal gets whatever the command
+      // itself would have claimed.
+      if (resolution.kind === "nothing-to-do") {
         log(resolution.message);
         return 1;
       }
@@ -1473,6 +1471,33 @@ export async function closeInitiativeIfDone(
 // be the obvious thing for the next reader to reach for.
 
 /**
+ * Where a ticket's whole initiative stands, as a plain value.
+ *
+ * **This is what lets `timone status` speak about an initiative rather than
+ * about a run** ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D4). A ticket is a conversation and a run is one chunk of it (ADR-0026), so
+ * between two chunks the ticket's last run is `done` while the initiative is
+ * very much alive.
+ *
+ * It carries how far the initiative has got, plus the one fact about the
+ * *artifact* a reader has to be told: that the list has grown since they
+ * approved it. The two are separate facts about one initiative.
+ *
+ * ✏ 2026-09-30: moved here from `src/daemon/cta.ts`, which went with the
+ * ticket's standing note. The functions below produce it.
+ */
+export interface InitiativeProgress {
+  /** How many steps the initiative has. */
+  total: number;
+  /** How many of them are done. */
+  done: number;
+  /** The step to take next, or absent when none is. `index` counts from 1. */
+  next?: { index: number; title: string };
+  /** Whether the list of pieces has grown since the human approved it. */
+  reproposed?: boolean;
+}
+
+/**
  * Where a ticket's initiative stands, for `timone status`, which renders
  * without waiting and reads fvermaut's own checkout
  * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
@@ -1514,9 +1539,9 @@ function progressFrom(
   if (!regrown) return progress;
   // No picture, and the list has regrown. `total` is the count the file lists
   // and `done` is nought — both true statements about **step tickets**, of
-  // which this initiative has none yet. Neither is rendered: the re-proposal
-  // branch of the call to action answers before it reaches them, because what
-  // the human is being asked is a judgement rather than a number.
+  // which this initiative has none yet. Neither is rendered: `timone status`
+  // answers on the regrown list before it reaches them, because what the
+  // human is being asked is a judgement rather than a number.
   const listed = read.kind === "ok" ? read.breakdown.chunks.length : 0;
   return { total: listed, done: 0, ...progress, reproposed: true };
 }

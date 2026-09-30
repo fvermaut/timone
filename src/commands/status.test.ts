@@ -32,12 +32,9 @@ function breakdownIn(
   };
 }
 
-import { ctaComment, ctaFor } from "../daemon/cta.js";
 import type { Holder } from "../daemon/holder.js";
-import { progressOf } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
-  CARRY_ON_WAIT,
   RunStore,
   type DaemonRecord,
   type InitiativeRecord, runId, type Run } from "../daemon/runs.js";
@@ -146,22 +143,6 @@ describe("renderStatus", () => {
     expect(line).not.toMatch(/triage/);
   });
 
-  it("names who is waited on, and what for, when a run is parked", () => {
-    const runs = [
-      run({
-        project: "scratch-app",
-        ticket: 7,
-        status: "parked",
-        stage: "triage",
-        wait: { on: "approval on the ticket" },
-      }),
-    ];
-    const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
-
-    expect(line).toMatch(/waiting on you/i);
-    expect(line).toMatch(/approval on the ticket/);
-  });
-
   it("shows every waiting ticket, not just the first", () => {
     // Several tickets can now wait at once: a run that holds no work branch
     // holds no project either. A status line that showed one of them would
@@ -172,14 +153,14 @@ describe("renderStatus", () => {
         ticket: 6,
         status: "parked",
         stage: "clarification",
-        wait: { on: "an answer about how it should behave" },
+        wait: { on: "an answer about how it should behave", kind: "runner" },
       }),
       run({
         project: "scratch-app",
         ticket: 7,
         status: "parked",
         stage: "clarification",
-        wait: { on: "an answer about the wording" },
+        wait: { on: "an answer about the wording", kind: "runner" },
       }),
     ];
     const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
@@ -196,20 +177,30 @@ describe("renderStatus", () => {
         project: "scratch-app",
         ticket: 6,
         status: "parked",
-        wait: { on: "an answer" },
+        wait: { on: "an answer", kind: "runner" },
       }),
       run({ project: "scratch-app", ticket: 7, status: "active", stage: "requirements" }),
     ];
     const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
 
     expect(line).toMatch(/#7.*working on it now/);
-    expect(line).toMatch(/#6.*waiting on you/);
+    expect(line).toMatch(/#6.*waiting: an answer/);
   });
 
   it("names every waiting ticket in the closing line", () => {
     const runs = [
-      run({ project: "scratch-app", ticket: 6, status: "parked", wait: { on: "an answer" } }),
-      run({ project: "other-app", ticket: 2, status: "parked", wait: { on: "approval" } }),
+      run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        wait: { on: "an answer", kind: "runner" },
+      }),
+      run({
+        project: "other-app",
+        ticket: 2,
+        status: "parked",
+        wait: { on: "approval", kind: "runner" },
+      }),
     ];
     const lastLine =
       renderStatus(manifest, runs, { stateExists: true }).trimEnd().split("\n").at(-1) ?? "";
@@ -237,7 +228,7 @@ describe("renderStatus", () => {
         project: "scratch-app",
         ticket: 7,
         status: "parked",
-        wait: { on: "the next stage" },
+        wait: { on: "the next stage", kind: "runner" },
         flags: ["unpushed commits on phase/01"],
       }),
     ];
@@ -296,7 +287,7 @@ describe("renderStatus", () => {
         project: "scratch-app",
         ticket: 7,
         status: "parked",
-        wait: { on: "approval on the ticket" },
+        wait: { on: "approval on the ticket", kind: "runner" },
       }),
     ];
     const output = renderStatus(manifest, runs, { stateExists: true });
@@ -336,27 +327,6 @@ describe("renderStatus — the back half of the pipeline", () => {
     expect(output).not.toMatch(/\bbreakdown\b/);
   });
 
-  it("names the pull request a review wait is waiting on", () => {
-    const output = renderStatus(
-      manifest,
-      [
-        run({
-          project: "scratch-app",
-          ticket: 6,
-          status: "parked",
-          stage: "delivery",
-          wait: { kind: "review", on: "your review" },
-          pr: 9,
-          branch: "timone/6-fiddly-box",
-        }),
-      ],
-      { stateExists: true },
-    );
-
-    const line = lineFor(output, "scratch-app");
-    expect(line).toMatch(/waiting on you/i);
-    expect(line).toMatch(/pull request #9/);
-  });
 });
 
 describe("renderStatus — a run whose daemon died under it", () => {
@@ -390,74 +360,6 @@ describe("renderStatus — what the terminal can ask without a daemon", () => {
       host: "fvermaut-mac",
     };
   }
-
-  it("stops saying 'waiting on you' about a ticket that needs nothing", () => {
-    // timone#14, seen live on the trading app on 2026-08-16. The shared
-    // calculation already says whether the human is being waited on, and this
-    // renderer printed the words over the top of its answer — so a map still
-    // working through its own questions read
-    // "waiting on you: nothing right now".
-    const output = renderStatus(
-      manifest,
-      [
-        run({
-          project: "scratch-app",
-          ticket: 7,
-          status: "parked",
-          stage: "charting",
-        }),
-      ],
-      { stateExists: true },
-    );
-
-    // Asserted on the project's own line: the closing summary legitimately
-    // says "nothing is waiting on you right now", and that sentence is the
-    // one this ticket's line was contradicting.
-    expect(lineFor(output, "scratch-app")).toContain("nothing right now");
-    expect(lineFor(output, "scratch-app")).not.toContain("waiting on you");
-  });
-
-  it("still says it about a ticket that does need something", () => {
-    const output = renderStatus(
-      manifest,
-      [
-        run({
-          project: "scratch-app",
-          ticket: 7,
-          status: "parked",
-          stage: "requirements",
-          wait: { on: "your approval of the specification", kind: "gate" },
-        }),
-      ],
-      { stateExists: true },
-    );
-
-    expect(output).toContain("waiting on you: your approval of the specification");
-  });
-
-  it("does not say a person is waited on about a run handed back to the machine", () => {
-    // Found by phase 31's live gate, check 4, on the run it had just watched
-    // work: `timone status` read "waiting on you: nothing — I'll carry on
-    // from where you left it." That is timone#14's self-contradicting
-    // sentence in a new place, and 31f's fix could not catch it because the
-    // shared calculation was answering `true`.
-    const output = renderStatus(
-      manifest,
-      [
-        run({
-          project: "scratch-app",
-          ticket: 7,
-          status: "parked",
-          stage: "planning",
-          wait: { on: CARRY_ON_WAIT, resolvableBy: ["planning"] },
-        }),
-      ],
-      { stateExists: true },
-    );
-
-    expect(lineFor(output, "scratch-app")).not.toContain("waiting on you");
-    expect(lineFor(output, "scratch-app")).toContain("on my next pass");
-  });
 
   it("does not call a run working when the process running it is gone", () => {
     // timone#11. With nothing watching, a killed session read "working on it
@@ -555,7 +457,7 @@ describe("renderStatus — what a run is costing right now", () => {
           ticket: 7,
           status: "parked",
           stage: "planning",
-          wait: { on: "your answer on the ticket", kind: "gate" },
+          wait: { on: "your answer on the ticket", kind: "runner" },
         }),
       ],
       { stateExists: true, now: new Date("2026-08-06T10:00:30Z") },
@@ -583,177 +485,7 @@ describe("renderStatus — what a run is costing right now", () => {
   });
 });
 
-describe("renderStatus — a ticket built in pieces", () => {
-  it("names which piece of an initiative is waiting on a review", () => {
-    // ADR-0028 D4's third state on the terminal: the pull request number is
-    // what the reader navigates by, and the piece is how much of the whole
-    // this review is.
-    const runs = [
-      run({
-        project: "scratch-app",
-        ticket: 51,
-        status: "parked",
-        stage: "delivery",
-        wait: { kind: "review", on: "your review" },
-        pr: 9,
-      }),
-    ];
-    // ✏ 29g: which piece this is comes off the **step tickets** now, cached in
-    // the ledger, rather than from counting done runs against a file. The
-    // sentence the reader sees is unchanged, which is the point of asserting
-    // it here rather than asserting the source.
-    const output = renderStatus(manifest, runs, {
-      stateExists: true,
-      pictures: (project) =>
-        project === "scratch-app"
-          ? [
-              {
-                project: "scratch-app",
-                initiative: 6,
-                title: "the lists could be smarter",
-                steps: [51, 52],
-                done: 0,
-                next: 51,
-                nextTitle: "The ledger learns chunks",
-                at: "2026-08-02T10:00:00Z",
-              },
-            ]
-          : [],
-    });
-
-    expect(lineFor(output, "scratch-app")).toContain(
-      "your review of pull request #9 — that's piece 1 of 2.",
-    );
-  });
-
-  it("says a project with no breakdown anywhere exactly what it always said", () => {
-    // The checkout has no `doc/plans/breakdowns/` at all — nearly every
-    // ticket, and every chore. Held against the literal line.
-    const runs = [
-      run({
-        project: "scratch-app",
-        ticket: 6,
-        status: "parked",
-        stage: "delivery",
-        wait: { kind: "review", on: "your review" },
-        pr: 9,
-      }),
-    ];
-    const output = renderStatus(manifest, runs, {
-      stateExists: true,
-      // A plain fixture directory, not a clone: the production default reads
-      // the approved list off the default branch (ADR-0030 D2).
-            ...breakdownIn(rootWith(6)),
-    });
-
-    expect(lineFor(output, "scratch-app")).toBe(
-      "scratch-app  #6 (delivering) — waiting on you: your review of pull request #9",
-    );
-  });
-});
-
-describe("renderStatus — one computation, two renderers", () => {
-  it("says the same thing on the ticket and on the status line, from one call", () => {
-    const parked = run({
-      project: "scratch-app",
-      ticket: 6,
-      status: "parked",
-      stage: "delivery",
-      wait: { kind: "review", on: "your review" },
-      pr: 9,
-      branch: "timone/6-fiddly-box",
-    });
-
-    // **One call**, whose result is handed to both renderers. The expectations
-    // below are the computed CTA itself rather than two literals that happen to
-    // match, so a change to the computation has to move both outputs or this
-    // fails — which is the property R21's clause 8 closes by construction.
-    const cta = ctaFor({
-      project: parked.project,
-      ticket: parked.ticket,
-      run: parked,
-    });
-
-    expect(cta.needFromYou).not.toBe("");
-    expect(ctaComment(cta)).toContain(cta.needFromYou);
-    expect(
-      renderStatus(manifest, [parked], { stateExists: true }),
-    ).toContain(cta.needFromYou);
-  });
-
-  it("agrees about a run nothing written can restart, and shows the way out", () => {
-    // R21 clause 8 for ADR-0033's park. The same one call, rendered twice —
-    // and the terminal has to show the command as well as the sentence, or a
-    // reader of `timone status` alone is told they are being waited on with
-    // nothing they can do about it.
-    const stuck = run({
-      project: "scratch-app",
-      ticket: 31,
-      status: "parked",
-      stage: "verification",
-      wait: { kind: "escalation", on: "me — I can't take this one further myself." },
-      branch: "timone/31-slow-page",
-    });
-
-    const cta = ctaFor({ project: "scratch-app", ticket: 31, run: stuck });
-    const output = renderStatus(manifest, [stuck], { stateExists: true });
-
-    expect(ctaComment(cta)).toContain(cta.needFromYou);
-    expect(output).toContain(cta.needFromYou);
-    expect(output).toContain("timone takeover scratch-app#31");
-  });
-
-  it("resolves an initiative's progress the same way for the ticket and the terminal", () => {
-    // R21 clause 8, asserted rather than intended. **One** progress value,
-    // resolved the way `reconcileCtas` resolves it — through `progressOf`
-    // over the ledger's picture — fed to `ctaFor` once, and both renderings
-    // of that one call are then required to carry the same sentence.
-    // `renderStatus` resolves its own value internally, so if it read a
-    // different picture or counted differently, its line would name a
-    // different piece and this fails.
-    //
-    // ✏ 29g: the value used to be counted out of the ledger against a file in
-    // a checkout. The guarantee is unchanged and the source is not: doneness
-    // is a fact about step tickets now (ADR-0040).
-    const record: InitiativeRecord = {
-      project: "scratch-app",
-      initiative: 6,
-      title: "the lists could be smarter",
-      steps: [51, 52, 53],
-      done: 1,
-      next: 52,
-      nextTitle: "The next chunk opens",
-      at: "2026-08-02T10:00:00Z",
-    };
-    const pictures = (project: string): readonly InitiativeRecord[] =>
-      project === "scratch-app" ? [record] : [];
-    const runs = [
-      run({
-        project: "scratch-app",
-        ticket: 52,
-        status: "parked",
-        stage: "delivery",
-        wait: { kind: "review", on: "your review" },
-        pr: 12,
-      }),
-    ];
-
-    const cta = ctaFor({
-      project: "scratch-app",
-      ticket: 52,
-      run: runs.at(-1),
-      progress: progressOf(record),
-    });
-
-    // Not agreement about nothing: the sentence they have to agree on is the
-    // one that names the piece.
-    expect(cta.needFromYou).toContain("piece 2 of 3");
-    expect(ctaComment(cta)).toContain(cta.needFromYou);
-    expect(renderStatus(manifest, runs, { stateExists: true, pictures })).toContain(
-      cta.needFromYou,
-    );
-  });
-
+describe("renderStatus — who the closing line names", () => {
   it("names a ticket once in its closing line however many pieces it has had", () => {
     // A re-proposed initiative is the first state in which a *done* run is
     // waiting on the human, and a ticket built in three pieces holds three of
@@ -779,14 +511,14 @@ describe("renderStatus — one computation, two renderers", () => {
     );
   });
 
-  it("names in its closing line exactly the tickets the computation is waiting on", () => {
+  it("names in its closing line exactly the tickets that are waiting on the reader", () => {
     const runs = [
       run({
         project: "scratch-app",
         ticket: 6,
         status: "parked",
         stage: "planning",
-        wait: { kind: "gate", on: "your answer on the ticket" },
+        wait: { kind: "runner", on: "your answer on the ticket" },
       }),
       run({ project: "scratch-app", ticket: 7, status: "active", stage: "execution" }),
       run({
@@ -1276,5 +1008,66 @@ describe("renderStatus — the runs the old code left in the ledger", () => {
     expect(output).not.toMatch(/stopped early/);
     expect(output).not.toMatch(/pick it up from where it stopped/);
     expect(output).not.toMatch(/\bretry\b/);
+  });
+
+  it("says where each kind of run stands, and names no command", () => {
+    // The same ledger, read the same way. After it is read it holds three
+    // kinds of run: done, cancelled (two of them were failed), and waiting
+    // for the runner (five of them waited on an older kind of wait). Written
+    // out by hand from the fixture.
+    const root = mkdtempSync(join(tmpdir(), "timone-status-"));
+    tempDirs.push(root);
+    const path = join(root, ".timone", "state.json");
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(
+      fileURLToPath(new URL("../daemon/fixtures/ledger-before-166.json", import.meta.url)),
+      path,
+    );
+    const both: Manifest = {
+      projects: {
+        "scratch-app": {
+          repo_url: "https://github.com/fvermaut/scratch-app.git",
+          path: "projects/scratch-app",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+        ivtrends: {
+          repo_url: "https://github.com/fvermaut/ivtrends.git",
+          path: "projects/ivtrends",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+      },
+    };
+
+    const output = renderStatus(both, RunStore.open(path).all(), { stateExists: true });
+
+    // A done run is not on its project's line. Every waiting run is, in its
+    // own words. Every cancelled run is listed with its reason. The closing
+    // line names every waiting run that asked for something, and not #94,
+    // which waits on the runner's own words for asking nobody anything.
+    expect(output).toBe(
+      [
+        "scratch-app  #24 (delivering) — waiting: your review of pull request #31",
+        [
+          "ivtrends     #90 (writing down what it needs) — waiting: your approval of the requirements I wrote down",
+          "#91 (asking what you need) — waiting: your answer to the question in my last comment.",
+          "#92 (talking a question through) — waiting: me — I can't take this one further on my own.",
+          "#93 (sorting the request) — waiting: the next stage to be built",
+          "#94 (sorting the request) — waiting: the next thing that happens on this ticket",
+        ].join("  ·  "),
+        "",
+        "scratch-app #15 was cancelled: fvermaut: not needed any more",
+        "scratch-app #21 was cancelled: stopped before the old code was removed: " +
+          "the execution stage finished without committing anything to gate",
+        "ivtrends #61 was cancelled: fvermaut: a duplicate of #60",
+        "ivtrends #88 was cancelled: stopped before the old code was removed: " +
+          "triage recorded no classification",
+        "",
+        "**What I need from you:** answer on scratch-app #24, ivtrends #90, " +
+          "ivtrends #91, ivtrends #92, ivtrends #93 — each ticket says what it needs.",
+      ].join("\n"),
+    );
+    expect(output).not.toMatch(/timone \w+/);
   });
 });

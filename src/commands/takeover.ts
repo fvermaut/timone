@@ -8,22 +8,10 @@ import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
 import type {
   TicketingAdapter,
   TicketingProject,
-  TicketThread,
 } from "../adapters/ticketing.js";
 import { loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
-import {
-  inBuild,
-  waitFor,
-  wayfinderStage,
-  type PipelineStage,
-} from "../daemon/pipeline.js";
-import { outcomeCursorFrom } from "../daemon/outcomes.js";
-import {
-  PROMPTED_STAGES,
-  escalationPrompt,
-  takeoverPrompt,
-} from "../daemon/prompts.js";
+import { escalationPrompt } from "../daemon/prompts.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
 import { takeHold, type Holder } from "../daemon/holder.js";
@@ -35,6 +23,7 @@ import {
   type WaitOptions,
 } from "../daemon/requests.js";
 import { intervalTicker, waitOf, type Ticker } from "../daemon/session.js";
+import { RUNNER_DEFAULT_WAIT } from "../runner/session.js";
 
 /** A parsed `<project>#<ticket>` target. */
 export interface TakeoverTarget {
@@ -44,19 +33,18 @@ export interface TakeoverTarget {
 
 /** What a takeover turns out to be. */
 export type TakeoverResolution =
-  | { kind: "converse"; run: Run; stage: PipelineStage; thread: TicketThread }
   /**
-   * The machinery stopped on this one and cannot take it further itself
-   * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
-   * What opens is a session bound to no stage — which is why no stage travels
-   * with this resolution, and why the stage the run stopped at is not checked
-   * against `PROMPTED_STAGES`: the stop happens at work stages no
-   * conversation exists for, and refusing there is the wedge this exists to
-   * prevent.
+   * A run waiting for the runner, for the terminal to hold in a session bound
+   * to no step ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md),
+   * [ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
+   * What the run does next is the runner's to decide, not a step's, so no
+   * step travels with this resolution.
+   *
+   * ✏ 2026-09-30: the only session a takeover opens. The session bound to a
+   * stage, for a run parked on a conversation, went with the old code
+   * between steps: the ledger loads every old kind of wait as the runner's.
    */
-  | { kind: "escalation"; run: Run; thread?: TicketThread }
-  /** The ticket is waiting, but on a reply rather than on an interview. */
-  | { kind: "answer-on-ticket"; message: string }
+  | { kind: "escalation"; run: Run }
   /** Nothing to take over; the message says what *is* happening instead. */
   | { kind: "nothing-to-do"; message: string };
 
@@ -146,10 +134,7 @@ export function parseTarget(raw: string): TakeoverTarget {
 export async function resolveTakeover(
   target: TakeoverTarget,
   deps: TakeoverResolutionDeps,
-): Promise<
-  | Exclude<TakeoverResolution, { kind: "converse" }>
-  | { kind: "converse"; run: Run; stage: PipelineStage; thread?: TicketThread }
-> {
+): Promise<TakeoverResolution> {
   const { manifest, store } = deps;
 
   if (!(target.project in manifest.projects)) {
@@ -176,19 +161,23 @@ export async function resolveTakeover(
           `I'm working on ${target.project} #${target.ticket} right now. ` +
           "Anything I need from you will land on the ticket.",
       };
+    case "parked":
+      // ✏ 2026-09-30: **every parked run waits for the runner.** The ledger
+      // loads a run parked on an older kind of wait — a gate, a review, a
+      // conversation, a stop — as waiting for the runner, and the runner is
+      // what moves it (ADR-0060). So the session that opens is the one bound
+      // to no step. The answers this command used to give for a gate or a
+      // review, and the conversation it opened at a stage, went with the old
+      // code between steps.
+      return { kind: "escalation", run };
     case "done":
       return {
         kind: "nothing-to-do",
         message: `${target.project} #${target.ticket} is finished — see the ticket.`,
       };
+    // ✏ 2026-09-30: a failed run is answered as a cancelled one. No run can
+    // be read as failed any more: the ledger loads one as cancelled.
     case "failed":
-      // **A failed run opens the session bound to no stage**
-      // ([ADR-0059](../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md)).
-      // This used to answer "Re-mark the ticket to try again", on a ticket
-      // whose own comment offered this command — and `timone retry` ran the
-      // same step into the same stop (`ivtrends` #126). Nothing is written
-      // here: {@link reopenIfFailed} does that, just before the claim.
-      return { kind: "escalation", run };
     case "cancelled": {
       // Abandoned, not broken — so the words say it was cancelled, and never
       // that something went wrong. Its reason lives in `cancellation` rather
@@ -209,66 +198,7 @@ export async function resolveTakeover(
               "on my next pass."),
       };
     }
-    case "parked":
-      break;
   }
-
-  if (run.wait?.kind === "gate") {
-    return {
-      kind: "answer-on-ticket",
-      message:
-        `${target.project} #${target.ticket} isn't waiting for a conversation — ` +
-        `it's waiting for your answer on the ticket: ${run.wait?.on ?? "a decision"}. ` +
-        "Reply there and I'll carry on from your reply.",
-    };
-  }
-
-  if (run.wait?.kind === "review") {
-    return {
-      kind: "answer-on-ticket",
-      message:
-        `${target.project} #${target.ticket} isn't waiting for a conversation — ` +
-        `its work is open as pull request #${run.pr ?? "?"}, waiting for your ` +
-        "review. Comment or merge there, and I'll carry on from what you do.",
-    };
-  }
-
-  // Before the conversation branch, because a run stopped this way is
-  // parked at a work stage — `verification` on ivtrends #1 — and the
-  // conversation branch would refuse it with the sentence about a stage it
-  // cannot hold a conversation for. That refusal, on the one park whose CTA
-  // hands the human this very command, is the wedged project ADR-0033's
-  // ordering exists to prevent.
-  // ✏ The runner's wait opens the same way (ADR-0060). What a run of the
-  // runner does next is the runner's to decide, not a stage's, so there is
-  // no stage to open a conversation at; the session bound to no stage is
-  // the one that fits.
-  if (run.wait?.kind === "escalation" || run.wait?.kind === "runner") {
-    return { kind: "escalation", run };
-  }
-
-  if (run.wait?.kind !== "conversation" || run.stage === undefined) {
-    return {
-      kind: "nothing-to-do",
-      message:
-        `${target.project} #${target.ticket} is parked, but not on anything I ` +
-        `can pick up in a conversation: ${run.wait?.on ?? "no reason recorded"}.`,
-    };
-  }
-
-  // **A build stage is never a stage this command opens a conversation at**
-  // ([ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
-  // Nothing may park a run there any more, so reaching this line means a
-  // ledger written by older code, or a way in nobody has thought of yet.
-  // Opening the stage is what `ivtrends` #88 did: the checking step ran again
-  // from the start, could not act, and put the same question back — so the
-  // ticket offered this same command again, without limit. The refusal says
-  // what is wrong and gives a way out that is not this command again.
-  if (inBuild(run.stage)) {
-    return { kind: "nothing-to-do", message: parkedInBuild(target, run.stage) };
-  }
-
-  return { kind: "converse", run, stage: run.stage };
 }
 
 /**
@@ -288,14 +218,20 @@ export async function resolveTakeover(
  * The refusal survives for the two cases where there is genuinely nothing to
  * pick up, each with a sentence of its own, because "closed" and "no such
  * ticket" are different things to have got wrong.
+ *
+ * ✏ 2026-09-30: **the new run waits for the runner**
+ * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)),
+ * with no step chosen. That is the wait the runner puts a run on when it
+ * first wakes for it (`putOnRunnersWait` in `src/runner/session.ts`). The
+ * terminal then holds it like any other run the runner waits on, and gives
+ * it back with a request to wake the runner. Until then the run was parked
+ * on a conversation at the stage its labels named, and a ticket at a stage
+ * with no conversation of its own was refused.
  */
 async function enrolFromTracker(
   target: TakeoverTarget,
   deps: TakeoverResolutionDeps,
-): Promise<
-  | Exclude<TakeoverResolution, { kind: "converse" }>
-  | { kind: "converse"; run: Run; stage: PipelineStage; thread: TicketThread }
-> {
+): Promise<TakeoverResolution> {
   const { manifest, store, adapter } = deps;
   const project = {
     name: target.project,
@@ -306,106 +242,20 @@ async function enrolFromTracker(
   const ticket = open.find((candidate) => candidate.number === target.ticket);
   if (ticket === undefined) return notOpen(target, project, adapter);
 
-  const stage = entryStage(ticket.labels);
-  // Asked **before** anything is written down. A stage this command cannot
-  // hold a conversation for is one it is about to refuse, and a run created
-  // on the way to a refusal is worse than the refusal: on a map it would open
-  // a wait nobody asked for, which is ADR-0024's own fault inverted.
-  if (!isPrompted(stage)) {
-    return { kind: "nothing-to-do", message: cannotConverse(target) };
-  }
-
   const created = store.register(target.project, target.ticket).run;
   if (created.status === "queued") {
     return { kind: "nothing-to-do", message: queuedMessage(target) };
   }
 
-  const thread = await adapter.getTicket(project, target.ticket);
-  const run = settle(created, stage, thread, store);
-  return { kind: "converse", run, stage, thread };
-}
-
-/**
- * Put the new run into the state the **daemon's own pickup** would have left
- * it in at this stage, and no other. That is the whole rule, and it is what
- * keeps a takeover-created run resumable by the machinery that already exists
- * rather than by something new.
- *
- * - A stage that waits on a conversation is parked on one, exactly as
- *   `openConversation` parks it — minus the invitation, which would be a
- *   question posted at somebody already sitting in the conversation. The
- *   daemon then resumes this run off the record the session posts, or off a
- *   written answer, by the path it has always used.
- * - Anything else keeps the `picked-up` that {@link RunStore.register} just
- *   gave it, with its stage written down. It is not waiting on a human, so
- *   saying it is would be a lie in the ledger *and* on the ticket — `ctaFor`
- *   reads the same fields.
- */
-function settle(
-  run: Run,
-  stage: PipelineStage,
-  thread: TicketThread,
-  store: RunStore,
-): Run {
-  if (waitFor(stage) !== "conversation") return store.setStage(run.id, stage);
-
-  return store.park(run.id, {
-    waitingOn: "a conversation in your terminal",
-    kind: "conversation",
-    stage,
-    // Everything already on the ticket was said before this conversation was
-    // opened, so none of it can answer it — `outcomeCursorFrom`'s own rule.
-    // A cursor at the machine's last word instead would have the next cycle
-    // read something the human wrote before anybody had asked them anything,
-    // and resume this run behind the session they are sitting in.
-    waitCursor: outcomeCursorFrom(thread),
+  // Opened when the run was, and ended by the step a new ticket starts at,
+  // as the runner's own first wait is.
+  const run = store.park(created.id, {
+    waitingOn: RUNNER_DEFAULT_WAIT,
+    kind: "runner",
+    waitCursor: created.updatedAt,
+    resolvableBy: ["triage"],
   });
-}
-
-/**
- * Where a ticket with no run enters the pipeline, read off the labels the
- * tracker holds — `entryContext`'s rule in `poll.ts` (a wayfinder ticket
- * enters at its own stage, because a session already decided what kind of
- * question it holds), and the spawner's default behind it.
- */
-function entryStage(labels: readonly string[]): PipelineStage {
-  return wayfinderStage(labels) ?? "triage";
-}
-
-/** Whether a conversation can be held for `stage` at all. */
-function isPrompted(stage: PipelineStage): boolean {
-  return (PROMPTED_STAGES as readonly string[]).includes(stage);
-}
-
-/**
- * What a ticket waiting at a stage no conversation exists for is told. One
- * copy of the sentence, said by both the run that was already there and the
- * ticket this command declined to create one for.
- */
-function cannotConverse(target: TakeoverTarget): string {
-  return (
-    `${target.project} #${target.ticket} is waiting at a stage I can't hold a ` +
-    "conversation for yet. Nothing has changed."
-  );
-}
-
-/**
- * What a ticket parked on a conversation inside the build is told.
- *
- * It names the fault rather than the stage's own question, because the
- * question is not the human's to answer — it should never have been asked.
- * And it ends on a command that is not this one: repeating this one is the
- * loop the refusal exists to break.
- */
-function parkedInBuild(target: TakeoverTarget, stage: PipelineStage): string {
-  return (
-    `${target.project} #${target.ticket} is stopped at the ${stage} step, ` +
-    "waiting on you. That should not happen: once you have approved the work, " +
-    "nothing before the pull request asks you anything. Running this command " +
-    "again will do the same thing. Throw this attempt away with " +
-    `\`timone cancel ${target.project}#${target.ticket}\` and the ticket will ` +
-    "say what to do next."
-  );
+  return { kind: "escalation", run };
 }
 
 /** What a ticket behind another on its project is told. */
@@ -509,9 +359,7 @@ export async function runTakeover(
   process.once("SIGTERM", giveBack);
 
   try {
-    return claimed.escalation === true
-      ? await escalate(target, claimed.run, claimed.thread, deps, log)
-      : await converse(target, claimed.run, claimed.thread, deps, log);
+    return await escalate(target, claimed.run, deps, log);
   } finally {
     process.off("SIGINT", giveBack);
     process.off("SIGTERM", giveBack);
@@ -525,50 +373,8 @@ export async function runTakeover(
   }
 }
 
-/**
- * Say, on the run itself, that this conversation is the answer being read —
- * so a conversation that changes nothing counts against ADR-0033's re-ask
- * floor exactly as a written reply that changes nothing already does.
- *
- * **Why it is needed at all.** A takeover that ends without the session
- * recording a finished step puts the run back on the wait it came from, cursor
- * and all. Nothing distinguished that from a run nobody had ever spoken to, so
- * the ticket went on offering `timone takeover` and each run of it cost a full
- * session and moved nothing. `ivtrends` #88 is the sighting: same command,
- * same stop, no bound. With the marker set, the second stuck takeover at the
- * same stage trips `RE_ASK_LIMIT` in `applyPark` and the wait becomes an
- * escalation — which `resolveTakeover` already opens differently.
- *
- * **Ordered before the claim, never after**: `repark` refuses a run that is
- * not parked, and the claim makes it active. The same order the daemon's own
- * resumption path uses in `poll.ts`.
- *
- * Silent when the run is not parked — a takeover that has just enrolled a
- * ticket at a stage with no wait has nothing to have asked twice.
- */
-export function markAnswerConsumed(store: RunStore, run: Run): void {
-  if (store.get(run.id)?.status !== "parked") return;
-  store.repark(run.id, {
-    ...waitOf(run),
-    consumedAnswerAt: run.wait?.opened ?? run.updatedAt,
-  });
-}
-
-/**
- * Park a failed run on a person before it is claimed, so it can be claimed at
- * all ([ADR-0059](../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md)).
- * `failed` may not go straight to `active`, and a run with no wait would have
- * nothing to go back to when the session ends. Silent on any other run.
- */
-export function reopenIfFailed(store: RunStore, run: Run): void {
-  if (store.get(run.id)?.status !== "failed") return;
-  store.reopenForTakeover(run.id);
-}
-
 /** A claimed run, or the exit code of a takeover that never started one. */
-type Claim =
-  | { kind: "claimed"; run: Run; thread?: TicketThread; escalation?: true }
-  | { kind: "no"; code: number };
+type Claim = { kind: "claimed"; run: Run } | { kind: "no"; code: number };
 
 /**
  * Take the run for this conversation, by whichever road the ledger allows.
@@ -580,9 +386,9 @@ type Claim =
  *
  * **Refusals keep their words wherever they can.** Where the ledger already
  * knows this ticket, resolution is a read, so it happens here and the human
- * gets the same sentence they have always got about a gate, a review, a
- * finished run. Only enrolling a ticket the ledger has never heard of is a
- * write, and only that case is handed to the daemon whole.
+ * gets the same sentence they have always got about a queued run, a running
+ * one, a finished one. Only enrolling a ticket the ledger has never heard of
+ * is a write, and only that case is handed to the daemon whole.
  */
 async function claimForTakeover(
   raw: string,
@@ -612,28 +418,11 @@ async function claimForTakeover(
   if (acquired.ok) {
     try {
       const resolution = await resolveTakeover(target, deps);
-      if (resolution.kind === "escalation") {
-        reopenIfFailed(store, resolution.run);
-        return {
-          kind: "claimed",
-          run: store.claim(resolution.run.id, hold),
-          escalation: true,
-        };
-      }
-      if (resolution.kind !== "converse") {
+      if (resolution.kind === "nothing-to-do") {
         log(resolution.message);
-        return { kind: "no", code: resolution.kind === "answer-on-ticket" ? 0 : 1 };
-      }
-      if (!isPrompted(resolution.stage)) {
-        log(cannotConverse(target));
         return { kind: "no", code: 1 };
       }
-      markAnswerConsumed(store, resolution.run);
-      return {
-        kind: "claimed",
-        run: store.claim(resolution.run.id, hold),
-        ...(resolution.thread === undefined ? {} : { thread: resolution.thread }),
-      };
+      return { kind: "claimed", run: store.claim(resolution.run.id, hold) };
     } finally {
       acquired.lock.release();
     }
@@ -649,12 +438,8 @@ async function claimForTakeover(
   // refusals stay exactly as verified against R14.
   if (store.runsForTicket(target.project, target.ticket).length > 0) {
     const resolution = await resolveTakeover(target, deps);
-    if (resolution.kind !== "converse" && resolution.kind !== "escalation") {
+    if (resolution.kind === "nothing-to-do") {
       log(resolution.message);
-      return { kind: "no", code: resolution.kind === "answer-on-ticket" ? 0 : 1 };
-    }
-    if (resolution.kind === "converse" && !isPrompted(resolution.stage)) {
-      log(cannotConverse(target));
       return { kind: "no", code: 1 };
     }
   }
@@ -703,12 +488,7 @@ async function claimForTakeover(
     );
     return { kind: "no", code: 1 };
   }
-  // The claim cleared nothing about what the run was waiting on
-  // (`RunStore.claim` keeps the wait deliberately), so which session to open
-  // is still readable off the run the daemon handed back.
-  return run.wait?.kind === "escalation" || run.wait?.kind === "runner"
-    ? { kind: "claimed", run, escalation: true }
-    : { kind: "claimed", run };
+  return { kind: "claimed", run };
 }
 
 /**
@@ -792,13 +572,7 @@ async function withdraw(
       run.status === "active" &&
       run.holder?.token === hold.token
     ) {
-      return {
-        kind: "applied",
-        claim:
-          run.wait?.kind === "escalation" || run.wait?.kind === "runner"
-            ? { kind: "claimed", run, escalation: true }
-            : { kind: "claimed", run },
-      };
+      return { kind: "applied", claim: { kind: "claimed", run } };
     }
     if (looked < WITHDRAW_LOOKS) await sleep(intervalMs);
   }
@@ -890,51 +664,16 @@ function releaseClaim(
 }
 
 /**
- * The conversation itself, holding no lock. Everything it needs was decided
- * before the claim; all that is left is the prompt and the terminal.
- */
-async function converse(
-  target: TakeoverTarget,
-  run: Run,
-  known: TicketThread | undefined,
-  deps: TakeoverDeps,
-  log: (message: string) => void,
-): Promise<number> {
-  const project = {
-    name: target.project,
-    repoUrl: deps.manifest.projects[target.project].repo_url,
-  };
-  const stage = run.stage;
-  if (stage === undefined || !isPrompted(stage)) {
-    log(cannotConverse(target));
-    return 1;
-  }
-
-  // Read again only where the claim had no reason to: a ticket enrolled from
-  // the tracker was already fetched to open its wait from, and fetching it
-  // twice in one command is the fault 19d closed in the poll loop.
-  const thread = known ?? (await deps.adapter.getTicket(project, target.ticket));
-  const prompt = takeoverPrompt(
-    target.project,
-    stage as (typeof PROMPTED_STAGES)[number],
-    thread,
-  );
-
-  log(`Picking up ${target.project} #${target.ticket} — over to you.`);
-  return deps.launcher.run("claude", [prompt], { cwd: deps.root });
-}
-
-/**
- * The unbound session: the same terminal, and a prompt that names no stage.
+ * The session bound to no step: the terminal, and a prompt that names no
+ * stage. The ticket is read here, once, for the prompt.
  *
- * It reads beside {@link converse} on purpose. Everything about the command is
- * the same — the claim, the launcher, the root — and exactly one thing differs:
- * what the session is told it is.
+ * ✏ 2026-09-30: the only session a takeover opens. Its twin, the session
+ * bound to the stage a run was parked on for a conversation, went with the
+ * old code between steps.
  */
 async function escalate(
   target: TakeoverTarget,
   run: Run,
-  known: TicketThread | undefined,
   deps: TakeoverDeps,
   log: (message: string) => void,
 ): Promise<number> {
@@ -942,7 +681,7 @@ async function escalate(
     name: target.project,
     repoUrl: deps.manifest.projects[target.project].repo_url,
   };
-  const thread = known ?? (await deps.adapter.getTicket(project, target.ticket));
+  const thread = await deps.adapter.getTicket(project, target.ticket);
   const prompt = escalationPrompt(target.project, run, thread);
 
   log(
@@ -967,38 +706,11 @@ async function takeover(
   }
 
   const resolution = await resolveTakeover(target, deps);
-  if (resolution.kind === "escalation") {
-    reopenIfFailed(deps.store, resolution.run);
-    const run = deps.store.get(resolution.run.id) ?? resolution.run;
-    return escalate(target, run, resolution.thread, deps, log);
-  }
-  if (resolution.kind !== "converse") {
+  if (resolution.kind === "nothing-to-do") {
     log(resolution.message);
-    return resolution.kind === "answer-on-ticket" ? 0 : 1;
-  }
-
-  const project = {
-    name: target.project,
-    repoUrl: deps.manifest.projects[target.project].repo_url,
-  };
-  if (!isPrompted(resolution.stage)) {
-    log(cannotConverse(target));
     return 1;
   }
-
-  // Read again only where the resolution had no reason to: a ticket enrolled
-  // from the tracker was already fetched to open its wait from, and fetching
-  // it twice in one command is the fault 19d closed in the poll loop.
-  const thread =
-    resolution.thread ?? (await deps.adapter.getTicket(project, target.ticket));
-  const prompt = takeoverPrompt(
-    target.project,
-    resolution.stage as (typeof PROMPTED_STAGES)[number],
-    thread,
-  );
-
-  log(`Picking up ${target.project} #${target.ticket} — over to you.`);
-  return deps.launcher.run("claude", [prompt], { cwd: deps.root });
+  return escalate(target, resolution.run, deps, log);
 }
 
 /**
