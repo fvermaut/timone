@@ -8,22 +8,25 @@
 
 ## Waiting on you
 
-> **Read this first.** ivtrends now runs on the runner, as you decided (`8630a4f`). Next it has to finish one real ticket there. After that the old code can be deleted.
+> **Read this first.** ivtrends runs on the runner. Its first real ticket, [#59](https://github.com/fvermaut/ivtrends/issues/59), reached its pull request by itself, with no stop on the way: [ivtrends #142](https://github.com/fvermaut/ivtrends/pull/142).
 
-**1. Start the daemon, and mark one ivtrends ticket.** From your own terminal, in `~/dev/timone`, run `node dist/cli.js daemon`. Its first line should name the lasting token. Then put the `timone` label on one ivtrends ticket. I suggest [#59](https://github.com/fvermaut/ivtrends/issues/59): the second piece of [#57](https://github.com/fvermaut/ivtrends/issues/57), already approved, and small. The runner will also end the old run of [#68](https://github.com/fvermaut/ivtrends/issues/68), which you closed on 18 September.
+**1. Review ivtrends [#142](https://github.com/fvermaut/ivtrends/pull/142).** `npm run nightly:run` now shows one line saying where it has got to. The pull request asks you to look at three things first:
 
-Two faults from the watched run may show up. The machine may ask for something the work does not need ([#177](https://github.com/fvermaut/timone/issues/177)). After you close a pull request, it asks you to say "stop" on the ticket ([#178](https://github.com/fvermaut/timone/issues/178)). One comment gets past either.
+- It also fixes a bug that was already on `main`: the history fill's time figure went back to zero at each restart (commit `45a3396`).
+- Some browser tests fail. They fail the same way on `main`, and this work changes no page.
+- One check in the plan was changed during the build, and it says why.
 
-**What I need from you:** start the daemon, and mark #59 or another ticket.
+When you merge it, the runner should end the run, close #59, and close the map [#57](https://github.com/fvermaut/ivtrends/issues/57), whose last piece it is. The daemon must be running for that.
 
-**2. What is left of [#164](https://github.com/fvermaut/timone/issues/164), in order.**
+It cost $20.41. Checking took 2 h 50 min of that, because ivtrends' checks all run twice ([#110](https://github.com/fvermaut/timone/issues/110)).
 
-1. That ivtrends ticket reaches its pull request, and you merge or close it.
-2. [#166](https://github.com/fvermaut/timone/issues/166): the old code is deleted. One more pull request.
+**What I need from you:** review #142, then merge it or close it.
+
+**2. What is left of [#164](https://github.com/fvermaut/timone/issues/164).** Only [#166](https://github.com/fvermaut/timone/issues/166): the old code is deleted. One more pull request, in a new session.
 
 Open for later, none blocking: [#176](https://github.com/fvermaut/timone/issues/176) (review findings), [#177](https://github.com/fvermaut/timone/issues/177), [#178](https://github.com/fvermaut/timone/issues/178) and [#179](https://github.com/fvermaut/timone/issues/179) (from the watched run).
 
-**What I need from you:** nothing beyond item 1.
+**What I need from you:** say when to start #166.
 
 **3. On scratch-app, from the watched run.** [Pull request #70](https://github.com/fvermaut/scratch-app/pull/70) is open: a small tidy-up the run built. It asks you one real question: with JavaScript turned off, the built app shows a blank page after adding a to-do, on `main` too. [#69](https://github.com/fvermaut/scratch-app/pull/69) was closed by the machine without merging; its branch is kept.
 
