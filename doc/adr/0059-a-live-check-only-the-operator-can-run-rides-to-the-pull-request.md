@@ -2,6 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-25
+- **Amended by:** [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), 2026-09-30 — D2: there is no failed run for `timone takeover` to open
 - **Source:** fvermaut, on [ivtrends#126](https://github.com/fvermaut/ivtrends/issues/126), 2026-09-25: *"ivtrends#126 is stuck, takeover and retry are not working"*. He agreed to both decisions below in the same session.
 - **Amends:** [ADR-0051](0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D3 and [ADR-0052](0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), which kept an owed live gate as a refusal at delivery.
 

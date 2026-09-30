@@ -6,6 +6,8 @@
 
 ## R1 — A reply that is neither an approval nor a change request is met with one short question
 
+> ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): the ask check was removed in phase 41, with the old code between steps. The runner now writes every question with the whole run in view. See the status line of [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md).
+
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
@@ -22,6 +24,8 @@
 
 ## R2 — Only a known approval word closes a gate
 
+> ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): the ask check was removed in phase 41, with the old code between steps. The runner now writes every question with the whole run in view. See the status line of [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md).
+
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** api
@@ -37,6 +41,8 @@
 
 ## R3 — The ask check cannot move work to another step
 
+> ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): the ask check was removed in phase 41, with the old code between steps. The runner now writes every question with the whole run in view. See the status line of [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md).
+
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** api
@@ -48,6 +54,8 @@
 - **Verification hint:** the ask check is given no means of writing a run's state, so this holds by construction rather than by care. Verify by the seam: the ask check's declared output type admits only *let it through* and *ask this instead*, and it is handed nothing that can write the ledger. A test asserting run state is unchanged across an ask-check call backs it up.
 
 ## R4 — A message the ask check does not replace is posted unchanged, and it may never withhold one
+
+> ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): the ask check was removed in phase 41, with the old code between steps. The runner now writes every question with the whole run in view. See the status line of [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md).
 
 - **Priority:** MUST
 - **Status:** draft
@@ -63,6 +71,8 @@
 
 ## R5 — One question per ask, and it does not spend the clarifying round
 
+> ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): the ask check was removed in phase 41, with the old code between steps. The runner now writes every question with the whole run in view. See the status line of [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md).
+
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** api
@@ -77,6 +87,8 @@
 - **Verification hint:** the existing clarifying round is counted by `clarifyingRounds` in `src/daemon/gates.ts`, reading a marker on the thread. The ask check's budget must be counted separately, so a test that spends an ask-check question and then asserts `clarifyingRounds` still reads zero is the direct check.
 
 ## R6 — The ask check speaks only where a person was already going to be asked
+
+> ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): the ask check was removed in phase 41, with the old code between steps. The runner now writes every question with the whole run in view. See the status line of [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md).
 
 - **Priority:** MUST
 - **Status:** draft
@@ -111,6 +123,8 @@
 - **Verification hint:** supervised run against a real forge. Drive a run into a dead stop both ways — once with an ask-check question posted, once without — and compare. The record the session owes is the one [ADR-0033](../../adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md) D5 already requires.
 
 ## R8 — The question reads plainly and says what is needed
+
+> ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): the ask check was removed in phase 41, with the old code between steps. The runner now writes every question with the whole run in view. See the status line of [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md).
 
 - **Priority:** SHOULD
 - **Status:** draft

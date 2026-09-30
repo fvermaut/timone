@@ -1,6 +1,6 @@
 # ADR-0034: A technical stop is retried, not reported
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
 - **Date:** 2026-08-18
 - **Source:** [timone#29](https://github.com/fvermaut/timone/issues/29), filed on fvermaut's ruling of 2026-08-18 — *"a failed run for technical/transient reasons should not surface on the ticket"*
 - **Takes up:** [ADR-0017](0017-a-runs-liveness-is-its-heartbeat.md)'s own escalation clause — *"if that proves to be the wrong trade, the escalation already discussed is one free automatic re-arm per run with an attempt counter, and this ADR is what to revisit"*

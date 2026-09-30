@@ -2,6 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-08-16
+- **Amended by:** [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), 2026-09-30 — `timone retry` is removed
 - **Source:** fvermaut's ruling of 2026-08-16, in the grill session on [timone#2](https://github.com/fvermaut/timone/issues/2), from three options for the short commands and three for the takeover
 - **Amends:** [ADR-0023](0023-one-answer-one-session.md), whose *"this binds `takeover` and `retry` as well as `daemon`"* this replaces with a rule about acting rather than about writing
 - **Bounds:** [ADR-0025](0025-a-lock-holders-proof-of-life-is-its-process.md), unchanged — the lock is still reclaimed on the holder's process, and is simply held for far less time

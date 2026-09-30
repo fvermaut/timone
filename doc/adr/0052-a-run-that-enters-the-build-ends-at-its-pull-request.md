@@ -1,6 +1,6 @@
 # ADR-0052: A run that enters the build ends at its pull request
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
 - **Date:** 2026-09-05
 - **Source:** requirements interview of 2026-09-05, driven by [timone#99](https://github.com/fvermaut/timone/issues/99); persisted as [PRD-03](../specs/prd/prd-03-a-run-ends-at-its-pull-request.md)
 

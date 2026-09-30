@@ -2,6 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-08-15
+- **Amended by:** [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), 2026-09-30 — D2: chunk zero merges only when a named person's yes is on record
 - **Source:** fvermaut's rulings of 2026-08-15, put to him as three plain-language questions about what he would see on a ticket rather than about the mechanism, over the two questions [phase 22](../plans/phases/phase-22.md)'s `✂ Cut` of 2026-08-15 stopped 22c on and named as the next phase's to settle up front
 - **Extends:** [ADR-0028](0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md), whose D1 said the planning stage "gains a second artifact and a second gate shape" without deciding the mechanism, and whose D2 said approving the breakdown merges chunk zero without deciding what performs the merge
 

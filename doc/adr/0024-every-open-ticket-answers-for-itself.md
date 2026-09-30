@@ -2,6 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-08-13
+- **Amended by:** [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), 2026-09-30 — the runner writes what a ticket needs
 - **Source:** fvermaut's ruling of 2026-08-13, from six questions put one at a time with their trade-offs, after he wrote an instruction on a ticket and nothing happened
 - **Amends:** [ADR-0010](0010-wayfinder-discovery-maps.md), whose "the map is an index, never a run" this reverses for the map's closing transition
 - **Extends:** [ADR-0022](0022-a-conversation-ticket-can-be-answered-in-writing.md), whose written-answer path this makes universal rather than per-ticket-type; [ADR-0012](0012-conversation-channels.md), whose two channels this holds every open ticket to

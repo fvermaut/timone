@@ -1303,3 +1303,91 @@ The test count is unchanged by the amendment: case (1) was extended, not added t
 - `src/commands/takeover.ts`, in the `cancelled` arm of `resolveTakeover`: a comment says the reason "lives in `cancellation` rather than `failure`". `failure` no longer exists. The file was granted only for the printed line, the help text and the `failed` arm, so it was left.
 - `src/adapters/command-runner.test.ts:99` still names `upsertComment`, in a comment that records how a fault was found. Left on purpose.
 - `dist/daemon/gates.*` and `dist/channels/conversation.*` stay until `dist/` is cleaned.
+
+## 41i — The decision records and the requirement lists say what happened
+
+**Built.** The records now say what phase 41 did. Nine ADRs read `superseded by [ADR-0060](…)`: the eight ADR-0060 lists, and ADR-0054, whose status line also says why the ask check went. Six ADRs stay `accepted` and each carry one `Amended by: [ADR-0060]` line, dated 2026-09-30, naming what changed. ADR-0060's "Supersedes" and "Amends" lines lost their condition, and a dated note on each says phase 41 met it. PRD-05's open question on the ask check has its answer. PRD-05.R19 says its period is over. PRD-02.R18 and R22 say that `timone retry` was removed and that the runner decides whether a step is tried again. The product overview's first goal says the process is now followed by default, with every departure shown. No status line of any requirement was changed. No code changed.
+
+**Files touched.**
+
+- `doc/adr/0022-…`, `0023-…`, `0031-…`, `0034-…`, `0035-…`, `0046-…`, `0052-…`, `0056-…` — status line is now `superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)`, as ADR-0017 writes it.
+- `doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md` — the same status line, then a dated sentence: ADR-0060 left the ask check to the build, and phase 41 removed it with the old code, because the runner writes every question with the whole run in view.
+- `doc/adr/0014-…`, `0024-…`, `0030-…`, `0032-…`, `0049-…`, `0059-…` — status stays `accepted`. A line `- **Amended by:** [ADR-0060](…), 2026-09-30 — <what changed>` added after the Date line, where ADR-0016 has it.
+- `doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md` — the labels are now `Supersedes:` and `Amends:`. Each line ends with a dated note that quotes the old condition and says phase 41 met it.
+- `doc/specs/prd/prd-05-a-runner-decides-each-step.md` — a dated answer under the open question "Does the ask check stay?".
+- `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` — a dated note under R19's criteria.
+- `doc/specs/prd/prd-02-inversion-of-control.criteria.md` — a dated note under R18's third clause and under R22's second clause.
+- `doc/specs/product-overview.md` — a dated note after the first business goal.
+
+**Decisions taken inside the slice.**
+
+1. **ADR-0054's sentence sits on its status line**, after a dash and the dated marker. ADR-0012 already puts a note on its status line this way. The first status line the validation reads still begins `superseded by [ADR-0060](…)`.
+2. **ADR-0049's line does not use the plan's words "the wait value goes".** They do not match the code. A run still has one `wait` value (`src/daemon/runs.ts`: `RunWait`, `ParkOptions`, `resolvableBy` still in the schema). What went is its four kinds: since 41h a wait's kind is `runner` or absent. The line says: *the holder stays, and the wait loses its four kinds: a parked run now waits only for the runner*. ADR-0060's own line 7 still says "the wait value goes". It is that record's own wording, so I left it.
+3. **ADR-0060's conditions are quoted, not deleted.** The labels lost the condition. The note on each line quotes the old wording, so the validation grep finds it on the same line as the dated marker.
+4. **ADR-0060's "Supersedes" note also names ADR-0054.** ADR-0060 does not list it, and ADR-0054 now says it is superseded by ADR-0060. One sentence in the note makes the two records agree.
+5. **The other five "Amended by" lines** use ADR-0060's own list, a little longer where the short form would not be clear on its own: 0014 *the runner may skip a gate, and says so on the ticket and on the pull request* (ADR-0060 D1 and D3); 0024 *the runner writes what a ticket needs*; 0030 *D2: chunk zero merges only when a named person's yes is on record* (`tryMergeChunkZero` in `src/daemon/chunk-zero.ts` still checks this); 0032 *`timone retry` is removed*; 0059 *D2: there is no failed run for `timone takeover` to open*.
+6. **The PRD-02 notes also cover the verification hints.** R18's hint and R22's hint name `timone retry` too. Each note says so, so a verifier does not go looking for the command. The notes are indented quotes under the clause, as PRD-05's register places its notes. The older evidence notes that mention the command are unchanged, and each new note says they are history.
+7. **Every dated marker reads `✏ 2026-09-30 (phase 41, timone#166): …`**, with `timone#166` linked to the issue, as other notes in these files link issues.
+
+**Validation evidence.** No behaviour-carrying code, so no test cases. The three commands, as run:
+
+```
+$ for n in 0022 0023 0031 0034 0035 0046 0052 0054 0056; do grep -H -m1 -- '- \*\*Status:\*\*' doc/adr/$n-*.md; done
+doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md:- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+doc/adr/0023-one-answer-one-session.md:- **Status:** superseded by [ADR-0060](0060-…)
+doc/adr/0031-a-handoff-is-a-wait-not-a-failure.md:- **Status:** superseded by [ADR-0060](0060-…)
+doc/adr/0034-a-technical-stop-is-retried-not-reported.md:- **Status:** superseded by [ADR-0060](0060-…)
+doc/adr/0035-a-resolved-escalation-hands-the-run-back.md:- **Status:** superseded by [ADR-0060](0060-…)
+doc/adr/0046-a-pull-request-closed-without-merging-holds-its-ticket-and-asks.md:- **Status:** superseded by [ADR-0060](0060-…)
+doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md:- **Status:** superseded by [ADR-0060](0060-…)
+doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md:- **Status:** superseded by [ADR-0060](0060-…) — ✏ 2026-09-30 (phase 41, [timone#166](…)): ADR-0060 left to the build whether the ask check stays, and phase 41 removed it with the old code, because the runner writes every question with the whole run in view.
+doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md:- **Status:** superseded by [ADR-0060](0060-…)
+
+$ for n in 0014 0024 0030 0032 0049 0059; do grep -H -c -- 'Amended by:\*\* \[ADR-0060\]' doc/adr/$n-*.md; done
+doc/adr/0014-artifact-first-gates.md:1
+doc/adr/0024-every-open-ticket-answers-for-itself.md:1
+doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md:1
+doc/adr/0032-a-human-command-asks-the-daemon-to-act.md:1
+doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md:1
+doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md:1
+
+$ grep -n "once the runner has replaced\|on the same condition" doc/adr/0060-*.md
+6:- **Supersedes:** [ADR-0022](…), … [ADR-0056](…) — ✏ 2026-09-30 (phase 41, [timone#166](…)): this line used to say "Supersedes, once the runner has replaced the old code on every project". Phase 41 met that condition: every project now runs on the runner, and the old code is removed. It also removed the ask check, so [ADR-0054](…) is superseded too.
+7:- **Amends:** [ADR-0014](…) (…), … [ADR-0059](…) D2 (…) — ✏ 2026-09-30 (phase 41, [timone#166](…)): this line used to say "Amends, on the same condition". Phase 41 met that condition.
+```
+
+(Long link targets trimmed to `…` here; the files carry the full names.)
+
+Extra checks. Every relative link added in the diff was tested against the file system: 35 links, all resolve. No `Status:` line of a requirement is among the changed lines of `doc/specs`; the one match in the diff is a context line (R19, still `verified`). `git status --short` lists only the 20 files above.
+
+- [x] Nine status lines read `superseded by [ADR-0060](…)`, with a link that resolves. **PASS**
+- [x] Six records each carry one `Amended by: [ADR-0060]` line, naming what changed. **PASS**
+- [x] ADR-0060's two conditions carry the dated marker. **PASS**
+
+**What delivery and later readers must know.**
+
+- **Left as written, outside what the plan asked:**
+  - ADR-0060's Consequences still say the ADR status lines change "in that same change, not now", and that whether the ask check stays "is left to the build". Both are now history. D9's "built beside the current daemon and chosen per project" is too.
+  - PRD-02.R18's first clause says a reclaimed run "is failed with a plain reason". Since 41b a stale run goes back to the runner, and no run is failed. R22's seventh clause lists `failed` among the states the ledger admits. Since 41h it admits none. Neither clause names `timone retry`, so neither got a note. Verification may want them.
+  - PRD-05's Scope still says "Each project runs on either the runner or the current daemon, until every project has moved (R19)". R19's new note covers it.
+  - PRD-04's register still describes the ask check (41f named this). Not in this slice's files.
+- **The eight ADRs ADR-0060 lists, plus ADR-0054, have no note in their body.** Only the status line changed, as ADR-0017 did it. Their text still describes the old code in the present tense.
+
+### ✏ 2026-09-30 — 41i finished under the plan's amendment
+
+**Built.** The four places listed above under *Left as written* now each carry a dated note (`✏ 2026-09-30 (phase 41, timone#166): …`). No Status line changed. ADR-0060's line 7 still says "the wait value goes", as decided above.
+
+**Notes added.**
+
+- `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, R18 clause 1 — a stale run is no longer failed. It goes back to the runner's wait, and the runner is woken and decides what happens next (PRD-05.R16).
+- `doc/specs/prd/prd-02-inversion-of-control.criteria.md`, R22 clause 7 — the ledger no longer admits `failed`. A failed run in an older ledger is read as `cancelled`, and the reason it stopped is kept.
+- `doc/specs/prd/prd-04-one-short-question-instead-of-a-terminal.criteria.md` (newly granted) — the same note under the headings of R1, R2, R3, R4, R5, R6 and R8, in the place R7's deprecation note uses: the ask check was removed in phase 41, with the old code between steps; the runner now writes every question with the whole run in view; see ADR-0054's status line. R7 got no note: it is already deprecated, with its own note.
+- `doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md`, Consequences — after "The ADRs listed above get their status lines changed in that same change, not now: …": this is done; phase 41 deleted that code and changed those status lines. After "Whether the ask check stays … is left to the build.": the build removed it; ADR-0054 is superseded. Neither note contains the words the third validation command looks for, so its result is unchanged.
+
+**Validation, run again.** The three commands give the same output as above: nine status lines `superseded by [ADR-0060](…)` (ADR-0054's with its sentence), six counts of 1, and ADR-0060's lines 6 and 7, both with the dated marker. 37 relative links added in `doc/adr` and `doc/specs` all resolve. No changed line in `doc/specs` is a Status line.
+
+- [x] Nine status lines read `superseded by [ADR-0060](…)`, with a link that resolves. **PASS**
+- [x] Six records each carry one `Amended by: [ADR-0060]` line, naming what changed. **PASS**
+- [x] ADR-0060's two conditions carry the dated marker. **PASS**
+
+The *Left as written* list above is now out of date for these four places. Its other items stay open: ADR-0060 D9's "chosen per project", PRD-05's Scope sentence on R19, and the bodies of the nine superseded ADRs.

@@ -1,6 +1,6 @@
 # ADR-0031: A handoff is a wait, not a failure
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
 - **Date:** 2026-08-16
 - **Source:** fvermaut's ruling of 2026-08-16, in the grill session on [timone#1](https://github.com/fvermaut/timone/issues/1), from three options laid out with their trade-offs
 - **Extends:** [ADR-0022](0022-a-conversation-ticket-can-be-answered-in-writing.md), whose written path gains the one class of stop that could not use it

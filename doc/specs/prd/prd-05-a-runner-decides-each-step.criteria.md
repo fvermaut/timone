@@ -363,6 +363,7 @@
 - **Status:** verified
 - **Verify-via:** api
 - **Criteria:** a project's entry in `timone.yaml` says which one drives its tickets. The daemon drives each project the way its entry says, and two projects can differ. scratch-app moves first, and ivtrends moves only after a supervised run on scratch-app has passed R9, R12, R13 and R15.
+    > ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): every project has moved to the runner. The `driver` line went with the old code (R20): a `timone.yaml` that still has one does not load, and says to delete the line. So the period R19 covers is over. Its status is left to verification.
 
 ## R20 — The old code between steps is removed once every project runs on the runner
 
