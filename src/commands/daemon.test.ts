@@ -35,6 +35,8 @@ import {
 } from "./daemon.js";
 import { agentSdkRuntime } from "../daemon/session.js";
 import { enqueue } from "../daemon/requests.js";
+import { RunnerDriver } from "../runner/driver.js";
+import { RunningSteps } from "../runner/actions.js";
 
 const tempDirs: string[] = [];
 
@@ -70,6 +72,21 @@ const manifest: Manifest = {
       path: "projects/scratch-app",
       stack: [],
       bindings: { ticketing: "github" },
+    },
+  },
+};
+
+/**
+ * The same project, driven by the runner (ADR-0060 D9), with fvermaut the one
+ * person who may instruct it. Every test here whose subject both drivers
+ * share runs on this one.
+ */
+const runnerManifest: Manifest = {
+  projects: {
+    "scratch-app": {
+      ...manifest.projects["scratch-app"]!,
+      driver: "runner",
+      instructors: ["fvermaut"],
     },
   },
 };
@@ -115,6 +132,34 @@ const idleSpawner: SessionSpawner = {
 };
 
 /**
+ * The real runner driver over the test's store and forge, its record kept in
+ * a fresh folder, with a stand-in for its sessions that does nothing when a
+ * wake is asked for.
+ */
+function standInRunner(store: RunStore, adapter: TicketingAdapter): RunnerDriver {
+  const root = mkdtempSync(join(tmpdir(), "timone-daemon-runner-"));
+  tempDirs.push(root);
+  return new RunnerDriver({
+    store,
+    adapter,
+    manifest: runnerManifest,
+    root,
+    sessionsFor: () => ({
+      async wake(): Promise<void> {},
+      stop(): void {},
+    }),
+    running: new RunningSteps(),
+    consult: async () => undefined,
+    startStep: async () => {
+      throw new Error("no step starts in this test");
+    },
+    timonePin: async () => undefined,
+    clock: () => "2026-09-27T12:00:00Z",
+    log: () => {},
+  });
+}
+
+/**
  * A root with no project checkouts under it, for the tests that are about the
  * lock and the cadence rather than about what a merge means. Nothing in them
  * reaches a breakdown, and a directory that does not exist is read as "this
@@ -140,7 +185,7 @@ describe("runDaemon — one writer, and it says who holds it", () => {
       },
     };
     const first = runDaemon({
-      manifest,
+      manifest: runnerManifest,
       store,
       statePath,
       root: noCheckouts,
@@ -148,19 +193,23 @@ describe("runDaemon — one writer, and it says who holds it", () => {
       once: true,
       adapter: blocking,
       spawner: idleSpawner,
+      runner: standInRunner(store, blocking),
       log: () => {},
     });
 
     const said: string[] = [];
+    const second = RunStore.open(statePath);
+    const other = quietAdapter();
     const code = await runDaemon({
-      manifest,
-      store: RunStore.open(statePath),
+      manifest: runnerManifest,
+      store: second,
       statePath,
       root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
-      adapter: quietAdapter(),
+      adapter: other,
       spawner: idleSpawner,
+      runner: standInRunner(second, other),
       log: (line) => said.push(line),
     });
 
@@ -177,28 +226,32 @@ describe("runDaemon — one writer, and it says who holds it", () => {
     // function, so every test that drives a cycle by hand keeps working and
     // no unit had to learn about locking to keep passing.
     const { store, statePath } = clockedStore();
+    const seven: Ticket = {
+      number: 7,
+      title: "typing in the box is fiddly on my phone",
+      body: "the message box is hard to use on mobile",
+      labels: ["timone"],
+      url: "https://github.com/fvermaut/scratch-app/issues/7",
+      author: "fvermaut",
+      createdAt: "2026-08-06T09:00:00Z",
+    };
     const marked: TicketingAdapter = {
       ...quietAdapter(),
       async listMarkedTickets(): Promise<Ticket[]> {
-        return [
-          {
-            number: 7,
-            title: "typing in the box is fiddly on my phone",
-            body: "the message box is hard to use on mobile",
-            labels: ["timone"],
-            url: "https://github.com/fvermaut/scratch-app/issues/7",
-            author: "fvermaut",
-            createdAt: "2026-08-06T09:00:00Z",
-          },
-        ];
+        return [seven];
+      },
+      // The runner reads the ticket of the run it is told about.
+      async getTicket() {
+        return { ...seven, comments: [] };
       },
     };
 
     const result = await pollOnce({
-      manifest,
+      manifest: runnerManifest,
       store,
       adapter: marked,
       spawner: idleSpawner,
+      runner: standInRunner(store, marked),
       log: () => {},
     });
 
@@ -217,7 +270,11 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     store.claimBranch(run.id, "timone/7-slow");
   }
 
-  /** One cycle, at `at`, with the loop told to poll every `intervalMs`. */
+  /**
+   * One cycle, at `at`, with the loop told to poll every `intervalMs`. The
+   * quiet run's ticket can be read, because the runner reads it once the run
+   * is handed back.
+   */
   async function cycle(
     store: RunStore,
     set: (iso: string) => void,
@@ -225,15 +282,31 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     intervalMs: number,
   ): Promise<void> {
     set(at);
+    const adapter: TicketingAdapter = {
+      ...quietAdapter(),
+      async getTicket(_project, number) {
+        return {
+          number,
+          title: "the page feels slow",
+          body: "it drags",
+          labels: ["timone"],
+          url: `https://github.com/fvermaut/scratch-app/issues/${number}`,
+          author: "fvermaut",
+          createdAt: "2026-08-06T09:00:00Z",
+          comments: [],
+        };
+      },
+    };
     await runDaemon({
-      manifest,
+      manifest: runnerManifest,
       store,
       root: noCheckouts,
       intervalMs,
       staleAfterMs: FOUR_INTERVALS,
       once: true,
-      adapter: quietAdapter(),
+      adapter,
       spawner: idleSpawner,
+      runner: standInRunner(store, adapter),
       log: () => {},
     });
   }
@@ -260,7 +333,11 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     await cycle(store, set, "2026-08-06T10:01:00Z", 5 * 60 * 1000);
     await cycle(store, set, "2026-08-06T10:05:00Z", 5 * 60 * 1000);
 
-    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
+    // Reclaimed: the quiet run goes back to the runner.
+    expect(store.get("scratch-app#7/1")).toMatchObject({
+      status: "parked",
+      wait: { kind: "runner" },
+    });
   });
 });
 
@@ -387,15 +464,17 @@ describe("runDaemon — the requests waiting beside the ledger it holds", () => 
     enqueue(statePath, { kind: "cancel", project: "scratch-app", ticket: 31 });
 
     const said: string[] = [];
+    const adapter = quietAdapter();
     const code = await runDaemon({
-      manifest,
+      manifest: runnerManifest,
       store,
       statePath,
       root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
-      adapter: quietAdapter(),
+      adapter,
       spawner: idleSpawner,
+      runner: standInRunner(store, adapter),
       log: (line) => said.push(line),
     });
 
@@ -609,15 +688,17 @@ describe("the daemon says when its own process is running old code", () => {
     const store = options.store ?? made.store;
     const statePath = options.statePath ?? made.statePath;
     const said: string[] = [];
+    const adapter = quietAdapter();
     await runDaemon({
-      manifest,
+      manifest: runnerManifest,
       store,
       statePath,
       root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
-      adapter: quietAdapter(),
+      adapter,
       spawner: idleSpawner,
+      runner: standInRunner(store, adapter),
       version,
       log: (line) => said.push(line),
     });
@@ -676,15 +757,17 @@ describe("the daemon says when its own process is running old code", () => {
       return store.witness(options);
     };
 
+    const adapter = quietAdapter();
     await runDaemon({
-      manifest,
+      manifest: runnerManifest,
       store: stopping,
       statePath,
       root: noCheckouts,
       intervalMs: 0,
       once: false,
-      adapter: quietAdapter(),
+      adapter,
       spawner: idleSpawner,
+      runner: standInRunner(stopping, adapter),
       version: async () => ({ commit: BEHIND, tip: TIP }),
       log: (line) => said.push(line),
     }).catch(() => {});

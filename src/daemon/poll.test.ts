@@ -72,8 +72,8 @@ import {
 import { SpawnRefusal } from "./faults.js";
 import { processStage, stageLabel } from "./pipeline.js";
 import { AgentSessionSpawner } from "./session.js";
-import { RunnerDriver, type RunnerDriverDeps } from "../runner/driver.js";
-import { RunningSteps } from "../runner/actions.js";
+import { RunnerDriver, pullRequestEvent, type RunnerDriverDeps } from "../runner/driver.js";
+import { RunningSteps, runnerActions } from "../runner/actions.js";
 import type { WakeOptions } from "../runner/session.js";
 import { appendEntry, readRecord, type RecordEntry } from "../runner/record.js";
 
@@ -268,15 +268,13 @@ function fakeSpawner(): { spawner: SessionSpawner; spawned: Run[] } {
 describe("pollOnce — pickup and acknowledgement", () => {
   it("registers a run and acknowledges exactly once for a marked ticket", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-    });
+    const result = await pollOnce({ manifest, store, adapter, spawner, runner });
 
     expect(store.all()).toHaveLength(1);
     expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
@@ -287,31 +285,28 @@ describe("pollOnce — pickup and acknowledgement", () => {
 
   it("touches nothing when no ticket carries the mark", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, comments } = fakeAdapter({ "scratch-app": [] });
-    const { spawner, spawned } = fakeSpawner();
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
 
     expect(store.all()).toEqual([]);
     expect(comments).toEqual([]);
-    expect(spawned).toEqual([]);
+    expect(wakes).toEqual([]);
   });
 
   it("says nothing on a second cycle over the same ticket", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
-    const deps = {
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-    };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, runner };
 
     await pollOnce(deps);
     const second = await pollOnce(deps);
@@ -323,17 +318,15 @@ describe("pollOnce — pickup and acknowledgement", () => {
 
   it("ends every acknowledgement with a call to action", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, comments } = fakeAdapter({
       "scratch-app": [ticket(7), ticket(8)],
     });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner, runner });
 
     expect(comments).toHaveLength(2);
     for (const comment of comments) {
@@ -344,17 +337,15 @@ describe("pollOnce — pickup and acknowledgement", () => {
 
   it("never asks the human to know a stage or a skill name", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, comments } = fakeAdapter({
       "scratch-app": [ticket(7), ticket(8)],
     });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner, runner });
 
     for (const comment of comments) {
       expect(comment.body).not.toMatch(/timone-\w+|stage \d|sub-phase/i);
@@ -365,17 +356,16 @@ describe("pollOnce — pickup and acknowledgement", () => {
 describe("pollOnce — serialization", () => {
   it("queues a second marked ticket and says so in its acknowledgement", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, comments } = fakeAdapter({
       "scratch-app": [ticket(7), ticket(8)],
     });
-    const { spawner, spawned } = fakeSpawner();
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-    });
+    const result = await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
 
     expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
     expect(store.queue("scratch-app").map((run) => run.ticket)).toEqual([8]);
@@ -384,28 +374,28 @@ describe("pollOnce — serialization", () => {
     const queuedAck = comments.find((comment) => comment.number === 8);
     expect(queuedAck?.body).toMatch(/queue/i);
     expect(queuedAck?.body).toMatch(/#7/);
-    expect(spawned.map((run) => run.ticket)).toEqual([7]);
+    // Only the run that holds the project is handed on; the queued one waits.
+    expect(wakes.map((wake) => wake.runId)).toEqual(["scratch-app#7/1"]);
   });
 
   it("picks the queued ticket up on a later cycle, once the first is done", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7), ticket(8)] });
-    const { spawner, spawned } = fakeSpawner();
-    const deps = {
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner,
-    };
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, runner };
 
     await pollOnce(deps);
     store.activate("scratch-app#7/1", "session-1");
     store.activate("scratch-app#7/1", "session-7");
     store.complete("scratch-app#7/1");
     await pollOnce(deps);
+    await runner.drain();
 
     expect(store.occupyingRun("scratch-app")?.ticket).toBe(8);
-    expect(spawned.map((run) => run.ticket)).toEqual([7, 8]);
+    expect(wakes.map((wake) => wake.runId)).toEqual(["scratch-app#7/1", "scratch-app#8/1"]);
   });
 
   it("spawns a session for the occupying run only once", async () => {
@@ -477,18 +467,16 @@ describe("pollOnce — a ticket that stopped being mine while its run waited", (
 describe("pollOnce — resilience", () => {
   it("carries on with the other projects when one fails", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha", "beta"), "alpha", "beta");
     const { adapter, comments } = fakeAdapter(
       { alpha: [ticket(1)], beta: [ticket(2)] },
       ["alpha"],
     );
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    const result = await pollOnce({
-      manifest: manifestWith("alpha", "beta"),
-      store,
-      adapter,
-      spawner,
-    });
+    const result = await pollOnce({ manifest, store, adapter, spawner, runner });
 
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toMatch(/alpha/);
@@ -1101,14 +1089,18 @@ describe("pollOnce — resuming a run whose human answered", () => {
     const store = RunStore.open(path);
     expect(store.get("scratch-app#6/1")?.status).toBe("queued");
 
-    // Unclassified, so #4 has nothing to be resumed *into* — this test is
-    // about the queue moving, not about the park being picked back up.
+    // This test is about the queue moving, not about the park being picked
+    // back up.
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(4), ticket(6)] });
-    const { spawner, spawned } = fakeSpawner();
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({ manifest: manifestWith("scratch-app"), store, adapter, spawner });
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
 
-    expect(spawned.map((run) => run.ticket)).toEqual([6]);
+    expect(wakes.map((wake) => wake.runId)).toEqual(["scratch-app#6/1"]);
     expect(store.get("scratch-app#4/1")?.status).toBe("parked");
   });
 });
@@ -1927,8 +1919,11 @@ describe("reclaiming a run its daemon left behind", () => {
     // The false positive that matters most. A four-hour execution session is
     // a normal thing, and reclaiming one would kill work in progress.
     const { store, set } = clockedStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-alive");
@@ -1942,10 +1937,11 @@ describe("reclaiming a run its daemon left behind", () => {
     set("2026-08-06T14:00:20Z");
 
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
     });
 
@@ -1986,15 +1982,18 @@ describe("reclaiming a run its daemon left behind", () => {
 
   it("leaves a run parked on a human alone, however long it has waited", async () => {
     const { store, set } = clockedStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "s");
     store.claimBranch(run.id, "timone/7-slow");
     store.park(run.id, {
-      waitingOn: "your answer on the ticket",
-      kind: "gate",
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
       stage: "requirements",
       waitCursor: "2026-08-06T10:00:00Z",
     });
@@ -2002,10 +2001,11 @@ describe("reclaiming a run its daemon left behind", () => {
     watchingSince(store, "2026-08-25T09:57:00Z", "2026-08-25T10:00:00Z");
     set("2026-08-25T10:00:00Z");
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
     });
 
@@ -2053,43 +2053,53 @@ describe("reclaiming a run its daemon left behind", () => {
     // change that merely stopped reclaiming would satisfy every test below
     // and destroy the requirement this phase exists to close.
     const { store, set } = clockedStore();
-    const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
+    const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     quietRun(store);
 
     watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:09:00Z");
     set("2026-08-06T10:09:00Z");
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
       pollIntervalMs: POLL_INTERVAL,
     });
+    await runner.drain();
 
     expect(result.reclaimed).toEqual(["scratch-app#7/1"]);
-    expect(comments.some((c) => c.body.includes("stopped before the work"))).toBe(
-      true,
-    );
+    // The run goes back to the runner, which is told why.
+    expect(wakes.map((wake) => wake.events)).toContainEqual([
+      "The daemon stopped while a step was running.",
+    ]);
   });
 
   it("reclaims nothing on the cycle that discovers a gap, and says why", async () => {
     // 15a's night: 146 suspensions, 113 of them past the threshold. Under a
     // continuously running daemon each one of those was a healthy run killed.
     const { store, set } = clockedStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     const lines: string[] = [];
     quietRun(store);
 
     watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:02:00Z");
     set("2026-08-06T10:18:00Z");
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
       pollIntervalMs: POLL_INTERVAL,
       log: (line) => lines.push(line),
@@ -2114,15 +2124,19 @@ describe("reclaiming a run its daemon left behind", () => {
     // young to judge. An operator who reads a line they know to be nonsense
     // stops reading the lines, and this is the line the gate turns on.
     const { store, set } = clockedStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     const lines: string[] = [];
     quietRun(store);
     const deps = {
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
       pollIntervalMs: POLL_INTERVAL,
       log: (line: string) => lines.push(line),
@@ -2149,14 +2163,18 @@ describe("reclaiming a run its daemon left behind", () => {
 
   it("is delayed, not disabled: the same run is reclaimed a window later", async () => {
     const { store, set } = clockedStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     quietRun(store);
     const deps = {
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
       pollIntervalMs: POLL_INTERVAL,
     };
@@ -2174,16 +2192,20 @@ describe("reclaiming a run its daemon left behind", () => {
 
   it("grants the window on a state file no daemon has ever observed", async () => {
     const { store, set } = clockedStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     quietRun(store);
 
     set("2026-08-06T10:09:00Z");
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
       pollIntervalMs: POLL_INTERVAL,
     });
@@ -2196,11 +2218,18 @@ describe("reclaiming a run its daemon left behind", () => {
     // A witness taken per project would have project one's fresh stamp answer
     // for project two, which is the same masking hazard two daemons have.
     const { store, set } = clockedStore();
+    const manifest = drivenByRunner(
+      manifestWith("scratch-app", "other-app"),
+      "scratch-app",
+      "other-app",
+    );
     const { adapter } = fakeAdapter({
       "scratch-app": [ticket(7)],
       "other-app": [ticket(8)],
     });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     const lines: string[] = [];
 
     for (const [project, number] of [
@@ -2215,10 +2244,11 @@ describe("reclaiming a run its daemon left behind", () => {
     watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:02:00Z");
     set("2026-08-06T10:18:00Z");
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app", "other-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
       pollIntervalMs: POLL_INTERVAL,
       log: (line) => lines.push(line),
@@ -2236,17 +2266,21 @@ describe("reclaiming a run its daemon left behind", () => {
     // five-minute one. The threshold is not a constant, it is twice the
     // cadence the daemon was actually told to poll at.
     const { store, set } = clockedStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     quietRun(store);
 
     watchingSince(store, "2026-08-06T10:00:00Z", "2026-08-06T10:02:00Z");
     set("2026-08-06T10:06:00Z");
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
       pollIntervalMs: 5 * 60 * 1000,
     });
@@ -2291,6 +2325,11 @@ interface Upsert {
 /**
  * A ticketing fake whose pull-request surface answers with `pulls`, keyed by
  * branch, and records every in-place comment revision.
+ *
+ * It lists no marked ticket. Its tickets and pull-request threads are still
+ * readable, because the runner reads the ticket and the pull request of every
+ * run it looks at: a ticket with no comments, and the pull request as `pulls`
+ * holds it, with none either.
  */
 function previewTicketing(pulls: Record<string, PullRequest>): {
   adapter: TicketingAdapter;
@@ -2307,16 +2346,18 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
       return [];
     },
     ...noOtherListings,
-    async getTicket(): Promise<TicketThread> {
-      throw new Error("no ticket is read in this test");
+    async getTicket(_project, number): Promise<TicketThread> {
+      return { ...ticket(number), comments: [] };
     },
     async postComment(): Promise<void> {},
     async applyLabel(): Promise<void> {},
     async findPullRequest(_project, branch): Promise<PullRequest | undefined> {
       return pulls[branch];
     },
-    async getPullRequestThread(): Promise<PullRequestThread> {
-      throw new Error("no pull-request thread is read in this test");
+    async getPullRequestThread(_project, number): Promise<PullRequestThread> {
+      const found = Object.values(pulls).find((candidate) => candidate.number === number);
+      if (found === undefined) throw new Error(`no pull request #${number} in this test`);
+      return { ...found, comments: [] };
     },
     async postPullRequestComment(): Promise<void> {},
     async upsertPullRequestComment(project, number, marker, body): Promise<void> {
@@ -2436,22 +2477,29 @@ describe("a run whose holder can be asked about", () => {
     return run.id;
   }
 
-  /** One cycle at `at`, with the sweep's threshold set to four intervals. */
+  /**
+   * One cycle at `at`, with the sweep's threshold set to four intervals, on a
+   * project the runner drives.
+   */
   async function cycleAt(
     store: RunStore,
     set: (iso: string) => void,
     at: string,
     lines: string[],
   ) {
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     watchingSince(store, "2026-09-04T10:00:00Z", at);
     set(at);
     return pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
       log: (line) => lines.push(line),
     });
@@ -2498,8 +2546,11 @@ describe("a run whose holder can be asked about", () => {
     const { store, set } = watchedStore([]);
     const id = runningRun(store);
     const lines: string[] = [];
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     // One cycle, then nothing for an hour: the daemon was not there and
     // cannot say whether the run went quiet or the machine did.
@@ -2510,10 +2561,11 @@ describe("a run whose holder can be asked about", () => {
     });
     set("2026-09-04T11:00:00Z");
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       staleAfterMs: FOUR_INTERVALS,
       log: (line) => lines.push(line),
     });
@@ -2595,7 +2647,11 @@ describe("a run whose holder can be asked about", () => {
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-1");
     store.claimBranch(run.id, "timone/7-slow");
-    store.park(run.id, { waitingOn: "me — a question", kind: "conversation" });
+    store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
     store.claim(run.id, holderOf("timone takeover scratch-app#7", 9100));
     const lines: string[] = [];
 
@@ -2947,18 +3003,22 @@ describe("a parked occupier whose ticket is no longer listed", () => {
 describe("pollOnce — previews are opt-in", () => {
   it("does not reconcile a project with no preview binding at all", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     runWithPullRequest(store, "scratch-app", 7, 9);
     const { adapter, upserts } = previewTicketing({
       "timone/7-work": pull(9, "abc1234"),
     });
     const { previews, ensured } = fakePreviews();
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       previews,
     });
 
@@ -2972,17 +3032,21 @@ describe("pollOnce — previews are opt-in", () => {
 
   it("does nothing for a bound project when the daemon has no preview adapter", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWithPreviews("scratch-app"), "scratch-app");
     runWithPullRequest(store, "scratch-app", 7, 9);
     const { adapter, upserts } = previewTicketing({
       "timone/7-work": pull(9, "abc1234"),
     });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     await pollOnce({
-      manifest: manifestWithPreviews("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
     });
 
     expect(upserts).toEqual([]);
@@ -2993,6 +3057,7 @@ describe("pollOnce — previews are opt-in", () => {
 describe("pollOnce — previews reconcile and land on the pull request", () => {
   it("says it once and revises it in place, never once per cycle", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWithPreviews("scratch-app"), "scratch-app");
     runWithPullRequest(store, "scratch-app", 7, 9);
     const pulls = { "timone/7-work": pull(9, "abc1234") };
     const { adapter, upserts } = previewTicketing(pulls);
@@ -3002,11 +3067,14 @@ describe("pollOnce — previews reconcile and land on the pull request", () => {
       url: `http://localhost:${port}/`,
     }));
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     const deps = {
-      manifest: manifestWithPreviews("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       previews,
     };
 
@@ -3033,16 +3101,20 @@ describe("pollOnce — previews reconcile and land on the pull request", () => {
 
   it("records the preview against the commit it was reconciled for", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWithPreviews("scratch-app"), "scratch-app");
     runWithPullRequest(store, "scratch-app", 7, 9);
     const { adapter } = previewTicketing({ "timone/7-work": pull(9, "abc1234") });
     const { previews, ensured } = fakePreviews();
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     await pollOnce({
-      manifest: manifestWithPreviews("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       previews,
     });
 
@@ -3060,6 +3132,11 @@ describe("pollOnce — previews reconcile and land on the pull request", () => {
 
   it("posts a failed preview's reason and lets the rest of the cycle happen", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(
+      manifestWithPreviews("scratch-app", "other-app"),
+      "scratch-app",
+      "other-app",
+    );
     runWithPullRequest(store, "scratch-app", 7, 9);
     runWithPullRequest(store, "other-app", 3, 4);
     const { adapter, upserts } = previewTicketing({
@@ -3072,12 +3149,15 @@ describe("pollOnce — previews reconcile and land on the pull request", () => {
         : { state: "ready", url: "http://localhost:54321/" },
     );
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: manifestWithPreviews("scratch-app", "other-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       previews,
     });
 
@@ -3093,6 +3173,11 @@ describe("pollOnce — previews reconcile and land on the pull request", () => {
 
   it("catches an adapter that throws into errors, leaving the rest of the cycle intact", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(
+      manifestWithPreviews("scratch-app", "other-app"),
+      "scratch-app",
+      "other-app",
+    );
     runWithPullRequest(store, "scratch-app", 7, 9);
     runWithPullRequest(store, "other-app", 3, 4);
     const { adapter, upserts } = previewTicketing({
@@ -3106,12 +3191,15 @@ describe("pollOnce — previews reconcile and land on the pull request", () => {
       },
     );
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: manifestWithPreviews("scratch-app", "other-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       previews,
     });
 
@@ -3132,6 +3220,7 @@ describe("pollOnce — previews end when their pull request does", () => {
     pulls: Record<string, PullRequest>;
   }> {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWithPreviews("scratch-app"), "scratch-app");
     runWithPullRequest(store, "scratch-app", 7, 9);
     const pulls: Record<string, PullRequest> = {
       "timone/7-work": pull(9, "abc1234"),
@@ -3139,11 +3228,14 @@ describe("pollOnce — previews end when their pull request does", () => {
     const { adapter, upserts } = previewTicketing(pulls);
     const { previews, released } = fakePreviews();
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     const deps = {
-      manifest: manifestWithPreviews("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       previews,
     };
 
@@ -3200,12 +3292,15 @@ describe("pollOnce — previews end when their pull request does", () => {
 
   it("reports a release that fails and does not wedge the cycle", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWithPreviews("scratch-app"), "scratch-app");
     runWithPullRequest(store, "scratch-app", 7, 9);
     const pulls: Record<string, PullRequest> = {
       "timone/7-work": pull(9, "abc1234"),
     };
     const { adapter } = previewTicketing(pulls);
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     const previews: PreviewAdapter = {
       async ensure(): Promise<Preview> {
         return { state: "ready", url: "http://localhost:54321/" };
@@ -3215,10 +3310,11 @@ describe("pollOnce — previews end when their pull request does", () => {
       },
     };
     const deps = {
-      manifest: manifestWithPreviews("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       previews,
     };
 
@@ -3322,22 +3418,17 @@ describe("pollOnce — a wayfinder decision ticket", () => {
     // map itself is the ticket this protects: it is never marked, and a run
     // on it would be a run nothing could resolve.
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, comments } = fakeAdapter({ "scratch-app": [] });
-    const spawned: Run[] = [];
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("scratch-app"),
-      store,
-      adapter,
-      spawner: {
-        async spawn(run) {
-          spawned.push(run);
-        },
-      },
-    });
+    await pollOnce({ manifest, store, adapter, spawner, runner });
+    await runner.drain();
 
     expect(store.all()).toEqual([]);
-    expect(spawned).toEqual([]);
+    expect(wakes).toEqual([]);
     expect(comments).toEqual([]);
   });
 
@@ -4732,29 +4823,28 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // comment. Speaking to an unmarked ticket is what this slice adds; working
     // one is what it must never do, and this is the assertion that says so.
     const store = newStore();
+    const manifest = drivenByRunner(introducing(manifestWith("scratch-app")), "scratch-app");
     const { adapter } = twoListings([
       ticket(5, { labels: [] }),
       ticket(7),
     ]);
-    const { spawner, spawned } = fakeSpawner();
-    const deps = {
-      manifest: introducing(manifestWith("scratch-app")),
-      store,
-      adapter,
-      spawner,
-    };
+    const { spawner } = fakeSpawner();
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, runner };
 
     const first = await pollOnce(deps);
     await pollOnce(deps);
     await pollOnce(deps);
+    await runner.drain();
 
     expect(store.all().map((run) => run.id)).toEqual(["scratch-app#7/1"]);
     expect(store.get("scratch-app#5/1")).toBeUndefined();
     expect(first.pickedUp).toEqual(["scratch-app#7/1"]);
-    // And no session was ever started on it either — a run is what a spawn
+    // And nothing was ever handed on for it either — a run is what a wake
     // needs, so this cannot fail on its own, but it is the consequence R1 is
     // actually about and it costs one line to say so.
-    expect(spawned.filter((run) => run.ticket === 5)).toEqual([]);
+    expect(wakes.filter((wake) => wake.runId.startsWith("scratch-app#5/"))).toEqual([]);
   });
 
   it("introduces itself exactly once across three cycles", async () => {
@@ -4762,14 +4852,12 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // a two-cycle test, and "exactly once for the life of the daemon" is the
     // whole promise. Counted on the seam rather than in the thread.
     const store = newStore();
+    const manifest = drivenByRunner(introducing(manifestWith("scratch-app")), "scratch-app");
     const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
     const { spawner } = fakeSpawner();
-    const deps = {
-      manifest: introducing(manifestWith("scratch-app")),
-      store,
-      adapter,
-      spawner,
-    };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, runner };
 
     await pollOnce(deps);
     await pollOnce(deps);
@@ -4786,15 +4874,13 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // the exact label. Hand-written here rather than composed from the same
     // function the loop composes it with.
     const store = newStore();
+    const manifest = drivenByRunner(introducing(manifestWith("scratch-app")), "scratch-app");
     const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: introducing(manifestWith("scratch-app")),
-      store,
-      adapter,
-      spawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner, runner });
 
     const body = writesOn(calls, 5)[0]?.body ?? "";
     expect(body).toContain("add the `timone` label");
@@ -4805,31 +4891,25 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
 
   it("leaves a marked ticket to the path it already had", async () => {
     // The negative half, and the one that protects everything built before
-    // this: a ticket carrying the mark is acknowledged, run and given its
-    // standing call to action exactly as it was, and is never introduced to.
+    // this: a ticket carrying the mark is acknowledged and run exactly as it
+    // was, and is never introduced to.
     const store = newStore();
+    const manifest = drivenByRunner(introducing(manifestWith("scratch-app")), "scratch-app");
     const { adapter, calls } = twoListings([
       ticket(5, { labels: [] }),
       ticket(7),
     ]);
     const { spawner } = fakeSpawner();
-    const deps = {
-      manifest: introducing(manifestWith("scratch-app")),
-      store,
-      adapter,
-      spawner,
-    };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, runner };
 
     await pollOnce(deps);
     await pollOnce(deps);
 
     const saidOnSeven = writesOn(calls, 7);
-    expect(saidOnSeven.map((entry) => entry.call)).toEqual([
-      "postComment",
-      "upsertComment",
-    ]);
+    expect(saidOnSeven.map((entry) => entry.call)).toEqual(["postComment"]);
     expect(saidOnSeven[0]?.body).toContain("**Picked this up.**");
-    expect(saidOnSeven[1]?.body).toContain(CTA_MARKER);
     for (const entry of saidOnSeven) {
       expect(entry.body).not.toContain("this repository is worked by a machine");
     }
@@ -4841,21 +4921,18 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // — and the introduction, having been posted once, is not repeated when
     // the ticket loses the label again.
     //
-    // Since 22b the third cycle also *abandons* the run: a ticket that has
-    // left the marked-and-open listing is one nobody is asking Timone to work,
-    // and the loop cancels rather than spawning on it. The introduction still
-    // stays unrepeated, which is what this test is about — a cancelled run is
-    // still a run, so `introduceUnmarked` keeps its peace.
+    // On the third cycle the ticket has left the marked-and-open listing, so
+    // the runner is told so. The introduction still stays unrepeated, which
+    // is what this test is about — the ticket has a run, so
+    // `introduceUnmarked` keeps its peace.
     const store = newStore();
+    const manifest = drivenByRunner(introducing(manifestWith("scratch-app")), "scratch-app");
     const open = [ticket(5, { labels: [] })];
     const { adapter, calls } = twoListings(open);
     const { spawner } = fakeSpawner();
-    const deps = {
-      manifest: introducing(manifestWith("scratch-app")),
-      store,
-      adapter,
-      spawner,
-    };
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, runner };
 
     await pollOnce(deps);
     open[0] = ticket(5, { labels: ["timone"] });
@@ -4863,8 +4940,10 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     open[0] = ticket(5, { labels: [] });
     const before = calls.length;
     await pollOnce(deps);
+    await runner.drain();
 
-    expect(store.get("scratch-app#5/1")?.status).toBe("cancelled");
+    expect(wakes.at(-1)?.runId).toBe("scratch-app#5/1");
+    expect(wakes.at(-1)?.events).toContain("The ticket was closed, or its mark was removed.");
     expect(
       writesOn(calls, 5).filter((entry) => entry.call === "postComment"),
     ).toHaveLength(2);
@@ -4885,24 +4964,16 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // get its introduction, or the fix has silenced 20d rather than corrected
     // it.
     const store = newStore();
-    const enrolled = store.register("scratch-app", 5).run;
-    store.park(enrolled.id, {
-      waitingOn: "a conversation in your terminal",
-      kind: "conversation",
-      stage: "wayfinding",
-      waitCursor: "2026-08-03T12:00:00Z",
-    });
+    const manifest = drivenByRunner(introducing(manifestWith("scratch-app")), "scratch-app");
+    waitingForRunner(store, 5);
     const { adapter, calls } = twoListings([
       ticket(5, { labels: [] }),
       ticket(6, { labels: [] }),
     ]);
     const { spawner } = fakeSpawner();
-    const deps = {
-      manifest: introducing(manifestWith("scratch-app")),
-      store,
-      adapter,
-      spawner,
-    };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, runner };
 
     await pollOnce(deps);
     await pollOnce(deps);
@@ -4922,16 +4993,14 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // is empty — which is the discriminating case: a loop reading the thread
     // to decide would see nothing there and post.
     const store = newStore();
+    const manifest = drivenByRunner(introducing(manifestWith("scratch-app")), "scratch-app");
     store.recordIntroduction("scratch-app", 5);
     const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: introducing(manifestWith("scratch-app")),
-      store,
-      adapter,
-      spawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner, runner });
 
     expect(writesIn(calls)).toEqual([]);
     // And it did not read the thread to find that out, either.
@@ -4944,6 +5013,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // record written after a successful post would put a second introduction
     // on a client's ticket the moment anything crashed between the two.
     const store = newStore();
+    const manifest = drivenByRunner(introducing(manifestWith("scratch-app")), "scratch-app");
     const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
     const { spawner } = fakeSpawner();
     const failing: TicketingAdapter = {
@@ -4952,11 +5022,14 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
         throw new Error("gh could not comment on issue 5");
       },
     };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter: failing, manifest, sessions });
     const deps = {
-      manifest: introducing(manifestWith("scratch-app")),
+      manifest,
       store,
       adapter: failing,
       spawner,
+      runner,
     };
 
     const first = await pollOnce(deps);
@@ -4979,23 +5052,28 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // it, so a repository Timone cannot enumerate would also stop telling
     // reviewers where to look. That is a bigger consequence than the fault.
     const store = newStore();
+    const manifest = drivenByRunner(introducing(manifestWithPreviews("scratch-app")), "scratch-app");
     runWithPullRequest(store, "scratch-app", 7, 9);
-    const { adapter, upserts } = previewTicketing({
+    const { adapter: base, upserts } = previewTicketing({
       "timone/7-work": pull(9, "abc1234"),
     });
+    const adapter: TicketingAdapter = {
+      ...base,
+      async listOpenTickets(): Promise<Ticket[]> {
+        throw new Error("gh could not list the open issues");
+      },
+    };
     const { previews, ensured } = fakePreviews();
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: introducing(manifestWithPreviews("scratch-app")),
+      manifest,
       store,
-      adapter: {
-        ...adapter,
-        async listOpenTickets(): Promise<Ticket[]> {
-          throw new Error("gh could not list the open issues");
-        },
-      },
+      adapter,
       spawner,
+      runner,
       previews,
     });
 
@@ -5013,6 +5091,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     // hundred times in its first cycle, which the ADR calls a worse first
     // impression than silence.
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
     let listings = 0;
     const counted: TicketingAdapter = {
@@ -5023,11 +5102,14 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       },
     };
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter: counted, manifest, sessions });
     const deps = {
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter: counted,
       spawner,
+      runner,
     };
 
     await pollOnce(deps);
@@ -5050,22 +5132,24 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
     const store = newStore();
     const { adapter, calls } = twoListings([ticket(5, { labels: [] })]);
     const { spawner } = fakeSpawner();
-    const both = manifestWith("quiet-app", "chatty-app");
-
-    await pollOnce({
-      manifest: {
-        projects: {
-          "quiet-app": both.projects["quiet-app"]!,
-          "chatty-app": {
-            ...both.projects["chatty-app"]!,
-            introduce_unmarked: true,
-          },
+    const both = drivenByRunner(
+      manifestWith("quiet-app", "chatty-app"),
+      "quiet-app",
+      "chatty-app",
+    );
+    const manifest: Manifest = {
+      projects: {
+        "quiet-app": both.projects["quiet-app"]!,
+        "chatty-app": {
+          ...both.projects["chatty-app"]!,
+          introduce_unmarked: true,
         },
       },
-      store,
-      adapter,
-      spawner,
-    });
+    };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, spawner, runner });
 
     const said = writesIn(calls);
     expect(said).toHaveLength(1);
@@ -5077,6 +5161,7 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
 
   it("carries on to the next ticket when one introduction cannot be posted", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(introducing(manifestWith("scratch-app")), "scratch-app");
     const { adapter, calls } = twoListings([
       ticket(5, { labels: [] }),
       ticket(6, { labels: [] }),
@@ -5089,12 +5174,15 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
         await adapter.postComment(project, number, body);
       },
     };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter: failing, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: introducing(manifestWith("scratch-app")),
+      manifest,
       store,
       adapter: failing,
       spawner,
+      runner,
     });
 
     expect(result.errors).toHaveLength(1);
@@ -6142,6 +6230,7 @@ describe("pollOnce — requests a human left for the daemon", () => {
 
   it("carries out a queued cancellation, in the human's own words", async () => {
     const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const run = failedRun(store);
     enqueue(statePath, {
       kind: "cancel",
@@ -6151,12 +6240,15 @@ describe("pollOnce — requests a human left for the daemon", () => {
     });
     const { adapter } = fakeAdapter({ "scratch-app": [] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       statePath,
     });
 
@@ -6172,13 +6264,16 @@ describe("pollOnce — requests a human left for the daemon", () => {
    */
   it("settles a request it cannot carry out, and does not try it again", async () => {
     const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { run } = store.register("scratch-app", 31);
     store.activate(run.id, "session-1");
     store.complete(run.id);
     enqueue(statePath, { kind: "retry", project: "scratch-app", ticket: 31 });
     const { adapter } = fakeAdapter({ "scratch-app": [] });
     const { spawner } = fakeSpawner();
-    const deps = { manifest: manifestWith("scratch-app"), store, adapter, spawner, statePath };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, spawner, runner, statePath };
 
     const first = await pollOnce(deps);
     const second = await pollOnce(deps);
@@ -6191,17 +6286,21 @@ describe("pollOnce — requests a human left for the daemon", () => {
 
   it("reports an unreadable request, leaves it alone, and polls anyway", async () => {
     const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     mkdirSync(requestsDir(statePath), { recursive: true });
     const corrupt = join(requestsDir(statePath), "2026-08-16T12-00-00-000Z-000000-dead.json");
     writeFileSync(corrupt, "{ not json", "utf8");
     const { adapter, comments } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       statePath,
     });
 
@@ -6215,14 +6314,18 @@ describe("pollOnce — requests a human left for the daemon", () => {
 
   it("costs nothing when nobody has ever asked for anything", async () => {
     const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       statePath,
     });
 
@@ -6238,15 +6341,19 @@ describe("pollOnce — requests a human left for the daemon", () => {
    */
   it("serves nobody when the cycle was never told where the ledger is", async () => {
     const { store } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     failedRun(store);
     const { adapter } = fakeAdapter({ "scratch-app": [] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
     });
 
     expect(result.applied).toEqual([]);
@@ -6366,6 +6473,7 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
 
   it("says so, and changes nothing, when there is nothing to hand over", async () => {
     const { store, statePath } = newStoreAt();
+    const manifest = drivenByRunner(manifestWith("scratch-app"), "scratch-app");
     enqueue(statePath, {
       kind: "release-takeover",
       project: "scratch-app",
@@ -6374,12 +6482,15 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     });
     const { adapter } = fakeAdapter({ "scratch-app": [] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: manifestWith("scratch-app"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
       statePath,
     });
 
@@ -7554,19 +7665,17 @@ describe("the frontier decides which step is taken", () => {
   /** (1) Steps 1–2 closed → step 3 is the one that gets a run. */
   it("opens a run on the first step that is not done", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative([
       { state: "closed" },
       { state: "closed" },
       {},
     ]);
     const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     expect(store.runsForTicket("alpha", 53)).toHaveLength(1);
     expect(store.runsForTicket("alpha", 51)).toEqual([]);
@@ -7580,15 +7689,13 @@ describe("the frontier decides which step is taken", () => {
    */
   it("never opens a run on the map ticket", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative([{}, {}]);
     const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     expect(store.runsForTicket("alpha", MAP)).toEqual([]);
   });
@@ -7596,15 +7703,13 @@ describe("the frontier decides which step is taken", () => {
   /** Fourteen marked steps must not become fourteen runs at once. */
   it("opens one run, not one per step", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative(Array.from({ length: 14 }, () => ({})));
     const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     const opened = steps.filter(
       (step) => store.runsForTicket("alpha", step.number).length > 0,
@@ -7619,18 +7724,16 @@ describe("the frontier decides which step is taken", () => {
    */
   it("leaves a held step alone and takes the next one instead", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative([
       { labels: ["timone", HELD_LABEL] },
       {},
     ]);
     const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     expect(store.runsForTicket("alpha", 51)).toEqual([]);
     expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
@@ -7639,15 +7742,13 @@ describe("the frontier decides which step is taken", () => {
   /** A step a person took is theirs; the machine does not start it underneath them. */
   it("leaves a step a person has taken alone", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative([{ assignees: ["fvermaut"] }, {}]);
     const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     expect(store.runsForTicket("alpha", 51)).toEqual([]);
     expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
@@ -7656,6 +7757,7 @@ describe("the frontier decides which step is taken", () => {
   /** A step waiting on an open one is not eligible, whatever its position. */
   it("skips a blocked step even when it sorts first", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative([
       {
         blockedBy: [
@@ -7669,13 +7771,10 @@ describe("the frontier decides which step is taken", () => {
       {},
     ]);
     const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     expect(store.runsForTicket("alpha", 51)).toEqual([]);
     expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
@@ -7687,15 +7786,13 @@ describe("the frontier decides which step is taken", () => {
    */
   it("holds the step it claims, so the next cycle leaves it alone", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative([{}, {}]);
     const { adapter, labelled } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     expect(labelled).toContainEqual({ number: 51, label: HELD_LABEL });
   });
@@ -7703,15 +7800,13 @@ describe("the frontier decides which step is taken", () => {
   /** The machine never writes an assignee: that field is the human's half. */
   it("never assigns anybody to anything", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative([{}, {}]);
     const { adapter, labelled } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     for (const step of steps) expect(step.assignees).toEqual([]);
     expect(labelled.every((entry) => entry.label !== "assignee")).toBe(true);
@@ -7720,18 +7815,16 @@ describe("the frontier decides which step is taken", () => {
   /** (4) Every step closed → nothing is taken up. */
   it("opens nothing when every step is closed", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative([
       { state: "closed" },
       { state: "closed" },
     ]);
     const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     for (const step of steps) {
       expect(store.runsForTicket("alpha", step.number)).toEqual([]);
@@ -7745,15 +7838,13 @@ describe("the frontier decides which step is taken", () => {
    */
   it("writes down what it saw, so status need not ask GitHub", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { tickets, steps } = initiative([{ state: "closed" }, {}, {}]);
     const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     expect(store.initiativeFor("alpha", 52)).toMatchObject({
       initiative: MAP,
@@ -7766,14 +7857,12 @@ describe("the frontier decides which step is taken", () => {
   /** A ticket that is nobody's step is untouched by any of this. */
   it("leaves an ordinary marked ticket exactly as it was", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const { adapter } = fakeAdapter({ alpha: [ticket(3)] });
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
-    await pollOnce({
-      manifest: manifestWith("alpha"),
-      store,
-      adapter,
-      spawner: idleSpawner,
-    });
+    await pollOnce({ manifest, store, adapter, spawner: idleSpawner, runner });
 
     expect(store.runsForTicket("alpha", 3)).toHaveLength(1);
   });
@@ -7910,10 +7999,18 @@ describe("closing: the step, then the initiative", () => {
   ): Promise<{ closed: number[]; comments: PostedComment[] }> {
     const closed: number[] = [];
     const comments: PostedComment[] = [];
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     const tickets = [
       ticket(MAP, { labels: ["timone", MAP_LABEL] }),
       ...steps.map((s) => ticket(s.number, { title: s.title, labels: s.labels })),
     ];
+    const merged = {
+      number: pr,
+      title: "the piece",
+      url: `https://github.com/fvermaut/scratch-app/pull/${pr}`,
+      state: "merged" as const,
+      headSha: "abc",
+    };
     const base = fakeAdapter({ alpha: tickets });
     const adapter: TicketingAdapter = {
       ...base.adapter,
@@ -7930,24 +8027,26 @@ describe("closing: the step, then the initiative", () => {
       async closeTicket(_project, number): Promise<void> {
         closed.push(number);
       },
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return merged;
+      },
+      async aheadOfDefault(): Promise<number | undefined> {
+        return 0;
+      },
       async getPullRequestThread(): Promise<PullRequestThread> {
-        return {
-          number: pr,
-          title: "the piece",
-          url: `https://github.com/fvermaut/scratch-app/pull/${pr}`,
-          state: "merged",
-          headSha: "abc",
-          comments: [],
-        };
+        return { ...merged, comments: [] };
       },
     };
+    const runner = endingOnMerge({ store, adapter, manifest });
 
     await pollOnce({
-      manifest: manifestWith("alpha"),
+      manifest,
       store,
       adapter,
       spawner: { async spawn(): Promise<void> {} },
+      runner,
     });
+    await runner.drain();
     return { closed, comments };
   }
 
@@ -7959,9 +8058,8 @@ describe("closing: the step, then the initiative", () => {
     store.recordPullRequest(run.id, pr);
     store.park(run.id, {
       waitingOn: `your review of pull request #${pr}`,
-      kind: "review",
-      stage: "delivery",
-      waitCursor: "2026-08-02T10:00:00Z",
+      kind: "runner",
+      resolvableBy: ["delivery"],
     });
   }
 
@@ -7985,13 +8083,9 @@ describe("closing: the step, then the initiative", () => {
 
     expect(closed).toContain(51);
     expect(closed).not.toContain(MAP);
-    // And it says the right thing on the right ticket. The old closing put
-    // the *initiative's* words — "this ticket's journey ends here" — on the
-    // step, which closes the same ticket and tells the human the whole thing
-    // is over. That is the half of this case that discriminates.
-    const said = comments.find((comment) => comment.number === 51)?.body ?? "";
-    expect(said).toContain("this step is done");
-    expect(said).not.toContain("journey ends here");
+    // And nothing is said on the initiative: its closing words are owed only
+    // when its last step closes.
+    expect(comments.filter((comment) => comment.number === MAP)).toEqual([]);
   });
 
   /** (2) The last merge closes both. */
@@ -8069,32 +8163,42 @@ describe("closing: the step, then the initiative", () => {
   /** A ticket in no initiative closes exactly as it always did. */
   it("leaves an ordinary ticket's closing untouched", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     delivered(store, 3, 92);
     const closed: number[] = [];
+    const merged = {
+      number: 92,
+      title: "the work",
+      url: "https://github.com/fvermaut/scratch-app/pull/92",
+      state: "merged" as const,
+      headSha: "abc",
+    };
     const base = fakeAdapter({ alpha: [ticket(3)] });
     const adapter: TicketingAdapter = {
       ...base.adapter,
       async closeTicket(_project, number): Promise<void> {
         closed.push(number);
       },
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return merged;
+      },
+      async aheadOfDefault(): Promise<number | undefined> {
+        return 0;
+      },
       async getPullRequestThread(): Promise<PullRequestThread> {
-        return {
-          number: 92,
-          title: "the work",
-          url: "https://github.com/fvermaut/scratch-app/pull/92",
-          state: "merged",
-          headSha: "abc",
-          comments: [],
-        };
+        return { ...merged, comments: [] };
       },
     };
+    const runner = endingOnMerge({ store, adapter, manifest });
 
     await pollOnce({
-      manifest: manifestWith("alpha"),
+      manifest,
       store,
       adapter,
       spawner: { async spawn(): Promise<void> {} },
+      runner,
     });
+    await runner.drain();
 
     expect(closed).toEqual([3]);
   });
@@ -8122,6 +8226,7 @@ describe("a bug filed during a step takes the project before the next step", () 
 
   it("promotes the waiting bug, and opens the next step behind it", async () => {
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("alpha"), "alpha");
     store.rememberInitiative({
       project: "alpha",
       initiative: MAP,
@@ -8138,9 +8243,8 @@ describe("a bug filed during a step takes the project before the next step", () 
     store.recordPullRequest(run.id, 90);
     store.park(run.id, {
       waitingOn: "your review of pull request #90",
-      kind: "review",
-      stage: "delivery",
-      waitCursor: "2026-08-02T10:00:00Z",
+      kind: "runner",
+      resolvableBy: ["delivery"],
     });
     store.register("alpha", 8);
 
@@ -8152,11 +8256,17 @@ describe("a bug filed during a step takes the project before the next step", () 
       ticket(8),
     ];
     const base = fakeAdapter({ alpha: tickets });
-    const spawned: string[] = [];
+    const merged = {
+      number: 90,
+      title: "the piece",
+      url: "https://github.com/fvermaut/scratch-app/pull/90",
+      state: "merged" as const,
+      headSha: "abc",
+    };
     // The tracker answers honestly across the cycle: step 51 is **open** when
-    // the survey runs at the top of it, and closed only once the merge path
-    // has closed it. A fake that reported it closed from the start would let
-    // the frontier take step 52 in the very cycle the bug is promoted, and
+    // the survey runs at the top of it, and closed only once the end of its
+    // run has closed it. A fake that reported it closed from the start would
+    // let the frontier take step 52 in the very cycle the bug is promoted, and
     // this test would be asserting a race that production does not have.
     const closed = new Set<number>();
     const adapter: TicketingAdapter = {
@@ -8171,38 +8281,43 @@ describe("a bug filed during a step takes the project before the next step", () 
       async closeTicket(_project, number): Promise<void> {
         closed.add(number);
       },
+      async findPullRequest(): Promise<PullRequest | undefined> {
+        return merged;
+      },
+      async aheadOfDefault(): Promise<number | undefined> {
+        return 0;
+      },
       async getPullRequestThread(): Promise<PullRequestThread> {
-        return {
-          number: 90,
-          title: "the piece",
-          url: "https://github.com/fvermaut/scratch-app/pull/90",
-          state: "merged",
-          headSha: "abc",
-          comments: [],
-        };
+        return { ...merged, comments: [] };
       },
     };
-
-    await pollOnce({
-      manifest: manifestWith("alpha"),
+    const wakes: string[] = [];
+    const runner = endingOnMerge({ store, adapter, manifest }, wakes);
+    const deps = {
+      manifest,
       store,
       adapter,
-      spawner: {
-        async spawn(run): Promise<void> {
-          spawned.push(run.id);
-        },
-      },
-    });
+      spawner: { async spawn(): Promise<void> {} },
+      runner,
+    };
+
+    await pollOnce(deps);
+    await runner.drain();
 
     // The window: the step is finished, the bug holds the project, and no run
     // exists for step 52 at all yet.
     expect(store.get("alpha#51/1")?.status).toBe("done");
     expect(store.get("alpha#8/1")?.status).toBe("picked-up");
     expect(store.runsForTicket("alpha", 52)).toEqual([]);
-    // Asserted on the spawner, not on two log lines: the bug is the run a
-    // session was started for.
-    expect(spawned).toContain("alpha#8/1");
-    expect(spawned).not.toContain("alpha#52/1");
+
+    // The next cycle hands on the bug, and opens step 52 behind it. Asserted
+    // on the wakes, not on two log lines: the bug is the run handed on.
+    await pollOnce(deps);
+    await runner.drain();
+
+    expect(wakes).toContain("alpha#8/1");
+    expect(wakes).not.toContain("alpha#52/1");
+    expect(store.runsForTicket("alpha", 52).map((each) => each.status)).toEqual(["queued"]);
   });
 });
 
@@ -8212,14 +8327,18 @@ describe("a project called `timone` is a project like any other", () => {
     // what makes a self-run different is the repository, and the repository is
     // the harness rule's business (32b), not the pickup's.
     const store = newStore();
+    const manifest = drivenByRunner(manifestWith("timone"), "timone");
     const { adapter, comments } = fakeAdapter({ timone: [ticket(39)] });
     const { spawner } = fakeSpawner();
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
 
     const result = await pollOnce({
-      manifest: manifestWith("timone"),
+      manifest,
       store,
       adapter,
       spawner,
+      runner,
     });
 
     expect(result.pickedUp).toEqual(["timone#39/1"]);
@@ -8342,6 +8461,45 @@ function runnerFor(
     log: () => {},
   });
   return { runner, root };
+}
+
+/**
+ * The real driver, over a runner that does what a runner does once it hears
+ * that a run's pull request was merged: it ends the run and closes its
+ * ticket, through the real actions. It does nothing on any other wake. Each
+ * run it is woken for is written down in `woken`.
+ */
+function endingOnMerge(
+  deps: Pick<RunnerDriverDeps, "store" | "adapter" | "manifest">,
+  woken: string[] = [],
+): RunnerDriver {
+  const root = mkdtempSync(join(tmpdir(), "timone-runner-"));
+  tempDirs.push(root);
+  return new RunnerDriver({
+    store: deps.store,
+    adapter: deps.adapter,
+    manifest: deps.manifest,
+    root,
+    sessionsFor: (actionsFor) => ({
+      async wake(run, events) {
+        woken.push(run.id);
+        if (run.pr === undefined || !events.includes(pullRequestEvent(run.pr, "merged"))) return;
+        await runnerActions(actionsFor(run), run).endRun({
+          reason: `Pull request #${run.pr} was merged.`,
+          closeTicket: true,
+        });
+      },
+      stop() {},
+    }),
+    running: new RunningSteps(),
+    consult: async () => undefined,
+    startStep: async () => {
+      throw new Error("no step starts in this test");
+    },
+    timonePin: async () => undefined,
+    clock: () => "2026-09-27T12:00:00Z",
+    log: () => {},
+  });
 }
 
 /**
