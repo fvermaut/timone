@@ -176,9 +176,6 @@ export async function resolveTakeover(
         kind: "nothing-to-do",
         message: `${target.project} #${target.ticket} is finished — see the ticket.`,
       };
-    // ✏ 2026-09-30: a failed run is answered as a cancelled one. No run can
-    // be read as failed any more: the ledger loads one as cancelled.
-    case "failed":
     case "cancelled": {
       // Abandoned, not broken — so the words say it was cancelled, and never
       // that something went wrong. Its reason lives in `cancellation` rather
@@ -689,8 +686,8 @@ async function escalate(
   });
 
   log(
-    `Picking up ${target.project} #${target.ticket} — I couldn't take this one ` +
-      "further myself. Over to you.",
+    `Picking up ${target.project} #${target.ticket} here. When you end this ` +
+      "session, the runner reads the ticket and decides what comes next.",
   );
   return deps.launcher.run("claude", [prompt], { cwd: deps.root });
 }
@@ -740,7 +737,7 @@ export function registerTakeoverCommand(program: Command): void {
   program
     .command("takeover")
     .argument("<ticket>", "which ticket to pick up, as <project>#<ticket>")
-    .description("Pick up a ticket that is waiting to talk something through")
+    .description("Work on a ticket in this terminal, then give it back to the runner")
     .option(
       "--manifest <path>",
       "path to the timone manifest file",

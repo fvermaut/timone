@@ -357,31 +357,6 @@ export interface SessionRuntime {
 }
 
 /**
- * The comment posted when a session ends badly.
- *
- * ✏ 2026-09-30: the spawner that posted it was removed. It stays only for
- * `mergeChunkZero` in `chunk-zero.ts`, which stays because
- * `src/runner/actions.test.ts` still names it. Nothing calls either.
- */
-export function failedComment(reason: string): string {
-  return [
-    "**Something went wrong while I was working on this.**",
-    "",
-    `The session stopped early: ${reason}`,
-    "",
-    "Nothing was decided about this ticket, so nothing here is final.",
-    "",
-    // **Not "re-mark this ticket"**, which is what this line said until
-    // ADR-0049 D7. The mark is already on — nothing took it off — so there is
-    // no gesture there for the reader to make, and timone#27 is people trying
-    // it and watching nothing happen. The standing note carried the command
-    // that started the run again, until both were removed on 2026-09-30.
-    "**What I need from you:** the standing note below has the command that " +
-      "starts this again. Or leave it and tell me what looks wrong.",
-  ].join("\n");
-}
-
-/**
  * The workspace half of a request, or nothing at all.
  *
  * **This function is what was missing on 2026-08-22**, when the first real
@@ -478,11 +453,6 @@ export function waitOf(run: Run): ParkOptions {
     ...(run.wait?.kind === undefined ? {} : { kind: run.wait?.kind }),
     ...(run.stage === undefined ? {} : { stage: run.stage }),
     ...(run.wait?.opened === undefined ? {} : { waitCursor: run.wait?.opened }),
-    // Carried, unlike the consumed marker: this one says what the human has
-    // already been told, and a re-park that forgot it would say it again.
-    ...(run.wait?.acknowledgedAt === undefined
-      ? {}
-      : { acknowledgedAt: run.wait?.acknowledgedAt }),
   };
 }
 

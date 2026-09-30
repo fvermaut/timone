@@ -214,7 +214,7 @@ describe("a step session, started and watched", () => {
     store.activate(run.id, "session-before");
     store.park(run.id, {
       waitingOn: "your answer on the ticket",
-      kind: "gate",
+      kind: "runner",
       stage: "requirements",
       waitCursor: "2026-09-27T09:30:00Z",
     });
@@ -238,7 +238,7 @@ describe("a step session, started and watched", () => {
     expect(after?.status).toBe("parked");
     expect(after?.wait).toMatchObject({
       on: "your answer on the ticket",
-      kind: "gate",
+      kind: "runner",
       opened: "2026-09-27T09:30:00Z",
     });
   });

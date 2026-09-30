@@ -20,39 +20,13 @@ export const MARK_LABEL = "timone";
 export const MACHINE_MARKER =
   "🤖 **Timone** · automatic message — written by the machine, not by the account it appears under";
 
-/**
- * The line the machine's one clarifying question carries, when a written
- * answer left something unsettled ([ADR-0022](../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md)).
- *
- * The written path is bounded at **one clarifying round**, and this marker is
- * where that round is counted. It is counted on the *ticket* rather than in
- * the ledger deliberately: the thread already holds the fact — the machine
- * either asked again or it did not — and a counter beside it would be a
- * second copy of one truth, free to disagree with the comments a human is
- * looking at. Read by {@link clarifyingRounds}.
- *
- * ✏ 2026-09-30: no step is told to write it any more. It stays because
- * `clarifyingRounds` in `gates.ts` still reads it.
- */
-export const CLARIFICATION_MARKER =
-  "❓ **Still open** · written by the machine when a written answer left something unsettled";
-
 // ✏ 2026-09-30: the marker lines a step once wrote to say how it ended — step
-// finished, needs more than a reply, picking it back up, carrying on at — the
-// line of an accepted conversation record, and the marker of a ticket's
-// standing call to action were deleted. No step is told to write them, and no
-// code reads them: the runner reads a step's plain comment. The replay cases
-// write the texts they recorded themselves.
-
-/**
- * The line a stage's closing comment carried when it stopped inside its
- * bounds and a person had to look.
- *
- * ✏ 2026-09-30: no step is told to write it any more, and no code reads it.
- * It stays only because `outcomes.test.ts` and the replay cases import it.
- */
-export const STAGE_HANDED_MARKER =
-  "🙋 **Needs a person** · written by the machine when a stage stopped and is asking for help";
+// finished, needs a person, needs more than a reply, picking it back up,
+// carrying on at — the line of an accepted conversation record, the line of a
+// clarifying question still open, and the marker of a ticket's standing call
+// to action were deleted. No step is told to write them, and no code reads
+// them: the runner reads a step's plain comment. The replay cases and
+// `outcomes.test.ts` write the texts they recorded themselves.
 
 /**
  * The line every message Timone posts ends on, and the one a reader looks at
@@ -577,32 +551,6 @@ export interface TicketingAdapter {
     body: string,
   ): Promise<void>;
 
-  /**
-   * Say something on a ticket **in place of** whatever was last said under
-   * `marker`, editing that comment rather than adding another. The twin of
-   * {@link upsertPullRequestComment}, on the other surface.
-   *
-   * Phase 20's widening of this seam, and deliberate rather than incidental.
-   * A ticket's call to action is the same kind of statement that docblock
-   * argues about a preview — a standing fact whose truth changes, reconciled
-   * every cycle
-   * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)),
-   * so appending it would fill a client's ticket with near-identical
-   * comments. **That argument transfers here verbatim and is deliberately not
-   * restated**; read it there.
-   *
-   * Implementations match on `marker` appearing in a comment they themselves
-   * wrote — told by {@link isMachineComment}, never by the author, who is
-   * only the account the machine borrows — and post a new one when they find
-   * none. The body is stamped exactly as {@link postComment}'s is.
-   */
-  upsertComment(
-    project: TicketingProject,
-    number: number,
-    marker: string,
-    body: string,
-  ): Promise<void>;
-
   /** Add a label to a ticket (labels are read off {@link Ticket.labels}). */
   applyLabel(
     project: TicketingProject,
@@ -711,37 +659,4 @@ export interface TicketingAdapter {
     number: number,
     reason: "completed" | "not-planned",
   ): Promise<void>;
-}
-
-/**
- * True when `body` carries `marker`, reading the words and ignoring where the
- * picture sits.
- *
- * **Every marker a session types is read through here**, and that is the whole
- * reason it exists. The daemon judges an unattended stage partly by a line the
- * session writes on the ticket, and the prompt hands that line over verbatim
- * with "exactly as written" beside it. On 2026-09-19 a planning session on
- * ivtrends [#101](https://github.com/fvermaut/ivtrends/issues/101) wrote
- * `**Step finished** 🏁 ·` — every word right, the picture one place to the
- * left — and a finished, committed, pushed plan was reported as a stage that
- * had recorded no outcome. An exact match asks a language model to reproduce
- * an emoji's position perfectly every time, and that is not something it can
- * promise.
- *
- * So the pictures come out of both sides and the words are compared. The words
- * alone still tell the three stage outcomes apart, and nothing here decides
- * *whose* record a comment is — every caller has already checked it is
- * Timone's.
- */
-export function carriesMarker(body: string, marker: string): boolean {
-  return withoutPictures(body).includes(withoutPictures(marker));
-}
-
-/** `text` with the pictures dropped and the gaps they leave closed up. */
-function withoutPictures(text: string): string {
-  return text
-    .replace(/\p{Extended_Pictographic}\uFE0F?/gu, " ")
-    .replace(/[^\S\n]+/g, " ")
-    .replace(/ ?\n ?/g, "\n")
-    .trim();
 }

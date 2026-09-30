@@ -110,7 +110,6 @@ function forge(body: string): {
     async postComment(_project, _number, comment) {
       posted.push(comment);
     },
-    async upsertComment() {},
     async applyLabel() {},
     async closeTicket() {},
     async findPullRequest(_project, branch) {

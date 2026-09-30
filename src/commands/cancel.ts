@@ -264,18 +264,6 @@ async function cancel(
         `${name} was already cancelled: ${run.cancellation ?? "no reason recorded"}.`,
       );
       return 1;
-    // A failure is cancellable, and this is the arm that used to refuse it.
-    // Ruled by fvermaut 2026-08-15: a failure had two exits, not one. `timone
-    // retry` re-armed the chunk, until it was removed on 2026-09-30, and this
-    // abandons it. The refusal that stood here made abandoning a failure a
-    // two-command dance — retry first, to get it out of `failed`, then
-    // cancel — with a window in between that the daemon polls, so a run
-    // somebody was trying to delete could be picked up and spend real money
-    // before the second command landed. Nothing about
-    // a failure is worth protecting from a person who has typed `cancel`: the
-    // branch, stage and pull request the old wording defended are still there
-    // in the ledger, and a ticket that deserves another go takes a fresh chunk.
-    case "failed":
     case "queued":
     case "picked-up":
     case "active":

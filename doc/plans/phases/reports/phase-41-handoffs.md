@@ -1074,3 +1074,232 @@ PASS #110 — Send the step a message to run only the tests its change affects. 
 - **`src/commands/takeover.ts`:** the line the terminal prints when the session opens still says "I couldn't take this one further myself. Over to you.", and the command's help still says "Pick up a ticket that is waiting to talk something through". Neither was in this slice's grant.
 - **`dist/`** is not cleaned by `tsc`; nothing was deleted as a file here.
 - **Refactoring I would do but did not:** rename `escalationPrompt` to `takeoverPrompt` and `StoppedRun` to `TakenOverRun`, now that the old `takeoverPrompt` is gone and the run has not always stopped. The "Do not write application code" paragraph still says "the machinery"; "the runner and its steps" would be plainer.
+
+## 41h — The ledger and the step table keep only what the runner uses
+
+**Stopped, with the build red for one reason: edits in 12 files outside this slice's list (7 lines changed, 72 deleted).** Everything the plan asks is done in this slice's files. Removing `failed`, the old wait kinds and `upsertComment` breaks the type check in files this slice was not given, and one test there reads the takeover's printed line. The lines are listed under *What the orchestrator must grant*. With them applied in a scratch copy, `tsc` exits 0, 1399 tests pass, and the dry replay passes 19 of 19. Four fields the plan removes stay in the schema, because 41c's tests compare its fixture's runs whole (decision 1).
+
+**Built.** A run's status is one of `queued`, `picked-up`, `active`, `parked`, `done`, `cancelled`. The transition table has no `failed` row and no move into `failed`; `active → picked-up` is gone. A wait's kind is `runner` or absent. The ledger drops `askCheck`, `deaths`, `refusal` and `carried` when it is read, and reads an old kind of wait on a run that is not parked as the runner's, so an old ledger still loads. A read writes nothing; the next write puts the runs on disk without those fields. `RunStore` lost `runningRun`, `parkedRuns`, `rememberAskCheck`, `fail`, `reopenForTakeover`, `refuse`, `started`, `unstarted`, `refusalTold`, `reclaim` and `carry`; `runs.ts` lost `RE_ARM_LIMIT`, `stoppedTwiceWait`, `assertAllowed`, `RE_ASK_LIMIT`, `ESCALATION_WAIT`, `CARRY_ON_WAIT`, `isReAskAfterAnswer`, the type `AskCheckRecord`, and the re-ask floor in `applyPark`. The step table keeps each step's label, `ownsBranch`, model and effort, and nothing else: `next`, `stageAfter`, the wait column, `waitFor`, `WaitKind`, `runsUnattended`, `requireWait`, `resolvableBy`, `built`, `isBuilt`, `inBuild`, `processStage`, `readGate`, `concludeConversation`, `routeAfterTriage`, `PipelineTransition`, `frontierIsEmpty`, `FRONTIER_EMPTY_LABEL`, `isMap` and `stageFromLabel` are deleted. With them went what 41b to 41g left: `mergeChunkZero`, `failedComment`, `gates.ts`, `CLARIFICATION_MARKER`, `STAGE_HANDED_MARKER`, `carriesMarker`, `upsertComment`, `uncommittedFiles`, `TerminalChannel`, `inviteToConversation` and the conversation seam. `timone takeover` prints a new line and has new help text.
+
+**Files touched.**
+
+- `src/daemon/runs.ts` — as above. New `REMOVED_FIELDS` and `normaliseRemovedFields`, run after `normaliseOldPath`. `normaliseWait` works out an old wait's `resolvableBy` itself (a review was ended by remediation, any other wait by its stage), as `resolvableBy` in `pipeline.ts` did. `applyPark` gives a wait with no `resolvableBy` the stage it parks at. `ParkOptions.kind` is `"runner"`; `ParkOptions.consumedAnswerAt` is gone. Comments that described `failed`, `timone retry`, the floor or the consumed answer as live were rewritten. `normaliseOldPath` and `STOPPED_BEFORE_REMOVAL` are unchanged.
+- `src/daemon/runs.test.ts` — case (1): two tests. 21 tests deleted, 16 re-based (below). 41c's describe, its helpers and its fixture are unchanged.
+- `src/daemon/pipeline.ts` — as above. `StageFacts` holds `label` and `ownsBranch`; a step with no session is `{ spawns: false }`. The row comments that spoke of waits, `next`, `built` or `inBuild` were removed; the comments on models and branches stay.
+- `src/daemon/pipeline.test.ts` — case (3): 13 tests. 39 tests deleted, 3 re-based (below).
+- `src/daemon/gates.ts`, `src/daemon/gates.test.ts` — deleted (3 tests). Nothing imported `GateDecision` or `clarifyingRounds` once `readGate` went.
+- `src/adapters/ticketing.ts` — deleted `CLARIFICATION_MARKER`, `STAGE_HANDED_MARKER`, `upsertComment` on the interface, and `carriesMarker` with its helper `withoutPictures`, whose one caller was `gates.ts`.
+- `src/adapters/github-tickets.ts` — the forge's `upsertComment` deleted. `src/adapters/github-tickets.test.ts` — its describe (5 tests) and its line in *every call this adapter makes can be scoped to a repository*.
+- `src/adapters/ticketing.stubs.ts` — not changed: it has no `upsertComment` stub.
+- `src/daemon/outcomes.test.ts`, `src/runner/replay/cases.ts` — each has a local `STAGE_HANDED_MARKER` holding the text exactly as recorded, as 41g did for the "Step finished" line. The import went.
+- `src/runner/actions.test.ts` — the type check names `tryMergeChunkZero`, in the import and the two lines of the check.
+- `src/daemon/chunk-zero.ts` — `mergeChunkZero` deleted; what its comment said about the required approval now sits on `tryMergeChunkZero`. `failedComment` import gone.
+- `src/daemon/chunk-zero.test.ts` — the `mergeChunkZero` test deleted, and the helpers only it used. The approval check stays, renamed (below).
+- `src/daemon/session.ts` — `failedComment` deleted, nothing else.
+- `src/git.ts`, `src/git.test.ts` — `uncommittedFiles` and its 3 tests deleted; `mkdirSync` import gone.
+- `src/channels/conversation.ts` — deleted. Once `TerminalChannel` went, nothing implemented or called the seam.
+- `src/channels/terminal.ts` — only `takeoverCommand` stays. `src/channels/terminal.test.ts` — only its test stays (16 deleted).
+- `src/daemon/step-session.ts`, `src/guards/checkouts.test.ts` — comments only.
+- `src/commands/takeover.ts` — the printed line and the help text only.
+- `doc/plans/phases/reports/phase-41-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **`failure`, `consumedAnswerAt`, `reAsksAfterAnswer` and `wait.acknowledgedAt` stay in the schema.** 41c's fixture carries all four (#21 and #88 `failure`, #88 `consumedAnswerAt`, #91 `reAsksAfterAnswer`, #24 `acknowledgedAt`), and 41c's tests (1) and (2) compare the loaded run with the fixture's run whole. Stripping the fields breaks both tests (shown below), and the prompt says those tests pass unchanged. `failure` also fails the plan's own test: 41c's cancelled runs keep it (41c decision 1). Nothing sets any of the four to a value now. `setStage`, `complete`, `cancel` and `applyPark` still clear the first two, as before, so a run the runner touches loses them as it did; `src/runner/actions.ts:863` says so and stays true. `acknowledgedAt` is also still copied by `waitOf` in `src/daemon/session.ts`, which this slice could only touch for `failedComment`.
+2. **The wait's `kind` stays, with one value.** The runner reads it: `handBack` in `src/runner/driver.ts:841` and `settle` in `src/runner/session.ts:469` keep a wait's words only when its kind is `runner`.
+3. **An old kind of wait on a run that is not parked is read as the runner's.** 41c converts only parked runs. With `runner` the only kind in the schema, a run claimed by the old code while still holding its gate wait would make the whole ledger fail to load. This is case (1)'s second test.
+4. **Transitions kept:** every move the runner's path makes — `picked-up → parked` (a run the runner puts on its wait before it looks, and a takeover of a ticket with no run), `active → active` (a claim, then the session), `active → done` and `parked → done` (the runner's `end_run`; `src/runner/session.ts` says a run ends only from `active` or `parked`), and every move into `cancelled`. Removed: the `failed` row, every move into `failed`, and `active → picked-up` (only `unstarted` made it).
+5. **`TERMINAL` and `SETTLED` now hold the same two statuses.** Both stay; they answer different questions. Their comments say so.
+6. **`carriesMarker` and `withoutPictures` were deleted, though the amendment does not name them.** Their one caller was `gates.ts`, deleted here, and they live in `ticketing.ts`, which is in this slice's files. **`conversation.ts` was deleted whole**, not only `inviteToConversation`: with `TerminalChannel` gone, `recordConversationOutcome` and the four types had no user but the test of the seam.
+7. **The takeover's printed line** is now *"Picking up scratch-app #6 here. When you end this session, the runner reads the ticket and decides what comes next."* Its help text is *"Work on a ticket in this terminal, then give it back to the runner"*. Both say what happens now, as 41g's prompt does.
+8. **Tests re-based where an old kind or a deleted method was only the starting state.** In `runs.test.ts`, ten tests and the helper `parkedBranchless` park on `runner` instead of `gate`, `conversation` or `review`. *records what a parked run is waiting for, and where the gate starts* does too, and is renamed *…, and when the wait opened*. *leaves finished runs alone, however old* cancels its second run instead of failing it. *has nothing more to reclaim once it has reclaimed* parks the stale run on the runner's wait, which is what the cycle now does with one. *shows another process's claim to a guard that has itself written nothing* asserts through `occupyingRun` only. *moves a wait with repark…* and *refuses a wait no stage can end* use `runner`. In `pipeline.test.ts`: *keeps the breakdown on chunk zero's branch, at process stage 5* → *keeps the breakdown on chunk zero's branch* (the branch assertion only); *gives every stage the daemon spawns a session for a declared model* → *gives every stage a session is started for a declared model* (every stage but `charting`); *declares nothing for a stage no session is ever started for* lost its `isBuilt` line. In `chunk-zero.test.ts`: *…cannot be written without the approval that allows the merge, as the daemon's form cannot* lost its last clause.
+
+Tests deleted, because what they test is deleted (88):
+
+- `runs.test.ts` (21): *the answer a run has read and not acted on* (2); *a run parked on something nothing written can resolve* (2); *the floor under a stage that does not notice* (6); *promotion* › promotes when a run fails, too; *reopenForTakeover* › refuses a run that has not failed; *the heartbeat, …* › frees the project the moment a stale run is failed; *two processes writing the one ledger* › lets only one of two processes resume the same parked run (with its helper, a copy of the old `resumeAnswered`); *a failed run stops waiting* (2); *a run whose holder died* (4); *a wait that says what can end it* › says remediation ends a review, because nothing else acts on one.
+- `pipeline.test.ts` (39): *routeAfterTriage* (5); *the stage graph* (15 of 18: every test of `stageAfter`, `waitFor`, `isBuilt`, `processStage` or `runsUnattended`); *inBuild* (3); *readGate* (6); *concludeConversation* (3); *one name per step* › the three tests of `stageFromLabel`; *the escalation wait* (4).
+- `gates.test.ts` (3), `git.test.ts` (3), `github-tickets.test.ts` (5), `terminal.test.ts` (16), `chunk-zero.test.ts` (1).
+
+1399 = 1472 − 88 + 15 new. Test files: 56 (`gates.test.ts` gone).
+
+**Validation evidence.**
+
+*(1) A ledger carrying every removed field loads, and the loaded runs carry none of them* (`runs.test.ts` › *fields only the old code wrote are dropped when the ledger is read (41h)*). Written before the change, with a done run, a parked run and a cancelled run carrying `askCheck`, `deaths`, `refusal` and `carried`, and an active run holding a gate wait. Red:
+
+```
+× … > loads a ledger carrying each of them, and gives runs that carry none of them
+  → expected { id: 'scratch-app#30/1', …(12) } to deeply equal { id: 'scratch-app#30/1', …(10) }
+  +   "carried": [ { "at": "2026-09-20T10:00:00Z", "stage": "execution", … } ],
+  +   "deaths": [ "the machine running it stopped" ],
+× … > reads an old kind of wait on a run that is not parked as the runner's, and still loads
+  -   "kind": "runner",
+  +   "kind": "gate",
+Tests  2 failed | 139 skipped (141)
+```
+
+Green after the change: `Tests  6 passed | 135 skipped (141)` (with 41c's four). The first test also checks that the read leaves the file as it was, and that the next write drops the fields.
+
+*(2) 41c's fixture loads as 41c's tests say, and they pass unchanged.* The ten tests on `ledger-before-166.json` (four in `runs.test.ts`, three in `poll.test.ts`, three in `status.test.ts`) pass before and after. Before: `Tests  10 passed | 281 skipped (291)`. After: `Tests  10 passed | 260 skipped (270)`; the same ten names, the same result. The three describes hash the same at HEAD and now (`d13a638e94d1`, `d10aa04249d5`, `b06f13de786a`), `git diff` shows no change to 41c's helpers in `runs.test.ts`, and the fixture is unchanged. This cannot be red first. What it guards is shown by adding `failure`, `consumedAnswerAt` and `reAsksAfterAnswer` to `REMOVED_FIELDS`, then restoring (`diff` against a saved copy empty):
+
+```
+× … > loads each failed run as cancelled, keeping what stopped it, …
+  → expected { id: 'scratch-app#21/1', …(12) } to deeply equal { id: 'scratch-app#21/1', …(13) }
+× … > loads each old kind of wait as the runner's, keeping what it waits on and when it opened
+  → expected { id: 'ivtrends#91/1', …(10) } to deeply equal { id: 'ivtrends#91/1', …(11) }
+Tests  2 failed | 2 passed | 137 skipped (141)
+```
+
+A copy of the real ledger (131 runs) also loads with the new code; its runs carry no `askCheck`, `deaths` or `carried`, and the read leaves the copy unchanged.
+
+*(3) For every step, the table gives the same label, model, effort and `ownsBranch` as on `main`* (`pipeline.test.ts` › *what the runner reads from the step table (41h)*, 13 tests; the expected table is written out by hand from `main`, where `pipeline.ts` equals HEAD). Written before the change: `Tests  13 passed | 67 skipped (80)`. It cannot be red first. Two breaks in `pipeline.ts`, each restored (`git diff --stat` empty):
+
+```
+execution owns no branch:
+× … > gives execution the same label, model, effort and branch as on main
+  → expected { label: 'building', …(3) } to deeply equal { label: 'building', …(3) }
+Tests  1 failed | 12 passed | 67 skipped (80)
+delivery's effort raised to high:
+× … > gives delivery the same label, model, effort and branch as on main
+  → expected { label: 'delivering', …(3) } to deeply equal { label: 'delivering', …(3) }
+Tests  1 failed | 12 passed | 67 skipped (80)
+```
+
+Kept after the change: `pipeline.test.ts` `Tests  41 passed (41)`.
+
+Validation commands, as run in this repository:
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+> tsc
+src/commands/cancel.test.ts(54,7): error TS2322: Type '"gate"' is not assignable to type '"runner"'.
+src/commands/cancel.ts(278,10): error TS2678: Type '"failed"' is not comparable to type '"queued" | … | "cancelled"'.
+src/commands/daemon.test.ts(109,11): error TS2561: … 'upsertComment' does not exist in type 'TicketingAdapter'. …
+src/commands/status.test.ts(244,48), (340,11), (527,9): error TS2322: Type '"failed"' is not assignable to type …
+src/commands/takeover.ts(181,10): error TS2678: Type '"failed"' is not comparable to type …
+src/daemon/poll.test.ts(441,7), (454,7): error TS2322: Type '"conversation"' / '"gate"' is not assignable to type '"runner"'.
+src/daemon/poll.test.ts(601,13), (987,11), (1642,13), (4300,13): error TS2561: … 'upsertComment' does not exist …
+src/daemon/step-session.test.ts(217,7): error TS2322: Type '"gate"' is not assignable to type '"runner"'.
+src/runner/actions.test.ts(161,5), src/runner/driver.test.ts(113,11), src/runner/replay/recording.ts(513,11): error TS2561: … 'upsertComment' …
+(exit 2; the implicit-any errors that follow from the same lines are left out here)
+$ npm test 2>&1 | tail -5          # run on its own, since the build stops the line above
+ × a run the runner waits on > opens the session bound to no step, even for a run that stopped at a step
+ Test Files  1 failed | 55 passed (56)
+      Tests  1 failed | 1398 passed (1399)
+$ grep -rnw "stageAfter\|routeAfterTriage\|inBuild\|readStageOutcome" src --include='*.ts' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' ; echo "exit: $? (expected 1)"
+exit: 1 (expected 1)
+$ npm run --silent replay -- --dry 2>&1 | tail -3
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+```
+
+Every build error is in a file outside this slice's list. The one failing test is `takeover.test.ts:1316`, which reads the old printed line. In a scratch copy of this tree with the edits below applied: `tsc --noEmit` exit 0, `npm run build` exit 0, `Tests  1399 passed (1399)`, dry replay `19 of 19 cases passed.`
+
+- [x] PRD-05.R1's hint holds: no table in code picks the next step. `next` and `stageAfter` no longer exist; the grep exits 1. **PASS**
+- [x] `RunStatus` no longer has `failed`. The word stays in the code that reads an old ledger (`normaliseOldPath`, `STOPPED_BEFORE_REMOVAL`), and in comments that say it was removed. **PASS in `runs.ts`.** Two `case "failed":` lines remain outside this slice's files (below), and they are what stops the build.
+- [x] Red-green evidence for each of the three cases is in this section. Case (1) was seen red, then green. Cases (2) and (3) cannot be red; the breaks above show each can fail. **PASS**
+- `npm run build && npm test`: **FAIL** in this repository, for the lines below only. **PASS** in the scratch copy with them applied.
+- Dry replay: 19 of 19. **PASS**
+
+**What the orchestrator must grant.** The edits, file by file. None changes behaviour; each follows from something this slice deleted.
+
+- `src/commands/takeover.ts` — delete `case "failed":` (line 181) and the two comment lines above it.
+- `src/commands/cancel.ts` — delete `case "failed":` (line 278) and the eleven comment lines above it, which describe cancelling a failure.
+- `src/commands/status.test.ts` — `status: "failed"` becomes `status: "cancelled"` at lines 244, 340 and 527, the status the ledger reads such a run as. The `failure` fields beside them stay valid.
+- `src/commands/cancel.test.ts:54`, `src/daemon/step-session.test.ts:217` and `:241` — `kind: "gate"` becomes `kind: "runner"`.
+- `src/daemon/poll.test.ts` — delete the constant `invitation` and the helpers `parkedOnConversation` and `parkedOnGate` that alone read it (lines 428–458; unused since 41b, as 41e noted); delete `upsertComment` from the five fakes that define it (lines 176, 601, 987, 1642–1658, 4300–4302) and `"upsertComment"` from `WRITE_CALLS` (line 1565).
+- `src/commands/daemon.test.ts:109`, `src/daemon/hooks.test.ts:617`, `src/commands/takeover.test.ts:170`, `src/runner/actions.test.ts:161`, `src/runner/driver.test.ts:113` — delete the fake's `upsertComment` line. (`hooks.test.ts` and `takeover.test.ts` compile either way; their line is dead.)
+- `src/runner/replay/recording.ts:513–515` — delete the replay forge's `upsertComment`. Nothing calls it; the dry replay passes without it.
+- `src/commands/takeover.test.ts:1316` — the expected line becomes `"Picking up scratch-app #6 here. When you end this session, the runner reads the ticket and decides what comes next."`.
+
+**Still dead, and why it stays.**
+
+- `failure`, `consumedAnswerAt` and `reAsksAfterAnswer` on a run, `acknowledgedAt` on a wait, and the code that clears them (`setStage`, `complete`, `cancel`, `applyPark`) — `src/daemon/runs.ts`. 41c's tests compare its fixture whole (decision 1). To remove them: change 41c's expected runs in `runs.test.ts` to leave the four out, add them to `REMOVED_FIELDS` (and strip `wait.acknowledgedAt` beside the old kind), drop `acknowledgedAt` from `waitOf` in `src/daemon/session.ts` and from `ParkOptions`, and reword `src/runner/actions.ts:863`.
+- `ParkOptions.acknowledgedAt` — `src/daemon/runs.ts`; only `waitOf` in `src/daemon/session.ts` passes it, from the kept field.
+- Everything in the list above, until it is granted.
+
+**What the next reader must know.**
+
+- `dist/` is not cleaned by `tsc`: `dist/daemon/gates.*` and `dist/channels/conversation.*` stay until it is. Nothing imports them.
+- `src/adapters/command-runner.test.ts:99` names `upsertComment` in a comment that tells how a fault was found on 2026-08-22. It is history and was not in this slice's files.
+- The ADRs and plans that name the deleted functions are records and were not edited.
+- **Refactoring I would do but did not:** merge `TERMINAL` and `SETTLED` into one list now that they are equal, or keep both and let one be defined as the other. Rename `escalationPrompt` and `StoppedRun` as 41g suggested. The runner's own `RunnerDriverDeps.consult` could use the `Consult` type (41f).
+
+### ✏ 2026-09-30 — 41h finished under the plan's second amendment
+
+**Built.** (a) The twelve edits listed above under *What the orchestrator must grant* are applied, exactly as they were checked in the scratch copy. (b) `failure`, `consumedAnswerAt`, `reAsksAfterAnswer` and the wait's `acknowledgedAt` are removed from the run's schema and stripped when the ledger is read, as the other four removed fields are. `ParkOptions.acknowledgedAt` is gone. So are the clears that existed only for these fields: in `setStage`, `complete`, `cancel` and `applyPark`. `waitOf` no longer copies `acknowledgedAt`. A run the old code failed keeps its reason in `cancellation`: `normaliseOldPath` writes it there before `failure` is stripped. The build and the whole suite pass. Decision 1 above, and the first item under *Still dead*, no longer hold.
+
+**Files touched, in addition to the list above.**
+
+- The twelve files of (a): `src/commands/takeover.ts`, `src/commands/cancel.ts`, `src/commands/status.test.ts`, `src/commands/cancel.test.ts`, `src/daemon/step-session.test.ts`, `src/daemon/poll.test.ts`, `src/commands/daemon.test.ts`, `src/daemon/hooks.test.ts`, `src/commands/takeover.test.ts`, `src/runner/actions.test.ts`, `src/runner/driver.test.ts`, `src/runner/replay/recording.ts`.
+- `src/daemon/runs.ts` — the four fields out of the schema and into `REMOVED_FIELDS` (`acknowledgedAt` is stripped from the wait in `normaliseRemovedFields`); `ParkOptions.acknowledgedAt` and the clears deleted; the comments that said why the fields stayed, deleted.
+- `src/daemon/runs.test.ts` — case (1)'s ledger now carries the four fields too, and its check after a write names them. 41c's tests (1) and (2) compare against a new helper, `before166Read`: the fixture's run without the four fields, written out by hand. Only the expected runs of #21, #88 (test 1) and the loop over #90, #91, #24, #92, #93 (test 2) use it; it differs from the fixture only for #21, #88, #91 and #24. What each test checks is unchanged.
+- `src/daemon/session.ts` — `waitOf` stops copying `acknowledgedAt`, with its comment.
+- `src/runner/actions.ts` — the comment near line 863 now says `setStage` changes only the stage, and that the two fields it cleared were removed.
+- `src/commands/status.test.ts` — beyond (a): two fixtures, in *a run whose daemon died under it* › frees the project… and *who the closing line names* › names in its closing line exactly the tickets…, set their reason as `cancellation` instead of `failure`. The field no longer exists, so they no longer compiled. Neither test reads the reason.
+
+`poll.test.ts` and `status.test.ts` needed no change for 41c's tests: none of their expected values carries one of the four fields.
+
+**Evidence for (a).** After `git apply` of the patch checked above (`shasum` 29961fd8…), each of the twelve files is byte-for-byte the scratch copy's (`cmp`). Then, before (b): `tsc --noEmit` exit 0, `npm run build` exit 0, `Tests  1399 passed (1399)`.
+
+**Evidence for (b).**
+
+*Case (1), extended.* Seen red with the four fields added to its ledger, before they were removed:
+
+```
+× … > loads a ledger carrying each of them, and gives runs that carry none of them
+  → expected { id: 'ivtrends#96/1', …(10) } to deeply equal { id: 'ivtrends#96/1', …(9) }
+  +   "reAsksAfterAnswer": 1,
+  +     "acknowledgedAt": "2026-09-29T14:02:00Z",
+Tests  1 failed | 1 passed | 118 skipped (120)
+```
+
+Green after: both case (1) tests pass.
+
+*Case (2), again.* After the schema change and before the test change, 41c's tests (1) and (2) failed on the fields, as expected: `expected { id: 'scratch-app#21/1', …(12) } to deeply equal { …(13) }` and `expected { id: 'ivtrends#91/1', …(10) } to deeply equal { …(11) }`. After the expected runs changed, all ten tests on 41c's fixture pass: `Tests  10 passed | 260 skipped (270)`. Three breaks in the conversion, each restored (`diff` against a saved copy empty):
+
+```
+break 1 — a failed run's reason loses its prefix:
+× … > loads each failed run as cancelled, keeping what stopped it, …
+× renderStatus — the runs the old code left in the ledger > says where each kind of run stands, and names no command
+Tests  2 failed | 8 passed | 260 skipped (270)
+break 2 — an old kind of wait on a parked run is left as it was:
+× … > loads each old kind of wait as the runner's, …
+  → expected { id: 'ivtrends#93/1', …(10) } to deeply equal { id: 'ivtrends#93/1', …(10) }
+Tests  1 failed | 9 passed | 260 skipped (270)
+break 3 — `failure` is no longer stripped:
+× (all ten) → Invalid daemon state file "…/state.json": runs.2: Unrecognized key: "failure"; runs.6: Unrecognized key: "failure"
+Tests  10 failed | 260 skipped (270)
+restored: Tests  10 passed | 260 skipped (270)
+```
+
+*The real ledger.* A fresh copy (never the file itself) carried `failure` on 5 runs, `consumedAnswerAt` on 2, `reAsksAfterAnswer` on 9, `askCheck` on 10, `deaths` on 1, `carried` on 4, and 4 failed runs. Read with the new code: `131 runs loaded`; statuses `cancelled 19, done 104, parked (runner) 7, active 1`; the loaded runs carry only `branch cancellation createdAt flags heartbeatAt holder id pr project seq sessionId stage status ticket updatedAt wait`; the copy is unchanged by the read. `git status --short .timone` is empty.
+
+**Validation commands, run again.**
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+> tsc
+ Test Files  56 passed (56)
+      Tests  1399 passed (1399)
+$ grep -rnw "stageAfter\|routeAfterTriage\|inBuild\|readStageOutcome" src --include='*.ts' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' ; echo "exit: $? (expected 1)"
+exit: 1 (expected 1)
+$ npm run --silent replay -- --dry 2>&1 | tail -3
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+```
+
+The test count is unchanged by the amendment: case (1) was extended, not added to. 1399 = 1472 − 88 + 15.
+
+- [x] PRD-05.R1's hint holds: no table in code picks the next step. `next` and `stageAfter` no longer exist; the grep exits 1. **PASS**
+- [x] `RunStatus` no longer has `failed`. As a run's status, the word is left only in `normaliseOldPath`, which reads an old ledger, and in 41c's fixture. The other `"failed"` strings in `src/` are a preview's state and the runner's `WakeEnd` kind. **PASS**
+- [x] Red-green evidence for each of the three cases is in this section and the one above. **PASS**
+- `npm run build && npm test`: 1399 passed. **PASS**
+- Dry replay: 19 of 19. **PASS**
+
+**What is still dead, or out of date.**
+
+- `src/commands/takeover.ts`, in the `cancelled` arm of `resolveTakeover`: a comment says the reason "lives in `cancellation` rather than `failure`". `failure` no longer exists. The file was granted only for the printed line, the help text and the `failed` arm, so it was left.
+- `src/adapters/command-runner.test.ts:99` still names `upsertComment`, in a comment that records how a fault was found. Left on purpose.
+- `dist/daemon/gates.*` and `dist/channels/conversation.*` stay until `dist/` is cleaned.

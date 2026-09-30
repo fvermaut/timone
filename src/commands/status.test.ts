@@ -241,7 +241,7 @@ describe("renderStatus", () => {
   it("ignores finished runs when deciding what a project is doing", () => {
     const runs = [
       run({ project: "scratch-app", ticket: 6, status: "done" }),
-      run({ project: "scratch-app", ticket: 5, status: "failed" }),
+      run({ project: "scratch-app", ticket: 5, status: "cancelled" }),
     ];
     expect(lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app")).toMatch(
       /idle/i,
@@ -337,8 +337,8 @@ describe("renderStatus — a run whose daemon died under it", () => {
         run({
           project: "scratch-app",
           ticket: 7,
-          status: "failed",
-          failure: "the machine running it stopped before the work was finished",
+          status: "cancelled",
+          cancellation: "the machine running it stopped before the work was finished",
         }),
       ],
       { stateExists: true },
@@ -524,9 +524,9 @@ describe("renderStatus — who the closing line names", () => {
       run({
         project: "other-app",
         ticket: 2,
-        status: "failed",
+        status: "cancelled",
         stage: "planning",
-        failure: "the model was unavailable",
+        cancellation: "the model was unavailable",
       }),
     ];
 

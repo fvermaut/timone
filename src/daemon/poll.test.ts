@@ -173,7 +173,6 @@ const noPullRequests = {
   },
   async postPullRequestComment(): Promise<void> {},
   async upsertPullRequestComment(): Promise<void> {},
-  async upsertComment(): Promise<void> {},
   async closeTicket(): Promise<void> {},
 };
 
@@ -425,38 +424,6 @@ describe("pollOnce — resuming a run whose human answered", () => {
     return { adapter, posted };
   }
 
-  const invitation = {
-    author: "fvermaut",
-    body: `${MACHINE_MARKER}\n\ncome and talk to me`,
-    createdAt: "2026-08-03T10:00:00Z",
-    fromTimone: true,
-  };
-
-  /** A run parked on a conversation opened at `invitation`. */
-  function parkedOnConversation(store: RunStore): Run {
-    const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "session-1");
-    return store.park(run.id, {
-      waitingOn: "a conversation in your terminal",
-      kind: "conversation",
-      stage: "clarification",
-      waitCursor: invitation.createdAt,
-    });
-  }
-
-  /** A run parked on a gate opened at `invitation`. */
-  function parkedOnGate(store: RunStore): Run {
-    const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "session-1");
-    store.claimBranch(run.id, "timone/6-message-box");
-    return store.park(run.id, {
-      waitingOn: "your answer on the ticket",
-      kind: "gate",
-      stage: "requirements",
-      waitCursor: invitation.createdAt,
-    });
-  }
-
   it("starts a run left queued behind a park that no longer holds anything", async () => {
     // The exact ledger phase 11 left on disk: #4 parked holding the project
     // under the old rule, #6 queued behind it forever. Written as a file
@@ -598,7 +565,6 @@ describe("reclaiming a run its daemon left behind", () => {
       },
       async postPullRequestComment(): Promise<void> {},
       async upsertPullRequestComment(): Promise<void> {},
-      async upsertComment(): Promise<void> {},
       async closeTicket(_project, number, reason): Promise<void> {
         closed.push(`${number}:${reason}`);
       },
@@ -984,7 +950,6 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
     async upsertPullRequestComment(project, number, marker, body): Promise<void> {
       upserts.push({ project: project.name, number, marker, body });
     },
-    async upsertComment(): Promise<void> {},
     async closeTicket(): Promise<void> {},
   };
   return { adapter, upserts };
@@ -1562,7 +1527,6 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
   /** Every call on the seam whose effect a human can see. */
   const WRITE_CALLS = [
     "postComment",
-    "upsertComment",
     "applyLabel",
     "closeTicket",
     "postPullRequestComment",
@@ -1638,23 +1602,6 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
           createdAt: `2026-08-03T13:${String(clock++).padStart(2, "0")}:00Z`,
           fromTimone: true,
         });
-      },
-      async upsertComment(_project, number, marker, body): Promise<void> {
-        calls.push({ call: "upsertComment", number, body });
-        const comments = thread(number);
-        const existing = comments.find(
-          (comment) => comment.fromTimone && comment.body.includes(marker),
-        );
-        if (existing === undefined) {
-          comments.push({
-            author: "fvermaut",
-            body: stamp(body),
-            createdAt: `2026-08-03T13:${String(clock++).padStart(2, "0")}:00Z`,
-            fromTimone: true,
-          });
-        } else {
-          existing.body = stamp(body);
-        }
       },
       async applyLabel(_project, number, label): Promise<void> {
         calls.push({ call: "applyLabel", number, body: label });
@@ -4296,9 +4243,6 @@ function forgeBefore166(given: {
       },
       async postComment(project, number, body): Promise<void> {
         writes.push(`comment on ${project.name}#${number}: ${body}`);
-      },
-      async upsertComment(project, number): Promise<void> {
-        writes.push(`comment kept up to date on ${project.name}#${number}`);
       },
       async applyLabel(project, number, label): Promise<void> {
         writes.push(`label ${label} on ${project.name}#${number}`);

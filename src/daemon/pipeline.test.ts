@@ -1,43 +1,17 @@
-import { assert, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import type { TicketComment } from "../adapters/ticketing.js";
-import type { GateDecision } from "./gates.js";
 import {
   APPROVAL_RECORD_MODEL,
   CLASSIFICATIONS,
   PIPELINE_STAGES,
   classificationFromLabels,
-  concludeConversation,
   effortFor,
-  inBuild,
-  isBuilt,
   modelFor,
   ownsBranch,
-  processStage,
-  readGate,
-  stageFromLabel,
   stageLabel,
-  routeAfterTriage,
-  runsUnattended,
-  stageAfter,
-  waitFor,
   wayfinderStage,
   type PipelineStage,
-  type PipelineTransition,
 } from "./pipeline.js";
-
-const reply: TicketComment = {
-  author: "fvermaut",
-  body: "whatever",
-  createdAt: "2026-08-03T11:00:00Z",
-  fromTimone: false,
-};
-
-const approval: GateDecision = { kind: "approve", comment: reply };
-
-function changeRequest(feedback: string): GateDecision {
-  return { kind: "change-request", feedback, comment: { ...reply, body: feedback } };
-}
 
 describe("classificationFromLabels", () => {
   it.each(CLASSIFICATIONS)("reads triage:%s off the labels", (kind) => {
@@ -75,8 +49,7 @@ describe("wayfinderStage", () => {
     // unroutable on purpose — an index nobody answers — and the effect was
     // that fvermaut's "ok go ahead and write the spec" on `ivtrends` #1 had
     // nowhere to land. It is now a ticket of its own kind, and the stage it
-    // enters is **not** `wayfinding`: see the graph, where wayfinding still
-    // has nothing following it.
+    // enters is **not** `wayfinding`.
     expect(wayfinderStage(["timone", "wayfinder:map"])).toBe("charting");
   });
 
@@ -91,91 +64,13 @@ describe("wayfinderStage", () => {
   });
 });
 
-describe("routeAfterTriage", () => {
-  it("sends a feature to the clarification conversation", () => {
-    expect(routeAfterTriage("feature")).toEqual({
-      kind: "advance",
-      stage: "clarification",
-    });
-  });
-
-  it("sends a chore straight to planning, and planning stops for nobody", () => {
-    // process.md stage 1: chore / technical enabler → stage 5, unanchored.
-    const chore = routeAfterTriage("chore");
-
-    expect(chore).toEqual({ kind: "advance", stage: "planning" });
-
-    // ✏ ADR-0030 D3. The route is untouched and the ruling is about where it
-    // lands: a chore skips requirements and the breakdown, and since D1 the
-    // stage it does reach no longer gates — so it meets no human between
-    // triage and its pull request, on purpose. Asserted as the property *and*
-    // as the value above, because either alone can be satisfied by the wrong
-    // change: the value by gating `planning` again and calling it a fix, the
-    // property by quietly re-pointing the chore at some other ungated stage.
-    assert(chore.kind === "advance");
-    expect(waitFor(chore.stage)).toBe("none");
-  });
-
-  it("sends a bug straight to planning, because triage already read enough", () => {
-    // ✏ Was the feedback stage, retired by
-    // [ADR-0036](../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md).
-    // A bug now means what D3 says: the code breaks a promise that is written
-    // down. Triage established that by reading the register, so there is
-    // nothing left to diagnose. A complaint about a promise nobody made is a
-    // `feature`, and a wrong document is a `chore`.
-    expect(routeAfterTriage("bug")).toEqual({
-      kind: "advance",
-      stage: "planning",
-    });
-  });
-
-  it("terminates a question, which is answered rather than built", () => {
-    const transition = routeAfterTriage("question");
-
-    expect(transition.kind).toBe("finish");
-    expect(transition).toMatchObject({ reason: expect.any(String) });
-  });
-
-  it("routes every classification the process defines", () => {
-    for (const kind of CLASSIFICATIONS) {
-      expect(routeAfterTriage(kind).kind).not.toBe("wait");
-    }
-  });
-});
-
 describe("the stage graph", () => {
-  it("runs clarification → requirements → breakdown → planning → execution", () => {
-    // ✏ ADR-0030 D1 put `breakdown` between the specification and the plan.
-    // The breakdown is the list of pieces the initiative is built in, approved
-    // once; `planning` then runs once per piece and writes that piece's phase
-    // file with no gate of its own.
-    expect(stageAfter("clarification")).toBe("requirements");
-    expect(stageAfter("requirements")).toBe("breakdown");
-    expect(stageAfter("breakdown")).toBe("planning");
-    expect(stageAfter("planning")).toBe("execution");
-  });
-
-  it("waits on a conversation at clarification, and gates the two written proposals", () => {
-    // ✏ The gate moved with the artifact (ADR-0030 D1). `planning` is
-    // deliberately wait-free now: what the human approved is the breakdown,
-    // and a per-chunk phase file re-opening a gate they already answered is
-    // the shape the split exists to prevent.
-    expect(waitFor("clarification")).toBe("conversation");
-    expect(waitFor("requirements")).toBe("gate");
-    expect(waitFor("breakdown")).toBe("gate");
-    expect(waitFor("planning")).toBe("none");
-  });
-
-  it("keeps the breakdown on chunk zero's branch, at process stage 5", () => {
+  it("keeps the breakdown on chunk zero's branch", () => {
     // ADR-0028 D2: requirements and the breakdown share one branch. `breakdown`
-    // owns a branch so the project stays held across the gate — `claimBranch`
-    // returns early when the run already has one, so it inherits rather than
-    // cuts. `processStage: 5` because it is written by the planning stage in
-    // `process.md`'s sense (ADR-0030 D1's answered objection).
-    expect(processStage("breakdown")).toBe(5);
-    expect(processStage("planning")).toBe(5);
+    // owns a branch so the project stays held across the approval —
+    // `claimBranch` returns early when the run already has one, so it
+    // inherits rather than cuts.
     expect(ownsBranch("breakdown")).toBe(true);
-    expect(isBuilt("breakdown")).toBe(true);
   });
 
   it("owns no branch before the requirements stage, and one from there on", () => {
@@ -186,173 +81,9 @@ describe("the stage graph", () => {
     expect(ownsBranch("execution")).toBe(true);
   });
 
-  it("knows which stages can actually be run right now", () => {
-    // A stage the graph calls built but nothing can run is a lie the daemon
-    // acts on: it would start a session with no prompt. Each flips as the
-    // slice that builds it lands — requirements in 12e, planning in 12f,
-    // the back half across phase 13.
-    expect(isBuilt("triage")).toBe(true);
-    expect(isBuilt("clarification")).toBe(true);
-    expect(isBuilt("requirements")).toBe(true);
-    expect(isBuilt("planning")).toBe(true);
-    // The back half exists in the graph from 13b but flips built only as the
-    // slice supplying each stage's prompt lands: execution in 13c,
-    // verification in 13d, delivery in 13e.
-    expect(isBuilt("execution")).toBe(true);
-    expect(isBuilt("verification")).toBe(true);
-    expect(isBuilt("delivery")).toBe(true);
-    // Every stage the graph can route to must be runnable. This is the whole
-    // assertion, and the individual lines above are its worked examples.
-    expect(PIPELINE_STAGES.filter((stage) => !isBuilt(stage))).toEqual([]);
-  });
-
-  it("sends a remediation through the full check again — never straight back to the PR", () => {
-    // ADR-0016's invariant: nothing lands on the pull request unverified.
-    expect(stageAfter("remediation")).toBe("verification");
-    expect(ownsBranch("remediation")).toBe(true);
-    expect(isBuilt("remediation")).toBe(true);
-  });
-
-  it("runs execution → verification → delivery, and nothing follows delivery", () => {
-    expect(stageAfter("execution")).toBe("verification");
-    expect(stageAfter("verification")).toBe("delivery");
-    // Nothing follows delivery in the graph: the run ends at the PR, whose
-    // merge or close is a terminal event, not a stage.
-    expect(stageAfter("delivery")).toBeUndefined();
-  });
-
-  it("maps the back half onto process.md stages 6, 7 and 8", () => {
-    expect(processStage("execution")).toBe(6);
-    expect(processStage("verification")).toBe(7);
-    expect(processStage("delivery")).toBe(8);
-  });
-
-  it("waits on nothing through the build and check, then on a review", () => {
-    expect(waitFor("execution")).toBe("none");
-    expect(waitFor("verification")).toBe("none");
-    expect(waitFor("delivery")).toBe("review");
-  });
-
   it("holds the branch through the whole back half", () => {
     expect(ownsBranch("verification")).toBe(true);
     expect(ownsBranch("delivery")).toBe(true);
-  });
-
-  it("runs the whole back half unattended", () => {
-    expect(runsUnattended("execution")).toBe(true);
-    expect(runsUnattended("verification")).toBe(true);
-    expect(runsUnattended("delivery")).toBe(true);
-  });
-
-  it("resolves a wayfinder decision ticket at process stage 2, on a conversation", () => {
-    // Stage 2 at scale (ADR-0010) — the same requirements discovery as the
-    // interview, so the same process stage and the same kind of wait. It
-    // holds no branch: a decision ticket produces a decision, not a commit.
-    expect(processStage("wayfinding")).toBe(2);
-    expect(waitFor("wayfinding")).toBe("conversation");
-    expect(ownsBranch("wayfinding")).toBe(false);
-    expect(isBuilt("wayfinding")).toBe(true);
-  });
-
-  it("resolves a research ticket unattended, and ends its own run", () => {
-    // Nobody waits on a research ticket — its CTA promises the machine will
-    // resolve it. ✏ Built in phase 27: what was missing was the daemon's
-    // ability to judge such a session's outcome, and `afterStage` now has a
-    // branch of its own for it.
-    expect(processStage("research")).toBe(2);
-    expect(waitFor("research")).toBe("none");
-    expect(runsUnattended("research")).toBe(true);
-    expect(ownsBranch("research")).toBe(false);
-    expect(isBuilt("research")).toBe(true);
-    // Nothing follows it, exactly as nothing follows `wayfinding`: a research
-    // answer feeds the map, and advancing on one would write requirements off
-    // a single lookup.
-    expect(stageAfter("research")).toBeUndefined();
-  });
-
-  it("carries the map itself at process stage 2, and hands it to stage 3", () => {
-    // ADR-0024's fourth ruling. The map is the effort's own ticket: it holds
-    // no branch and runs no session of its own, and what follows it is the
-    // specification the whole map was finding its way to — which is why the
-    // `next` is here and not on `wayfinding`.
-    expect(processStage("charting")).toBe(2);
-    expect(waitFor("charting")).toBe("conversation");
-    expect(ownsBranch("charting")).toBe(false);
-    expect(isBuilt("charting")).toBe(true);
-    expect(stageAfter("charting")).toBe("requirements");
-  });
-
-  it("still has nothing following a decision ticket, now that the map has", () => {
-    // **The property most easily broken by adding the stage beside it.** A
-    // decision ticket's answer resolves that ticket and ends its run; a PRD
-    // written off one answer is the fault this clause exists to prevent
-    // (ADR-0010, and ADR-0024's own words: "decision tickets are unchanged
-    // and `wayfinding` still has nothing following it"). Asserted directly,
-    // beside the map's `next`, so the two can never be confused for one.
-    expect(stageAfter("wayfinding")).toBeUndefined();
-    expect(stageAfter("charting")).toBe("requirements");
-  });
-
-  it("ends a decision ticket's run where the ticket ends, rather than in a PRD", () => {
-    // The trap the clarification row sets: `stageAfter("clarification")` is
-    // requirements, so a decision ticket parked at a stage copied from it
-    // would advance into writing requirements off a single answer. The
-    // destination artifact is the whole map's to hand over, once it closes.
-    expect(stageAfter("wayfinding")).toBeUndefined();
-    expect(stageAfter("research")).toBeUndefined();
-  });
-
-  it("leaves the conversation stage to a human-opened session", () => {
-    // A conversation needs someone at the keyboard; the daemon's sessions
-    // run with nobody there.
-    expect(runsUnattended("clarification")).toBe(false);
-    expect(runsUnattended("triage")).toBe(true);
-    expect(runsUnattended("requirements")).toBe(true);
-    // ✏ Both halves of the split run unattended. `runsUnattended` is derived
-    // from the wait being a conversation, so `planning` losing its gate does
-    // not change this answer — asserted for both so the split is on record as
-    // having left it alone.
-    expect(runsUnattended("breakdown")).toBe(true);
-    expect(runsUnattended("planning")).toBe(true);
-  });
-
-  it("describes every stage it can route to", () => {
-    for (const stage of PIPELINE_STAGES) {
-      expect(typeof waitFor(stage)).toBe("string");
-      expect(typeof ownsBranch(stage)).toBe("boolean");
-    }
-  });
-});
-
-describe("inBuild", () => {
-  // ADR-0052: from the run's last human agreement to its pull request, an
-  // escalation is a fault to file rather than a wait to serve — but only
-  // inside the build. `inBuild` is the pure fact `afterStage` branches on.
-
-  it("is true for the three build stages", () => {
-    expect(inBuild("execution")).toBe(true);
-    expect(inBuild("verification")).toBe(true);
-    expect(inBuild("delivery")).toBe(true);
-  });
-
-  it("is false for every stage before the build, and for remediation", () => {
-    expect(inBuild("triage")).toBe(false);
-    expect(inBuild("clarification")).toBe(false);
-    expect(inBuild("wayfinding")).toBe(false);
-    expect(inBuild("charting")).toBe(false);
-    expect(inBuild("research")).toBe(false);
-    expect(inBuild("requirements")).toBe(false);
-    expect(inBuild("breakdown")).toBe(false);
-    expect(inBuild("planning")).toBe(false);
-    // Remediation acts on a pull request a human already reviewed: its
-    // escalation path stays ADR-0033's, not ADR-0052's carve-out.
-    expect(inBuild("remediation")).toBe(false);
-  });
-
-  it("is exhaustive over every declared stage", () => {
-    for (const stage of PIPELINE_STAGES) {
-      expect(typeof inBuild(stage)).toBe("boolean");
-    }
   });
 });
 
@@ -440,9 +171,11 @@ describe("the model and effort each stage runs on", () => {
     expect(modelFor("triage")).not.toBe(APPROVAL_RECORD_MODEL);
   });
 
-  it("gives every stage the daemon spawns a session for a declared model", () => {
+  it("gives every stage a session is started for a declared model", () => {
+    // ✏ 2026-09-30: was every stage the daemon started of its own accord.
+    // The runner starts a session for every stage but the map's.
     for (const stage of PIPELINE_STAGES) {
-      if (!isBuilt(stage) || !runsUnattended(stage)) continue;
+      if (stage === "charting") continue;
       expect(modelFor(stage), `${stage} declares no model`).toEqual(
         expect.any(String),
       );
@@ -467,7 +200,6 @@ describe("the model and effort each stage runs on", () => {
     // ✏ And the second way to be one, since ADR-0024: the map's stage is
     // built, and what happens at it is a ticket waiting rather than a session
     // running. The session that follows the go-ahead is stage 3's.
-    expect(isBuilt("charting")).toBe(true);
     expect(modelFor("charting")).toBeUndefined();
     expect(effortFor("charting")).toBeUndefined();
   });
@@ -479,102 +211,10 @@ describe("the model and effort each stage runs on", () => {
   });
 });
 
-describe("readGate", () => {
-  it("advances a waiting run exactly one stage on approval", () => {
-    expect(readGate("requirements", approval)).toEqual({
-      kind: "advance",
-      stage: "breakdown",
-    });
-    // ✏ Was `planning → execution`. `planning` is no longer a gate at all
-    // (ADR-0030 D1), so asking it to read one now throws — the second gate is
-    // the breakdown, and what it advances to is the per-chunk planning stage.
-    expect(readGate("breakdown", approval)).toEqual({
-      kind: "advance",
-      stage: "planning",
-    });
-  });
-
-  it("re-enters the same stage on a change request, carrying the words", () => {
-    const transition = readGate("requirements", changeRequest("it's not about phones"));
-
-    expect(transition).toEqual({
-      kind: "repeat",
-      stage: "requirements",
-      feedback: "it's not about phones",
-    });
-  });
-
-  it("never advances on a change request, at either gated stage", () => {
-    // ✏ Derived rather than written out, so the pair it loops over is the pair
-    // that actually gates. Written out, this test would have gone on asserting
-    // a property of `planning` after `planning` stopped having it.
-    for (const stage of PIPELINE_STAGES.filter((s) => waitFor(s) === "gate")) {
-      expect(readGate(stage, changeRequest("no")).kind).toBe("repeat");
-    }
-  });
-
-  it("waits while the human has not answered", () => {
-    expect(readGate("requirements", undefined)).toEqual({ kind: "wait" });
-  });
-
-  it("refuses to read a gate at a stage that has none", () => {
-    // A gate reply at a stage that waits on a conversation means the caller
-    // has lost track of what the run is doing — a loud failure, not a guess.
-    expect(() => readGate("clarification", approval)).toThrow(/clarification/);
-  });
-
-  it("uses one mechanism for both gated stages", () => {
-    // 12f's "no second copy of the approval logic", asserted by construction:
-    // the two stages differ only in what follows them.
-    const gated = PIPELINE_STAGES.filter((stage) => waitFor(stage) === "gate");
-
-    // ✏ Was `["requirements", "planning"]`. ADR-0030 D1 moved the second gate
-    // off the phase file and onto the breakdown — the list of pieces, approved
-    // once for the whole initiative. The set is still exactly two, and this
-    // literal is the alarm that says so: a third gate appearing here is a
-    // decision, not a detail.
-    // ✏ Back to two. Phase 27 added a third for stage 9's diagnosis;
-    // [ADR-0036](../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md)
-    // retired the stage, and its gate went with it. The literal stays the
-    // alarm — a third gate here is a decision.
-    expect(gated).toEqual(["requirements", "breakdown"]);
-    for (const stage of gated) {
-      expect(readGate(stage, approval)).toEqual({
-        kind: "advance",
-        stage: stageAfter(stage),
-      });
-    }
-  });
-});
-
-describe("concludeConversation", () => {
-  it("advances when the human accepted the outcome", () => {
-    expect(concludeConversation("clarification", { accepted: true })).toEqual({
-      kind: "advance",
-      stage: "requirements",
-    });
-  });
-
-  it("keeps waiting when the conversation ended without acceptance", () => {
-    // Someone opened the interview and walked away. Nothing was decided, so
-    // nothing moves — the ticket is still waiting on them.
-    expect(concludeConversation("clarification", { accepted: false })).toEqual({
-      kind: "wait",
-    });
-  });
-
-  it("refuses at a stage that waits on a gate instead", () => {
-    expect(() => concludeConversation("requirements", { accepted: true })).toThrow(
-      /requirements/,
-    );
-  });
-});
-
 describe("one name per step, in one place", () => {
-  // ADR-0035 D3. The name a person reads for a step is now read *back* by the
-  // machinery — an escalation session names the step to carry on at, in these
-  // words — so the map has to be total and unambiguous. It was neither: it
-  // lived in `status.ts` and covered five stages of thirteen.
+  // ADR-0035 D3. The name a person reads for a step has to be total and
+  // unambiguous. It was neither: it lived in `status.ts` and covered five
+  // stages of thirteen.
 
   it("gives every stage a name written for a person", () => {
     // A loop rather than a list, so a stage added later cannot quietly ship
@@ -585,34 +225,10 @@ describe("one name per step, in one place", () => {
     }
   });
 
-  it("round-trips every name back to its own stage", () => {
-    for (const stage of PIPELINE_STAGES) {
-      expect(stageFromLabel(stageLabel(stage))).toBe(stage);
-    }
-  });
-
   it("gives no two stages the same name", () => {
-    // Uniqueness is what makes the round trip a fact rather than a hope: two
-    // stages sharing a name is a handback that starts the wrong one.
+    // Two stages sharing a name would read to a person as one step.
     const labels = PIPELINE_STAGES.map((stage) => stageLabel(stage));
     expect(new Set(labels).size).toBe(labels.length);
-  });
-
-  it("yields nothing for a name nobody defined", () => {
-    // The refusal ADR-0035 D3 asks for. Guessing here starts a session at the
-    // wrong step on a branch of half-built work.
-    expect(stageFromLabel("whatever")).toBeUndefined();
-    expect(stageFromLabel("")).toBeUndefined();
-    expect(stageFromLabel("   ")).toBeUndefined();
-  });
-
-  it("forgives the case and the spacing a session writes it with", () => {
-    // Forgiving about how it was typed, exact about which words: a session
-    // writing "Building" means the same step, and one writing "build" does
-    // not mean anything.
-    expect(stageFromLabel("  Building  ")).toBe("execution");
-    expect(stageFromLabel("BUILDING")).toBe("execution");
-    expect(stageFromLabel("build")).toBeUndefined();
   });
 
   it("keeps the five names `timone status` already shipped", () => {
@@ -634,45 +250,38 @@ describe("one name per step, in one place", () => {
   });
 });
 
-describe("the escalation wait", () => {
-  // ADR-0033. A stage that is handed an answer it may not act on stops and
-  // says so. What the run then waits on is a person, not a comment — so the
-  // kind exists here beside the other three, and the refusal to resume on
-  // written words lives with it.
+describe("what the runner reads from the step table (41h)", () => {
+  // Written out by hand from the table on `main` on 2026-09-30, before the
+  // columns only the old code read were deleted. The runner reads these four
+  // values for every step, so none of them may move when the rest goes.
+  const onMain: Record<
+    PipelineStage,
+    { label: string; model?: string; effort?: string; ownsBranch: boolean }
+  > = {
+    triage: { label: "sorting the request", model: "claude-opus-5-5", effort: "medium", ownsBranch: false },
+    clarification: { label: "asking what you need", model: "claude-opus-5-5", effort: "high", ownsBranch: false },
+    wayfinding: { label: "talking a question through", model: "claude-opus-5-5", effort: "high", ownsBranch: false },
+    charting: { label: "keeping the list of questions", ownsBranch: false },
+    research: { label: "looking something up", model: "claude-opus-5-5", effort: "high", ownsBranch: false },
+    requirements: { label: "writing down what it needs", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
+    breakdown: { label: "working out the pieces", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
+    planning: { label: "preparing the work", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
+    execution: { label: "building", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
+    verification: { label: "checking the result", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
+    delivery: { label: "delivering", model: "claude-opus-5-5", effort: "medium", ownsBranch: true },
+    remediation: { label: "acting on your review", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
+  };
 
-  it("is a kind of park, and no stage declares it as its own wait", () => {
-    // A stage's declared wait is what its *own* session opens when it ends
-    // well. An escalation is the opposite of that: it is written onto a run
-    // whichever stage was running. A stage declaring it would mean every run
-    // reaching that stage escalates.
-    for (const stage of PIPELINE_STAGES) {
-      expect(waitFor(stage)).not.toBe("escalation");
-    }
+  it("has the same steps, in the same order", () => {
+    expect([...PIPELINE_STAGES]).toEqual(Object.keys(onMain));
   });
 
-  it("is not an answer any stage can be handed", () => {
-    // The same refusal `readGate` and `concludeConversation` already make for
-    // each other's answers, asserted for the new kind so nothing routes one
-    // into a stage as though a human had replied.
-    expect(() => readGate("requirements", approval)).not.toThrow();
-    expect(() => concludeConversation("requirements", { accepted: true })).toThrow(
-      /requirements/,
-    );
-  });
-
-  it("carries why the stage stopped, and what it could not get to", () => {
-    const transition: PipelineTransition = {
-      kind: "escalate",
-      reason: "the answer asks me to reword the promises I check against",
-      owed: "delivery",
-    };
-
-    expect(transition.reason).toContain("reword");
-    expect(transition.owed).toBe("delivery");
-  });
-
-  it("can name no stage at all, for a stop with nothing owed after it", () => {
-    const transition: PipelineTransition = { kind: "escalate", reason: "stuck" };
-    expect(transition.owed).toBeUndefined();
+  it.each(PIPELINE_STAGES)("gives %s the same label, model, effort and branch as on main", (stage) => {
+    expect({
+      label: stageLabel(stage),
+      model: modelFor(stage),
+      effort: effortFor(stage),
+      ownsBranch: ownsBranch(stage),
+    }).toEqual(onMain[stage]);
   });
 });

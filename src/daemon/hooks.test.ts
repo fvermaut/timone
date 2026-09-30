@@ -614,7 +614,6 @@ const noPullRequests = {
   },
   async postPullRequestComment(): Promise<void> {},
   async upsertPullRequestComment(): Promise<void> {},
-  async upsertComment(): Promise<void> {},
   async listOpenTickets(): Promise<never[]> {
     return [];
   },

@@ -51,7 +51,7 @@ describe("timone cancel", async () => {
     store.claimBranch(run.id, "timone/6-fiddly-box");
     store.park(run.id, {
       waitingOn: "your approval of the plan",
-      kind: "gate",
+      kind: "runner",
       stage: "planning",
     });
     const { log, lines } = collect();

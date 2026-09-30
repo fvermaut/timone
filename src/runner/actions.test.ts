@@ -12,7 +12,7 @@ import type {
 } from "../adapters/ticketing.js";
 import type { Manifest } from "../manifest.js";
 import { breakdownPath, renderBreakdown } from "../daemon/breakdown.js";
-import { mergeChunkZero, type ChunkZeroDeps } from "../daemon/chunk-zero.js";
+import { tryMergeChunkZero, type ChunkZeroDeps } from "../daemon/chunk-zero.js";
 import { RunStore, type Run } from "../daemon/runs.js";
 import type {
   StepResult,
@@ -158,7 +158,6 @@ function fakeForge(ticket: TicketThread, calls: string[]) {
         state.issueComments.push({ project, number, body });
       }
     },
-    upsertComment: unused("upsertComment"),
     applyLabel: async (_project, _number, label) => {
       calls.push(`label ${label}`);
       state.thread.labels = [...state.thread.labels, label];
@@ -873,8 +872,8 @@ describe("the runner's actions", () => {
     // The merge itself cannot be written without an approval: `tsc` fails on
     // this file if the line below ever compiles. It is never run.
     const mergeWithoutApproval = (deps: ChunkZeroDeps, project: TicketingProject) =>
-      // @ts-expect-error — `mergeChunkZero` requires the approval that allows it (R3).
-      mergeChunkZero(deps, run, project);
+      // @ts-expect-error — `tryMergeChunkZero` requires the approval that allows it (R3).
+      tryMergeChunkZero(deps, run, project);
     expect(mergeWithoutApproval).toBeTypeOf("function");
   });
 

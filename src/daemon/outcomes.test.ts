@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { MACHINE_MARKER, STAGE_HANDED_MARKER } from "../adapters/ticketing.js";
+import { MACHINE_MARKER } from "../adapters/ticketing.js";
 import { askedFor, LONGEST_ASK } from "./outcomes.js";
+
+/**
+ * The line a stage's closing comment opened on when it stopped and asked a
+ * person for help, as the old steps wrote it. Its constant was deleted on
+ * 2026-09-30; the text is kept here so these closing comments read as before.
+ */
+const STAGE_HANDED_MARKER =
+  "🙋 **Needs a person** · written by the machine when a stage stopped and is asking for help";
 
 // timone#144. A stage that hands a run back is parked on what it asked for,
 // and what it asked for is read off its own closing line. The fault: a wait

@@ -167,7 +167,6 @@ const noPullRequests = {
   },
   async postPullRequestComment(): Promise<void> {},
   async upsertPullRequestComment(): Promise<void> {},
-  async upsertComment(): Promise<void> {},
   async closeTicket(): Promise<void> {},
 };
 
@@ -1313,7 +1312,7 @@ describe("a run the runner waits on", () => {
     );
     expect(asked).toEqual([6]);
     expect(said[0]).toBe(
-      "Picking up scratch-app #6 — I couldn't take this one further myself. Over to you.",
+      "Picking up scratch-app #6 here. When you end this session, the runner reads the ticket and decides what comes next.",
     );
   });
 

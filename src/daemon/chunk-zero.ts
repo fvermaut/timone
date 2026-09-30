@@ -10,7 +10,7 @@ import {
   type Chunk,
 } from "./breakdown.js";
 import type { Run, RunStore } from "./runs.js";
-import { failedComment, mergeMessage } from "./session.js";
+import { mergeMessage } from "./session.js";
 import {
   HELD_LABEL,
   HELD_LABEL_DESCRIPTION,
@@ -65,66 +65,29 @@ export type ChunkZeroRefusal = Extract<MergeOutcome, { merged: false }>;
 /**
  * Merge chunk zero — the branch carrying the specification and the approved
  * breakdown — into the project's default branch, with no pull request
- * (ADR-0030 D2). Returns false when it did not happen, having failed the run
- * and said why on the ticket, exactly as a failed approval record does:
- * chunk 1 cuts from the default branch, so a silently failed merge would
- * have it build against a default branch that does not carry the
- * specification, and nothing downstream would notice.
- *
- * This was the old daemon's form. The runner's path merges through
- * {@link tryMergeChunkZero}, which fails nothing (40x): on a project the
- * runner drives, a failed run is one nothing wakes again.
- *
- * ✏ 2026-09-30: nothing calls this any more. The spawner that called it was
- * removed. It stays only because `src/runner/actions.test.ts` still names it
- * in a check that it cannot be written without an approval.
+ * (ADR-0030 D2). Returns the refusal, or undefined when the branch is on the
+ * default branch now. It writes nothing about a refusal: no run is failed and
+ * no ticket is told. What a refusal means for the run, and what the ticket is
+ * told, is the caller's to decide (40x).
  *
  * **`approval` is required, so no caller can merge without one** (PRD-05 R3:
  * only a named person's yes lets work reach a default branch with no pull
- * request). Both paths that close chunk zero merge through here or through
- * {@link tryMergeChunkZero}, and each must name the approval that allows it:
- * the runner's path takes it only from the run record's `approval` entry,
- * and the daemon's from the person's reply it has just read. The check is
- * the compiler's — a call without an approval does not build — so nothing
- * here reads it again.
+ * request). The runner takes it only from the run record's `approval` entry.
+ * The check is the compiler's — a call without an approval does not build —
+ * so nothing here reads it again.
  *
- * {@link attemptMerge} below takes no approval. Only {@link tryMergeChunkZero}
- * may call it.
- */
-export async function mergeChunkZero(
-  deps: ChunkZeroDeps,
-  run: Run,
-  project: TicketingProject,
-  approval: ChunkZeroApproval,
-): Promise<boolean> {
-  const refusal = await tryMergeChunkZero(deps, run, project, approval);
-  if (refusal === undefined) return true;
-
-  const reason =
-    refusal.conflict === true
-      ? "the approved breakdown and the default branch have changes that clash — " +
-        `a merge conflict, and nothing was merged (${refusal.reason}). ` +
-        "Somebody has to decide which side wins; trying again changes nothing."
-      : `could not merge the approved breakdown into the default branch: ${refusal.reason}`;
-  deps.store.fail(run.id, reason);
-  await deps.adapter.postComment(project, run.ticket, failedComment(reason));
-  return false;
-}
-
-/**
- * Merge chunk zero as {@link mergeChunkZero} does, and write nothing about a
- * refusal: no run is failed and no ticket is told. Returns the refusal, or
- * undefined when the branch is on the default branch now.
+ * {@link attemptMerge} below takes no approval. Only this function may call
+ * it.
  *
- * The runner's form (40x). What a refusal means for the run, and what the
- * ticket is told, is the caller's to decide.
+ * ✏ 2026-09-30: `mergeChunkZero`, the old daemon's form, which failed the
+ * run and posted on the ticket, was deleted. Nothing called it.
  */
 export async function tryMergeChunkZero(
   deps: ChunkZeroDeps,
   run: Run,
   project: TicketingProject,
-  // Required and not read: see {@link mergeChunkZero}. Named with an
-  // underscore only so a reader does not look for where it is used.
+  // Required and not read: see above. Named with an underscore only so a
+  // reader does not look for where it is used.
   _approval: ChunkZeroApproval,
 ): Promise<ChunkZeroRefusal | undefined> {
   const branch = deps.store.get(run.id)?.branch;
