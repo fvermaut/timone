@@ -272,7 +272,8 @@
     - GIVEN two tickets on the same project
       WHEN both are ready
       THEN only one runs at a time, as today
-- **Verification hint:** this is [#148](https://github.com/fvermaut/timone/issues/148). Measure it as #148 did: the `observedAt` stamp in `.timone/state.json` must keep moving while a session runs.
+- **Verification hint:** this is [#148](https://github.com/fvermaut/timone/issues/148). Time the runner's wake. Clause 1: the time from the comment, as the forge dates it, to the `woke` entry that carries it in the run record (`timone record`), while the other project's step runs. Clause 2: the second ticket's record shows its try to start a step refused while the first run holds the project, and its next step starts only after a wake on "The project is free now."
+    > ✏ 2026-09-30 — changed for the watched run ([timone#175](https://github.com/fvermaut/timone/issues/175)). It used to say to watch the `observedAt` stamp in `.timone/state.json`. Since 40y that stamp is written only at the start of a cycle, and a runner project is served while it stands still, so it no longer shows what R15 is about ([phase-40-verification.md](../../plans/phases/reports/phase-40-verification.md), re-check after 40y, item 4).
 
 ## R16 — A runner that fails is started again, and the run is not failed for it
 
