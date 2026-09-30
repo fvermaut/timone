@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { ctaComment, ctaFor } from "./cta.js";
-import { BUILD_ESCALATION_PREFIX } from "./faults.js";
 import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
 import { runId, type Run, type RunWait } from "./runs.js";
 
@@ -86,27 +85,6 @@ describe("ctaFor", () => {
     expect(cta.waitingOnYou).toBe(false);
   });
 
-  it("names the exact retry command for a run that stopped early", () => {
-    // ADR-0024's `scratch-app` #13: `timone status` already offers this
-    // command and the ticket does not. One computation, so it cannot.
-    const cta = ctaFor({
-      project: "scratch-app",
-      ticket: 13,
-      run: run({
-        project: "scratch-app",
-        ticket: 13,
-        status: "failed",
-        stage: "planning",
-        failure: "the model was unavailable",
-      }),
-    });
-
-    expect(cta.command).toBe("timone retry scratch-app#13");
-    expect(cta.needFromYou).toBe(
-      "run the command and I'll pick it up from where it stopped.",
-    );
-  });
-
   /**
    * ✏ 29j — **this test used to pin a promise the machine no longer keeps.**
    * It asserted *"nothing — while this ticket is open and marked for me I'll
@@ -159,9 +137,9 @@ describe("ctaFor", () => {
 
   /**
    * Neither way on is a `timone` command, so there is none to print. A slice
-   * that reached for `timone retry <project>#<step>` here would be naming a
-   * command the ledger refuses outright — that is blocker G, and D7 is why
-   * this is the answer instead.
+   * that reached for `timone retry <project>#<step>` here would have named a
+   * command the ledger refused outright, and one since removed — that is
+   * blocker G, and D7 is why this is the answer instead.
    */
   it("offers no command, because neither way out is one", () => {
     const cta = ctaFor({
@@ -197,25 +175,9 @@ describe("ctaFor", () => {
   });
 
   /**
-   * The neighbouring branches, one assertion each. Branch order in `ctaFor`
-   * is the only thing keeping them apart from the one above.
+   * The neighbouring branch, in one assertion. Branch order in `ctaFor` is
+   * the only thing keeping it apart from the one above.
    */
-  it("leaves a failed run saying it failed, with its own retry command", () => {
-    const cta = ctaFor({
-      project: "scratch-app",
-      ticket: 13,
-      run: run({
-        project: "scratch-app",
-        ticket: 13,
-        status: "failed",
-        failure: "the session died",
-      }),
-    });
-
-    expect(cta.needFromYou).not.toContain("timone:held");
-    expect(cta.command).toBe("timone retry scratch-app#13");
-  });
-
   it("leaves a run under way saying it is under way", () => {
     const cta = ctaFor({
       project: "scratch-app",
@@ -470,8 +432,8 @@ describe("ctaFor", () => {
   });
 
   it("heads a stopped ticket with what happened, in the words already used", () => {
-    // `parkedComment`'s headline for a ticket nothing can move, and
-    // `failedComment`'s for one that broke — the reader has seen both before.
+    // `parkedComment`'s headline for a ticket nothing can move — the reader
+    // has seen it before.
     const stopped = ctaFor({
       project: "scratch-app",
       ticket: 4,
@@ -483,17 +445,9 @@ describe("ctaFor", () => {
         wait: { on: "the next stage to be built" },
       }),
     });
-    const broken = ctaFor({
-      project: "scratch-app",
-      ticket: 13,
-      run: run({ project: "scratch-app", ticket: 13, status: "failed" }),
-    });
 
     expect(stopped.headline).toBe(
       "That's as far as I can take this one for now.",
-    );
-    expect(broken.headline).toBe(
-      "Something went wrong while I was working on this.",
     );
   });
 });
@@ -552,25 +506,6 @@ describe("ctaFor — the wayfinder map's two states", () => {
     // conversation for that yet" is worse than one naming none.
     expect(ctaFor({ project: "ivtrends", ticket: 1, run: map("conversation") }).command)
       .toBeUndefined();
-  });
-
-  it("says a map that broke what a broken ticket says, not what a map says", () => {
-    // The map's branch is a *parked* branch. A run that failed, is queued or
-    // is being worked reads exactly as any other ticket in that state — the
-    // map is not an exception to the rest of the computation.
-    const cta = ctaFor({
-      project: "ivtrends",
-      ticket: 1,
-      run: run({
-        project: "ivtrends",
-        ticket: 1,
-        status: "failed",
-        stage: "charting",
-      }),
-    });
-
-    expect(cta.headline).toBe("Something went wrong while I was working on this.");
-    expect(cta.command).toBe("timone retry ivtrends#1");
   });
 });
 
@@ -673,111 +608,6 @@ describe("ctaComment", () => {
     expect(body.split("\n").at(-1)).toBe(
       "**What I need from you:** the next stage to be built",
     );
-  });
-});
-
-describe("ctaFor — a run the machine broke itself", () => {
-  it("says the fault is its own when the link went, and still names the way back", () => {
-    const cta = ctaFor({
-      project: "ivtrends",
-      ticket: 1,
-      run: run({
-        project: "ivtrends",
-        ticket: 1,
-        status: "failed",
-        failure: "the session stopped on an API error (server_error)",
-      }),
-    });
-
-    expect(cta.headline).toBe("I could not reach the service I run on, so I stopped.");
-    expect(cta.waitingOnYou).toBe(false);
-    expect(cta.command).toBe("timone retry ivtrends#1");
-  });
-
-  it("says the login was refused, and that it needs fixing before the command works", () => {
-    const cta = ctaFor({
-      project: "ivtrends",
-      ticket: 1,
-      run: run({
-        project: "ivtrends",
-        ticket: 1,
-        status: "failed",
-        failure: "the session stopped on an API error (authentication_failed)",
-      }),
-    });
-
-    expect(cta.headline).toBe(
-      "My login to the service I run on was refused, so I stopped.",
-    );
-    expect(cta.needFromYou).toMatch(/login needs fixing first/);
-  });
-
-  it("says the login ran out, which is a different thing from being refused", () => {
-    // #55: the ticket used to say the login was refused and that fvermaut had
-    // to fix it. Nothing was refused and nothing of his was broken — the
-    // token simply ran out mid-run, and by the time this note is written the
-    // daemon has already tried again and failed again.
-    const cta = ctaFor({
-      project: "ivtrends",
-      ticket: 24,
-      run: run({
-        project: "ivtrends",
-        ticket: 24,
-        status: "failed",
-        failure:
-          "the session stopped on an API error (authentication_failed: Failed to " +
-          "authenticate. API Error: 401 OAuth access token has expired.)",
-      }),
-    });
-
-    expect(cta.headline).toBe(
-      "My login ran out while I was working, and did not come back, so I stopped.",
-    );
-    expect(cta.needFromYou).toMatch(/login needs fixing first/);
-    expect(cta.command).toBe("timone retry ivtrends#24");
-  });
-
-  it("keeps the old words for a failure that was about the work", () => {
-    const cta = ctaFor({
-      project: "ivtrends",
-      ticket: 1,
-      run: run({
-        project: "ivtrends",
-        ticket: 1,
-        status: "failed",
-        failure: "the planning stage said it finished, but nothing was committed",
-      }),
-    });
-
-    expect(cta.headline).toBe("Something went wrong while I was working on this.");
-  });
-
-  /**
-   * ADR-0052: a build stage asking an unanswerable question is now a fault
-   * to file, never a wait to serve. `session.ts`'s `failBuildEscalation`
-   * writes the reason with `BUILD_ESCALATION_PREFIX` ahead of the stage's own
-   * account, and this is the CTA that reads it back — worded as the
-   * machine's own defect, with no "waiting on you" framing, matching the
-   * shape of the technical-fault branches just above it.
-   */
-  it("says the question itself was the defect, when a build stage escalated", () => {
-    const cta = ctaFor({
-      project: "ivtrends",
-      ticket: 1,
-      run: run({
-        project: "ivtrends",
-        ticket: 1,
-        status: "failed",
-        failure:
-          `${BUILD_ESCALATION_PREFIX}You told me to go ahead, but two of the ` +
-          "promises I check against cannot pass as they are worded.",
-      }),
-    });
-
-    expect(cta.headline).not.toBe("Something went wrong while I was working on this.");
-    expect(cta.waitingOnYou).toBe(false);
-    expect(cta.needFromYou).not.toMatch(/waiting on you/i);
-    expect(cta.command).toBe("timone retry ivtrends#1");
   });
 });
 

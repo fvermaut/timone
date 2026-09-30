@@ -9,7 +9,6 @@ import { registerDaemonCommand } from "./commands/daemon.js";
 import { registerGuardrailsCommand } from "./commands/guardrails.js";
 import { registerProjectsCommand } from "./commands/projects.js";
 import { registerRecordCommand } from "./commands/record.js";
-import { registerRetryCommand } from "./commands/retry.js";
 import { registerStageCommand } from "./commands/stage.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { registerTranscriptCommand } from "./commands/transcript.js";
@@ -28,6 +27,15 @@ function packageVersion(): string {
   ) as { version: string };
   return pkg.version;
 }
+
+/**
+ * What `timone retry` says since it was removed. The runner reads the ticket
+ * each time it wakes, so writing there is how to ask it for anything
+ * ([ADR-0060](../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+ * D6).
+ */
+const RETRY_REMOVED =
+  "`timone retry` was removed. Write on the ticket instead: say what you want done.";
 
 /**
  * Build the root commander program. Future sub-phases register commands here
@@ -49,7 +57,17 @@ export function buildProgram(): Command {
   registerTranscriptCommand(program);
   registerRecordCommand(program);
   registerTakeoverCommand(program);
-  registerRetryCommand(program);
+  // Kept only to answer a person who still types it: with any arguments, it
+  // says the sentence above and exits 1. Hidden, so the help does not offer it.
+  program
+    .command("retry", { hidden: true })
+    .argument("[anything...]")
+    .allowUnknownOption()
+    .helpOption(false)
+    .action(() => {
+      console.error(RETRY_REMOVED);
+      process.exitCode = 1;
+    });
   registerCancelCommand(program);
   registerStageCommand(program);
 

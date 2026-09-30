@@ -2,6 +2,7 @@ import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -2092,7 +2093,7 @@ describe("pollOnce — requests a human left for the daemon", () => {
     const { run } = store.register("scratch-app", 31);
     store.activate(run.id, "session-1");
     store.complete(run.id);
-    enqueue(statePath, { kind: "retry", project: "scratch-app", ticket: 31 });
+    enqueue(statePath, { kind: "takeover-ended", project: "scratch-app", ticket: 31 });
     const { adapter } = fakeAdapter({ "scratch-app": [] });
     const { sessions } = fakeWakes();
     const { runner } = runnerFor({ store, adapter, manifest, sessions });
@@ -2102,7 +2103,7 @@ describe("pollOnce — requests a human left for the daemon", () => {
     const second = await pollOnce(deps);
 
     expect(first.applied).toEqual([]);
-    expect(first.errors.join(" ")).toContain("could not apply retry scratch-app#31");
+    expect(first.errors.join(" ")).toContain("could not apply takeover-ended scratch-app#31");
     expect(pending(statePath).requests).toEqual([]);
     expect(second.errors).toEqual([]);
   });
@@ -3354,26 +3355,44 @@ describe("the runner drives its projects in the poll cycle", () => {
     ]);
   });
 
-  it("settles a retry asked of a runner project with the refusal, and leaves the run as it was", async () => {
-    // ADR-0060 D6 removes `timone retry` for these projects: the runner reads
-    // the ticket each time it wakes, so writing there is the way to ask.
+  it("settles a retry request left from before the command was removed, and says so once", async () => {
+    // `timone retry` was removed on 2026-09-30. A request an older command
+    // left beside the ledger is written here by hand, in the shape it wrote.
     const { store, statePath } = newStoreAt();
     const run = waitingForRunner(store, 31);
-    enqueue(statePath, { kind: "retry", project: "scratch-app", ticket: 31 }, { by: "fvermaut" });
+    mkdirSync(requestsDir(statePath), { recursive: true });
+    const leftover = join(requestsDir(statePath), "2026-09-29T18-00-00-000Z-000000-0a1b2c3d.json");
+    writeFileSync(
+      leftover,
+      `${JSON.stringify(
+        {
+          askedAt: "2026-09-29T18:00:00.000Z",
+          askedBy: "fvermaut",
+          body: { kind: "retry", project: "scratch-app", ticket: 31 },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
     const manifest = manifestWith("scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(31)] });
     const { sessions } = fakeWakes();
     const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const deps = { manifest, store, adapter, statePath, runner };
 
-    const result = await pollOnce({ manifest, store, adapter, statePath, runner });
+    const first = await pollOnce(deps);
+    const second = await pollOnce(deps);
     await runner.drain();
 
-    expect(result.applied).toEqual([]);
-    expect(result.errors).toEqual([
+    expect(first.applied).toEqual([]);
+    expect(first.errors).toEqual([
       "could not apply retry scratch-app#31 asked by fvermaut: " +
-        "This project is run by the runner. Write on the ticket instead: say what you want done.",
+        "the retry command was removed. Write on the ticket instead: say what you want done.",
     ]);
-    expect(pending(statePath).requests).toEqual([]);
+    expect(readdirSync(requestsDir(statePath))).toEqual([]);
+    expect(second.applied).toEqual([]);
+    expect(second.errors).toEqual([]);
     expect(store.get(run.id)).toEqual(run);
   });
 

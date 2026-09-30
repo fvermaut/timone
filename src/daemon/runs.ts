@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { HELD_LABEL } from "./steps.js";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
@@ -10,12 +9,9 @@ import {
   type Holder,
   type Liveness,
 } from "./holder.js";
-import { BUILD_ESCALATION_PREFIX, isBuildEscalation } from "./faults.js";
 import {
   PIPELINE_STAGES,
-  inBuild,
   resolvableBy,
-  stageAfter,
   type PipelineStage,
   type WaitKind,
 } from "./pipeline.js";
@@ -29,9 +25,10 @@ import {
  * is unfinished and will resume where it stopped.
  *
  * `cancelled` is the abandoned ending, and it is deliberately **not**
- * `failed`: `failed` means the work broke and `timone retry` re-arms it, while
- * a run that should never have existed must not be one keystroke from
- * restarting. See {@link TRANSITIONS}, where it is the second dead end.
+ * `failed`: `failed` meant the work broke, and `timone retry` re-armed it
+ * until that command was removed on 2026-09-30. A run that should never have
+ * existed must not be one keystroke from restarting. See {@link TRANSITIONS},
+ * where it is the second dead end.
  */
 export type RunStatus =
   | "queued"
@@ -70,12 +67,13 @@ const TERMINAL: readonly RunStatus[] = ["done", "failed", "cancelled"];
  *
  * - {@link TERMINAL} is about the **project lock**. A failed run is over, so
  *   it stops holding the project and whatever queued behind it is promoted.
- * - Settledness is about the **ticket's succession**. A failed chunk is still
- *   its ticket's current business, because `timone retry <project>#<ticket>`
- *   re-arms *that* chunk in place. Letting the ticket move on would open a
+ * - Settledness is about the **ticket's succession**. A failed chunk was
+ *   still its ticket's current business, because `timone retry
+ *   <project>#<ticket>` re-armed *that* chunk in place, until the command was
+ *   removed on 2026-09-30. Letting the ticket move on would have opened a
  *   chunk beside the failure — the poll loop registers every marked ticket on
  *   every cycle, so within a minute — and the one-session guard would then
- *   refuse the retry, deleting the only road a broken chunk has back to
+ *   have refused the retry, deleting the only road a broken chunk had back to
  *   working.
  *
  * A chunk advances only on success — or on being abandoned. `cancelled` is
@@ -114,7 +112,7 @@ function isSettled(status: RunStatus): boolean {
  * ([timone#161](https://github.com/fvermaut/timone/issues/161)). One stage
  * finished and the session for the next one never began, so no session is
  * running and nothing broke: the run is back to waiting for the daemon to
- * start it, exactly as a run fresh from `timone retry` is. Left `active`, it
+ * start it, exactly as a run just picked up is. Left `active`, it
  * was held by a daemon that was not running anything for it, and nothing ever
  * started it again.
  */
@@ -125,13 +123,14 @@ const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   parked: ["active", "done", "failed", "cancelled"],
   done: [],
   // Abandoned, and abandoned for good. An empty list here is the whole of
-  // "`cancelled` is deliberately not `failed`": a failure can be re-armed by
-  // `timone retry`, and a run that should never have existed must not be one
-  // keystroke from restarting. A ticket that deserves another go gets a
+  // "`cancelled` is deliberately not `failed`": a failure could be re-armed by
+  // `timone retry` until it was removed, and a run that should never have
+  // existed must not be one keystroke from restarting. A ticket that deserves another go gets a
   // *fresh chunk* from `register`, because cancellation settles this one.
   cancelled: [],
-  // Failure has two roads out, and they are not the same road. `timone retry`
-  // re-arms the run at the stage it failed; `timone cancel` abandons it. The
+  // Failure had two roads out, and they were not the same road. `timone
+  // retry` re-armed the run at the stage it failed, until it was removed on
+  // 2026-09-30; `timone cancel` abandons it. The
   // second was added by fvermaut's ruling of 2026-08-15, because without it
   // clearing a failed run meant retrying it *first* — and the window between
   // the two commands is one the daemon polls, so a run somebody was trying to
@@ -282,7 +281,8 @@ const runSchema = z.strictObject({
    * session killed after that left the run `failed` with nothing pointing at
    * the answer, so `timone retry` had nothing to rewind and re-posted the
    * original question instead. That is a silent re-ask, which is not the trade
-   * ADR-0023 accepted: it undertook that retry rewinds the marker.
+   * ADR-0023 accepted: it undertook that retry rewinds the marker. (`timone
+   * retry` was removed on 2026-09-30.)
    *
    * **Present only while the answer is outstanding.** It is written when the
    * answer is consumed, survives `activate` and {@link RunStore.fail} — the
@@ -290,11 +290,11 @@ const runSchema = z.strictObject({
    * on: a new wait ({@link applyPark}), the next stage ({@link
    * RunStore.setStage}), or the run resolving ({@link RunStore.complete}). So a
    * marker that is present always names an answer nobody has finished with, and
-   * `timone retry` can rewind to it without asking the human anything.
+   * `timone retry` could rewind to it without asking the human anything.
    *
    * Optional, and its absence is a legitimate state: a run that consumed
    * nothing has none, and neither has one parked by a daemon predating the
-   * field — `retry` falls back to the cursor for those, as it did before.
+   * field — `retry` fell back to the cursor for those, as it had before.
    */
   consumedAnswerAt: z.string().optional(),
   /**
@@ -851,7 +851,7 @@ export class RunStore {
    * one is live, since {@link register} only opens a new sequence number once
    * nothing of the ticket is live, and otherwise the chunk the ticket last
    * finished on. That is what the surfaces addressed to a human ask for:
-   * `timone retry`, `timone takeover` and a ticket's call to action all speak
+   * `timone takeover`, `timone cancel` and a ticket's call to action all speak
    * about a ticket, and the chunk they mean is its most recent one, whether or
    * not it is still going.
    *
@@ -870,9 +870,9 @@ export class RunStore {
    * another lives, which is what keeps a ticket's work a *sequence* rather
    * than a fan-out. `parked` counts as living — a run waiting on a human is
    * unfinished — and so does **`failed`**, which is the surprising half: a
-   * failed chunk is what `timone retry` re-arms, so the ticket is not done
-   * with it. Only `done` (and, from 22b, `cancelled`) ends a chunk's claim on
-   * its ticket. See {@link isSettled} for why that is not {@link TERMINAL}.
+   * failed chunk was what `timone retry` re-armed, until the command was
+   * removed on 2026-09-30, so the ticket was not done with it. Only `done`
+   * (and, from 22b, `cancelled`) ends a chunk's claim on its ticket. See {@link isSettled} for why that is not {@link TERMINAL}.
    */
   liveRunForTicket(project: string, ticket: number): Run | undefined {
     this.refresh();
@@ -989,9 +989,10 @@ export class RunStore {
    *
    * **A failed chunk is unsettled**, so it is handed back rather than
    * succeeded (ADR-0029): a chunk advances only on success, and `timone retry`
-   * is how a broken one recovers. A failure that nobody will retry is ended by
-   * `timone cancel` instead, which settles it — that is what lets its ticket
-   * move on rather than being held for ever by a chunk that will never run.
+   * was how a broken one recovered, until the command was removed on
+   * 2026-09-30. A failure that nobody will retry is ended by `timone cancel`
+   * instead, which settles it — that is what lets its ticket move on rather
+   * than being held for ever by a chunk that will never run.
    *
    * Until phase 22 it was idempotent by the ticket in *any* state, finished
    * included, which is what made a ticket and a run the same object. A ticket
@@ -1185,12 +1186,10 @@ export class RunStore {
    * a later reader builds on, so it is cleared here, where the wait ends.
    *
    * **What survives is {@link Run.consumedAnswerAt}, deliberately** (ADR-0023).
-   * That is the marker `timone retry` rewinds a re-armed run to, and it is the
-   * one fact about a dead session that is still owed to somebody: they wrote an
-   * answer, it was read, and nothing acted on it. The `waitCursor` fallback
-   * beside it in `retry` is only ever reached on a **parked** run — a failed one
-   * takes the `store.retry` path — so clearing the cursor here costs that
-   * fallback nothing.
+   * It is the one fact about a dead session that is still owed to somebody:
+   * they wrote an answer, it was read, and nothing acted on it. `timone retry`
+   * rewound a re-armed run to it, until the command was removed on
+   * 2026-09-30.
    */
   fail(id: string, reason: string): Run {
     return this.transition(id, "failed", (run) => {
@@ -1259,94 +1258,6 @@ export class RunStore {
     this.promoteHead(project);
     this.persist();
     return this.loadedRunningRun(project);
-  }
-
-  /**
-   * Re-arm a failed run at the stage it failed, keeping its branch, stage
-   * and pull request — they are what "picking up where it stopped" means.
-   * The transition guards still apply: a project that has moved on to
-   * another run refuses, because re-arming would put two sets of work on
-   * one repository.
-   *
-   * What it does *not* keep is everything belonging to the attempt that
-   * died: its failure, its session, and its guardrail flags. The flags were
-   * missed until 14g, where a re-armed run carried a warning about a file
-   * whose cause had already been fixed — so `timone status` complained about
-   * something that no longer existed. They are cleared here rather than in
-   * `runRetry` so there is one answer to what re-arming resets.
-   */
-  retry(id: string): Run {
-    const run = this.mutable(id);
-    // Before the generic refusal, and written as a sentence: `timone retry`
-    // prints whatever this throws, verbatim and with no case of its own for a
-    // cancelled run, so these words are what a person sees after typing a
-    // command. What they need is why there is nothing to retry and what would
-    // start the work again — never that a status failed a comparison.
-    if (run.status === "cancelled") {
-      const because =
-        run.cancellation === undefined || run.cancellation === ""
-          ? "."
-          : `: ${run.cancellation}.`;
-      // The way out depends on whether this ticket is a **step**. A dropped
-      // step is held — by the label — and stays stopped until a human takes
-      // the hold off. Any other ticket's cancelled chunk is settled, so the
-      // next cycle simply opens a fresh one, which is what it has always
-      // done. One sentence for each, and neither is said to the other.
-      const held =
-        this.loadedInitiativeFor(run.project, run.ticket) !== undefined
-          ? `remove the \`${HELD_LABEL}\` label from the ticket and I'll start ` +
-            "it afresh, or close it and I'll carry on without it."
-          : "reopen the ticket and mark it for me, and I'll start it afresh " +
-            "on my next pass.";
-      throw new Error(
-        `${run.project} #${run.ticket} was cancelled${because} Cancelled work ` +
-          `isn't retried — ${held}`,
-      );
-    }
-    if (run.status !== "failed") {
-      throw new Error(
-        `Run ${id} is ${run.status}, not failed — only a failed run can be retried`,
-      );
-    }
-    // **A run filed for asking a question inside the build resumes at the
-    // *next* stage, carrying what it asked**
-    // ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
-    // The stage did its work and left its artifact on the branch; only its
-    // last sentence was out of order, and re-running it buys the same
-    // sentence again — which is literally what `ivtrends` #93 did when it was
-    // retried. Nothing files a run this way any anymore, so this is the way
-    // back for the ones filed before that changed.
-    const escalated =
-      run.failure !== undefined &&
-      isBuildEscalation(run.failure) &&
-      run.stage !== undefined &&
-      inBuild(run.stage)
-        ? {
-            stage: run.stage,
-            // Without the prefix: it is the daemon's own bookkeeping, and
-            // what rides to the pull request is the stage's words.
-            words: run.failure.slice(BUILD_ESCALATION_PREFIX.length),
-          }
-        : undefined;
-
-    return this.transition(id, "picked-up", (rearmed) => {
-      rearmed.failure = undefined;
-      rearmed.sessionId = undefined;
-      rearmed.flags = [];
-      // Cleared for the flags' reason: it belongs to the attempt that died.
-      // The stage runs again and asks again if it still wants to, and a
-      // question carried twice would reach the pull request twice.
-      rearmed.carried = undefined;
-      if (escalated !== undefined) {
-        rearmed.carried = [
-          { stage: escalated.stage, at: this.now(), words: escalated.words },
-        ];
-        rearmed.stage = stageAfter(escalated.stage) ?? escalated.stage;
-      }
-      // Whoever held the attempt that died is not holding this one. The
-      // holder belongs to the session, as the session id beside it does.
-      rearmed.holder = undefined;
-    });
   }
 
   /**
@@ -1538,9 +1449,9 @@ export class RunStore {
    * ago, which has never ticked, would be reclaimed instantly, and a run left
    * `active` by a daemon predating the field would be immortal. Without
    * taking the later of the two, a heartbeat from a *previous* session
-   * outlives the session that wrote it: a run re-armed by `timone retry`
-   * carries the old tick, and the next cycle reclaims it before it has had a
-   * chance to start. That happened live on 2026-08-07.
+   * outlives the session that wrote it: a re-armed run carries the old tick,
+   * and the next cycle reclaims it before it has had a chance to start. That
+   * happened live on 2026-08-07.
    */
   staleRuns(thresholdMs: number, now?: string): Run[] {
     const cutoff = Date.parse(now ?? this.now()) - thresholdMs;
@@ -1723,18 +1634,6 @@ export class RunStore {
         // most needs to say how far the work has got — and it is not one of
         // its own children, so matching only the steps left it the one ticket
         // in the system with nothing to report.
-        (record.initiative === ticket || record.steps.includes(ticket)),
-    );
-  }
-
-  /** {@link initiativeFor} without a reload, for use inside a mutation. */
-  private loadedInitiativeFor(
-    project: string,
-    ticket: number,
-  ): InitiativeRecord | undefined {
-    return Object.values(this.state.initiatives ?? {}).find(
-      (record) =>
-        record.project === project &&
         (record.initiative === ticket || record.steps.includes(ticket)),
     );
   }
@@ -1943,7 +1842,7 @@ export class RunStore {
  * them apart.
  *
  * **The human never types the sequence.** `timone takeover ivtrends#1` and
- * `timone retry ivtrends#1` still name a ticket, because a ticket is what a
+ * `timone cancel ivtrends#1` still name a ticket, because a ticket is what a
  * person has an opinion about; the sequence is the machine's bookkeeping and
  * is resolved from the ledger.
  */
@@ -2281,7 +2180,7 @@ const STOPPED_BEFORE_REMOVAL = "stopped before the old code was removed: ";
  * code wrote mean nothing to it:
  *
  * - **A failed run becomes cancelled.** Nothing re-arms a failed run any
- *   more: `timone retry` refuses on every project. What stopped it is kept
+ *   more: `timone retry` was removed. What stopped it is kept
  *   where {@link RunStore.cancel} keeps its reason, after
  *   {@link STOPPED_BEFORE_REMOVAL}.
  * - **A parked run's old kind of wait becomes the runner's.** A gate, a

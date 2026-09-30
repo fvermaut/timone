@@ -257,23 +257,10 @@ describe("renderStatus", () => {
     );
   });
 
-  it("mentions a project's last failure rather than hiding it", () => {
-    const runs = [
-      run({
-        project: "scratch-app",
-        ticket: 6,
-        status: "failed",
-        failure: "model unavailable",
-      }),
-    ];
-    const output = renderStatus(manifest, runs, { stateExists: true });
-    expect(output).toMatch(/model unavailable/);
-  });
-
   it("says a cancelled chunk was stopped, without calling it a failure", () => {
     // Typing `timone cancel` must change something the human can see, and
     // what they see must carry the difference the ledger records: abandoned
-    // rather than broken, so no "stopped early" and no retry command.
+    // rather than broken.
     const runs = [
       run({
         project: "scratch-app",
@@ -287,8 +274,6 @@ describe("renderStatus", () => {
     expect(output).toContain(
       "scratch-app #6 was cancelled: its ticket is no longer open and marked for me",
     );
-    expect(output).not.toMatch(/stopped early/);
-    expect(output).not.toMatch(/timone retry/);
     expect(lineFor(output, "scratch-app")).toMatch(/idle/i);
     expect(output).toMatch(/nothing is waiting on you/i);
   });
@@ -375,30 +360,6 @@ describe("renderStatus — the back half of the pipeline", () => {
 });
 
 describe("renderStatus — a run whose daemon died under it", () => {
-  it("says what happened and what to type, without naming a daemon or a run", () => {
-    const output = renderStatus(
-      manifest,
-      [
-        run({
-          project: "scratch-app",
-          ticket: 7,
-          status: "failed",
-          stage: "execution",
-          failure: "the machine running it stopped before the work was finished",
-        }),
-      ],
-      { stateExists: true },
-    );
-
-    expect(output).toContain(
-      "scratch-app #7 stopped early: the machine running it stopped before the work was finished",
-    );
-    expect(output).toContain("timone retry scratch-app#7");
-    // 12c's discipline: nothing here should require knowing what a stage,
-    // a heartbeat, a poll cycle or a marker is.
-    expect(output).not.toMatch(/heartbeat|stale|reclaim|poll|session id/i);
-  });
-
   it("frees the project, so the line reads idle rather than busy", () => {
     const output = renderStatus(
       manifest,
@@ -414,23 +375,6 @@ describe("renderStatus — a run whose daemon died under it", () => {
     );
 
     expect(lineFor(output, "scratch-app")).toContain("idle");
-  });
-
-  it("names the way back for every failure, not only the reclaimed ones", () => {
-    const output = renderStatus(
-      manifest,
-      [
-        run({
-          project: "scratch-app",
-          ticket: 7,
-          status: "failed",
-          failure: "the model was unavailable",
-        }),
-      ],
-      { stateExists: true },
-    );
-
-    expect(output).toContain("timone retry scratch-app#7");
   });
 });
 
@@ -1297,5 +1241,40 @@ describe("renderStatus — the runs the old code left in the ledger", () => {
         "#94 (sorting the request) — waiting: the next thing that happens on this ticket",
       ].join("  ·  "),
     );
+  });
+
+  it("shows no list of failures, and names no command that no longer exists", () => {
+    // The same ledger, read the same way. Its two failed runs read as
+    // cancelled, and `retry` was removed on 2026-09-30.
+    const root = mkdtempSync(join(tmpdir(), "timone-status-"));
+    tempDirs.push(root);
+    const path = join(root, ".timone", "state.json");
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(
+      fileURLToPath(new URL("../daemon/fixtures/ledger-before-166.json", import.meta.url)),
+      path,
+    );
+    const both: Manifest = {
+      projects: {
+        "scratch-app": {
+          repo_url: "https://github.com/fvermaut/scratch-app.git",
+          path: "projects/scratch-app",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+        ivtrends: {
+          repo_url: "https://github.com/fvermaut/ivtrends.git",
+          path: "projects/ivtrends",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+      },
+    };
+
+    const output = renderStatus(both, RunStore.open(path).all(), { stateExists: true });
+
+    expect(output).not.toMatch(/stopped early/);
+    expect(output).not.toMatch(/pick it up from where it stopped/);
+    expect(output).not.toMatch(/\bretry\b/);
   });
 });

@@ -16,7 +16,6 @@
 import { MARK_LABEL } from "../adapters/ticketing.js";
 import { HELD_LABEL } from "./steps.js";
 import { takeoverCommand } from "../channels/terminal.js";
-import { isBuildEscalation, technicalFault } from "./faults.js";
 import { CARRY_ON_WAIT, type Run } from "./runs.js";
 import { RUNNER_DEFAULT_WAIT } from "../runner/session.js";
 
@@ -126,14 +125,10 @@ export interface Cta {
    * Whether the ticket has stopped and is waiting for the human to **say
    * something on it** — what `timone status`'s closing line names.
    *
-   * A run that stopped early needs the human too, and this is false for it:
-   * what it needs is a command rather than an answer, and `timone status`
-   * reports that in its own sentence beside {@link Cta.command}.
-   *
    * **✏ 29j — a *dropped* step needs the human and is still false here**, and
    * the reason is worth writing down because the opposite looks right. Its
    * two ways on are gestures on the tracker rather than a command, so there
-   * is nothing to report beside {@link Cta.command} either — which reads like
+   * is nothing to report beside {@link Cta.command} — which reads like
    * an argument for setting this true. It is not: `timone status` lists every
    * cancelled run with its reason regardless, so the step is never invisible;
    * and the daemon cancels a run when its ticket is **closed**, so true would
@@ -236,7 +231,7 @@ function capitalize(sentence: string): string {
  *
  * Every branch's words are the ones the ticket has already been told
  * elsewhere — `pickedUpComment`, `queuedComment`, `parkedComment`,
- * `failedComment`, `describeWait` — because this relocates the decision rather
+ * `describeWait` — because this relocates the decision rather
  * than restating it in a second dialect.
  */
 export function ctaFor(state: TicketState): Cta {
@@ -294,58 +289,10 @@ export function ctaFor(state: TicketState): Cta {
     };
   }
 
-  if (run.status === "failed") {
-    // ADR-0052: a build stage that asked a question it had no business
-    // asking is filed as a fault, never parked on a person. Checked ahead of
-    // `technicalFault` because it is a different kind of machine-caused stop
-    // — not the infrastructure breaking under it, but a stage behaving
-    // wrongly — and the wording says so rather than borrowing the login/link
-    // language below.
-    //
-    // ✏ Since [ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)
-    // no new run reaches this: the question rides to the pull request and the
-    // run carries on. It is kept for the runs already filed this way when the
-    // change landed — `ivtrends` #93 was one — because their tickets still
-    // have to say what stopped them.
-    if (isBuildEscalation(run.failure)) {
-      return {
-        headline: "I asked a question inside the build that I had no business asking, so I stopped.",
-        needFromYou: "nothing on this ticket — this is mine to fix, and this command starts me again.",
-        waitingOnYou: false,
-        command: `timone retry ${state.project}#${state.ticket}`,
-      };
-    }
-
-    // A stop the machine caused itself does not read like a stop about the
-    // work (ADR-0034), and the ticket's two surfaces must not disagree: the
-    // comment posted at the moment of failure says the fault was the
-    // machine's, and this note is what that comment points the reader at.
-    const fault = technicalFault(run.failure);
-    if (fault !== undefined) {
-      return {
-        headline:
-          fault === "credentials"
-            ? "My login to the service I run on was refused, so I stopped."
-            : fault === "expired"
-              ? "My login ran out while I was working, and did not come back, so I stopped."
-              : "I could not reach the service I run on, so I stopped.",
-        needFromYou:
-          fault === "credentials" || fault === "expired"
-            ? "nothing on this ticket — my login needs fixing first, and then this command starts me again."
-            : "nothing on this ticket — this one is mine. Once it is sorted, this command starts me again.",
-        waitingOnYou: false,
-        command: `timone retry ${state.project}#${state.ticket}`,
-      };
-    }
-    return {
-      headline: "Something went wrong while I was working on this.",
-      needFromYou: "run the command and I'll pick it up from where it stopped.",
-      waitingOnYou: false,
-      command: `timone retry ${state.project}#${state.ticket}`,
-    };
-  }
-
-  if (run.status === "cancelled") {
+  // ✏ 2026-09-30: a failed run is answered as a cancelled one. No run can be
+  // read as failed any more: the ledger loads one as cancelled. The branch
+  // that named `timone retry` for it went with the command.
+  if (run.status === "cancelled" || run.status === "failed") {
     // ✏ 29j: **the work is dropped, and it stays dropped.** This branch used
     // to promise *"while this ticket is open and marked for me I'll start it
     // afresh on my next pass"*, on the strength of ADR-0029: cancelling
@@ -361,9 +308,7 @@ export function ctaFor(state: TicketState): Cta {
     // reader who has to look up what "the hold" is cannot act on the sentence
     // in front of them. **Neither way is a `timone` command** — one is
     // removing a label, the other is closing the ticket, and both are two
-    // clicks in any GitHub view (D7) — so there is no `command` to print, and
-    // reaching for `timone retry` here would name a command the ledger
-    // refuses outright.
+    // clicks in any GitHub view (D7) — so there is no `command` to print.
     //
     // **`waitingOnYou` stays false**, as {@link Cta.waitingOnYou}'s own
     // docblock says it must, and the slice that wrote this branch tried true

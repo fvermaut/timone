@@ -131,7 +131,7 @@ describe("the ledger's exclusive lock", () => {
     expect(outcome).toEqual({ ok: true, value: 0 });
     const next = acquireStateLock({
       statePath,
-      command: "timone retry scratch-app#6",
+      command: "timone cancel scratch-app#6",
       pid: 4300,
       staleAfterMs: STALE_AFTER_MS,
       now: () => "2026-08-13T10:00:05Z",
@@ -307,7 +307,7 @@ describe("the ledger's exclusive lock", () => {
     // A refusal — the path that used to write.
     const refused = acquireStateLock({
       statePath,
-      command: "timone retry scratch-app#6",
+      command: "timone cancel scratch-app#6",
       pid: 4300,
       staleAfterMs: STALE_AFTER_MS,
       now: () => "2026-08-13T10:00:30Z",

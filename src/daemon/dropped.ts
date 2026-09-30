@@ -21,9 +21,9 @@ import type { RunStore } from "./runs.js";
  * cancelled run was a dropped step shipped the first of those, and asking what
  * a poll cycle would post on a real non-step ticket is what caught it.
  *
- * **Its own module because four surfaces ask the question** — the ticket's
- * standing note, `timone cancel`, `timone takeover` and `timone retry`'s
- * refusal. Each keeps its own lead-in; only the way out is shared.
+ * **Its own module because three surfaces ask the question** — the ticket's
+ * standing note, `timone cancel` and `timone takeover`. Each keeps its own
+ * lead-in; only the way out is shared.
  */
 export function heldStepWayOut(
   store: RunStore,

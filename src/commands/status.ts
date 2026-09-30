@@ -466,25 +466,12 @@ export function renderStatus(
     (name) => `${name.padEnd(width)}  ${describeProject(name, runs, context)}`,
   );
 
-  // Every failure names the way back, in the same breath as the bad news.
-  // A run reclaimed from a dead daemon arrives here like any other failure,
-  // which is the point: the reader does not need to know it was reclaimed,
-  // only what happened and what to type.
-  const failures = runs
-    .filter((run) => run.status === "failed" && run.failure !== undefined)
-    .flatMap((run) => {
-      const { command } = ctaOf(run, context);
-      return [
-        `${run.project} #${run.ticket} stopped early: ${run.failure}`,
-        ...(command === undefined
-          ? []
-          : [`  to pick it up from where it stopped: ${command}`]),
-      ];
-    });
-
-  // Beside the failures rather than among them, and in its own words. A
-  // cancelled chunk was abandoned, not broken: there is no way back into it —
-  // `timone retry` refuses one — so it is stated and nothing is offered. It is
+  // ✏ 2026-09-30: there is no list of failures any more. No run can be read
+  // as failed: the ledger loads a failed run as cancelled, so it is listed
+  // below with what stopped it.
+  //
+  // In its own words. A cancelled chunk was abandoned, not broken: there is
+  // no way back into it, so it is stated and nothing is offered. It is
   // reported at all because typing `timone cancel` has to change something the
   // person who typed it can see.
   const cancelled = runs
@@ -521,7 +508,6 @@ export function renderStatus(
       : ["Nothing has run yet — start it with `timone daemon`.", ""]),
     ...(outOfDate === undefined ? [] : [outOfDate, ""]),
     ...lines,
-    ...(failures.length > 0 ? ["", ...failures] : []),
     ...(cancelled.length > 0 ? ["", ...cancelled] : []),
     "",
     closing,

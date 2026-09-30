@@ -42,7 +42,7 @@ describe("enqueue", () => {
 
     const file = enqueue(
       path,
-      { kind: "retry", project: "scratch-app", ticket: 31 },
+      { kind: "cancel", project: "scratch-app", ticket: 31 },
       { now: frozen(), by: "fvermaut" },
     );
 
@@ -50,7 +50,7 @@ describe("enqueue", () => {
     const { requests } = pending(path);
     expect(requests).toHaveLength(1);
     expect(requests[0]?.body).toEqual({
-      kind: "retry",
+      kind: "cancel",
       project: "scratch-app",
       ticket: 31,
     });
@@ -84,11 +84,11 @@ describe("enqueue", () => {
     const path = statePath();
     const now = frozen();
 
-    enqueue(path, { kind: "retry", project: "scratch-app", ticket: 31 }, { now });
+    enqueue(path, { kind: "takeover-ended", project: "scratch-app", ticket: 31 }, { now });
     enqueue(path, { kind: "cancel", project: "scratch-app", ticket: 32 }, { now });
 
     const { requests } = pending(path);
-    expect(requests.map((request) => request.body.kind)).toEqual(["retry", "cancel"]);
+    expect(requests.map((request) => request.body.kind)).toEqual(["takeover-ended", "cancel"]);
   });
 
   it("orders requests by when they were asked", () => {
@@ -96,12 +96,12 @@ describe("enqueue", () => {
 
     enqueue(
       path,
-      { kind: "retry", project: "scratch-app", ticket: 1 },
+      { kind: "cancel", project: "scratch-app", ticket: 1 },
       { now: frozen("2026-08-16T12:00:02.000Z") },
     );
     enqueue(
       path,
-      { kind: "retry", project: "scratch-app", ticket: 2 },
+      { kind: "cancel", project: "scratch-app", ticket: 2 },
       { now: frozen("2026-08-16T12:00:01.000Z") },
     );
 
@@ -113,7 +113,7 @@ describe("enqueue", () => {
 describe("pending", () => {
   it("answers nothing when nobody has ever asked for anything", () => {
     // The state every existing installation is in: no directory at all.
-    expect(pending(statePath())).toEqual({ requests: [], unreadable: [] });
+    expect(pending(statePath())).toEqual({ requests: [], removed: [], unreadable: [] });
   });
 
   /**
@@ -123,7 +123,7 @@ describe("pending", () => {
    */
   it("skips an unreadable request, names it, and leaves it on disk", () => {
     const path = statePath();
-    enqueue(path, { kind: "retry", project: "scratch-app", ticket: 31 }, { now: frozen() });
+    enqueue(path, { kind: "cancel", project: "scratch-app", ticket: 31 }, { now: frozen() });
     const corrupt = join(requestsDir(path), "2026-08-16T12-00-00-000Z-000000-dead.json");
     writeFileSync(corrupt, "{ this is not json", "utf8");
 
@@ -137,7 +137,7 @@ describe("pending", () => {
   it("treats a well-formed file with an unknown kind as unreadable", () => {
     const path = statePath();
     const wrong = join(requestsDir(path), "2026-08-16T12-00-00-000Z-000000-beef.json");
-    enqueue(path, { kind: "retry", project: "scratch-app", ticket: 31 }, { now: frozen() });
+    enqueue(path, { kind: "cancel", project: "scratch-app", ticket: 31 }, { now: frozen() });
     writeFileSync(wrong, JSON.stringify({ body: { kind: "explode" } }), "utf8");
 
     const { requests, unreadable } = pending(path);
@@ -148,7 +148,7 @@ describe("pending", () => {
 
   it("ignores anything that is not a request file", () => {
     const path = statePath();
-    enqueue(path, { kind: "retry", project: "scratch-app", ticket: 31 }, { now: frozen() });
+    enqueue(path, { kind: "cancel", project: "scratch-app", ticket: 31 }, { now: frozen() });
     writeFileSync(join(requestsDir(path), "README"), "not mine", "utf8");
 
     expect(pending(path).requests).toHaveLength(1);
@@ -160,8 +160,8 @@ describe("settle", () => {
   it("removes exactly the one it is given", () => {
     const path = statePath();
     const now = frozen();
-    const first = enqueue(path, { kind: "retry", project: "scratch-app", ticket: 1 }, { now });
-    enqueue(path, { kind: "retry", project: "scratch-app", ticket: 2 }, { now });
+    const first = enqueue(path, { kind: "cancel", project: "scratch-app", ticket: 1 }, { now });
+    enqueue(path, { kind: "cancel", project: "scratch-app", ticket: 2 }, { now });
 
     settle(first);
 
@@ -173,7 +173,7 @@ describe("settle", () => {
 
   it("is content with a request somebody else already settled", () => {
     const path = statePath();
-    const file = enqueue(path, { kind: "retry", project: "scratch-app", ticket: 1 });
+    const file = enqueue(path, { kind: "cancel", project: "scratch-app", ticket: 1 });
 
     settle(file);
 

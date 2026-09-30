@@ -154,27 +154,14 @@ export function refusalClears(error: unknown): boolean {
  * question itself is the defect.
  *
  * ✏ **Nothing writes this any more** ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
- * ADR-0052 filed the defect by failing the run, and failing the run is still
+ * ADR-0052 filed the defect by failing the run, and failing the run was still
  * a stop: the work sat one step short of its pull request until a person
- * typed `timone retry`. A build stage's question is now carried to the pull
- * request and the run walks on, so no new run is ever failed for one. This
- * and {@link isBuildEscalation} stay because ledgers written before that
- * change still hold runs failed this way, and their tickets must keep saying
- * what happened to them rather than reading as a broken login.
+ * typed `timone retry`, a command removed on 2026-09-30. A build stage's
+ * question is now carried to the pull request and the run walks on, so no
+ * new run is ever failed for one.
+ *
+ * ✏ 2026-09-30: the reader of this prefix, `isBuildEscalation`, went with
+ * the call to action for a failed run, since no run can be read as failed
+ * any more. This stays only because `session.ts` still names it.
  */
 export const BUILD_ESCALATION_PREFIX = "a build stage escalated: ";
-
-/**
- * Whether a run's failure reason is a build-stage escalation (ADR-0052)
- * rather than an ordinary technical stop or a defect in the work itself.
- *
- * **Not a `TechnicalFault` variant.** A technical fault is the machine's own
- * infrastructure breaking under it; this is a stage that behaved wrongly by
- * asking a question it had no authority to ask. Both are the machine's fault
- * rather than the reader's, which is why `ctaFor` checks this first and
- * `technicalFault` second, but they are different kinds of wrong and stay
- * different types.
- */
-export function isBuildEscalation(failure: string | undefined): boolean {
-  return failure !== undefined && failure.startsWith(BUILD_ESCALATION_PREFIX);
-}

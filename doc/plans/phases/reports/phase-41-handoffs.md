@@ -539,3 +539,149 @@ $ git status --short .timone ; echo "(expected: nothing — no test touched the 
 
 - `runs.ts` still holds the code these deletions leave with no test and no reachable use: `RunStore.fail`, `retry`, `reopenForTakeover`, the re-arm in `reclaim`, the `failed` rows of `TRANSITIONS`, and the comments that describe a failed run as waiting for `timone retry`. `takeover.ts` (41e) still has its gate, review, conversation, failed and no-kind branches in `resolveTakeover`, and `settle` still parks a new run on `conversation`. That run reads back as the runner's. `cta.ts` still has its `failed` branches, and `status.ts` still prints "stopped early" for a failed run. Neither can see one now.
 - `normaliseOldPath` runs on every read. Anything later slices leave writing `failed` or an old kind is read back converted, so no test can observe those states through the store any more.
+
+## 41d — `timone retry` is gone
+
+**Built.** `timone retry` no longer exists. Typed with any arguments, it exits with code 1 and prints on stderr: *"`timone retry` was removed. Write on the ticket instead: say what you want done."* It is not in `timone --help`. The `retry` request kind is gone. A retry request an older build left beside the ledger is settled on the next cycle, reported once on that cycle's errors, and not reported again. `RunStore.retry` is deleted. No call to action and no line of `timone status` names `timone retry` any more: the status report has no list of failures, and a failed run's call to action is the one a cancelled run gets. The comments in the files that stay no longer describe `timone retry` as a command that exists.
+
+**Files touched.**
+
+- `src/commands/retry.ts`, `src/commands/retry.test.ts` — deleted (6 tests).
+- `src/cli.ts` — `registerRetryCommand` gone. A hidden `retry` command takes any arguments, prints `RETRY_REMOVED` on stderr and sets exit code 1.
+- `src/cli.test.ts` — created. Runs the built `dist/cli.js` in an empty temp directory. Cases (1) and (2).
+- `src/daemon/requests.ts` — `retry` removed from the request body. New `removedSchema`, type `RemovedRequest`, and `PendingRequests.removed`: a file that is a retry request in the old shape is listed there, not in `unreadable`. `read` became `readJson`.
+- `src/daemon/poll.ts` — `runRetry` import and the `retry` case gone. `applyRequests` settles each `removed` request and reports it once, with the "could not apply" line a failed request gets. New constant `RETRY_REMOVED`. Four comments no longer speak of a retry request.
+- `src/daemon/poll.test.ts` — case (3) replaces *settles a retry asked of a runner project with the refusal, and leaves the run as it was*. *settles a request it cannot carry out, and does not try it again* now uses a `takeover-ended` request on a done run instead of a retry. `readdirSync` imported.
+- `src/daemon/requests.test.ts` — the sample requests use `cancel` and `takeover-ended` instead of `retry`. The empty answer of `pending` now has `removed: []`.
+- `src/daemon/runs.ts` — `retry()` and `loadedInitiativeFor` deleted; imports `HELD_LABEL`, `BUILD_ESCALATION_PREFIX`, `isBuildEscalation`, `inBuild`, `stageAfter` removed. Comments that named `timone retry` now say it was removed on 2026-09-30, or name `timone cancel` where they listed commands that name a ticket.
+- `src/daemon/runs.test.ts` — 5 tests deleted, 1 trimmed (below). One comment reworded.
+- `src/daemon/cta.ts` — the `failed` branch is gone; `failed` is answered by the `cancelled` branch. `isBuildEscalation` and `technicalFault` no longer imported. Three doc comments updated.
+- `src/daemon/cta.test.ts` — 8 tests deleted, 1 trimmed (below). `BUILD_ESCALATION_PREFIX` import gone. One comment reworded.
+- `src/commands/status.ts` — the list of failures is gone, with its comment.
+- `src/commands/status.test.ts` — case (4) added. 3 tests deleted, 1 trimmed (below).
+- `src/commands/cancel.ts`, `src/commands/takeover.ts`, `src/daemon/dropped.ts` — comments only.
+- `src/daemon/faults.ts` — `isBuildEscalation` deleted. The comment on `BUILD_ESCALATION_PREFIX` says it stays only because `session.ts` names it.
+- `src/daemon/lock.test.ts` — the sample command is `timone cancel scratch-app#6`.
+- `doc/plans/phases/reports/phase-41-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **A hidden command, not no command.** Commander has no public way to answer one unknown command name with a sentence of our own; its unknown-command error is private. A command registered with `{ hidden: true }` is left out of the help. `.argument("[anything...]")`, `.allowUnknownOption()` and `.helpOption(false)` make any arguments, `--help` included, reach the sentence.
+2. **The sentence goes to stderr**, as the commands' errors that stop them before any work already do (a manifest that cannot be read, for example). It is a refusal with exit code 1, not an answer.
+3. **The unreadable path does not behave as the plan asks, so it was not used.** Today an unreadable file is left on disk on purpose, as evidence, and reported on every cycle. Removing `retry` from the schema alone sends a leftover retry down that path (seen red below). So `pending` recognises a retry in the old shape and lists it apart, and the cycle settles it. The cancellation watch reads only `requests`, so it never sees one.
+4. **The cycle's report does not name `timone retry`.** It says *"the retry command was removed. Write on the ticket instead: say what you want done."* after the usual `could not apply retry <project>#<ticket> asked by <who>:`. So the only code outside comments that names `timone retry` is the command line's own sentence.
+5. **`failed` shares the `cancelled` branch in `ctaFor`.** The type still has `failed`, and `run.status satisfies "parked"` needs every other status handled before it. The ledger loads a failed run as cancelled, so this is what every reader already sees.
+6. **`isBuildEscalation` is deleted.** Its two callers went in this slice, it lives in `faults.ts`, which is in this slice's list, and no test covered it. `BUILD_ESCALATION_PREFIX` stays: `session.ts` (41f) imports it.
+7. **Case (4) asserts that the output does not contain the word `retry` at all**, which covers `timone retry`, plus no "stopped early" and no "pick it up from where it stopped".
+8. **Tests of removed text are deleted; tests that only started from a failed run are kept.** `renderStatus — a run whose daemon died under it › frees the project, so the line reads idle rather than busy` stays: it is still true, and says nothing about retry.
+
+Tests deleted or trimmed, because the text or method they assert is removed:
+
+- `src/commands/retry.test.ts` — all 6, with the file.
+- `src/daemon/cta.test.ts` — deleted (8): *ctaFor* › names the exact retry command for a run that stopped early; › leaves a failed run saying it failed, with its own retry command; *ctaFor — the wayfinder map's two states* › says a map that broke what a broken ticket says, not what a map says; *ctaFor — a run the machine broke itself* › all five (the link went; the login was refused; the login ran out; a failure about the work; a build stage escalated). Trimmed: *ctaFor* › heads a stopped ticket with what happened, in the words already used lost its failed half.
+- `src/commands/status.test.ts` — deleted (3): *renderStatus* › mentions a project's last failure rather than hiding it; *renderStatus — a run whose daemon died under it* › says what happened and what to type, without naming a daemon or a run; › names the way back for every failure, not only the reclaimed ones. Trimmed: *renderStatus* › says a cancelled chunk was stopped, without calling it a failure lost its two assertions that no "stopped early" and no `timone retry` are printed. Nothing can print either now.
+- `src/daemon/runs.test.ts` — deleted (5): *retry* › refuses to retry anything that is not failed; *cancelling a run* › refuses a retry in words a person can act on, not an assertion; › says so without a reason, when none was recorded; *refusing to retry a step the machine is holding* › names the label to remove, because that is what would start it; › does not tell an ordinary ticket to remove a label it has not got. Trimmed and renamed: *cancelling a run* › has no way out of cancelled, retry included → › has no way out of cancelled.
+
+**Validation evidence.**
+
+*(1) and (2), the built command line* (`src/cli.test.ts`). Written first, built, and seen red:
+
+```
+× the removed retry command > exits 1 and sends the person to the ticket: `timone retry scratch-app#1`
+  → expected 'Cannot read manifest file "timone.yam…' to be '`timone retry` was removed. Write on …'
+× … `timone retry`
+  → expected 'error: missing required argument \'ti…' to be '`timone retry` was removed. Write on …'
+× … `timone retry scratch-app#1 --state elsewhere.json`
+  → expected 'Cannot read manifest file "timone.yam…' to be '`timone retry` was removed. Write on …'
+× … `timone retry --help`
+  → expected +0 to be 1
+× the removed retry command > is not listed in the help
+  → expected 'Usage: timone [options] [command]\n\n…' not to match /\bretry\b/
+Tests  5 failed (5)
+```
+
+Then one case at a time. The `retry` command registered in `cli.ts` with the sentence, not yet hidden: case (1) green, case (2) still red.
+
+```
+✓ … `timone retry scratch-app#1`   ✓ … `timone retry`   ✓ … --state elsewhere.json   ✓ … `timone retry --help`
+× the removed retry command > is not listed in the help
+  → expected 'Usage: timone [options] [command]\n\n…' not to match /\bretry\b/
+Tests  1 failed | 4 passed (5)
+```
+
+Hidden with `{ hidden: true }`: `Tests  5 passed (5)`.
+
+*(3), a retry request left in the queue* (`poll.test.ts` › *the runner drives its projects in the poll cycle* › settles a retry request left from before the command was removed, and says so once). The file is written by hand in the shape the old `enqueue` wrote. Red on the old code, which still read and refused it, in other words:
+
+```
+-   "could not apply retry scratch-app#31 asked by fvermaut: the retry command was removed. Write on the ticket instead: say what you want done.",
++   "could not apply retry scratch-app#31 asked by fvermaut: This project is run by the runner. Write on the ticket instead: say what you want done.",
+Tests  1 failed | 106 skipped (107)
+```
+
+Red again with `retry` taken out of the schema, `poll.ts` and the command, and nothing added. This is the unreadable path:
+
+```
+-   "could not apply retry scratch-app#31 asked by fvermaut: the retry command was removed. …",
++   "unreadable request at /var/folders/…/.timone/requests/2026-09-29T18-00-00-000Z-000000-0a1b2c3d.json, left where it is",
+Tests  1 failed | 106 skipped (107)
+```
+
+Green with `removed` in `pending` and its loop in `applyRequests`: `Tests  1 passed | 106 skipped (107)`. The "nothing on the next cycle" half is not vacuous: with `settle(leftover.path)` commented out, `expected [ '2026-09-29T18-00-00-000Z-000000-0a1b2c3d.json' ] to deeply equal []`, `Tests  1 failed`. Restored (`diff` against a saved copy empty): `1 passed`.
+
+*(4), `timone status` on 41c's fixture* (`status.test.ts` › *renderStatus — the runs the old code left in the ledger* › shows no list of failures, and names no command that no longer exists). It passed before any change, because 41c already loads each failed run as cancelled, so it could not be red first. With 41c's conversion taken out of `normaliseSequences` and the old `status.ts`, it fails:
+
+```
+AssertionError: expected 'scratch-app  #24 (delivering) — waiti…' not to match /stopped early/
+scratch-app #21 stopped early: the execution stage finished without committing anything to gate
+  to pick it up from where it stopped: timone retry scratch-app#21
+ivtrends #88 stopped early: triage recorded no classification
+  to pick it up from where it stopped: timone retry ivtrends#88
+Tests  1 failed | 54 skipped (55)
+```
+
+Restored (`diff` empty): `1 passed`. After the change to `status.ts` and `cta.ts`, it passes both with the conversion and with it taken out again, so the status report itself no longer lists failures or names `timone retry`, even for a failed run:
+
+```
+✓ … shows no list of failures, and names no command that no longer exists
+-- with the conversion taken out:
+✓ … shows no list of failures, and names no command that no longer exists
+```
+
+All four cases together: `Tests  7 passed | 157 skipped (164)`.
+
+Validation commands, as run:
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+> timone@0.1.0 build
+> tsc
+ Test Files  59 passed (59)
+      Tests  1798 passed (1798)
+$ node dist/cli.js retry scratch-app#1 ; echo "exit: $? (expected 1)"
+`timone retry` was removed. Write on the ticket instead: say what you want done.
+exit: 1 (expected 1)
+$ node dist/cli.js --help | grep -c retry ; echo "(expected 0)"
+0
+(expected 0)
+$ grep -rn "timone retry" src --include='*.ts' | grep -v '^src/daemon/session\.ts' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)'
+src/cli.ts:38:  "`timone retry` was removed. Write on the ticket instead: say what you want done.";
+src/cli.test.ts:44:      "`timone retry` was removed. Write on the ticket instead: say what you want done.\n",
+```
+
+1798 = 1814 − 6 (`retry.test.ts`) − 8 (`cta.test.ts`) − 3 (`status.test.ts`) − 5 (`runs.test.ts`) + 5 (`cli.test.ts`) + 1 (case 4). Case (3) replaced one test.
+
+- [x] The last command prints only the new sentence in `src/cli.ts` and its test. `src/runner/replay/cases.ts` has no mention of `timone retry` at all, so it prints none. `src/daemon/session.ts` still names it. **PASS**
+- [x] No comment in a file this slice was given, and that stays, describes `timone retry` as a command that exists: each one now says it was removed, or tells what happened in the past tense. **PASS** for this slice's files. One comment outside them still does: `src/daemon/session.test.ts:4256` ("a run failed here would need `timone retry` on every ticket"), in 41f's area.
+- [x] Red-green evidence for each of the four cases is in this section. Case (4) could not be red first; the break above shows it can fail. **PASS**
+
+**What 41e and later slices must know.**
+
+- **Code left with no production caller, in files this slice does not own.** `BUILD_ESCALATION_PREFIX` in `src/daemon/faults.ts` is read only by `src/daemon/session.ts`; delete it when 41f deletes that file. `technicalFault` is still used by `src/runner/session.ts`. 41b's and 41c's lists are otherwise unchanged: `RunStore.fail`, `reopenForTakeover`, the re-arm in `reclaim`, `ctaComment`, `refusalClears`, and the rest.
+- **`RunStatus` still has `failed`**, and `TRANSITIONS` still has its `failed` row. `reclaim`'s re-arm goes `active → failed → picked-up` in one write, so the row is still used. `ctaFor` answers `failed` as `cancelled`; `timone status` shows a failed run nowhere.
+- **Outside `src/`, `timone retry` is still named** in `README.md`, `manual/how-the-daemon-works.md`, `CONTEXT.md`, `process.md`, `STATUS.md` and older ADRs and plans. None was in this slice's files.
+- **`src/daemon/session.test.ts`** still names `timone retry` in two comments (lines 2592, 4256).
+- **`timone help retry`** prints `Usage: timone retry [anything...]` and exits 0. That is commander answering `help` for the hidden command. `timone retry --help` gives the sentence and exit 1.
+- **`dist/commands/retry.js`** and its test build stay in `dist/` until it is cleaned. `tsc` does not delete output for a deleted source. Nothing imports them, and `vitest` does not read `dist/`.
+- **The CLI test runs the built file.** `src/cli.test.ts` runs `dist/cli.js`, so `npm test` alone after a change to `src/cli.ts` tests the last build. `npm run build && npm test` is the order the plan uses.
+- **Refactoring I would do but did not:** case (4) repeats the fixture copy and the two-project manifest of 41c's test above it. A small helper in `status.test.ts` could build both.

@@ -17,9 +17,8 @@ export interface CancelDeps {
   store: RunStore;
   /**
    * Where the ledger lives, so a cancellation is the only thing writing it
-   * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)) — the same
-   * reason `timone retry` takes the lock: ending a run is a ledger mutation
-   * and the daemon may be mid-cycle over the same file.
+   * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)): ending a run
+   * is a ledger mutation and the daemon may be mid-cycle over the same file.
    *
    * Absent means no lock is taken, which is the shape the refusal tests use.
    */
@@ -102,10 +101,9 @@ export async function holdCancelledTicket(
  * not carry on, and the end of hand-editing `.timone/state.json` to do it.
  *
  * **Cancelling is not failing.** A cancelled chunk is finished business: it is
- * settled, so the ticket may take a fresh chunk, and it has no way back —
- * `timone retry` refuses it in as many words. Everything that cannot be
- * cancelled is refused with a sentence about what the ticket *is* doing, in
- * the same discipline as `timone retry` and `timone takeover`.
+ * settled, so the ticket may take a fresh chunk, and it has no way back.
+ * Everything that cannot be cancelled is refused with a sentence about what
+ * the ticket *is* doing, in the same discipline as `timone takeover`.
  */
 export async function runCancel(raw: string, deps: CancelDeps): Promise<number> {
   const log = deps.log ?? ((message: string) => console.log(message));
@@ -267,12 +265,13 @@ async function cancel(
       );
       return 1;
     // A failure is cancellable, and this is the arm that used to refuse it.
-    // Ruled by fvermaut 2026-08-15: a failure has two exits, not one. `timone
-    // retry` re-arms the chunk and this abandons it, and the refusal that
-    // stood here made abandoning a failure a two-command dance — retry first,
-    // to get it out of `failed`, then cancel — with a window in between that
-    // the daemon polls, so a run somebody was trying to delete could be picked
-    // up and spend real money before the second command landed. Nothing about
+    // Ruled by fvermaut 2026-08-15: a failure had two exits, not one. `timone
+    // retry` re-armed the chunk, until it was removed on 2026-09-30, and this
+    // abandons it. The refusal that stood here made abandoning a failure a
+    // two-command dance — retry first, to get it out of `failed`, then
+    // cancel — with a window in between that the daemon polls, so a run
+    // somebody was trying to delete could be picked up and spend real money
+    // before the second command landed. Nothing about
     // a failure is worth protecting from a person who has typed `cancel`: the
     // branch, stage and pull request the old wording defended are still there
     // in the ledger, and a ticket that deserves another go takes a fresh chunk.

@@ -939,17 +939,6 @@ describe("the pull request on a run", () => {
   });
 });
 
-describe("retry", () => {
-
-  it("refuses to retry anything that is not failed", () => {
-    const store = newStore();
-    const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "s1");
-
-    expect(() => store.retry(run.id)).toThrow(/not failed/);
-  });
-});
-
 describe("reopenForTakeover", () => {
 
   it("refuses a run that has not failed", () => {
@@ -1023,41 +1012,12 @@ describe("cancelling a run", () => {
     );
   });
 
-  it("has no way out of cancelled, retry included", () => {
+  it("has no way out of cancelled", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
     store.cancel(run.id, "its ticket is no longer open");
 
     expect(() => store.cancel(run.id, "again")).toThrow(/nothing — it is finished/);
-    expect(() => store.retry(run.id)).toThrow();
-  });
-
-  it("refuses a retry in words a person can act on, not an assertion", () => {
-    // `timone retry` prints whatever this throws, verbatim (`retry.ts`'s
-    // `switch` has no `cancelled` case and falls through to here). So the
-    // message is a user interface, and the generic "is cancelled, not failed"
-    // would put a state-machine complaint in front of somebody who just typed
-    // a command.
-    const store = newStore();
-    const { run } = store.register("scratch-app", 7);
-    store.cancel(run.id, "its ticket is no longer open and marked");
-
-    expect(() => store.retry(run.id)).toThrow(
-      "scratch-app #7 was cancelled: its ticket is no longer open and marked. " +
-        "Cancelled work isn't retried — reopen the ticket and mark it for " +
-        "me, and I'll start it afresh on my next pass.",
-    );
-  });
-
-  it("says so without a reason, when none was recorded", () => {
-    const store = newStore();
-    const { run } = store.register("scratch-app", 7);
-    store.cancel(run.id, "");
-
-    expect(() => store.retry(run.id)).toThrow(
-      "scratch-app #7 was cancelled. Cancelled work isn't retried — reopen " +
-        "the ticket and mark it for me, and I'll start it afresh on my next pass.",
-    );
   });
 
   it("frees the project for whatever was queued behind it", () => {
@@ -1852,7 +1812,8 @@ describe("a failed run stops waiting", () => {
   it("keeps the answer it read and never acted on", () => {
     // The one fact about a dead session still owed to somebody (ADR-0023):
     // they wrote an answer, it was read, and nothing acted on it. `timone
-    // retry` rewinds to this, so clearing it here would silently re-ask.
+    // retry` rewound to this until it was removed on 2026-09-30, so clearing
+    // it here would have made it re-ask in silence.
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-1");
@@ -1977,37 +1938,6 @@ describe("an initiative's picture is found from the map as well", () => {
     });
 
     expect(store.initiativeFor("scratch-app", 7)?.initiative).toBe(7);
-  });
-});
-
-/**
- * The other half of the same refusal. A **step** the machine dropped is held
- * and stays stopped; the ticket above is not a step, so its chunk is simply
- * opened again. Both sentences are true and neither may be said to the other.
- */
-describe("refusing to retry a step the machine is holding", () => {
-  it("names the label to remove, because that is what would start it", () => {
-    const store = newStore();
-    store.rememberInitiative({
-      project: "scratch-app",
-      initiative: 7,
-      title: "the lists could be smarter",
-      steps: [51, 52],
-      done: 0,
-      next: 51,
-    });
-    const { run } = store.register("scratch-app", 51);
-    store.cancel(run.id, "you asked me to stop");
-
-    expect(() => store.retry(run.id)).toThrow(/remove the `timone:held` label/);
-  });
-
-  it("does not tell an ordinary ticket to remove a label it has not got", () => {
-    const store = newStore();
-    const { run } = store.register("scratch-app", 7);
-    store.cancel(run.id, "you asked me to stop");
-
-    expect(() => store.retry(run.id)).toThrow(/mark it for me/);
   });
 });
 

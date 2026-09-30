@@ -29,10 +29,9 @@ import {
 import type { InitiativeProgress } from "./cta.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 // The commands themselves, called with no state path so they take no lock:
-// the daemon already holds it, and re-implementing what may be retried or
-// cancelled would be a second opinion that drifts from the one the human gets
+// the daemon already holds it, and re-implementing what may be cancelled or
+// taken over would be a second opinion that drifts from the one the human gets
 // at the terminal (ADR-0032).
-import { runRetry } from "../commands/retry.js";
 import { holdCancelledTicket, runCancel } from "../commands/cancel.js";
 import { resolveTakeover } from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
@@ -422,7 +421,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   };
 
   // First of all, before the witness and before any project is looked at: a
-  // human asked for this while the daemon held the ledger, and a retry applied
+  // human asked for this while the daemon held the ledger, and a request applied
   // after the registration loop has already walked past its ticket waits a
   // whole cycle to do anything (ADR-0032). The natural place to add a new call
   // is at the end, and the end is the one place this may not go.
@@ -504,6 +503,10 @@ async function pollProjects(
   }
 }
 
+/** What the cycle says about a retry request left from before it was removed. */
+const RETRY_REMOVED =
+  "the retry command was removed. Write on the ticket instead: say what you want done.";
+
 /**
  * Carry out what humans asked for while the daemon held the ledger
  * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
@@ -512,8 +515,8 @@ async function pollProjects(
  * this exists: ADR-0023's rule is kept literally true by moving the *act* here
  * rather than by letting a second process write the file.
  *
- * **A request is settled whether or not it could be carried out.** The run was
- * already re-armed, the ticket has been closed, the project has left the
+ * **A request is settled whether or not it could be carried out.** The run has
+ * already ended, the ticket has been closed, the project has left the
  * manifest — none of those get better by being retried every sixty seconds,
  * and a request that survives its own failure is a poison pill that stops the
  * queue for ever. What could not be done is said once, on the cycle's errors,
@@ -527,13 +530,24 @@ async function applyRequests(
   const { statePath } = deps;
   if (statePath === undefined) return;
 
-  const { requests, unreadable } = pending(statePath);
+  const { requests, removed, unreadable } = pending(statePath);
 
   for (const path of unreadable) {
     // Reported and left alone. Deleting it would destroy the only evidence of
     // whatever wrote it, and throwing would take the cycle — and therefore
     // every project — down over one bad file.
     const line = `unreadable request at ${path}, left where it is`;
+    result.errors.push(line);
+    log(`error  ${line}`);
+  }
+
+  for (const leftover of removed) {
+    // A retry left before the command was removed. It can no longer be
+    // carried out, so it is settled like any request that could not be, and
+    // said once. Left on disk, it would be reported on every cycle.
+    settle(leftover.path);
+    const what = `${leftover.body.kind} ${leftover.body.project}#${leftover.body.ticket}`;
+    const line = `could not apply ${what} asked by ${leftover.askedBy}: ${RETRY_REMOVED}`;
     result.errors.push(line);
     log(`error  ${line}`);
   }
@@ -609,7 +623,7 @@ interface CancelWatch {
  *
  * **Cancellations only, and deliberately.** Every other request asks for work
  * to *start* or to *move*, and a cycle already walking the projects is the
- * worst moment to be told either — a retry applied halfway through the
+ * worst moment to be told either — a request applied halfway through the
  * registration loop is exactly the race ADR-0032 avoided by applying requests
  * before the walk. A cancellation is the opposite: it asks for work to stop,
  * it is the one request that is worth less the later it lands, and nothing it
@@ -617,8 +631,9 @@ interface CancelWatch {
  *
  * **The order between the two clocks is the request's own order**, which is
  * all ADR-0032 promised: cancellations are carried out oldest first here, as
- * they are there. A cancellation may overtake a retry that was asked for
- * earlier, and that is the intended effect rather than a lost guarantee.
+ * they are there. A cancellation may overtake a request of another kind that
+ * was asked for earlier, and that is the intended effect rather than a lost
+ * guarantee.
  */
 function watchForCancellations(
   deps: PollDeps,
@@ -679,11 +694,9 @@ function watchForCancellations(
  * One request, applied by **the command's own code** rather than by a second
  * implementation of it.
  *
- * `runRetry` and `runCancel` take no lock when handed no state path — the
- * shape their own refusal tests use — so the daemon reaches the same decisions
- * about which runs may be retried, which may be cancelled, and what a rewind
- * of a consumed answer means, without either of them learning that a daemon
- * exists.
+ * `runCancel` takes no lock when handed no state path — the shape its own
+ * refusal tests use — so the daemon reaches the same decisions about which
+ * runs may be cancelled, without the command learning that a daemon exists.
  */
 async function applyRequest(
   request: QueuedRequest,
@@ -695,8 +708,6 @@ async function applyRequest(
   const target = `${body.project}#${body.ticket}`;
 
   switch (body.kind) {
-    case "retry":
-      return runRetry(target, { manifest, store, log });
     case "cancel": {
       const code = await runCancel(target, {
         manifest,

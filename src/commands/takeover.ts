@@ -190,11 +190,11 @@ export async function resolveTakeover(
       // here: {@link reopenIfFailed} does that, just before the claim.
       return { kind: "escalation", run };
     case "cancelled": {
-      // Abandoned, not broken — so the words say what `timone retry`'s own
-      // refusal says (`RunStore.retry`), and never that something went wrong.
-      // Its reason lives in `cancellation` rather than `failure` for exactly
-      // that reason, and dropping the clause when there is none beats a
-      // sentence reading "cancelled: " with nothing after it.
+      // Abandoned, not broken — so the words say it was cancelled, and never
+      // that something went wrong. Its reason lives in `cancellation` rather
+      // than `failure` for exactly that reason, and dropping the clause when
+      // there is none beats a sentence reading "cancelled: " with nothing
+      // after it.
       const because =
         run.cancellation === undefined || run.cancellation === ""
           ? "."
