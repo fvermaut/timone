@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -1501,6 +1504,11 @@ describe("every call this adapter makes can be scoped to a repository", () => {
       () => adapter.applyLabel(project, 7, "timone:held"),
       () => adapter.postPullRequestComment(project, 9, "hi"),
       () => adapter.upsertPullRequestComment(project, 9, "📌", "hi"),
+      () => adapter.removeLabel(project, 7, "timone:held"),
+      () => adapter.createIssue(project, { title: "t", body: "b", labels: ["bug"] }),
+      () => adapter.getPullRequestBody(project, 9),
+      () => adapter.setPullRequestBody(project, 9, "b"),
+      () => adapter.aheadOfDefault(project, "b"),
     ];
 
     for (const call of calls) {
@@ -1532,5 +1540,190 @@ describe("every call this adapter makes can be scoped to a repository", () => {
     }
 
     expect(unscoped, `unscoped:\n${unscoped.join("\n")}`).toEqual([]);
+  });
+});
+
+describe("the forge calls the runner needs", () => {
+  it("takes a label off an issue", async () => {
+    const { run, calls } = fakeRunner("");
+
+    await new GitHubTicketingAdapter({ run }).removeLabel(
+      alpha,
+      7,
+      "timone:held",
+    );
+
+    expect(calls[0].args).toEqual([
+      "issue",
+      "edit",
+      "7",
+      "--repo",
+      "fvermaut/scratch-app",
+      "--remove-label",
+      "timone:held",
+    ]);
+  });
+
+  it("opens an issue with each label as its own argument, and answers its number", async () => {
+    const { run, calls } = fakeRunner(
+      "https://github.com/fvermaut/scratch-app/issues/88\n",
+    );
+
+    const number = await new GitHubTicketingAdapter({ run }).createIssue(alpha, {
+      title: "The fix round on #7 found a fault in Timone",
+      body: "The check stopped because the forge refused a call.",
+      labels: ["bug", "live-gate"],
+    });
+
+    expect(number).toBe(88);
+    expect(calls[0].args).toEqual([
+      "issue",
+      "create",
+      "--repo",
+      "fvermaut/scratch-app",
+      "--title",
+      "The fix round on #7 found a fault in Timone",
+      "--body",
+      "The check stopped because the forge refused a call.",
+      "--label",
+      "bug",
+      "--label",
+      "live-gate",
+    ]);
+  });
+
+  it("reads a pull request's body as it stands on the forge", async () => {
+    const body =
+      "<!-- timone:departures -->\n**Not checked.** Reason: a spelling fix.\n" +
+      "<!-- /timone:departures -->\n\nCloses #7";
+    const { run, calls } = fakeRunner(JSON.stringify({ body }));
+
+    const read = await new GitHubTicketingAdapter({ run }).getPullRequestBody(
+      alpha,
+      9,
+    );
+
+    expect(read).toBe(body);
+    expect(calls[0].args).toEqual([
+      "pr",
+      "view",
+      "9",
+      "--repo",
+      "fvermaut/scratch-app",
+      "--json",
+      "body",
+    ]);
+  });
+
+  it("counts the commits on a branch that the default branch the forge names does not have", async () => {
+    const { run, calls } = fakeRunnerWithOptions(
+      JSON.stringify({
+        data: {
+          repository: {
+            defaultBranchRef: { name: "trunk", target: { oid: "aaaa111" } },
+            ref: null,
+          },
+        },
+      }),
+      "3\n",
+    );
+
+    const ahead = await new GitHubTicketingAdapter({ run }).aheadOfDefault(
+      alpha,
+      "timone/7-slow",
+    );
+
+    expect(ahead).toBe(3);
+    expect(calls[1].args).toEqual([
+      "api",
+      "repos/fvermaut/scratch-app/compare/trunk...timone/7-slow",
+      "--jq",
+      ".ahead_by",
+    ]);
+    expect(calls[1].options?.repository).toBe("fvermaut/scratch-app");
+  });
+
+  it("answers undefined for a branch the forge does not know, and does not call that an error", async () => {
+    // What `gh api` says, word for word, when the compare names a branch that
+    // does not exist (read from fvermaut/timone on 2026-09-27).
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error(
+        "gh api repos/fvermaut/scratch-app/compare/main...timone/7-slow --jq .ahead_by failed: gh: Not Found (HTTP 404)",
+      ),
+    );
+
+    const ahead = await new GitHubTicketingAdapter({ run }).aheadOfDefault(
+      alpha,
+      "timone/7-slow",
+    );
+
+    expect(ahead).toBeUndefined();
+  });
+
+  it("reports a dropped connection, and never renders one as a missing branch", async () => {
+    // For readBranches' reason: work that is on the forge, reported as a
+    // branch that does not exist, would be a step judged to have done nothing.
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error("gh api repos/... failed after 3 attempts: ECONNRESET"),
+    );
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).aheadOfDefault(alpha, "timone/7-slow"),
+    ).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it("hands gh the new description in a file that holds exactly the body", async () => {
+    // Long, and with characters a shell would read: the body must reach the
+    // forge as it was written, and never as an argument.
+    const body =
+      "<!-- timone:departures -->\n**Not checked.** Reason: `$(date)` & \"quotes\".\n" +
+      "<!-- /timone:departures -->\n\n" +
+      "Closes #7\n".repeat(2_000);
+    const calls: string[][] = [];
+    let heldWhenRun: string | undefined;
+    const run: CommandRunner = async (_command, args) => {
+      calls.push(args);
+      heldWhenRun = readFileSync(args[args.indexOf("--body-file") + 1], "utf8");
+      return "";
+    };
+
+    await new GitHubTicketingAdapter({ run }).setPullRequestBody(alpha, 9, body);
+
+    const path = calls[0][calls[0].indexOf("--body-file") + 1];
+    expect(calls[0]).toEqual([
+      "pr",
+      "edit",
+      "9",
+      "--repo",
+      "fvermaut/scratch-app",
+      "--body-file",
+      path,
+    ]);
+    expect(path.startsWith(tmpdir())).toBe(true);
+    expect(heldWhenRun).toBe(body);
+  });
+
+  it("leaves no file behind once the description is replaced", async () => {
+    const { run, calls } = fakeRunner("");
+
+    await new GitHubTicketingAdapter({ run }).setPullRequestBody(alpha, 9, "b");
+
+    const path = calls[0].args[calls[0].args.indexOf("--body-file") + 1];
+    expect(existsSync(dirname(path))).toBe(false);
+  });
+
+  it("leaves no file behind when the forge refuses the edit, and lets the refusal travel", async () => {
+    const { run, calls } = fakeRunnerFailing(
+      new Error("gh pr edit 9 failed: GraphQL: Resource not accessible by integration"),
+    );
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).setPullRequestBody(alpha, 9, "b"),
+    ).rejects.toThrow(/Resource not accessible/);
+
+    const path = calls[0].args[calls[0].args.indexOf("--body-file") + 1];
+    expect(existsSync(dirname(path))).toBe(false);
   });
 });

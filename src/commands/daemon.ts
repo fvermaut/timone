@@ -1,3 +1,5 @@
+import { query } from "@anthropic-ai/claude-agent-sdk";
+
 import type { AskCheckDeps } from "../daemon/ask-check.js";
 import { sdkConsult } from "../daemon/consult.js";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
@@ -41,8 +43,14 @@ import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import {
   AgentSessionSpawner,
   agentSdkRuntime,
+  intervalTicker,
+  readTimoneCheckout,
   type SessionRuntime,
 } from "../daemon/session.js";
+import { startStepSession } from "../daemon/step-session.js";
+import { RunningSteps } from "../runner/actions.js";
+import { RunnerDriver } from "../runner/driver.js";
+import { RunnerSessions } from "../runner/session.js";
 import { containerRuntime } from "../daemon/container-runtime.js";
 import { bringUpServices } from "../daemon/services.js";
 import { readRunEnv } from "../daemon/run-env.js";
@@ -382,6 +390,15 @@ export interface RunDaemonOptions {
    * not a checkout gets, since there is no version there to be behind.
    */
   version?: () => Promise<DaemonVersion | undefined>;
+  /**
+   * ✏ The runner, for the projects whose entry says `driver: runner`
+   * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+   * D9). One for the daemon's life, because a step it starts outlives the
+   * cycle that asked for it. Absent means those projects are left alone —
+   * which is what every test of the cadence and the lock wants, since none of
+   * them names such a project.
+   */
+  runner?: RunnerDriver;
   log?: (message: string) => void;
 }
 
@@ -470,6 +487,7 @@ async function poll(
       // poll every five minutes must not read a four-minute gap as an absence.
       pollIntervalMs: options.intervalMs,
       previews: options.previews,
+      runner: options.runner,
       log,
     });
     failures = result.errors.length;
@@ -482,6 +500,13 @@ async function poll(
     if (options.once) break;
     await new Promise((done) => setTimeout(done, options.intervalMs));
   }
+
+  // ✏ `--once` asks for one cycle, and a cycle no longer waits for the
+  // runner's wakes (PRD-05 R15). So the single cycle's wakes are waited for
+  // here, before the command reports: the cycle's effects are then what a
+  // person inspecting it afterwards finds. A step a wake started is not waited
+  // for; its end is handled when it comes, for as long as the process lives.
+  await options.runner?.drain();
 
   return failures > 0 ? 1 : 0;
 }
@@ -673,10 +698,47 @@ export function registerDaemonCommand(program: Command): void {
         log,
       });
 
+      // ✏ The runner, beside the spawner: the spawner goes on driving every
+      // project whose entry says nothing, and the runner drives the ones
+      // whose entry says `driver: runner` (ADR-0060 D9, PRD-05 R19). One of
+      // each for the daemon's life, sharing one list of running steps, so a
+      // wake's actions and the driver's checks see the same steps.
+      const running = new RunningSteps();
+      const runner = new RunnerDriver({
+        store,
+        adapter,
+        manifest,
+        root: process.cwd(),
+        sessionsFor: (actionsFor) => new RunnerSessions({ runQuery: query, actionsFor }),
+        running,
+        consult: sdkConsult(),
+        startStep: (input) =>
+          startStepSession(
+            {
+              store,
+              runtime,
+              progressIntervalMs: progressInterval * 1000,
+              ticker: intervalTicker,
+              log,
+            },
+            input,
+          ),
+        // Read at each step, as the spawner reads it: the version of Timone a
+        // step's box is built from is the one checked out when it starts.
+        timonePin: async () => (await readTimoneCheckout(process.cwd())).pin,
+        clock: () => new Date().toISOString(),
+        log,
+      });
+
       // Ctrl-C is how every operator stops the daemon, and a lock left behind
       // by that is a project wedged until the reclaim path's window passes.
       // `withStateLock`'s `finally` never runs on a signal, so the exit path
       // has to say it itself.
+      //
+      // ✏ The runner is not drained here, deliberately. Its wakes and its
+      // steps can run for an hour, and a Ctrl-C that waited for them would not
+      // stop the daemon. A step cut short this way is found by the next
+      // daemon's reclaim, which hands its run back to the runner and says why.
       for (const signal of ["SIGINT", "SIGTERM"] as const) {
         process.once(signal, () => {
           releaseHeldLocks();
@@ -707,6 +769,7 @@ export function registerDaemonCommand(program: Command): void {
         // The ask check's model, beside the other live seams and for the same
         // reason they are here (ADR-0054).
         consultAskCheck: sdkConsult(),
+        runner,
         // What this process is running, against what the default branch has
         // moved to (timone#5). `ls-remote`, so fvermaut's own checkout is
         // read and never written (ADR-0043's spirit, in his own folder).

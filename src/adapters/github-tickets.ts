@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { z } from "zod";
 
 import {
@@ -194,6 +198,25 @@ export function commentDatabaseId(url: string): string {
     throw new Error(`Cannot derive a comment id from "${url}"`);
   }
   return match[1];
+}
+
+/**
+ * The number of an issue `gh issue create` just opened, read from the issue
+ * url it prints.
+ *
+ * Throws rather than answering a guess: the issue exists by now, and a caller
+ * that went on with a wrong number would comment on, label or block somebody
+ * else's issue. `opened` says which call it was, for the message.
+ */
+function createdIssueNumber(raw: string, opened: string): number {
+  const created = /\/issues\/(\d+)\s*$/.exec(raw.trim());
+  if (created === null) {
+    throw new Error(
+      `${opened} but could not read its ` +
+        `number from an answer that is not an issue url: ${raw.trim()}`,
+    );
+  }
+  return Number(created[1]);
 }
 
 /**
@@ -492,6 +515,53 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
   }
 
   /**
+   * Commits on `branch` that the default branch lacks, through the REST
+   * compare endpoint — `GET /repos/{owner}/{repo}/compare/{base}...{head}`.
+   *
+   * A branch name with a slash goes into the path as it is; the forge reads
+   * `compare/main...timone/165-…` correctly (checked on fvermaut/timone on
+   * 2026-09-27). GitHub is also known to answer 404 when the two branches
+   * share no history at all, which would read as undefined here too; that
+   * case was not checked live.
+   */
+  async aheadOfDefault(
+    project: TicketingProject,
+    branch: string,
+  ): Promise<number | undefined> {
+    const slug = repoSlug(project.repoUrl);
+    // The forge names its own default branch, for mergeIntoDefault's reason.
+    const { defaultBranch } = await this.readBranches(project);
+
+    let raw: string;
+    try {
+      raw = await this.run(
+        "gh",
+        [
+          "api",
+          `repos/${slug}/compare/${defaultBranch}...${branch}`,
+          "--jq",
+          ".ahead_by",
+        ],
+        { repository: slug },
+      );
+    } catch (error) {
+      // REST answers an unknown branch with 404, so here, unlike in
+      // readBranches, "not there" arrives as a failed command. Only that
+      // status is read as an answer. Anything else, a dropped connection
+      // above all, means the question was never answered, so it is thrown.
+      const said = error instanceof Error ? error.message : String(error);
+      if (/\(HTTP 404\)/.test(said)) return undefined;
+      throw error;
+    }
+
+    return parseGhJson(
+      z.number().int().nonnegative(),
+      raw,
+      `comparing ${branch} with ${defaultBranch} on ${slug}`,
+    );
+  }
+
+  /**
    * One file's content on a branch, through GraphQL's `object(expression:)`.
    *
    * GraphQL again, and for the reason `readBranches` gives: an absent path
@@ -697,14 +767,27 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
       String(initiative),
     ]);
 
-    const created = /\/issues\/(\d+)\s*$/.exec(raw.trim());
-    if (created === null) {
-      throw new Error(
-        `${slug}: opened a step for #${initiative} but could not read its ` +
-          `number from an answer that is not an issue url: ${raw.trim()}`,
-      );
-    }
-    return Number(created[1]);
+    return createdIssueNumber(raw, `${slug}: opened a step for #${initiative}`);
+  }
+
+  async createIssue(
+    project: TicketingProject,
+    issue: { title: string; body: string; labels: string[] },
+  ): Promise<number> {
+    const slug = repoSlug(project.repoUrl);
+    const raw = await this.run("gh", [
+      "issue",
+      "create",
+      "--repo",
+      slug,
+      "--title",
+      issue.title,
+      "--body",
+      issue.body,
+      ...issue.labels.flatMap((label) => ["--label", label]),
+    ]);
+
+    return createdIssueNumber(raw, `${slug}: opened an issue`);
   }
 
   async blockStep(
@@ -885,6 +968,22 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     ]);
   }
 
+  async removeLabel(
+    project: TicketingProject,
+    number: number,
+    label: string,
+  ): Promise<void> {
+    await this.run("gh", [
+      "issue",
+      "edit",
+      String(number),
+      "--repo",
+      repoSlug(project.repoUrl),
+      "--remove-label",
+      label,
+    ]);
+  }
+
   async closeTicket(
     project: TicketingProject,
     number: number,
@@ -1019,6 +1118,67 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
         a.createdAt.localeCompare(b.createdAt),
       ),
     };
+  }
+
+  async getPullRequestBody(
+    project: TicketingProject,
+    number: number,
+  ): Promise<string> {
+    const slug = repoSlug(project.repoUrl);
+    const raw = await this.run("gh", [
+      "pr",
+      "view",
+      String(number),
+      "--repo",
+      slug,
+      "--json",
+      "body",
+    ]);
+
+    return parseGhJson(
+      z.looseObject({ body: z.string() }),
+      raw,
+      `reading the description of ${slug}!${number}`,
+    ).body;
+  }
+
+  /**
+   * Replace a description through `gh pr edit --body-file`, with the body in
+   * a file of its own.
+   *
+   * **A file, never an argument.** A description can be long, and Linux
+   * limits the size of a single argument; every other body this adapter
+   * sends goes as an argument. The injected {@link CommandRunner} cannot pass
+   * stdin, so `--body-file -` is not available either. A file needs no change
+   * to the `CommandRunner` (phase 40's plan, amended 2026-09-27).
+   *
+   * The file lives in a fresh directory, so two edits at once never share
+   * one, and the directory is removed in `finally`, whether the forge
+   * accepted the edit or refused it. A refusal is thrown, as every other
+   * method's is.
+   */
+  async setPullRequestBody(
+    project: TicketingProject,
+    number: number,
+    body: string,
+  ): Promise<void> {
+    const slug = repoSlug(project.repoUrl);
+    const dir = await mkdtemp(join(tmpdir(), "timone-pr-body-"));
+    try {
+      const file = join(dir, "body.md");
+      await writeFile(file, body, "utf8");
+      await this.run("gh", [
+        "pr",
+        "edit",
+        String(number),
+        "--repo",
+        slug,
+        "--body-file",
+        file,
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   }
 
   async postPullRequestComment(

@@ -25,20 +25,8 @@ import {
   technicalFault,
   type TechnicalFault,
 } from "./faults.js";
-import { takeHold } from "./holder.js";
 import { gateCommentFor } from "./gate-comment.js";
-import {
-  fromForgeDefaultBranch,
-  readBreakdown,
-  type BreakdownSource,
-  type Chunk,
-} from "./breakdown.js";
-import {
-  HELD_LABEL,
-  HELD_LABEL_DESCRIPTION,
-  MAP_LABEL,
-  MAP_LABEL_DESCRIPTION,
-} from "./steps.js";
+import type { BreakdownSource } from "./breakdown.js";
 import { STAGE_TRAILER } from "./hooks.js";
 import { instant, readConversationRecord, waitCursorFrom } from "./gates.js";
 import {
@@ -74,8 +62,6 @@ import {
 import {
   DEFAULT_PROGRESS_INTERVAL_SECONDS,
   SessionProgress,
-  closingLine,
-  tickLine,
   type ProgressSnapshot,
   type SessionSummary,
 } from "./progress.js";
@@ -85,6 +71,14 @@ import {
   type Run,
   type RunStore,
 } from "./runs.js";
+import { startStepSession, type StepSession } from "./step-session.js";
+import {
+  attemptMerge,
+  mergeChunkZero,
+  openStepTickets,
+  type ChunkZeroApproval,
+  type ChunkZeroDeps,
+} from "./chunk-zero.js";
 
 /**
  * Timone itself, at one exact commit — never a branch name (ADR-0041 D2).
@@ -222,6 +216,21 @@ export interface SessionRequest {
    * request without one runs exactly as it always did.
    */
   workspace?: SessionWorkspace;
+  /**
+   * The session will be spoken to while it runs, through
+   * {@link StartedSession.send} (timone#165).
+   *
+   * **Absent for every stage the daemon runs**, which send their prompt once
+   * and wait: those produce exactly the box they always did. Only the runner
+   * asks for this, because only the runner has anything to say to a step
+   * after it has started. `true` or absent, never `false`, for the reason
+   * {@link effort} is absent rather than undefined.
+   *
+   * The in-process runtime starts such a request as it starts any other and
+   * offers no `send` (phase 40, departure recorded in
+   * `phase-40-departures.md`); the box is where the runner's steps run.
+   */
+  interactive?: true;
 }
 
 /** What {@link sessionRequest} is given to assemble a request from. */
@@ -233,6 +242,8 @@ export interface SessionRequestInput {
   effort?: EffortLevel;
   /** Absent until the caller can name the versions to clone at. */
   workspace?: WorkspaceInput;
+  /** Absent for a session nobody will speak to once it has started. */
+  interactive?: true;
 }
 
 /** A git object name as `git rev-parse` reports one: 40 hexadecimal digits. */
@@ -269,6 +280,7 @@ export function sessionRequest(input: SessionRequestInput): SessionRequest {
     ...(input.workspace === undefined
       ? {}
       : { workspace: workspaceOf(input.workspace) }),
+    ...(input.interactive === undefined ? {} : { interactive: input.interactive }),
   };
 }
 
@@ -326,6 +338,16 @@ export interface StartedSession {
    * work to stop.
    */
   stop?(): void;
+  /**
+   * Say something to the session while it runs (timone#165): the text
+   * reaches it as a message from the user.
+   *
+   * Offered only for a request marked {@link SessionRequest.interactive}, and
+   * only by a runtime that can deliver it — today, the box. A message sent
+   * after the session has finished goes nowhere; how the session ended is
+   * what `completed` says.
+   */
+  send?(text: string): void;
 }
 
 /** A running ticker, stoppable. */
@@ -461,51 +483,6 @@ export function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
  */
 export interface SessionRuntime {
   start(request: SessionRequest): Promise<StartedSession>;
-}
-
-/** How a step ticket is titled: the chunk's number, then its name. */
-function stepTitle(index: number, title: string): string {
-  return `${index + 1}. ${title}`;
-}
-
-/**
- * What a step ticket says. Short, and every technical word is a link: a
- * ticket carries what is being done and what is needed, and the detail lives
- * in the committed artifact it points at (`process.md`, *Writing to the
- * human*).
- */
-function stepBody(
-  chunk: Chunk,
-  initiative: number,
-  breakdownPath: string,
-): string {
-  return [
-    chunk.delivers,
-    "",
-    `Part of #${initiative}. The full list is in \`${breakdownPath}\`.`,
-  ].join("\n");
-}
-
-/**
- * The initiative's ticket, rewritten as the map of its children.
- *
- * Each line is the step's **number**, which GitHub renders as a live link
- * carrying its title and whether it is closed — so the map shows how far the
- * work has got without anything having to keep a tally up to date.
- */
-function initiativeMap(
-  steps: { number: number; chunk: Chunk }[],
-  breakdownPath: string,
-): string {
-  return [
-    "This is built in pieces. Each one is its own ticket below.",
-    "",
-    ...steps.map(
-      (step, index) => `${index + 1}. #${step.number} — ${step.chunk.delivers}`,
-    ),
-    "",
-    `The list was approved in \`${breakdownPath}\`.`,
-  ].join("\n");
 }
 
 export interface AgentSessionSpawnerOptions {
@@ -935,7 +912,7 @@ async function forgePlannedPhase(
  * is told nothing. So the honest request is "clone the project, name no
  * branch", not "no workspace at all".
  */
-function workspaceFor(
+export function workspaceFor(
   pin: TimonePin | undefined,
   project: TicketingProject,
   branch: string | undefined,
@@ -1191,7 +1168,7 @@ function laterOf(one: string, other: string): string {
 }
 
 /** Whether `stage` is one the prompts module knows how to instruct. */
-function isPrompted(
+export function isPrompted(
   stage: PipelineStage,
 ): stage is (typeof PROMPTED_STAGES)[number] {
   return (PROMPTED_STAGES as readonly string[]).includes(stage);
@@ -1227,7 +1204,7 @@ export class AgentSessionSpawner implements SessionSpawner {
    * A map rather than one field because the daemon polls several projects and
    * each may have a session of its own.
    */
-  private readonly running = new Map<string, StartedSession>();
+  private readonly running = new Map<string, StepSession>();
 
   constructor(private readonly options: AgentSessionSpawnerOptions) {
     this.log = options.log ?? (() => {});
@@ -1251,23 +1228,12 @@ export class AgentSessionSpawner implements SessionSpawner {
    * Silent when there is nothing to stop — a run parked, queued, or being
    * worked by a different daemon has no session here — and silent when the
    * runtime cannot stop one. In both cases the cancellation still stands; all
-   * that is lost is the work stopping early.
+   * that is lost is the work stopping early. What is said in the log, and the
+   * guard against a stop that throws, belong to the session itself
+   * ({@link StepSession.stop}), because the runner stops sessions too.
    */
   stop(runId: string): void {
-    const started = this.running.get(runId);
-    if (started === undefined) return;
-    if (started.stop === undefined) {
-      this.log(`stop   ${runId} — this runtime cannot stop a running session`);
-      return;
-    }
-    this.log(`stop   ${runId} — cancelled, so its session is being ended`);
-    try {
-      started.stop();
-    } catch (error) {
-      // A stop that throws is not the cancelling cycle's failure. The run is
-      // cancelled either way, and the session ends when it ends.
-      this.log(`stop   ${runId} — could not end its session: ${oneLine(error)}`);
-    }
+    this.running.get(runId)?.stop();
   }
 
   /** Whether a human has cancelled this run since it was last looked at. */
@@ -1630,9 +1596,16 @@ export class AgentSessionSpawner implements SessionSpawner {
     request: SessionRequest,
     attempt: number,
   ): Promise<SessionOutcome> {
-    let started: StartedSession;
+    let session: StepSession;
     try {
-      started = await this.startClaimed(run, request);
+      session = await this.startClaimed(
+        run,
+        request,
+        `${run.id} (${stage})`,
+        (sessionId) =>
+          `session ${sessionId} started for ${run.id} ` +
+          `(${stage}, ${request.model})${attempt === 1 ? "" : ` — attempt ${attempt}`}`,
+      );
     } catch (error) {
       if (attempt === 1) {
         // Still active here means a later stage of the walk: a parked run
@@ -1649,11 +1622,7 @@ export class AgentSessionSpawner implements SessionSpawner {
       return { sessionId: "unknown", ok: false, error: oneLine(error) };
     }
 
-    this.log(
-      `session ${started.sessionId} started for ${run.id} ` +
-        `(${stage}, ${request.model})${attempt === 1 ? "" : ` — attempt ${attempt}`}`,
-    );
-    return this.watch(run.id, `${run.id} (${stage})`, started);
+    return this.watch(run.id, session);
   }
 
   /**
@@ -1680,46 +1649,31 @@ export class AgentSessionSpawner implements SessionSpawner {
   }
 
   /**
-   * Claim the run, then start its session — in that order (ADR-0023).
+   * Claim the run, then start its session, in the one place both the spawner
+   * and the runner start one: {@link startStepSession}, which holds the reason
+   * for the order (ADR-0023) and for putting a parked run back on its wait
+   * when the start throws.
    *
-   * The claim is what tells a second process the run is taken, so it has to
-   * be on disk *before* the work exists rather than after it returns.
-   * `runtime.start` awaits the session's first message, so the window between
-   * the two used to be as long as a session takes to answer, and for all of
-   * it the ledger still advertised the run as waiting on a human.
-   *
-   * Only a parked run is claimed here, because a `picked-up` run is already
-   * claimed: that status occupies the project's session slot and every guard
-   * already excludes it. What was missing was never a claim for the entry
-   * path — it was one for the resume path.
-   *
-   * If the spawn fails the run goes back to the wait it came from, and the
-   * error goes on to whoever asked for the session. **A claim that outlives
-   * its session is the stuck-run fault**, so releasing it is part of the same
-   * path rather than a later cycle's problem.
+   * `announce` is the line that says the session started. It is logged before
+   * the first tick, which is the order the daemon's log has always had.
    */
-  private async startClaimed(
+  private startClaimed(
     run: Run,
     request: SessionRequest,
-  ): Promise<StartedSession> {
+    label: string,
+    announce: (sessionId: string) => string,
+  ): Promise<StepSession> {
     const { store, runtime } = this.options;
-
-    const before = store.get(run.id);
-    const parked = before?.status === "parked" ? before : undefined;
-    // The holder is this process, because this process is what is running the
-    // session (ADR-0049 D1). If it dies, the pid goes with it and the run is
-    // reclaimable at once rather than after a clock says so.
-    const holder = takeHold(`timone daemon ${run.id}`);
-    if (parked !== undefined) store.claim(run.id, holder);
-
-    try {
-      const started = await runtime.start(request);
-      store.activate(run.id, started.sessionId, holder);
-      return started;
-    } catch (error) {
-      if (parked !== undefined) store.park(run.id, waitOf(parked));
-      throw error;
-    }
+    return startStepSession(
+      {
+        store,
+        runtime,
+        progressIntervalMs: this.progressIntervalMs,
+        ticker: this.options.ticker ?? intervalTicker,
+        log: this.log,
+      },
+      { runId: run.id, request, label, announce },
+    );
   }
 
   /**
@@ -2250,7 +2204,7 @@ export class AgentSessionSpawner implements SessionSpawner {
     // Its own declared model, never the runtime's default: this is the second
     // `runtime.start` site and not a `PipelineStage`, so nothing in the graph
     // speaks for it. Haiku carries no effort at all.
-    const started = await this.startClaimed(
+    const session = await this.startClaimed(
       run,
       sessionRequest({
         cwd: root,
@@ -2258,10 +2212,11 @@ export class AgentSessionSpawner implements SessionSpawner {
         model: APPROVAL_RECORD_MODEL,
         ...workspaceFor(pin, project, store.get(run.id)?.branch),
       }),
+      `${run.id} (approval record)`,
+      () => `record ${run.id} — ${approval.by} approved ${approval.stage}`,
     );
-    this.log(`record ${run.id} — ${approval.by} approved ${approval.stage}`);
 
-    const outcome = await this.watch(run.id, `${run.id} (approval record)`, started);
+    const outcome = await this.watch(run.id, session);
     if (!outcome.ok) {
       const reason = `could not record the approval: ${outcome.error ?? "the session ended without a result"}`;
       store.fail(run.id, reason);
@@ -2274,7 +2229,14 @@ export class AgentSessionSpawner implements SessionSpawner {
     // before its approval was recorded would be work on the default branch
     // with nothing on the branch saying what authorised it.
     if (approval.stage === "breakdown") {
-      if (!(await this.mergeChunkZero(run, project))) return false;
+      if (
+        !(await mergeChunkZero(this.chunkZero(), run, project, {
+          by: approval.by,
+          at: approval.at,
+        }))
+      ) {
+        return false;
+      }
 
       // **And the run stops here, either way.** Approving a breakdown turns
       // this ticket into a *map* of its steps
@@ -2284,7 +2246,7 @@ export class AgentSessionSpawner implements SessionSpawner {
       // the chunk model wearing the new model's clothes — it planned the whole
       // initiative on the map ticket, for nine minutes of Opus, and phase 29's
       // live gate is what caught it.
-      const failure = await this.openStepTickets(run, project);
+      const failure = await openStepTickets(this.chunkZero(), run, project);
       if (failure !== undefined) {
         // A failure here leaves an approved breakdown with no steps, so
         // nothing will ever pick the work up. It is a fault and is recorded as
@@ -2302,153 +2264,39 @@ export class AgentSessionSpawner implements SessionSpawner {
   }
 
   /**
-   * Open one ticket per step of an approved breakdown, as children of the
-   * initiative's own ticket, and turn that ticket into a map of them
-   * ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)).
-   *
-   * **This is TypeScript and must never become an instruction in
-   * `approvalRecordPrompt`.** Idempotence is the whole deliverable here, and
-   * idempotence cannot be asserted about a prompt: a model told "create only
-   * what is missing" is a hope, not a guard. Fourteen issues opened twice is
-   * worse than fourteen never opened, and re-running is the ordinary case —
-   * a retry, a redelivered comment, a daemon restarted mid-cycle.
-   *
-   * It answers rather than throws. A tracker that fell over on the seventh
-   * create leaves six real tickets behind, and the next cycle opens the other
-   * eight; taking the run down with it would turn a partial success into a
-   * failed initiative.
+   * The two acts that close chunk zero read the spawner's own seams, with
+   * the same defaults, and log to the same place.
    */
-  private async openStepTickets(
-    run: Run,
-    project: TicketingProject,
-  ): Promise<string | undefined> {
-    const { adapter, root } = this.options;
-    const read = await readBreakdown(
-      run.ticket,
-      this.options.breakdownSource ??
-        fromForgeDefaultBranch(adapter, project),
-    );
-    if (read.kind !== "ok") {
-      return (
-        `the approved breakdown at ${read.path} is ${read.kind}, so no step ` +
-        "tickets could be opened"
-      );
-    }
-
-    try {
-      // Before anything can be held, the label has to exist — a state nobody
-      // created is a state nobody can be in, which is why `timone-wayfind`
-      // creates its own on first use. **29c owns this, not 29d**; both slices
-      // assuming the other did it shows up as a claim silently not applied.
-      await adapter.ensureLabel(project, HELD_LABEL, HELD_LABEL_DESCRIPTION);
-      await adapter.ensureLabel(project, MAP_LABEL, MAP_LABEL_DESCRIPTION);
-
-      // The existing children are what makes a re-run free. They are matched
-      // by title, and the title carries the chunk's number — so two chunks
-      // that happen to be called the same thing are still two tickets, and a
-      // child a human opened by hand matches nothing and is left alone.
-      const existing = await adapter.listSteps(project, run.ticket);
-      const byTitle = new Map(existing.map((step) => [step.title, step.number]));
-
-      const opened: { number: number; chunk: Chunk }[] = [];
-      let previous: number | undefined;
-      for (const [index, chunk] of read.breakdown.chunks.entries()) {
-        const title = stepTitle(index, chunk.title);
-        let number = byTitle.get(title);
-
-        if (number === undefined) {
-          number = await adapter.createStep(project, run.ticket, {
-            title,
-            body: stepBody(chunk, run.ticket, read.path),
-          });
-          // The chain is written only for a ticket this run opened. A step
-          // that already existed already carries its relation, and writing it
-          // again is the second `blockedBy` edge case (2) forbids.
-          if (previous !== undefined) {
-            await adapter.blockStep(project, number, previous);
-          }
-        }
-        previous = number;
-        opened.push({ number, chunk });
-      }
-
-      await adapter.setTicketBody(
-        project,
-        run.ticket,
-        initiativeMap(opened, read.path),
-      );
-      // Last, and only once the children exist: from here the daemon reads
-      // this ticket as a map and never opens a run on it. Marking it before
-      // its steps were opened would strand the initiative — a map with no
-      // children is a ticket nothing will ever pick up.
-      await adapter.applyLabel(project, run.ticket, MAP_LABEL);
-      this.log(`steps ${run.id} — ${read.breakdown.chunks.length} steps stand`);
-      return undefined;
-    } catch (error) {
-      // The tickets already opened are real and stay — re-running opens only
-      // what is missing, which is what 29c's idempotence is for. What must not
-      // happen is this run carrying on as though the steps existed.
-      return `could not open the step tickets: ${oneLine(error)}`;
-    }
+  private chunkZero(): ChunkZeroDeps {
+    const { store, adapter, breakdownSource, mergeProbe } = this.options;
+    return {
+      store,
+      adapter,
+      ...(breakdownSource === undefined ? {} : { breakdownSource }),
+      ...(mergeProbe === undefined ? {} : { mergeProbe }),
+      log: this.log,
+    };
   }
 
   /**
-   * Merge chunk zero — the branch carrying the specification and the approved
-   * breakdown — into the project's default branch, with no pull request
-   * (ADR-0030 D2). Returns false when it did not happen, having failed the run
-   * and said why on the ticket, exactly as a failed approval record does:
-   * chunk 1 cuts from the default branch, so a silently failed merge would
-   * have it build against a default branch that does not carry the
-   * specification, and nothing downstream would notice.
+   * {@link mergeChunkZero} and {@link attemptMerge}, under the names they had
+   * as methods here. Kept because `session.test.ts` reaches these two private
+   * methods by name, and that file is the proof that moving them to
+   * `chunk-zero.ts` changed nothing — so it may not change with the move.
    */
-  private async mergeChunkZero(
+  private mergeChunkZero(
     run: Run,
     project: TicketingProject,
+    approval: ChunkZeroApproval,
   ): Promise<boolean> {
-    const { store, adapter } = this.options;
-    const branch = store.get(run.id)?.branch;
-    const outcome = await this.attemptMerge(project, branch);
-
-    if (outcome.merged) {
-      // `alreadyThere` is a success and is logged as the different thing it
-      // is: a cycle retried after a merge that landed reaches here, and
-      // reporting it as a fresh merge would hide a retry nobody knew about.
-      this.log(
-        outcome.alreadyThere === true
-          ? `merged ${run.id} — ${branch} was already on ${outcome.into}`
-          : `merged ${run.id} — ${branch} into ${outcome.into}`,
-      );
-      return true;
-    }
-
-    const reason =
-      outcome.conflict === true
-        ? "the approved breakdown and the default branch have changes that clash — " +
-          `a merge conflict, and nothing was merged (${outcome.reason}). ` +
-          "Somebody has to decide which side wins; trying again changes nothing."
-        : `could not merge the approved breakdown into the default branch: ${outcome.reason}`;
-    store.fail(run.id, reason);
-    await adapter.postComment(project, run.ticket, failedComment(reason));
-    return false;
+    return mergeChunkZero(this.chunkZero(), run, project, approval);
   }
 
-  /** The merge itself, with a thrown git failure reduced to a refusal. */
-  private async attemptMerge(
+  private attemptMerge(
     project: TicketingProject,
     branch: string | undefined,
   ): Promise<MergeOutcome> {
-    if (branch === undefined) {
-      return { merged: false, reason: "the run holds no work branch" };
-    }
-    const merge =
-      this.options.mergeProbe ??
-      ((target: TicketingProject, name: string, message: string) =>
-        this.options.adapter.mergeIntoDefault(target, name, message));
-    try {
-      return await merge(project, branch, mergeMessage(branch));
-    } catch (error) {
-      return { merged: false, reason: oneLine(error) };
-    }
+    return attemptMerge(this.chunkZero(), project, branch);
   }
 
   /**
@@ -2604,47 +2452,23 @@ export class AgentSessionSpawner implements SessionSpawner {
   }
 
   /**
-   * Await a session, saying what it is doing while it works and what it cost
-   * when it stops.
+   * Await a session, keeping it reachable for as long as it runs.
    *
-   * The ticker is cleared in a `finally`, so a session that fails or throws
-   * leaves no timer behind, and the closing line is printed there too — the
-   * money was spent whether or not the session succeeded, and a cost report
-   * that only appears on success is a success report wearing its clothes.
+   * What it says while it works and what it cost when it stops is
+   * {@link startStepSession}'s, which ticks from the moment the session
+   * starts. What stays here is the spawner's own map: an entry exists only
+   * while the session is genuinely running, because this is what a
+   * cancellation stops (ADR-0047).
    */
   private async watch(
     runId: string,
-    label: string,
-    started: StartedSession,
+    session: StepSession,
   ): Promise<SessionOutcome> {
-    const { progress } = started;
-    const start = this.options.ticker ?? intervalTicker;
-
-    // One tick, two jobs (ADR-0020, which narrowed the heartbeat's meaning and
-    // left ADR-0017's mechanism alone). The heartbeat is stamped unconditionally
-    // — including for a runtime that can say nothing about its progress —
-    // because it is what proves the run alive, and a tick made conditional on
-    // having something to print would silently move recovery with it.
-    const ticker = start(() => {
-      this.options.store.heartbeat(runId);
-      if (progress !== undefined) {
-        this.log(`work   ${label} — ${tickLine(progress.snapshot())}`);
-      }
-    }, this.progressIntervalMs);
-
-    // Reachable while it runs, and only while it runs: this is what a
-    // cancellation stops (ADR-0047).
-    this.running.set(runId, started);
-
+    this.running.set(runId, session);
     try {
-      return await started.completed;
+      return (await session.completed).outcome;
     } finally {
       this.running.delete(runId);
-      ticker.stop();
-      const summary = progress?.summary();
-      if (summary !== undefined) {
-        this.log(`cost   ${label} — ${closingLine(summary)}`);
-      }
     }
   }
 

@@ -17,6 +17,7 @@ import { STAGE_DONE_MARKER } from "../adapters/ticketing.js";
 import {
   noBranches,
   noFiles,
+  noRunnerCalls,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import { RunStore, type Run } from "../daemon/runs.js";
@@ -194,6 +195,7 @@ function fakeAdapter(open: readonly Ticket[] = []): {
     ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {
@@ -1616,5 +1618,72 @@ describe("takeover claims through the run, not the lock", () => {
     expect(
       pending(statePath).requests.map((request) => request.body.kind),
     ).toEqual(["release-takeover"]);
+  });
+});
+
+describe("a run the runner waits on", () => {
+  // ADR-0060 and PRD-05 R11: `timone takeover` stays. What a run of the
+  // runner does next is the runner's to decide, not a stage's, so the
+  // session that opens is the one bound to no stage.
+  it("resolves to the session bound to no stage", async () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 6);
+    store.park(run.id, {
+      waitingOn: "your answer on the ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
+
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store, adapter: fakeAdapter().adapter },
+    );
+
+    expect(resolution.kind).toBe("escalation");
+    expect(resolution).not.toHaveProperty("stage");
+  });
+
+  it("gives the run back to the runner when no daemon is running, and leaves the daemon a request to wake it", async () => {
+    // PRD-05 R11: when the terminal session ends, the runner wakes and reads
+    // what it left. With no daemon running, nothing can wake it now, so the
+    // next daemon is asked to.
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-runner-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath);
+    const onRunner: Manifest = {
+      projects: {
+        "scratch-app": { ...manifest.projects["scratch-app"]!, driver: "runner" },
+      },
+    };
+    const { run } = store.register("scratch-app", 6);
+    store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
+    const { launcher, calls } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest: onRunner,
+      store,
+      statePath,
+      adapter: fakeAdapter().adapter,
+      launcher,
+      root: dir,
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
+    expect(pending(statePath).requests.map((request) => request.body)).toEqual([
+      { kind: "takeover-ended", project: "scratch-app", ticket: 6 },
+    ]);
+    expect(said.at(-1)).toBe(
+      "scratch-app #6 goes back to the runner. It reads what the session left as soon as the daemon runs.",
+    );
   });
 });

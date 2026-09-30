@@ -96,3 +96,32 @@ export const noFiles = {
     return undefined;
   },
 };
+
+/**
+ * The forge calls only the runner makes (phase 40), stubbed for the fakes
+ * that stand in for the daemon's port.
+ *
+ * **Every member throws**, like {@link noStepWrites}, and here the reads too.
+ * {@link noBranches} and {@link noFiles} answer because the tests that use
+ * them used to get "nothing there" from a command, and keeping that answer
+ * keeps those tests about their own subject. Nothing the daemon does calls
+ * these, so there is no earlier answer to keep, and a daemon test that
+ * reaches one has found a call nobody meant to make.
+ */
+export const noRunnerCalls = {
+  async removeLabel(): Promise<void> {
+    throw new Error("no test here takes a label off a ticket");
+  },
+  async createIssue(): Promise<number> {
+    throw new Error("no test here opens an issue");
+  },
+  async getPullRequestBody(): Promise<string> {
+    throw new Error("no test here reads a pull request's description");
+  },
+  async setPullRequestBody(): Promise<void> {
+    throw new Error("no test here rewrites a pull request's description");
+  },
+  async aheadOfDefault(): Promise<number | undefined> {
+    throw new Error("no test here compares a branch with the default branch");
+  },
+};

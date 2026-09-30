@@ -854,6 +854,47 @@ export function approvalRecordPrompt(
 }
 
 /**
+ * The sentence a step is given when the runner skipped the approval of the
+ * requirements. **Read by the skills, word for word** — they look for it to
+ * know that an unapproved specification is not a fault to stop on — so it is
+ * a constant, and it is never reworded in one place only.
+ */
+export const SKIPPED_REQUIREMENTS_APPROVAL =
+  "The runner skipped the approval of the requirements, and recorded that it did.";
+
+/** {@link SKIPPED_REQUIREMENTS_APPROVAL}, for the approval of the list of pieces. */
+export const SKIPPED_PIECES_APPROVAL =
+  "The runner skipped the approval of the list of pieces, and recorded that it did.";
+
+/**
+ * The runner's instructions for a step, appended to the step's own prompt
+ * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
+ *
+ * Under their own heading, so a step can tell what its stage always does
+ * from what the runner asked of it this time. When the runner skipped an
+ * approval this run, the step is told so in the exact sentence the skills
+ * read: a skill that finds an unapproved artifact would otherwise stop and
+ * ask for the approval the runner chose to go without.
+ */
+export function runnerInstructionsBlock(
+  instructions: string,
+  skipped: readonly ("requirements" | "pieces")[],
+): string {
+  return [
+    "## The runner's instructions for this step",
+    "",
+    "The runner is the part of Timone that decides what happens next on this",
+    "ticket. It started this step with these instructions:",
+    "",
+    instructions.trim(),
+    ...(skipped.length === 0 ? [] : [""]),
+    ...skipped.map((what) =>
+      what === "requirements" ? SKIPPED_REQUIREMENTS_APPROVAL : SKIPPED_PIECES_APPROVAL,
+    ),
+  ].join("\n");
+}
+
+/**
  * The work branch a ticket's chunk owns, from the requirements stage on.
  *
  * Named from the ticket rather than from the phase, because at this point

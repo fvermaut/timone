@@ -21,6 +21,7 @@ import type {
 import {
   noBranches,
   noFiles,
+  noRunnerCalls,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
@@ -79,6 +80,7 @@ function quietAdapter(): TicketingAdapter {
     ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
     // No initiative in this test is broken into step tickets.
     async listSteps(): Promise<Step[]> {

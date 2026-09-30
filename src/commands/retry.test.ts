@@ -17,6 +17,7 @@ import {
 import {
   noBranches,
   noFiles,
+  noRunnerCalls,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
 import { acquireStateLock } from "../daemon/lock.js";
@@ -369,6 +370,7 @@ describe("timone retry — the answer a killed session had already read", async 
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
@@ -654,6 +656,7 @@ describe("timone retry — the way back from a consumed answer", async () => {
       ...noBranches,
     ...noFiles,
     ...noMerges,
+    ...noRunnerCalls,
     ...noStepWrites,
       // No initiative in this test is broken into step tickets.
       async listSteps(): Promise<Step[]> {
@@ -720,5 +723,80 @@ describe("timone retry — the way back from a consumed answer", async () => {
     expect(code).toBe(0);
     expect(again.resumed).toEqual(["scratch-app#6/1"]);
     expect(contexts.at(-1)?.feedback).toBe(answer.body);
+  });
+});
+
+describe("timone retry — a project the runner drives", async () => {
+  // ADR-0060 D6 and PRD-05 R11: `retry` is removed for these projects. The
+  // runner reads the ticket each time it wakes, so the sentence sends the
+  // person there, on whichever path the command takes.
+  const runnerManifest: Manifest = {
+    projects: {
+      "scratch-app": {
+        repo_url: "https://github.com/fvermaut/scratch-app.git",
+        path: "projects/scratch-app",
+        stack: [],
+        bindings: { ticketing: "github" },
+        driver: "runner",
+        instructors: ["fvermaut"],
+      },
+    },
+  };
+
+  it("refuses with the sentence that sends the person to the ticket, when no daemon holds the ledger", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-retry-runner-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-06T10:00:00Z" });
+    failedRun(store);
+    const before = store.get("scratch-app#6/1");
+    const { log, lines } = collect();
+
+    const code = await runRetry("scratch-app#6", { manifest: runnerManifest, store, statePath, log });
+
+    expect(code).toBe(1);
+    expect(lines.join("\n")).toBe(
+      "This project is run by the runner. Write on the ticket instead: say what you want done.",
+    );
+    expect(store.get("scratch-app#6/1")).toEqual(before);
+  });
+
+  it("refuses with the same sentence when a daemon holds the ledger, and asks it for nothing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-retry-runner-daemon-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-06T10:00:00Z" });
+    failedRun(store);
+    const before = store.get("scratch-app#6/1");
+    acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    const { log, lines } = collect();
+    // The daemon's side, as `applyRequests` does it: the command's own code
+    // over the store, then settle.
+    const daemonCycle = async (): Promise<void> => {
+      for (const request of pending(statePath).requests) {
+        await runRetry("scratch-app#6", { manifest: runnerManifest, store, log: () => {} });
+        settle(request.path);
+      }
+    };
+
+    const code = await runRetry("scratch-app#6", {
+      manifest: runnerManifest,
+      store,
+      statePath,
+      log,
+      wait: { intervalMs: 1, boundMs: 100, sleep: daemonCycle },
+    });
+
+    expect(code).toBe(1);
+    expect(lines.join("\n")).toBe(
+      "This project is run by the runner. Write on the ticket instead: say what you want done.",
+    );
+    expect(pending(statePath).requests).toEqual([]);
+    expect(store.get("scratch-app#6/1")).toEqual(before);
   });
 });

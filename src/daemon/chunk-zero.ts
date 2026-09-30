@@ -1,0 +1,308 @@
+import type {
+  MergeOutcome,
+  TicketingAdapter,
+  TicketingProject,
+} from "../adapters/ticketing.js";
+import {
+  fromForgeDefaultBranch,
+  readBreakdown,
+  type BreakdownSource,
+  type Chunk,
+} from "./breakdown.js";
+import type { Run, RunStore } from "./runs.js";
+// `session.ts` imports this module back. That is safe only because nothing
+// here reads these two names while the modules load, only when a merge runs.
+import { failedComment, mergeMessage } from "./session.js";
+import {
+  HELD_LABEL,
+  HELD_LABEL_DESCRIPTION,
+  MAP_LABEL,
+  MAP_LABEL_DESCRIPTION,
+} from "./steps.js";
+
+/**
+ * What the two acts that close chunk zero need from outside: merging its
+ * branch, and opening one ticket per step of the approved breakdown
+ * (ADR-0030 D2, ADR-0040).
+ *
+ * Moved out of `AgentSessionSpawner` so that the runner calls the same code
+ * rather than a copy of it. The seams are the spawner's options of the same
+ * names, with the same defaults.
+ */
+export interface ChunkZeroDeps {
+  store: RunStore;
+  adapter: TicketingAdapter;
+  /**
+   * Reads a ticket's approved breakdown. Defaults to the forge's default
+   * branch, `breakdown.ts`'s `fromForgeDefaultBranch`.
+   */
+  breakdownSource?: BreakdownSource;
+  /**
+   * Merges chunk zero's branch into the default branch and pushes it.
+   * Defaults to the ticketing adapter's `mergeIntoDefault`.
+   */
+  mergeProbe?: (
+    project: TicketingProject,
+    branch: string,
+    message: string,
+  ) => Promise<MergeOutcome>;
+  log: (message: string) => void;
+}
+
+/**
+ * A named person's approval of the list of pieces: who gave it, and when
+ * their comment says they did.
+ */
+export interface ChunkZeroApproval {
+  by: string;
+  at: string;
+}
+
+/**
+ * Why chunk zero was not merged: what the forge or git said, and whether the
+ * two sides clash.
+ */
+export type ChunkZeroRefusal = Extract<MergeOutcome, { merged: false }>;
+
+/**
+ * Merge chunk zero — the branch carrying the specification and the approved
+ * breakdown — into the project's default branch, with no pull request
+ * (ADR-0030 D2). Returns false when it did not happen, having failed the run
+ * and said why on the ticket, exactly as a failed approval record does:
+ * chunk 1 cuts from the default branch, so a silently failed merge would
+ * have it build against a default branch that does not carry the
+ * specification, and nothing downstream would notice.
+ *
+ * This is the current daemon's form. The runner's path merges through
+ * {@link tryMergeChunkZero}, which fails nothing (40x): on a project the
+ * runner drives, a failed run is one nothing wakes again.
+ *
+ * **`approval` is required, so no caller can merge without one** (PRD-05 R3:
+ * only a named person's yes lets work reach a default branch with no pull
+ * request). Both paths that close chunk zero merge through here or through
+ * {@link tryMergeChunkZero}, and each must name the approval that allows it:
+ * the runner's path takes it only from the run record's `approval` entry,
+ * and the daemon's from the person's reply it has just read. The check is
+ * the compiler's — a call without an approval does not build — so nothing
+ * here reads it again.
+ *
+ * {@link attemptMerge} below takes no approval. It is exported only for the
+ * spawner's delegator of the same name, which its tests reach; nothing else
+ * may call it.
+ */
+export async function mergeChunkZero(
+  deps: ChunkZeroDeps,
+  run: Run,
+  project: TicketingProject,
+  approval: ChunkZeroApproval,
+): Promise<boolean> {
+  const refusal = await tryMergeChunkZero(deps, run, project, approval);
+  if (refusal === undefined) return true;
+
+  const reason =
+    refusal.conflict === true
+      ? "the approved breakdown and the default branch have changes that clash — " +
+        `a merge conflict, and nothing was merged (${refusal.reason}). ` +
+        "Somebody has to decide which side wins; trying again changes nothing."
+      : `could not merge the approved breakdown into the default branch: ${refusal.reason}`;
+  deps.store.fail(run.id, reason);
+  await deps.adapter.postComment(project, run.ticket, failedComment(reason));
+  return false;
+}
+
+/**
+ * Merge chunk zero as {@link mergeChunkZero} does, and write nothing about a
+ * refusal: no run is failed and no ticket is told. Returns the refusal, or
+ * undefined when the branch is on the default branch now.
+ *
+ * The runner's form (40x). What a refusal means for the run, and what the
+ * ticket is told, is the caller's to decide.
+ */
+export async function tryMergeChunkZero(
+  deps: ChunkZeroDeps,
+  run: Run,
+  project: TicketingProject,
+  // Required and not read: see {@link mergeChunkZero}. Named with an
+  // underscore only so a reader does not look for where it is used.
+  _approval: ChunkZeroApproval,
+): Promise<ChunkZeroRefusal | undefined> {
+  const branch = deps.store.get(run.id)?.branch;
+  const outcome = await attemptMerge(deps, project, branch);
+  if (!outcome.merged) return outcome;
+
+  // `alreadyThere` is a success and is logged as the different thing it
+  // is: a cycle retried after a merge that landed reaches here, and
+  // reporting it as a fresh merge would hide a retry nobody knew about.
+  deps.log(
+    outcome.alreadyThere === true
+      ? `merged ${run.id} — ${branch} was already on ${outcome.into}`
+      : `merged ${run.id} — ${branch} into ${outcome.into}`,
+  );
+  return undefined;
+}
+
+/**
+ * The merge itself, with a thrown git failure reduced to a refusal.
+ *
+ * Exported beside {@link mergeChunkZero} because the spawner still answers to
+ * this name: its tests reach the merge through it.
+ */
+export async function attemptMerge(
+  deps: ChunkZeroDeps,
+  project: TicketingProject,
+  branch: string | undefined,
+): Promise<MergeOutcome> {
+  if (branch === undefined) {
+    return { merged: false, reason: "the run holds no work branch" };
+  }
+  const merge =
+    deps.mergeProbe ??
+    ((target: TicketingProject, name: string, message: string) =>
+      deps.adapter.mergeIntoDefault(target, name, message));
+  try {
+    return await merge(project, branch, mergeMessage(branch));
+  } catch (error) {
+    return { merged: false, reason: oneLine(error) };
+  }
+}
+
+/**
+ * Open one ticket per step of an approved breakdown, as children of the
+ * initiative's own ticket, and turn that ticket into a map of them
+ * ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)).
+ *
+ * **This is TypeScript and must never become an instruction in
+ * `approvalRecordPrompt`.** Idempotence is the whole deliverable here, and
+ * idempotence cannot be asserted about a prompt: a model told "create only
+ * what is missing" is a hope, not a guard. Fourteen issues opened twice is
+ * worse than fourteen never opened, and re-running is the ordinary case —
+ * a retry, a redelivered comment, a daemon restarted mid-cycle.
+ *
+ * It answers rather than throws. A tracker that fell over on the seventh
+ * create leaves six real tickets behind, and the next cycle opens the other
+ * eight; taking the run down with it would turn a partial success into a
+ * failed initiative.
+ */
+export async function openStepTickets(
+  deps: ChunkZeroDeps,
+  run: Run,
+  project: TicketingProject,
+): Promise<string | undefined> {
+  const { adapter } = deps;
+  const read = await readBreakdown(
+    run.ticket,
+    deps.breakdownSource ?? fromForgeDefaultBranch(adapter, project),
+  );
+  if (read.kind !== "ok") {
+    return (
+      `the approved breakdown at ${read.path} is ${read.kind}, so no step ` +
+      "tickets could be opened"
+    );
+  }
+
+  try {
+    // Before anything can be held, the label has to exist — a state nobody
+    // created is a state nobody can be in, which is why `timone-wayfind`
+    // creates its own on first use. **29c owns this, not 29d**; both slices
+    // assuming the other did it shows up as a claim silently not applied.
+    await adapter.ensureLabel(project, HELD_LABEL, HELD_LABEL_DESCRIPTION);
+    await adapter.ensureLabel(project, MAP_LABEL, MAP_LABEL_DESCRIPTION);
+
+    // The existing children are what makes a re-run free. They are matched
+    // by title, and the title carries the chunk's number — so two chunks
+    // that happen to be called the same thing are still two tickets, and a
+    // child a human opened by hand matches nothing and is left alone.
+    const existing = await adapter.listSteps(project, run.ticket);
+    const byTitle = new Map(existing.map((step) => [step.title, step.number]));
+
+    const opened: { number: number; chunk: Chunk }[] = [];
+    let previous: number | undefined;
+    for (const [index, chunk] of read.breakdown.chunks.entries()) {
+      const title = stepTitle(index, chunk.title);
+      let number = byTitle.get(title);
+
+      if (number === undefined) {
+        number = await adapter.createStep(project, run.ticket, {
+          title,
+          body: stepBody(chunk, run.ticket, read.path),
+        });
+        // The chain is written only for a ticket this run opened. A step
+        // that already existed already carries its relation, and writing it
+        // again is the second `blockedBy` edge case (2) forbids.
+        if (previous !== undefined) {
+          await adapter.blockStep(project, number, previous);
+        }
+      }
+      previous = number;
+      opened.push({ number, chunk });
+    }
+
+    await adapter.setTicketBody(
+      project,
+      run.ticket,
+      initiativeMap(opened, read.path),
+    );
+    // Last, and only once the children exist: from here the daemon reads
+    // this ticket as a map and never opens a run on it. Marking it before
+    // its steps were opened would strand the initiative — a map with no
+    // children is a ticket nothing will ever pick up.
+    await adapter.applyLabel(project, run.ticket, MAP_LABEL);
+    deps.log(`steps ${run.id} — ${read.breakdown.chunks.length} steps stand`);
+    return undefined;
+  } catch (error) {
+    // The tickets already opened are real and stay — re-running opens only
+    // what is missing, which is what 29c's idempotence is for. What must not
+    // happen is this run carrying on as though the steps existed.
+    return `could not open the step tickets: ${oneLine(error)}`;
+  }
+}
+
+/** How a step ticket is titled: the chunk's number, then its name. */
+function stepTitle(index: number, title: string): string {
+  return `${index + 1}. ${title}`;
+}
+
+/**
+ * What a step ticket says. Short, and every technical word is a link: a
+ * ticket carries what is being done and what is needed, and the detail lives
+ * in the committed artifact it points at (`process.md`, *Writing to the
+ * human*).
+ */
+function stepBody(
+  chunk: Chunk,
+  initiative: number,
+  breakdownPath: string,
+): string {
+  return [
+    chunk.delivers,
+    "",
+    `Part of #${initiative}. The full list is in \`${breakdownPath}\`.`,
+  ].join("\n");
+}
+
+/**
+ * The initiative's ticket, rewritten as the map of its children.
+ *
+ * Each line is the step's **number**, which GitHub renders as a live link
+ * carrying its title and whether it is closed — so the map shows how far the
+ * work has got without anything having to keep a tally up to date.
+ */
+function initiativeMap(
+  steps: { number: number; chunk: Chunk }[],
+  breakdownPath: string,
+): string {
+  return [
+    "This is built in pieces. Each one is its own ticket below.",
+    "",
+    ...steps.map(
+      (step, index) => `${index + 1}. #${step.number} — ${step.chunk.delivers}`,
+    ),
+    "",
+    `The list was approved in \`${breakdownPath}\`.`,
+  ].join("\n");
+}
+
+function oneLine(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.split("\n")[0];
+}

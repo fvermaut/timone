@@ -65,8 +65,14 @@ function duration(ms: number): string {
   return `${seconds}s`;
 }
 
-/** The one thing worth knowing about a tool call. */
-function summarise(name: string, input: unknown): string {
+/**
+ * The one thing worth knowing about a tool call.
+ *
+ * Exported so the runner's view of a step names a call exactly as this
+ * reading does (`SessionProgress.activitySince`): `Bash(npm test)` in one
+ * place and something else in the other would be two names for one command.
+ */
+export function summarise(name: string, input: unknown): string {
   if (typeof input !== "object" || input === null) return "";
   const fields = input as Record<string, unknown>;
 

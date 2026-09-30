@@ -1,4 +1,4 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import type { AskCheckDeps } from "./ask-check.js";
 
@@ -19,6 +19,15 @@ export const ASK_CHECK_MODEL = "claude-haiku-4-5-20251001";
 export const ASK_CHECK_TIMEOUT_MS = 30_000;
 
 /**
+ * The SDK's `query`, or a test's stand-in that sees the options it is given.
+ * Only the part of it this file uses: one prompt in, the messages out.
+ */
+export type ConsultQuery = (params: {
+  prompt: string;
+  options: Options;
+}) => AsyncIterable<SDKMessage>;
+
+/**
  * Put a question to a model, with no tools and one turn.
  *
  * **It never throws and it never hangs.** Both are contractual: this runs
@@ -29,17 +38,18 @@ export const ASK_CHECK_TIMEOUT_MS = 30_000;
  * composed*.
  */
 export function sdkConsult(
-  options: { model?: string; timeoutMs?: number } = {},
+  options: { model?: string; timeoutMs?: number; query?: ConsultQuery } = {},
 ): AskCheckDeps["consult"] {
   const model = options.model ?? ASK_CHECK_MODEL;
   const timeoutMs = options.timeoutMs ?? ASK_CHECK_TIMEOUT_MS;
+  const ask = options.query ?? query;
 
   return async (prompt: string): Promise<string | undefined> => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const session = query({
+      const session = ask({
         prompt,
         options: {
           abortController: controller,
@@ -47,7 +57,18 @@ export function sdkConsult(
           // It reads a string and writes a string. Anything it could reach
           // would be something it could act on, and acting is the one thing
           // this is not allowed to do (ADR-0054 D2).
+          //
+          // ✏ `tools: []` is what takes the built-in tools away (40u).
+          // `allowedTools` only lists the tools that need no permission, so
+          // an empty one took nothing away: the check was started with every
+          // built-in tool — the shell, file writes, the web — in the
+          // daemon's folder, and handed a named person's words to judge.
+          tools: [],
           allowedTools: [],
+          // And none of the settings on disk: left out, every source is
+          // loaded — the project's CLAUDE.md, its hooks, its tool servers.
+          // A question with one answer needs none of them.
+          settingSources: [],
           permissionMode: "default",
         },
       });

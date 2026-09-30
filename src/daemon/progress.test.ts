@@ -456,3 +456,74 @@ describe("where the running token total comes from", () => {
     expect(progress.snapshot().replies).toBe(1);
   });
 });
+
+/** The agent reaching for a tool, on the main thread. */
+function toolUse(name: string, input: Record<string, unknown>): SDKMessage {
+  return {
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: {
+      content: [{ type: "tool_use", id: `toolu_${name}`, name, input }],
+      usage: { input_tokens: 25_000, output_tokens: 4 },
+    },
+    uuid: "assistant-uuid",
+    session_id: "session-abc",
+  } as unknown as SDKMessage;
+}
+
+/**
+ * What a step did since the runner last looked (timone#165). The runner
+ * wakes, reads this, and decides whether to leave the step alone; the
+ * instant is when it last looked.
+ */
+describe("what a session did since a given moment", () => {
+  it("lists only the tool uses made after the moment, as the transcript names them", () => {
+    const clock = fakeClock();
+    const progress = new SessionProgress({ now: clock.now });
+
+    progress.observe(
+      toolUse("Read", { file_path: "/workspace/timone/projects/scratch-app/src/page.tsx" }),
+    );
+    // 1_000_000 ms after the epoch, plus a minute: 1060 s is 17 min 40 s.
+    clock.advance(60_000);
+    const lookedAt = "1970-01-01T00:17:40.000Z";
+    clock.advance(1_000);
+    progress.observe(toolUse("Bash", { command: "npm test" }));
+
+    expect(progress.activitySince(lookedAt).tools).toEqual(["Bash(npm test)"]);
+  });
+
+  it("counts only the output tokens written after the moment", () => {
+    const clock = fakeClock();
+    const progress = new SessionProgress({ now: clock.now });
+    const [start, halfway, finished, assistant] = assistantTurn(1_000);
+
+    // A message 500 tokens into its 1 000 when the runner looks…
+    progress.observe(start!);
+    progress.observe(halfway!);
+    clock.advance(60_000);
+    const lookedAt = "1970-01-01T00:17:40.000Z";
+    clock.advance(1_000);
+    // …then its other 500, and a sub-agent's 250.
+    progress.observe(finished!);
+    progress.observe(assistant!);
+    feed(progress, assistantTurn(250, { parent: "toolu_1" }));
+
+    expect(progress.activitySince(lookedAt).outputTokens).toBe(750);
+  });
+
+  it("moves the time of the last output on every stream event", () => {
+    const clock = fakeClock();
+    const progress = new SessionProgress({ now: clock.now });
+    const [start, firstDelta] = assistantTurn(800);
+    const lookedAt = "1970-01-01T00:16:40.000Z"; // 1_000_000 ms, when it began
+
+    clock.advance(5_000);
+    progress.observe(start!);
+    expect(progress.activitySince(lookedAt).lastOutputAt).toBe("1970-01-01T00:16:45.000Z");
+
+    clock.advance(7_000);
+    progress.observe(firstDelta!);
+    expect(progress.activitySince(lookedAt).lastOutputAt).toBe("1970-01-01T00:16:52.000Z");
+  });
+});

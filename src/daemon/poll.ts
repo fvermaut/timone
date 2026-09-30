@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
-import type { Manifest, ProjectConfig } from "../manifest.js";
+import { driverOf, type Manifest, type ProjectConfig } from "../manifest.js";
+import type { RunnerDriver } from "../runner/driver.js";
 import {
   CTA_MARKER,
   MARK_LABEL,
@@ -69,7 +70,7 @@ import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 // cancelled would be a second opinion that drifts from the one the human gets
 // at the terminal (ADR-0032).
 import { runRetry } from "../commands/retry.js";
-import { runCancel } from "../commands/cancel.js";
+import { holdCancelledTicket, runCancel } from "../commands/cancel.js";
 import {
   markAnswerConsumed,
   reopenIfFailed,
@@ -207,6 +208,9 @@ export interface PollDeps {
    * derives from (ADR-0020): a gap longer than
    * {@link UNWITNESSED_POLL_INTERVALS} of these means no daemon was watching
    * across it. Defaults to the command's own default cadence.
+   *
+   * ✏ It is also how often the runner's projects get a turn while a project
+   * the current daemon drives holds the cycle (PRD-05 R15).
    */
   pollIntervalMs?: number;
   /**
@@ -226,6 +230,20 @@ export interface PollDeps {
    * last session happened to leave checked out.
    */
   breakdownSource?: BreakdownSource;
+  /**
+   * ✏ The runner, which drives every project whose entry says `driver:
+   * runner` ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+   * D9, PRD-05 R19). Such a project is handed to it after the registration
+   * loop, and nothing below that loop touches it: no resume, no spawn, no
+   * call to action.
+   *
+   * **Optional, and absent means a runner project is left alone**, with a
+   * line in the log. It is never handed to the spawner instead: one project
+   * driven two ways at once is the fault R19 exists to avoid. Every existing
+   * test constructs the loop without one, and none of them names a runner
+   * project.
+   */
+  runner?: RunnerDriver;
   /** Progress sink; defaults to silence (the command wires stdout). */
   log?: (message: string) => void;
 }
@@ -722,7 +740,8 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
  *
  * Its own function so that {@link watchForCancellations} can wrap exactly the
  * part of a cycle that blocks, and so the watch is stopped on the way out
- * whatever happens in here.
+ * whatever happens in here. The runner's projects' own clock
+ * ({@link turnRunnerProjects}) is started and stopped in here, the same way.
  */
 async function pollProjects(
   deps: PollDeps,
@@ -748,7 +767,7 @@ async function pollProjects(
     );
   }
 
-  for (const [name, config] of Object.entries(manifest.projects)) {
+  const turn = async ([name, config]: [string, ProjectConfig]): Promise<void> => {
     const project: TicketingProject = { name, repoUrl: config.repo_url };
     // One reader per ticket for this project's whole turn in this cycle, so
     // every question asked of a ticket's thread is answered from one fetch of
@@ -771,7 +790,103 @@ async function pollProjects(
       result.errors.push(line);
       log(`error  ${line}`);
     }
+  };
+
+  // ✏ The runner's projects first, then the current daemon's (PRD-05 R15). A
+  // runner project's turn never waits for a session, and a daemon project's
+  // turn waits for the whole of one. In manifest order, a daemon project
+  // listed first held up every runner project behind it for as long as its
+  // session ran. With no runner project, this is the manifest order.
+  const projects = Object.entries(manifest.projects);
+  const runnerProjects = projects.filter(([, config]) => driverOf(config) === "runner");
+  const daemonProjects = projects.filter(([, config]) => driverOf(config) !== "runner");
+
+  for (const entry of runnerProjects) await turn(entry);
+  const runnerTurns = turnRunnerProjects(runnerProjects, deps, result, log);
+  try {
+    for (const entry of daemonProjects) await turn(entry);
+  } finally {
+    await runnerTurns.stop();
   }
+}
+
+/** The runner's projects' own clock, stoppable — and awaited when it is stopped. */
+interface RunnerTurns {
+  stop(): Promise<void>;
+}
+
+/**
+ * ✏ Give each project the runner drives a turn every poll interval, on a
+ * clock of its own, while a project the current daemon drives holds the cycle
+ * (PRD-05 R15).
+ *
+ * **Why.** On a daemon project the cycle waits for the whole session: the
+ * spawner waits for every step of the run. Without this clock, a comment on a
+ * runner project is not seen, and its runner is not woken, until that session
+ * ends — which can be hours.
+ *
+ * **A turn is {@link pollProject} and nothing else.** No reclaim and no
+ * previews: those stay once per cycle. The turn never waits for a session,
+ * since the runner's own tick never waits for a wake. It makes a fresh thread
+ * reader, so it sees what was said since the last turn.
+ *
+ * **Built as {@link watchForCancellations} is.** One turn at a time, an error
+ * is a line on this cycle's result, the timer never keeps the process alive,
+ * and a turn under way finishes before the cycle reports.
+ *
+ * Requests other than a cancel, such as `timone takeover`, are not read here.
+ * They wait for the start of the next cycle, as they did before.
+ */
+function turnRunnerProjects(
+  runnerProjects: readonly [string, ProjectConfig][],
+  deps: PollDeps,
+  result: PollResult,
+  log: (message: string) => void,
+): RunnerTurns {
+  if (runnerProjects.length === 0) return { stop: async () => {} };
+
+  // One turn at a time. A turn that runs long — a slow forge — must not be
+  // overtaken by the next tick and look at the same runs twice at once.
+  let turning: Promise<void> | undefined;
+  const turn = async (): Promise<void> => {
+    if (turning !== undefined) return;
+    turning = (async () => {
+      for (const [name, config] of runnerProjects) {
+        const project: TicketingProject = { name, repoUrl: config.repo_url };
+        // Caught for each project, so this promise never rejects and one
+        // project that fails does not cost the next its turn.
+        try {
+          await pollProject(project, config, deps, result, log, threadReaders(project, deps.adapter));
+        } catch (error) {
+          const line = `${name}: ${oneLine(error)}`;
+          result.errors.push(line);
+          log(`error  ${line}`);
+        }
+      }
+    })();
+    try {
+      await turning;
+    } finally {
+      turning = undefined;
+    }
+  };
+
+  const handle = setInterval(
+    () => void turn(),
+    deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_SECONDS * 1000,
+  );
+  // The daemon's own loop is what keeps the process alive; this timer must
+  // never be the reason a `--once` run refuses to exit.
+  handle.unref?.();
+
+  return {
+    async stop(): Promise<void> {
+      clearInterval(handle);
+      // A turn under way finishes before the cycle reports: it writes the
+      // ledger and adds to this cycle's result.
+      await turning;
+    },
+  };
 }
 
 /**
@@ -978,7 +1093,25 @@ async function applyRequest(
       // has stopped nothing and must not kill a session that is fine.
       if (code === 0) {
         const cancelled = store.runsForTicket(body.project, body.ticket).at(-1);
-        if (cancelled !== undefined) deps.spawner.stop?.(cancelled.id);
+        if (cancelled !== undefined) {
+          deps.spawner.stop?.(cancelled.id);
+          // ✏ And the runner's work, on a project it drives: the step's box
+          // and the runner's own session (PRD-05 R11). Nothing of it runs
+          // for a project the current daemon drives, so this stops nothing
+          // there.
+          deps.runner?.stop(cancelled.id);
+        }
+        // ✏ Then, on a project the runner drives, the hold on the ticket
+        // (40u): still open and marked, it would otherwise be taken up as a
+        // new run on the next pass. After the stop, never before it: the
+        // forge can take a minute to answer, and the work must not run on
+        // meanwhile. Before this request is settled, so the pass that follows
+        // it lists the ticket held.
+        await holdCancelledTicket(
+          { manifest, store, adapter: deps.adapter },
+          { project: body.project, ticket: body.ticket },
+          log,
+        );
       }
       return code;
     }
@@ -1021,10 +1154,37 @@ async function applyRequest(
         log(`${target} is not out at the terminal — nothing to take back.`);
         return 1;
       }
+      // ✏ On a project the runner drives, it goes back to the runner, which
+      // is woken to read what the terminal session left (PRD-05 R11). Not to
+      // the wait it had before: a failed run taken over was parked on a
+      // person (ADR-0059), and on such a project only the runner moves a run.
+      if (drivenByRunner(manifest, body.project) && deps.runner !== undefined) {
+        deps.runner.terminalEnded(run);
+        log(`${target} is back with the runner (${body.outcome}).`);
+        return 0;
+      }
       // What it goes back to is read off the run: `claim` leaves the wait in
       // place precisely so a claim can be undone by whoever finds it.
       store.park(run.id, waitOf(run));
       log(`${target} is back on its wait (${body.outcome}).`);
+      return 0;
+    }
+    case "takeover-ended": {
+      // ✏ A terminal session ended while no daemon ran (PRD-05 R11). The
+      // takeover already put the run back on its wait; the runner is woken
+      // now to read what the session left, as it is when a daemon takes the
+      // run back itself. A run that moved on since is left alone.
+      const run = store.runsForTicket(body.project, body.ticket).at(-1);
+      if (!drivenByRunner(manifest, body.project) || deps.runner === undefined) {
+        log(`${target} is not driven by a runner here — nothing to wake.`);
+        return 1;
+      }
+      if (run === undefined || run.status !== "parked") {
+        log(`${target} is ${run?.status ?? "not in the ledger"} now — nothing to wake.`);
+        return 1;
+      }
+      deps.runner.terminalEnded(run);
+      log(`${target} is back with the runner (the terminal session ended while no daemon ran).`);
       return 0;
     }
   }
@@ -1089,6 +1249,15 @@ async function boundRefusal(
     run.ticket,
     refusedComment(reason, refused.count),
   );
+}
+
+/**
+ * Whether the runner drives `project` (ADR-0060 D9, PRD-05 R19). A project
+ * the manifest does not name is driven by nobody, so it is not.
+ */
+function drivenByRunner(manifest: Manifest, project: string): boolean {
+  const config = manifest.projects[project];
+  return config !== undefined && driverOf(config) === "runner";
 }
 
 /** Who is holding a run, as a log line names them. */
@@ -1212,6 +1381,24 @@ async function reclaimStale(
       continue;
     }
     if (held !== "gone" && !witness.mayJudge) continue;
+
+    // ✏ A run of a project the runner drives is never failed or re-armed
+    // here (ADR-0060 D9, PRD-05 R16). What to do with work a stopped daemon
+    // left half done is the runner's to decide, and a failed run would need
+    // a person to start it again. So it goes back on the runner's wait, and
+    // the runner is woken and told why — whatever its pull request says,
+    // which the runner reads for itself.
+    if (drivenByRunner(deps.manifest, project.name)) {
+      if (deps.runner === undefined) {
+        log(`runner ${run.id} — no runner is wired into this daemon, so it is left as it is`);
+        continue;
+      }
+      deps.runner.reclaimed(run);
+      result.reclaimed.push(run.id);
+      const why = held === "gone" ? `${heldBy(run)} is gone` : "it went silent while the daemon watched";
+      log(`reclaim ${run.id} — ${why}, so it goes back to the runner`);
+      continue;
+    }
 
     // The verdict on the branch is asked for before the verdict on the
     // session, and it overrules it. A session can die *after* its pull request
@@ -1503,6 +1690,35 @@ async function surveyInitiatives(
   };
 }
 
+/**
+ * Whether a runner project's ticket that the listing showed free is held, or
+ * about to be, now that it would be taken up again (40u).
+ *
+ * Asked only of a ticket all of whose runs have ended — the one case where
+ * the registration opens a new run, and so the only case a cancel can reach.
+ * A cancel of its run still being carried out counts as held: its request is
+ * settled only after the hold is on. Otherwise the forge is asked for the
+ * ticket as it is now. In that order, so a carry-out that ends between the two
+ * questions has already put the hold on when the forge is asked.
+ */
+async function heldSinceListing(
+  project: TicketingProject,
+  ticket: number,
+  deps: PollDeps,
+): Promise<boolean> {
+  const { store, statePath } = deps;
+  if (store.liveRunForTicket(project.name, ticket) !== undefined) return false;
+  if (store.runsForTicket(project.name, ticket).length === 0) return false;
+  const cancelling =
+    statePath !== undefined &&
+    pending(statePath).requests.some(
+      ({ body }) =>
+        body.kind === "cancel" && body.project === project.name && body.ticket === ticket,
+    );
+  if (cancelling) return true;
+  return (await deps.adapter.getTicket(project, ticket)).labels.includes(HELD_LABEL);
+}
+
 async function pollProject(
   project: TicketingProject,
   config: ProjectConfig,
@@ -1553,6 +1769,15 @@ async function pollProject(
     // the human's half of the rule (ADR-0044 D7).
     if (ticket.labels.includes(HELD_LABEL)) continue;
 
+    // ✏ And a runner ticket held since the listing was read (40u). A cancel
+    // the watch carries out while this turn runs puts the hold on after its
+    // run is cancelled, so a listing read in between shows the ticket free.
+    // A run opened from it would sit on a held ticket, which nothing wakes,
+    // and hold the project for every ticket behind it.
+    if (driverOf(config) === "runner" && (await heldSinceListing(project, ticket.number, deps))) {
+      continue;
+    }
+
     const occupier = store.occupyingRun(project.name);
     const { run, created } = store.register(project.name, ticket.number);
     if (!created) continue;
@@ -1581,6 +1806,28 @@ async function pollProject(
       log(`pickup ${run.id}`);
       await adapter.postComment(project, ticket.number, pickedUpComment());
     }
+  }
+
+  // ✏ A project the runner drives leaves the old path here (ADR-0060 D9,
+  // PRD-05 R19). What happens next to each of its runs is the runner's to
+  // decide, so nothing below may decide it: no go-ahead, no resume, no spawn,
+  // no call to action. The queue is still promoted — one run per project at
+  // a time is kept for these projects too (R15) — and the introduction is
+  // still owed. The driver returns once it has asked for its wakes; it never
+  // waits for one, so this project's work does not hold up the next (R15).
+  if (driverOf(config) === "runner") {
+    store.promoteQueue(project.name);
+    if (deps.runner === undefined) {
+      log(`runner ${project.name} — no runner is wired into this daemon, so its runs are left as they are`);
+    } else {
+      const cycle = { tickets, isStep: frontier.isStep, threads };
+      for (const line of await deps.runner.tick(project, config, cycle)) {
+        result.errors.push(line);
+        log(`error  ${line}`);
+      }
+    }
+    await introduceUnmarked(project, config, deps, result, log);
+    return;
   }
 
   // Before anything is resumed: a map whose frontier emptied since the last
@@ -2623,11 +2870,31 @@ async function concludeStep(
   deps: PollDeps,
   log: (message: string) => void,
 ): Promise<void> {
-  const { store, adapter } = deps;
+  const { adapter } = deps;
 
   await adapter.postComment(project, run.ticket, stepMergedComment(pr));
   await adapter.closeTicket(project, run.ticket, "completed");
   log(`closed ${run.id} — step #${run.ticket} of #${initiative}`);
+
+  await closeInitiativeIfDone(deps, project, initiative, log);
+}
+
+/**
+ * Close an initiative when no step of it is open, with the comment that says
+ * what was built and what was dropped ({@link initiativeClosedComment}).
+ *
+ * ✏ 40s: taken out of {@link concludeStep} unchanged, and exported, so the
+ * runner's `endRun` closes a map with this same code when its last piece's
+ * run ends after a merge. Two copies of it would drift. It needs only the
+ * ledger and the forge, so that is all it asks for.
+ */
+export async function closeInitiativeIfDone(
+  deps: Pick<PollDeps, "store" | "adapter">,
+  project: TicketingProject,
+  initiative: number,
+  log: (message: string) => void,
+): Promise<void> {
+  const { store, adapter } = deps;
 
   const steps = await adapter.listSteps(project, initiative);
   if (steps.some((step) => step.state === "open")) {

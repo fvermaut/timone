@@ -641,9 +641,18 @@ export function waitFor(stage: PipelineStage): WaitKind {
  * anything; an escalation's handback note defaults to the stage it stopped at.
  * `review` is the exception: a reviewer's words are acted on by `remediation`
  * and by nothing else.
+ *
+ * ✏ `runner` is the wait of a run whose project the runner drives
+ * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)):
+ * it waits for the next thing that happens on its ticket, and what comes
+ * next is the runner's to decide, not a stage's. It is not a stage's wait,
+ * so it is not a {@link WaitKind}, which is what the stage table says each
+ * stage waits for. It still has to name a stage, because a wait nothing can
+ * end is refused (ADR-0049 D6), and the stage the run stopped at is the
+ * honest one.
  */
 export function resolvableBy(
-  kind: WaitKind | undefined,
+  kind: WaitKind | "runner" | undefined,
   stage: PipelineStage,
 ): PipelineStage[] {
   return kind === "review" ? ["remediation"] : [stage];

@@ -10,7 +10,7 @@ import type {
   TicketingProject,
   TicketThread,
 } from "../adapters/ticketing.js";
-import { loadManifest, type Manifest } from "../manifest.js";
+import { driverOf, loadManifest, type Manifest } from "../manifest.js";
 import {
   CARRY_ON_WAIT,
   RunStore,
@@ -248,7 +248,11 @@ export async function resolveTakeover(
   // cannot hold a conversation for. That refusal, on the one park whose CTA
   // hands the human this very command, is the wedged project ADR-0033's
   // ordering exists to prevent.
-  if (run.wait?.kind === "escalation") {
+  // ✏ The runner's wait opens the same way (ADR-0060). What a run of the
+  // runner does next is the runner's to decide, not a stage's, so there is
+  // no stage to open a conversation at; the session bound to no stage is
+  // the one that fits.
+  if (run.wait?.kind === "escalation" || run.wait?.kind === "runner") {
     return { kind: "escalation", run };
   }
 
@@ -711,7 +715,7 @@ async function claimForTakeover(
   // The claim cleared nothing about what the run was waiting on
   // (`RunStore.claim` keeps the wait deliberately), so which session to open
   // is still readable off the run the daemon handed back.
-  return run.wait?.kind === "escalation"
+  return run.wait?.kind === "escalation" || run.wait?.kind === "runner"
     ? { kind: "claimed", run, escalation: true }
     : { kind: "claimed", run };
 }
@@ -763,6 +767,16 @@ async function endTakeover(
         `${now?.status ?? "gone from the ledger"}. I've left it alone rather ` +
         "than writing over whatever did that.",
     );
+    return;
+  }
+
+  // ✏ **On a project the runner drives, the runner reads what the session
+  // left** (PRD-05 R11), in plain words, from the ticket. So nothing here
+  // reads the session's outcome: the run goes back, and the runner is woken
+  // — now by a daemon that is running, or by the next one to start.
+  if (drivenByRunner(deps.manifest, target.project)) {
+    releaseClaim(target, run, deps, log);
+    log(`${name} goes back to the runner. It reads what the session left as soon as the daemon runs.`);
     return;
   }
 
@@ -916,7 +930,7 @@ async function withdraw(
       return {
         kind: "applied",
         claim:
-          run.wait?.kind === "escalation"
+          run.wait?.kind === "escalation" || run.wait?.kind === "runner"
             ? { kind: "claimed", run, escalation: true }
             : { kind: "claimed", run },
       };
@@ -979,12 +993,24 @@ function releaseClaim(
     staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
   });
   if (acquired.ok) {
+    let parked = false;
     try {
       store.park(run.id, waitOf(run));
+      parked = true;
     } catch (error) {
       log(error instanceof Error ? error.message : String(error));
     } finally {
       acquired.lock.release();
+    }
+    // ✏ No daemon is running, so nothing can wake the runner now, and the
+    // session's closing comment is the machine's own, which never wakes it
+    // (PRD-05 R10). The next daemon is asked to, on its first cycle (R11).
+    if (parked && drivenByRunner(deps.manifest, target.project)) {
+      enqueue(statePath, {
+        kind: "takeover-ended",
+        project: target.project,
+        ticket: target.ticket,
+      });
     }
     return;
   }
@@ -996,6 +1022,15 @@ function releaseClaim(
     ticket: target.ticket,
     outcome: "ended",
   });
+}
+
+/**
+ * Whether the runner drives `project` (ADR-0060 D9, PRD-05 R19). A project
+ * the manifest does not name is driven by nobody, so it is not.
+ */
+function drivenByRunner(manifest: Manifest, project: string): boolean {
+  const config = manifest.projects[project];
+  return config !== undefined && driverOf(config) === "runner";
 }
 
 /**
