@@ -20,8 +20,6 @@ projects:
     bindings:
       ticketing: github
       preview: docker
-    # Driven by the runner since phase 40 (ADR-0060, PRD-05.R19).
-    driver: runner
   ivtrends:
     repo_url: https://github.com/fvermaut/ivtrends.git
     path: projects/ivtrends
@@ -37,9 +35,6 @@ projects:
     bindings:
       ticketing: github
       preview: docker
-    # Driven by the runner since 2026-09-30, on fvermaut's word after the
-    # third watched run on scratch-app (timone#175).
-    driver: runner
   timone:
     repo_url: https://github.com/fvermaut/timone.git
     path: projects/timone

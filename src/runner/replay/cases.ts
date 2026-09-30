@@ -143,21 +143,18 @@ export const REPLAY_MANIFEST: Manifest = {
       path: "projects/ivtrends",
       stack: ["typescript", "nextjs"],
       bindings: { ticketing: "github" },
-      driver: "runner",
     },
     "scratch-app": {
       repo_url: "https://github.com/fvermaut/scratch-app.git",
       path: "projects/scratch-app",
       stack: ["typescript", "nextjs"],
       bindings: { ticketing: "github" },
-      driver: "runner",
     },
     timone: {
       repo_url: "https://github.com/fvermaut/timone.git",
       path: "projects/timone",
       stack: ["typescript"],
       bindings: { ticketing: "github" },
-      driver: "runner",
     },
   },
 };

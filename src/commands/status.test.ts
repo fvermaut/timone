@@ -33,7 +33,7 @@ function breakdownIn(
 
 import { ctaComment, ctaFor } from "../daemon/cta.js";
 import type { Holder } from "../daemon/holder.js";
-import { progressOf, reclaimedReason } from "../daemon/poll.js";
+import { progressOf } from "../daemon/poll.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
   CARRY_ON_WAIT,
@@ -382,7 +382,7 @@ describe("renderStatus — a run whose daemon died under it", () => {
           ticket: 7,
           status: "failed",
           stage: "execution",
-          failure: reclaimedReason(),
+          failure: "the machine running it stopped before the work was finished",
         }),
       ],
       { stateExists: true },
@@ -405,7 +405,7 @@ describe("renderStatus — a run whose daemon died under it", () => {
           project: "scratch-app",
           ticket: 7,
           status: "failed",
-          failure: reclaimedReason(),
+          failure: "the machine running it stopped before the work was finished",
         }),
       ],
       { stateExists: true },
@@ -1140,7 +1140,6 @@ describe("renderStatus — what a ticket the runner works on has spent", () => {
         path: "projects/scratch-app",
         stack: [],
         bindings: { ticketing: "github" },
-        driver: "runner",
         ticket_limit_usd: 80,
       },
     },
@@ -1214,26 +1213,39 @@ describe("renderStatus — what a ticket the runner works on has spent", () => {
     );
   });
 
-  it("says nothing about spending on a project the daemon drives, and reads no record for it", () => {
+  it("shows what a ticket has spent on a project whose entry names no driver, against the default limit", () => {
+    // Every project is driven by the runner now, so every project's line
+    // says what its ticket has spent.
     const runs = [
       run({
         project: "scratch-app",
-        ticket: 7,
+        ticket: 12,
         status: "parked",
-        stage: "triage",
-        wait: { on: "approval on the ticket" },
+        stage: "execution",
+        wait: { on: RUNNER_DEFAULT_WAIT, kind: "runner" },
       }),
     ];
-    const asked: string[] = [];
     const output = renderStatus(manifest, runs, {
       stateExists: true,
-      records: (project, ticket) => {
-        asked.push(`${project}#${ticket}`);
-        return { ok: true, value: [] };
-      },
+      records: () => ({
+        ok: true,
+        value: [
+          {
+            kind: "step-ended",
+            at: "2026-09-27T10:40:00.000Z",
+            runId: "scratch-app#12/1",
+            stage: "execution",
+            sessionId: "s-1",
+            ok: true,
+            costUsd: 4.5,
+          },
+        ],
+      }),
     });
 
-    expect(lineFor(output, "scratch-app")).not.toMatch(/spent|spending/);
-    expect(asked).toEqual([]);
+    // $150 is the limit of a project that names none of its own.
+    expect(lineFor(output, "scratch-app")).toBe(
+      `scratch-app  #12 (building) — waiting: ${RUNNER_DEFAULT_WAIT} — $4.50 of $150.00 spent`,
+    );
   });
 });

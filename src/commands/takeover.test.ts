@@ -1176,63 +1176,6 @@ describe("a takeover that finishes the step it took over", () => {
     fromTimone: true,
   };
 
-  it("stops the run asking, once the session has recorded a finished step", async () => {
-    // timone#76. `ivtrends` #58's building and checking were both finished
-    // inside a takeover and pushed, the session posted the finished marker,
-    // and the run was parked again on exactly the wait it had before — cursor
-    // and all. The ticket went on asking a person for an answer they had
-    // given three hours earlier by doing the work.
-    const { store, statePath } = ledger();
-    handedBackAtRequirements(store);
-    const { launcher } = fakeLauncher();
-    const said: string[] = [];
-
-    const code = await runTakeover("scratch-app#6", {
-      manifest,
-      store,
-      statePath,
-      adapter: trackerSaying([finished]),
-      launcher,
-      root: "/root",
-      ticker: () => ({ stop: () => {} }),
-      log: (message) => said.push(message),
-    });
-
-    expect(code).toBe(0);
-    const after = store.get("scratch-app#6/1");
-    // Parked with no kind of wait: the ledger's way of saying "not waiting on
-    // a person, carry on when you can". `resolveWait` resumes such a run at
-    // its own stage on the next cycle.
-    expect(after?.status).toBe("parked");
-    expect(after?.wait?.kind).toBeUndefined();
-    expect(after?.stage).toBe("requirements");
-    expect(said.join("\n")).toContain("stops asking");
-  });
-
-  it("puts the run back exactly as it was when nothing was recorded", async () => {
-    const { store, statePath } = ledger();
-    handedBackAtRequirements(store);
-    const { launcher } = fakeLauncher();
-    const said: string[] = [];
-
-    await runTakeover("scratch-app#6", {
-      manifest,
-      store,
-      statePath,
-      adapter: trackerSaying([]),
-      launcher,
-      root: "/root",
-      ticker: () => ({ stop: () => {} }),
-      log: (message) => said.push(message),
-    });
-
-    const after = store.get("scratch-app#6/1");
-    expect(after?.status).toBe("parked");
-    expect(after?.wait?.kind).toBe("conversation");
-    expect(after?.wait?.opened).toBe("2026-08-03T09:30:00Z");
-    expect(said.join("\n")).toContain("nothing was recorded");
-  });
-
   it("stops offering itself once two conversations running have moved nothing", async () => {
     // `ivtrends` #88. The ticket said to run `timone takeover`, it was run, the
     // stage could not act, and the run went back on exactly the wait it came
@@ -1272,29 +1215,6 @@ describe("a takeover that finishes the step it took over", () => {
       { manifest, store, adapter: trackerSaying([]) },
     );
     expect(resolution.kind).toBe("escalation");
-  });
-
-  it("leaves the floor alone when the session finished the step", async () => {
-    // The other side of the same marker: a takeover that moves the work must
-    // not spend a strike on the run it just advanced.
-    const { store, statePath } = ledger();
-    handedBackAtRequirements(store);
-
-    await runTakeover("scratch-app#6", {
-      manifest,
-      store,
-      statePath,
-      adapter: trackerSaying([finished]),
-      launcher: fakeLauncher().launcher,
-      root: "/root",
-      ticker: () => ({ stop: () => {} }),
-      log: () => {},
-    });
-
-    const after = store.get("scratch-app#6/1");
-    expect(after?.wait?.kind).toBeUndefined();
-    expect(after?.consumedAnswerAt).toBeUndefined();
-    expect(after?.reAsksAfterAnswer ?? 0).toBe(0);
   });
 
   it("says so, and writes nothing, when the run moved under it", async () => {
@@ -1651,11 +1571,6 @@ describe("a run the runner waits on", () => {
     tempDirs.push(dir);
     const statePath = join(dir, ".timone", "state.json");
     const store = RunStore.open(statePath);
-    const onRunner: Manifest = {
-      projects: {
-        "scratch-app": { ...manifest.projects["scratch-app"]!, driver: "runner" },
-      },
-    };
     const { run } = store.register("scratch-app", 6);
     store.park(run.id, {
       waitingOn: "the next thing that happens on this ticket",
@@ -1666,7 +1581,45 @@ describe("a run the runner waits on", () => {
     const said: string[] = [];
 
     const code = await runTakeover("scratch-app#6", {
-      manifest: onRunner,
+      manifest,
+      store,
+      statePath,
+      adapter: fakeAdapter().adapter,
+      launcher,
+      root: dir,
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(0);
+    expect(calls).toHaveLength(1);
+    expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
+    expect(pending(statePath).requests.map((request) => request.body)).toEqual([
+      { kind: "takeover-ended", project: "scratch-app", ticket: 6 },
+    ]);
+    expect(said.at(-1)).toBe(
+      "scratch-app #6 goes back to the runner. It reads what the session left as soon as the daemon runs.",
+    );
+  });
+
+  it("gives the run back to the runner on a project whose entry names no driver, and leaves the daemon a request to wake it", async () => {
+    // Every project is driven by the runner now, so the way back does not
+    // depend on what the project's entry says.
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-no-driver-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath);
+    const { run } = store.register("scratch-app", 6);
+    store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
+    const { launcher, calls } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
       store,
       statePath,
       adapter: fakeAdapter().adapter,

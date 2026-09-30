@@ -13,9 +13,6 @@ const bindingsSchema = z.strictObject({
   preview: z.literal("docker").optional(),
 });
 
-/** The two things that can move a project's tickets forward. */
-const driverSchema = z.enum(["daemon", "runner"]);
-
 /** Schema for a single entry under `projects`. Unknown keys are rejected. */
 const projectConfigSchema = z.strictObject({
   repo_url: z.string().min(1, "must not be empty"),
@@ -44,17 +41,6 @@ const projectConfigSchema = z.strictObject({
    */
   introduce_unmarked: z.boolean().optional(),
   bindings: bindingsSchema,
-  /**
-   * What moves this project's tickets forward: the daemon's fixed pipeline, or
-   * the runner, which decides each step of a run
-   * ([ADR-0060](../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
-   * D1).
-   *
-   * Optional, and absent means `daemon` (read through {@link driverOf}). Every
-   * entry written before the runner existed keeps the driver it has always
-   * had, and a project moves to the runner only when somebody writes so.
-   */
-  driver: driverSchema.optional(),
   /**
    * The forge logins whose comments the runner takes as instructions on this
    * project (ADR-0060 D6: "only people named for the project in `timone.yaml`
@@ -130,68 +116,45 @@ const identitySchema = z.strictObject({
 });
 
 /** Schema for the whole timone.yaml manifest. Unknown keys are rejected. */
-const manifestSchema = z
-  .strictObject({
-    /**
-     * Optional here, and refused at the daemon.
-     *
-     * `workspace sync` and `projects list` are fvermaut's own commands, run
-     * from his terminal under his own login, and a manifest that never spawns
-     * a run needs no identity. What may never borrow his login is the daemon —
-     * so `src/commands/daemon.ts` refuses to start without this block, which
-     * is where "fails loudly at spawn time, never falls back to ambient login"
-     * actually lives.
-     */
-    identity: identitySchema.optional(),
-    /**
-     * The operator's own forge login: the person who may instruct the runner
-     * on every project that does not name its own `instructors` (ADR-0060 D6).
-     *
-     * Top-level because it is one person across every project, and optional
-     * because a manifest with no runner project has nobody to name.
-     */
-    operator: z.string().min(1, "must not be empty").optional(),
-    projects: z.record(z.string(), projectConfigSchema),
-  })
-  .superRefine((manifest, context) => {
-    // Refused here, where the file is read, rather than when the runner first
-    // reads a comment. A runner project with nobody named could take no
-    // instruction from anyone, and an error at load names the project to fix.
-    for (const [name, project] of Object.entries(manifest.projects)) {
-      if (
-        project.driver === "runner" &&
-        project.instructors === undefined &&
-        manifest.operator === undefined
-      ) {
-        context.addIssue({
-          code: "custom",
-          path: ["projects", name],
-          message:
-            "it is driven by the runner, but names nobody who may instruct it. " +
-            'Add "instructors" to the project, or "operator" at the top of the manifest.',
-        });
-      }
-    }
-  });
+const manifestSchema = z.strictObject({
+  /**
+   * Optional here, and refused at the daemon.
+   *
+   * `workspace sync` and `projects list` are fvermaut's own commands, run
+   * from his terminal under his own login, and a manifest that never spawns
+   * a run needs no identity. What may never borrow his login is the daemon —
+   * so `src/commands/daemon.ts` refuses to start without this block, which
+   * is where "fails loudly at spawn time, never falls back to ambient login"
+   * actually lives.
+   */
+  identity: identitySchema.optional(),
+  /**
+   * The operator's own forge login: the person who may instruct the runner
+   * on every project that does not name its own `instructors` (ADR-0060 D6).
+   *
+   * Top-level because it is one person across every project. Optional,
+   * because `workspace sync` and `projects list` need nobody named.
+   *
+   * ✏ 2026-09-30: until the `driver` line was removed, a runner project
+   * that named nobody was refused here. Refusing it here now would refuse
+   * every manifest without an operator, including the ones those two
+   * commands read. So the refusal moved to the daemon's start, beside the
+   * refusal of a missing `identity` block: `src/commands/daemon.ts` does not
+   * start while any project names nobody who may instruct it.
+   */
+  operator: z.string().min(1, "must not be empty").optional(),
+  projects: z.record(z.string(), projectConfigSchema),
+});
 
 export type Identity = z.infer<typeof identitySchema>;
 export type ProjectConfig = z.infer<typeof projectConfigSchema>;
 export type Manifest = z.infer<typeof manifestSchema>;
-export type Driver = z.infer<typeof driverSchema>;
-
-/**
- * What moves this project's tickets forward. `daemon` when the entry does not
- * say, which is every entry written before the runner existed.
- */
-export function driverOf(config: ProjectConfig): Driver {
-  return config.driver ?? "daemon";
-}
 
 /**
  * The forge logins whose comments may instruct the runner on project `name`:
  * the project's own `instructors` when it names any, and otherwise the
- * operator alone. Empty when the manifest names nobody, which the schema
- * allows only for a project the daemon drives.
+ * operator alone. Empty when the manifest names nobody, which the daemon
+ * refuses at its start (`src/commands/daemon.ts`).
  *
  * Logins come back as written. Comparing them with a comment's author is the
  * caller's work, because only the caller knows which surface the author came
@@ -266,10 +229,36 @@ function formatIssue(issue: z.core.$ZodIssue, data: unknown): string {
 }
 
 /**
+ * One sentence for each project in `data` whose entry still has a `driver`
+ * line, saying to delete it. Empty when none has.
+ *
+ * ✏ 2026-09-30: the runner drives every project, so the line that chose
+ * between it and the old daemon means nothing any more
+ * ([ADR-0060](../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+ * D9). It is refused rather than ignored, so a manifest that still says
+ * `driver: daemon` cannot load and look as if the line did something. Read
+ * before the schema, whose "unknown key" would not say why the line went.
+ */
+function removedDriverLines(data: unknown): string[] {
+  const projects = valueAt(data, ["projects"]);
+  if (projects === null || typeof projects !== "object") return [];
+  return Object.entries(projects)
+    .filter(([, entry]) => entry !== null && typeof entry === "object" && "driver" in entry)
+    .map(
+      ([name]) =>
+        `${name}: the \`driver\` line was removed on 2026-09-30. ` +
+        "Every project is now driven by the runner. Delete the line.",
+    );
+}
+
+/**
  * Validate already-parsed manifest data. Throws an Error with readable,
  * project/field-scoped messages on failure.
  */
 export function parseManifest(data: unknown): Manifest {
+  const removed = removedDriverLines(data);
+  if (removed.length > 0) throw new Error(removed.join("\n"));
+
   const result = manifestSchema.safeParse(data);
   if (!result.success) {
     const details = result.error.issues.map((issue) => formatIssue(issue, data));

@@ -1,12 +1,8 @@
-import { join } from "node:path";
-
-import { driverOf, type Manifest, type ProjectConfig } from "../manifest.js";
+import type { Manifest, ProjectConfig } from "../manifest.js";
 import type { RunnerDriver } from "../runner/driver.js";
 import {
-  CTA_MARKER,
   MARK_LABEL,
   PREVIEW_MARKER,
-  stampMachineComment,
   type PullRequest,
   type PullRequestThread,
   type Step,
@@ -14,40 +10,13 @@ import {
   type TicketingAdapter,
   type TicketingProject,
   type TicketThread,
-  type TicketComment,
 } from "../adapters/ticketing.js";
 import type {
   Preview,
   PreviewAdapter,
   PreviewProject,
 } from "../adapters/preview.js";
-import {
-  instant as instantOf,
-  readConversationRecord,
-  readGateDecision,
-  waitCursorFrom,
-} from "./gates.js";
-import {
-  askCheck,
-  planAskCheck,
-  type AskCheckDeps,
-} from "./ask-check.js";
-import { readHandback, type Handback } from "./outcomes.js";
-import { PROMPTED_STAGES } from "./prompts.js";
-import {
-  classificationFromLabels,
-  concludeConversation,
-  frontierIsEmpty,
-  isBuilt,
-  isMap,
-  readGate,
-  routeAfterTriage,
-  stageAfter,
-  stageLabel,
-  waitFor,
-  wayfinderStage,
-  type PipelineStage,
-} from "./pipeline.js";
+import type { PipelineStage } from "./pipeline.js";
 import {
   fromForgeDefaultBranch,
   isReproposal,
@@ -57,13 +26,7 @@ import {
   type SyncBreakdownSource,
   type BreakdownSource,
 } from "./breakdown.js";
-import {
-  ctaComment,
-  ctaFor,
-  type Cta,
-  type InitiativeProgress,
-  type TicketState,
-} from "./cta.js";
+import type { InitiativeProgress } from "./cta.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 // The commands themselves, called with no state path so they take no lock:
 // the daemon already holds it, and re-implementing what may be retried or
@@ -71,35 +34,20 @@ import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 // at the terminal (ADR-0032).
 import { runRetry } from "../commands/retry.js";
 import { holdCancelledTicket, runCancel } from "../commands/cancel.js";
-import {
-  markAnswerConsumed,
-  reopenIfFailed,
-  resolveTakeover,
-} from "../commands/takeover.js";
+import { resolveTakeover } from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
 import {
   type InitiativeRecord, type Run, type RunStore, type Witness } from "./runs.js";
-import {
-  HELD_LABEL,
-  HELD_LABEL_DESCRIPTION,
-  MAP_LABEL,
-  nextStep,
-} from "./steps.js";
-// The same comment the spawner posts when a session ends badly, because this
-// is the same kind of ending: work stopped, nothing was decided, try again.
-// `waitOf` comes from there too, so a run put back onto its wait is described
-// by one function wherever it is put back — the spawner's release path and
-// this loop's consume must not drift on what a run was waiting for.
-import { refusalClears } from "./faults.js";
-import {
-  failedComment,
-  refusedComment,
-  refusedWait,
-  stoppedTwiceComment,
-  waitOf,
-} from "./session.js";
+import { HELD_LABEL, MAP_LABEL, nextStep } from "./steps.js";
 
-/** What a spawn is resuming, when it is resuming something. */
+/**
+ * What a spawn is resuming, when it is resuming something.
+ *
+ * ✏ 2026-09-30: nothing in the cycle spawns a session any more; the runner
+ * drives every project (ADR-0060 D9). This and {@link SessionSpawner} stay
+ * only because `session.ts` still builds the old spawner, until that file is
+ * removed.
+ */
 export interface SpawnContext {
   /** Start at this stage rather than the run's recorded one. */
   stage?: PipelineStage;
@@ -121,10 +69,9 @@ export interface SpawnContext {
 }
 
 /**
- * The hand-off to a spawned agent session. Declared here rather than in the
- * session module so the poll loop depends on the seam, not on the Agent SDK:
- * the loop is fully testable with a fake, and the real spawner is one
- * implementation of this interface.
+ * The hand-off to a spawned agent session.
+ *
+ * ✏ 2026-09-30: the poll cycle no longer takes one (see {@link SpawnContext}).
  */
 export interface SessionSpawner {
   spawn(
@@ -138,8 +85,7 @@ export interface SessionSpawner {
    *
    * Called **after** the cancellation is in the ledger, so the spawner reads
    * a cancelled run when its session ends and reports nothing. Optional
-   * because a spawner with no session to stop — every fake in these tests —
-   * should not have to say so.
+   * because a spawner with no session to stop should not have to say so.
    */
   stop?(runId: string): void;
 }
@@ -148,7 +94,6 @@ export interface PollDeps {
   manifest: Manifest;
   store: RunStore;
   adapter: TicketingAdapter;
-  spawner: SessionSpawner;
   /**
    * ~~The timone root, so the loop can reach a project's checkout.~~
    *
@@ -169,24 +114,11 @@ export interface PollDeps {
    *
    * **Optional, and absent means this cycle serves nobody**: a loop built
    * without one behaves exactly as it did before commands could ask for
-   * anything. That is the shape every existing test constructs, and it is why
-   * this is optional rather than required — `runDaemon` passes the path it
-   * already resolved for the lock, so every real daemon has one.
+   * anything. That is the shape most tests construct, and it is why this is
+   * optional rather than required — `runDaemon` passes the path it already
+   * resolved for the lock, so every real daemon has one.
    */
   statePath?: string;
-  /**
-   * How the ask check puts its question to a model
-   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
-   *
-   * **Optional, and absent means no check runs at all** — every message asking
-   * a person for something is posted exactly as it was composed, which is how
-   * the loop behaved before the check existed. That is the shape every
-   * existing test constructs, and it is also the correct behaviour for any
-   * deployment that cannot reach a model: the failure the check guards is a
-   * person being sent somewhere expensive, and posting the composed message is
-   * never worse than that.
-   */
-  consultAskCheck?: AskCheckDeps["consult"];
   /**
    * How often a cycle that is busy looks for a cancellation to carry out
    * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
@@ -208,9 +140,6 @@ export interface PollDeps {
    * derives from (ADR-0020): a gap longer than
    * {@link UNWITNESSED_POLL_INTERVALS} of these means no daemon was watching
    * across it. Defaults to the command's own default cadence.
-   *
-   * ✏ It is also how often the runner's projects get a turn while a project
-   * the current daemon drives holds the cycle (PRD-05 R15).
    */
   pollIntervalMs?: number;
   /**
@@ -231,45 +160,30 @@ export interface PollDeps {
    */
   breakdownSource?: BreakdownSource;
   /**
-   * ✏ The runner, which drives every project whose entry says `driver:
-   * runner` ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
-   * D9, PRD-05 R19). Such a project is handed to it after the registration
-   * loop, and nothing below that loop touches it: no resume, no spawn, no
-   * call to action.
+   * The runner, which drives every project
+   * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+   * D9). Each project is handed to it after the registration loop: what
+   * happens next to each run is the runner's to decide.
    *
-   * **Optional, and absent means a runner project is left alone**, with a
-   * line in the log. It is never handed to the spawner instead: one project
-   * driven two ways at once is the fault R19 exists to avoid. Every existing
-   * test constructs the loop without one, and none of them names a runner
-   * project.
+   * ✏ 2026-09-30: required. Until then a project chose its driver in the
+   * manifest, and a cycle built without a runner left the runner's projects
+   * alone. There is one driver now, so there is nothing to leave a project to.
    */
-  runner?: RunnerDriver;
+  runner: RunnerDriver;
   /** Progress sink; defaults to silence (the command wires stdout). */
   log?: (message: string) => void;
 }
 
 export interface PollResult {
-  /** Run ids reclaimed from a dead daemon this cycle. */
-  reclaimed: string[];
   /**
-   * Run ids whose holder was found gone and which were put back to work at
-   * the stage they died in (ADR-0049 D4). They are on {@link
-   * PollResult.reclaimed} as well: the sweep took them back either way, and
-   * this says which of them are going again rather than waiting on a human.
+   * Run ids reclaimed from a dead daemon this cycle, and so given back to the
+   * runner.
    */
-  rearmed: string[];
+  reclaimed: string[];
   /** Run ids newly picked up this cycle. */
   pickedUp: string[];
   /** Run ids newly queued behind an occupying run this cycle. */
   queued: string[];
-  /** Run ids handed to the spawner this cycle. */
-  spawned: string[];
-  /** Run ids abandoned this cycle, because their ticket stopped being ours. */
-  cancelled: string[];
-  /** Run ids whose human wait was answered and which resumed this cycle. */
-  resumed: string[];
-  /** Run ids that reached a terminal state this cycle (a PR merged or closed). */
-  completed: string[];
   /**
    * What a human asked for and this cycle carried out, as `<kind> <target>`
    * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
@@ -301,57 +215,11 @@ export const UNWITNESSED_POLL_INTERVALS = 2;
  * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
  *
  * **Seconds, not a poll interval.** The whole value of a cancellation is how
- * soon it lands, and the cycle it has to interrupt is one that may be hours
- * long. The cost of a look is one `readdir` of a directory that is almost
- * always empty.
+ * soon it lands, and the cycle it has to interrupt can be held by a forge
+ * that is slow to answer or a preview that is slow to start. The cost of a
+ * look is one `readdir` of a directory that is almost always empty.
  */
 export const CANCEL_WATCH_INTERVAL_MS = 2_000;
-
-/**
- * The comment posted on the ticket when its **last** pull request was merged
- * and the initiative is over.
- *
- * It names **every** pull request the initiative produced, not only the one
- * that just merged ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
- * D3). A ticket built in four pieces closes on the fourth, and by then the
- * first is weeks up the thread — so the closing comment is the one place the
- * whole of the work is listed, and a reader arriving at the end can still find
- * all of it.
- */
-export function mergedComment(prs: readonly number[]): string {
-  const opening =
-    prs.length <= 1
-      ? `The work for this ticket went in with pull request ${listOf(prs)}.`
-      : `The work for this ticket went in over ${prs.length} pieces — ` +
-        `pull requests ${listOf(prs)}.`;
-
-  return [
-    "**Merged — this one is done.**",
-    "",
-    `${opening} The branches have`,
-    "served their purpose, and this ticket's journey ends here.",
-    "",
-    "**What I need from you:** nothing — file a new ticket for anything else.",
-  ].join("\n");
-}
-
-/**
- * The comment posted on a **step** when its pull request merged.
- *
- * Short, because the step's ticket is not where the initiative is discussed:
- * the map ticket carries that, and this one carries a single piece of work
- * that is now finished.
- */
-export function stepMergedComment(pr: number): string {
-  return [
-    "**Merged — this step is done.**",
-    "",
-    `Pull request #${pr} went in. This step's ticket ends here; the rest of`,
-    "the work carries on under the main ticket.",
-    "",
-    "**What I need from you:** nothing.",
-  ].join("\n");
-}
 
 /**
  * The comment that closes an **initiative**, once no step of it is open.
@@ -395,99 +263,11 @@ export function initiativeClosedComment(
   ].join("\n");
 }
 
-/**
- * The comment posted when a piece merged and the initiative carries on.
- *
- * It says three things a human would otherwise have to infer: that this piece
- * is in, how much of the list is left, and that the next one does **not** jump
- * the queue — R22 clause 6's promise that the project is free between chunks
- * is only kept if the person watching can see it being kept.
- */
-export function pieceMergedComment(
-  pr: number,
-  done: number,
-  total: number,
-  next: string,
-): string {
-  return [
-    `**Merged — that's ${done} of ${total} done.**`,
-    "",
-    `Pull request #${pr} went in, and this ticket isn't finished: the next piece`,
-    `is **${next}**. I'll start it when this project is next free — it works one`,
-    "thing at a time, so anything already waiting goes first.",
-    "",
-    "**What I need from you:** nothing — I'll comment here when the next piece starts.",
-  ].join("\n");
-}
-
-/**
- * The comment posted when a piece merged but the list of pieces has grown
- * since the human approved it
- * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
- * D3).
- *
- * **The ticket stays open and nothing else starts.** The piece that would come
- * next is one nobody has read, and the machine is not entitled to decide on
- * its own that the longer list is fine. What it *is* obliged to do is say so —
- * a ticket that simply went quiet would look exactly like a daemon that had
- * stopped.
- */
-export function reproposedComment(
-  pr: number,
-  listed: number,
-  approved: number,
-  path: string,
-): string {
-  return [
-    "**Merged — and I've stopped here.**",
-    "",
-    `Pull request #${pr} went in. But the list of pieces for this ticket now`,
-    `holds ${listed}, and the version you approved held ${approved} — so it has`,
-    "grown since, and the piece I would pick up next is one you have never seen.",
-    "I'm not going to build something nobody agreed to, and I'm not going to",
-    "decide on my own that the longer list is fine.",
-    "",
-    `**What I need from you:** read the list of pieces in \`${path}\` and say here whether to carry on with it.`,
-  ].join("\n");
-}
-
 /** `#9`, `#9 and #12`, `#9, #12 and #14` — a list a person reads aloud. */
 function listOf(prs: readonly number[]): string {
   const marked = prs.map((pr) => `#${pr}`);
   if (marked.length <= 1) return marked[0] ?? "none";
   return `${marked.slice(0, -1).join(", ")} and ${marked.at(-1)}`;
-}
-
-/**
- * The comment posted when the pull request was closed without merging.
- *
- * **It asks; it does not conclude.** A pull request closed by hand can mean
- * the work was rejected, and it can equally mean somebody clicked the wrong
- * button — or that a sentence in another pull request's body carried a word
- * GitHub reads as an instruction to close this one. The machine cannot tell
- * those apart, so it says what it saw and stops.
- */
-export function closedUnmergedComment(pr: number): string {
-  return [
-    "**The pull request was closed without merging.**",
-    "",
-    `Pull request #${pr} for this ticket was closed rather than merged. I have`,
-    "not closed this ticket and I have not started anything else: a close by",
-    "hand can mean the work was wrong, or it can mean the close was a mistake,",
-    "and I cannot tell which.",
-    "",
-    "Nothing is running. The branch and everything on it stay where they are.",
-    "",
-    "**What I need from you:** one of these.",
-    "",
-    "- The work is not wanted: **close this ticket**, and I'll carry on without it.",
-    "- You want it built again from scratch: **remove the " +
-      `\`${HELD_LABEL}\` label**, and I'll start it afresh on the next pass.`,
-    `- The close was a mistake: **reopen pull request #${pr} and merge it** — but` +
-      " **close this ticket yourself when you do.** I stopped watching that pull" +
-      " request when it closed, so I will not see it merge and I will not close" +
-      " this ticket for you.",
-  ].join("\n");
 }
 
 /**
@@ -504,36 +284,6 @@ export function pickedUpComment(): string {
     "happen next. Whatever I work out gets written back here on this ticket.",
     "",
     "**What I need from you:** nothing right now — I'll comment here when I do.",
-  ].join("\n");
-}
-
-/**
- * The acknowledgement posted on a **pull request** when the human's review
- * comment has been read and a session is starting on it
- * ([timone#147](https://github.com/fvermaut/timone/issues/147)).
- *
- * **The one surface that said nothing.** A new ticket gets
- * {@link pickedUpComment}; a review comment used to get silence from the
- * moment it was written until the remediation finished — which on
- * 2026-09-21 was long enough for fvermaut to conclude the machine was not
- * picking it up at all, and to ask so on the ticket. Silence and "not
- * listening" look identical, and only one of them is worth a person's
- * attention.
- *
- * It is posted as a new comment rather than an edit of an older one,
- * because the reader judges a pull request by its newest message: an
- * acknowledgement edited into a comment from three hours ago is not one.
- */
-export function reviewReadComment(): string {
-  return [
-    "**I've read your comment.**",
-    "",
-    "I'm working on it now. I'll change the code on this branch where your",
-    "words ask for a change, and I'll reply here when I'm done — either with",
-    "what I changed, or with a question if something isn't clear.",
-    "",
-    "**What I need from you:** nothing right now. This can take a while, and",
-    "there's nothing to see until I write back.",
   ].join("\n");
 }
 
@@ -563,11 +313,9 @@ export function queuedComment(
  * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
  *
  * **It says nothing about this ticket's state**, deliberately. It is posted
- * once and never revised — unlike the standing call to action, which is
- * reconciled every cycle and is the place a claim about *this* ticket
- * belongs. A one-time comment that made such a claim would be a sentence
- * frozen at the moment it was written, on a ticket that may be handed over
- * five minutes later.
+ * once and never revised. A one-time comment that made a claim about *this*
+ * ticket would be a sentence frozen at the moment it was written, on a ticket
+ * that may be handed over five minutes later.
  *
  * The label is named rather than described, because the whole failure this
  * closes is a human with no way of knowing what to do: `scratch-app` #5 was
@@ -588,33 +336,6 @@ export function introductionComment(): string {
     "",
     `**What I need from you:** nothing — add the \`${MARK_LABEL}\` label if you would like me to pick this up.`,
   ].join("\n");
-}
-
-/**
- * Why a reclaimed run failed, in words that assume nothing about daemons.
- *
- * It says what happened and stops. Reclaim is deliberately not recovery
- * (ADR-0020, keeping ADR-0017's conservatism intact): a crash mid-stage can
- * leave partial commits on the branch, and
- * a reproducible crash re-armed automatically would loop forever. The way
- * back is `timone retry`, and {@link failedComment} already asks for it.
- */
-export function reclaimedReason(): string {
-  return "the machine running it stopped before the work was finished";
-}
-
-/**
- * Why a run was abandoned before its session started, in the words of what was
- * actually observed.
- *
- * **It reports the observation, not a verdict.** A `Ticket` carries no
- * open/closed field and the listing this is judged against is the marked and
- * open one, so the ticket having left it is the whole of the evidence — it
- * covers a ticket closed and a mark taken off, and asserting a closure that
- * was never read would be the ledger claiming to know something it does not.
- */
-export function noLongerListedReason(): string {
-  return "its ticket is no longer open and marked for me";
 }
 
 /**
@@ -683,8 +404,7 @@ function oneLine(error: unknown): string {
 /**
  * Run one poll cycle over every project in the manifest: list the marked
  * tickets, register the ones not already tracked, acknowledge each exactly
- * once, resume any parked run whose human has answered, and hand the
- * project's occupying run to the spawner if no session is attached to it yet.
+ * once, and ask the runner to wake for each run that has something new.
  *
  * Nothing here throws: a project whose tracker misbehaves is reported in
  * `errors` and the remaining projects are still polled. The acknowledgement
@@ -692,17 +412,11 @@ function oneLine(error: unknown): string {
  * cycles silent (the store's registration is idempotent per ticket).
  */
 export async function pollOnce(deps: PollDeps): Promise<PollResult> {
-  const { manifest } = deps;
   const log = deps.log ?? (() => {});
   const result: PollResult = {
     reclaimed: [],
-    rearmed: [],
     pickedUp: [],
     queued: [],
-    spawned: [],
-    cancelled: [],
-    resumed: [],
-    completed: [],
     applied: [],
     errors: [],
   };
@@ -715,9 +429,9 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   await applyRequests(deps, result, log);
 
   // From here to the end of the cycle, a cancellation is read on a clock of
-  // its own (ADR-0047). Everything below can block for as long as a run
-  // takes, and a `timone cancel` that waits for that is a cancel that never
-  // arrives (#69).
+  // its own (ADR-0047). Everything below can block for as long as a slow
+  // forge call or a slow preview start takes, and a `timone cancel` that
+  // waits for that is a cancel that arrives late (#69).
   const cancellations = watchForCancellations(deps, result, log);
   try {
     await pollProjects(deps, result, log);
@@ -740,8 +454,7 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
  *
  * Its own function so that {@link watchForCancellations} can wrap exactly the
  * part of a cycle that blocks, and so the watch is stopped on the way out
- * whatever happens in here. The runner's projects' own clock
- * ({@link turnRunnerProjects}) is started and stopped in here, the same way.
+ * whatever happens in here.
  */
 async function pollProjects(
   deps: PollDeps,
@@ -767,126 +480,28 @@ async function pollProjects(
     );
   }
 
-  const turn = async ([name, config]: [string, ProjectConfig]): Promise<void> => {
+  // ✏ In manifest order, and one after the other (PRD-05 R15). No project's
+  // turn waits for a session: the runner's tick returns once it has asked for
+  // its wakes, so one project's work does not hold up the next. Until
+  // 2026-09-30 a project the old daemon drove waited for the whole of its
+  // session here, and the runner's projects needed a clock of their own.
+  for (const [name, config] of Object.entries(manifest.projects)) {
     const project: TicketingProject = { name, repoUrl: config.repo_url };
-    // One reader per ticket for this project's whole turn in this cycle, so
-    // every question asked of a ticket's thread is answered from one fetch of
-    // it. Made here rather than inside `pollProject` because the reclaim asks
-    // one of those questions too — a stale run's pull request — and a second
-    // reader would fetch the same thread twice in the same cycle.
-    const threads = threadReaders(project, deps.adapter);
     try {
       // Before anything is picked up: a run left `active` by a daemon that
       // died is holding its project, and every ticket behind it is waiting on
       // a session that no longer exists.
-      await reclaimStale(project, deps, result, log, witness, staleAfterMs, threads);
-      await pollProject(project, config, deps, result, log, threads);
-      // Last, so a run whose pull request merged during `pollProject` has
-      // already been completed when its preview is released — R12's "within
-      // one poll cycle" is the same cycle, not the next one.
+      await reclaimStale(project, deps, result, log, witness, staleAfterMs);
+      await pollProject(project, config, deps, result, log);
+      // Last, so a preview is looked at after everything else this project
+      // did in the cycle.
       await reconcilePreviews(project, config, deps, result, log);
     } catch (error) {
       const line = `${name}: ${oneLine(error)}`;
       result.errors.push(line);
       log(`error  ${line}`);
     }
-  };
-
-  // ✏ The runner's projects first, then the current daemon's (PRD-05 R15). A
-  // runner project's turn never waits for a session, and a daemon project's
-  // turn waits for the whole of one. In manifest order, a daemon project
-  // listed first held up every runner project behind it for as long as its
-  // session ran. With no runner project, this is the manifest order.
-  const projects = Object.entries(manifest.projects);
-  const runnerProjects = projects.filter(([, config]) => driverOf(config) === "runner");
-  const daemonProjects = projects.filter(([, config]) => driverOf(config) !== "runner");
-
-  for (const entry of runnerProjects) await turn(entry);
-  const runnerTurns = turnRunnerProjects(runnerProjects, deps, result, log);
-  try {
-    for (const entry of daemonProjects) await turn(entry);
-  } finally {
-    await runnerTurns.stop();
   }
-}
-
-/** The runner's projects' own clock, stoppable — and awaited when it is stopped. */
-interface RunnerTurns {
-  stop(): Promise<void>;
-}
-
-/**
- * ✏ Give each project the runner drives a turn every poll interval, on a
- * clock of its own, while a project the current daemon drives holds the cycle
- * (PRD-05 R15).
- *
- * **Why.** On a daemon project the cycle waits for the whole session: the
- * spawner waits for every step of the run. Without this clock, a comment on a
- * runner project is not seen, and its runner is not woken, until that session
- * ends — which can be hours.
- *
- * **A turn is {@link pollProject} and nothing else.** No reclaim and no
- * previews: those stay once per cycle. The turn never waits for a session,
- * since the runner's own tick never waits for a wake. It makes a fresh thread
- * reader, so it sees what was said since the last turn.
- *
- * **Built as {@link watchForCancellations} is.** One turn at a time, an error
- * is a line on this cycle's result, the timer never keeps the process alive,
- * and a turn under way finishes before the cycle reports.
- *
- * Requests other than a cancel, such as `timone takeover`, are not read here.
- * They wait for the start of the next cycle, as they did before.
- */
-function turnRunnerProjects(
-  runnerProjects: readonly [string, ProjectConfig][],
-  deps: PollDeps,
-  result: PollResult,
-  log: (message: string) => void,
-): RunnerTurns {
-  if (runnerProjects.length === 0) return { stop: async () => {} };
-
-  // One turn at a time. A turn that runs long — a slow forge — must not be
-  // overtaken by the next tick and look at the same runs twice at once.
-  let turning: Promise<void> | undefined;
-  const turn = async (): Promise<void> => {
-    if (turning !== undefined) return;
-    turning = (async () => {
-      for (const [name, config] of runnerProjects) {
-        const project: TicketingProject = { name, repoUrl: config.repo_url };
-        // Caught for each project, so this promise never rejects and one
-        // project that fails does not cost the next its turn.
-        try {
-          await pollProject(project, config, deps, result, log, threadReaders(project, deps.adapter));
-        } catch (error) {
-          const line = `${name}: ${oneLine(error)}`;
-          result.errors.push(line);
-          log(`error  ${line}`);
-        }
-      }
-    })();
-    try {
-      await turning;
-    } finally {
-      turning = undefined;
-    }
-  };
-
-  const handle = setInterval(
-    () => void turn(),
-    deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_SECONDS * 1000,
-  );
-  // The daemon's own loop is what keeps the process alive; this timer must
-  // never be the reason a `--once` run refuses to exit.
-  handle.unref?.();
-
-  return {
-    async stop(): Promise<void> {
-      clearInterval(handle);
-      // A turn under way finishes before the cycle reports: it writes the
-      // ledger and adds to this cycle's result.
-      await turning;
-    },
-  };
 }
 
 /**
@@ -988,6 +603,10 @@ interface CancelWatch {
  * purpose is to interrupt work that is happening now
  * ([#69](https://github.com/fvermaut/timone/issues/69)).
  *
+ * ✏ 2026-09-30: no cycle waits for a session any more, since the runner's
+ * wakes run on their own. The clock stays, because a forge that is slow to
+ * answer, or a preview that is slow to start, still holds the cycle.
+ *
  * **Cancellations only, and deliberately.** Every other request asks for work
  * to *start* or to *move*, and a cycle already walking the projects is the
  * worst moment to be told either — a retry applied halfway through the
@@ -1087,26 +706,20 @@ async function applyRequest(
       });
       // The ledger first, the work second, and never the other way round
       // ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)):
-      // the spawner reads the run when its session ends, and a session
-      // stopped before the cancellation was written would be reported as a
-      // failure. Only when the cancellation actually took — a refused one
-      // has stopped nothing and must not kill a session that is fine.
+      // a step reads the run when it ends, and a step stopped before the
+      // cancellation was written would end on a run not yet cancelled, and
+      // wake the runner for it. Only when the cancellation actually took — a
+      // refused one has stopped nothing and must not stop work that is fine.
       if (code === 0) {
         const cancelled = store.runsForTicket(body.project, body.ticket).at(-1);
-        if (cancelled !== undefined) {
-          deps.spawner.stop?.(cancelled.id);
-          // ✏ And the runner's work, on a project it drives: the step's box
-          // and the runner's own session (PRD-05 R11). Nothing of it runs
-          // for a project the current daemon drives, so this stops nothing
-          // there.
-          deps.runner?.stop(cancelled.id);
-        }
-        // ✏ Then, on a project the runner drives, the hold on the ticket
-        // (40u): still open and marked, it would otherwise be taken up as a
-        // new run on the next pass. After the stop, never before it: the
-        // forge can take a minute to answer, and the work must not run on
-        // meanwhile. Before this request is settled, so the pass that follows
-        // it lists the ticket held.
+        // The runner's work: the step's box and the runner's own session
+        // (PRD-05 R11).
+        if (cancelled !== undefined) deps.runner.stop(cancelled.id);
+        // Then the hold on the ticket (40u): still open and marked, it would
+        // otherwise be taken up as a new run on the next pass. After the
+        // stop, never before it: the forge can take a minute to answer, and
+        // the work must not run on meanwhile. Before this request is settled,
+        // so the pass that follows it lists the ticket held.
         await holdCancelledTicket(
           { manifest, store, adapter: deps.adapter },
           { project: body.project, ticket: body.ticket },
@@ -1131,16 +744,6 @@ async function applyRequest(
         log(resolution.message);
         return 1;
       }
-      // The conversation about to start is this run's answer being read, and
-      // it is marked as such here for the same reason the command's own
-      // direct-lock path marks it — a takeover that changes nothing must
-      // count against the re-ask floor. Before the claim, because `repark`
-      // refuses a run that is not parked.
-      if (resolution.kind === "converse") {
-        markAnswerConsumed(store, resolution.run);
-      } else {
-        reopenIfFailed(store, resolution.run);
-      }
       // On the asking terminal's behalf, never on the daemon's (ADR-0049 D1).
       // A run the daemon recorded itself as holding is one its own sweep will
       // reclaim from under a live conversation — timone#63.
@@ -1154,19 +757,10 @@ async function applyRequest(
         log(`${target} is not out at the terminal — nothing to take back.`);
         return 1;
       }
-      // ✏ On a project the runner drives, it goes back to the runner, which
-      // is woken to read what the terminal session left (PRD-05 R11). Not to
-      // the wait it had before: a failed run taken over was parked on a
-      // person (ADR-0059), and on such a project only the runner moves a run.
-      if (drivenByRunner(manifest, body.project) && deps.runner !== undefined) {
-        deps.runner.terminalEnded(run);
-        log(`${target} is back with the runner (${body.outcome}).`);
-        return 0;
-      }
-      // What it goes back to is read off the run: `claim` leaves the wait in
-      // place precisely so a claim can be undone by whoever finds it.
-      store.park(run.id, waitOf(run));
-      log(`${target} is back on its wait (${body.outcome}).`);
+      // It goes back to the runner, which is woken to read what the terminal
+      // session left (PRD-05 R11). Only the runner moves a run.
+      deps.runner.terminalEnded(run);
+      log(`${target} is back with the runner (${body.outcome}).`);
       return 0;
     }
     case "takeover-ended": {
@@ -1175,10 +769,6 @@ async function applyRequest(
       // now to read what the session left, as it is when a daemon takes the
       // run back itself. A run that moved on since is left alone.
       const run = store.runsForTicket(body.project, body.ticket).at(-1);
-      if (!drivenByRunner(manifest, body.project) || deps.runner === undefined) {
-        log(`${target} is not driven by a runner here — nothing to wake.`);
-        return 1;
-      }
       if (run === undefined || run.status !== "parked") {
         log(`${target} is ${run?.status ?? "not in the ledger"} now — nothing to wake.`);
         return 1;
@@ -1188,76 +778,6 @@ async function applyRequest(
       return 0;
     }
   }
-}
-
-/**
- * How many cycles running the daemon may refuse to start the same run for the
- * same reason before the human is told (ADR-0049 D4, timone#75).
- *
- * Three. One is a coincidence and the poll interval is a minute, so three is
- * about three minutes of a run going nowhere — short enough that nobody waits
- * two and a half hours, long enough that a refusal clearing on its own never
- * reaches a ticket.
- */
-const REFUSAL_LIMIT = 3;
-
-/**
- * Count a refused spawn, and put it in front of the human once it has
- * repeated (ADR-0049 D4, timone#75).
- *
- * **A refusal that clears on its own is not counted at all.** Uncommitted
- * changes in Timone's own folder are the human in the middle of an edit, and
- * the next cycle starts the run as soon as they commit — bounding that would
- * break the half of this that already works.
- *
- * **Parked and not failed.** The run has never started, so there is nothing to
- * retry and nothing broke; what is wanted is for somebody to look. A park is
- * answerable and carries a call to action, where `failed` would offer
- * `timone retry` for a run that would be refused again the moment it ran.
- */
-async function boundRefusal(
-  run: Run,
-  project: TicketingProject,
-  error: unknown,
-  deps: PollDeps,
-  result: PollResult,
-  log: (message: string) => void,
-): Promise<void> {
-  const { store, adapter } = deps;
-
-  // Recorded whichever kind it is, because the record is also what keeps the
-  // sweep off the run: a run the daemon is refusing to start has not died,
-  // and reclaiming it would report "the machine running it stopped" about a
-  // machine that is running perfectly and saying no.
-  const reason = oneLine(error);
-  const refused = store.refuse(run.id, reason).refusal;
-  if (refused === undefined) return;
-
-  // Counted, and never told. This is the refusal that goes away by itself.
-  if (refusalClears(error)) return;
-
-  if (refused.count < REFUSAL_LIMIT || refused.told === true) return;
-
-  store.park(run.id, {
-    waitingOn: refusedWait(reason),
-    kind: "escalation",
-  });
-  store.refusalTold(run.id);
-  log(`refused ${run.id} — ${refused.count} times, asking the human`);
-  await adapter.postComment(
-    project,
-    run.ticket,
-    refusedComment(reason, refused.count),
-  );
-}
-
-/**
- * Whether the runner drives `project` (ADR-0060 D9, PRD-05 R19). A project
- * the manifest does not name is driven by nobody, so it is not.
- */
-function drivenByRunner(manifest: Manifest, project: string): boolean {
-  const config = manifest.projects[project];
-  return config !== undefined && driverOf(config) === "runner";
 }
 
 /** Who is holding a run, as a log line names them. */
@@ -1317,10 +837,8 @@ function humanMs(ms: number): string {
 }
 
 /**
- * Fail every run of `project` whose heartbeat has gone quiet *while a daemon
- * was listening*, tell its ticket, and let the ledger free the project and
- * promote whatever was queued behind it — `store.fail` does both, because
- * ending a run is what releases it.
+ * Give back to the runner every run of `project` whose heartbeat has gone
+ * quiet *while a daemon was listening*, or whose holder is gone.
  *
  * **The witness comes first and can stop this outright** (ADR-0020). A
  * `setInterval` cannot fire while its process is not scheduled, so a suspended
@@ -1330,8 +848,8 @@ function humanMs(ms: number): string {
  * run seventeen times over. So a cycle that cannot vouch for having watched
  * the window it is judging reclaims nothing and waits for one that can.
  *
- * Idempotent across cycles for free: a failed run is no longer running, so
- * the next call finds nothing and the ticket is told exactly once.
+ * Idempotent across cycles for free: a run given back is parked on the
+ * runner's wait and no longer running, so the next call does not find it.
  */
 async function reclaimStale(
   project: TicketingProject,
@@ -1340,9 +858,8 @@ async function reclaimStale(
   log: (message: string) => void,
   witness: Witness,
   threshold: number,
-  threadsFor: (ticket: number) => RunThreads,
 ): Promise<void> {
-  const { store, adapter } = deps;
+  const { store, runner } = deps;
 
   for (const run of store.staleRuns(threshold)) {
     if (run.project !== project.name) continue;
@@ -1365,16 +882,6 @@ async function reclaimStale(
     // holder on another machine cannot be asked, and a run with no holder is
     // every run written before this — so witnessed time still protects a
     // laptop that slept, which is what phase 17 verified.
-    // A run the daemon is refusing to start is not a run that died, and it
-    // must not be reported as one (ADR-0049 D4). ivtrends #57 was told "the
-    // machine running it stopped before the work was finished" while nothing
-    // had stopped — the daemon was refusing it once a minute, in silence.
-    // What bounds it is the refusal's own count, not this sweep.
-    if (run.refusal !== undefined) {
-      log(`refused ${run.id} — ${run.refusal.reason}`);
-      continue;
-    }
-
     const held = store.hold(run);
     if (held === "alive") {
       log(`holding ${run.id} — ${heldBy(run)} is still running`);
@@ -1382,93 +889,16 @@ async function reclaimStale(
     }
     if (held !== "gone" && !witness.mayJudge) continue;
 
-    // ✏ A run of a project the runner drives is never failed or re-armed
-    // here (ADR-0060 D9, PRD-05 R16). What to do with work a stopped daemon
-    // left half done is the runner's to decide, and a failed run would need
-    // a person to start it again. So it goes back on the runner's wait, and
-    // the runner is woken and told why — whatever its pull request says,
-    // which the runner reads for itself.
-    if (drivenByRunner(deps.manifest, project.name)) {
-      if (deps.runner === undefined) {
-        log(`runner ${run.id} — no runner is wired into this daemon, so it is left as it is`);
-        continue;
-      }
-      deps.runner.reclaimed(run);
-      result.reclaimed.push(run.id);
-      const why = held === "gone" ? `${heldBy(run)} is gone` : "it went silent while the daemon watched";
-      log(`reclaim ${run.id} — ${why}, so it goes back to the runner`);
-      continue;
-    }
-
-    // The verdict on the branch is asked for before the verdict on the
-    // session, and it overrules it. A session can die *after* its pull request
-    // was merged — the merge is the human's, and it does not wait for the
-    // machine to still be alive to be true — and calling that a failure buries
-    // a piece of work that actually landed. The ticket then stalls on a chunk
-    // ADR-0029 deliberately will not advance past, so every remaining piece of
-    // the initiative waits behind a run whose only road out is a human
-    // retrying a stage with nothing left to do.
-    //
-    // Merged only. A pull request closed *without* merging says the opposite —
-    // the work did not land — so `failed` is the honest record there, and the
-    // roads ADR-0029 leaves a human are the right ones.
-    if (run.pr !== undefined) {
-      let merged: boolean;
-      try {
-        merged =
-          (await threadsFor(run.ticket).pullRequest(run.pr)).state === "merged";
-      } catch (error) {
-        // Unreadable is not open: a tracker that cannot be reached is no
-        // grounds to call a run dead, so the run keeps its status and the next
-        // cycle asks again. On a flaky link this is the difference between a
-        // slow answer and a wrong one.
-        const line =
-          `${project.name}: could not read PR #${run.pr} for #${run.ticket}, ` +
-          `so its run is left alone: ${oneLine(error)}`;
-        result.errors.push(line);
-        log(`error  ${line}`);
-        continue;
-      }
-
-      if (merged) {
-        // Through the same door a parked run leaves by, so the successor
-        // logic — the breakdown, the ticket's next piece, closing it when
-        // there is none — lives in exactly one place.
-        await concludeReview(run, project, threadsFor(run.ticket), deps, result, log);
-        continue;
-      }
-    }
-
-    // A run whose holder is provably gone is re-armed once and parks on the
-    // second death (ADR-0049 D4, following ADR-0034). A run judged dead by
-    // witnessed time alone keeps the ending phase 17 verified: witnessed time
-    // is a well-founded inference and a pid is a fact, and only the second is
-    // worth spending a second session on.
-    if (held === "gone") {
-      const outcome = store.reclaim(run.id, reclaimedReason());
-      result.reclaimed.push(run.id);
-      if (outcome.rearmed) {
-        result.rearmed.push(run.id);
-        log(
-          `re-arm ${run.id} — ${heldBy(run)} is gone, so it goes again at ` +
-            `${run.stage ?? "the start"}`,
-        );
-        continue;
-      }
-      log(`stopped twice ${run.id} — ${heldBy(run)} is gone, asking the human`);
-      await adapter.postComment(
-        project,
-        run.ticket,
-        stoppedTwiceComment(outcome.run.deaths ?? []),
-      );
-      continue;
-    }
-
-    const reason = reclaimedReason();
-    store.fail(run.id, reason);
-    log(`reclaim ${run.id} — ${reason}`);
+    // ✏ A stale run is never failed or re-armed here (ADR-0060 D9, PRD-05
+    // R16). What to do with work a stopped daemon left half done is the
+    // runner's to decide, and a failed run would need a person to start it
+    // again. So it goes back on the runner's wait, and the runner is woken
+    // and told why — whatever its pull request says, which the runner reads
+    // for itself.
+    runner.reclaimed(run);
     result.reclaimed.push(run.id);
-    await adapter.postComment(project, run.ticket, failedComment(reason));
+    const why = held === "gone" ? `${heldBy(run)} is gone` : "it went silent while the daemon watched";
+    log(`reclaim ${run.id} — ${why}, so it goes back to the runner`);
   }
 }
 
@@ -1598,26 +1028,12 @@ async function releasePreview(
 }
 
 /**
- * One project's share of a cycle. Throws only on tracker-level failures.
- *
- * It takes the project's manifest entry as well as its tracker identity
- * because one thing it does is governed per project rather than for every
- * project alike — see {@link introduceUnmarked}. `reconcilePreviews` takes the
- * same pair for the same reason.
- */
-/**
  * What this cycle knows about every initiative on a project: which tickets are
  * steps, and which step of each is the one to take next.
  */
 interface Frontier {
   isStep(ticket: number): boolean;
   isNext(ticket: number): boolean;
-  /**
-   * A step that waits on another step which is still open — one the frontier
-   * passes over every cycle, and which must not be told it will be picked up
-   * on the next pass.
-   */
-  isBlocked(ticket: number): boolean;
 }
 
 /**
@@ -1645,7 +1061,6 @@ async function surveyInitiatives(
   const { store, adapter } = deps;
   const steps = new Set<number>();
   const next = new Set<number>();
-  const blocked = new Set<number>();
 
   for (const map of tickets.filter((t) => t.labels.includes(MAP_LABEL))) {
     let children: Step[];
@@ -1659,15 +1074,7 @@ async function surveyInitiatives(
       continue;
     }
 
-    for (const child of children) {
-      steps.add(child.number);
-      if (
-        child.state === "open" &&
-        (child.dependenciesIncomplete || child.blockedBy.some((d) => d.open))
-      ) {
-        blocked.add(child.number);
-      }
-    }
+    for (const child of children) steps.add(child.number);
     const eligible = nextStep(children);
     if (eligible !== undefined) next.add(eligible.number);
 
@@ -1686,13 +1093,12 @@ async function surveyInitiatives(
   return {
     isStep: (ticket) => steps.has(ticket),
     isNext: (ticket) => next.has(ticket),
-    isBlocked: (ticket) => blocked.has(ticket),
   };
 }
 
 /**
- * Whether a runner project's ticket that the listing showed free is held, or
- * about to be, now that it would be taken up again (40u).
+ * Whether a ticket that the listing showed free is held, or about to be, now
+ * that it would be taken up again (40u).
  *
  * Asked only of a ticket all of whose runs have ended — the one case where
  * the registration opens a new run, and so the only case a cancel can reach.
@@ -1719,24 +1125,29 @@ async function heldSinceListing(
   return (await deps.adapter.getTicket(project, ticket)).labels.includes(HELD_LABEL);
 }
 
+/**
+ * One project's share of a cycle. Throws only on tracker-level failures.
+ *
+ * It takes the project's manifest entry as well as its tracker identity
+ * because one thing it does is governed per project rather than for every
+ * project alike — see {@link introduceUnmarked}. `reconcilePreviews` takes the
+ * same pair for the same reason.
+ */
 async function pollProject(
   project: TicketingProject,
   config: ProjectConfig,
   deps: PollDeps,
   result: PollResult,
   log: (message: string) => void,
-  // One reader per ticket for this project's turn, so every question the
-  // cycle asks of a ticket's thread — has this wait ended, what should the
-  // run resume with, does its call to action still stand — is answered from
-  // one fetch of it. Made by the caller, which shares it with the reclaim.
-  threads: (ticket: number) => RunThreads,
 ): Promise<void> {
-  const { store, adapter } = deps;
+  const { store, adapter, runner } = deps;
+  // One reader per ticket for this project's turn, so every question the
+  // runner asks of a ticket's thread in this cycle is answered from one fetch
+  // of it.
+  const threads = threadReaders(project, adapter);
 
   const tickets = await adapter.listMarkedTickets(project);
   const frontier = await surveyInitiatives(project, tickets, deps, log);
-  // Tickets told where they stand a moment ago, by the acknowledgement below.
-  const acknowledged = new Set<number>();
   for (const ticket of tickets) {
     // A map ticket is a conversation, not work: the runs belong to the steps
     // it points at. Without this the daemon works the initiative and its own
@@ -1769,19 +1180,16 @@ async function pollProject(
     // the human's half of the rule (ADR-0044 D7).
     if (ticket.labels.includes(HELD_LABEL)) continue;
 
-    // ✏ And a runner ticket held since the listing was read (40u). A cancel
-    // the watch carries out while this turn runs puts the hold on after its
-    // run is cancelled, so a listing read in between shows the ticket free.
-    // A run opened from it would sit on a held ticket, which nothing wakes,
-    // and hold the project for every ticket behind it.
-    if (driverOf(config) === "runner" && (await heldSinceListing(project, ticket.number, deps))) {
-      continue;
-    }
+    // ✏ And a ticket held since the listing was read (40u). A cancel the
+    // watch carries out while this turn runs puts the hold on after its run
+    // is cancelled, so a listing read in between shows the ticket free. A run
+    // opened from it would sit on a held ticket, which nothing wakes, and hold
+    // the project for every ticket behind it.
+    if (await heldSinceListing(project, ticket.number, deps)) continue;
 
     const occupier = store.occupyingRun(project.name);
     const { run, created } = store.register(project.name, ticket.number);
     if (!created) continue;
-    acknowledged.add(ticket.number);
 
     // The claim, and it is the whole of how a dropped step stays dropped: the
     // next cycle finds this step held and passes over it, and after a
@@ -1808,170 +1216,24 @@ async function pollProject(
     }
   }
 
-  // ✏ A project the runner drives leaves the old path here (ADR-0060 D9,
-  // PRD-05 R19). What happens next to each of its runs is the runner's to
-  // decide, so nothing below may decide it: no go-ahead, no resume, no spawn,
-  // no call to action. The queue is still promoted — one run per project at
-  // a time is kept for these projects too (R15) — and the introduction is
-  // still owed. The driver returns once it has asked for its wakes; it never
-  // waits for one, so this project's work does not hold up the next (R15).
-  if (driverOf(config) === "runner") {
-    store.promoteQueue(project.name);
-    if (deps.runner === undefined) {
-      log(`runner ${project.name} — no runner is wired into this daemon, so its runs are left as they are`);
-    } else {
-      const cycle = { tickets, isStep: frontier.isStep, threads };
-      for (const line of await deps.runner.tick(project, config, cycle)) {
-        result.errors.push(line);
-        log(`error  ${line}`);
-      }
-    }
-    await introduceUnmarked(project, config, deps, result, log);
-    return;
-  }
-
-  // Before anything is resumed: a map whose frontier emptied since the last
-  // cycle is a map that has a question to ask, and asking it is what makes
-  // the answer readable. Ordered first so a go-ahead already written — the
-  // daemon was down, or the human answered the closing summary within the
-  // minute — is picked up on this cycle rather than the next.
-  await openGoAheads(project, tickets, threads, deps, result, log);
-
-  await resumeAnswered(project, deps, result, log, threads);
-
-  // Hand off whatever now holds the project, if nothing is running it yet.
-  // `promoteQueue` is what starts a run left queued behind a park that no
-  // longer holds anything — promotion is otherwise a side effect of the run
-  // ahead moving, and nothing moved.
+  // What happens next to each run is the runner's to decide (ADR-0060 D9,
+  // PRD-05 R19), so nothing here decides it. The queue is promoted first: one
+  // run per project at a time (R15). `promoteQueue` is what starts a run left
+  // queued behind a park that no longer holds anything — promotion is
+  // otherwise a side effect of the run ahead moving, and nothing moved. The
+  // runner's tick returns once it has asked for its wakes; it never waits for
+  // one, so this project's work does not hold up the next (R15).
   store.promoteQueue(project.name);
-  const occupier = store.occupyingRun(project.name);
-  if (occupier !== undefined && occupier.status !== "active") {
-    // Before the spawn, never after it: a session started on a ticket nobody
-    // is asking about any more is work done into a void, and the whole cost of
-    // it has been paid by the time anything else could notice.
-    //
-    // **Absence from this cycle's listing is the observation, and the reason
-    // says exactly that.** There is no open/closed field on a `Ticket` and the
-    // listing is `--state open` and marked, so "closed" is not a question that
-    // can be asked here without an adapter this slice does not have. What can
-    // be seen is that the ticket is no longer in the set Timone is asked to
-    // work, which covers the ticket being closed *and* the mark being taken
-    // off it — both of which mean the same thing to the human who did it. The
-    // reason must not claim more than that.
-    //
-    // Self-healing by construction: cancelling settles the chunk (ADR-0029),
-    // so a ticket that comes back open and marked is registered as a fresh
-    // chunk on the next cycle rather than being stuck behind an abandoned one.
-    if (!tickets.some((candidate) => candidate.number === occupier.ticket)) {
-      const reason = noLongerListedReason();
-      store.cancel(occupier.id, reason);
-      result.cancelled.push(occupier.id);
-      log(`cancel ${occupier.id} — ${reason}`);
-    } else if (occupier.status === "picked-up") {
-      try {
-        await deps.spawner.spawn(
-          occupier,
-          project,
-          entryContext(
-            occupier,
-            tickets,
-            store.initiativeFor(project.name, occupier.ticket) !== undefined,
-          ),
-        );
-        store.started(occupier.id);
-        result.spawned.push(occupier.id);
-        log(`spawn  ${occupier.id}`);
-      } catch (error) {
-        const line = `${project.name}: could not start a session for #${occupier.ticket}: ${oneLine(error)}`;
-        result.errors.push(line);
-        log(`error  ${line}`);
-        await boundRefusal(occupier, project, error, deps, result, log);
-      }
-    }
+  const cycle = { tickets, isStep: frontier.isStep, threads };
+  for (const line of await runner.tick(project, config, cycle)) {
+    result.errors.push(line);
+    log(`error  ${line}`);
   }
-
-  // Last, and deliberately: a ticket's call to action is a statement about
-  // where its run stands *now*, and everything above is what moves it. A run
-  // that resumed, failed or finished during this cycle says so on the same
-  // cycle rather than a minute later.
-  await reconcileCtas(
-    project,
-    tickets,
-    acknowledged,
-    frontier,
-    threads,
-    deps,
-    result,
-    log,
-  );
 
   // And after it, on the tickets nothing above could see — where this project
   // has asked for that. Nothing in this call reaches the ledger's pickup path,
   // which is what keeps R1 true.
   await introduceUnmarked(project, config, deps, result, log);
-}
-
-/**
- * Ask a wayfinder map for its go-ahead, once its own questions are all closed
- * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
- *
- * **This is the map's question being asked, and nothing else here asks it.**
- * A map is parked with no kind of wait for as long as it is being worked — it
- * is waiting on its own decision tickets, not on a human. The closing session
- * empties the frontier and says so with a label, and this is the cycle that
- * turns that into a wait a written answer can resolve.
- *
- * **It posts nothing.** The map's standing call to action is reconciled at
- * the end of this same cycle and flips itself, because {@link ctaFor} reads
- * the wait this writes — one computation, and the terminal follows it too.
- *
- * **The cursor is the machine's last word**, exactly as the spawner opens
- * every other wait, and for the reason {@link waitCursorFrom} gives: a human
- * who answers in the moment between the closing summary and this cycle must
- * not land past their own answer. Its other half matters more here — a map is
- * a ticket people talk on for weeks, and everything said *before* the way was
- * clear was said about something else. It cannot agree to a question nobody
- * had asked yet.
- *
- * The thread comes from the cycle's own reader, so it is the one the resume
- * decision reads a moment later and the reconciler reads after that: opening
- * the wait costs the tracker nothing.
- *
- * One-way, deliberately: a frontier that reopens (fog graduating into fresh
- * tickets) leaves the wait standing rather than withdrawing a question the
- * human may be in the middle of answering.
- */
-async function openGoAheads(
-  project: TicketingProject,
-  tickets: readonly Ticket[],
-  threads: (ticket: number) => RunThreads,
-  deps: PollDeps,
-  result: PollResult,
-  log: (message: string) => void,
-): Promise<void> {
-  const { store } = deps;
-
-  for (const ticket of tickets) {
-    const run = store.runsForTicket(project.name, ticket.number).at(-1);
-    if (run === undefined || run.stage !== "charting") continue;
-    if (run.status !== "parked" || run.wait?.kind !== undefined) continue;
-    if (!frontierIsEmpty(ticket.labels)) continue;
-
-    try {
-      const thread = await threads(ticket.number).ticket();
-      store.repark(run.id, {
-        waitingOn: "your go-ahead to write the specification",
-        kind: "conversation",
-        stage: run.stage,
-        waitCursor: waitCursorFrom(thread),
-      });
-      log(`asking ${run.id} — the way to the destination is clear`);
-    } catch (error) {
-      const line = `${project.name}: could not ask for the go-ahead on #${ticket.number}: ${oneLine(error)}`;
-      result.errors.push(line);
-      log(`error  ${line}`);
-    }
-  }
 }
 
 /**
@@ -2069,590 +1331,6 @@ async function introduceUnmarked(
 }
 
 /**
- * Bring every listed ticket into line with what it is currently asking of the
- * human, and say nothing wherever it already asks it
- * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
- *
- * **The differs-from-last guard is the whole of the restraint here, and it is
- * the way this goes wrong.** The loop runs every minute; an upsert issued
- * unconditionally is one comment edit per ticket per minute, which on a
- * client's tracker is a notification storm and a thread nobody can read. The
- * rendered body is the comparison key and needs no record of its own:
- * `ctaComment(ctaFor(state))` is a pure function of the state, so a body
- * identical to the one already on the ticket *is* the statement that nothing
- * has changed.
- *
- * **It compares by the same rule the upsert writes by** — ours, carrying the
- * marker, the first such comment. A guard judging by a different rule than
- * the write it guards would compare against one comment and edit another, and
- * so write on every cycle for ever, which is the fault it exists to prevent
- * wearing the costume of a fix.
- *
- * Nothing here decides what a ticket needs: {@link ctaFor} does, once, for
- * this surface and for `timone status` both. One ticket's failure is one
- * ticket's — a thread that cannot be read is reported and the rest of the
- * listing is still reconciled.
- */
-async function reconcileCtas(
-  project: TicketingProject,
-  tickets: readonly Ticket[],
-  acknowledged: ReadonlySet<number>,
-  frontier: Frontier,
-  threads: (ticket: number) => RunThreads,
-  deps: PollDeps,
-  result: PollResult,
-  log: (message: string) => void,
-): Promise<void> {
-  const { store, adapter } = deps;
-
-  for (const ticket of tickets) {
-    // A ticket acknowledged moments ago has just been told this, in these
-    // words — `pickedUpComment` and `queuedComment` end on the very line the
-    // call to action is made of. Repeating it under a marker in the same
-    // cycle would be two near-identical comments seconds apart, which is what
-    // the guard below exists to prevent everywhere else. Its standing copy
-    // lands on the next cycle, by which time the run has usually moved.
-    if (acknowledged.has(ticket.number)) continue;
-
-    try {
-      // Every chunk this ticket has had, because what the thread is asking
-      // about is the initiative and the last run is only the latest piece of
-      // it. On the cycle a piece merges, that last run is `done` and the
-      // successor has not been opened yet — which is the gap ADR-0028 D4
-      // exists to fill.
-      const chunks = store.runsForTicket(project.name, ticket.number);
-      // Read before the call to action is computed, not after: since
-      // ADR-0035 one of the things a ticket may need to say is read off its
-      // own thread — a handback note naming a step the machine does not know.
-      // It is the same cached read the resume decision already made.
-      const thread = await threads(ticket.number).ticket();
-      const cta = ctaFor({
-        project: project.name,
-        ticket: ticket.number,
-        run: chunks.at(-1),
-        labels: ticket.labels,
-        blocked: frontier.isBlocked(ticket.number),
-        misreadStep: misreadStep(chunks.at(-1), thread),
-        progress: await initiativeProgress(
-          deps.breakdownSource ?? fromForgeDefaultBranch(adapter, project),
-          ticket.number,
-          store.initiativeFor(project.name, ticket.number),
-        ),
-      });
-      const body = `${CTA_MARKER}\n\n${ctaComment(cta)}`;
-      const posted = await cheaperAsk(
-        { run: chunks.at(-1), cta, body, thread },
-        deps,
-        log,
-      );
-
-      if (saysTheSame(standingCta(thread), stampMachineComment(posted))) continue;
-
-      await adapter.upsertComment(project, ticket.number, CTA_MARKER, posted);
-      log(`cta    ${project.name}#${ticket.number}`);
-    } catch (error) {
-      const line = `${project.name}: could not say where #${ticket.number} stands: ${oneLine(error)}`;
-      result.errors.push(line);
-      log(`error  ${line}`);
-    }
-  }
-}
-
-
-/**
- * The message to post for this ticket: the one that was composed, or the
- * shorter question the ask check put in its place
- * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
- *
- * **Four things return the composed message before a model is ever asked**,
- * and each is one of PRD-04's limits standing up:
- *
- * - The ticket is not waiting on a person (R6). The check speaks only where
- *   somebody was already going to be interrupted, so it can never add a
- *   message that would not otherwise exist.
- * - Nothing was given to consult with. A deployment that cannot reach a model
- *   behaves exactly as the loop did before this existed.
- * - There is no run to remember a question on, so a question asked here would
- *   be re-asked, in new words, every cycle.
- * - The check has already had its turn on this ask (R5).
- *
- * **And the consult itself fails to the composed message too** (R4). Whatever
- * goes wrong — unreachable, slow, an answer in a shape nothing recognises, a
- * thrown error — the person still gets the message the machinery wrote. This
- * check exists to make an ask cheaper, and an ask nobody receives is not
- * cheaper, it is lost.
- */
-async function cheaperAsk(
-  input: {
-    run: Run | undefined;
-    cta: Cta;
-    body: string;
-    thread: TicketThread;
-  },
-  deps: PollDeps,
-  log: (message: string) => void,
-): Promise<string> {
-  const { run, cta, body, thread } = input;
-  const consult = deps.consultAskCheck;
-
-  if (!asksAPerson(cta) || consult === undefined || run === undefined) return body;
-
-  // **The check obeys the rule it exists to enforce.** ADR-0052 ruled that a
-  // stage may only ask a question the machinery can act on the answer to, and
-  // that is exactly what an escalation park is not: `resolveWait` moves it on
-  // a handback the machine wrote, never on words a person typed (ADR-0033 D4).
-  // A question asked here would be answered, the answer would move nothing,
-  // and the next cycle would post the very command the question stood in front
-  // of — costing a reply and changing nothing, which is worse than the message
-  // it replaced. PRD-04.R7 is what makes this branch reachable, and until it
-  // exists the honest thing is silence.
-  if (run.wait?.kind === "escalation") return body;
-
-  const spoken = lastHumanWords(thread);
-  const plan = planAskCheck(body, run.askCheck, spoken?.createdAt);
-  if (plan.kind === "as-composed") return body;
-  if (plan.kind === "reuse") return instead(plan.question, cta, spoken);
-
-  let verdict;
-  try {
-    verdict = await askCheck(
-      { composed: ctaComment(cta), lastWords: spoken?.body },
-      { consult },
-    );
-  } catch (error) {
-    log(`ask    could not be run on #${run.ticket}: ${oneLine(error)}`);
-    return body;
-  }
-
-  if (verdict.kind === "as-composed") return body;
-
-  // Remembered *before* it is posted. The other order loses the record when
-  // the upsert fails, and a question posted with nothing remembering it is
-  // re-asked in different words on the next cycle, for ever.
-  deps.store.rememberAskCheck(run.id, { for: body, question: verdict.question });
-  log(`ask    ${run.project}#${run.ticket} — asked instead of sending them away`);
-
-  return instead(verdict.question, cta, spoken);
-}
-
-/**
- * The standing note as the check leaves it: its question in place of the
- * words, and the command kept whenever nobody has spoken
- * ([timone#145](https://github.com/fvermaut/timone/issues/145)).
- *
- * **Taking the command away is the point, and only for somebody who has
- * spoken.** ADR-0054 was written for `ivtrends` #90: a reply of `aprrove`
- * answered with a demand for a terminal session, where the expensive thing
- * *was* the command and asking one short question instead of it is the whole
- * saving. That case still drops it, because they replied.
- *
- * Nobody replying is the other case, and on `ivtrends` #111 it cost a person
- * their only way out. The note said *"answer the question in my last
- * comment"* on a comment holding no question (timone#144), the check saw the
- * hole and wrote a question about it, and the note — `upsertComment`, so
- * replaced rather than added to — lost the `timone takeover` line that frees
- * a stuck run. A person who has said nothing has not been misread, so there
- * is nothing to rescue them from and no reason to spend their way out on it.
- */
-function instead(question: string, cta: Cta, spoken: TicketComment | undefined): string {
-  const keepTheWayOut = spoken === undefined && cta.command !== undefined;
-
-  return [
-    `${CTA_MARKER}\n\n${question}`,
-    ...(keepTheWayOut ? ["", "```", cta.command, "```"] : []),
-  ].join("\n");
-}
-
-/**
- * Whether this call to action asks a person for anything at all — which is
- * the whole of where the ask check is allowed to speak (PRD-04.R6).
- *
- * **Both halves, because they are different asks and each can stand alone.**
- * {@link Cta.waitingOnYou} is *they have to say something here*; {@link
- * Cta.command} is *they have to go and run this*. A run that stopped badly
- * carries the second and not the first, and it is precisely the expensive kind
- * of ask this exists to make cheaper — so reading only `waitingOnYou` would
- * leave the check silent at the stops that cost the most.
- */
-function asksAPerson(cta: Cta): boolean {
-  return cta.waitingOnYou || cta.command !== undefined;
-}
-
-/**
- * The newest thing a person said on this thread, or undefined when they have
- * said nothing.
- *
- * Told by {@link TicketComment.fromTimone}, never by the author, for the
- * reason `readGateDecision` gives: Timone posts through the human's account
- * and the two logins are identical.
- */
-function lastHumanWords(thread: TicketThread): TicketComment | undefined {
-  return [...thread.comments].reverse().find((comment) => !comment.fromTimone);
-}
-
-/**
- * Whether what the ticket already says and what this cycle would say are the
- * same statement — undefined on the left meaning it has never been said.
- *
- * **Compared by their words rather than byte for byte, because the guard
- * fails open.** A tracker that hands a body back with the line endings it
- * stores rather than the ones it was sent — or a maintainer who edited the
- * comment in a browser — would otherwise make every cycle find a difference
- * and rewrite the comment, silently, for ever. That is not a near-miss of the
- * guard: it is precisely the storm the guard exists to prevent, arriving
- * through the one door left open.
- */
-function saysTheSame(said: string | undefined, saying: string): boolean {
-  const words = (body: string): string => body.replace(/\r\n/g, "\n").trim();
-  return said !== undefined && words(said) === words(saying);
-}
-
-/**
- * What the machine last said under {@link CTA_MARKER} on `thread`, exactly as
- * the ticket holds it — stamp and all — or undefined where it has never said
- * it.
- *
- * The *first* such comment rather than the newest, matching
- * {@link TicketingAdapter.upsertComment}'s own `find`: this must name the
- * comment that call would edit. And ours rather than merely marked, for the
- * reason that call gives — Timone comments under a person's account, so the
- * machine header is the only thing telling the two apart, and a human
- * quoting the marker back is not the machine's last word.
- */
-function standingCta(thread: TicketThread): string | undefined {
-  return thread.comments.find(
-    (comment) => comment.fromTimone && comment.body.includes(CTA_MARKER),
-  )?.body;
-}
-
-/**
- * Where a run that has never run anything starts, when its ticket's labels —
- * or its own place in its ticket's sequence — say somewhere other than the
- * default.
- *
- * Two things answer, in this order.
- *
- * **The labels**, for a wayfinder decision ticket. It was charted by a
- * discovery session that had already decided what kind of question it holds,
- * so sending it through triage would classify a decision as a fresh request
- * and route it into the build pipeline.
- *
- * **The sequence number**, for a successor chunk. A ticket is a durable
- * conversation and hosts a sequence of chunks
- * ([ADR-0026](../../doc/adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md));
- * triage classified it when its *first* chunk ran, and the classification is a
- * fact about the ticket rather than about one piece of it. A second chunk sent
- * through triage would re-classify a conversation already in flight — and
- * re-interview the human about a feature whose breakdown they have approved.
- * What a successor needs is a plan for its own piece, which is `planning`.
- *
- * **Labels first, deliberately:** a decision ticket that opens a second chunk
- * is still a decision ticket, and the sequence rule must not quietly re-point
- * it at the build pipeline.
- *
- * **A map is the one exception, and the sequence wins there.** A
- * `wayfinder:map` ticket is not a question — it is the effort, and its stage
- * exists for a single transition: handing the whole of stage 2 to stage 3 once
- * the way is clear. That happens once. Reading the label after that sent every
- * later run on a map back to `charting`, where the frontier label — never
- * taken off — parked it on a go-ahead the human gave the day before, and the
- * map never built its second piece
- * ([#21](https://github.com/fvermaut/timone/issues/21)).
- *
- * **✏ 2026-08-23 — a later run on a map enters at `breakdown`, not at
- * `planning`.** It went to planning because the list of pieces was written on
- * the map's first run and could be assumed to exist by the second. That
- * assumption is no longer true, and it was never checked here:
- * {@link successorHeldBack} lets a later run open on a ticket **only** when
- * its breakdown is absent or unreadable — an approved one answers `finished`
- * and holds the ticket back, a regrown one answers `reproposed`. So a map
- * reaching this line has no usable list, and planning it writes one phase file
- * for a whole initiative on the map ticket. That is the chunk model wearing
- * the new model's clothes: phase 29's live gate caught it on `scratch-app`,
- * and `recordApproval` in `session.ts` refuses to walk on into planning for
- * the same reason. Found on `ivtrends` #1, whose list was deleted by the
- * wind-back of 2026-08-20.
- *
- * Everything else gets `undefined` — the spawner's own default is triage, and
- * naming it here as well would let the two disagree.
- *
- * The labels come from the listing this cycle already made, so recognising a
- * wayfinder ticket costs the tracker nothing, and the sequence is on the run.
- *
- * **✏ 29d — what "successor" means has moved fields, and the old test now
- * answers no for every step there is.** Under
- * [ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)
- * a step is its own ticket and hosts one run, so `run.seq > 1` — which used
- * to mean *a later piece of an approved list* — is `false` for all fourteen
- * pieces of a fourteen-step initiative. That fact lives in the ticket's
- * position among its siblings now, and being a step at all is what carries
- * it: the approval that opened the step came before the step existed. The
- * sequence test is kept beside it for a ledger written before any of this.
- */
-function entryContext(
-  run: Run,
-  tickets: readonly Ticket[],
-  // Whether this run's ticket is a step of an initiative — see the successor
-  // note below.
-  isStep: boolean,
-): SpawnContext | undefined {
-  // A run that has already reached a stage is resuming rather than entering,
-  // and where it resumes is the ledger's answer, not the label's.
-  if (run.stage !== undefined) return undefined;
-
-  const labels =
-    tickets.find((candidate) => candidate.number === run.ticket)?.labels ?? [];
-  // ✏ 29d: a **step ticket** is what a successor is now, and `run.seq > 1` is
-  // what it used to be. The two are not the same test and the old one now
-  // answers no for every step there is: a step's run is always `seq` 1,
-  // because the step is its own ticket and hosts one run. Left alone, all
-  // fourteen steps of an initiative would enter at triage and re-interview a
-  // human who approved the list before any of them existed. Being a step *is*
-  // being a successor — the first one included, since the approval that
-  // opened it came before it.
-  const successor = isStep || run.seq > 1;
-
-  // A map with no usable list of pieces needs that list written before
-  // anything can be planned. The note above is why that is the only state a
-  // map can be in by the time it reaches this line.
-  if (successor && isMap(labels)) return { stage: "breakdown" };
-
-  const charted = wayfinderStage(labels);
-  if (charted !== undefined) return { stage: charted };
-
-  return successor ? { stage: "planning" } : undefined;
-}
-
-/**
- * Resume every parked run whose human has answered.
- *
- * The ticket is the one surface this reads (ADR-0012): a gate's answer is the
- * human's reply, and a conversation's is either the record the session posted
- * when it concluded or — since ADR-0022 — the answer they simply wrote in the
- * thread. All of them are found relative to the cursor stored when the run
- * parked, so nothing said before the question can answer it.
- *
- * Only one run resumes per cycle per project, because sessions serialize. The
- * rest keep waiting and are picked up by a later cycle in the order they
- * parked — no answer is lost by being second.
- */
-async function resumeAnswered(
-  project: TicketingProject,
-  deps: PollDeps,
-  result: PollResult,
-  log: (message: string) => void,
-  threadsFor: (ticket: number) => RunThreads,
-): Promise<void> {
-  const { store, adapter } = deps;
-
-  for (const run of store.parkedRuns(project.name)) {
-    if (store.runningRun(project.name) !== undefined) return;
-    if (run.stage === undefined) continue;
-
-    const holder = store.occupyingRun(project.name);
-    if (holder !== undefined && holder.id !== run.id) continue;
-
-    // Every question asked about this run below is asked of the same thread,
-    // fetched once. Two questions are asked — has the wait ended, and what
-    // should the run resume with — and they used to be two fetches, so the
-    // second could see a thread the first never saw and the pair could decide
-    // against different comments. One read makes the decision atomic with
-    // respect to what the human wrote, which is what ADR-0023 is about, and
-    // halves the latency of reaching it.
-    const threads = threadsFor(run.ticket);
-
-    // A review park is the one wait that can end the run outright — a PR
-    // merged or closed is a terminal event, not a stage to spawn.
-    if (run.wait?.kind === "review") {
-      try {
-        const ended = await concludeReview(run, project, threads, deps, result, log);
-        if (ended) return;
-      } catch (error) {
-        const line = `${project.name}: could not read PR for #${run.ticket}: ${oneLine(error)}`;
-        result.errors.push(line);
-        log(`error  ${line}`);
-        continue;
-      }
-    }
-
-    // A conversation park is the other one, for a different reason: at a
-    // stage nothing follows, the answer *is* the whole of the run.
-    if (run.wait?.kind === "conversation") {
-      try {
-        const ended = await concludeLastConversation(run, threads, deps, result, log);
-        if (ended) return;
-      } catch (error) {
-        const line = `${project.name}: could not read #${run.ticket}: ${oneLine(error)}`;
-        result.errors.push(line);
-        log(`error  ${line}`);
-        continue;
-      }
-    }
-
-    let resumption: Resumption | undefined;
-    try {
-      // A held ticket's parked run does not resume itself, the sibling of
-      // the registration-path check above (`:1490`) for a run already
-      // waiting rather than a fresh chunk. Read before `resolveWait`, not
-      // after: that call is what consumes an answer, and this run must leave
-      // one unread for whenever the hold comes off, not read it now and act
-      // on nothing.
-      //
-      // **Except on a step, where the label is the machine's own claim.** A
-      // step gains the hold the moment its run is registered (ADR-0044), and
-      // keeps it for the whole life of that run, so on a step the label says
-      // nothing about whether a person stopped it. A step that *was* stopped
-      // has no parked run to resume: `timone cancel` settles it, and a pull
-      // request closed unmerged completes it. Reading the claim as a stop
-      // left every step's review deaf to its comments — `ivtrends` #118 on
-      // 2026-09-22, parked on a review with a comment waiting and nothing
-      // posted back.
-      const ticket = await threads.ticket();
-      const isStep =
-        store.initiativeFor(project.name, run.ticket)?.steps.includes(run.ticket) ?? false;
-      if (ticket.labels.includes(HELD_LABEL) && !isStep) continue;
-
-      resumption = await resolveWait(run, threads);
-    } catch (error) {
-      const line = `${project.name}: could not read #${run.ticket}: ${oneLine(error)}`;
-      result.errors.push(line);
-      log(`error  ${line}`);
-      continue;
-    }
-    if (resumption === undefined) continue;
-
-    try {
-      // Reading the answer is what consumes it (ADR-0023), so the cursor moves
-      // before the session exists rather than after it returns: a second reader
-      // — another process, or this loop on its next cycle — then finds nothing
-      // outstanding. Before the spawn and not after it, deliberately: the
-      // spawner claims the run against the record it reads here and restores
-      // that record if the session never starts, so a cursor written now
-      // survives a failed spawn, while one written later would be overwritten.
-      //
-      // The same write records *which* answer was consumed, because the cursor
-      // cannot keep it: `activate` clears the wait a moment later, and a
-      // session killed after that used to leave the run failed with nothing
-      // pointing at the answer it had read — so `timone retry` re-asked the
-      // question instead of rewinding to it. One write, from the one read, so
-      // the marker and the cursor can never name different comments.
-      if (resumption.consumed !== undefined) {
-        store.repark(run.id, {
-          ...waitOf(run),
-          waitCursor: resumption.consumed,
-          consumedAnswerAt: resumption.consumed,
-        });
-      }
-
-      // **Before the spawn, because the spawn is the long part.** A session
-      // runs inside this cycle and takes as long as the work does, so an
-      // acknowledgement posted after it would arrive with the answer it was
-      // meant to precede — which is no acknowledgement at all. Posted here,
-      // the human sees it within one cycle of writing.
-      //
-      // The receipt is written first and separately: if posting throws, the
-      // catch below leaves the run parked and the next cycle tries again,
-      // and if the *spawn* is refused the receipt is what stops this from
-      // becoming one comment a minute for as long as the refusal lasts.
-      if (
-        resumption.acknowledge !== undefined &&
-        run.pr !== undefined &&
-        run.wait?.acknowledgedAt !== resumption.acknowledge
-      ) {
-        store.repark(run.id, {
-          ...waitOf(run),
-          acknowledgedAt: resumption.acknowledge,
-        });
-        await adapter.postPullRequestComment(
-          project,
-          run.pr,
-          reviewReadComment(),
-        );
-        log(`read   ${run.id} — told PR #${run.pr} its comment was read`);
-      }
-
-      await deps.spawner.spawn(run, project, resumption.context);
-      deps.store.started(run.id);
-      result.resumed.push(run.id);
-      log(`resume ${run.id} → ${resumption.context.stage ?? run.stage}`);
-    } catch (error) {
-      const line = `${project.name}: could not resume #${run.ticket}: ${oneLine(error)}`;
-      result.errors.push(line);
-      log(`error  ${line}`);
-      await boundRefusal(run, project, error, deps, result, log);
-    }
-    return;
-  }
-}
-
-/**
- * The step a handback note hands the run back to, or undefined when the note
- * names one this machine cannot use
- * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
- * D3).
- *
- * **Two ways to be unusable, and the run stays stopped for both.** A name
- * nobody defined is the obvious one. The other is a name that is perfectly
- * real and has no machinery behind it — `looking something up` is a step of
- * this process that no session exists for — and starting it would fail the
- * run and put *"something went wrong"* on a ticket whose stop the human had
- * just cleared. Refusing is not the same as guessing wrong: it costs a person
- * a second visit, and the ticket says so.
- *
- * **Naming nothing means the step it stopped at**, which is the honest
- * reading of a stop cleared without anything being written.
- */
-function handbackStage(
-  handback: Handback,
-  stopped: PipelineStage,
-): PipelineStage | undefined {
-  if (handback.kind === "unknown") return undefined;
-  const named = handback.kind === "at" ? handback.stage : stopped;
-  return canStart(named) ? named : undefined;
-}
-
-/** Whether the daemon has a session it can start for `stage`. */
-function canStart(stage: PipelineStage): boolean {
-  return isBuilt(stage) && (PROMPTED_STAGES as readonly string[]).includes(stage);
-}
-
-/**
- * The step a handback note named that this machine cannot use, or undefined
- * when there is no such note
- * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
- * D3).
- *
- * **Computed rather than stored**, and that is deliberate. It is a fact about
- * a comment on the thread, not about the run, and the ledger already carries
- * one truth about this run — that it is stopped. A field saying *and I could
- * not read my own note* would be a second copy of something the thread says,
- * free to disagree with it the moment the session posts a corrected note.
- */
-function misreadStep(
-  run: Run | undefined,
-  thread: TicketThread,
-): TicketState["misreadStep"] {
-  if (run?.wait?.kind !== "escalation" || run.wait?.opened === undefined) {
-    return undefined;
-  }
-  const handback = readHandback(thread, run.wait?.opened);
-  if (handback === undefined) return undefined;
-  if (handback.kind === "unnamed") return undefined;
-  if (handbackStage(handback, run.stage ?? "triage") !== undefined) return undefined;
-
-  // **Which of the two refusals fired, and not just the words that triggered
-  // it.** Both leave the run stopped and both are the machine's own mess, but
-  // they are different news to the person holding the ticket: a name nobody
-  // defined is a note to rewrite, and a real step with no session behind it is
-  // a note that was right and a machine that is not finished. Until phase 27
-  // the ticket said the first about both, which sent a reader off to correct a
-  // note that had nothing wrong with it.
-  return handback.kind === "unknown"
-    ? { named: handback.named, kind: "unknown" }
-    : { named: stageLabel(handback.stage), kind: "unbuilt" };
-}
-
-/**
  * The threads one parked run's decisions are taken from, each fetched at most
  * once for the run's turn in a cycle.
  *
@@ -2667,11 +1345,11 @@ function misreadStep(
  * another moment of itself, so the key is the ticket: a reader shared across
  * *runs* would answer a later run from a thread fetched before an earlier
  * run's session posted to it, and keying by ticket is what makes that
- * impossible. Within one ticket the sharing is the point — the call to action
- * reconciled at the end of the cycle is compared against the thread the
- * resume decision already read, rather than fetching it a second time, which
- * is what keeps "one read per parked run per cycle" true now that something
- * else in the cycle needs the same thread.
+ * impossible. Within one ticket the sharing is the point: whatever else in
+ * the cycle needs the same thread reads the one already fetched.
+ *
+ * ✏ 2026-09-30: the resume and the call to action are gone from the cycle.
+ * The runner reads each thread through these readers now.
  */
 interface RunThreads {
   /** The run's ticket, with its comments. */
@@ -2719,164 +1397,6 @@ function threadsOf(
       return pull.thread;
     },
   };
-}
-
-/**
- * End a review-parked run if its pull request reached a terminal state.
- * Returns true when the run ended (the ticket has been told and the queue
- * promoted); false when the PR is still open and the wait continues.
- */
-async function concludeReview(
-  run: Run,
-  project: TicketingProject,
-  threads: RunThreads,
-  deps: PollDeps,
-  result: PollResult,
-  log: (message: string) => void,
-): Promise<boolean> {
-  const { store, adapter } = deps;
-  if (run.pr === undefined) return false;
-
-  const pr = await threads.pullRequest(run.pr);
-  if (pr.state === "open") return false;
-
-  // **First, and before anything about a successor is decided.** Completing
-  // the chunk is what frees the project, and `store.complete` promotes
-  // whatever queued behind it while it was building — a bug filed on Tuesday
-  // takes the project here, in this call (R22 clause 6). This function's whole
-  // remaining job is *close the ticket or don't*: the next chunk is opened by
-  // the registration loop on a later cycle, which is what makes it queue
-  // behind the promoted work rather than ahead of it. Registering a successor
-  // from here would look identical and would starve the queue silently, which
-  // is the fault ADR-0026 split the ledger to end.
-  store.complete(run.id);
-
-  if (pr.state === "merged") {
-    await concludeInitiative(run, project, pr.number, deps, result, log);
-  } else {
-    // **A declined pull request stops the work; it does not decide anything.**
-    // This used to close the ticket as `not-planned`, which read a close by
-    // hand as "the human rejected this" and let the initiative advance to its
-    // next step. On 2026-08-30 an accidental close — a sentence in another
-    // pull request's body that GitHub read as a closing instruction — closed a
-    // ticket whose work was finished and awaiting review, and a run nobody
-    // wanted started 86 seconds after the ticket closed ([ADR-0046](../../doc/adr/0046-a-pull-request-closed-without-merging-holds-its-ticket-and-asks.md)).
-    //
-    // So the ticket stays open and gains the hold. The hold is what keeps the
-    // frontier off it — `nextStep` passes over a held step, and the
-    // registration loop passes over any held ticket — and only a human takes
-    // it off. The run itself is already over: `store.complete` above ended it
-    // and freed the project, so nothing is left running either way.
-    await adapter.ensureLabel(project, HELD_LABEL, HELD_LABEL_DESCRIPTION);
-    await adapter.applyLabel(project, run.ticket, HELD_LABEL);
-    await adapter.postComment(project, run.ticket, closedUnmergedComment(pr.number));
-  }
-
-  result.completed.push(run.id);
-  log(`done   ${run.id} — PR #${pr.number} ${pr.state}`);
-  return true;
-}
-
-/**
- * Say what a merged pull request means for the *initiative*, now that the
- * chunk it belonged to is finished: the ticket closes, or it stays open with a
- * piece still to come.
- *
- * **It closes the ticket or it does not, and that is all it does.** It opens
- * nothing — see {@link concludeReview} for why the ordering matters.
- */
-async function concludeInitiative(
-  run: Run,
-  project: TicketingProject,
-  pr: number,
-  deps: PollDeps,
-  result: PollResult,
-  log: (message: string) => void,
-): Promise<void> {
-  const { store, adapter } = deps;
-
-  // Under one step, one ticket `run.ticket` is a **step**, so the closing
-  // splits in two: this step's ticket ends here, and the initiative ends only
-  // when no step of it is open (ADR-0040). Everything below this block is the
-  // path for a ticket that is nobody's step — a chore, anything run by hand,
-  // anything from before this daemon started — and is unchanged.
-  const picture = store.initiativeFor(project.name, run.ticket);
-  if (picture !== undefined) {
-    await concludeStep(run, project, pr, picture.initiative, deps, log);
-    return;
-  }
-
-  const succession = await successionOf(project.name, run.ticket, deps);
-
-  if (succession.kind === "unreadable") {
-    // The file is there and says something nobody can act on. That is a fault
-    // worth a line in the cycle's errors — unlike its *absence*, which is an
-    // ordinary state of the world, since a chore has no breakdown by design
-    // (ADR-0030 D3) — and the ticket still closes, because the alternative is
-    // leaving it open on the strength of a file nothing could read.
-    const line =
-      `${project.name}: could not read the breakdown for #${run.ticket} ` +
-      `(${succession.path}): ${succession.reason}`;
-    result.errors.push(line);
-    log(`error  ${line}`);
-  }
-
-  if (succession.kind === "reproposed") {
-    await adapter.postComment(
-      project,
-      run.ticket,
-      reproposedComment(pr, succession.listed, succession.approved, succession.path),
-    );
-    log(
-      `held   ${run.id} — the list of pieces grew to ${succession.listed} ` +
-        `since ${succession.approved} were approved`,
-    );
-    return;
-  }
-
-  if (succession.kind === "continues") {
-    await adapter.postComment(
-      project,
-      run.ticket,
-      pieceMergedComment(pr, succession.done, succession.total, succession.next),
-    );
-    log(`next   ${run.id} — piece ${succession.done + 1} of ${succession.total}`);
-    return;
-  }
-
-  const prs = store
-    .runsForTicket(project.name, run.ticket)
-    .map((chunk) => chunk.pr)
-    .filter((number): number is number => number !== undefined);
-  await adapter.postComment(project, run.ticket, mergedComment(prs));
-  await adapter.closeTicket(project, run.ticket, "completed");
-}
-
-/**
- * Close a merged **step**, and then the initiative if that was the last one
- * open.
- *
- * **The tracker is asked again, deliberately.** The cached picture is from the
- * cycle's own survey, taken before this step closed, so it cannot answer
- * *is anything still open?*. This is one call on a path that runs when a pull
- * request merges — rare, and never in front of a waiting human, which is the
- * only place ADR-0044 D5 forbids one.
- */
-async function concludeStep(
-  run: Run,
-  project: TicketingProject,
-  pr: number,
-  initiative: number,
-  deps: PollDeps,
-  log: (message: string) => void,
-): Promise<void> {
-  const { adapter } = deps;
-
-  await adapter.postComment(project, run.ticket, stepMergedComment(pr));
-  await adapter.closeTicket(project, run.ticket, "completed");
-  log(`closed ${run.id} — step #${run.ticket} of #${initiative}`);
-
-  await closeInitiativeIfDone(deps, project, initiative, log);
 }
 
 /**
@@ -2941,20 +1461,12 @@ export async function closeInitiativeIfDone(
 // more (ADR-0043), and a helper for doing so left sitting in this file would
 // be the obvious thing for the next reader to reach for.
 
-
 /**
- * How far an initiative has got, from the picture the last cycle wrote.
- *
- * Every number here came off the tracker: `done` is how many of its step
- * tickets are closed, and `next` is the step the frontier chose. Nothing is
- * counted from the ledger, which is the point — a cancelled run leaves its
- * step ticket open, so the step is still the step to come without anything
- * having to remember to exclude it.
- */
-/**
- * Where a ticket's initiative stands, for the two surfaces that have to say so
- * out loud ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
- * D4) — or undefined when there is nothing to say.
+ * Where a ticket's initiative stands, for `timone status`, which renders
+ * without waiting and reads fvermaut's own checkout
+ * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ * D4) — or undefined when there is nothing to say. See
+ * {@link readBreakdownSync}.
  *
  * **✏ 29g: the count comes off the tracker and the re-proposal comes off the
  * artifact, and they are two different facts from two different places.**
@@ -2969,23 +1481,8 @@ export async function closeInitiativeIfDone(
  *   [ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
  *   D3), and no number of step tickets can tell you what a human agreed to.
  *
- * **Deleting the second along with the first is the mistake this docblock
- * exists to stop**, and it was made once here before the tests caught it: a
- * re-proposed initiative then reported *"this one is finished"* and the
- * approval gate stopped existing.
- */
-export async function initiativeProgress(
-  source: BreakdownSource,
-  ticket: number,
-  picture: InitiativeRecord | undefined,
-): Promise<InitiativeProgress | undefined> {
-  return progressFrom(await readBreakdown(ticket, source), picture);
-}
-
-/**
- * {@link initiativeProgress} for `timone status`, which renders without
- * waiting and reads fvermaut's own checkout. Same arithmetic, same file,
- * different source — see {@link readBreakdownSync}.
+ * ✏ 2026-09-30: its twin that read the forge, for the cycle's standing call
+ * to action, went with that call to action.
  */
 export function initiativeProgressSync(
   source: SyncBreakdownSource,
@@ -2995,7 +1492,7 @@ export function initiativeProgressSync(
   return progressFrom(readBreakdownSync(ticket, source), picture);
 }
 
-/** The arithmetic both of the two above share, over a breakdown already read. */
+/** The arithmetic of {@link initiativeProgressSync}, over a breakdown already read. */
 function progressFrom(
   read: BreakdownRead,
   picture: InitiativeRecord | undefined,
@@ -3036,10 +1533,9 @@ export function progressOfPicture(picture: InitiativeRecord): InitiativeProgress
  * What a ticket's approved list of pieces says about what happens after this
  * chunk.
  *
- * **`finished` and `unlisted` are separate arms although a merged pull request
- * treats them alike**, and that is the distinction the second reader will want
- * to collapse. Both close the ticket — there is no next piece either way — but
- * only `finished` is a statement *about an approved list*. `unlisted` means
+ * **`finished` and `unlisted` are separate arms**, and that is the
+ * distinction the second reader will want to collapse. There is no next piece
+ * either way, but only `finished` is a statement *about an approved list*. `unlisted` means
  * nobody ever wrote one, which is not a fault: a chore and a technical enabler
  * reach a pull request without ever meeting the breakdown stage (ADR-0030 D3),
  * and so does anything run by hand. So `unlisted` may never hold a ticket's
@@ -3110,13 +1606,9 @@ async function successionOf(
   }
 
   // ✏ 29g: **it is finished, and there is no counting left to do.** A ticket
-  // that reaches here has a readable, approved, un-regrown breakdown and no
-  // step tickets — because a ticket that *has* them never reaches this
-  // function at all, `concludeInitiative` having handed it to `concludeStep`
-  // first. So there is no next chunk to open: chunks are gone, and what
-  // replaced them is a ticket per step (ADR-0040). Its run merged, and the
-  // conversation ends, exactly as it did before a ticket hosted more than one
-  // of them.
+  // that reaches here has a readable, approved, un-regrown breakdown. There
+  // is no next chunk to open: chunks are gone, and what replaced them is a
+  // ticket per step (ADR-0040).
   void store;
   return { kind: "finished" };
 }
@@ -3161,356 +1653,4 @@ async function successorHeldBack(
   return succession.kind === "finished"
     ? "every piece the human approved has been built"
     : undefined;
-}
-
-/**
- * End a conversation-parked run whose stage has nothing after it, once the
- * conversation has been recorded as agreed. Returns true when the run ended,
- * false when it is still waiting or has somewhere left to go.
- *
- * Only `wayfinding` is such a stage today, and deliberately so (ADR-0010): a
- * decision ticket's answer resolves that ticket and the map owns what comes
- * next, so there is no next stage to advance into. Without this the run sat
- * `parked` for the rest of the ledger's life — harmless, since a closed
- * ticket leaves `listMarkedTickets` and nothing re-registers it, but it left
- * `timone status` claiming to be waiting on a human for a question they had
- * already answered.
- *
- * The session started by a *written* answer ends its own run, in the spawner:
- * it is still `active` when it finds the record, so it is not this loop's to
- * see. This is the takeover's half of the same ending — a session the daemon
- * never ran, whose only trace is what it posted.
- */
-async function concludeLastConversation(
-  run: Run,
-  threads: RunThreads,
-  deps: PollDeps,
-  result: PollResult,
-  log: (message: string) => void,
-): Promise<boolean> {
-  const { store } = deps;
-  const { stage } = run;
-  const waitCursor = run.wait?.opened;
-  if (stage === undefined || waitCursor === undefined) return false;
-
-  // A handoff parks a **work** stage on a conversation wait
-  // ([ADR-0031](../../doc/adr/0031-a-handoff-is-a-wait-not-a-failure.md)), and
-  // a work stage holds no conversation of its own. So the machine's own
-  // conversation record — written by a *conversation* stage, possibly about
-  // something else entirely on the same long-lived ticket — is not about this
-  // wait and may not settle it. Without this guard `concludeConversation`
-  // throws for such a stage, which leaves the run parked, errors every cycle
-  // and makes the human's answer unreachable for good: the exact shape of the
-  // defect this phase exists to remove, one layer down.
-  if (waitFor(stage) !== "conversation") return false;
-
-  const thread = await threads.ticket();
-  if (readConversationRecord(thread, waitCursor) === undefined) return false;
-
-  const transition = concludeConversation(stage, { accepted: true });
-  if (transition.kind !== "finish") return false;
-
-  store.complete(run.id);
-  result.completed.push(run.id);
-  log(`done   ${run.id} — ${transition.reason}`);
-  return true;
-}
-
-/**
- * A parked run's decision to resume: what the session should do, and what
- * reading the wait consumed in order to decide it.
- *
- * The two travel together because they are one decision. A cursor computed
- * separately would mean reading the thread twice and judging it twice, and two
- * readers of one thread are free to disagree about which comment the answer
- * was.
- */
-interface Resumption {
-  context: SpawnContext;
-  /**
-   * The instant the run's wait cursor must advance to before the session
-   * starts, when deciding to resume *was* reading the human's words
-   * (ADR-0023). Absent when nothing was consumed: an approval, an accepted
-   * conversation record and a park with no wait at all are all decided from
-   * something other than a comment the loop must not read twice.
-   */
-  consumed?: string;
-  /**
-   * The instant of the newest comment this resumption was decided from, when
-   * the human should be told it was read — a review park, whose answer is
-   * words they wrote on the pull request and who otherwise hear nothing
-   * until the work is finished ([timone#147](https://github.com/fvermaut/timone/issues/147)).
-   *
-   * Separate from {@link consumed} because a review park does not consume:
-   * its cursor stays put so that everything written after it keeps counting
-   * as the answer. This says only "they have been told", and is compared
-   * against the receipt on the wait.
-   */
-  acknowledge?: string;
-}
-
-/**
- * What a parked run should do now, or undefined while it is still waiting.
- *
- * A change request returns the *same* stage with the human's words; an
- * approval or an accepted conversation returns the next one. Nothing else
- * moves a run — an unanswered gate and an abandoned conversation both look
- * like silence, and silence is not an answer.
- *
- * It reads through {@link RunThreads} rather than the adapter, so the thread
- * it judges is the one the caller's own conclusion check judged, and no branch
- * here can quietly fetch a second copy of it.
- */
-async function resolveWait(
-  run: Run,
-  threads: RunThreads,
-): Promise<Resumption | undefined> {
-  const stage = run.stage;
-  if (stage === undefined) return undefined;
-
-  // A park with no kind of wait is not waiting on a human at all: it is a
-  // run stopped because a stage's machinery did not exist. Two vintages of
-  // that park meet here, and they recorded different things: phase 11 parked
-  // runs whose recorded stage had already *run* (triage, with what follows
-  // read off the labels); every later park records the stage that could not
-  // run, and resuming must run *that stage itself* — asking "what follows?"
-  // would skip it, and for a park at execution that means verifying code
-  // nobody wrote.
-  if (run.wait?.kind === undefined) {
-    // A map being worked is the one park with no wait that is not a run
-    // stopped for want of machinery. It is waiting on its own decision
-    // tickets, and what moves it is {@link openGoAheads} finding the frontier
-    // empty — never a resume, which at this stage would spawn a session for a
-    // map nobody has agreed to write anything about.
-    if (stage === "charting") return undefined;
-    if (stage !== "triage") {
-      return isBuilt(stage) ? { context: { stage } } : undefined;
-    }
-    const thread = await threads.ticket();
-    const next = whatFollows(stage, thread.labels);
-    return next !== undefined && isBuilt(next)
-      ? { context: { stage: next } }
-      : undefined;
-  }
-
-  const cursor = run.wait?.opened;
-  if (cursor === undefined) return undefined;
-
-  // The wait no *answer* resolves
-  // ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
-  // The stage that stopped had already read the human's words and judged,
-  // correctly, that acting on them was outside what it may do — so resuming
-  // it on those same words spends a full pass to reach the same judgement.
-  // That ended five times on ivtrends #1.
-  //
-  // **What does resolve it is the machine's own record of the session the
-  // person opened** ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)),
-  // in the same shape as a conversation record and read the same way. Without
-  // it a stop the human had already cleared stayed stopped for ever, with the
-  // ticket still asking them to run the command they had just run.
-  if (run.wait?.kind === "escalation") {
-    const thread = await threads.ticket();
-    const handback = readHandback(thread, cursor);
-    if (handback === undefined) return undefined;
-
-    const resume = handbackStage(handback, stage);
-    return resume === undefined ? undefined : { context: { stage: resume } };
-  }
-
-  if (run.wait?.kind === "gate") {
-    const thread = await threads.ticket();
-    const decision = readGateDecision(thread, cursor);
-    const transition = readGate(stage, decision);
-
-    if (transition.kind === "advance") {
-      return {
-        context: {
-          stage: transition.stage,
-          approval:
-            decision?.kind === "approve"
-              ? {
-                  stage,
-                  by: decision.comment.author,
-                  at: decision.comment.createdAt,
-                }
-              : undefined,
-        },
-      };
-    }
-    if (transition.kind === "repeat") {
-      return {
-        context: { stage: transition.stage, feedback: transition.feedback },
-      };
-    }
-    return undefined;
-  }
-
-  if (run.wait?.kind === "conversation") {
-    // The map's conversation is the one whose answer is *agreement* rather
-    // than information (ADR-0024). Everywhere else a written answer re-enters
-    // the same stage, because that stage has to judge whether the answer
-    // settles the question it asked; here the question is "shall I write the
-    // specification?", nothing runs at this stage, and what the agreement
-    // starts is stage 3 — on this run, holding this project until the
-    // specification is committed.
-    //
-    // The frontier is re-checked rather than trusted: the wait was opened
-    // when it was empty, and a map that has since grown a question back is
-    // one nobody has agreed anything about. It is the same clause the
-    // `waitingKind === undefined` branch above enforces, and it is worth two
-    // copies — this is the branch that starts a build.
-    if (stage === "charting") {
-      const thread = await threads.ticket();
-      if (!frontierIsEmpty(thread.labels)) return undefined;
-
-      const answer = writtenAnswer(thread, cursor);
-      if (answer === undefined) return undefined;
-
-      const transition = concludeConversation(stage, { accepted: true });
-      return transition.kind === "advance"
-        ? {
-            context: { stage: transition.stage, feedback: answer.words },
-            consumed: answer.at,
-          }
-        : undefined;
-    }
-
-    // One thread, and both halves of the decision taken from it: what the
-    // session is handed, and the instant consuming it advances the cursor to
-    // (ADR-0023). Splitting the pair across two reads would let the run resume
-    // on words it had already consumed, or consume words it never read.
-    const thread = await threads.ticket();
-    // Same guard as `concludeLastConversation`, and for the same reason: only
-    // a stage that actually holds a conversation can have its own record read
-    // as the answer to one.
-    const record =
-      waitFor(stage) === "conversation"
-        ? readConversationRecord(thread, cursor)
-        : undefined;
-    if (record !== undefined) {
-      const transition = concludeConversation(stage, { accepted: true });
-      return transition.kind === "advance"
-        ? { context: { stage: transition.stage } }
-        : undefined;
-    }
-
-    // ADR-0022's second path. The conversation may also be answered in
-    // writing, and what resumes is the *same* stage carrying the words — the
-    // conversation is what ingests an answer to its own question, and
-    // advancing on it would skip the stage that has to judge whether the
-    // answer settles anything.
-    //
-    // This is the one wait resolved by reading what a human wrote where the
-    // words themselves are the trigger, so it is the one that must be consumed
-    // (ADR-0023): a gate's answer clears its wait by advancing the run to
-    // another stage, and a conversation record is the machine's own.
-    const answer = writtenAnswer(thread, cursor);
-    return answer === undefined
-      ? undefined
-      : { context: { stage, feedback: answer.words }, consumed: answer.at };
-  }
-
-  if (run.wait?.kind === "review") {
-    if (run.pr === undefined) return undefined;
-    const pr = await threads.pullRequest(run.pr);
-
-    // Only a human wakes a parked review. The machine's own bookkeeping —
-    // outcome comments, threaded replies — lands on the same surface, and a
-    // loop that answered itself would remediate forever.
-    const said = pr.comments.filter(
-      (comment) =>
-        !comment.fromTimone &&
-        instantOf(comment.createdAt) > instantOf(cursor) &&
-        comment.body.trim() !== "",
-    );
-    const words = said.map((comment) => comment.body.trim());
-    if (words.length === 0) return undefined;
-
-    // The newest of the comments this resumption was decided from, so the
-    // receipt names exactly what the human has been told was read. A second
-    // thought written while the session runs is newer than this, and is
-    // therefore still owed an acknowledgement of its own.
-    const newest = said[said.length - 1].createdAt;
-
-    // Where it resumes is read off the wait rather than named here
-    // (ADR-0049 D5): the writer recorded what could end this wait, and a
-    // second opinion at the reader is what let a wait and its answer disagree
-    // in the first place. The fallback is for a ledger written before the
-    // field existed.
-    const into = run.wait?.resolvableBy?.[0] ?? "remediation";
-    return {
-      context: { stage: into, feedback: words.join("\n\n---\n\n") },
-      acknowledge: newest,
-    };
-  }
-
-  return undefined;
-}
-
-/**
- * The human's written answer to an open conversation, or undefined while they
- * have not written one — their words, and the instant of the last comment the
- * answer was read from.
- *
- * That instant is what consuming moves the cursor to (ADR-0023), and it is the
- * *newest* comment read rather than the oldest so that nothing already read is
- * left outstanding, and nothing said later is swallowed with it.
- *
- * **No keyword, and Timone's own comments can never be it** — the machine asks
- * its remaining question on the same thread it is watching, and a loop that
- * read its own question as the answer would ask forever. `fromTimone` is the
- * adapter's marker-derived judgement, never the author, because Timone posts
- * through the human's account.
- *
- * **Everything they wrote after the park is the answer, joined** — the same
- * rule the review park reads a review by, and settled deliberately against
- * preferring the newest. A written answer is meant to be read generously, and
- * someone who answers and then adds a second thought has said one thing in two
- * comments: dropping the first would lose it, silently and without telling
- * them.
- */
-function writtenAnswer(
-  thread: TicketThread,
-  cursor: string,
-): { words: string; at: string } | undefined {
-  const after = instantOf(cursor);
-
-  const said = thread.comments.filter(
-    (comment) =>
-      !comment.fromTimone &&
-      instantOf(comment.createdAt) > after &&
-      comment.body.trim() !== "",
-  );
-  const newest = said.at(-1);
-  if (newest === undefined) return undefined;
-
-  return {
-    words: said.map((comment) => comment.body.trim()).join("\n\n---\n\n"),
-    at: newest.createdAt,
-  };
-}
-
-/**
- * The stage that follows `stage` for a ticket carrying `labels`. After
- * triage that depends on the classification; everywhere else the graph
- * already knows.
- */
-function whatFollows(
-  stage: PipelineStage,
-  labels: readonly string[],
-): PipelineStage | undefined {
-  if (stage !== "triage") return stageAfter(stage);
-
-  // The map wins over the classification, and is read first for that reason.
-  // These two labels can genuinely coexist: a ticket triaged before anyone
-  // decided to chart it keeps its `triage:<kind>` label, and routing on that
-  // would send a decision question off to have its requirements written. What
-  // the ticket has *become* is a decision ticket on a map.
-  const charted = wayfinderStage(labels);
-  if (charted !== undefined) return charted;
-
-  const kind = classificationFromLabels(labels);
-  if (kind === undefined) return undefined;
-  const transition = routeAfterTriage(kind);
-  return transition.kind === "advance" ? transition.stage : undefined;
 }

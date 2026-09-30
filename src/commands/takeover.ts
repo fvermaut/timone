@@ -10,24 +10,15 @@ import type {
   TicketingProject,
   TicketThread,
 } from "../adapters/ticketing.js";
-import { driverOf, loadManifest, type Manifest } from "../manifest.js";
-import {
-  CARRY_ON_WAIT,
-  RunStore,
-  defaultStatePath,
-  type Run,
-} from "../daemon/runs.js";
+import { loadManifest, type Manifest } from "../manifest.js";
+import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import {
   inBuild,
   waitFor,
   wayfinderStage,
   type PipelineStage,
 } from "../daemon/pipeline.js";
-import {
-  outcomeCursorFrom,
-  readStageOutcome,
-  type StageOutcome,
-} from "../daemon/outcomes.js";
+import { outcomeCursorFrom } from "../daemon/outcomes.js";
 import {
   PROMPTED_STAGES,
   escalationPrompt,
@@ -720,32 +711,23 @@ async function claimForTakeover(
     : { kind: "claimed", run };
 }
 
-/** Reduce an error to one readable line. */
-function oneLine(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.split("\n")[0];
-}
-
 /**
- * End a takeover by reading what its session actually recorded, and say at the
- * terminal what changed
- * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
- * D6, second half).
+ * End a takeover: give the run back to the runner, and say at the terminal
+ * what happens next.
  *
- * **`releaseClaim` restored the old wait blindly, and that is timone#76.**
- * `ivtrends` #58's building and checking were both finished inside a takeover
- * and pushed; the session posted `🏁 Step finished`; and the run was then
- * parked again on exactly the wait it had before, cursor and all. The ticket
- * went on asking a person for an answer they had given three hours earlier by
- * doing the work.
+ * **The runner reads what the session left** (PRD-05 R11), in plain words,
+ * from the ticket. So nothing here reads the session's outcome: the run goes
+ * back, and the runner is woken — now by a daemon that is running, or by the
+ * next one to start.
  *
- * So the ending consults the ticket from the claim's own cursor with the same
- * {@link readStageOutcome} the spawner uses. A finished step advances the run;
- * anything else goes back to the wait it came from.
+ * ✏ 2026-09-30: until the runner drove every project, a run of a project the
+ * old daemon drove was moved on here when the session had recorded a
+ * finished step (ADR-0049 D6, timone#76). The runner reads that record for
+ * itself.
  *
- * **And it says so, either way.** Ending silently is what left #58 looking
- * answered: the person walked away from a terminal that had told them nothing
- * about what their session had or had not moved.
+ * **And it says so.** Ending silently is what left `ivtrends` #58 looking
+ * answered: the person walked away from a terminal that had told them
+ * nothing about what their session had or had not moved.
  */
 async function endTakeover(
   target: TakeoverTarget,
@@ -770,125 +752,8 @@ async function endTakeover(
     return;
   }
 
-  // ✏ **On a project the runner drives, the runner reads what the session
-  // left** (PRD-05 R11), in plain words, from the ticket. So nothing here
-  // reads the session's outcome: the run goes back, and the runner is woken
-  // — now by a daemon that is running, or by the next one to start.
-  if (drivenByRunner(deps.manifest, target.project)) {
-    releaseClaim(target, run, deps, log);
-    log(`${name} goes back to the runner. It reads what the session left as soon as the daemon runs.`);
-    return;
-  }
-
-  const cursor = run.wait?.opened;
-  const stage = run.stage;
-  if (cursor === undefined || stage === undefined) {
-    releaseClaim(target, run, deps, log);
-    log(`${name} goes back to what it was waiting for.`);
-    return;
-  }
-
-  let outcome: StageOutcome | undefined;
-  try {
-    const project = {
-      name: target.project,
-      repoUrl: deps.manifest.projects[target.project].repo_url,
-    };
-    outcome = readStageOutcome(
-      await deps.adapter.getTicket(project, target.ticket),
-      cursor,
-    );
-  } catch (error) {
-    // An unreadable ticket is no grounds to move a run. The claim goes back
-    // and the next cycle reads the thread with a clearer head.
-    log(
-      `I couldn't read ${name} to see what we finished: ${oneLine(error)}. ` +
-        "It goes back to what it was waiting for.",
-    );
-    releaseClaim(target, run, deps, log);
-    return;
-  }
-
-  if (outcome?.kind !== "advanced") {
-    releaseClaim(target, run, deps, log);
-    log(
-      outcome === undefined
-        ? `${name} goes back to what it was waiting for — nothing was recorded ` +
-            "as finished, so I've changed nothing."
-        : `${name} goes back to what it was waiting for.`,
-    );
-    return;
-  }
-
-  // The wait itself says which stage may end it (31h), so this is not a guess
-  // about whose work the outcome was: a step finished at a stage the wait does
-  // not name is somebody else's business.
-  const endedBy = run.wait?.resolvableBy;
-  if (endedBy !== undefined && !endedBy.includes(stage)) {
-    releaseClaim(target, run, deps, log);
-    log(
-      `${name} goes back to what it was waiting for — what we finished isn't ` +
-        "what it was waiting on.",
-    );
-    return;
-  }
-
-  // **Parked with no kind of wait, which is the ledger's way of saying "not
-  // waiting on a person, carry on when you can".** `resolveWait` resumes such
-  // a run at its own stage on the next cycle, and that stage then finishes
-  // through every check it already has — the phase file's status, the branch
-  // having moved, the outcome the session posted.
-  //
-  // Deliberately *not* "work out the next stage and go there". What follows a
-  // work stage is decided by `afterWorkStage`, which reads the branch; a
-  // command that skipped it to save one cheap session would be advancing a
-  // run past a check on the strength of a comment. One more pass is the right
-  // price for not guessing.
-  release(target, deps, () => {
-    store.park(run.id, {
-      waitingOn: CARRY_ON_WAIT,
-      stage,
-      waitCursor: outcome.comment.createdAt,
-    });
-  });
-  log(
-    `${name} has the step you finished recorded against it, so it stops ` +
-      "asking. I'll carry it on from there on my next pass.",
-  );
-}
-
-/**
- * Do `write` under the ledger's lock, or leave the daemon a request to take
- * the run back. {@link releaseClaim}'s two roads, without its wait.
- */
-function release(
-  target: TakeoverTarget,
-  deps: TakeoverDeps,
-  write: () => void,
-): void {
-  const { statePath } = deps;
-  if (statePath === undefined) return;
-
-  const acquired = acquireStateLock({
-    statePath,
-    command: "timone takeover (writing back what we finished)",
-    staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
-  });
-  if (acquired.ok) {
-    try {
-      write();
-    } finally {
-      acquired.lock.release();
-    }
-    return;
-  }
-  if (acquired.error.holder === undefined) return;
-  enqueue(statePath, {
-    kind: "release-takeover",
-    project: target.project,
-    ticket: target.ticket,
-    outcome: "ended",
-  });
+  releaseClaim(target, run, deps, log);
+  log(`${name} goes back to the runner. It reads what the session left as soon as the daemon runs.`);
 }
 
 /**
@@ -1005,7 +870,7 @@ function releaseClaim(
     // ✏ No daemon is running, so nothing can wake the runner now, and the
     // session's closing comment is the machine's own, which never wakes it
     // (PRD-05 R10). The next daemon is asked to, on its first cycle (R11).
-    if (parked && drivenByRunner(deps.manifest, target.project)) {
+    if (parked) {
       enqueue(statePath, {
         kind: "takeover-ended",
         project: target.project,
@@ -1022,15 +887,6 @@ function releaseClaim(
     ticket: target.ticket,
     outcome: "ended",
   });
-}
-
-/**
- * Whether the runner drives `project` (ADR-0060 D9, PRD-05 R19). A project
- * the manifest does not name is driven by nobody, so it is not.
- */
-function drivenByRunner(manifest: Manifest, project: string): boolean {
-  const config = manifest.projects[project];
-  return config !== undefined && driverOf(config) === "runner";
 }
 
 /**

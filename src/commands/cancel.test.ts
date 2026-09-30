@@ -290,7 +290,7 @@ describe("timone cancel — what it reports once the daemon has acted (40u)", ()
 });
 
 describe("timone cancel — on a project the runner drives, with no daemon running (40u)", () => {
-  /** scratch-app, driven by the runner and instructed by the operator. */
+  /** scratch-app, instructed by the operator. */
   const runnerManifest: Manifest = {
     operator: "fvermaut",
     projects: {
@@ -299,7 +299,6 @@ describe("timone cancel — on a project the runner drives, with no daemon runni
         path: "projects/scratch-app",
         stack: [],
         bindings: { ticketing: "github" },
-        driver: "runner",
       },
     },
   };

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
-import { driverOf, loadManifest, ticketLimitOf, type Manifest } from "../manifest.js";
+import { loadManifest, ticketLimitOf, type Manifest } from "../manifest.js";
 import {
   fromDefaultBranch,
   type SyncBreakdownSource,
@@ -154,7 +154,7 @@ interface RenderContext {
   initiativesOf: (project: string) => readonly InitiativeRecord[];
   /**
    * What this run's ticket has spent against its limit, as the words that
-   * end its phrase — or nothing, for a project the runner does not drive.
+   * end its phrase — or nothing, when no reader of records was given.
    */
   spendingOf: (run: Run) => string;
 }
@@ -162,11 +162,14 @@ interface RenderContext {
 /**
  * The reader `timone status` resolves every ticket's progress through.
  *
- * **It is `poll.ts`'s {@link initiativeProgress}, called the same way, and
- * that is the whole of R21 clause 8's guarantee**: the terminal and the ticket
- * cannot disagree about where an initiative stands, because there is no second
+ * **It is `poll.ts`'s {@link initiativeProgressSync}, and that was the whole
+ * of R21 clause 8's guarantee**: the terminal and the ticket could not
+ * disagree about where an initiative stands, because there was no second
  * computation for them to disagree between. Memoized per ticket so a project
  * with several waiting tickets reads each breakdown once.
+ *
+ * ✏ 2026-09-30: the cycle's standing call to action, the ticket's side of
+ * that guarantee, went with the old daemon's path.
  */
 function progressReader(
   root: string | undefined,
@@ -198,11 +201,13 @@ function progressReader(
 }
 
 /**
- * What a ticket of a project the runner drives has spent against its limit,
- * ` — $12.34 of $150.00 spent`, from the functions that decide whether
- * another session may start — so the number here is the number that stops
- * the work. Nothing at all for any other project, or when no reader of
- * records was given.
+ * What a ticket has spent against its limit, ` — $12.34 of $150.00 spent`,
+ * from the functions that decide whether another session may start — so the
+ * number here is the number that stops the work. Nothing at all when no
+ * reader of records was given.
+ *
+ * ✏ 2026-09-30: every project, since the runner drives every project. Until
+ * then a project the old daemon drove showed no spending.
  */
 function spendingReader(
   manifest: Manifest,
@@ -210,9 +215,7 @@ function spendingReader(
 ): (run: Run) => string {
   return (run) => {
     const config = manifest.projects[run.project];
-    if (records === undefined || config === undefined || driverOf(config) !== "runner") {
-      return "";
-    }
+    if (records === undefined || config === undefined) return "";
     const record = records(run.project, run.ticket);
     // Said rather than left out: a missing number would read as a ticket
     // that has spent nothing, and the record is what the limit is counted

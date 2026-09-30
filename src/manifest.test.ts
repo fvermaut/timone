@@ -6,7 +6,6 @@ import { parse as parseYamlText } from "yaml";
 
 import {
   addProject,
-  driverOf,
   loadManifest,
   namedPeople,
   parseManifest,
@@ -276,6 +275,35 @@ projects:
 `);
     expect(() => loadManifest(file)).toThrowError(
       'Invalid manifest: project "client-alpha": field "repo_url": must not be empty',
+    );
+  });
+
+  it("refuses a project that still has a `driver` line, and says to delete it", () => {
+    // The runner drives every project since 2026-09-30. A line saying which
+    // one drives it is refused rather than ignored, so a manifest that still
+    // says `driver: daemon` cannot load and look as if it meant something.
+    const file = writeManifest(`
+operator: fvermaut
+projects:
+  client-alpha:
+    repo_url: git@github.com:fvermaut/pilot-app.git
+    path: projects/client-alpha
+    stack: []
+    bindings:
+      ticketing: github
+    driver: runner
+`);
+
+    let message: string | undefined;
+    try {
+      loadManifest(file);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+
+    expect(message).toBe(
+      "client-alpha: the `driver` line was removed on 2026-09-30. " +
+        "Every project is now driven by the runner. Delete the line.",
     );
   });
 
@@ -612,7 +640,7 @@ describe("Timone is in its own manifest (ADR-0050 D1)", () => {
   });
 });
 
-describe("who may instruct a project, which driver runs it, and its limit", () => {
+describe("who may instruct a project, and its limit", () => {
   const entry = {
     repo_url: "git@github.com:fvermaut/client-alpha.git",
     path: "projects/client-alpha",
@@ -620,29 +648,13 @@ describe("who may instruct a project, which driver runs it, and its limit", () =
     bindings: { ticketing: "github" },
   };
 
-  it("refuses a project driven by the runner when nobody is named to instruct it", () => {
-    // The runner acts only on what named people write on a ticket. With
-    // nobody named it could take no instruction from anyone, so the file is
-    // refused where it is read, and the error names the project to fix.
-    expect(() =>
-      parseManifest({
-        projects: { "client-alpha": { ...entry, driver: "runner" } },
-      }),
-    ).toThrowError(
-      'Invalid manifest: project "client-alpha": it is driven by the runner, but names nobody who may instruct it. Add "instructors" to the project, or "operator" at the top of the manifest.',
-    );
-  });
-
-  it("reads a project that sets none of the three as daemon-driven, limited to $150, and instructed by the operator", () => {
-    // Every entry written before the runner existed is such a project, and
-    // re-reading it must change nothing about how its tickets move.
+  it("reads a project that sets neither as limited to $150, and instructed by the operator", () => {
     const manifest = parseManifest({
       operator: "fvermaut",
       projects: { "client-alpha": entry },
     });
     const project = manifest.projects["client-alpha"]!;
 
-    expect(driverOf(project)).toBe("daemon");
     expect(ticketLimitOf(project)).toBe(150);
     expect(namedPeople(manifest, "client-alpha")).toEqual(["fvermaut"]);
   });
@@ -653,7 +665,6 @@ describe("who may instruct a project, which driver runs it, and its limit", () =
       projects: {
         "client-alpha": {
           ...entry,
-          driver: "runner",
           instructors: ["alice-client", "bob-client"],
         },
       },
@@ -675,7 +686,6 @@ describe("who may instruct a project, which driver runs it, and its limit", () =
         projects: {
           "client-alpha": {
             ...entry,
-            driver: "runner",
             instructor: ["alice-client"],
           },
         },
@@ -706,7 +716,7 @@ describe("who may instruct a project, which driver runs it, and its limit", () =
       parseManifest({
         operator: "fvermaut",
         projects: {
-          "client-alpha": { ...entry, driver: "runner", instructors: [] },
+          "client-alpha": { ...entry, instructors: [] },
         },
       }),
     ).toThrowError(/project "client-alpha": field "instructors"/);
