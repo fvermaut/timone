@@ -192,7 +192,7 @@ grep -rn "timone retry" src --include='*.ts' | grep -v '^src/daemon/session\.ts'
 
 ```bash
 npm run build && npm test 2>&1 | tail -5
-grep -rnw "converse\|markAnswerConsumed\|reopenIfFailed\|CARRY_ON_WAIT" src --include='*.ts' | grep -v '^src/daemon/session\.ts\|^src/daemon/runs\.ts' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' ; echo "exit: $? (expected 1; session.ts and runs.ts are 41f's and 41h's)"
+grep -rnw "converse\|markAnswerConsumed\|reopenIfFailed\|CARRY_ON_WAIT" src --include='*.ts' | grep -v '^src/daemon/session\.ts\|^src/daemon/runs\.ts\|^src/runner/session\.ts' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' ; echo "exit: $? (expected 1; session.ts and runs.ts are 41f's and 41h's; ✏ 2026-09-30 (build, timone#166): src/runner/session.ts has a function of its own called converse, which is the runner's and stays)"
 ```
 
 - [ ] Red-green evidence for each of the five cases is in the handoff.

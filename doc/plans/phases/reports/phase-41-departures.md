@@ -36,3 +36,10 @@
 **Agreed:** 41c changes `runs.ts` and adds tests; the tests of old states go with their code in later slices.
 **Did instead:** 41c also deletes, or re-bases, 39 existing tests that assert what only a failed run or an old wait kind can do, in six test files.
 **Why:** the conversion runs on every read, so no reader can see those states any more. The tests could not pass, and the code they covered is deleted by 41d to 41h.
+
+## 2026-09-30 — timone#166, execution
+
+**Kind:** check not run
+**Agreed:** 41e's search for `converse` and three other names finds nothing outside the files later slices own.
+**Did instead:** the search also leaves out `src/runner/session.ts`.
+**Why:** that file has a function of its own called `converse`, which belongs to the runner and has nothing to do with the takeover. The search as written could not pass on correct code.
