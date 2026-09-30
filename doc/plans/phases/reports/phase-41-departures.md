@@ -43,3 +43,10 @@
 **Agreed:** 41e's search for `converse` and three other names finds nothing outside the files later slices own.
 **Did instead:** the search also leaves out `src/runner/session.ts`.
 **Why:** that file has a function of its own called `converse`, which belongs to the runner and has nothing to do with the takeover. The search as written could not pass on correct code.
+
+## 2026-09-30 — timone#166, execution
+
+**Kind:** plan step
+**Agreed:** 41f deletes `mergeChunkZero`, `gates.ts` and `gates.test.ts`.
+**Did instead:** 41f kept `mergeChunkZero` (and `failedComment`, which only it uses) and trimmed `gates.ts` and its test instead of deleting them. 41h deletes them, together with dead code 41b to 41g left in files no slice owned.
+**Why:** files outside 41f's list still import them: a runner test names `mergeChunkZero` in a type check, `pipeline.ts` imports `GateDecision`, and `prompts.ts` imports `clarifyingRounds`. The plan's rule is to keep what something still imports.

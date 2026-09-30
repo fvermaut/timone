@@ -270,6 +270,15 @@ npm run --silent replay -- --dry 2>&1 | tail -3
 - Fields only the old path wrote are removed from the schema and stripped when the ledger is read: `reAsksAfterAnswer`, `consumedAnswerAt`, `askCheck`, `deaths`, `refusal`, `carried`, `wait.acknowledgedAt`, and `failure` unless 41c's cancelled runs keep their reason in it. The rule is the same for each: remove it only if nothing on the runner's path writes it.
 - Deleted methods: `runningRun`, `parkedRuns`, `rememberAskCheck`, `fail`, `reopenForTakeover`, `refuse`, `started`, `unstarted`, `refusalTold`, `reclaim` and `carry`. Deleted helpers: `RE_ARM_LIMIT`, `stoppedTwiceWait`, `assertAllowed`, `RE_ASK_LIMIT`, `ESCALATION_WAIT`, `CARRY_ON_WAIT`, `isReAskAfterAnswer`, and the re-ask floor in `applyPark`.
 
+> ✏ 2026-09-30 (build, timone#166): **41h also takes what 41b to 41g left behind.** 41f could not delete three things, because files outside its list still import them, and several files no slice owned were left with dead code. Granted for this, in addition to the files below:
+> - `src/runner/actions.test.ts` — its type check that the chunk-zero merge cannot be written without an approval names `mergeChunkZero`; it names `tryMergeChunkZero` instead. Then `mergeChunkZero` and its test in `src/daemon/chunk-zero.ts` and `chunk-zero.test.ts`, and `failedComment` in `src/daemon/session.ts`, are deleted.
+> - `src/daemon/gates.ts` and `gates.test.ts` — deleted once `readGate` (here) and `writtenAnswerBlock` (41g) are gone, if nothing else imports them.
+> - `src/git.ts` — `uncommittedFiles`, if nothing but its own test calls it.
+> - `src/channels/conversation.ts` and `src/channels/terminal.ts` — `inviteToConversation` and `TerminalChannel`, if nothing calls them. `takeoverCommand` stays: `prompts.ts` uses it.
+> - `src/daemon/step-session.ts`, `src/guards/checkouts.test.ts` — comments that name the deleted spawner, or the uncommitted files the checkout no longer lists.
+>
+> The rule is the same as for every slice: delete only what a search of `src/` shows nothing imports. Recorded in [phase-41-departures.md](reports/phase-41-departures.md).
+
 **[MODIFY]** `src/daemon/pipeline.ts` — the table keeps what the runner reads: `PIPELINE_STAGES`, `stageLabel`, `modelFor`, `effortFor`, `ownsBranch`, `classificationFromLabels`, `wayfinderStage` and `APPROVAL_RECORD_MODEL`, and whatever else a search of `src/` still finds an importer for. Deleted: `next` and `stageAfter`, the wait columns and `waitFor`, `WaitKind`, `runsUnattended`, `requireWait` and `resolvableBy`, `built` and `isBuilt`, `inBuild`, `processStage`, `readGate`, `concludeConversation`, `routeAfterTriage`, `PipelineTransition`, `frontierIsEmpty`, `isMap` and `stageFromLabel`.
 **[MODIFY]** `src/daemon/runs.test.ts`, `src/daemon/pipeline.test.ts` — the tests of what is deleted go with it.
 
