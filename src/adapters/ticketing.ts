@@ -21,19 +21,6 @@ export const MACHINE_MARKER =
   "🤖 **Timone** · automatic message — written by the machine, not by the account it appears under";
 
 /**
- * The line an accepted conversation record carries, under the machine marker.
- *
- * A conversation concludes inside the conversation, but the *record* of it
- * lands on the ticket — and the ticket is the one surface the loop reads
- * ([ADR-0012](../../doc/adr/0012-conversation-channels.md)). This marker is
- * what lets the daemon tell "we agreed this" from everything else a session
- * might post. Matching on prose instead would make the pipeline's advance
- * depend on wording nobody knew was load-bearing.
- */
-export const CONVERSATION_RECORD_MARKER =
-  "✅ **Agreed** · the record of a conversation, accepted by the human";
-
-/**
  * The line the machine's one clarifying question carries, when a written
  * answer left something unsettled ([ADR-0022](../../doc/adr/0022-a-conversation-ticket-can-be-answered-in-writing.md)).
  *
@@ -43,68 +30,29 @@ export const CONVERSATION_RECORD_MARKER =
  * either asked again or it did not — and a counter beside it would be a
  * second copy of one truth, free to disagree with the comments a human is
  * looking at. Read by {@link clarifyingRounds}.
+ *
+ * ✏ 2026-09-30: no step is told to write it any more. It stays because
+ * `clarifyingRounds` in `gates.ts` still reads it.
  */
 export const CLARIFICATION_MARKER =
   "❓ **Still open** · written by the machine when a written answer left something unsettled";
 
-/**
- * The line a stage's closing comment carries when its work is done and the
- * pipeline may move on. Phase 13's back half runs stages whose sessions do
- * real, fallible work; the daemon judges them by the artifact they owe *and*
- * this record ([phase 13](../../doc/plans/phases/phase-13.md)'s outcome
- * rule, extending ADR-0014 from gates to outcomes) — never by an exit code,
- * which is how a gate once opened over nothing.
- */
-export const STAGE_DONE_MARKER =
-  "🏁 **Step finished** · written by the machine when a stage completed its work";
+// ✏ 2026-09-30: the marker lines a step once wrote to say how it ended — step
+// finished, needs more than a reply, picking it back up, carrying on at — the
+// line of an accepted conversation record, and the marker of a ticket's
+// standing call to action were deleted. No step is told to write them, and no
+// code reads them: the runner reads a step's plain comment. The replay cases
+// write the texts they recorded themselves.
 
 /**
- * {@link STAGE_DONE_MARKER}'s sibling for the other honest ending: the stage
- * stopped inside its bounds — a failed slice, an exhausted fix loop — and a
- * person has to look. The comment carrying it is the report R6 requires.
+ * The line a stage's closing comment carried when it stopped inside its
+ * bounds and a person had to look.
+ *
+ * ✏ 2026-09-30: no step is told to write it any more, and no code reads it.
+ * It stays only because `outcomes.test.ts` and the replay cases import it.
  */
 export const STAGE_HANDED_MARKER =
   "🙋 **Needs a person** · written by the machine when a stage stopped and is asking for help";
-
-/**
- * {@link STAGE_HANDED_MARKER}'s stronger sibling: the stage was given an
- * answer and acting on it is outside what that stage may do
- * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
- *
- * The difference from a handoff is what happens next, and it is the whole
- * reason there are two markers. A handoff waits for a reply and resumes on
- * one. This one has given up on being replied to: the stage already read the
- * answer and was right about it, so another answer buys another pass and the
- * same judgement — five of them, on ivtrends #1.
- */
-export const STAGE_ESCALATED_MARKER =
-  "🆘 **Needs more than a reply** · written by the machine when a stage cannot act on the answer it was given";
-
-/**
- * The line a session writes when a stop has been cleared and the work goes
- * back to the machinery
- * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)).
- *
- * **{@link STAGE_ESCALATED_MARKER}'s other half.** That one says *a person is
- * needed and no answer will do*; this one says *the person came, we settled
- * it, carry on*. It is the only thing that ends an escalation: not the
- * human's words, which the stage had already read and was right about, but
- * the machine's own record of the session they went through together — the
- * same shape as a conversation record, and read the same way.
- */
-export const HANDBACK_MARKER =
-  "🔁 **Picking it back up** · written by the machine when a stop has been cleared and the work goes on without you";
-
-/**
- * The line under {@link HANDBACK_MARKER} naming where the work carries on, in
- * the plain words `stageLabel` gives a step — *"Carrying on at: building"*.
- *
- * A line rather than a hidden field: the ticket is the record, and a person
- * reading this thread is owed the same fact the machinery is reading. Absent
- * means *carry on where it stopped*, which is the honest default for a stop
- * cleared without anything being written.
- */
-export const HANDBACK_STEP_PREFIX = "Carrying on at:";
 
 /**
  * The line every message Timone posts ends on, and the one a reader looks at
@@ -135,26 +83,6 @@ export const NEEDED_FROM_YOU = "**What I need from you:**";
  */
 export const PREVIEW_MARKER =
   "🔍 **Preview** · a running copy of this pull request, kept up to date by the machine";
-
-/**
- * The line a ticket's standing call to action carries, so a ticket ends up
- * with one of them rather than one per poll cycle.
- *
- * {@link PREVIEW_MARKER}'s kind of marker rather than its siblings': an
- * *identity*, not just provenance. What an open ticket is asking of the human
- * is a standing fact whose truth changes — a blocker closes, a run fails, a
- * stage moves — and [ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)
- * has the daemon repair it every cycle rather than report it. This is what
- * {@link TicketingAdapter.upsertComment} matches on to find what was said
- * last time, and what the poll loop compares against to decide whether
- * anything needs saying at all.
- *
- * It can never change once it has shipped: an edited marker orphans every
- * comment posted under the old one, and the next cycle posts a second call to
- * action beside the first.
- */
-export const CTA_MARKER =
-  "📌 **Where this stands** · what this ticket needs right now, kept up to date by the machine";
 
 /** Put the machine header on a comment body, unless it already carries one. */
 export function stampMachineComment(body: string): string {

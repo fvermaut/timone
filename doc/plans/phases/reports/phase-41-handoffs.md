@@ -919,3 +919,158 @@ src/cli.test.ts:44:      "`timone retry` was removed. Write on the ticket instea
   - `DEFAULT_PROGRESS_INTERVAL_SECONDS` (`progress.ts`) lost the one test of its value, *defaults to thirty seconds*, with the rest of `session.test.ts`.
 - **`dist/daemon/ask-check.*` and `dist/daemon/gate-comment.*`** stay in `dist/` until it is cleaned. `tsc` does not delete output for a deleted source. Nothing imports them.
 - **Refactoring I would do but did not:** make `attemptMerge` private. Rename `ASK_CHECK_MODEL` and `ASK_CHECK_TIMEOUT_MS` in `consult.ts`, now that no ask check exists. Let the runner's `RunnerDriverDeps.consult` use the `Consult` type.
+
+## 41g — What a step is told matches the runner
+
+**Built.** No step is told to write a marker line any more. A step that finishes or stops closes with one plain comment that says how it ended, and that comment ends with the line `askedFor` reads, which every step prompt now names in its exact words: `**What I need from you:**`. A step that cannot go on says why on the ticket, says what it needs, and ends; it no longer writes the escalation line or the takeover command. The clarification and wayfinding prompts no longer ask for the "Agreed" record line, and no longer say the session was started because someone answered in writing. The takeover prompt (`escalationPrompt`) is now the prompt for a takeover of any run: it names the run's step and what the run waits on, lists what the run record says happened on this run, quotes what the named people wrote since the run began waiting, and says that when the session ends the runner wakes and reads the ticket, so the session ends by writing there what it did and what should happen next. When the run's step is a conversation, it tells the session to hold that conversation with the person, with that step's skill. The hand-back note, the "what ordinarily follows" hint and the stopped stage's quoted account are gone. `SYSTEM` in `src/runner/brief.ts` is unchanged.
+
+**Files touched.**
+
+- `src/daemon/prompts.ts` — `writingBlock` names `NEEDED_FROM_YOU`. `stuckBlock` rewritten, takes no argument. `outcomeBlock` without markers. `conversationOpening` has one opening. Clarification and wayfinding prompts lose the record line. Remediation prompt points at the review comment on the pull request and the runner's instructions, instead of the removed "what they replied" block. Execution prompt: the `Complete — see <report>` flip is described as the line the runner reads. `escalationPrompt` takes a fourth argument, `TakeoverFacts` (`record`, as `readRecord` returns it, and `namedPeople`), and is rewritten as above. New: `TakeoverFacts`, `recordBlock`, `recordLine`, `CONVERSATION_SKILLS`, `conversationBlock`, `namedWordsBlock`. Deleted: `feedbackBlock`, `writtenAnswerBlock`, `carriedBlock`, `conversationSubject`, `takeoverPrompt`, `handbackBlock`, `stoppedAccountBlock`, `unstamped`, `humanWordsBlock`, and the `PromptContext` fields `feedback`, `carried` and `interactive`. Imports of `clarifyingRounds` and `stageAfter` gone.
+- `src/daemon/prompts.test.ts` — the five cases and five more tests of the new takeover prompt (below). 66 tests deleted and 20 re-based (below).
+- `src/adapters/ticketing.ts` — deleted `CONVERSATION_RECORD_MARKER`, `STAGE_DONE_MARKER`, `STAGE_ESCALATED_MARKER`, `HANDBACK_MARKER`, `HANDBACK_STEP_PREFIX`, `CTA_MARKER`. `STAGE_HANDED_MARKER` and `CLARIFICATION_MARKER` kept, each with a dated note saying why.
+- `src/runner/replay/cases.ts` — the import of `STAGE_DONE_MARKER` replaced by a local constant of the same name holding the same text. Nothing else changed.
+- `src/commands/takeover.ts` — two import lines, and the `escalationPrompt` call, which now passes `readRecord(deps.root, …)` and `namedPeople(deps.manifest, …)`.
+- `src/commands/takeover.test.ts` — the `STAGE_DONE_MARKER` import line; its one use, a sample comment body, now holds the text itself (decision 5); the two `escalationPrompt` calls pass an empty record and the test manifest's named people (none).
+- `doc/plans/phases/reports/phase-41-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **The takeover prompt reads the run record through its caller.** The plan asks the prompt to say "what the run record says happened". The prompt stays a pure builder: `takeover.ts` passes the result of `readRecord`, and the prompt writes one line per entry of this run (steps, how they ended, the runner's decisions with their reasons, departures, approvals) and the ticket's two spending entries. The machine's bookkeeping entries (`woke`, `runner-ended`, `seen`, `notice`) are left out. An unreadable record is said in one sentence with the reader's own message. `renderRecord` in `src/commands/record.ts` was not reused: `prompts.ts` would then import a command file that imports `takeover.ts`, which imports `prompts.ts`.
+2. **"The named people's words since" means since the run's wait opened**, compared with the runner's own `isNamedPerson` (imported from `src/runner/brief.ts`, which is unchanged). The runner reopens the wait each time it settles, so these are the words it has not acted on yet. The whole thread is still shown above them, voices told apart, as before.
+3. **The stopped stage's quoted account is removed.** It found the account by the machine comment posted at the exact instant the wait opened, which only the old code between steps arranged. The runner's wait opens when the runner settles, so it would always have said "the stage left no account". One sentence stays in its place: the machine's comments in the thread may be wrong, check them first. Its test was re-based to that.
+4. **`interactive` is deleted with `takeoverPrompt`.** It was read by `conversationOpening` only, and only `takeoverPrompt` passed it on a path that reads it (`escalationPrompt` set it and read nothing from it). With `takeoverPrompt` gone, the branch it selected could not be reached.
+5. **`STAGE_DONE_MARKER` is deleted, and one line of `takeover.test.ts` beyond its import changed.** The import line could not go while its one use stayed. The use is a sample comment body; it now holds the marker's text, so the sample is exactly as it was. This is the same rule the plan gives for the replay cases. I report it because the grant for that file names only import lines and the call.
+6. **`STAGE_HANDED_MARKER` is kept**, because `src/daemon/outcomes.test.ts` imports it and that file was not given to this slice. The replay cases import it too. Nothing in production code reads it or tells a step to write it. **`CLARIFICATION_MARKER` is kept**, because `clarifyingRounds` in `gates.ts` still reads it.
+7. **`CTA_MARKER` is deleted too**, although 41f did not list it: it had no reference at all in `src/` (its reader, the standing call to action, went in 41b).
+8. **The stuck rule no longer gives the takeover command.** The plan says the step says it cannot go on, says what it needs, and ends; the runner reads that. Whether to offer a takeover is the runner's decision (its rules already say when not to write the command).
+9. **The requirements and breakdown prompts are unchanged.** "The machinery posts the approval request itself, immediately after yours" names no mechanism that is gone: the runner asks for the approval after the step ends.
+10. **The conversation steps and their skills:** clarification → `timone-grill`, wayfinding and charting → `timone-wayfind`.
+11. **The name `escalationPrompt` is kept**, so `takeover.ts` changes only its call. Renaming it would touch more of a file this slice may only lightly edit.
+
+**Validation evidence.**
+
+*(1) No step's prompt carries a retired marker line* (`prompts.test.ts` › *what a step is told matches the runner (41g)* › `%s is told to write none of the retired marker lines`, one per step in `PROMPTED_STAGES`). The test lists the eight texts as they were written: the six deleted markers, and the handed and clarification lines, which stay as constants but which no step is told to write. Red before the change:
+
+```
+× … > triage is told to write none of the retired marker lines
+  → triage still carries: 🆘 **Needs more than a reply** · written by the machine when a stage cannot act on the answer it was given: …
+× … > clarification is told to write none of the retired marker lines
+  → clarification still carries: ✅ **Agreed** · the record of a conversation, accepted by the human: …
+× … > research is told to write none of the retired marker lines
+  → research still carries: 🏁 **Step finished** · written by the machine when a stage completed its work: …
+(and the same for the other eight steps)
+Tests  11 failed | 223 skipped (234)
+```
+
+Green after `stuckBlock`, `outcomeBlock` and the two record lines changed: `Tests  11 passed | 223 skipped (234)`.
+
+*(2) Every step is still told to end with the line `askedFor` reads* (`%s is still told to end with the line \`askedFor\` reads`, one per step). `askedFor` reads the text after `NEEDED_FROM_YOU` = `**What I need from you:**` on the last such line. The old prompts said only "one explicit line saying what, if anything, you need from them" and never named those words, so this was honestly red:
+
+```
+× … > triage is still told to end with the line `askedFor` reads
+  → expected 'A ticket was filed on the managed pro…' to contain 'End every message to them with one li…'
+(and the same for the other ten steps)
+Tests  11 failed | 234 skipped (245)
+```
+
+Green after `writingBlock` named `NEEDED_FROM_YOU`: `Tests  22 passed | 223 skipped (245)` (cases 1 and 2 together).
+
+*(3) The takeover prompt for a run waiting for the runner names its step and what it waits on, and says nothing about a hand-back line* (`the takeover prompt for a run the runner waits on (41g)` › `names the run's step and what it waits on, and says nothing about a hand-back line`). Red: `→ expected 'You are picking up **scratch-app #6**…' not to contain 'Picking it back up'`. After the hand-back section went it was red a second time, because the step's plain name had only ever appeared in the hand-back list: `→ … to contain 'writing down what it needs'`. Green after the "where the run stands" lines named the step: `✓ … names the run's step and what it waits on, and says nothing about a hand-back line`.
+
+*(4) A run whose step is wayfinding names the wayfinding skill* (`tells the session to hold the %s conversation with the person, with \`%s\``, for wayfinding, clarification and charting). Red:
+
+```
+× … > tells the session to hold the wayfinding conversation with the person, with `timone-wayfind`
+  → expected 'You are picking up **scratch-app #6**…' to contain '`timone-wayfind`'
+× … clarification … `timone-grill`   × … charting … `timone-wayfind`
+Tests  4 failed | 22 passed | 223 skipped (249)   (cases 3 and 4)
+```
+
+Green after `conversationBlock`: `Tests  26 passed | 223 skipped (249)`. The guard `holds no conversation for a step that is not one` passed before the change, so it could not be red first. Made `conversationBlock` answer `timone-wayfind` for every step: `→ expected 'You are picking up **scratch-app #6**…' not to match /hold that conversation/i`, `Tests  1 failed | 187 skipped (188)`. Restored (`diff` against a saved copy empty): `1 passed`.
+
+*(5) The dry replay passes 19 of 19, with every case's recorded comments unchanged.* Before any change, I dumped every case's ticket (with its comments), pull request (with its comments), record, events, files and right calls to JSON through `tsx`. After the change I dumped them again. `cmp` found the two files identical: 19 cases, 70 ticket comments, 5 pull-request comments, 49 occurrences of the "Step finished" text. This cannot be red first, since nothing may change. To show the comparison can fail, I changed "Step finished" to "Step done" in the local constant, dumped again, and `cmp` failed: `differ: char 755, line 20`, 48 lines changed, the first being scratch-app's sorting comment. Restored (`diff` against a saved copy empty). The dry replay after the change: `19 of 19 cases passed.`
+
+*The rest of the new takeover prompt*, each written first and seen red, then green:
+
+```
+× … > says the runner wakes when the session ends and reads what it left on the ticket
+  → expected 'You are picking up **scratch-app #6**…' to match /when this session ends, the runner w…/i
+× … > says what the run record says happened on this run, and on no other
+  → expected 'You are picking up **scratch-app #6**…' to contain 'two questions only the operator can a…'
+× … > says so when the run record cannot be read
+  → expected 'You are picking up **scratch-app #6**…' to contain 'line 3 is not JSON'
+× … > carries what the named people wrote since the run began waiting, and nobody else's words
+  → expected '--- what they wrote ---\nonly the dra…' not to contain 'make it purple'
+Tests  4 failed | 27 passed | 223 skipped (254)
+```
+
+Green: `Tests  31 passed | 223 skipped (254)`.
+
+**Tests deleted, because what they assert is removed (66).** All in `prompts.test.ts`:
+
+- *every stage prompt* › `%s carries the human's words when a gate sent it back` (11) and `%s says nothing about feedback when there was none` (11): the `feedback` field is gone.
+- *the clarification prompt* and *the wayfinding prompt* › `tells the session someone is present and waiting, when one is` (2): `interactive` is gone.
+- *the wayfinding prompt* › `marks the resolution so the machinery knows the run is over` (1): the record line is gone.
+- *a conversation prompt built for a written answer* › `%s carries what they wrote, as an answer`, `%s forbids re-asking what the answer already settles`, `%s allows exactly one more question, marked so it can be counted`, `%s hands back the takeover instead of asking a third time` (2 each, 8): `writtenAnswerBlock` is gone.
+- *conversationSubject* (1) and *takeoverPrompt* (1): the functions are gone.
+- *the execution / verification / delivery / remediation prompt* › `carries both outcome markers, verbatim` (4): case (1) asserts the opposite.
+- *the rule every stage carries about an answer it may not act on* › `asks the %s prompt for the machine header above the marker, in that order` (11), `gives the %s prompt the exact command its comment must close on` (11), `forbids inviting another answer, and still leaves them something to do` (1).
+- *the escalation prompt* › `names what normally follows as the pipeline's default, not as a decision`, `gives the exact shape of the note that hands the work back`, `lists every step it may name, and only steps that can be started`, `warns that a name off that list is refused, not guessed` (4).
+
+**Tests re-based (20).**
+
+- *the clarification prompt* › `requires an accepted summary, marked so the machine can find it again` → `requires an accepted summary before it posts one as agreed`.
+- *the wayfinding prompt* › `is a stage a takeover can hold a conversation for` → `is a step the runner can start a session for` (same assertion; the reason now given is `isPrompted`).
+- *a conversation prompt built for a written answer* › `%s does not claim anyone is at the keyboard when nobody is` (2) → *a conversation prompt, with nobody at the keyboard* › `%s does not claim anyone is at the keyboard, or that a written answer started it`.
+- *the planning prompt* › `asks for the outcome record the daemon reads it by` → `asks for the closing comment the runner reads`.
+- *the remediation prompt* › `carries the review comment as the defect brief` → `takes the review comment on the pull request as the defect brief`. Seen red before the remediation prompt was reworded.
+- *the rule every stage carries…* renamed *the rule every step carries for when it cannot go on*; `is carried by the %s prompt` (11) asserts the rule and that the runner reads the comment, not the marker.
+- *the escalation prompt* › `is not any stage's prompt, wearing a hat` (no `interactive`, no `takeoverPrompt`); `carries the stopped stage's account, and says it may be wrong` → `carries the stopped step's account, and says the machine's comments may be wrong`; `carries what the human wrote after it stopped` → `carries what a named person wrote after the run began waiting`. Its other tests only gained the fourth argument.
+
+**Tests added (31):** case (1) 11, case (2) 11, case (3) 1, case (4) 3, the guard 1, and four more tests of the takeover prompt. 1472 = 1507 − 66 + 31. `prompts.test.ts`: 223 → 188.
+
+**Each marker deleted, and the search that shows nothing reads it.**
+
+```
+$ for m in CONVERSATION_RECORD_MARKER STAGE_DONE_MARKER STAGE_ESCALATED_MARKER HANDBACK_MARKER HANDBACK_STEP_PREFIX CTA_MARKER; do grep -rnw "$m" src --include='*.ts' | grep -v '^src/runner/replay/cases.ts'; echo "$m exit $?"; done
+CONVERSATION_RECORD_MARKER exit 1
+STAGE_DONE_MARKER exit 1
+STAGE_ESCALATED_MARKER exit 1
+HANDBACK_MARKER exit 1
+HANDBACK_STEP_PREFIX exit 1
+CTA_MARKER exit 1
+```
+
+`cases.ts` is left out of the search only because it now has its own local constant named `STAGE_DONE_MARKER`. By text, the six lines appear only in test samples: `prompts.test.ts` (the list case (1) checks against), `takeover.test.ts` (one sample body) and `cases.ts` (the recorded comments). Before deleting, the search that decided it was the same `grep -rnw` over `src/`, and `grep -rn` for the marker texts and for "Agreed", "in writing" and "conversation record" in `src/runner` and `src/channels`: none of these is read by the runner, `timone status`, `conversation.ts` or `terminal.ts`.
+
+**Validation commands, as run.**
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+> timone@0.1.0 build
+> tsc
+ Test Files  57 passed (57)
+      Tests  1472 passed (1472)
+$ git diff --quiet main -- src/runner/brief.ts ; echo "exit: $? (expected 0: the runner's instructions are unchanged)"
+exit: 0 (expected 0: the runner's instructions are unchanged)
+$ npm run --silent replay -- --dry 2>&1 | tail -3
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+```
+
+- [x] Red-green evidence for each of the five cases is in the handoff. Cases (1) to (4) were seen red, then green. Case (5) cannot be red; the comparison of the recorded comments was shown able to fail. **PASS**
+- [x] The handoff lists each marker deleted, and for each, the search that shows nothing reads it. **PASS**
+- `npm run build && npm test`: 1472 passed. **PASS**
+- `src/runner/brief.ts` unchanged: exit 0. **PASS**
+- Dry replay: 19 of 19. **PASS**
+
+**What 41h must know.**
+
+- **`src/daemon/gates.ts`:** `clarifyingRounds` has no production caller now (its one caller was `writtenAnswerBlock`). Only `gates.test.ts` calls it. The comment at line 11 says `prompts.ts` imports it, which is no longer true. With `readGate` gone as well, `gates.ts`, `gates.test.ts` and `CLARIFICATION_MARKER` can all go.
+- **`src/adapters/ticketing.ts`:** `STAGE_HANDED_MARKER` stays only for `src/daemon/outcomes.test.ts` (lines 3, 17, 36) and the replay cases. To delete it, write its text into those two files as `cases.ts` now does for the "Step finished" line. `TicketingAdapter.upsertComment` has no production caller (its caller was the standing call to action); only its implementations and the replay's fake define it.
+- **`src/daemon/pipeline.ts`:** `stageAfter` lost its last caller outside `pipeline.ts` (`escalationPrompt`); it is still called inside, by functions 41f listed as having no outside caller.
+- **`src/commands/takeover.ts`:** the line the terminal prints when the session opens still says "I couldn't take this one further myself. Over to you.", and the command's help still says "Pick up a ticket that is waiting to talk something through". Neither was in this slice's grant.
+- **`dist/`** is not cleaned by `tsc`; nothing was deleted as a file here.
+- **Refactoring I would do but did not:** rename `escalationPrompt` to `takeoverPrompt` and `StoppedRun` to `TakenOverRun`, now that the old `takeoverPrompt` is gone and the run has not always stopped. The "Do not write application code" paragraph still says "the machinery"; "the runner and its steps" would be plainer.

@@ -1,6 +1,5 @@
 import {
   NEEDED_FROM_YOU,
-  STAGE_DONE_MARKER,
   STAGE_HANDED_MARKER,
   stampMachineComment,
   type PullRequestThread,
@@ -187,6 +186,13 @@ const AFTER_STEP_WAIT = "the runner to look at what the step did";
 
 /** What the step skills write on the line that ends a closing comment that asks nothing. */
 const NOTHING = `${NEEDED_FROM_YOU} nothing.`;
+
+/**
+ * The line a step's closing comment opened on when its work was done, as the
+ * comments these cases replay were written. Its constant in `ticketing.ts`
+ * was deleted on 2026-09-30: no step writes it now, and no code reads it.
+ */
+const STAGE_DONE_MARKER = "🏁 **Step finished** · written by the machine when a stage completed its work";
 
 /** A step ticket of an initiative. */
 const STEP_TICKET: TicketContext = { isStep: true, isRemediation: false };

@@ -13,7 +13,6 @@ import type {
   TicketingProject,
   TicketThread,
 } from "../adapters/ticketing.js";
-import { STAGE_DONE_MARKER } from "../adapters/ticketing.js";
 import {
   noBranches,
   noFiles,
@@ -774,7 +773,7 @@ describe("a takeover that finishes the step it took over", () => {
   /** What a session posts when it has finished the step it was given. */
   const finished: TicketComment = {
     author: "fvermaut",
-    body: `${STAGE_DONE_MARKER}\n\nThe backfill says where it has got to.`,
+    body: "🏁 **Step finished** · written by the machine when a stage completed its work\n\nThe backfill says where it has got to.",
     createdAt: "2026-08-03T10:48:00Z",
     fromTimone: true,
   };
@@ -1149,7 +1148,10 @@ describe("a takeover of a ticket with no run", () => {
     });
     // The session bound to no step, built from the ticket read once.
     expect(during[0]?.prompt).toBe(
-      escalationPrompt("scratch-app", during[0]?.run as Run, decisionThread),
+      escalationPrompt("scratch-app", during[0]?.run as Run, decisionThread, {
+        record: { ok: true, value: [] },
+        namedPeople: [],
+      }),
     );
     expect(asked).toEqual([12]);
     // Given back to the runner, and the next daemon is asked to wake it.
@@ -1304,7 +1306,10 @@ describe("a run the runner waits on", () => {
     expect(during).toHaveLength(1);
     expect(during[0]?.run).toMatchObject({ status: "active", stage: "requirements" });
     expect(during[0]?.prompt).toBe(
-      escalationPrompt("scratch-app", during[0]?.run as Run, thread),
+      escalationPrompt("scratch-app", during[0]?.run as Run, thread, {
+        record: { ok: true, value: [] },
+        namedPeople: [],
+      }),
     );
     expect(asked).toEqual([6]);
     expect(said[0]).toBe(

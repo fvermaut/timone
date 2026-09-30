@@ -9,7 +9,7 @@ import type {
   TicketingAdapter,
   TicketingProject,
 } from "../adapters/ticketing.js";
-import { loadManifest, type Manifest } from "../manifest.js";
+import { loadManifest, namedPeople, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import { escalationPrompt } from "../daemon/prompts.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
@@ -24,6 +24,7 @@ import {
 } from "../daemon/requests.js";
 import { intervalTicker, waitOf, type Ticker } from "../daemon/session.js";
 import { RUNNER_DEFAULT_WAIT } from "../runner/session.js";
+import { readRecord } from "../runner/record.js";
 
 /** A parsed `<project>#<ticket>` target. */
 export interface TakeoverTarget {
@@ -682,7 +683,10 @@ async function escalate(
     repoUrl: deps.manifest.projects[target.project].repo_url,
   };
   const thread = await deps.adapter.getTicket(project, target.ticket);
-  const prompt = escalationPrompt(target.project, run, thread);
+  const prompt = escalationPrompt(target.project, run, thread, {
+    record: readRecord(deps.root, target.project, target.ticket),
+    namedPeople: namedPeople(deps.manifest, target.project),
+  });
 
   log(
     `Picking up ${target.project} #${target.ticket} — I couldn't take this one ` +
