@@ -50,3 +50,17 @@
 **Agreed:** 41f deletes `mergeChunkZero`, `gates.ts` and `gates.test.ts`.
 **Did instead:** 41f kept `mergeChunkZero` (and `failedComment`, which only it uses) and trimmed `gates.ts` and its test instead of deleting them. 41h deletes them, together with dead code 41b to 41g left in files no slice owned.
 **Why:** files outside 41f's list still import them: a runner test names `mergeChunkZero` in a type check, `pipeline.ts` imports `GateDecision`, and `prompts.ts` imports `clarifyingRounds`. The plan's rule is to keep what something still imports.
+
+## 2026-09-30 — timone#166, execution
+
+**Kind:** plan step
+**Agreed:** 41h changes its listed files, and other files only in import lines and type annotations.
+**Did instead:** 41h also removes `case "failed"` arms in `takeover.ts` and `cancel.ts`, old wait kinds and the removed `upsertComment` method in the stand-ins of nine test files and the replay's recording, and the expected printed line in one takeover test.
+**Why:** those lines name a status, a wait kind and a method that no longer exist, so the build cannot pass with them. The edits change no behaviour.
+
+## 2026-09-30 — timone#166, execution
+
+**Kind:** plan step
+**Agreed:** 41h case (2): 41c's tests pass unchanged.
+**Did instead:** 41c's tests change only where an expected run carries `failure`, `consumedAnswerAt`, `reAsksAfterAnswer` or `wait.acknowledgedAt`, which are removed and stripped on read.
+**Why:** the plan also asks 41h to remove fields nothing writes any more, and those four are such fields. The two instructions could not both hold. What 41c's tests check is unchanged.
