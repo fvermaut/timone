@@ -8,26 +8,24 @@
 
 ## Waiting on you
 
-> **Read this first.** The watched run for [#175](https://github.com/fvermaut/timone/issues/175) is done. It ran this morning on scratch-app, with only the machine watching, and saw almost all it had to see. It found two new faults. One decision is yours: whether ivtrends moves to the runner now.
+> **Read this first.** ivtrends now runs on the runner, as you decided (`8630a4f`). Next it has to finish one real ticket there. After that the old code can be deleted.
 
-**1. One pull request to merge: [#180](https://github.com/fvermaut/timone/pull/180).** It holds the report of the watched run, the notes it adds to the requirements, and the fix to R15's hint. It changes no code.
+**1. Start the daemon, and mark one ivtrends ticket.** From your own terminal, in `~/dev/timone`, run `node dist/cli.js daemon`. Its first line should name the lasting token. Then put the `timone` label on one ivtrends ticket. I suggest [#59](https://github.com/fvermaut/ivtrends/issues/59): the second piece of [#57](https://github.com/fvermaut/ivtrends/issues/57), already approved, and small. The runner will also end the old run of [#68](https://github.com/fvermaut/ivtrends/issues/68), which you closed on 18 September.
 
-**What I need from you:** merge #180 when you have read it.
+Two faults from the watched run may show up. The machine may ask for something the work does not need ([#177](https://github.com/fvermaut/timone/issues/177)). After you close a pull request, it asks you to say "stop" on the ticket ([#178](https://github.com/fvermaut/timone/issues/178)). One comment gets past either.
 
-**2. Your decision: does ivtrends move to the runner now?**
+**What I need from you:** start the daemon, and mark #59 or another ticket.
 
-What the run saw: every comment in plain words moved the work; a change asked for on a pull request got a reply there first; the machine stopped a running build when asked; two tickets on one project never ran at the same time; and the 15-minute check came. Not seen: the check's summary shows no output (already in [#176](https://github.com/fvermaut/timone/issues/176)), and the stopped build had pushed nothing yet, so "its pushed commits stay" was not tested.
+**2. What is left of [#164](https://github.com/fvermaut/timone/issues/164), in order.**
 
-What it found, both new:
+1. That ivtrends ticket reaches its pull request, and you merge or close it.
+2. [#166](https://github.com/fvermaut/timone/issues/166): the old code is deleted. One more pull request.
 
-- [#177](https://github.com/fvermaut/timone/issues/177): the machine held a build and asked you for a setting the build did not need. One comment moved it on.
-- [#178](https://github.com/fvermaut/timone/issues/178): when you close a pull request and say why, the machine still asks you to say "stop" on the ticket, and the next ticket waits until you do.
+Open for later, none blocking: [#176](https://github.com/fvermaut/timone/issues/176) (review findings), [#177](https://github.com/fvermaut/timone/issues/177), [#178](https://github.com/fvermaut/timone/issues/178) and [#179](https://github.com/fvermaut/timone/issues/179) (from the watched run).
 
-My recommendation: move ivtrends now. Each fault costs one extra comment, and neither loses work. Both can be fixed while ivtrends runs its first ticket.
+**What I need from you:** nothing beyond item 1.
 
-**What I need from you:** say "move ivtrends", or "fix #177 and #178 first". A new session does either.
-
-**3. On scratch-app, from the run.** [Pull request #70](https://github.com/fvermaut/scratch-app/pull/70) is open: a small tidy-up the run built. It asks you one real question: with JavaScript turned off, the built app shows a blank page after adding a to-do, on `main` too. [#69](https://github.com/fvermaut/scratch-app/pull/69) was closed by the machine without merging; its branch is kept.
+**3. On scratch-app, from the watched run.** [Pull request #70](https://github.com/fvermaut/scratch-app/pull/70) is open: a small tidy-up the run built. It asks you one real question: with JavaScript turned off, the built app shows a blank page after adding a to-do, on `main` too. [#69](https://github.com/fvermaut/scratch-app/pull/69) was closed by the machine without merging; its branch is kept.
 
 **What I need from you:** nothing, unless you want #70 merged or a ticket for the blank page.
 
@@ -40,7 +38,7 @@ The review findings left for later are [#176](https://github.com/fvermaut/timone
 
 **What I need from you:** nothing beyond item 2.
 
-**5. Older questions, no hurry.**
+**4. Older questions, no hurry.**
 
 - [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal. It has never been marked, so nothing starts it.
 - [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47): three questions about moving a row. Step 1, [#46](https://github.com/fvermaut/scratch-app/issues/46), is held for the same reason.
