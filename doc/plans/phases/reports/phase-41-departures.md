@@ -64,3 +64,10 @@
 **Agreed:** 41h case (2): 41c's tests pass unchanged.
 **Did instead:** 41c's tests change only where an expected run carries `failure`, `consumedAnswerAt`, `reAsksAfterAnswer` or `wait.acknowledgedAt`, which are removed and stripped on read.
 **Why:** the plan also asks 41h to remove fields nothing writes any more, and those four are such fields. The two instructions could not both hold. What 41c's tests check is unchanged.
+
+## 2026-09-30 — timone#166, execution
+
+**Kind:** plan step
+**Agreed:** 41i marks the records ADR-0060 lists, the R19 and R11-related notes, and the product overview.
+**Did instead:** 41i also notes four more places that described the old code as current: PRD-02.R18 clause 1, PRD-02.R22 clause 7, the ask-check requirements of PRD-04, and ADR-0060's Consequences.
+**Why:** the slice found them while working. A change of this kind has to reach every document that describes it, or a later reader follows a rule that no longer exists.

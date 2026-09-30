@@ -312,6 +312,8 @@ npm run --silent replay -- --dry 2>&1 | tail -3
 **[MODIFY]** `doc/specs/prd/prd-05-a-runner-decides-each-step.md` — the open question on the ask check gets a dated answer: removed in phase 41, and why.
 **[MODIFY]** `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` — R19 gets a dated note: every project moved, and the `driver` line went with the old code (R20), so the period R19 covers is over. No status is changed; verification owns statuses.
 **[MODIFY]** `doc/specs/prd/prd-02-inversion-of-control.criteria.md` — the clauses of R18 and R22 that name `timone retry` get a dated note: the command was removed by PRD-05.R11, and the runner decides whether a step is tried again (ADR-0060 D6). Older evidence notes that mention it are history and stay.
+> ✏ 2026-09-30 (build, timone#166): 41i found four more places that still describe the old code as current, and adds a dated note to each: PRD-02.R18 clause 1 (a reclaimed run "is failed"; it now goes back to the runner), PRD-02.R22 clause 7 (`failed` as a state the ledger admits), the ask-check requirements in `doc/specs/prd/prd-04-one-short-question-instead-of-a-terminal.criteria.md` (granted), and ADR-0060's Consequences (the status lines are now changed, and the ask check is removed). No Status line changes. Recorded in [phase-41-departures.md](reports/phase-41-departures.md).
+
 **[MODIFY]** `doc/specs/product-overview.md` — the goal "One written process, enforced identically on every project" gets a dated note, in ADR-0060's words: the process is followed by default, and every departure is shown.
 
 No behaviour-carrying code in this sub-phase, so no seams are declared; validation is checklist-based.
