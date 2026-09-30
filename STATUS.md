@@ -8,39 +8,21 @@
 
 ## Waiting on you
 
-> **Read this first.** The watched run for [#175](https://github.com/fvermaut/timone/issues/175) is done. It ran this morning on scratch-app, with only the machine watching, and saw almost all it had to see. It found two new faults. One decision is yours: whether ivtrends moves to the runner now.
+> **Read this first.** The runner is merged ([pull request #173](https://github.com/fvermaut/timone/pull/173)). scratch-app runs on it; ivtrends and Timone stay on the fixed order. What is left of #164 is below.
 
-**1. One pull request to merge: [#180](https://github.com/fvermaut/timone/pull/180).** It holds the report of the watched run, the notes it adds to the requirements, and the fix to R15's hint. It changes no code.
+**1. Nothing to merge now.** #173 is merged, and its ticket, [#165](https://github.com/fvermaut/timone/issues/165), is closed.
 
-**What I need from you:** merge #180 when you have read it.
+**2. What is left of [#164](https://github.com/fvermaut/timone/issues/164) after the merge, in order.**
 
-**2. Your decision: does ivtrends move to the runner now?**
+1. [#175](https://github.com/fvermaut/timone/issues/175): the watched run on scratch-app. Your daemon runs for 1 to 2 hours, from your terminal.
+2. ivtrends moves to the runner (one line in `timone.yaml`), and finishes one real ticket on it.
+3. [#166](https://github.com/fvermaut/timone/issues/166): the old code is deleted. One more pull request.
 
-What the run saw: every comment in plain words moved the work; a change asked for on a pull request got a reply there first; the machine stopped a running build when asked; two tickets on one project never ran at the same time; and the 15-minute check came. Not seen: the check's summary shows no output (already in [#176](https://github.com/fvermaut/timone/issues/176)), and the stopped build had pushed nothing yet, so "its pushed commits stay" was not tested.
+The review findings left for later are [#176](https://github.com/fvermaut/timone/issues/176). None of them blocks #164.
 
-What it found, both new:
+**What I need from you:** in a new session, say when you can start the daemon for #175.
 
-- [#177](https://github.com/fvermaut/timone/issues/177): the machine held a build and asked you for a setting the build did not need. One comment moved it on.
-- [#178](https://github.com/fvermaut/timone/issues/178): when you close a pull request and say why, the machine still asks you to say "stop" on the ticket, and the next ticket waits until you do.
-
-My recommendation: move ivtrends now. Each fault costs one extra comment, and neither loses work. Both can be fixed while ivtrends runs its first ticket.
-
-**What I need from you:** say "move ivtrends", or "fix #177 and #178 first". A new session does either.
-
-**3. On scratch-app, from the run.** [Pull request #70](https://github.com/fvermaut/scratch-app/pull/70) is open: a small tidy-up the run built. It asks you one real question: with JavaScript turned off, the built app shows a blank page after adding a to-do, on `main` too. [#69](https://github.com/fvermaut/scratch-app/pull/69) was closed by the machine without merging; its branch is kept.
-
-**What I need from you:** nothing, unless you want #70 merged or a ticket for the blank page.
-
-**4. What is left of [#164](https://github.com/fvermaut/timone/issues/164) after that, in order.**
-
-1. ivtrends moves to the runner (one line in `timone.yaml`), and finishes one real ticket on it.
-2. [#166](https://github.com/fvermaut/timone/issues/166): the old code is deleted. One more pull request.
-
-The review findings left for later are [#176](https://github.com/fvermaut/timone/issues/176); two of them were seen live today. Five small things the run found are [#179](https://github.com/fvermaut/timone/issues/179). None of them blocks #164.
-
-**What I need from you:** nothing beyond item 2.
-
-**5. Older questions, no hurry.**
+**3. Older questions, no hurry.**
 
 - [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal. It has never been marked, so nothing starts it.
 - [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47): three questions about moving a row. Step 1, [#46](https://github.com/fvermaut/scratch-app/issues/46), is held for the same reason.
