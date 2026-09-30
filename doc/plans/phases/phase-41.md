@@ -123,10 +123,12 @@ node dist/cli.js projects list
 
 No wake is asked for because of a conversion.
 
+> ✏ 2026-09-30 (build, timone#166): the build found two things the plan did not settle. **(a) Case (5) contradicted the Goal Description**, which says a failed run's ticket that is still open and marked is picked up again as new work. Case (5) is reworded to match, and case (8) is added. **(b) Converting on every read makes the old states unreachable for every reader**, not only for runs the old code left: a run written as failed, or parked on an old kind, reads back converted. Nothing on the live path writes `failed` since 41b; the takeover's old branches still write old kinds, and 41e removes them. So the tests that assert behaviour only an old state can have are deleted here, and a test that uses an old state only as its starting point starts from the nearest state that can still exist (cancelled, or waiting for the runner). Granted for this: `src/commands/cancel.test.ts`, `src/commands/daemon.test.ts`, `src/commands/takeover.test.ts` and `src/daemon/session.test.ts`. The production code those tests covered becomes unreachable here and is deleted by 41d to 41h. Recorded in [phase-41-departures.md](reports/phase-41-departures.md).
+
 **[NEW FILE]** `src/daemon/fixtures/ledger-before-166.json` — a ledger typed for this test, shaped like the real one on 2026-09-30: a failed run with a branch and one without, a parked run of each old kind (one of them on a branch), a run waiting for the runner, and done and cancelled runs.
 **[MODIFY]** `src/daemon/runs.test.ts`, `src/daemon/poll.test.ts`, `src/commands/status.test.ts`
 
-**Seams under test (TDD):** the store's load from a file, as `runs.test.ts` already reads older ledgers; `pollOnce` for the absence of a wake; the status report. Red-green: (1) each failed run loads as cancelled, with what stopped it kept; (2) each old wait kind loads as `runner`, with what it waits on and when it opened kept; (3) loading twice gives the same runs, and the file is unchanged after a load; (4) a converted run on a branch still holds its project, and one without a branch does not; (5) one `pollOnce` over the converted ledger, with no new comment, asks for no wake and posts nothing; (6) a named person's comment on a converted run's ticket asks for a wake; (7) `timone status` shows what a converted run waits on.
+**Seams under test (TDD):** the store's load from a file, as `runs.test.ts` already reads older ledgers; `pollOnce` for the absence of a wake; the status report. Red-green: (1) each failed run loads as cancelled, with what stopped it kept; (2) each old wait kind loads as `runner`, with what it waits on and when it opened kept; (3) loading twice gives the same runs, and the file is unchanged after a load; (4) a converted run on a branch still holds its project, and one without a branch does not; (5) one `pollOnce` over the converted ledger, with no new comment, asks for no wake and posts nothing on the ticket of any converted waiting run, or of any converted failed run whose ticket is closed or not marked (✏ 2026-09-30, build, timone#166: narrowed to match the Goal Description); (6) a named person's comment on a converted run's ticket asks for a wake; (7) `timone status` shows what a converted run waits on; ✏ 2026-09-30 (build, timone#166): (8) a converted failed run whose ticket is still open and marked is picked up again as new work, like any marked ticket with no run.
 
 > Sub-phase 41b must be complete before starting this sub-phase (the old path, which still read these runs, is gone).
 
@@ -137,8 +139,9 @@ npm run build && npm test 2>&1 | tail -5
 git status --short .timone ; echo "(expected: nothing — no test touched the real ledger)"
 ```
 
-- [ ] Red-green evidence for each of the seven cases is in the handoff.
-- [ ] **Hard gate:** these seven tests are the only protection the conversion has before the live check. None may be skipped or weakened.
+- [ ] Red-green evidence for each of the eight cases is in the handoff.
+- [ ] Every test deleted or changed because an old state became unreachable is named in the handoff, with which of the two it was.
+- [ ] **Hard gate:** these eight tests are the only protection the conversion has before the live check. None may be skipped or weakened.
 
 ---
 

@@ -22,3 +22,17 @@
 **Agreed:** the manifest refuses to load a runner project that names nobody who may instruct it (phase 40).
 **Did instead:** the daemon refuses to start while any project names nobody. The manifest itself no longer checks it.
 **Why:** with every project on the runner, the manifest check would refuse every manifest with no `operator`, including the ones `projects list` and `workspace sync` read, which need nobody named. The daemon is where the missing `identity` block is already refused, so a project nobody may instruct is still refused loudly, where it matters.
+
+## 2026-09-30 — timone#166, execution
+
+**Kind:** plan step
+**Agreed:** 41c case (5): one cycle over the converted ledger asks for no wake and posts nothing.
+**Did instead:** case (5) holds for converted waiting runs, and for converted failed runs whose ticket is closed or not marked. A converted failed run whose ticket is still open and marked is picked up again as new work (new case 8).
+**Why:** the plan's Goal Description already says so, and the runner's rules treat a marked ticket with no live run as new work. Case (5) as first written contradicted it. On the real ledger of 2026-09-30 no failed run's ticket is both open and marked.
+
+## 2026-09-30 — timone#166, execution
+
+**Kind:** plan step
+**Agreed:** 41c changes `runs.ts` and adds tests; the tests of old states go with their code in later slices.
+**Did instead:** 41c also deletes, or re-bases, 39 existing tests that assert what only a failed run or an old wait kind can do, in six test files.
+**Why:** the conversion runs on every read, so no reader can see those states any more. The tests could not pass, and the code they covered is deleted by 41d to 41h.
