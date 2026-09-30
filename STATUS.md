@@ -8,15 +8,9 @@
 
 ## Waiting on you
 
-> **Read this first.** The runner, [pull request #173](https://github.com/fvermaut/timone/pull/173) in the Timone repository, is ready to merge. The replay of past failures passed 19 of 19, and the last check found no fault. What is left of #164 after the merge is in item 2.
+> **Read this first.** The runner is merged ([pull request #173](https://github.com/fvermaut/timone/pull/173)). scratch-app runs on it; ivtrends and Timone stay on the fixed order. What is left of #164 is below.
 
-**1. Merge [pull request #173](https://github.com/fvermaut/timone/pull/173).**
-
-On scratch-app, an agent now decides each step of a ticket, instead of the fixed order. ivtrends and Timone stay on the fixed order. 1,978 automatic tests pass. Four checks by sessions that did not build it; the last found no fault. Replay run 7, which you ran, passed 19 of 19.
-
-Merging is also your yes to two changes in the requirements, both listed on the pull request: the runner's eighth action (recording an approval), and the narrow reading of the $150 limit. If you do not agree with one, say so before merging.
-
-**What I need from you:** merge #173.
+**1. Nothing to merge now.** #173 is merged, and its ticket, [#165](https://github.com/fvermaut/timone/issues/165), is closed.
 
 **2. What is left of [#164](https://github.com/fvermaut/timone/issues/164) after the merge, in order.**
 
@@ -26,7 +20,7 @@ Merging is also your yes to two changes in the requirements, both listed on the 
 
 The review findings left for later are [#176](https://github.com/fvermaut/timone/issues/176). None of them blocks #164.
 
-**What I need from you:** after the merge, say when you can start the daemon for #175.
+**What I need from you:** in a new session, say when you can start the daemon for #175.
 
 **3. Older questions, no hurry.**
 
