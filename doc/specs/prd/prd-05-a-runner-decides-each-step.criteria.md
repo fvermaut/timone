@@ -162,6 +162,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** [phase-40-live-gate.md](../../plans/phases/reports/phase-40-live-gate.md), third attempt, 2026-09-30 — all three clauses seen. Every comment moved the run or got an answer; "go bakc to planning" was done on scratch-app#68, and "stop the build now" on #67; a change asked for on pull request #69 got a reply there 33 s before the session that made it. Stays draft: clause 1 claims "any kind, in any state", which watching cannot establish.
 - **Criteria:**
     - GIVEN a run of any kind, in any state
       WHEN a named person comments on its ticket or pull request
@@ -216,6 +217,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** [phase-40-live-gate.md](../../plans/phases/reports/phase-40-live-gate.md), third attempt, 2026-09-30 — clause 1 seen for comments (3 to 62 s) and step ends (within 5 s); a failing or silent step was not seen. Clause 2 seen in part: a check at 15 min 6 s, with the commands listed by code, but no output ([#176](https://github.com/fvermaut/timone/issues/176)), and a stopped step's cost recorded as $0 (#176).
 - **Criteria:**
     - GIVEN a run
       WHEN a step ends, a step fails, a step is silent for longer than its limit, or a named person comments
@@ -233,6 +235,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** [phase-40-live-gate.md](../../plans/phases/reports/phase-40-live-gate.md) — clause 1 seen in the first and second attempts (2026-09-28). Clause 2 seen in the third attempt, 2026-09-30, on a questions step (scratch-app#65) and a build (#67): the step stopped, the box session ended, and the record names the runner and its reason. "Its pushed commits stay" was not seen: the build had pushed nothing yet.
 - **Criteria:**
     - GIVEN a build step that has run the full browser test suite six times in 30 minutes (the case of [#110](https://github.com/fvermaut/timone/issues/110))
       WHEN the runner's check sees it
@@ -265,6 +268,7 @@
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** live
+- **Last live gate:** [phase-40-live-gate.md](../../plans/phases/reports/phase-40-live-gate.md), third attempt, 2026-09-30 — clause 2 seen: two refusals ("one session per project at a time"), two wakes on "The project is free now.", and no two steps of scratch-app at once. Clause 1 not watched: no second project with tickets can be used for a test.
 - **Criteria:**
     - GIVEN a step running on one project
       WHEN a named person comments on a ticket of another project
