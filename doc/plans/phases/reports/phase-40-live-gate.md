@@ -1,6 +1,6 @@
 # Phase 40 — Watched run on scratch-app
 
-> **Status:** run twice on 2026-09-28. The first attempt found four faults (fixed in 40r); the second passed, with R9's pull-request clause unseen. See Result. A third attempt, on the code after 40z, is planned at the end; fvermaut chose to merge first and run it after, before ivtrends moves.
+> **Status:** run three times. The first attempt (2026-09-28) found four faults, fixed in 40r; the second (2026-09-28) passed, with R9's pull-request clause unseen. The third (2026-09-30, [timone#175](https://github.com/fvermaut/timone/issues/175)) ran on the merged code with nobody watching but the machine: it saw R9 whole, R15's one-at-a-time clause, R13's stop and R12's 15-minute check, and found two new faults. See the last section.
 > **Plan:** [phase-40.md](../phase-40.md), sub-phase 40l. **Ticket:** [timone#165](https://github.com/fvermaut/timone/issues/165).
 
 ## What it checks
@@ -200,3 +200,91 @@ The first two attempts ran before 40s–40z changed the runner. This attempt run
 - On A, a few minutes after its build starts: *"stop the build and go bakc to planning: an edited title must also keep its old value when it is refused, not become empty"* — the runner should stop the build step (R13) and start preparing the work again (R9).
 - On A's pull request, once it is open: *"plase also add a test for an edited title that is only spaces"* — the runner should reply on the pull request first, then start the change (R9).
 - B needs no comment. It should start only after A's run has ended or freed the project (R15).
+
+### The watched run — third attempt, 2026-09-30, [timone#175](https://github.com/fvermaut/timone/issues/175): result
+
+fvermaut started the daemon from `projects/timone` at 06:10:55 UTC, on `4110602` (the merge of #173). Its first line: "Model login: a lasting token, from this daemon's environment. Runs of any length are covered." It warned that it was one commit behind `main`; that commit (`e04b774`) changes only `STATUS.md`. The machine then ran everything else alone, as fvermaut asked: it wrote every ticket and comment, each marked as machine-typed, and stopped the daemon at the end.
+
+**The two tickets in the plan were wrong.** Ticket A asked to trim an *edited* title, but the app has no way to edit a title. Ticket B asked to show how many to-dos are left, but the app already shows "N left". Both would have needed fvermaut's approval of new requirements, so neither could reach a pull request without him. The machine closed both (#65, #66) and opened two real chores in their place. Both were raised by the Standards review of scratch-app's phase 12 and never filed:
+
+- **A, [scratch-app#67](https://github.com/fvermaut/scratch-app/issues/67):** handle each reason a new title is refused by name (finding 2).
+- **B, [scratch-app#68](https://github.com/fvermaut/scratch-app/issues/68):** remove the 59 null checks the to-do service tests no longer need (finding 3).
+
+B got the project first (see "Found", item 4), so the comments the plan wrote for A went to whichever ticket was building. The pull request the machine closed was B's; A's is left open for fvermaut.
+
+#### The wrong pair, #65 and #66
+
+| Time (UTC) | What happened | Shows |
+| --- | --- | --- |
+| 06:11:23 | #65 opened, with the labels `timone` and `triage:chore`. Picked up at 06:12:02. | — |
+| 06:12:10 | #66 opened. At 06:13:08 it was put in the queue: "This one is in the queue." | R15 |
+| 06:12:41 → 06:13:32 | Sorting on #65 found that the app cannot edit a title, so the ticket asks for a feature. It changed the label to `triage:feature` and said questions come next. | a good judgement |
+| 06:13:53 | #65's runner tried to start the questions step and was refused: "Project scratch-app already has a session for run scratch-app#66/1 (picked-up) — one session per project at a time". #66 had left the queue while #65 paused between steps. | **R15**, clause 2 |
+| 06:15:15 → 06:18:45 | Sorting, then questions, on #66. | — |
+| 06:18:45 | #65's runner woke on "The project is free now.", the second #66's questions step ended. | **R15**, clause 2 |
+| 06:19:03 | The machine closed #65 and #66, as fvermaut, saying why. #65's questions step was running. | — |
+| 06:19:49 → 06:20:01 | #65's runner woke on the comment and the close, 46 s later, and stopped the running step: "fvermaut closed the ticket … so there is no reason to ask questions." The record: the step ended, stopped by the runner. Both runs then ended, with nothing changed. | **R13**, clause 2; **R9**, clause 1 |
+
+#### B, #68, and its pull request #69
+
+| Time (UTC) | What happened | Shows |
+| --- | --- | --- |
+| 06:20:35, 06:20:58 | A (#67) and B (#68) opened, 23 s apart. | — |
+| 06:22:27 | A had been sorted as a small technical job. Its runner tried to start preparing the work and was refused: B held the project, having left the queue while A paused after sorting. A said so on its ticket: "Waiting for another ticket." | **R15**, clause 2 |
+| 06:23:54 → 06:33:57 | On B: sorting, preparing the work, building. The build pushed its commit and closed its phase in under 3 minutes. | R1 |
+| 06:33:56 | The machine wrote on B, as fvermaut: "stop the build and go bakc to planning: the plan should also look at the browser tests under `tests/e2e` …". The build ended by itself one second later. | — |
+| 06:34:13 | The runner answered on the ticket: the build had already finished, so there was nothing to stop, the pushed changes stay, and it was going back to the plan. | **R9**, clause 2 |
+| 06:34:47 → 06:54:41 | Preparing the work again, now with the browser tests; building; checking; delivering. Pull request [#69](https://github.com/fvermaut/scratch-app/pull/69) opened. | R1 |
+| 06:55:12 | The machine wrote on #69, as fvermaut: "plase also add one line above `createdTodo` saying it never returns an empty value …". | — |
+| 06:56:07 → 06:56:52 | The runner woke 55 s later. At 06:56:19 it replied on the pull request: "I am making this change now." The build step started at 06:56:52, 33 s after the reply. | **R9**, clause 3 |
+| 06:57:38 | The change was pushed. At 06:57:56 the runner replaced its reply on the pull request, which was no longer true. | — |
+| 06:59:15 | The machine closed #69 without merging, saying it was a test. The runner woke 6 s later. | — |
+| 06:59:36 | The runner did not end the run. It asked on the ticket for a stop "from a comment on this ticket. The comment on the pull request does not count." B kept the project. | fault 2 |
+| 07:40:07 | The machine wrote the stop on the ticket. It had missed the request for 40 minutes, because it was watching for A's build only. The run ended 17 s later, as cancelled. | R9 |
+
+#### A, #67
+
+| Time (UTC) | What happened | Shows |
+| --- | --- | --- |
+| 07:41:13 | A's runner woke on "The project is free now.", 79 minutes after it was refused. | **R15**, clause 2 |
+| 07:41:55 → 07:46:23 | Preparing the work. | — |
+| 07:47:02 | The build started. | — |
+| 07:48:06 | The machine wrote on A, as fvermaut: "stop the build now. The plan should also build the number in the refusal message from `TITLE_MAX_LENGTH` … Plan that, then build again." | — |
+| 07:48:35 → 07:48:46 | The runner woke 29 s later and stopped the build: "fvermaut asked to stop the build now so the plan can be changed first." The box session ended ("cancelled, so its session is being ended"). The record: the step ended, stopped by the runner, with that reason. The plan's commit stayed on the branch; the build had pushed nothing yet. | **R13**, clause 2 |
+| 07:49:38 | Preparing the work started again, with the new scope. | **R9**, clause 2 |
+| 07:49:39 | The runner also asked fvermaut to add `DIRECT_URL` to the daemon's settings file, saying the build could not run the tests without it. That was wrong: the stopped build had set the value in its own shell, as its plan said, and had applied the migrations and passed the type check. B had built twice the same way. At 07:55:23, when planning ended, the runner held the build for it. | fault 1 |
+| 07:55:57 | The machine answered, as fvermaut, with that evidence. The runner woke 62 s later, started the build at 07:57:46, and corrected its own comment. | R9, clause 1 |
+| 07:57:46 → 08:06:46 | Building, on the new plan. | R1 |
+| 08:07:30 | Checking started. | — |
+| 08:22:36 | **A 15-minute check** woke the runner, 15 min 6 s into the check. Its brief, written by code, listed every command the step had run, cut to one line each, and when the step last wrote (5 s before). The runner left the step alone and posted nothing: "It's making progress … Nothing shows it ran the whole suite more than twice." | **R12**, clause 2 |
+| 08:27:05 → 08:30:58 | Checking ended; delivering opened pull request [#70](https://github.com/fvermaut/scratch-app/pull/70). Its description opens with the departure list, then a question for fvermaut: with JavaScript turned off, the built app shows a blank page after any add, on `main` too. | R5 |
+| 08:31:56 | The machine stopped the daemon (SIGTERM), with no step running. It exited cleanly. A's run waits on #70. | — |
+
+**Seen working in this attempt:**
+
+- **R9, all three clauses.** Every comment moved the run or got an answer. A request to go back to planning, with a spelling mistake, was done. A change asked for on the pull request got a reply there 33 s before the session that made it.
+- **R13, clause 2**, on a questions step (#65) and on a build (#67): the runner stopped the step, the box session ended, and the record says it was the runner and why.
+- **R15, clause 2.** Two refusals ("one session per project at a time") and two wakes on "The project is free now.". No two steps of scratch-app ran at the same time all morning.
+- **R12, clause 2**, in part: a check at 15 minutes, with the commands listed by code.
+- **R12, clause 1, for comments and step ends.** The runner woke between 3 and 62 seconds after each comment, and within 5 seconds of each step's end. The polling cycle is 60 seconds.
+
+**Not seen:**
+
+- **R13, clause 2, "its pushed commits stay on the branch".** The build was stopped before it had pushed anything. The plan's commit stayed.
+- **R12, clause 2, "the output so far".** The summary lists commands, not their output. This is already in [#176](https://github.com/fvermaut/timone/issues/176).
+- **R12, clause 1, a step that fails or goes silent**, and **R15, clause 1** (a second project), as the plan said.
+
+**Found:**
+
+1. **The runner held a build for a setting it did not need.** After it stopped A's build, it read that build's session, told fvermaut the build "cannot run the tests" without `DIRECT_URL`, and held the next build until someone answered. The build had set the value in its own shell, as its plan said. The run moved on only when a comment said so. Filed as [#177](https://github.com/fvermaut/timone/issues/177).
+2. **A stop written when closing a pull request is not taken.** The runner asks for it again on the ticket, and the run keeps the project until then. Here A waited 40 more minutes. The code does this on purpose (40w); the second question is still one too many. Filed as [#178](https://github.com/fvermaut/timone/issues/178).
+3. **A stopped step's cost is recorded as $0.** A's stopped build ran 1 min 40 s. Already in [#176](https://github.com/fvermaut/timone/issues/176); now seen live.
+4. **Smaller things**, filed together as [#179](https://github.com/fvermaut/timone/issues/179):
+   - The queue hands the project to the next ticket whenever the running ticket pauses between steps. B overtook A, although A was opened first and sorted first.
+   - The departure lists on #69 and #70 say "ran out of order. No reason given." The runner gave its reason when it started the step (fvermaut asked), but the list reads reasons only from departure entries.
+   - The comment that asked to go back to planning woke the runner twice: first inside the wake for the build's end, where it acted on it, then again at 06:34:51 as a new event. The second wake cost $0.04 and did nothing.
+   - While A waited for B, `timone status` said "#67 (sorting the request) — waiting: nothing." It did not say A waited for #68.
+   - The check's brief said "There are no open Timone issues labelled bug". There are many; this daemon's settings name no Timone project, so it could not read them.
+5. **Not new, noted.** Sorting and status-file commits went straight to scratch-app's `main` three times (`570f682`, `78db7e8`, `99dbc31`), as the skills say. ADR-0060 D2 says nothing reaches a default branch without a person's yes. [#85](https://github.com/fvermaut/timone/issues/85) is the open issue.
+
+**Cost.** About $22: the wrong pair $1.53 (#65 $0.57, #66 $0.96), B $9.45, A $11.08. Of that, $1.89 was the runner deciding what to do next.
