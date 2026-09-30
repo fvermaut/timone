@@ -2,41 +2,33 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-29.
+**Last updated:** 2026-09-30.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** The runner, [pull request #173](https://github.com/fvermaut/timone/pull/173) in the Timone repository, has its four worst faults fixed, as you asked. A fresh check saw each fix work, and both code reviews were run again. Three things are still owed before a merge. The scratch-app test leftovers are closed.
+> **Read this first.** The runner, [pull request #173](https://github.com/fvermaut/timone/pull/173) in the Timone repository, is ready to merge. The replay of past failures passed 19 of 19, and the last check found no fault. What is left of #164 after the merge is in item 2.
 
-**1. Review and merge [pull request #173](https://github.com/fvermaut/timone/pull/173), after the owed checks.**
+**1. Merge [pull request #173](https://github.com/fvermaut/timone/pull/173).**
 
-On scratch-app, an agent now decides each step of a ticket, instead of the fixed order. ivtrends and Timone stay on the fixed order. 1,977 automatic tests pass. Three sessions that did not build it have checked it; the last one checked the four fixes.
+On scratch-app, an agent now decides each step of a ticket, instead of the fixed order. ivtrends and Timone stay on the fixed order. 1,978 automatic tests pass. Four checks by sessions that did not build it; the last found no fault. Replay run 7, which you ran, passed 19 of 19.
 
-The four fixes:
+Merging is also your yes to two changes in the requirements, both listed on the pull request: the runner's eighth action (recording an approval), and the narrow reading of the $150 limit. If you do not agree with one, say so before merging.
 
-- a run that records your approval no longer shows "ran out of order";
-- a failed merge on a runner project no longer fails the run: it waits, says so on the ticket, and the runner is woken;
-- a step on ivtrends no longer holds up scratch-app's runner (a comment was acted on after 2 seconds, against 87 before);
-- a pull request closed without merging no longer lets the run drop its work.
+**What I need from you:** merge #173.
 
-The code reviews, run again:
+**2. What is left of [#164](https://github.com/fvermaut/timone/issues/164) after the merge, in order.**
 
-- **Standards: 22 findings.** They are about how the code is written. None changes what the runner does.
-- **Spec: 9 findings.** Two are new, and worth knowing before you merge:
-  - after a failed merge of the list of pieces, trying again needs you to approve the same list a second time;
-  - `timone takeover` on scratch-app still waits while an ivtrends step runs. Only a comment gets through at once.
+1. [#175](https://github.com/fvermaut/timone/issues/175): the watched run on scratch-app. Your daemon runs for 1 to 2 hours, from your terminal.
+2. ivtrends moves to the runner (one line in `timone.yaml`), and finishes one real ticket on it.
+3. [#166](https://github.com/fvermaut/timone/issues/166): the old code is deleted. One more pull request.
 
-Owed before a merge, all listed on the pull request:
+The review findings left for later are [#176](https://github.com/fvermaut/timone/issues/176). None of them blocks #164.
 
-- replay run 6: `npm run --silent replay` in `~/dev/timone/projects/timone`, from your terminal, about $2.50;
-- a new watched run on scratch-app;
-- your yes to one change in the requirements: the runner has an eighth action, recording an approval.
+**What I need from you:** after the merge, say when you can start the daemon for #175.
 
-**What I need from you:** run replay run 6 and paste me its last lines, then say when you can start the daemon for the watched run. Or tell me to fix the two new findings first.
-
-**2. Older questions, no hurry.**
+**3. Older questions, no hurry.**
 
 - [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal. It has never been marked, so nothing starts it.
 - [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47): three questions about moving a row. Step 1, [#46](https://github.com/fvermaut/scratch-app/issues/46), is held for the same reason.
@@ -94,6 +86,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**30 September — #173 is ready to merge.** Replay run 6 found one case passing two tries of three. One sentence in the runner's rules fixed it, and run 7, which you ran, passed 19 of 19. A fourth check found no fault. The watched run is filed as [#175](https://github.com/fvermaut/timone/issues/175), to run after the merge, and the review findings left for later as [#176](https://github.com/fvermaut/timone/issues/176).
 
 **29 September, evening — the four worst faults are fixed, and the leftovers closed.** You said "fix first" and "close leftovers". Four fixes were built one after another, each test first, then checked by a session that built none of them: all 16 checks pass, and each fix was seen working. Both code reviews were run again, and the pull request describes the new state first. The scratch-app test leftovers (#61, #60, #62) are closed. One small fault in the new `timone stage` command was filed as [#174](https://github.com/fvermaut/timone/issues/174).
 
