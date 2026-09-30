@@ -1,6 +1,14 @@
 import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 
-import type { AskCheckDeps } from "./ask-check.js";
+/**
+ * Put the prompt to a model and hand back what it said, or `undefined` when
+ * it could not be asked at all. Never throws: a question that can fail the
+ * cycle it runs in is worse than no question.
+ *
+ * ✏ 2026-09-30: moved here from `ask-check.ts`, which was removed with the
+ * standing note it checked. The runner still asks a model through it.
+ */
+export type Consult = (prompt: string) => Promise<string | undefined>;
 
 /**
  * The model the ask check consults, and the cheapest one that can do the job
@@ -15,7 +23,7 @@ import type { AskCheckDeps } from "./ask-check.js";
  */
 export const ASK_CHECK_MODEL = "claude-haiku-4-5-20251001";
 
-/** How long the check may take before the composed message goes instead. */
+/** How long the model may take before the question counts as unanswered. */
 export const ASK_CHECK_TIMEOUT_MS = 30_000;
 
 /**
@@ -31,15 +39,14 @@ export type ConsultQuery = (params: {
  * Put a question to a model, with no tools and one turn.
  *
  * **It never throws and it never hangs.** Both are contractual: this runs
- * inside the cycle that keeps every ticket's call to action current, so a
- * consult that threw would take down the reconciliation of every other ticket
- * in the listing, and one that hung would stop the loop. Every failure comes
- * back as `undefined`, which the check reads as *post the message as it was
- * composed*.
+ * inside the poll cycle, where the runner asks whether a reply to the
+ * spending limit means "go on". A consult that threw would take down the
+ * cycle's look at every other ticket, and one that hung would stop the loop.
+ * Every failure comes back as `undefined`, which the runner reads as no.
  */
 export function sdkConsult(
   options: { model?: string; timeoutMs?: number; query?: ConsultQuery } = {},
-): AskCheckDeps["consult"] {
+): Consult {
   const model = options.model ?? ASK_CHECK_MODEL;
   const timeoutMs = options.timeoutMs ?? ASK_CHECK_TIMEOUT_MS;
   const ask = options.query ?? query;

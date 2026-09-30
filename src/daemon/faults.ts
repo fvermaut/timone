@@ -2,12 +2,16 @@
  * What kind of stop a failure was, when the daemon can tell
  * ([ADR-0034](../../doc/adr/0034-a-technical-stop-is-retried-not-reported.md)).
  *
- * Its own module, and a pure one, because two surfaces need the same
- * judgement and only one of them may load an agent runtime: the spawner
- * decides whether to try the stage again, and a ticket's standing note
- * decides which words to say about a run that failed. `timone status` renders
- * that note, so a classifier living in `session.ts` would drag the SDK into
- * every terminal command.
+ * Its own module, and a pure one, because it was written for two surfaces and
+ * only one of them could load an agent runtime: the spawner decided whether to
+ * try the stage again, and a ticket's standing note decided which words to
+ * say about a run that failed. `timone status` rendered that note, so a
+ * classifier living in `session.ts` would have dragged the SDK into every
+ * terminal command.
+ *
+ * ✏ 2026-09-30: both are gone. The runner's session reads it now, to decide
+ * whether a stop is worth trying again. The refusal type, its reader and the
+ * prefix of a build stage's escalation went with the spawner.
  */
 
 /**
@@ -111,57 +115,3 @@ export function technicalFault(error: string | undefined): TechnicalFault | unde
   if (LINK_SIGNS.some((sign) => text.includes(sign))) return "link";
   return undefined;
 }
-
-/**
- * The spawner declining to start a session at all — not a session that ran
- * and stopped
- * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
- * D4's second half).
- *
- * **`clears` is the whole reason this is a type rather than a message.**
- * There are two refusals and they want opposite treatment. One clears on its
- * own — uncommitted changes in Timone's own folder, which the human is in the
- * middle of making — and retrying that for ever is correct. The other never
- * clears: a missing workspace, a stage with no prompt, anything wrong with
- * the wiring. Retrying *that* for ever is the stuck run of timone#75, which
- * sat at "picked up, about to start" for two and a half hours.
- *
- * **An unclassified error does not clear**, which is the safe direction and
- * the same one {@link technicalFault} takes: a refusal nobody has taught this
- * about is put in front of a human rather than repeated in silence.
- */
-export class SpawnRefusal extends Error {
-  constructor(
-    message: string,
-    readonly clears: boolean,
-  ) {
-    super(message);
-    this.name = "SpawnRefusal";
-  }
-}
-
-/** Whether a refusal is the kind that goes away without anybody being told. */
-export function refusalClears(error: unknown): boolean {
-  return error instanceof SpawnRefusal && error.clears;
-}
-
-/**
- * The prefix a build-stage escalation's failure reason carries
- * ([ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)).
- *
- * A stage at `execution`, `verification` or `delivery` that is handed an
- * answer it may not act on no longer parks the run on a person — the
- * question itself is the defect.
- *
- * ✏ **Nothing writes this any more** ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
- * ADR-0052 filed the defect by failing the run, and failing the run was still
- * a stop: the work sat one step short of its pull request until a person
- * typed `timone retry`, a command removed on 2026-09-30. A build stage's
- * question is now carried to the pull request and the run walks on, so no
- * new run is ever failed for one.
- *
- * ✏ 2026-09-30: the reader of this prefix, `isBuildEscalation`, went with
- * the call to action for a failed run, since no run can be read as failed
- * any more. This stays only because `session.ts` still names it.
- */
-export const BUILD_ESCALATION_PREFIX = "a build stage escalated: ";

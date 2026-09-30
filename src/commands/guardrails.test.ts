@@ -5,27 +5,12 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type {
-  PullRequest,
-  PullRequestThread,
-  Step,
-  Ticket,
-  TicketingAdapter,
-  TicketThread,
-} from "../adapters/ticketing.js";
-import {
-  noBranches,
-  noFiles,
-  noRunnerCalls,
-  noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import type { Violation } from "../daemon/hooks.js";
 import { RunStore } from "../daemon/runs.js";
 import { declareStage } from "../daemon/declared-stage.js";
-import {
-  AgentSessionSpawner,
-  type SessionRuntime,
-} from "../daemon/session.js";
+import { sessionRequest, type SessionRuntime } from "../daemon/session.js";
+import { startStepSession } from "../daemon/step-session.js";
 import {
   appendJournal,
   readHookPayload,
@@ -53,22 +38,6 @@ const manifest: Manifest = {
       bindings: { ticketing: "github" },
     },
   },
-};
-
-const noPullRequests = {
-  async findPullRequest(): Promise<PullRequest | undefined> {
-    return undefined;
-  },
-  async getPullRequestThread(): Promise<PullRequestThread> {
-    throw new Error("no pull request exists in this test");
-  },
-  async postPullRequestComment(): Promise<void> {},
-  async upsertPullRequestComment(): Promise<void> {},
-  async upsertComment(): Promise<void> {},
-  async listOpenTickets(): Promise<never[]> {
-    return [];
-  },
-  async closeTicket(): Promise<void> {},
 };
 
 /** A commit message carrying the provenance trailer every session owes. */
@@ -368,40 +337,6 @@ describe("finding the run that drove a session", () => {
     const dir = mkdtempSync(join(tmpdir(), "timone-guardrails-"));
     tempDirs.push(dir);
     const store = newStore(dir);
-    const project = {
-      name: "scratch-app",
-      repoUrl: "https://github.com/fvermaut/scratch-app.git",
-    };
-    const ticket: TicketThread = {
-      number: 7,
-      title: "the page feels slow",
-      body: "when I add many items the page feels slow",
-      labels: ["timone", "triage:feature"],
-      url: "https://github.com/fvermaut/scratch-app/issues/7",
-      author: "fvermaut",
-      createdAt: "2026-08-06T09:00:00Z",
-      comments: [],
-    };
-    const adapter: TicketingAdapter = {
-      ...noBranches,
-    ...noFiles,
-    ...noMerges,
-    ...noRunnerCalls,
-    ...noStepWrites,
-      // No initiative in this test is broken into step tickets.
-      async listSteps(): Promise<Step[]> {
-        return [];
-      },
-      async listMarkedTickets(): Promise<Ticket[]> {
-        return [];
-      },
-      async getTicket(): Promise<TicketThread> {
-        return { ...ticket, labels: [...ticket.labels], comments: [] };
-      },
-      async postComment(): Promise<void> {},
-      async applyLabel(): Promise<void> {},
-      ...noPullRequests,
-    };
     const runtime: SessionRuntime = {
       async start() {
         return {
@@ -413,23 +348,27 @@ describe("finding the run that drove a session", () => {
 
     const { run } = store.register("scratch-app", 7);
     store.park(run.id, {
-      waitingOn: "a conversation in your terminal",
-      kind: "conversation",
+      waitingOn: "an answer from fvermaut",
+      kind: "runner",
       stage: "clarification",
       waitCursor: "2026-08-06T10:00:00Z",
     });
 
-    await new AgentSessionSpawner({
-      manifest,
-      store,
-      adapter,
-      runtime,
-      root: dir,
-      headProbe: async () => undefined,
-    }).spawn(store.get(run.id)!, project, {
-      stage: "clarification",
-      feedback: "it's the draft they lose, not the phone layout",
-    });
+    const session = await startStepSession(
+      {
+        store,
+        runtime,
+        progressIntervalMs: 30_000,
+        ticker: () => ({ stop() {} }),
+        log: () => {},
+      },
+      {
+        runId: run.id,
+        request: sessionRequest({ cwd: dir, prompt: "go", model: "claude-opus-4-6" }),
+        label: `${run.id} (clarification)`,
+      },
+    );
+    await session.completed;
 
     expect(runForSession(store, "session-resumed")?.id).toBe("scratch-app#7/1");
   });

@@ -804,3 +804,118 @@ The grep exits 0, not 1. Both lines are in `src/runner/session.ts`: the runner's
 - **Nothing reads `InitiativeProgress.next`'s `index` or `title` any more.** `timone status` only asks whether `next` exists.
 - **Left as they were:** `takeover.ts` imports `HELD_LABEL` and does not use it (already so at a3bcb32). `poll.test.ts` has two unused helpers, `parkedOnConversation` and `parkedOnGate`, in *pollOnce — resuming a run whose human answered* (already unused at a3bcb32). The ADRs that name `cta.ts` and `ctaFor` (0030, 0031, 0033, 0034, 0049) are records and were not edited. The command's help still says "Pick up a ticket that is waiting to talk something through".
 - **Refactoring I would do but did not:** export the runner's first wait from `src/runner/session.ts`, so `enrolFromTracker` does not write the same shape a second time. Rename the resolution kind `escalation`, now that it is the only session. Case (2) and › resolves to the session bound to no stage say part of the same thing, and case (4) repeats the fixture set-up of the two 41c and 41d tests above it; a helper in `status.test.ts` could build the ledger and the manifest once.
+
+## 41f — The old spawner, and everything only it used, is deleted
+
+**Built.** The old spawner is gone. `AgentSessionSpawner`, its options, its ticket comments, its forge readers, and the helpers only it called are deleted from `src/daemon/session.ts`, which went from 2,560 lines to 579. `gate-comment.ts` and `ask-check.ts` are deleted. `outcomes.ts` keeps only `askedFor` and `LONGEST_ASK`, and `faults.ts` only `technicalFault`. The type of a model call now lives in `consult.ts`. `readTimoneCheckout` reads the version of Timone only: the list of uncommitted files had one reader, the spawner's refusal. No behaviour changes. No path has reached this code since 41b and 41e. Three things the plan deletes are kept, because a file outside this slice still imports them. They are under decisions 1 and 2.
+
+**Files touched.**
+
+- `src/daemon/session.ts` — deleted: `AgentSessionSpawner`, `AgentSessionSpawnerOptions`, `parkedComment`, `answeredComment`, `refusedWait`, `refusedComment`, `stoppedTwiceComment`, `unreachableComment`, `producedNothingComment`, `unclassifiedComment`, `newestPhaseFile`, `forgePlanStatus`, `forgeVerificationReport`, `forgePlannedPhase`, `handBack`, `escalate`, `carryToPullRequest`, `asBuildOutcome`, `laterOf`, `uncommittedRefusal`, `NAMED_IN_REFUSAL`, `DEFAULT_LINK_RETRY_WAITS_MS`, `waitWords`, and `TimoneCheckout.uncommitted`. Kept, as the plan lists, and `failedComment` (decision 1). Nothing renamed. Comments that named deleted code were corrected; the doc comments of `oneLine` and `waitOf`, which sat in the wrong place, are back above their functions, and `waitOf`'s no longer names `timone retry`.
+- `src/daemon/session.test.ts` — 147 tests deleted. The 13 tests of `sessionOutcomeFrom`, `apiErrorFrom` and `sessionRequest` stay, unchanged.
+- `src/daemon/chunk-zero.ts` — comments only: the note about `session.ts` importing this file back (it no longer does), and the notes that named the spawner. `mergeChunkZero` kept (decision 1).
+- `src/daemon/chunk-zero.test.ts` — one describe title: *mergeChunkZero, as the current daemon uses it (40x)* became *mergeChunkZero, the form the old daemon used (40x)*.
+- `src/daemon/gates.ts` — only `GateDecision` and `clarifyingRounds` stay (decision 2). Deleted: `APPROVAL_TOKENS`, `readGateDecision`, `readConversationRecord`, `waitCursorFrom`, `isApproval`, `instant`.
+- `src/daemon/gates.test.ts` — the 3 tests of `clarifyingRounds` stay. 34 deleted: the `readGateDecision` and `gateComment` describes.
+- `src/daemon/gate-comment.ts` — deleted.
+- `src/daemon/ask-check.ts`, `src/daemon/ask-check.test.ts` — deleted (18 tests).
+- `src/daemon/consult.ts` — new exported type `Consult`, the model call, moved from `AskCheckDeps["consult"]`. `sdkConsult` returns it. Comments now say what the runner uses it for.
+- `src/daemon/outcomes.ts` — only `askedFor` and `LONGEST_ASK`. Deleted: `StageOutcome`, `outcomeCursorFrom`, `readStageOutcome`, `Handback`, `readHandback`, `namedStep`.
+- `src/daemon/outcomes.test.ts` — the 5 tests of `askedFor` stay. 22 deleted: the `readStageOutcome` and `readHandback` describes.
+- `src/daemon/faults.ts` — only `technicalFault`, with its type and word lists. Deleted: `SpawnRefusal`, `refusalClears`, `BUILD_ESCALATION_PREFIX`. The module comment says who reads it now.
+- `src/daemon/poll.ts` — `SpawnContext`, `SessionSpawner` and the `PipelineStage` import only they used, deleted.
+- `src/commands/guardrails.test.ts` — the one spawner case moved to `startStepSession` (decision 4). The helpers and imports only it used, deleted.
+- `doc/plans/phases/reports/phase-41-handoffs.md` — this section.
+
+`src/daemon/faults.test.ts`, `src/daemon/consult.test.ts`, `src/commands/daemon.ts`, `src/runner/session.ts` and `src/runner/actions.ts` needed no change: every name they import is kept.
+
+**Decisions taken inside the slice.**
+
+1. **`mergeChunkZero` is kept, and `failedComment` with it.** `src/runner/actions.test.ts` imports `mergeChunkZero` for a check that it cannot be written without an approval (line 15, and the `@ts-expect-error` at 876–877). That file is not in this slice's list, and the runner's tests are to stay unchanged. Deleting the function breaks the build there. The plan's rule says to keep it and say so. `failedComment` stays because `mergeChunkZero` calls it, and the one test of `mergeChunkZero` in `chunk-zero.test.ts` stays with the function. Nothing calls either. Both carry a dated comment saying why they stay. To finish: in `actions.test.ts`, name `tryMergeChunkZero` instead of `mergeChunkZero` in the import and the two lines at 876–877 (`chunk-zero.test.ts` already makes the same check on `tryMergeChunkZero`). Then `mergeChunkZero`, its test, `failedComment`, and the `failedComment` imports in `chunk-zero.ts` and `chunk-zero.test.ts` can go.
+2. **`gates.ts` and `gates.test.ts` are kept, trimmed.** `pipeline.ts` (41h) and `pipeline.test.ts` import the type `GateDecision`, for `readGate`. `prompts.ts` (41g) imports `clarifyingRounds`, for `writtenAnswerBlock`. Neither file is in this slice's list. The rule says keep, so both stay, and so do the 3 tests of `clarifyingRounds`. A dated comment at the top of `gates.ts` names the two importers. When 41g and 41h drop those imports, the two files can be deleted.
+3. **The model call's type is named `Consult`.** It is exported, so a later caller can name it. The runner's `RunnerDriverDeps.consult` writes the same shape out, and was left as it was.
+4. **The guardrails case moved to `startStepSession`, because it tests a guardrail on a step's session.** *finding the run that drove a session › finds the run of a session started under the claim-first ordering* checks that `runForSession` finds the run whose session was started after the run was claimed. That path is `startStepSession`'s, which the spawner called. The test now parks the run on the runner's wait instead of a conversation (the ledger reads a conversation as the runner's since 41c), starts the session through `startStepSession` with a ticker that does nothing, and asserts the same thing. The ticket, the adapter and the project it built are gone, because nothing reads them now.
+5. **`TechnicalFault` stays in `faults.ts`.** It is `technicalFault`'s return type.
+6. **`attemptMerge` stays exported**, as the plan keeps it and renames nothing. Nothing outside `chunk-zero.ts` calls it now; its comment says so.
+7. **Comments.** Every comment in this slice's files that named deleted code, or said the spawner does something now, was corrected. Comments that tell the history of a choice were left.
+
+**Validation evidence.**
+
+There are no new seams, so no red-green. The checks are the compiler, the suite, the runner's tests unchanged, and the replay's dry run.
+
+*The compiler finds every user of what was deleted.* After `session.ts` was cut down, before any test was changed:
+
+```
+$ npx tsc --noEmit -p .
+src/commands/guardrails.test.ts(26,3): error TS2305: Module '"../daemon/session.js"' has no exported member 'AgentSessionSpawner'.
+src/daemon/session.test.ts(51,3): error TS2305: Module '"./session.js"' has no exported member 'AgentSessionSpawner'.
+src/daemon/session.test.ts(52,3): error TS2305: Module '"./session.js"' has no exported member 'parkedComment'.
+src/daemon/session.test.ts(285,22): error TS2322: Type 'Promise<{ uncommitted: never[]; }>' is not assignable to type 'Promise<TimoneCheckout>'.
+… (and implicit-any errors in session.test.ts from the same missing types)
+```
+
+After `gates.ts` was trimmed: `src/daemon/outcomes.ts(12,10): error TS2305: Module '"./gates.js"' has no exported member 'instant'.` After the last change, `npx tsc --noEmit -p .` prints nothing.
+
+*The moved guardrails case is not vacuous.* It passes, so it could not be red first. I commented out `store.activate(runId, started.sessionId, holder);` in `src/daemon/step-session.ts`, ran it, and put the file back from a saved copy (`diff` empty):
+
+```
+× finding the run that drove a session > finds the run of a session started under the claim-first ordering 7ms
+  → expected undefined to be 'scratch-app#7/1' // Object.is equality
+Tests  1 failed | 32 skipped (33)
+```
+
+Restored: `Tests  1 passed | 32 skipped (33)`.
+
+*The runner's tests are unchanged.* `git diff HEAD -- src/runner` is empty. `npx vitest run src/runner`: `Tests  171 passed (171)`.
+
+Validation commands, as run:
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+> timone@0.1.0 build
+> tsc
+ Test Files  57 passed (57)
+      Tests  1507 passed (1507)
+$ git diff --name-only main -- src/runner | grep -v '^src/runner/replay/' | grep -v '\.test\.ts$' ; echo "exit: $? (expected 1: …)"
+exit: 1 (expected 1: the runner's own source files are unchanged; ✏ 2026-09-30 (build, timone#166): its test files lose their driver line in 41b)
+$ npm run --silent replay -- --dry 2>&1 | tail -3
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+19 of 19 cases passed. The runner's sessions cost $0.00 in all.
+$ grep -rn "timone retry" src --include='*.ts' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)'
+src/cli.ts:38:  "`timone retry` was removed. Write on the ticket instead: say what you want done.";
+src/cli.test.ts:44:      "`timone retry` was removed. Write on the ticket instead: say what you want done.\n",
+```
+
+1507 = 1728 − 147 (`session.test.ts`) − 18 (`ask-check.test.ts`) − 34 (`gates.test.ts`) − 22 (`outcomes.test.ts`). The guardrails case was moved, not added. Test files: 57, one fewer.
+
+- [x] The dry replay reports 19 of 19 cases. **PASS**
+- [x] The last command prints only the sentence in `src/cli.ts` and its test. `src/runner/replay/cases.ts` has no mention of `timone retry`, so it prints none. **PASS**
+- `npm run build && npm test`: 1507 passed. **PASS**
+- The runner's own source files are unchanged: exit 1. **PASS**
+- **Not met as the plan words it:** `mergeChunkZero` (with `failedComment`) is not deleted, and `gates.ts` and `gates.test.ts` are trimmed, not deleted. Decisions 1 and 2 give the reason and what finishes each.
+
+**What 41g and 41h must know.**
+
+- **`src/daemon/prompts.ts` (41g):**
+  - `conversationSubject` has no production caller now (only `prompts.test.ts`).
+  - `PROMPTED_STAGES`'s one production reader is `isPrompted` in `session.ts`, which the runner calls.
+  - `writtenAnswerBlock` is what keeps `clarifyingRounds` in `gates.ts` alive (decision 2).
+  - Nothing reads these markers off a ticket any more: `CONVERSATION_RECORD_MARKER`, `HANDBACK_MARKER`, `HANDBACK_STEP_PREFIX`, `STAGE_ESCALATED_MARKER`, `STAGE_DONE_MARKER`, `STAGE_HANDED_MARKER` (`src/adapters/ticketing.ts`). Their readers were `readConversationRecord`, `readHandback` and `readStageOutcome`, deleted here. `prompts.ts` still tells sessions to write them, and `runner/replay/cases.ts` writes the last two.
+- **`src/daemon/pipeline.ts` (41h):**
+  - No caller outside `pipeline.ts` now: `concludeConversation`, `inBuild`, `isBuilt`, `processStage`, `routeAfterTriage`, `runsUnattended`, `stageFromLabel`, and `waitFor` (called inside by `runsUnattended` and `requireWait`; runner tests still call it). `readGate` was already on 41b's list. It is the one user of `GateDecision` from `gates.ts` (decision 2).
+  - The comment at line 728 links `{@link readGateDecision}`, which is deleted.
+- **`src/daemon/runs.ts` (41h):**
+  - `ESCALATION_WAIT` has no importer outside `runs.ts` (still read inside it, at line 2036).
+  - `RunStore.carry` and `RunStore.unstarted` have no production caller. `RunStore.fail`'s one caller is the kept `mergeChunkZero`, which nothing calls.
+  - The comment at line 673 names `AskCheckMemory` in `ask-check.ts`; both are deleted. `rememberAskCheck` and the `askCheck` field are still on 41b's list.
+- **Files no slice named, left as they are:**
+  - `src/git.ts`: `uncommittedFiles` has no production caller now (`git.test.ts` still tests it).
+  - `src/channels/conversation.ts`: `inviteToConversation`, and `src/channels/terminal.ts`: `TerminalChannel` have no production caller now (only `terminal.test.ts`).
+  - `src/daemon/step-session.ts`: the comment on its import from `session.ts` says `session.ts` imports it back, which is no longer true. Its doc says the spawner and the runner both call it; only the runner does.
+  - `src/guards/checkouts.test.ts`: the reason given for `daemon/session.ts` in `GIT_USERS` says it reads "what in it is uncommitted". It reads only the version now. The guard still passes, because `session.ts` still imports `git.ts`.
+  - `src/daemon/register.test.ts:78` names `ask-check.test.ts` inside a sample string. It checks nothing about the file.
+  - `doc/specs/prd/prd-04-…criteria.md` describes the ask check, which is now deleted.
+  - `DEFAULT_PROGRESS_INTERVAL_SECONDS` (`progress.ts`) lost the one test of its value, *defaults to thirty seconds*, with the rest of `session.test.ts`.
+- **`dist/daemon/ask-check.*` and `dist/daemon/gate-comment.*`** stay in `dist/` until it is cleaned. `tsc` does not delete output for a deleted source. Nothing imports them.
+- **Refactoring I would do but did not:** make `attemptMerge` private. Rename `ASK_CHECK_MODEL` and `ASK_CHECK_TIMEOUT_MS` in `consult.ts`, now that no ask check exists. Let the runner's `RunnerDriverDeps.consult` use the `Consult` type.

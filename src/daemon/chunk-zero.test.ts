@@ -58,7 +58,7 @@ function commentsOnly(posted: { number: number; body: string }[]): TicketingAdap
   };
 }
 
-describe("mergeChunkZero, as the current daemon uses it (40x)", () => {
+describe("mergeChunkZero, the form the old daemon used (40x)", () => {
   it("still fails the run and posts the failure comment when the merge conflicts", async () => {
     const root = mkdtempSync(join(tmpdir(), "timone-chunk-zero-"));
     tempDirs.push(root);

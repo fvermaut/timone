@@ -16,7 +16,6 @@ import type {
   PreviewAdapter,
   PreviewProject,
 } from "../adapters/preview.js";
-import type { PipelineStage } from "./pipeline.js";
 import {
   fromForgeDefaultBranch,
   isReproposal,
@@ -37,56 +36,6 @@ import { pending, settle, type QueuedRequest } from "./requests.js";
 import {
   type InitiativeRecord, type Run, type RunStore, type Witness } from "./runs.js";
 import { HELD_LABEL, MAP_LABEL, nextStep } from "./steps.js";
-
-/**
- * What a spawn is resuming, when it is resuming something.
- *
- * ✏ 2026-09-30: nothing in the cycle spawns a session any more; the runner
- * drives every project (ADR-0060 D9). This and {@link SessionSpawner} stay
- * only because `session.ts` still builds the old spawner, until that file is
- * removed.
- */
-export interface SpawnContext {
-  /** Start at this stage rather than the run's recorded one. */
-  stage?: PipelineStage;
-  /**
-   * The human's words, when they are what resumed the run: a gate's change
-   * request, or the answer they wrote on a ticket waiting on a conversation
-   * (ADR-0022). Its presence at a conversation stage is also what tells the
-   * spawner to *run* that stage rather than invite again — a stage reached
-   * with nothing in hand still stops.
-   */
-  feedback?: string;
-  /**
-   * The approval that resumed this run. Its stage's artifact has to record
-   * it before anything moves on: the reply lives on the ticket, but the
-   * artifact is the record (ADR-0006), and a gate whose outcome exists only
-   * in a comment thread is one the next stage cannot see.
-   */
-  approval?: { stage: PipelineStage; by: string; at: string };
-}
-
-/**
- * The hand-off to a spawned agent session.
- *
- * ✏ 2026-09-30: the poll cycle no longer takes one (see {@link SpawnContext}).
- */
-export interface SessionSpawner {
-  spawn(
-    run: Run,
-    project: TicketingProject,
-    context?: SpawnContext,
-  ): Promise<void>;
-  /**
-   * End the session this run is in, because it has just been cancelled
-   * ([ADR-0047](../../doc/adr/0047-a-cancel-stops-the-work-it-cancels.md)).
-   *
-   * Called **after** the cancellation is in the ledger, so the spawner reads
-   * a cancelled run when its session ends and reports nothing. Optional
-   * because a spawner with no session to stop should not have to say so.
-   */
-  stop?(runId: string): void;
-}
 
 export interface PollDeps {
   manifest: Manifest;

@@ -10,8 +10,6 @@ import {
   type Chunk,
 } from "./breakdown.js";
 import type { Run, RunStore } from "./runs.js";
-// `session.ts` imports this module back. That is safe only because nothing
-// here reads these two names while the modules load, only when a merge runs.
 import { failedComment, mergeMessage } from "./session.js";
 import {
   HELD_LABEL,
@@ -25,9 +23,9 @@ import {
  * branch, and opening one ticket per step of the approved breakdown
  * (ADR-0030 D2, ADR-0040).
  *
- * Moved out of `AgentSessionSpawner` so that the runner calls the same code
- * rather than a copy of it. The seams are the spawner's options of the same
- * names, with the same defaults.
+ * Moved out of the old spawner so that the runner called the same code rather
+ * than a copy of it. The spawner was removed on 2026-09-30; the runner is the
+ * one caller left.
  */
 export interface ChunkZeroDeps {
   store: RunStore;
@@ -73,9 +71,13 @@ export type ChunkZeroRefusal = Extract<MergeOutcome, { merged: false }>;
  * have it build against a default branch that does not carry the
  * specification, and nothing downstream would notice.
  *
- * This is the current daemon's form. The runner's path merges through
+ * This was the old daemon's form. The runner's path merges through
  * {@link tryMergeChunkZero}, which fails nothing (40x): on a project the
  * runner drives, a failed run is one nothing wakes again.
+ *
+ * ✏ 2026-09-30: nothing calls this any more. The spawner that called it was
+ * removed. It stays only because `src/runner/actions.test.ts` still names it
+ * in a check that it cannot be written without an approval.
  *
  * **`approval` is required, so no caller can merge without one** (PRD-05 R3:
  * only a named person's yes lets work reach a default branch with no pull
@@ -86,8 +88,7 @@ export type ChunkZeroRefusal = Extract<MergeOutcome, { merged: false }>;
  * the compiler's — a call without an approval does not build — so nothing
  * here reads it again.
  *
- * {@link attemptMerge} below takes no approval. It is exported only for the
- * spawner's delegator of the same name, which its tests reach; nothing else
+ * {@link attemptMerge} below takes no approval. Only {@link tryMergeChunkZero}
  * may call it.
  */
 export async function mergeChunkZero(
@@ -144,8 +145,9 @@ export async function tryMergeChunkZero(
 /**
  * The merge itself, with a thrown git failure reduced to a refusal.
  *
- * Exported beside {@link mergeChunkZero} because the spawner still answers to
- * this name: its tests reach the merge through it.
+ * ✏ 2026-09-30: it was exported for the old spawner, whose tests reached the
+ * merge through it. The spawner was removed, and nothing outside this file
+ * calls it now.
  */
 export async function attemptMerge(
   deps: ChunkZeroDeps,
