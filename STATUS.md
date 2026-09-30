@@ -29,15 +29,6 @@ Open for later, none blocking: [#176](https://github.com/fvermaut/timone/issues/
 
 **What I need from you:** nothing, unless you want #70 merged or a ticket for the blank page.
 
-**4. What is left of [#164](https://github.com/fvermaut/timone/issues/164) after that, in order.**
-
-1. ivtrends moves to the runner (one line in `timone.yaml`), and finishes one real ticket on it.
-2. [#166](https://github.com/fvermaut/timone/issues/166): the old code is deleted. One more pull request.
-
-The review findings left for later are [#176](https://github.com/fvermaut/timone/issues/176); two of them were seen live today. Five small things the run found are [#179](https://github.com/fvermaut/timone/issues/179). None of them blocks #164.
-
-**What I need from you:** nothing beyond item 2.
-
 **4. Older questions, no hurry.**
 
 - [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal. It has never been marked, so nothing starts it.
