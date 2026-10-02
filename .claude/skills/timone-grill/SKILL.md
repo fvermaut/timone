@@ -62,6 +62,6 @@ When all branches of the decision tree are resolved:
 1. **Summarise the decisions reached** — the shared understanding, branch by branch.
 2. **Highlight outstanding risks** and any questions deliberately left open.
 3. **State concrete next steps.**
-4. **Suggest running `timone-prd`** (stage 3) to persist the requirements as a PRD pair. The grill session's conclusions are raw material — they evaporate with the conversation unless persisted; the PRD is the artifact.
+4. **Suggest running `timone-prd`** (stage 3) to persist the requirements as a PRD pair. The grill session's conclusions are raw material — they evaporate with the conversation unless persisted; the PRD is the artifact. ✏ 2026-10-02 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): in a session the runner started, the runner reads what you posted on the ticket and chooses the next step itself; writing the requirements is the default one.
 
 The stage closes only when the human accepts the summary.

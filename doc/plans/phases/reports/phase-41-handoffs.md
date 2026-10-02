@@ -1991,3 +1991,87 @@ The same grep without the comment filter, and with `ASK_CHECK_TIMEOUT_MS`, `esca
 - **`dist/` is built from this slice's code.** The running daemon still runs the code it loaded at start. Nothing it reads or writes changed.
 - **Left as they were, outside the findings:** `src/daemon/consult.ts` still says, in its 40u note, that "the check was started with every built-in tool", and cites ADR-0054 D2 for the rule that a consult may not act. Both are history of the ask check, and the rule is still true. `poll.test.ts` keeps its doc on *every project is driven by the runner*: "A project entry names no driver any more", which is true.
 - **Refactoring I would do but did not:** in `takeover.test.ts`, *gives the run back to the runner, and leaves the daemon a request to wake it* is now the same test as the one above it, *…when no daemon is running, …*: same set-up, same assertions. 41b noted it. One of the two could go, but this slice may not change the count.
+
+## 41p — The skills, the manual, the glossary and one requirement say what the code does
+
+**Built.** No code. Five step skills now say, where they name the next step, that it is the default order, and that in a session the runner started the runner chooses the next step. The words are the ones `timone-plan` and `timone-verify` already use: "in a session the runner started, the runner … chooses the next step itself; X is the default one". Triage's *Route* section also says that its table is the default order, not a rule: the runner reads the `triage:<kind>` label to find the ticket's default order, may leave that order when it has a reason, and then says so on the ticket. The manual's takeover table says what the code does since 41m and 41n: an open ticket whose last run is done or cancelled gets a new run, at the step its `wayfinder:` label names; a closed one is answered and nothing opens; the closed-and-cancelled row quotes 41n's message. The glossary's **Conversation channel** entry no longer says the channels sit behind one adapter seam. PRD-05.R11 clause 2 reads "GIVEN any run nothing is working on", with a dated note naming fvermaut's answer on pull request #189. Every changed passage carries a `✏ 2026-10-02` marker, except the manual, which has none anywhere.
+
+**Files touched.**
+
+- `.claude/skills/timone-triage/SKILL.md` — a new paragraph under the *Route* table (the default order, the runner reads the label, may leave it, says so on the ticket). Closing item 3 gains the plan/verify note: the next step of the label's default order is the default one.
+- `.claude/skills/timone-execute/SKILL.md` — closing item 5 gains the note: verification is the default one.
+- `.claude/skills/timone-grill/SKILL.md` — *Conclude and hand off* item 4 gains the note: writing the requirements is the default one.
+- `.claude/skills/timone-adr/SKILL.md` — *Standalone at decision time*: recording an ADR is not a step of the default order; in a session the runner started it happens inside the step that made the decision, and the runner chooses the next step when that step ends.
+- `.claude/skills/timone-prd/SKILL.md` — workflow step 5 (*Hand off*) gains the note: the default next step is a named person's approval of the requirements, then working out the pieces.
+- `manual/how-the-daemon-works.md` — section 9, the takeover table: the "no run, ticket open" row names the step from the `wayfinder:` label; the `done` and `cancelled` rows are split into open and closed; the closed-and-cancelled row quotes 41n's message and the step ticket's other words.
+- `CONTEXT.md` — **Conversation channel**: "All channels sit behind one adapter seam" removed, with a dated note.
+- `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` — R11 clause 2 reworded, and a `> ✏ 2026-10-02 — reworded on fvermaut's answer on pull request #189: …` note under it, in the form of the register's other dated notes. No Status line changed.
+- `41p-handoff.md` in the orchestrator's scratchpad — this section. The shared handoff file was not touched, as asked.
+
+**Decisions taken inside the slice.**
+
+1. **The ADR skill gets a different sentence.** Recording an ADR is not a step in any default order (`src/runner/order.ts` has no such step). So it does not say "X is the default one". It says the ADR is not a step of the default order, is written inside the step that made the decision, and the runner chooses the next step when that step ends. It sits where the skill names the next step: "record the ADR now and return to that stage".
+2. **Triage's closing note names no single step.** The next step depends on the label: asking what you need for a feature, preparing the work for a chore or a bug, nothing for a question. So it says "the next step of that label's default order is the default one".
+3. **The grill note says "what you posted on the ticket", not "the summary".** In a session the runner started, an unaccepted conversation posts no summary; it posts what is still open (the clarification prompt says so).
+4. **"Restated here, no variants" and "Triage routes; it never starts the next stage" are left as they were.** Both are still true: the table restates `process.md` without variants, and triage never starts the next step. The new paragraph under the table is what says the table is a default.
+5. **The manual's closed-and-cancelled row quotes 41n's message**, after its first clause (the ticket and the reason), and gives the step ticket's other words in short. The `done`-and-closed row does not say "or does not exist": for a settled run the tracker is asked once, through the open listing, and the two are not told apart (41m, decision 8).
+6. **The manual's opening sentence of section 9 ("for a run that is waiting") is left.** A new run is put on the runner's wait before the session opens, so it is still true.
+
+**Validation evidence.** No behaviour-carrying code, so no seams and no red-green. The checks, as run:
+
+```
+$ grep -c "default" .claude/skills/timone-triage/SKILL.md .claude/skills/timone-execute/SKILL.md .claude/skills/timone-grill/SKILL.md .claude/skills/timone-adr/SKILL.md .claude/skills/timone-prd/SKILL.md
+.claude/skills/timone-triage/SKILL.md:2
+.claude/skills/timone-adr/SKILL.md:1
+.claude/skills/timone-grill/SKILL.md:1
+.claude/skills/timone-prd/SKILL.md:1
+.claude/skills/timone-execute/SKILL.md:5
+$ grep -n "adapter seam" CONTEXT.md ; echo "exit: $? (expected 1)"
+exit: 1 (expected 1)
+$ grep -n "nothing is working on" doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md
+207:    - GIVEN any run nothing is working on
+210:    > ✏ 2026-10-02 — reworded on fvermaut's answer on pull request [#189](https://github.com/fvermaut/timone/pull/189): "change the words". …
+299:      THEN its state is what it was before the failure, and the project is not held by a run that nothing is working on
+```
+
+Before the slice the first command gave 0 for triage, adr, grill and prd, and 4 for execute (all four about the default branch). Line 299 is R16, unchanged. `git diff` of the register has no `Status` line in it.
+
+- [x] Each of the five skills says the order is the default, in a sentence that reads as part of its section. **PASS.** Each changed passage was read in its section: triage's *Route* and *Closing* item 3, execute's *Closing* item 5, grill's *Conclude and hand off* item 4, adr's *Standalone at decision time*, prd's workflow step 5.
+- [x] R11 clause 2 says "nothing is working on". **PASS** (line 207).
+
+**What the orchestrator and verification must know.**
+
+- **A queued run is not covered by the new words either.** R11 clause 2 now says "any run nothing is working on". A run that is `queued` waits behind another run on its project; nothing is working on it, but a takeover still opens no session for it and says it is in the queue (`findTakeover` in `src/commands/takeover.ts`). Verification may read clause 2 as covering a queued run. The words are fvermaut's choice, so I did not change them further.
+- **Left as they were, outside the excerpt:** `timone-prd` line 15, *Pipeline position*, still shows `timone-grill` → `timone-prd` → `timone-plan` → … with no word saying it is a default. Step 5 of the same skill now says it.
+- 41o was changing `src/commands/takeover.ts` while this slice ran. Its change there renames `escalation` to `open-session` and `escalate` to `openSession`; it changes no behaviour the manual's table describes.
+- **Refactoring I would do but did not:** none in these files.
+
+### ✏ 2026-10-02 — 41p, two follow-ups at the orchestrator's request
+
+**Built.** (1) PRD-05.R11 clause 2 now matches what the code does for a queued run. It reads "GIVEN any run that nothing is working on, and that is not waiting its turn behind another run". The same dated note gains one sentence: a takeover of a run waiting its turn opens no session either, because the run waits while another run holds the project, and a terminal session on it would work in the same repository at the same time. No second note was added, and no Status line changed. (2) `timone-prd`'s *Pipeline position* line ends with `✏ 2026-10-02 ([ADR-0060](…)): these steps are the default order; in a session the runner started, the runner chooses the next step itself.`
+
+**Files touched, in addition to the list above.** `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` (clause 2 and its note, again) and `.claude/skills/timone-prd/SKILL.md` (line 15).
+
+**Validation commands, run again.**
+
+```
+$ grep -c "default" .claude/skills/timone-triage/SKILL.md .claude/skills/timone-execute/SKILL.md .claude/skills/timone-grill/SKILL.md .claude/skills/timone-adr/SKILL.md .claude/skills/timone-prd/SKILL.md
+.claude/skills/timone-triage/SKILL.md:2
+.claude/skills/timone-adr/SKILL.md:1
+.claude/skills/timone-grill/SKILL.md:1
+.claude/skills/timone-prd/SKILL.md:2
+.claude/skills/timone-execute/SKILL.md:5
+$ grep -n "adapter seam" CONTEXT.md ; echo "exit: $? (expected 1)"
+exit: 1 (expected 1)
+$ grep -n "nothing is working on" doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md
+207:    - GIVEN any run that nothing is working on, and that is not waiting its turn behind another run
+210:    > ✏ 2026-10-02 — reworded on fvermaut's answer on pull request [#189](https://github.com/fvermaut/timone/pull/189): "change the words". …
+299:      THEN its state is what it was before the failure, and the project is not held by a run that nothing is working on
+```
+
+`git diff` of the register still has no `Status` line in it.
+
+- [x] Each of the five skills says the order is the default, in a sentence that reads as part of its section. **PASS.** `timone-prd` now says it in two places: line 15 and workflow step 5.
+- [x] R11 clause 2 says "nothing is working on". **PASS** (line 207).
+
+The first two bullets under *What the orchestrator and verification must know* above are out of date: clause 2 now covers the queued run, and `timone-prd` line 15 now says the steps are the default order.

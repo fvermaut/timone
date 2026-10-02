@@ -47,6 +47,8 @@ The entry point follows the stage-1 routing table — restated here, no variants
 | chore / technical enabler | **`timone-plan`** (stage 5), un-anchored — the phase gets stamped un-anchored per the PRD-anchoring rule. **A chore meets no gate before its pull request** ([ADR-0030](../../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D3): it skips stages 2 and 3, and stage 5 no longer stops for an approval, so it runs on into stage 6 and is judged on the PR. Deliberate, not an oversight — fvermaut was shown the cost (nothing stops a misread chore before the work happens) and chose it. **So your rationale below is the last thing a human reads before the work is built**: a request classified `chore` by mistake is built by mistake, and getting the kind right matters more here than anywhere else in this table |
 | question | no pipeline entry — **answer it now**, from the project's artifacts (`doc/standards.md`, ADRs, specs, code) rather than from memory |
 
+✏ 2026-10-02 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). **This table is the default order, not a rule.** In a session the runner started, the runner reads your `triage:<kind>` label to find the ticket's default order, and it chooses the next step itself. It may leave that order when it has a reason. When it does, it says so on the ticket, with its reason. So classify and route exactly as above: your label and your rationale are what the runner starts from.
+
 Name the entry-point skill even if it is not implemented yet (today: `timone-deploy`, `timone-maintain`): the record describes the process, not what currently exists.
 
 ## Record the classification
@@ -109,6 +111,6 @@ Report to the user, in this order:
 
 1. The classification: kind + one-paragraph rationale.
 2. Where it was recorded (issue comment + label, or the committed `doc/triage/` path).
-3. The routing outcome: the exact next invocation (e.g. "next: `/timone-grill <project> <request>`") — or, for a question, the answer itself.
+3. The routing outcome: the exact next invocation (e.g. "next: `/timone-grill <project> <request>`") — or, for a question, the answer itself. ✏ 2026-10-02 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): in a session the runner started, the runner reads your label and chooses the next step itself; the next step of that label's default order is the default one.
 
 Triage routes; it never starts the next stage. Stop here.

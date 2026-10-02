@@ -501,11 +501,12 @@ that is waiting. What it does depends on the ticket's latest run:
 | The run | What happens |
 |---|---|
 | `parked` | The terminal takes the run, and the session opens. |
-| no run, and the ticket is open | A run is registered and put on the runner's wait, with no step chosen. Then the same. If another run holds the project, it is queued and nothing opens. |
+| no run, and the ticket is open | A run is registered and put on the runner's wait, at the step the ticket's `wayfinder:` label names: `wayfinding` for a decision ticket, `charting` for a map, `research` for a research ticket. A ticket with no `wayfinder:` label gets no step. Then the same. If another run holds the project, the new run is queued and nothing opens. |
 | no run, and the ticket is closed or does not exist | Refused, saying which of the two. |
 | `queued`, `picked-up` or `active` | Refused, with a sentence that says what is happening. |
-| `done` | Refused: the ticket is finished. |
-| `cancelled` | Refused, with the reason and how to start it again. |
+| `done` or `cancelled`, and the ticket is open | The ticket's next run is registered, as for a ticket with no run: at the step its `wayfinder:` label names, or with no step. Then the session opens. |
+| `done`, and the ticket is closed | Refused: the ticket is finished. Nothing opens. |
+| `cancelled`, and the ticket is closed | Refused, with the reason, and nothing opens. It says: *"Cancelled work isn't picked up again — reopen the ticket, make sure it has the `timone` label, and take the `timone:held` label off if it has it. Then I'll start it afresh on my next pass."* A step ticket is told instead to take the `timone:held` label off, or to close it. |
 
 While the session runs, the run is `active` and held by the terminal. The
 terminal writes the heartbeat every 30 seconds, so the reclaim leaves it alone.

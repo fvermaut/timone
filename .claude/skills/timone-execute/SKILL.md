@@ -335,6 +335,6 @@ Report to the user, in this order:
 2. The phase number and the branch name.
 3. The per-sub-phase outcomes, each with its commit SHA — including any recorded in the departures record.
 4. The completion report's path, and per changed screen whether its look check found differences left unfixed.
-5. The next invocation: `/timone-verify <project> <phase-NN>` — naming the phase just executed. Verification refuses to pick a phase for the user, so a handover that omits it strands any project with more than one phase.
+5. The next invocation: `/timone-verify <project> <phase-NN>` — naming the phase just executed. Verification refuses to pick a phase for the user, so a handover that omits it strands any project with more than one phase. ✏ 2026-10-02 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): in a session the runner started, the runner reads your report and chooses the next step itself; verification is the default one.
 
 Execution implements. It never verifies its own work and never opens a PR. Stop here.
