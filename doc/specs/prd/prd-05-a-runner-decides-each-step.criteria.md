@@ -206,10 +206,10 @@
     - GIVEN the runner cannot start, for example because the model service cannot be reached
       WHEN the operator runs `timone cancel <ticket>`
       THEN the run stops, any running session is stopped, and the project is free for the next ticket
-    - GIVEN any run that nothing is working on, and that is not waiting its turn behind another run
+    - GIVEN a run that nothing is working on, on a project where no other run is working and nothing waits its turn
       WHEN the operator runs `timone takeover <ticket>`
       THEN a terminal session opens on that ticket, and when it ends the runner wakes and reads what it left
-    > ✏ 2026-10-02 — reworded on fvermaut's answer on pull request [#189](https://github.com/fvermaut/timone/pull/189): "change the words". It said "GIVEN any run". A takeover of a run the machine is working on opens no session, and says what is happening. Nor does a takeover of a run waiting its turn: it waits because another run holds the project, and a terminal session on it would work in the same repository at the same time. The README already says a takeover opens a session "on a ticket nothing is working on right now". See the Spec review, finding 3, in [phase-41-delivery.md](../../plans/phases/reports/phase-41-delivery.md).
+    > ✏ 2026-10-02 — reworded on fvermaut's answer on pull request [#189](https://github.com/fvermaut/timone/pull/189): "change the words". It said "GIVEN any run". A takeover of a run the machine is working on opens no session, and says what is happening. Nor does a takeover of a run waiting its turn: it waits because another run holds the project, and a terminal session on it would work in the same repository at the same time. The README already says a takeover opens a session "on a ticket nothing is working on right now". See the Spec review, finding 3, in [phase-41-delivery.md](../../plans/phases/reports/phase-41-delivery.md). ✏ 2026-10-02, refined after verification iteration 3 ([report](../../plans/phases/reports/phase-41-verification.md)): the clause now names the whole rule the code keeps, one session per project at a time. A takeover is also refused while another run of the same project is working, for the same reason; the words before this refinement did not say so.
     - GIVEN the command line
       WHEN `timone retry` is typed
       THEN it does not exist, and the message says to write on the ticket instead
