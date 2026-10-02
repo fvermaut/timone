@@ -1721,3 +1721,23 @@ $ git status --short .timone ; echo "(expected: nothing — no test touched the 
 - **A takeover now opens work on a ticket whose run a person cancelled, if the ticket is still open.** `timone cancel` holds the ticket, and the poll loop does not pick a held ticket up. A takeover does not check the hold: it opens a new run and a session, as the amendment says for any open ticket. When that session ends, the run goes back to the runner, which reads the ticket.
 - **The takeover's new run skips the poll loop's `successorHeldBack` check** (the check that holds back a ticket's next run while its approved pieces are all built, or its list of pieces has grown since it was approved). That check lives in `src/daemon/poll.ts` and runs only for marked tickets the cycle lists. A takeover of a map ticket whose last run is done can therefore open a new run at charting while the map's pieces are all built. The runner then decides from the ticket.
 - **`dist/` is behind `src/` for `runs.ts` and `takeover.ts`** until the next `npm run build`. The running daemon still uses the code it loaded at start, so a `claim-takeover` request it carries out still has the old behaviour until it is restarted on a new build.
+
+## 41l — The live check: the replay, and one watched run on scratch-app
+
+**Built.** No code. fvermaut ran the replay from his terminal (19 of 19, three tries each, $2.50, run 8 in `phase-40-replay.md`) and restarted the daemon on this build. The real ledger was copied first to `.timone/state.json.bak-20260930-166`. One machine-typed feature ticket, scratch-app #71, went from pickup to pull request #73 on the new code, for $33.25. The full account is in [phase-41-live-gate.md](phase-41-live-gate.md).
+
+**Files touched.**
+
+- `doc/plans/phases/reports/phase-41-live-gate.md` — created.
+- `doc/plans/phases/reports/phase-40-replay.md` — run 8 appended (committed separately, `3c2729d`).
+
+**Decisions taken inside the slice.** The watched ticket was a small feature, so that the approval of the requirements on the ticket (PRD-02.R4) would be seen. It was checked against scratch-app's code before it was opened.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+- [x] The replay passes 19 of 19, three tries of three — **PASS**, at `3afc263`. 41m changed code after it; one more replay is owed on the final build.
+- [~] The ten old runs read as described, and no comment was posted on their tickets — **PARTLY.** The ten runs were converted as planned. The runner then ended the six conversation runs on Timone's own tickets, whose label had been removed, and posted on four of them. Recorded in `phase-41-departures.md`; 41m added.
+- [x] The watched ticket reached its pull request — **PASS**, with four stops, each for fvermaut, all from the default order for a feature (the plan had predicted one). No stop came from the machine: the checking step's question was carried to the pull request.
+- [x] **Human gate** — fvermaut ran the replay, started the daemon, answered the questions and approved the requirements and the list of pieces on the ticket.
+
+**What delivery must know.** Pull request scratch-app #73 is open and is fvermaut's to merge or close; nothing in Timone waits on it. The daemon is still running on `3afc263`; 41m's change to the ledger read reaches it only when it is restarted. One more replay is owed on the final build.
