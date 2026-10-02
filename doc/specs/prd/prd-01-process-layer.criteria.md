@@ -231,13 +231,15 @@
 
 ## R16 — TDD implementation loop
 
+> ✏ Revised 2026-10-02: the last clause changed. The full suite no longer runs at the end of every sub-phase; each sub-phase runs the tests its change can affect, and every suite runs whole once when the last one is done ([PRD-06.R4](prd-06-a-run-spends-its-time-on-the-work.criteria.md#r4--each-part-of-a-build-runs-the-tests-its-change-can-affect-and-everything-runs-whole-once-at-the-end), [ADR-0061](../../adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md)). The rest of the loop is unchanged.
+
 - **Priority:** MUST
-- **Status:** verified
+- **Status:** revised
 - **Verify-via:** human
 - **Criteria:**
     - GIVEN a phase file whose sub-phases declare seams under test
       WHEN the execute skill runs a sub-phase
-      THEN tests are written only at the declared seams, each written and run failing (red) before the implementation that makes it pass (green), one slice at a time; refactoring is deferred to the delivery review; the full suite runs once at sub-phase end
+      THEN tests are written only at the declared seams, each written and run failing (red) before the implementation that makes it pass (green), one slice at a time; refactoring is deferred to the delivery review; at sub-phase end the tests the change can affect run, and the full suite runs once when the last sub-phase is done, as PRD-06.R4 says
 - **Verification hint:** inspect the sub-agent transcript/handoff for a sub-phase: the test-red evidence must precede the implementing change; look for the named anti-patterns (implementation-coupled, tautological, horizontal slicing) in the produced tests.
 
 ## R17 — Two-axis delivery review
