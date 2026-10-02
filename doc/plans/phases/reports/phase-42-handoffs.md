@@ -249,3 +249,52 @@ $ git diff --stat -- . ':!process.md' ':!.claude/skills/timone-verify' ':!doc/pl
 ```
 
 The skill's count went from 9 to 10 with the new paragraph. `process.md` still counts 1 line, and now carries four markers on it (D1 twice, D2, D4).
+
+## 42c — Each building part runs the tests its change can affect, and everything runs whole once at the close
+
+**Built.** A building session no longer runs every suite whole at the end of each sub-phase. At the end of a sub-phase it runs the tests its change can affect, and every suite that takes under a minute, whole. The sub-phase's own validation steps still pass before the next sub-phase starts, but earlier sub-phases' validation steps no longer run again between sub-phases. At the close, when the last sub-phase's commit is in and before the completion report is written, every suite of the project runs whole once, and then every sub-phase's validation steps run once. The session decides once per phase which suites take under a minute: from the time the latest completion report records for each suite, or, when there is none, from one whole run before the first slice, stopped after one minute. Each handoff now names the tests and suites run at sub-phase end. The completion report has a new section, *Tests run*, that lists them per sub-phase, and then the close's run with the time each suite took.
+
+**Files touched.**
+- `.claude/skills/timone-execute/SKILL.md` — *The TDD loop inside a slice*: the *Rhythm* bullet rewritten, and a new bullet *Which suites take under a minute*. *Handoff-note template*: *Validation evidence* also names the tests and suites run at sub-phase end. *Closing the phase*: the first paragraph rewritten — the one run at the close, its order, the accepted risk, and a sentence saying that the next two paragraphs (superseded checkboxes, order of the runs) apply to that run. *Completion report template*: a new section `## Tests run` after *Sub-phase outcomes*.
+- `process.md` — the stage 6 paragraph only (line 44): *"Type-check regularly, run single test files during the loop, the full suite once at the end."* is now the loop sentence plus the rule, in two sentences after the marker.
+- `doc/plans/phases/reports/phase-42-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+1. **How the builder knows a suite takes under a minute.** The measure is the time of the suite's last whole run. The *Tests run* section now records, on the close's line, the time each suite's whole run took, and the next phase reads it there. The first phase a project builds under this rule has no such record. For that case I wrote one whole run of the suite before the first slice, stopped after one minute: a suite that finished takes under a minute, and a suite that was stopped does not. Two other answers were possible. "Treat a suite with no time as a minute or more" costs nothing, but on that first phase a fast unit suite would then run whole at no sub-phase end, and PRD-06.R4's verification hint looks for it at every sub-phase end. "Run it whole and time it" would run a slow browser suite whole twice on that phase, which is the cost the rule removes. The stopped run costs at most one minute per suite, once per project, and the report names it.
+2. **The orchestrating session decides, once per phase, and names the suites in each slice's prompt.** A slice context receives only the inputs the contract lists, and the earlier completion report is not one of them. Naming the suites in the prompt follows what the skill already does for the never-read rule ("say so in the slice's prompt"). The contract's six-item list is unchanged.
+3. **"The tests the change can affect"** is written as the tests of the files the sub-phase changed and the tests of the code that uses those files, with *"when you cannot tell whether a test can be affected, run it."* The plan and the ADR use the phrase without saying how to judge it. The builder has the code, so it judges from the code, and when in doubt the test runs.
+4. **The close paragraph now says "If a whole suite or a prior validation now fails"**. The old text named only a prior validation. A whole suite that fails at the close needs the same outcome, or the paragraph would not say what happens then.
+5. **Markers inside the two template code blocks use the short form** (`✏ ADR-0061:` and `✏ ADR-0061.`), as 42b did in the checking skill's report template. This skill had no marker inside a code block before; a link does not show there.
+6. **The *Tests run* section's "stated, never omitted" case** is a sub-phase that ran no tests: it says so, with the reason. A slice that changes rule text only, like this one, is that case.
+7. **Left as they were, because they stay true:** the look check's *"It runs after every prior slice's validation has been re-run (see *Closing the phase*)"* — that run is now the close's one run, which comes before the look check and the completion report; the close's list of conditions (*"every prior slice's validation still passes"*); the paragraph on a slice that breaks an earlier one still being committed; and the *Workflow* list, which never named the old re-runs either.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based. The four commands, run after the last edit:
+
+```
+$ git grep -n -E "full suite once\*\* at sub-phase end|after any slice that mutates shared state|re-check as soon as a slice" -- .claude/skills/timone-execute process.md; echo "exit: $?"
+exit: 1
+
+$ for f in process.md .claude/skills/timone-execute/SKILL.md; do git grep -c "ADR-0061" -- "$f" || echo "MISSING in $f"; done
+process.md:2
+.claude/skills/timone-execute/SKILL.md:5
+
+$ git grep -n "## Tests run" -- .claude/skills/timone-execute/SKILL.md
+.claude/skills/timone-execute/SKILL.md:286:## Tests run
+
+$ git diff --stat -- . ':!process.md' ':!.claude/skills/timone-execute' ':!doc/plans/phases/reports/phase-42-handoffs.md'
+(empty)
+```
+
+`process.md` counts 2 lines: line 44 (stage 6, this slice) and line 46 (stage 7, 42b). The skill counts 5 lines: *Rhythm*, the new bullet, the handoff template's evidence line, the close paragraph and the *Tests run* template. Line 286 lies between the completion report template's fences at lines 267 and 301, so the one `## Tests run` line is inside that template.
+
+- [x] From the skill alone, a reader can say what a sub-phase runs at its end, what runs at the close and in what order, and where the report lists it.
+  - Sub-phase end: *"**At sub-phase end, run the tests the change can affect, and every suite that takes under a minute, whole. Do not run the other suites whole:** every suite runs whole once, at the close (see *Closing the phase*)."* — *"The sub-phase's own validation steps still pass before the next sub-phase starts, as *The transition gate and escalation* says. Earlier sub-phases' validation steps do not run again until the close."* — *"A suite takes under a minute when its last whole run did."*
+  - Close and order: *"When the last sub-phase's commit is in, and before the completion report is written: first run every suite of the project whole, once; then run the validation steps of every sub-phase, the last one included, once."*
+  - Where it is listed: the completion report template's `## Tests run`: *"one line per sub-phase: its id, each test file its change could affect that it ran at its end, and each suite it ran whole. … Then one line for the close: every suite of the project run whole once, each with its result and the time its run took, and then every sub-phase's validation steps run once, in the order used, with the result."* And the handoff template's *Validation evidence*: *"then the tests and suites run at sub-phase end — each test file the change can affect, by name, and each suite run whole — with their results."*
+- [x] Stage 7's paragraph in `process.md` reads as 42b left it. The checksum of line 46 is the same before and after this slice (`c8d8b6a2…`), and `git diff -U0 process.md` has one hunk, `@@ -44 +44 @@`.
+- [x] Nothing else in stage 6 changed: TDD loop, gates, look check, commits and handoffs read as before. `git diff -U0` hunks in the skill are at old lines 137, 234, 248 and after 284 only: *Rhythm*, the handoff template's evidence line, the close's first paragraph and the new template section. The other TDD-loop bullets (red before green, seams, no speculative features, the three anti-patterns, refactoring, cases that cannot be driven red), the three gates, the commit rules, the sub-agent contract, both look checks, the transition gate, the handoff template's other fields, and the close's paragraphs on superseded checkboxes, order, committing a breaking slice and the close's conditions have no hunk. In `process.md` the word diff touches only the sentence *"Type-check regularly, run single test files during the loop, the full suite once at the end."*
+
+**What delivery must know.**
+- `process.md` stage 6 lists what a handoff note carries and what a completion report must hold. Neither list names the tests run at sub-phase end or the new *Tests run* section. The plan allowed one change to that paragraph, the test-rhythm sentence, so I did not add them. The skill carries both, and stage 6 says the layout belongs to the skill, so the two do not disagree. A reviewer may still want the lists to name it.
+- On the first phase a project builds under this rule, the build runs each suite with no recorded time once before the first slice, stopped after one minute. Someone counting whole browser-suite runs in that session (PRD-06.R4's verification hint) will see that stopped run as a second call of the suite. It is not a whole run, and the *Tests run* section names it.
+- The new bullet *Which suites take under a minute* and decision 2 add one thing the orchestrating session tells each slice. It is information about the project, not more of the plan.
