@@ -4,7 +4,7 @@
 - **Plan:** [phase-41.md](../phase-41.md) — breakdown [ticket-164.md](../../breakdowns/ticket-164.md), `Approved by fvermaut 2026-09-26 — 2 pieces`; this is piece 2, [#166](https://github.com/fvermaut/timone/issues/166).
 - **Requirements:** PRD-05.R11 (MUST) — `draft`; PRD-05.R20 (SHOULD) — `draft`. Execution leaves both statuses as they are; verification decides.
 - **Branch:** `timone/166-the-old-code-between-steps-is-removed`
-- **Departures:** [phase-41-departures.md](phase-41-departures.md) — 12 entries.
+- **Departures:** [phase-41-departures.md](phase-41-departures.md) — 15 entries.
 
 ## Summary
 
@@ -31,6 +31,9 @@ An older ledger still loads. A failed run is read as cancelled and keeps a one-l
 | 41k — the README and the manual describe the runner | built as planned; diagrams checked on GitHub | `f61186f` |
 | 41l — the live check | replay 19 of 19; the real ledger converted; scratch-app #71 reached pull request #73 for $33.25, stopping only for fvermaut; found two faults, fixed in 41m — see [phase-41-live-gate.md](phase-41-live-gate.md) | — |
 | 41m — what the live check found on the real ledger | added during 41l, built | `d82be1a` |
+| 41n — the review's code findings that change behaviour | added after delivery, on fvermaut's answers on #189; built | `a30bdd4` |
+| 41o — the review's tidy-up, no change in behaviour | built; 1,411 tests before and after, 29 test names changed | `a0fa4d7` |
+| 41p — the skills, the manual, the glossary and PRD-05.R11's words | built; R11 clause 2 reworded on fvermaut's answer | `bcc18b1` |
 
 ## Screen comparison
 
@@ -55,3 +58,7 @@ Every one is an entry in [phase-41-departures.md](phase-41-departures.md), with 
 - The replay was run on this build: 19 of 19, three tries each, $2.50, at `3afc263` (recorded in phase-40-replay.md as run 8). 41m changed code after it, in the takeover and the ledger read, neither of which the replay exercises.
 - The checks for PRD-05.R11 and R19 test what this phase removed on purpose (`timone retry` refusing on a runner project; the `driver` line). Verification re-authors them.
 - Older faults found on the way are filed: #186, #187, #188.
+
+## ✏ 2026-10-02 — closed again after 41n to 41p
+
+The phase was delivered as [pull request #189](https://github.com/fvermaut/timone/pull/189). Its two reviews found 12 things. fvermaut answered: fix them first, change PRD-05.R11's words rather than the code, and add a `Falsified-by` line to R11 and R20. 41n to 41p did the first two; the `Falsified-by` lines name verification's own checks, so the re-check writes them. 1,411 tests pass, and the dry replay passes 19 of 19. Code changed after replay run 9, so one more replay is owed on the final commit.
