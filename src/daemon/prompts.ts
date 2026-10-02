@@ -1156,7 +1156,7 @@ function planningPrompt(context: PromptContext): string {
  * Structural rather than `Run`, so this module stays a pure prompt builder
  * with no opinion about where a run is stored — a real `Run` satisfies it.
  */
-export interface StoppedRun {
+export interface TakeoverRun {
   id: string;
   /** The run's step: the one running, or the last one it started. */
   stage?: PipelineStage;
@@ -1217,9 +1217,9 @@ export interface TakeoverFacts {
  * posted at the instant the wait opened, which only the old code between
  * steps arranged.
  */
-export function escalationPrompt(
+export function takeoverPrompt(
   project: string,
-  run: StoppedRun,
+  run: TakeoverRun,
   ticket: TicketThread,
   facts: TakeoverFacts,
 ): string {
@@ -1330,7 +1330,7 @@ export function escalationPrompt(
  * runner session, a thread read, a notice given — are left out: the
  * decisions and the steps say what they led to.
  */
-function recordBlock(run: StoppedRun, record: TakeoverFacts["record"]): string {
+function recordBlock(run: TakeoverRun, record: TakeoverFacts["record"]): string {
   if (!record.ok) {
     return `**The run record cannot be read.** ${record.error.message}`;
   }
@@ -1431,7 +1431,7 @@ function conversationBlock(stage: PipelineStage | undefined): string {
  * without, and as text "…:00Z" sorts after "…:00.500Z".
  */
 function namedWordsBlock(
-  run: StoppedRun,
+  run: TakeoverRun,
   ticket: TicketThread,
   people: readonly string[],
 ): string {

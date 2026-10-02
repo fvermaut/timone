@@ -391,39 +391,7 @@ describe("pollOnce — resilience", () => {
   });
 });
 
-describe("pollOnce — resuming a run whose human answered", () => {
-  /** A thread whose comments the test controls. */
-  function threadedAdapter(
-    comments: TicketThread["comments"],
-    labels: string[] = ["timone", "triage:feature"],
-  ): {
-    adapter: TicketingAdapter;
-    posted: PostedComment[];
-  } {
-    const posted: PostedComment[] = [];
-    const base = ticket(6, { labels });
-    const adapter: TicketingAdapter = {
-      ...noBranches,
-    ...noFiles,
-    ...noMerges,
-    ...noRunnerCalls,
-    ...noStepWrites,
-      async listMarkedTickets(): Promise<Ticket[]> {
-        return [base];
-      },
-      ...noOtherListings,
-      async getTicket(): Promise<TicketThread> {
-        return { ...base, comments };
-      },
-      async postComment(project, number, body): Promise<void> {
-        posted.push({ project: project.name, number, body });
-      },
-      async applyLabel(): Promise<void> {},
-      ...noPullRequests,
-    };
-    return { adapter, posted };
-  }
-
+describe("pollOnce — a run queued behind a park that holds nothing", () => {
   it("starts a run left queued behind a park that no longer holds anything", async () => {
     // The exact ledger phase 11 left on disk: #4 parked holding the project
     // under the old rule, #6 queued behind it forever. Written as a file
@@ -517,67 +485,6 @@ describe("reclaiming a run its daemon left behind", () => {
         now: new Date(at).toISOString(),
       });
     }
-  }
-
-  /**
-   * A tracker for a stale run that had opened pull request #19, answering for
-   * that pull request in `state`. The reclaim tests above deal in runs that
-   * never got as far as one; these deal in the run that did.
-   */
-  function staleReviewAdapter(state: "open" | "merged" | "closed"): {
-    adapter: TicketingAdapter;
-    posted: PostedComment[];
-    closed: string[];
-  } {
-    const posted: PostedComment[] = [];
-    const closed: string[] = [];
-    const base = ticket(7);
-    const pull: PullRequestThread = {
-      number: 19,
-      title: "The volatility arithmetic",
-      url: "https://github.com/fvermaut/ivtrends/pull/19",
-      state,
-      headSha: "aaaaaaa",
-      comments: [],
-    };
-    const adapter: TicketingAdapter = {
-      ...noBranches,
-    ...noFiles,
-    ...noMerges,
-    ...noRunnerCalls,
-    ...noStepWrites,
-      async listMarkedTickets(): Promise<Ticket[]> {
-        return [base];
-      },
-      ...noOtherListings,
-      async getTicket(): Promise<TicketThread> {
-        return { ...base, comments: [] };
-      },
-      async postComment(project, number, body): Promise<void> {
-        posted.push({ project: project.name, number, body });
-      },
-      async applyLabel(): Promise<void> {},
-      async findPullRequest() {
-        return { ...pull };
-      },
-      async getPullRequestThread(): Promise<PullRequestThread> {
-        return pull;
-      },
-      async postPullRequestComment(): Promise<void> {},
-      async upsertPullRequestComment(): Promise<void> {},
-      async closeTicket(_project, number, reason): Promise<void> {
-        closed.push(`${number}:${reason}`);
-      },
-    };
-    return { adapter, posted, closed };
-  }
-
-  /** A stale run that got as far as opening pull request #19. */
-  function staleWithPullRequest(store: RunStore): void {
-    const { run } = store.register("scratch-app", 7);
-    store.activate(run.id, "session-gone");
-    store.claimBranch(run.id, "timone/7-slow");
-    store.recordPullRequest(run.id, 19);
   }
 
   it("never reclaims a long session that is still saying it is alive", async () => {
@@ -3869,7 +3776,7 @@ describe("every project is driven by the runner", () => {
     });
   }
 
-  it("asks the runner to wake for a new marked ticket on a project whose entry names no driver", async () => {
+  it("asks the runner to wake for a new marked ticket", async () => {
     const store = newStore();
     const manifest = manifestWith("scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7)] });

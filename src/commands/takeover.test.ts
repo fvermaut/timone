@@ -20,7 +20,7 @@ import {
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import { RunStore, type Run } from "../daemon/runs.js";
-import { escalationPrompt } from "../daemon/prompts.js";
+import { takeoverPrompt } from "../daemon/prompts.js";
 import { RUNNER_DEFAULT_WAIT } from "../runner/session.js";
 import { acquireStateLock, stateLockPath } from "../daemon/lock.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
@@ -328,7 +328,7 @@ describe("resolveTakeover", () => {
     });
     // Abandoned, not broken, and never parked: the words a person reads must
     // not hand them a fault to look for, nor a chunk to count.
-    const said = resolution.kind === "escalation" ? "" : resolution.message;
+    const said = resolution.kind === "open-session" ? "" : resolution.message;
     // ✏ 2026-10-02: a cancel holds every ticket since 40u, step or not, and
     // the cycle passes a held ticket over. So reopening and marking it starts
     // nothing: the way back is to reopen it and take the hold off. Until then
@@ -1147,7 +1147,7 @@ describe("a takeover of a ticket with no run", () => {
       { manifest, store, adapter },
     );
 
-    expect(resolution.kind).toBe("escalation");
+    expect(resolution.kind).toBe("open-session");
     expect(resolution).not.toHaveProperty("stage");
     const runs = store.runsForTicket("scratch-app", unmarkedTicket.number);
     expect(runs).toHaveLength(1);
@@ -1194,7 +1194,7 @@ describe("a takeover of a ticket with no run", () => {
     });
     // The session bound to no step, built from the ticket read once.
     expect(during[0]?.prompt).toBe(
-      escalationPrompt("scratch-app", during[0]?.run as Run, decisionThread, {
+      takeoverPrompt("scratch-app", during[0]?.run as Run, decisionThread, {
         record: { ok: true, value: [] },
         namedPeople: [],
       }),
@@ -1284,7 +1284,7 @@ describe("a takeover that opens a new run, at the step its `wayfinder:` label na
         { manifest, store, adapter: fakeAdapter([ticket]).adapter },
       );
 
-      expect(resolution.kind).toBe("escalation");
+      expect(resolution.kind).toBe("open-session");
       expect(store.runsForTicket("scratch-app", ticket.number)).toEqual([
         expect.objectContaining({
           status: "parked",
@@ -1388,7 +1388,7 @@ describe("a takeover that opens a new run, at the step its `wayfinder:` label na
       );
 
       expect(resolution).toMatchObject({
-        kind: "escalation",
+        kind: "open-session",
         run: { id: "scratch-app#12/2", status: "parked", stage: "wayfinding" },
       });
       expect(store.get(run.id)?.status).toBe(end);
@@ -1503,7 +1503,7 @@ describe("a run the runner waits on", () => {
       { manifest, store, adapter: fakeAdapter().adapter },
     );
 
-    expect(resolution.kind).toBe("escalation");
+    expect(resolution.kind).toBe("open-session");
     expect(resolution).not.toHaveProperty("stage");
   });
 
@@ -1549,7 +1549,7 @@ describe("a run the runner waits on", () => {
     expect(during).toHaveLength(1);
     expect(during[0]?.run).toMatchObject({ status: "active", stage: "requirements" });
     expect(during[0]?.prompt).toBe(
-      escalationPrompt("scratch-app", during[0]?.run as Run, thread, {
+      takeoverPrompt("scratch-app", during[0]?.run as Run, thread, {
         record: { ok: true, value: [] },
         namedPeople: [],
       }),
@@ -1599,7 +1599,7 @@ describe("a run the runner waits on", () => {
     );
   });
 
-  it("gives the run back to the runner on a project whose entry names no driver, and leaves the daemon a request to wake it", async () => {
+  it("gives the run back to the runner, and leaves the daemon a request to wake it", async () => {
     // Every project is driven by the runner now, so the way back does not
     // depend on what the project's entry says.
     const dir = mkdtempSync(join(tmpdir(), "timone-takeover-no-driver-"));

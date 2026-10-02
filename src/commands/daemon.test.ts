@@ -141,14 +141,6 @@ function standInRunner(store: RunStore, adapter: TicketingAdapter): RunnerDriver
   });
 }
 
-/**
- * A root with no project checkouts under it, for the tests that are about the
- * lock and the cadence rather than about what a merge means. Nothing in them
- * reaches a breakdown, and a directory that does not exist is read as "this
- * ticket has no list of pieces" rather than throwing.
- */
-const noCheckouts = "/nowhere";
-
 describe("runDaemon — one writer, and it says who holds it", () => {
   it("refuses a second daemon while the first holds the ledger, naming the holder", async () => {
     const { store, statePath } = clockedStore();
@@ -170,7 +162,6 @@ describe("runDaemon — one writer, and it says who holds it", () => {
       manifest: manifest,
       store,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter: blocking,
@@ -185,7 +176,6 @@ describe("runDaemon — one writer, and it says who holds it", () => {
       manifest: manifest,
       store: second,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter: other,
@@ -282,7 +272,6 @@ describe("runDaemon — it does not start while a project names nobody who may i
       manifest: manifestNaming(),
       store,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter,
@@ -307,7 +296,6 @@ describe("runDaemon — it does not start while a project names nobody who may i
       manifest: manifestNaming("fvermaut"),
       store,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter,
@@ -360,7 +348,6 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     await runDaemon({
       manifest: manifest,
       store,
-      root: noCheckouts,
       intervalMs,
       staleAfterMs: FOUR_INTERVALS,
       once: true,
@@ -423,7 +410,6 @@ describe("runDaemon — the requests waiting beside the ledger it holds", () => 
       manifest: manifest,
       store,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter,
@@ -646,7 +632,6 @@ describe("the daemon says when its own process is running old code", () => {
       manifest: manifest,
       store,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter,
@@ -714,7 +699,6 @@ describe("the daemon says when its own process is running old code", () => {
       manifest: manifest,
       store: stopping,
       statePath,
-      root: noCheckouts,
       intervalMs: 0,
       once: false,
       adapter,

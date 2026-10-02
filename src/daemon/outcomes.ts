@@ -6,8 +6,9 @@ import { NEEDED_FROM_YOU } from "../adapters/ticketing.js";
 
 /**
  * The longest ask this will carry onto a run. Past it, what the stage wrote
- * is a paragraph rather than a line, and the standing note it would land in
- * is one line — so the generic sentence is the honest thing to say instead.
+ * is a paragraph rather than a line, and the wait it would become is shown on
+ * one line of `timone status` — so the wait the run already had, or the
+ * runner's default words, is the honest thing to say instead.
  */
 export const LONGEST_ASK = 300;
 

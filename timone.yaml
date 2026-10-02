@@ -5,7 +5,7 @@ identity:
   login: timone-agent[bot]
   commit_email: 319428833+timone-agent[bot]@users.noreply.github.com
 # The operator's own forge login. Only named people may instruct the runner;
-# a runner project that names no instructors is instructed by the operator.
+# a project that names no instructors is instructed by the operator.
 operator: fvermaut
 projects:
   scratch-app:

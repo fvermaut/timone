@@ -15,12 +15,12 @@ import { stageLabel } from "./pipeline.js";
 import {
   PROMPTED_STAGES,
   approvalRecordPrompt,
-  escalationPrompt,
   stagePrompt,
+  takeoverPrompt,
   workBranch,
   type PromptContext,
-  type StoppedRun,
   type TakeoverFacts,
+  type TakeoverRun,
 } from "./prompts.js";
 
 const project: TicketingProject = {
@@ -679,7 +679,7 @@ describe("the rule every step carries for when it cannot go on", () => {
 });
 
 describe("the takeover prompt for a run the runner waits on (41g)", () => {
-  const waiting: StoppedRun = {
+  const waiting: TakeoverRun = {
     id: "scratch-app#6/1",
     stage: "requirements",
     branch: "timone/6-typing-in-the-box",
@@ -691,7 +691,7 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
   const facts: TakeoverFacts = { record: { ok: true, value: [] }, namedPeople: ["fvermaut"] };
 
   it("names the run's step and what it waits on, and says nothing about a hand-back line", () => {
-    const prompt = escalationPrompt("scratch-app", waiting, ticket, facts);
+    const prompt = takeoverPrompt("scratch-app", waiting, ticket, facts);
 
     expect(prompt).toContain(stageLabel("requirements"));
     expect(prompt).toContain("your answer to the two questions in my last comment");
@@ -705,14 +705,14 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
     ["clarification", "timone-grill"],
     ["charting", "timone-wayfind"],
   ] as const)("tells the session to hold the %s conversation with the person, with `%s`", (stage, skill) => {
-    const prompt = escalationPrompt("scratch-app", { ...waiting, stage }, ticket, facts);
+    const prompt = takeoverPrompt("scratch-app", { ...waiting, stage }, ticket, facts);
 
     expect(prompt).toContain(`\`${skill}\``);
     expect(prompt).toMatch(/hold that conversation with the person/i);
   });
 
   it("holds no conversation for a step that is not one", () => {
-    const prompt = escalationPrompt("scratch-app", { ...waiting, stage: "execution" }, ticket, facts);
+    const prompt = takeoverPrompt("scratch-app", { ...waiting, stage: "execution" }, ticket, facts);
 
     expect(prompt).not.toMatch(/hold that conversation/i);
     expect(prompt).not.toContain("timone-grill");
@@ -722,7 +722,7 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
   it("says the runner wakes when the session ends and reads what it left on the ticket", () => {
     // Nothing in the terminal reaches the runner. The ticket does, so the
     // session's last act is to write there what it did and what comes next.
-    const prompt = escalationPrompt("scratch-app", waiting, ticket, facts);
+    const prompt = takeoverPrompt("scratch-app", waiting, ticket, facts);
 
     expect(prompt).toMatch(/when this session ends, the runner wakes/i);
     expect(prompt).toMatch(/reads what you left on the ticket/i);
@@ -730,7 +730,7 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
   });
 
   it("says what the run record says happened on this run, and on no other", () => {
-    const prompt = escalationPrompt("scratch-app", waiting, ticket, {
+    const prompt = takeoverPrompt("scratch-app", waiting, ticket, {
       ...facts,
       record: {
         ok: true,
@@ -749,7 +749,7 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
   });
 
   it("says so when the run record cannot be read", () => {
-    const prompt = escalationPrompt("scratch-app", waiting, ticket, {
+    const prompt = takeoverPrompt("scratch-app", waiting, ticket, {
       ...facts,
       record: { ok: false, error: { line: 3, message: "The run record .timone/records/scratch-app/6.jsonl cannot be read: line 3 is not JSON." } },
     });
@@ -767,7 +767,7 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
       ],
     };
 
-    const prompt = escalationPrompt("scratch-app", waiting, thread, facts);
+    const prompt = takeoverPrompt("scratch-app", waiting, thread, facts);
     const since = prompt.slice(
       prompt.indexOf("--- what they wrote ---"),
       prompt.indexOf("--- end of what they wrote ---"),
@@ -784,7 +784,7 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
     // The ledger writes an instant with milliseconds, and GitHub writes one
     // without. As text, "…T10:00:00Z" sorts after "…T10:00:00.500Z", though
     // it is half a second before it.
-    const opened: StoppedRun = {
+    const opened: TakeoverRun = {
       ...waiting,
       wait: { on: "an answer", opened: "2026-08-03T10:00:00.500Z" },
     };
@@ -796,7 +796,7 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
       ],
     };
 
-    const prompt = escalationPrompt("scratch-app", opened, thread, facts);
+    const prompt = takeoverPrompt("scratch-app", opened, thread, facts);
     const since = prompt.slice(
       prompt.indexOf("--- what they wrote ---"),
       prompt.indexOf("--- end of what they wrote ---"),
@@ -811,7 +811,7 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
     // give for a session in which no step was running.
     const { stage: _none, ...noStep } = waiting;
 
-    const prompt = escalationPrompt("scratch-app", noStep, ticket, facts);
+    const prompt = takeoverPrompt("scratch-app", noStep, ticket, facts);
 
     expect(prompt).toContain(
       "Timone-Stage: <the stage whose skill you ran, or `interactive` if none>",
@@ -820,7 +820,7 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
   });
 });
 
-describe("the escalation prompt", () => {
+describe("the takeover prompt for a run that stopped at a step", () => {
   // ADR-0033 D5. The session this prompt starts is bound to no stage. ✏
   // 2026-09-30: it is the prompt for every takeover of a run, and the run
   // here is one that stopped at a step.
@@ -864,7 +864,7 @@ describe("the escalation prompt", () => {
     // Asserted by identity against every prompt a stage has, not by looking
     // for a word: a session handed a stage's instructions is the bound
     // session ADR-0033 rejected, whatever it is called.
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     for (const stage of PROMPTED_STAGES) {
       expect(prompt).not.toBe(
@@ -877,14 +877,14 @@ describe("the escalation prompt", () => {
   });
 
   it("carries the ticket and its thread, with the voices told apart", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toContain("the page is slow when I add many items");
     expect(prompt).toContain("how many times do I need to say YES?");
   });
 
   it("says where the run stopped, and what it holds", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toContain("scratch-app#31/1");
     expect(prompt).toContain("verification");
@@ -895,7 +895,7 @@ describe("the escalation prompt", () => {
     // ✏ 2026-09-30: the account is read in the thread, not quoted apart. It
     // was found by the comment posted at the instant the wait opened, which
     // only the old code between steps arranged.
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toContain("the check would prove nothing");
     // The account is evidence, not an instruction — and the prompt has to say
@@ -907,7 +907,7 @@ describe("the escalation prompt", () => {
   });
 
   it("carries what a named person wrote after the run began waiting", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/how many times do I need to say YES\?/);
   });
@@ -915,14 +915,14 @@ describe("the escalation prompt", () => {
   it("copes with a stop nobody wrote an account for, and with silence after it", () => {
     const bare: TicketThread = { ...stuck, comments: [] };
 
-    const prompt = escalationPrompt("scratch-app", run, bare, facts);
+    const prompt = takeoverPrompt("scratch-app", run, bare, facts);
 
     expect(prompt).toContain("scratch-app#31/1");
     expect(prompt).not.toContain("undefined");
   });
 
   it("grants the authority a stage does not have, in as many words", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/whichever .*skill/i);
     expect(prompt).toMatch(/depart/i);
@@ -932,7 +932,7 @@ describe("the escalation prompt", () => {
     // The only audit an unbound session has. Its absence is a failure, not a
     // nit: nothing else records what was done or why it departed from a
     // default.
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/commit/i);
     expect(prompt).toMatch(/record/i);
@@ -951,7 +951,7 @@ describe("the escalation prompt", () => {
     // carried the whole feature to a pull request in the terminal. The rule
     // needs the reason with it — a rule with no reason is one a capable
     // session talks itself out of.
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/do not write .*code/i);
     expect(prompt).toMatch(/pull request/i);
@@ -960,13 +960,13 @@ describe("the escalation prompt", () => {
 
   it("names what it may write instead", () => {
     // The line is artifacts, not code: the decision, the promises, the record.
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/requirements|promises|decision/i);
   });
 
   it("names the other honest ending, for work that should not happen", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck, facts);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toContain("timone cancel scratch-app#31");
   });

@@ -13,7 +13,7 @@ import {
 } from "../adapters/ticketing.js";
 import { loadManifest, namedPeople, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
-import { escalationPrompt } from "../daemon/prompts.js";
+import { takeoverPrompt } from "../daemon/prompts.js";
 import { wayfinderStage } from "../daemon/pipeline.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
@@ -48,7 +48,7 @@ export type TakeoverResolution =
    * stage, for a run parked on a conversation, went with the old code
    * between steps: the ledger loads every old kind of wait as the runner's.
    */
-  | { kind: "escalation"; run: Run }
+  | { kind: "open-session"; run: Run }
   /** Nothing to take over; the message says what *is* happening instead. */
   | { kind: "nothing-to-do"; message: string };
 
@@ -202,7 +202,7 @@ async function findTakeover(
       // to no step. The answers this command used to give for a gate or a
       // review, and the conversation it opened at a stage, went with the old
       // code between steps.
-      return { kind: "escalation", run };
+      return { kind: "open-session", run };
     case "done":
     case "cancelled": {
       // ✏ 2026-10-02 (41m): **a settled run on an open ticket gets a new
@@ -224,10 +224,9 @@ function settledMessage(target: TakeoverTarget, run: Run, store: RunStore): stri
     return `${target.project} #${target.ticket} is finished — see the ticket.`;
   }
   // Abandoned, not broken — so the words say it was cancelled, and never
-  // that something went wrong. Its reason lives in `cancellation` rather
-  // than `failure` for exactly that reason, and dropping the clause when
-  // there is none beats a sentence reading "cancelled: " with nothing
-  // after it.
+  // that something went wrong. Its reason is in `cancellation`, and dropping
+  // the clause when there is none beats a sentence reading "cancelled: "
+  // with nothing after it.
   const because =
     run.cancellation === undefined || run.cancellation === ""
       ? "."
@@ -326,7 +325,7 @@ function enrolFromTracker(
     waitCursor: created.updatedAt,
     resolvableBy: [stage ?? "triage"],
   });
-  return { kind: "escalation", run };
+  return { kind: "open-session", run };
 }
 
 /** What a ticket behind another on its project is told. */
@@ -430,7 +429,7 @@ export async function runTakeover(
   process.once("SIGTERM", giveBack);
 
   try {
-    return await escalate(target, claimed.run, deps, log);
+    return await openSession(target, claimed.run, deps, log);
   } finally {
     process.off("SIGINT", giveBack);
     process.off("SIGTERM", giveBack);
@@ -746,7 +745,7 @@ function releaseClaim(
  * bound to the stage a run was parked on for a conversation, went with the
  * old code between steps.
  */
-async function escalate(
+async function openSession(
   target: TakeoverTarget,
   run: Run,
   deps: TakeoverDeps,
@@ -757,7 +756,7 @@ async function escalate(
     repoUrl: deps.manifest.projects[target.project].repo_url,
   };
   const thread = await deps.adapter.getTicket(project, target.ticket);
-  const prompt = escalationPrompt(target.project, run, thread, {
+  const prompt = takeoverPrompt(target.project, run, thread, {
     record: readRecord(deps.root, target.project, target.ticket),
     namedPeople: namedPeople(deps.manifest, target.project),
   });
@@ -788,7 +787,7 @@ async function takeover(
     log(resolution.message);
     return 1;
   }
-  return escalate(target, resolution.run, deps, log);
+  return openSession(target, resolution.run, deps, log);
 }
 
 /**

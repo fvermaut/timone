@@ -108,11 +108,10 @@ export async function tryMergeChunkZero(
 /**
  * The merge itself, with a thrown git failure reduced to a refusal.
  *
- * ✏ 2026-09-30: it was exported for the old spawner, whose tests reached the
- * merge through it. The spawner was removed, and nothing outside this file
- * calls it now.
+ * Not exported: it takes no approval, so only {@link tryMergeChunkZero} may
+ * call it.
  */
-export async function attemptMerge(
+async function attemptMerge(
   deps: ChunkZeroDeps,
   project: TicketingProject,
   branch: string | undefined,

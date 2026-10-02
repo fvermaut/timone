@@ -371,20 +371,6 @@ export interface RunDaemonOptions {
    * `pollOnce` is reachable without one exactly as it always was.
    */
   statePath?: string;
-  /**
-   * The timone root.
-   *
-   * ✏ **Narrowed by phase 30's 30d.** It used to be here so the poll cycle
-   * could reach `projects/<name>/` and read a ticket's breakdown; the cycle
-   * reads the forge now and takes no root at all
-   * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)).
-   * What it is still for is the **timone** checkout — the spawner's version
-   * pin and its refusal to start on a dirty tree (ADR-0041 D2).
-   *
-   * ✏ 2026-09-30: nothing here reads it since the spawner went. The runner
-   * reads the same root from its own wiring.
-   */
-  root: string;
   intervalMs: number;
   /** How long a run may go silent before it is treated as orphaned. */
   staleAfterMs?: number;
@@ -754,8 +740,6 @@ export function registerDaemonCommand(program: Command): void {
         manifest,
         store,
         statePath,
-        // The timone root. The cycle takes none of its own.
-        root: process.cwd(),
         // One adapter for every bound project: which projects get previews is
         // the manifest's answer, not this command's (ADR-0021).
         previews: new DockerPreviewAdapter({ root: process.cwd() }),

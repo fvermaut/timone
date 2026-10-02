@@ -130,9 +130,8 @@ export interface RenderStatusOptions {
    * on can show what it has spent against its limit
    * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
    *
-   * **Read only for runs of projects the runner drives**, and only for the
-   * runs this command names: a project the daemon drives has no record, and
-   * reading a file per ticket there would cost time and say nothing.
+   * **Read only for the runs this command names**, one file per ticket, on
+   * every project: the runner drives them all.
    *
    * Absent means say nothing about spending, which is what a fixture wants.
    */

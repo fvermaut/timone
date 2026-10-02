@@ -1915,3 +1915,79 @@ The test count is unchanged: case (4) was changed, not added to. `git status --s
 - [x] The last command prints only the line in `normaliseWait`, which is older than this phase. **PASS**
 
 The second bullet under *What 41o and 41p must know* above is out of date: the message now names the mark, and takes the hold off only if the ticket has it.
+
+## 41o — The review's tidy-up findings, with no change in what the code does
+
+**Built.** No behaviour changed. Standards findings 1, 2, 3, 4 (the names), 5 and 9 of the delivery review are done. (1) `RunDaemonOptions.root`, which nothing read, is gone, with the line at the call site and the eight test arguments. (2) `attemptMerge` is no longer exported, so only `tryMergeChunkZero`, which requires an approval, can call it. (3) The three test helpers with no caller in `poll.test.ts` are deleted. (4) The takeover's names are takeover names: the resolution kind `escalation` is `open-session`, `escalate` is `openSession`, `escalationPrompt` is `takeoverPrompt`, and `StoppedRun` is `TakeoverRun`. `ASK_CHECK_MODEL` and `ASK_CHECK_TIMEOUT_MS` are `CONSULT_MODEL` and `CONSULT_TIMEOUT_MS`, and their comment says the one question they serve now: whether a reply at the spending limit means "go on". (5) Each comment the review quotes now says what the code does, including the two 41n named (`settledMessage` in `takeover.ts`, and the doc of `heldStepWayOut` in `dropped.ts`). (9) The step-table test, the describe that no longer holds a resume, and three test names are named for behaviour.
+
+**Files touched.**
+
+- `src/commands/daemon.ts` — `RunDaemonOptions.root` and its doc deleted; `root: process.cwd()` and its comment deleted at the call site.
+- `src/commands/daemon.test.ts` — the eight `root: noCheckouts,` lines deleted, and the constant `noCheckouts` with its doc, which had no other use.
+- `src/daemon/chunk-zero.ts` — `attemptMerge` not exported; its doc says why.
+- `src/daemon/poll.test.ts` — `threadedAdapter`, `staleReviewAdapter` and `staleWithPullRequest` deleted. The describe *pollOnce — resuming a run whose human answered* is now *pollOnce — a run queued behind a park that holds nothing*. *…asks the runner to wake for a new marked ticket on a project whose entry names no driver* is now *…asks the runner to wake for a new marked ticket*.
+- `src/commands/takeover.ts` — the renames; the `settledMessage` comment no longer names `failure`.
+- `src/commands/takeover.test.ts` — the renames follow (import, five `kind` checks, two prompt calls); *…gives the run back to the runner on a project whose entry names no driver, and leaves the daemon a request to wake it* is now *…gives the run back to the runner, and leaves the daemon a request to wake it*.
+- `src/daemon/prompts.ts` — `TakeoverRun`, `takeoverPrompt`; the two private functions that take the run follow.
+- `src/daemon/prompts.test.ts` — the renames follow (import, every call, two typed constants). The describe *the escalation prompt* is now *the takeover prompt for a run that stopped at a step* (decision 2).
+- `src/daemon/consult.ts` — `CONSULT_MODEL`, `CONSULT_TIMEOUT_MS`, and their doc.
+- `src/daemon/dropped.ts` — the doc of `heldStepWayOut`.
+- `src/commands/status.ts` — the doc of `RenderStatusOptions.records`.
+- `src/daemon/outcomes.ts` — the doc of `LONGEST_ASK`.
+- `src/daemon/pipeline.ts` — "the graph" is "the step table" twice; the `clarification` row's comments.
+- `timone.yaml` — the comment on `operator`.
+- `src/daemon/pipeline.test.ts` — *gives %s the same label, model, effort and branch as on main* is now *gives %s its label, model, effort and branch*; *has the same steps, in the same order* is now *lists every step, in order*; the local `onMain` is `table`, and its comment says what it holds (decision 3).
+- `src/commands/status.test.ts` — *shows what a ticket has spent on a project whose entry names no driver, against the default limit* is now *shows what a ticket has spent against the default limit*.
+- `doc/plans/phases/reports/phase-41-handoffs.md` — this section.
+
+Every importer of a renamed name is in this list. `src/daemon/poll.ts` reads the takeover resolution but only compares it with `nothing-to-do`, so it needed no change. `src/daemon/consult.test.ts` does not import the two constants. No file outside the grant was touched.
+
+**Decisions taken inside the slice.**
+
+1. **The names are the ones the plan gives as examples**: `open-session`, `openSession`, `takeoverPrompt`, `TakeoverRun`. The resolution kind is never written to disk: the `claim-takeover` request carries the project, the ticket and the holder, not the kind. So renaming it changes nothing a running daemon or an older ledger reads.
+2. **The describe *the escalation prompt* was renamed** to *the takeover prompt for a run that stopped at a step*. It was named after the function, and its own comment says the run in it is one that stopped at a step. This renames its 12 tests. The test *is not a stage, and is not listed as one* still checks that `"escalation"` is not in `PROMPTED_STAGES`. That is the old stage's name, not the takeover's, so it was left.
+3. **The step-table test is renamed, not deleted.** The plan says to name it for what it checks. The list it compares against is still written out by hand; its comment keeps the dated note on where it came from. The describe keeps its name, *what the runner reads from the step table (41h)*: it already says what it checks.
+4. **The clarification row's dated note stays, in the past tense.** The header of the step table says each dated Sonnet note records why that row was stepped down. So the note says what the work was then, and that the written answer was removed, instead of being deleted.
+5. **`dropped.ts` keeps its history sentence, shortened.** The fault it records (telling a ticket to remove a label it does not carry) can still happen for a ticket cancelled before 40u. The half about "a stop that is not coming" stopped being true when every cancel began to hold its ticket, so it went.
+
+**Validation evidence.** No behaviour-carrying code, so no seams and no red-green. As the orchestrator asked, a rename is proved to change nothing by the suite and the build only. One more check: every test name was saved before and after (`vitest run --reporter=json`), and the two lists were compared.
+
+```
+before: total 1411 passed 1411 failed 0
+after:  total 1411 passed 1411 failed 0
+only before: 29    only after: 29    in both: 1382
+renamed, by file: status.test.ts 1, takeover.test.ts 1, pipeline.test.ts 13, poll.test.ts 2, prompts.test.ts 12
+```
+
+The 29 are the names listed above: 13 in the step-table describe, 12 in the renamed prompt describe, one test moved with its renamed describe in `poll.test.ts`, and the three driver names. Every test passed before and after.
+
+`tsc --noUnusedLocals`, before and after, differs only by the three helpers. The six other entries it lists are older than this slice and outside finding 3 (`dirname` in `daemon.test.ts`, `enqueue` in `takeover.test.ts`, `readBreakdown` in `breakdown.test.ts`, two in `hooks.test.ts`, `z` in `lock.ts`).
+
+Validation commands, as run:
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+> timone@0.1.0 build
+> tsc
+ Test Files  56 passed (56)
+      Tests  1411 passed (1411)
+$ npx tsc --noEmit --noUnusedLocals 2>&1 | grep -c "threadedAdapter\|staleReviewAdapter\|staleWithPullRequest" ; echo "(expected 0)"
+0
+(expected 0)
+$ grep -rnw "escalationPrompt\|ASK_CHECK_MODEL\|StoppedRun" src --include='*.ts' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' ; echo "exit: $? (expected 1)"
+exit: 1 (expected 1)
+```
+
+The same grep without the comment filter, and with `ASK_CHECK_TIMEOUT_MS`, `escalate` and `noCheckouts` added, finds nothing either. `git status --short .timone` is empty.
+
+- [x] The number of tests is unchanged from 41n's end: 1411 before, 1411 after. **PASS**
+- [x] `npm run build && npm test`: 1411 passed. **PASS**
+- [x] The three helpers: 0 lines. **PASS**
+- [x] The old names: exit 1. **PASS**
+
+**What 41p and delivery must know.**
+
+- **Docs outside `src/` that name the old names.** `escalationPrompt` and `StoppedRun` are named only in plans and reports (`phase-25.md`, `phase-26.md`, `phase-41.md`, this file, `phase-41-delivery.md`), and `ASK_CHECK_MODEL` only in `phase-39-complete.md`, `phase-41.md`, this file and `phase-41-delivery.md`. Those are records and were not edited. Nothing under `.claude/skills/`, `manual/`, `CONTEXT.md` or `doc/specs/` names them.
+- **`dist/` is built from this slice's code.** The running daemon still runs the code it loaded at start. Nothing it reads or writes changed.
+- **Left as they were, outside the findings:** `src/daemon/consult.ts` still says, in its 40u note, that "the check was started with every built-in tool", and cites ADR-0054 D2 for the rule that a consult may not act. Both are history of the ask check, and the rule is still true. `poll.test.ts` keeps its doc on *every project is driven by the runner*: "A project entry names no driver any more", which is true.
+- **Refactoring I would do but did not:** in `takeover.test.ts`, *gives the run back to the runner, and leaves the daemon a request to wake it* is now the same test as the one above it, *…when no daemon is running, …*: same set-up, same assertions. 41b noted it. One of the two could go, but this slice may not change the count.

@@ -251,10 +251,11 @@ describe("one name per step, in one place", () => {
 });
 
 describe("what the runner reads from the step table (41h)", () => {
-  // Written out by hand from the table on `main` on 2026-09-30, before the
-  // columns only the old code read were deleted. The runner reads these four
-  // values for every step, so none of them may move when the rest goes.
-  const onMain: Record<
+  // The four values the runner reads for every step, written out by hand.
+  // ✏ 2026-09-30 (41h): copied from the table on `main` before the columns
+  // only the old code read were deleted, so that none of these moved when
+  // the rest went.
+  const table: Record<
     PipelineStage,
     { label: string; model?: string; effort?: string; ownsBranch: boolean }
   > = {
@@ -272,16 +273,16 @@ describe("what the runner reads from the step table (41h)", () => {
     remediation: { label: "acting on your review", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
   };
 
-  it("has the same steps, in the same order", () => {
-    expect([...PIPELINE_STAGES]).toEqual(Object.keys(onMain));
+  it("lists every step, in order", () => {
+    expect([...PIPELINE_STAGES]).toEqual(Object.keys(table));
   });
 
-  it.each(PIPELINE_STAGES)("gives %s the same label, model, effort and branch as on main", (stage) => {
+  it.each(PIPELINE_STAGES)("gives %s its label, model, effort and branch", (stage) => {
     expect({
       label: stageLabel(stage),
       model: modelFor(stage),
       effort: effortFor(stage),
       ownsBranch: ownsBranch(stage),
-    }).toEqual(onMain[stage]);
+    }).toEqual(table[stage]);
   });
 });

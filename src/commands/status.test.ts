@@ -891,7 +891,7 @@ describe("renderStatus — what a ticket the runner works on has spent", () => {
     );
   });
 
-  it("shows what a ticket has spent on a project whose entry names no driver, against the default limit", () => {
+  it("shows what a ticket has spent against the default limit", () => {
     // Every project is driven by the runner now, so every project's line
     // says what its ticket has spent.
     const runs = [

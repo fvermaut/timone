@@ -11,20 +11,21 @@ import { query, type Options, type SDKMessage } from "@anthropic-ai/claude-agent
 export type Consult = (prompt: string) => Promise<string | undefined>;
 
 /**
- * The model the ask check consults, and the cheapest one that can do the job
- * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
+ * The model a consult asks, and the cheapest one that can do the job.
  *
- * **The work is small on purpose.** Read one message, decide whether it is
- * more expensive than the matter it is about, and if so write two sentences.
- * The judgement was never the scarce thing — ADR-0033 recorded five sessions
- * at the most expensive setting the pipeline has, every one of which reached
- * the right conclusion. Spending that again to notice a misspelling would be
- * the same mistake wearing a fix.
+ * **The work is small on purpose.** The one question put to it now is the
+ * runner's: whether a named person's reply at the spending limit means
+ * "go on" (`limitQuestion` in `src/runner/driver.ts`). It reads one reply and
+ * answers YES or NO. That needs no more than the cheapest model.
+ *
+ * ✏ 2026-10-02: it was named for the ask check
+ * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)),
+ * which was removed on 2026-09-30.
  */
-export const ASK_CHECK_MODEL = "claude-haiku-4-5-20251001";
+export const CONSULT_MODEL = "claude-haiku-4-5-20251001";
 
 /** How long the model may take before the question counts as unanswered. */
-export const ASK_CHECK_TIMEOUT_MS = 30_000;
+export const CONSULT_TIMEOUT_MS = 30_000;
 
 /**
  * The SDK's `query`, or a test's stand-in that sees the options it is given.
@@ -47,8 +48,8 @@ export type ConsultQuery = (params: {
 export function sdkConsult(
   options: { model?: string; timeoutMs?: number; query?: ConsultQuery } = {},
 ): Consult {
-  const model = options.model ?? ASK_CHECK_MODEL;
-  const timeoutMs = options.timeoutMs ?? ASK_CHECK_TIMEOUT_MS;
+  const model = options.model ?? CONSULT_MODEL;
+  const timeoutMs = options.timeoutMs ?? CONSULT_TIMEOUT_MS;
   const ask = options.query ?? query;
 
   return async (prompt: string): Promise<string | undefined> => {

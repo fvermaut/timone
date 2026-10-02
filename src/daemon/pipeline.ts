@@ -115,8 +115,8 @@ type StageSpec = StageFacts & (SpawnedStage | UnspawnedStage);
 
 /**
  * The model the approval-recording session runs on. Not a stage — it has no
- * row in the graph because it is not one of `process.md`'s steps — but it is
- * the second place `runtime.start` is called, and the one that would
+ * row in the step table because it is not one of `process.md`'s steps — but
+ * it is the second place `runtime.start` is called, and the one that would
  * otherwise keep the runtime default while every real stage moved off it.
  *
  * Haiku because the work genuinely is mechanical: stamp a name and a date
@@ -132,7 +132,7 @@ export const APPROVAL_RECORD_MODEL = "claude-haiku-4-5";
  *
  * The model and effort columns were settled once, at the grill of
  * 2026-08-06, and carry their reasons here so no slice re-argues them. They
- * live in the graph rather than in `timone.yaml` because the manifest is
+ * live in the step table rather than in `timone.yaml` because the manifest is
  * strictly per-*project* and this is per-*stage*; moving them later would be
  * a refactor, and changing one is a one-line edit — which is why the choice
  * is recorded in phase 14's plan rather than in an ADR.
@@ -165,13 +165,13 @@ const STAGES: Record<PipelineStage, StageSpec> = {
   clarification: {
     label: "asking what you need",
     ownsBranch: false,
-    // The session judges whether what they wrote settles the question,
-    // resolves or asks the one remaining thing on that judgement, and may
-    // write an ADR: the same class of work as requirements and planning,
+    // The session interviews the person until every branch is resolved, and
+    // may write an ADR: the same class of work as requirements and planning,
     // which carry the same pair.
-    // ✏ Sonnet since 2026-08-30. The work is reading one written answer
-    // and deciding whether it settles the question. The effort stays `high`,
-    // because that judgement is the whole of the session.
+    // ✏ Sonnet since 2026-08-30. The work was then reading one written answer
+    // and deciding whether it settled the question; the written answer was
+    // removed on 2026-09-30. The effort stays `high`, because judging when
+    // the question is settled is the whole of the session.
     model: "claude-opus-5-5",
     effort: "high",
   },
