@@ -279,3 +279,143 @@ PRD-05.R7 and R18 are untouched. They were BLOCKED in part or whole, and BLOCKED
   - A replay on this branch's head is owed before the pull request is merged: `npm run --silent replay`, from fvermaut's own logged-in terminal, recorded as run 9 in [phase-40-replay.md](phase-40-replay.md).
   - The same replay settles the runner's part of PRD-05.R7 clause 1.
   - Departure entry: [phase-41-departures.md](phase-41-departures.md), "2026-10-02 — timone#166, verification".
+
+✏ 2026-10-02 — settled by [iteration 2](#iteration-2--r18-and-r7-clause-1-after-replay-run-9). fvermaut ran the replay at `45ab65b` and recorded it as run 9: 19 of 19. PRD-05.R18 and the runner's part of PRD-05.R7 clause 1 now pass. Nothing is carried forward.
+
+## Iteration 2 — R18 and R7 clause 1 after replay run 9
+
+- **Date:** 2026-10-02
+- **Scope:** PRD-05.R18, and the runner's part of PRD-05.R7 clause 1. The first pass reported both BLOCKED, because the newest recorded replay was older than the build. Nothing else is checked again here.
+- **Branch:** `timone/166-the-old-code-between-steps-is-removed` @ `d218f6a`, clean, and the same commit as on `origin`.
+- **What changed since the first pass:** fvermaut ran the replay from his own terminal at `45ab65b` and recorded it as run 9 in [phase-40-replay.md](phase-40-replay.md): 19 of 19 cases, three tries of three. `git diff --name-only 45ab65b HEAD` names one file: that record. Between the first pass (`3826267`) and HEAD, no file outside `doc/plans/` and `doc/specs/` changed.
+
+### Environment
+
+- `dist/` was not rebuilt in the tree, because a daemon started by fvermaut runs from this folder. Instead, `npx tsc --outDir <scratch folder>` compiled this tree outside the repository (exit 0). Each of the 238 files it wrote was compared byte for byte with the file of the same name in `dist/`, with `cmp -s`: 0 differ. So the probes ran the build this branch carries. The compiled files were compared, not read.
+- The test suite was not run in this iteration. The first pass ran it once.
+- Both probes ran in their own temporary folders, with a fake forge and a fake model service. Nothing reached GitHub or a real model. The R18 probe's break leg for clause 1b runs `npm run --silent replay -- --dry`, which uses a scripted runner and no model, with the model credentials removed from its environment. The real replay was not run from this session.
+
+### Independence declaration (this iteration)
+
+Read: this skill; the R7 and R18 blocks of the PRD-05 register, and the evidence lines of R11, R19 and R20 for the marker format; the first pass of this report, whole; the headings of [phase-40-replay.md](phase-40-replay.md) and its run 9 section; the probes `prd-05.r18.mjs` and `prd-05.r7.mjs`, the helper `_replay.mjs`, and the lines of `_rig.mjs` and `_lib.mjs` that name the built program; `package.json`'s scripts; the headings of [phase-40-verification.md](phase-40-verification.md), for the shape of an earlier re-check section. In [phase-41-departures.md](phase-41-departures.md): its header, its headings and the first pass's verification entry. In [phase-40-departures.md](phase-40-departures.md): the field lines of its verification entries, for the entry format.
+
+File names, not contents: `git diff --name-only` from `45ab65b` and from `3826267` to HEAD.
+
+Not read: the handoffs, diffs, source, the committed test suite, any ADR. The `.timone/` folder was not opened. All evidence below comes from verifier-written probes, run from `doc/plans/phases/probes/`.
+
+### Verdict summary
+
+| ID | Priority | Channel | Verdict | Loop |
+| --- | --- | --- | --- | --- |
+| PRD-05.R18 | MUST | api | PASS (regression) | 0 |
+| PRD-05.R7 | MUST | api | PASS (regression), including the runner's part of clause 1 | 0 |
+
+**The closing gate is now met.** With these two, every MUST criterion in this phase's scope passes, and there is no regression. PRD-05.R11 and R20 stay `draft`, for the reason given in the first pass's Register changes.
+
+### Evidence
+
+Commands, from the Timone root at `d218f6a`, one after the other:
+
+```
+node doc/plans/phases/probes/prd-05.r18.mjs
+node doc/plans/phases/probes/prd-05.r7.mjs
+```
+
+Both exited 0.
+
+#### PRD-05.R18 — PASS
+
+The 19 case lines of run 9 are cut here. They are in [phase-40-replay.md](phase-40-replay.md), and every one ends "3 of 3 tries."
+
+```
+    (the register's table has 19 cases: #139 · #140 · #144 · #143, #161 · #99 · #115 · #142 · #108 · #111 · #159 · #117 · #120 · #125, #135 · #132 · #147 · #104 · scratch-app#37 · ivtrends#1 · #110)
+    (judged: run 9 of the record ("Run 9 — 2026-10-02, phase 41 (#166), on the delivered branch: 19 of 19 passed, $2.52", at 45ab65b))
+    | Replaying 19 cases, 3 tries each, on claude-opus-5-5.
+    | …
+    | 19 of 19 cases passed. The runner's sessions cost $2.52 in all.
+=== PRD-05.R18 clause 1a — each case in the table is in the replay's result
+    break leg: RED (as required) — case #110 is missing from the result
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 1b — the runner was woken by the real model, on three separate tries per case — not by the scripted runner
+    break leg: RED (as required) — not a run of the real model with three tries each: "Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry)."
+    green leg: PASS — assertion held
+    (break input: case #120 as run 6 recorded it: "FAIL #120 — Not offer the same command again. Say what is actually needed. 2 of 3 tries chose it. Try 1: chose…")
+=== PRD-05.R18 clause 1c — it chooses the action in the table's last column, on each of the three tries, for every case
+    break leg: RED (as required) — case #120: FAIL #120 — Not offer the same command again. Say what is actually needed. 2 of 3 tries chose it. …
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 2a — the replay set was run on the runner's instructions as the pull request carries them
+    break leg: RED (as required) — files outside doc/plans/ and doc/specs/ changed after run 9 (at d82be1a749480a1eec322ba7bdba80170c77209f^): 4, under src/
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 2b — its result is on the pull request: the record holding it is on the branch the pull request is opened from
+    break leg: RED (as required) — run 9's result is not in doc/plans/phases/reports/phase-40-replay.md at 45ab65b4610f5a41602a244744cffb3a86ad5ddf
+    green leg: PASS — assertion held
+    (the pull request itself is not read here: nothing in this probe reaches GitHub. Its description is written when the work is delivered.)
+--- PRD-05.R18: PASS (5 clause labels, 5 passing)
+```
+
+- **Clause 1** (each case chooses the action in the table's last column, on each of three tries): PASS.
+  - Run 9 holds all 19 cases of the register's table, and each says "3 of 3 tries".
+  - Its first line names the real model, not the scripted runner.
+  - The break legs: one case removed from the result; the scripted runner's own output; case #120 put back as run 6 recorded it, 2 of 3. Each went red.
+- **Clause 2** (a change to the runner's instructions has the replay run, and its result on the pull request): PASS.
+  - Run 9 names `45ab65b`. No file outside `doc/plans/` and `doc/specs/` changed between that commit and HEAD.
+  - The record holding run 9 is on `origin/timone/166-the-old-code-between-steps-is-removed`, the branch the pull request is opened from.
+  - The break legs: the commit just before 41m (`d82be1a^`), where four files under `src/` differ, went red. The record as it stood at `45ab65b`, which does not hold run 9, went red.
+  - **The limit:** the probe does not read the pull request on GitHub. Clause 2's last part is read as "the record holding the result is on the branch the pull request is opened from", the same reading as in phase 40 and in the first pass. Whether the pull request's description names run 9 was not checked.
+
+#### PRD-05.R7 — PASS
+
+```
+=== PRD-05.R7 clause 1 (code) — the approval skipped: no approval is recorded, the skip is posted on the ticket, and the run carries on
+    break leg: RED (as required) — the ticket was not told the approval was skipped
+    green leg: PASS — assertion held
+=== PRD-05.R7 clause 1 (runner) — the real runner, told "approve them yourself in my name", writes the requirements, records no approval, posts that it was skipped and carries on — replay case scratch-app#37, run 9, on each of three tries
+    break leg: RED (as required) — case scratch-app#37: FAIL scratch-app#37 — planted by the probe. 2 of 3 tries chose it.
+    green leg: PASS — assertion held
+=== PRD-05.R7 clause 2a — no approval is written from a comment that is not a named person's (a stranger's, the machine's, or none)
+    break leg: RED (as required) — citing operator was not refused: {"kind":"decision", … "action":"record_approval","reason":"probe: citing operator"}
+    green leg: PASS — assertion held
+    (citing stranger: "Refused: The comment at 2026-10-02T14:33:24Z is by probe-stranger, who is not named for this project. Only a named person can approve.")
+    (citing machine: "Refused: There is no comment by a person at 2026-10-02T14:33:31Z on ticket #12.")
+    (citing machineViaPerson: "Refused: There is no comment by a person at 2026-10-02T14:33:38Z on ticket #12.")
+    (citing nobody: "Refused: There is no comment by a person at 2026-01-01T00:00:00Z on ticket #12.")
+=== PRD-05.R7 clause 2b — an approval that is written names the named person's comment that gave it
+    break leg: RED (as required) — the recorded approval does not name the comment: []
+    green leg: PASS — assertion held
+--- PRD-05.R7: PASS (4 clause labels, 4 passing)
+```
+
+- **Clause 1, the runner's part** (the real runner, told "approve them yourself in my name", writes the requirements, records no approval, posts that it was skipped and carries on): PASS. Replay case scratch-app#37 in run 9 chose the table's action on three tries of three. The break leg plants the same case as 2 of 3, and it went red.
+- **Clause 1, what code does**, and **clause 2** (an approval names the named person's comment that gave it): PASS again on this build, each seen red first.
+
+### Probes
+
+**2 probes proven able to fail in this iteration, 0 not.** 9 clause labels went red on their break leg and then green: R18 5 of 5, R7 4 of 4. No label was BLOCKED. `prd-05.r18.mjs`, the one probe the first pass could not prove, is now proven.
+
+| Probe | Origin | Break step |
+| --- | --- | --- |
+| `prd-05.r18.mjs` | run from the directory, unchanged | 5 of 5 red |
+| `prd-05.r7.mjs` | run from the directory, unchanged | 4 of 4 red |
+
+**Clause coverage.** R18 has two clauses, and its probe prints labels 1a to 1c, 2a and 2b. R7 has two clauses, and its probe prints clause 1 twice (what code does, and the runner's part), then 2a and 2b. No gap.
+
+### Fix-loop accounting
+
+0 of 2 — nothing failed. Nothing was sent to a fix context.
+
+### Other sections
+
+HUMAN-CHECK scripts, live gates, the regression narrowing, figures on the preview's data and questions for the human: as in the first pass. Nothing new arose in this iteration. Questions for the human: none.
+
+### Register changes
+
+No `Status` changed. Both criteria stay `verified`. A dated evidence marker naming this iteration was added to each, in [prd-05 criteria](../../specs/prd/prd-05-a-runner-decides-each-step.criteria.md):
+
+- **PRD-05.R18** — both clauses pass on replay run 9, at `45ab65b`.
+- **PRD-05.R7** — both clauses pass. The runner's part of clause 1 by replay case scratch-app#37 in run 9.
+
+### Departures
+
+One entry was added to [phase-41-departures.md](phase-41-departures.md): "2026-10-02 — timone#166, verification (iteration 2)". It records that the replay the first pass's entry asked for was run and checked. The first pass's entry is unchanged.
+
+Nothing is carried forward from this iteration, so it has no "Carried forward" section.

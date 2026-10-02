@@ -92,3 +92,10 @@
 **Agreed:** PRD-05.R18: the replay of the recorded failures on the real model, three tries per case, on the build the pull request carries. With it, the runner's own part of PRD-05.R7 clause 1 (replay case scratch-app#37).
 **Did instead:** Not run. Reported BLOCKED in [phase-41-verification.md](phase-41-verification.md). The newest recorded replay is run 8 (19 of 19, three tries of three), at `3afc263`. Four files under `src/` changed after it, in 41m (`d82be1a`). PRD-05.R18 and R7 keep their `verified` status: nothing was seen to be wrong.
 **Why:** The replay calls the real model, costs money, and needs fvermaut's own logged-in terminal. It is owed on this branch before the pull request is merged: run `npm run --silent replay` at the branch's head, and record it as run 9 in [phase-40-replay.md](phase-40-replay.md).
+
+## 2026-10-02 — timone#166, verification (iteration 2)
+
+**Kind:** check now run
+**Agreed:** The entry above: the replay for PRD-05.R18 on this branch, and with it the runner's part of PRD-05.R7 clause 1.
+**Did instead:** fvermaut ran the replay at `45ab65b` and recorded it as run 9 in [phase-40-replay.md](phase-40-replay.md): 19 of 19 cases, three tries of three. Only documents changed after that commit. Iteration 2 of [phase-41-verification.md](phase-41-verification.md#iteration-2--r18-and-r7-clause-1-after-replay-run-9) checked it: PRD-05.R18 and R7 pass, each check seen to fail first.
+**Why:** This entry closes the one above, which is left as it was written. Nothing from it is still to do.
