@@ -1,5 +1,10 @@
+import { generateKeyPairSync } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
+import { githubAppCredentials, type MintCall } from "../adapters/credentials.js";
 import {
   containerRuntime,
   keepForgeTokenFresh,
@@ -1358,6 +1363,176 @@ describe("the forge token a running box works on", () => {
     expect(minted).toEqual(["fvermaut/ivtrends", "fvermaut/ivtrends"]);
     expect(execs[0].env?.TIMONE_FORGE_TOKEN).toBe("ghs_round_1");
     expect(execs[1].env?.TIMONE_FORGE_TOKEN).toBe("ghs_round_2");
+  });
+
+  it("asks for a token that outlives the next refresh by ten minutes", async () => {
+    // PRD-06.R5: the token written now is the box's only one until the next
+    // refresh. With refreshes 30 minutes apart, it must have at least
+    // 30 + 10 = 40 minutes left.
+    const asked: ({ minLifeMs?: number } | undefined)[] = [];
+    const clock = handSleep();
+    const { spawn } = fakeContainer([]);
+
+    const refresh = keepForgeTokenFresh({
+      spawn,
+      name: "timone-ivtrends-1",
+      repository: "fvermaut/ivtrends",
+      credentials: {
+        async tokenFor(_repository, options) {
+          asked.push(options);
+          return "ghs_refreshed";
+        },
+      },
+      intervalMs: 30 * 60 * 1000,
+      sleep: clock.sleep,
+    });
+
+    await clock.tick();
+    refresh.stop();
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.minLifeMs ?? 0).toBeGreaterThanOrEqual(2_400_000);
+  });
+
+  it("starts a box with a token that outlives its first refresh by ten minutes", async () => {
+    // The first refresh comes 20 minutes after the start, so the token the
+    // box starts with must have at least 20 + 10 = 30 minutes left.
+    const asked: ({ minLifeMs?: number } | undefined)[] = [];
+    const clock = handSleep();
+    const { spawn } = fakeContainer([started, result()]);
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      credentials: {
+        async tokenFor(_repository, options) {
+          asked.push(options);
+          return "ghs_boxed";
+        },
+      },
+      // Never ticked, so the only call below is the spawn's own.
+      sleep: clock.sleep,
+    }).start(request());
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.minLifeMs ?? 0).toBeGreaterThanOrEqual(1_800_000);
+  });
+
+  it("starts a box with a token that outlives a longer refresh interval by ten minutes", async () => {
+    // The box's first refresh comes after the interval it was given, not
+    // the default. With 30 minutes, its first token needs at least
+    // 30 + 10 = 40 minutes left.
+    const asked: ({ minLifeMs?: number } | undefined)[] = [];
+    const clock = handSleep();
+    const { spawn } = fakeContainer([started, result()]);
+
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      credentials: {
+        async tokenFor(_repository, options) {
+          asked.push(options);
+          return "ghs_boxed";
+        },
+      },
+      refreshIntervalMs: 30 * 60 * 1000,
+      // Never ticked, so the only call below is the spawn's own.
+      sleep: clock.sleep,
+    }).start(request());
+
+    expect(asked).toHaveLength(1);
+    expect(asked[0]?.minLifeMs ?? 0).toBeGreaterThanOrEqual(2_400_000);
+  });
+
+  it("a box is never handed a token that dies before its next refresh", async () => {
+    // PRD-06.R5's falsifying test, with the real token cache on a fake
+    // clock. The cache is shared with the machine's own calls, and on
+    // 6 September it handed a box a token one of those calls had minted
+    // earlier. Here the cached token has 25 minutes left when the box starts,
+    // and the box's first refresh comes 20 minutes later.
+    const dir = mkdtempSync(join(tmpdir(), "timone-box-token-"));
+    try {
+      const { privateKey } = generateKeyPairSync("rsa", {
+        modulusLength: 2048,
+        privateKeyEncoding: { type: "pkcs8", format: "pem" },
+        publicKeyEncoding: { type: "spki", format: "pem" },
+      });
+      const keyPath = join(dir, "app.private-key.pem");
+      writeFileSync(keyPath, privateKey, { mode: 0o600 });
+
+      let now = new Date("2026-09-06T12:00:00Z");
+      // Each token the fake forge mints lives one hour, as GitHub's do, and
+      // is named for the time it was minted.
+      const mint: MintCall = async () => ({
+        token: `ghs_minted_at_${now.toISOString().slice(11, 16)}`,
+        expiresAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
+      });
+      const credentials = githubAppCredentials({
+        appId: 4670926,
+        installationId: 155426497,
+        privateKeyPath: keyPath,
+        mint,
+        now: () => now,
+      });
+
+      // A box that keeps running until the test ends it, so its refresh has
+      // something to write into.
+      const calls: { args: string[]; env?: Record<string, string> }[] = [];
+      let end!: () => void;
+      const ended = new Promise<void>((resolve) => {
+        end = resolve;
+      });
+      const spawn: ContainerSpawn = (_command, args, options) => {
+        calls.push({ args, ...(options?.env === undefined ? {} : { env: options.env }) });
+        if (args[0] !== "run") return oneShot();
+        let resolveExit!: (value: ContainerExit) => void;
+        const exit = new Promise<ContainerExit>((resolve) => {
+          resolveExit = resolve;
+        });
+        return {
+          lines: (async function* () {
+            yield started;
+            await ended;
+            yield result();
+            resolveExit({ code: 0, signal: null, stderr: "" });
+          })(),
+          exit,
+          kill: () => resolveExit({ code: null, signal: "SIGKILL", stderr: "" }),
+        };
+      };
+      const clock = handSleep();
+
+      // The machine's own call, at noon: its token dies at 13:00.
+      await credentials.tokenFor("fvermaut/scratch-app");
+
+      // 25 minutes before that token dies, a box starts.
+      now = new Date("2026-09-06T12:35:00Z");
+      const session = await containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        credentials,
+        sleep: clock.sleep,
+      }).start(request());
+
+      // Its first refresh, 20 minutes later.
+      now = new Date("2026-09-06T12:55:00Z");
+      await clock.tick();
+
+      end();
+      await session.completed;
+
+      const atStart = calls.find((call) => call.args[0] === "run")?.env?.GH_TOKEN;
+      const atRefresh = calls.find((call) => call.args[0] === "exec")?.env
+        ?.TIMONE_FORGE_TOKEN;
+      // The token minted for the box at 12:35 lives to 13:35. At the refresh
+      // at 12:55 it still has 40 minutes left, more than 20 + 10, so the
+      // refresh may hand it over again.
+      expect(atStart).toBe("ghs_minted_at_12:35");
+      expect(atRefresh).toBe("ghs_minted_at_12:35");
+      expect([atStart, atRefresh]).not.toContain("ghs_minted_at_12:00");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("passes the token by name, so it is in no argument vector", async () => {
