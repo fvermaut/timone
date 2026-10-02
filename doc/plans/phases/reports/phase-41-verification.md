@@ -690,6 +690,8 @@ No screen changed in this phase. The phase file says "Screens changed: none", an
 - **The choice.** Either change the words (for example: "… and no other run of the project is being worked on"), or change the code so that the takeover opens a session. Separately: the message does not say why. It says "it is parked", and not that ticket 13 holds the project.
 - **What it changes.** PRD-05.R11 stays `draft` until this is answered. Its probe passes every case it judges, and it now prints this case without judging it. Once you answer, the next check judges it and can move R11 to `verified`.
 
+✏ 2026-10-02 — answered by fvermaut on #189: "change the words". Clause 2 was reworded, and [iteration 4](#iteration-4--r11-after-its-refined-words-r18-and-r7-after-replay-run-10) judged this case on the new words: PASS. R11 is now `verified`.
+
 ### Register changes
 
 All in [prd-05 criteria](../../specs/prd/prd-05-a-runner-decides-each-step.criteria.md):
@@ -706,3 +708,263 @@ All in [prd-05 criteria](../../specs/prd/prd-05-a-runner-decides-each-step.crite
   - A replay on this branch's final commit is owed before the pull request is merged: `npm run --silent replay`, from fvermaut's own logged-in terminal, recorded as run 10 in [phase-40-replay.md](phase-40-replay.md). The R18 and R7 probes then judge it.
   - Departure entry: [phase-41-departures.md](phase-41-departures.md), "2026-10-02 — timone#166, verification (iteration 3)".
 - **PRD-05.R11 stays `draft`** until question 1 is answered. This is not a failure: every case the register decides passes.
+
+✏ 2026-10-02 — settled by [iteration 4](#iteration-4--r11-after-its-refined-words-r18-and-r7-after-replay-run-10). fvermaut ran the replay at `4686ef4` and recorded it as run 10: 19 of 19. PRD-05.R18 and the runner's part of PRD-05.R7 clause 1 now pass. Question 1 was answered by changing R11 clause 2's words, and R11 now passes on them and is `verified`. Nothing is carried forward.
+
+## Iteration 4 — R11 after its refined words, R18 and R7 after replay run 10
+
+- **Date:** 2026-10-02
+- **Scope:** PRD-05.R11 (MUST, claimed), and two criteria iteration 3 left BLOCKED: PRD-05.R18, and the runner's part of PRD-05.R7 clause 1 (the R7 probe runs whole). Nothing else is checked again. Only documents under `doc/plans/` and `doc/specs/` changed after `4686ef4`, the commit iteration 3 checked in full, so its other results stand for this code.
+- **Why this iteration:**
+  - R11: iteration 3 asked whether a takeover should work while another run of the same project is being worked on. fvermaut answered "change the words" on [#189](https://github.com/fvermaut/timone/pull/189). Clause 2 was reworded twice: in `1bc992a`, and again in `fb3f88a`, while this iteration ran.
+  - R18 and R7: fvermaut ran the replay at `4686ef4` and recorded it as run 10 in [phase-40-replay.md](phase-40-replay.md): 19 of 19 cases, three tries of three.
+- **Live gate owed:** no criterion in this scope is on the `live` channel. The list in iteration 3's header is unchanged.
+- **Branch:** `timone/166-the-old-code-between-steps-is-removed` @ `fb3f88a`, the same commit as on `origin`. The pass started at `272d0de`. `fb3f88a` was committed by the person who started this pass, and changes only the PRD-05 register.
+
+### Answer to iteration 3's question
+
+The words changed, not the code. R11 clause 2's GIVEN now reads:
+
+> GIVEN a run that nothing is working on, on a project where no other run is working, holds a work branch, or waits its turn
+
+It used to read "GIVEN any run that nothing is working on, and that is not waiting its turn behind another run". The note under it now says that the code keeps two rules, one session per project and one work branch per project, and that "A takeover is also refused while another run of the same project is working or holds a work branch". The case in question 1 (ticket 12 waits on nothing while a step runs on ticket 13) is now outside the GIVEN, and the note says it is refused. The probe now judges it: PASS.
+
+The question's side point is not answered by the new words: on that refusal the message says "it is parked. Its log says why", not that ticket 13 holds the project. No clause asks what this message says, so it is recorded here and not judged.
+
+### Environment
+
+- `dist/` was not rebuilt, because a daemon started by fvermaut runs from this folder. `npx tsc --outDir <scratch folder>` compiled this tree outside the repository at `272d0de` (exit 0). Each of the 238 files it wrote was compared byte for byte with `dist/` (`cmp -s`): 0 differ. `fb3f88a` changes only the register, so the build is the same.
+- The test suite was not run in this iteration. Iteration 3 ran it once, on the same code.
+- The running daemon was not touched. Every probe ran the built program in its own temporary folder, with a fake forge and a fake model service. Nothing reached GitHub or a real model. The real replay was not run. No probe ran with `--live`. The R18 probe's break leg for clause 1b runs `npm run --silent replay -- --dry`, which uses a scripted runner and no model, with the model credentials removed.
+- **Run order.** The three probes first ran at the same time at `272d0de`, with R11 judged on the words of `1bc992a`: all passed, R11 13 of 13 labels. Then `fb3f88a` arrived. The R11 probe was extended to its words, and the three probes ran again at the same time at `fb3f88a`. The second run is the one quoted.
+
+### Independence declaration (this iteration)
+
+Read: this skill; this report, whole, to append to it; in the PRD-05 register its header and the R7, R11 and R18 blocks (R11 again at `fb3f88a`); the probes `prd-05.r11.mjs` and `prd-05.r18.mjs`, the first 60 lines of `prd-05.r7.mjs` and its lines that name the replay, and the helpers `_rig.mjs`, `_lib.mjs` and `_replay.mjs`; the headings of [phase-40-replay.md](phase-40-replay.md) and its run 10 section; in [phase-41-departures.md](phase-41-departures.md) its header, its headings and its last four entries, for the entry format.
+
+File names, not contents: `git diff --name-only` from `4686ef4` to HEAD and from `272d0de` to `fb3f88a`. The phase file and the completion report are not among the files changed since iteration 3 read them, so the `Complete` stamp and the claimed scope are as iteration 3 recorded them.
+
+Before writing the work-branch checks, two short scripts were run with the same rig, outside the repository, to see how a run comes to hold a work branch and how `timone takeover` answers then. A step started by the runner leaves the run's entry in the ledger naming a branch (`timone/13-next-ticket`) once the run is parked. What the scripts showed is what the probe now checks and prints.
+
+Seen by accident, and declared: with no daemon running, the refused takeover prints a Node error with its stack trace. That output names compiled files under `dist/` and shows one line of compiled code (the line that raises the error). It is the program's own output, read once in a scratch run. The probe prints only its error line and counts the stack frames.
+
+Not read: the handoffs, diffs of code, source, the committed test suite, any ADR. The `.timone/` folder was not opened. All evidence below comes from verifier-written probes, run from `doc/plans/phases/probes/`.
+
+### Verdict summary
+
+| ID | Priority | Channel | Verdict | Loop |
+| --- | --- | --- | --- | --- |
+| PRD-05.R11 | MUST | api | PASS | 0 |
+| PRD-05.R18 | MUST | api | PASS (regression) | 0 |
+| PRD-05.R7 | MUST | api | PASS (regression), including the runner's part of clause 1 | 0 |
+
+**The closing gate is now met.** Every MUST criterion in this phase's scope passes: R11, which the phase claims, and the nine of the derived regression set (seven passed in iteration 3 on the same code; R7 and R18 pass here). There is no regression, and no fix loop was used. PRD-05.R20 (SHOULD) moved to `verified` in iteration 3.
+
+### Evidence
+
+Commands, from the Timone root at `fb3f88a`, at the same time:
+
+```
+node doc/plans/phases/probes/prd-05.r11.mjs
+node doc/plans/phases/probes/prd-05.r18.mjs
+node doc/plans/phases/probes/prd-05.r7.mjs
+```
+
+All three exited 0.
+
+#### PRD-05.R11 — PASS
+
+Clause 2 was re-written this iteration from its new words (see Probes). Clauses 1 and 3 ran from the committed probe, unchanged. Their side lines are cut here; they are as in iteration 3.
+
+```
+=== PRD-05.R11 clause 1a — the model service cannot be reached: timone cancel stops the run, and the project is free for the next ticket
+    break leg: RED (as required) — the run is parked
+    green leg: PASS — assertion held
+=== PRD-05.R11 clause 1b — timone cancel stops any running session
+    break leg: RED (as required) — the run is active
+    green leg: PASS — assertion held
+=== PRD-05.R11 clause 1c — the ticket left open and marked: after timone cancel the cancelled ticket is not taken up again, and the project is free for the next ticket
+    break leg: RED (as required) — the cancelled ticket was taken up again: fixture#12/2 parked
+    green leg: PASS — assertion held
+    (the ticket's labels after the cancel: ["timone","timone:held"]; the next ticket's run: fixture#13/1 parked)
+=== PRD-05.R11 clause 2a — a run that nothing is working on, on a project where no other run is working, holds a work branch, or waits its turn: timone takeover opens a terminal session on that ticket
+    break leg: RED (as required) — no terminal session was opened on the ticket
+    green leg: PASS — assertion held
+    (the run before the takeover: fixture#12/1 parked; no other run on the project)
+=== PRD-05.R11 clause 2b — when the terminal session ends, the runner wakes and reads what it left
+    break leg: RED (as required) — the terminal session ended and left its closing comment, but the runner did not wake
+    green leg: PASS — assertion held
+=== PRD-05.R11 clause 2b (daemon stopped) — takeover with no daemon running: when the daemon runs again, the runner wakes and reads what the session left
+    break leg: RED (as required) — the terminal session ended and left its closing comment, but the runner did not wake
+    green leg: PASS — assertion held
+=== PRD-05.R11 clause 2c — a run stopped with timone cancel is also one nothing is working on: timone takeover opens a terminal session on that ticket, and when it ends the runner wakes and reads what it left
+    break leg: RED (as required) — no terminal session was opened on the ticket
+    green leg: PASS — assertion held
+    (… runs after: fixture#12/1 cancelled, fixture#12/2 parked)
+=== PRD-05.R11 clause 2, note 1 — a takeover of a run the machine is working on opens no session, and says what is happening
+    break leg: RED (as required) — a terminal session was opened on the ticket: "You are picking up **fixture #12**. A human has just opened"
+    green leg: PASS — assertion held
+    (takeover of the busy run said, exit 1: "I'm working on fixture #12 right now. Anything I need from you will land on the ticket.")
+=== PRD-05.R11 clause 2, note 2 — nor does a takeover of a run waiting its turn behind another run open a session
+    break leg: RED (as required) — a terminal session was opened on the ticket: "You are picking up **fixture #12**. A human has just opened"
+    green leg: PASS — assertion held
+    (… runs: fixture#13/1 active, fixture#12/1 queued)
+=== PRD-05.R11 clause 2, note 3a — a takeover is also refused while another run of the same project is working: no session opens
+    break leg: RED (as required) — a terminal session was opened on the ticket: "You are picking up **fixture #12**. A human has just opened"
+    green leg: PASS — assertion held
+    (runs at the takeover: fixture#12/1 parked, fixture#13/1 active. Takeover said, exit 1: "… The daemon read the request and did not hand fixture #12 over — it is parked. Its log says why."; the daemon's log: "error  could not apply claim-takeover fixture#12 asked by pid 12515: Project fixture already has a session for run fixture#13/1 (active) — one session per project at a time")
+=== PRD-05.R11 clause 2d — another run of the project is parked and holds no work branch: timone takeover opens a terminal session on that ticket, and when it ends the runner wakes and reads what it left
+    break leg: RED (as required) — no terminal session was opened on the ticket
+    green leg: PASS — assertion held
+    (runs at the takeover: fixture#12/1 parked, fixture#13/1 parked. Takeover said, exit 0: "… Picking up fixture #12 here. When you end this session, the runner reads the ticket and decides what comes next. …")
+=== PRD-05.R11 clause 2, note 3b — a takeover is also refused while another run of the same project holds a work branch (parked: nothing works on it, it is not queued): no session opens
+    break leg: RED (as required) — a terminal session was opened on the ticket: "You are picking up **fixture #12**. A human has just opened"
+    green leg: PASS — assertion held
+    (runs at the takeover: fixture#12/1 parked, fixture#13/1 parked holding timone/13-next-ticket; step sessions: 1. Takeover said, exit 1: "… The daemon read the request and did not hand fixture #12 over — it is parked. Its log says why."; the daemon's log: "error  could not apply claim-takeover fixture#12 asked by pid 12947: Project fixture is held by run fixture#13/1 (parked, branch timone/13-next-ticket) — one work branch at a time")
+=== PRD-05.R11 clause 2, note 3b (daemon stopped) — the same with no daemon running: no session opens
+    break leg: RED (as required) — a terminal session was opened on the ticket: "You are picking up **fixture #12**. A human has just opened"
+    green leg: PASS — assertion held
+    (seen, not part of the clause: with no daemon, takeover exit 1; it printed 12 lines, 7 of them stack frames ("    at …"); its error line: "Error: Project fixture is held by run fixture#13/1 (parked, branch timone/13-next-ticket) — one work branch at a time")
+=== PRD-05.R11 clause 3a — timone retry does not exist: the command line does not offer it
+    break leg: RED (as required) — the command list offers it: "retry [options] <ticket> Re-arm a failed run at the stage where it"
+    green leg: PASS — assertion held
+=== PRD-05.R11 clause 3b — timone retry does not exist: typed on a ticket whose run the old build marked failed, it changes nothing
+    break leg: RED (as required) — timone retry went ahead (exit 0): "fixture #12 is re-armed at the point it stopped (triage). …"
+    green leg: PASS — assertion held
+=== PRD-05.R11 clause 3c — the message says to write on the ticket instead
+    break leg: RED (as required) — the message does not say to write on the ticket: "fixture #12 is re-armed at the point it stopped (triage). …"
+    green leg: PASS — assertion held
+    (timone retry said, exit 1: "`timone retry` was removed. Write on the ticket instead: say what you want done.")
+--- PRD-05.R11: PASS (16 clause labels, 16 passing)
+```
+
+- **Clause 1** (cancel when the runner cannot start): PASS again.
+- **Clause 2** (takeover, on the new words): PASS. Each fixture's state was read from the ledger before the takeover.
+  - **Inside the GIVEN, a session opens**, and when it ends the runner wakes and reads what it left. Checked on a run the runner left waiting on nothing (with and without a daemon), on a run stopped with `timone cancel`, and, new, on a run whose project has another run parked that holds no work branch (2d).
+  - **Outside the GIVEN, no session opens.** Checked on a busy run (note 1, and the message says what is happening), on a run in the queue (note 2), while another run of the project is working (note 3a, the case of iteration 3's question), and, new, while another run of the project is parked holding a work branch (note 3b), with and without a daemon. In note 3b, the other run keeps its branch, and ticket 12's run is not changed.
+  - The break legs of 2d and note 3b use the same two fixtures, which differ only in whether ticket 13's run holds a work branch. Each went red on the other.
+- **Clause 3** (`timone retry` does not exist, and the message says to write on the ticket): PASS again.
+
+**Seen, not part of any clause, and recorded as asked:** a takeover refused because another run holds a work branch answers differently with and without a daemon.
+
+- With a daemon running, it ends with exit 1 and says: "The daemon read the request and did not hand fixture #12 over — it is parked. Its log says why." It does not say that ticket 13 holds the project. The daemon's log does.
+- With no daemon, it ends with exit 1 and prints a raw program error, not a sentence: "Error: Project fixture is held by run fixture#13/1 (parked, branch timone/13-next-ticket) — one work branch at a time", then 7 stack frames, 12 lines in all.
+
+No register clause says what this refusal must print. Note 1 asks only that a takeover of a busy run says what is happening, and it does. So this does not change R11's verdict. It is recorded for the pull request. Verification does not fix it.
+
+#### PRD-05.R18 — PASS
+
+The 19 case lines of run 10 are cut here. They are in [phase-40-replay.md](phase-40-replay.md), and every one ends "3 of 3 tries."
+
+```
+    (the register's table has 19 cases: #139 · #140 · #144 · #143, #161 · #99 · #115 · #142 · #108 · #111 · #159 · #117 · #120 · #125, #135 · #132 · #147 · #104 · scratch-app#37 · ivtrends#1 · #110)
+    (judged: run 10 of the record ("Run 10 — 2026-10-02, phase 41 (#166), after the reviews' fixes: 19 of 19 passed, $2.54", at 4686ef4))
+    | Replaying 19 cases, 3 tries each, on claude-opus-5-5.
+    | …
+    | 19 of 19 cases passed. The runner's sessions cost $2.54 in all.
+=== PRD-05.R18 clause 1a — each case in the table is in the replay's result
+    break leg: RED (as required) — case #110 is missing from the result
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 1b — the runner was woken by the real model, on three separate tries per case — not by the scripted runner
+    break leg: RED (as required) — not a run of the real model with three tries each: "Replaying 19 cases, 3 tries each, with a scripted runner and no model (--dry)."
+    green leg: PASS — assertion held
+    (break input: case #120 as run 6 recorded it: "FAIL #120 — Not offer the same command again. Say what is actually needed. 2 of 3 tries chose it. Try 1: chose…")
+=== PRD-05.R18 clause 1c — it chooses the action in the table's last column, on each of the three tries, for every case
+    break leg: RED (as required) — case #120: FAIL #120 — Not offer the same command again. Say what is actually needed. 2 of 3 tries chose it. …
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 2a — the replay set was run on the runner's instructions as the pull request carries them
+    break leg: RED (as required) — files outside doc/plans/ and doc/specs/ changed after run 10 (at bcc18b1fa866b8c9e32697a2fd071dfb2e31b893^): 7, under .claude/, CONTEXT.md/, manual/
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 2b — its result is on the pull request: the record holding it is on the branch the pull request is opened from
+    break leg: RED (as required) — run 10's result is not in doc/plans/phases/reports/phase-40-replay.md at 4686ef47a91b14389ac1b05f3bcaf6b450095422
+    green leg: PASS — assertion held
+    (the pull request itself is not read here: nothing in this probe reaches GitHub. Its description is written when the work is delivered.)
+--- PRD-05.R18: PASS (5 clause labels, 5 passing)
+```
+
+- **Clause 1** (each case chooses the table's action, on each of three tries): PASS. Run 10 holds all 19 cases of the register's table, each "3 of 3 tries", and its first line names the real model.
+- **Clause 2** (the replay is run on the instructions the pull request carries, and its result is on the pull request): PASS. Run 10 names `4686ef4`, and only documents under `doc/plans/` and `doc/specs/` changed between that commit and HEAD. The record holding run 10 is on `origin/timone/166-the-old-code-between-steps-is-removed`.
+  - The break legs: the commit just before 41p (`bcc18b1^`), where seven files outside those folders differ, went red; the record as it stood at `4686ef4`, which does not hold run 10, went red.
+  - **The limit, as before:** the probe does not read the pull request on GitHub. Whether its description names run 10 was not checked.
+
+#### PRD-05.R7 — PASS
+
+```
+=== PRD-05.R7 clause 1 (code) — the approval skipped: no approval is recorded, the skip is posted on the ticket, and the run carries on
+    break leg: RED (as required) — the ticket was not told the approval was skipped
+    green leg: PASS — assertion held
+=== PRD-05.R7 clause 1 (runner) — the real runner, told "approve them yourself in my name", writes the requirements, records no approval, posts that it was skipped and carries on — replay case scratch-app#37, run 10, on each of three tries
+    break leg: RED (as required) — case scratch-app#37: FAIL scratch-app#37 — planted by the probe. 2 of 3 tries chose it.
+    green leg: PASS — assertion held
+=== PRD-05.R7 clause 2a — no approval is written from a comment that is not a named person's (a stranger's, the machine's, or none)
+    break leg: RED (as required) — citing operator was not refused: {"kind":"decision", … "action":"record_approval","reason":"probe: citing operator"}
+    green leg: PASS — assertion held
+=== PRD-05.R7 clause 2b — an approval that is written names the named person's comment that gave it
+    break leg: RED (as required) — the recorded approval does not name the comment: []
+    green leg: PASS — assertion held
+--- PRD-05.R7: PASS (4 clause labels, 4 passing)
+```
+
+- **Clause 1, the runner's part:** PASS. Replay case scratch-app#37 in run 10 chose the table's action on three tries of three. The break leg plants the same case as 2 of 3, and it went red.
+- **Clause 1, what code does**, and **clause 2:** PASS again on this build, each seen red first.
+
+### HUMAN-CHECK scripts
+
+None. No criterion in this scope is on the `human` channel.
+
+### Live gates
+
+No criterion in this scope is on the `live` channel. Nothing about the live gates changed since iteration 3, and no `Last live gate:` line was changed.
+
+### Regression
+
+- PRD-05.R7 — PASS, including the runner's part of clause 1
+- PRD-05.R18 — PASS
+
+The other seven criteria of the derived set passed in iteration 3, at `4686ef4`. No file outside `doc/plans/` and `doc/specs/` changed since, so they were not run again. The derived set and its narrowing are as in iteration 3: nothing was narrowed out.
+
+### Probes
+
+**3 probes proven able to fail in this iteration, 0 not.** 25 clause labels went red on their break leg and then green: R11 16, R18 5, R7 4. No label was BLOCKED, and no probe lacks a break step.
+
+| Probe | Origin | Break step |
+| --- | --- | --- |
+| `prd-05.r11.mjs` | run from the directory; clause 2 re-written this iteration | 16 of 16 red |
+| `prd-05.r18.mjs` | run from the directory, unchanged | 5 of 5 red |
+| `prd-05.r7.mjs` | run from the directory, unchanged | 4 of 4 red |
+
+**Changed this iteration, and why:** `prd-05.r11.mjs`, clause 2 only. The register's words changed twice, on fvermaut's answer to iteration 3's question (`1bc992a`, then `fb3f88a`).
+
+- The file now quotes the new GIVEN and the refined note, and the 2a label uses the new words.
+- The check of the GIVEN, read from the ledger before each takeover, now also requires that no other run of the project names a work branch. It counts such a run whatever its status, so it can only be stricter than the words.
+- Iteration 3's unjudged case is now judged, as note 3a.
+- New fixtures: ticket 13's run parked holding a work branch (a step started by the runner, then one commit pushed to that branch, as a step would have), and the same run parked holding none. They give three new labels: 2d, note 3b, and note 3b with no daemon.
+- The probe prints what a refused takeover says with no daemon: its error line and how many stack frames follow.
+
+**Clause coverage.** R11 has three clauses. Its probe prints 1a to 1c; 2a, 2b (twice), 2c, 2d and notes 1, 2, 3a, 3b (twice); and 3a to 3c. R18 has two clauses: 1a to 1c, 2a, 2b. R7 has two clauses: clause 1 twice (what code does, the runner's part), 2a, 2b. No gap.
+
+### Fix-loop accounting
+
+0 of 2 — nothing failed. Nothing was sent to a fix context.
+
+### Figures on the preview's data
+
+No screen changed in this phase, as in the first pass. No seed was loaded and no screenshot was taken.
+
+### Questions for the human
+
+None. Iteration 3's question is answered above. What a refused takeover prints is recorded under R11's evidence, for the pull request to show. It is not a question, because no clause decides it and nothing waits on it.
+
+### Register changes
+
+All in [prd-05 criteria](../../specs/prd/prd-05-a-runner-decides-each-step.criteria.md):
+
+- **PRD-05.R11** — **Status `draft` → `verified`.** All three clauses pass on the words as they stand at `fb3f88a`. The probe went red on every one of its 16 break legs in this run. The claim is universal ("any running session"), and the block's `Falsified-by` line, written in iteration 3, names this probe. Nothing written on the block records a clause not yet seen: the old "partial" marker of phase 40 and iteration 3's open question are both settled by later markers. An evidence marker names this iteration.
+- **PRD-05.R18** — stays `verified`. An evidence marker: both clauses pass on replay run 10.
+- **PRD-05.R7** — stays `verified`. An evidence marker: both clauses pass, the runner's part of clause 1 by replay case scratch-app#37 in run 10.
+
+### Departures
+
+One entry was added to [phase-41-departures.md](phase-41-departures.md): "2026-10-02 — timone#166, verification (iteration 4)". It records that the replay iteration 3's entry asked for was run and checked. Iteration 3's entry is unchanged.
+
+Nothing is carried forward from this iteration, so it has no "Carried forward" section.
