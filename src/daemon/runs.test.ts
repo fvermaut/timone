@@ -2104,3 +2104,116 @@ describe("fields only the old code wrote are dropped when the ledger is read (41
     });
   });
 });
+
+describe("a failed run the old code left keeps a reason of one line (41m)", () => {
+  /**
+   * A whole machine comment, as the old code could keep it as a run's
+   * failure: a line of its own, then the banner, the stage's account, and a
+   * command to type. Machine-typed in the shape the live check found on
+   * timone #106 on 2026-10-02; not copied from the real ledger.
+   */
+  const machineComment =
+    "🤖 **Timone** · automatic message — written by the machine, not by the account it appears under\n" +
+    "\n" +
+    "---\n" +
+    "\n" +
+    "🆘 **Needs a person** · the build stopped on a question it cannot answer alone.\n" +
+    "\n" +
+    "The plan renames the `holder` field, but the ledger on disk still has runs under the old name.\n" +
+    "\n" +
+    "**What I need from you:** take this over in your terminal:\n" +
+    "\n" +
+    "```\n" +
+    "timone takeover timone#106\n" +
+    "```\n";
+
+  /** A ledger holding one failed run of the old code, with `failure` as given. */
+  function ledgerWithFailure(failure: string): string {
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 1,
+        runs: [
+          {
+            id: "timone#106/1",
+            project: "timone",
+            ticket: 106,
+            seq: 1,
+            status: "failed",
+            stage: "execution",
+            branch: "timone/106-the-holder-field",
+            failure,
+            flags: [],
+            createdAt: "2026-09-08T09:00:00Z",
+            updatedAt: "2026-09-08T11:30:00Z",
+          },
+        ],
+      }),
+    );
+    return path;
+  }
+
+  it("loads an old failed run whose failure is a whole machine comment with one line, and no banner and no command", () => {
+    // Text before the banner on the first line is the reason. The rest of the
+    // comment is not.
+    const behind = RunStore.open(
+      ledgerWithFailure(`a build stage escalated: ${machineComment}`),
+    ).get("timone#106/1");
+    expect(behind?.status).toBe("cancelled");
+    expect(behind?.cancellation).toBe(
+      "stopped before the old code was removed: a build stage escalated",
+    );
+
+    // A failure that is the comment and nothing else has no reason of its own.
+    const whole = RunStore.open(ledgerWithFailure(machineComment)).get("timone#106/1");
+    expect(whole?.status).toBe("cancelled");
+    expect(whole?.cancellation).toBe(
+      "stopped before the old code was removed: no reason recorded",
+    );
+
+    for (const run of [behind, whole]) {
+      expect(run?.cancellation).not.toContain("\n");
+      expect(run?.cancellation).not.toContain("🤖");
+      expect(run?.cancellation).not.toContain("timone takeover");
+    }
+  });
+
+  it("cuts the reason the same way on a run an earlier build already converted and wrote", () => {
+    // An earlier build converted it on read and kept the whole comment. The
+    // daemon's next write put that run on disk as cancelled.
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    const written = {
+      id: "timone#106/1",
+      project: "timone",
+      ticket: 106,
+      seq: 1,
+      status: "cancelled",
+      stage: "execution",
+      branch: "timone/106-the-holder-field",
+      cancellation: `stopped before the old code was removed: a build stage escalated: ${machineComment}`,
+      flags: [],
+      createdAt: "2026-09-08T09:00:00Z",
+      updatedAt: "2026-09-08T11:30:00Z",
+    };
+    const cancelledByAPerson = {
+      ...written,
+      id: "timone#107/1",
+      ticket: 107,
+      branch: "timone/107-a-second-thing",
+      cancellation: "fvermaut: not needed any more",
+    };
+    writeFileSync(path, JSON.stringify({ version: 1, runs: [written, cancelledByAPerson] }));
+
+    const store = RunStore.open(path);
+
+    expect(store.get("timone#106/1")).toEqual({
+      ...written,
+      cancellation: "stopped before the old code was removed: a build stage escalated",
+    });
+    // A reason a person gave is left as it was.
+    expect(store.get("timone#107/1")).toEqual(cancelledByAPerson);
+  });
+});

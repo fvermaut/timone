@@ -1533,3 +1533,191 @@ npm error request to https://registry.npmjs.org/@mermaid-js%2fmermaid-cli failed
   - The reclaim wakes the runner with "The daemon stopped while a step was running." also for an `active` run a terminal held whose process died. The words are wrong for a terminal.
   - Between two cycles the daemon sleeps for the poll interval, and the cancellation watch runs only during a cycle. So a `timone cancel` left while the daemon sleeps waits up to 60 seconds. The command's own words say "within a few seconds". It waits 150 seconds, so it does not fail, but the words are not exact.
 - **Refactoring I would do but did not:** none in these files.
+
+## 41m — What the live check found on the real ledger
+
+**Built.** (1) A failed run the old code left now keeps a reason of one line when the ledger is read. The reason is the first line of the old failure, cut before the machine's banner (`🤖 **Timone**`) where that line carries one, with spaces and a trailing colon trimmed. If nothing is left, the reason is *"no reason recorded"*. So `timone status` no longer prints a whole machine comment, or the command inside it. The same cut applies to a run an earlier build already converted and wrote as cancelled (decision 1). (2) A takeover of a ticket with no run gives the new run the step its `wayfinder:` label names, as `wayfinderStage` reads it: `wayfinder:grilling`, `prototype` or `task` is at wayfinding, `wayfinder:map` at charting, `wayfinder:research` at research. The session's prompt then names the step and tells it to hold the conversation with `timone-wayfind`. The new run's wait is ended by that step. A ticket with no `wayfinder:` label gets no step and a wait ended by triage, as before. The daemon's `claim-takeover` request goes through the same code, so it does the same.
+
+**Files touched.**
+
+- `src/daemon/runs.ts` — new `MACHINE_BANNER` and `oneLineReason`. `normaliseOldPath` uses it for a failed run's reason, and cuts the reason of a cancelled run whose reason starts with `STOPPED_BEFORE_REMOVAL`. Its doc comment updated.
+- `src/daemon/runs.test.ts` — new describe *a failed run the old code left keeps a reason of one line (41m)*, two tests. 41c's tests unchanged.
+- `src/commands/takeover.ts` — `enrolFromTracker` parks the new run at `wayfinderStage(ticket.labels)` when it names one, with `resolvableBy` that step, else `["triage"]` as before. Import of `wayfinderStage`. Doc comment updated.
+- `src/commands/takeover.test.ts` — new describe *a takeover of a ticket with no run, at the step its `wayfinder:` label names (41m)*, three tests and the helper `takeOverWithNoRun`. One 41e test re-based (below).
+- `doc/plans/phases/reports/phase-41-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **The cut also applies to a run already written as cancelled.** The plan says what a failed run keeps when it is converted. But the daemon running since 41l read the real ledger with the 41h code and has written since, so a run like timone #106's is now on disk as `cancelled`, with `"stopped before the old code was removed: "` and the whole comment. A fix only for `failed` runs would never reach it. So `normaliseOldPath` also cuts the reason of a cancelled run whose reason starts with that prefix. It touches no other cancelled run: a reason a person gave is left as it was, and so is a reason that is already one line. It writes nothing on a read, like the rest of the conversion. This is a departure from the plan's words, made for the plan's purpose. If it is not wanted, delete the second `if` in `normaliseOldPath` and the test *cuts the reason the same way on a run an earlier build already converted and wrote*.
+2. **The banner is matched by its start, `🤖 **Timone**`**, as the plan writes it, not by the whole `MACHINE_MARKER`. So an older wording of the rest of the banner is cut too. `runs.ts` does not import `ticketing.ts`; the constant names it in its comment.
+3. **"The first line" is the text before the first newline**, even when it is empty. A failure that starts with a newline gets *"no reason recorded"*.
+4. **`wayfinderStage`, not `ticketKindOf`.** `wayfinderStage` maps the label straight to a step. `ticketKindOf` gives a kind, and the step would then be the first of that kind's default order, which is the same answer by one more step. `wayfinder:research` is at research, because that is what `wayfinderStage` says; the plan names only decisions and maps.
+5. **The new run's wait is ended by its step**, as `putOnRunnersWait` in `src/runner/session.ts` writes it: `[run.stage ?? "triage"]`.
+
+**Test re-based, because it asserted the opposite of this slice.** `takeover.test.ts` › *a takeover of a ticket with no run* › *registers a run waiting for the runner, and resolves to the session bound to no step* looped over the decision ticket and the unmarked ticket and expected no step for both. After the change it failed on the decision ticket: `→ expected { id: 'scratch-app#12/1', …(9) } to match object { status: 'parked', wait: { …(3) } }`. It now covers only the unmarked ticket, and is renamed *…, for a ticket with no `wayfinder:` label*. What it asserts for that ticket is unchanged. The decision ticket is covered by case (3).
+
+**Validation evidence.**
+
+*(1) An old failed run whose failure is a whole machine comment* (`runs.test.ts` › *loads an old failed run whose failure is a whole machine comment with one line, and no banner and no command*). The ledger is machine-typed: a failed run whose failure is `a build stage escalated: ` then a whole machine comment (banner, account, a fenced `timone takeover timone#106`), and the same run whose failure is the comment alone. Written first, seen red:
+
+```
+× … > loads an old failed run whose failure is a whole machine comment with one line, and no banner and no command
+  → expected 'stopped before the old code was remov…' to be 'stopped before the old code was remov…'
+- stopped before the old code was removed: a build stage escalated
++ stopped before the old code was removed: a build stage escalated: 🤖 **Timone** · automatic message — written by the machine, not by the account it appears under
++ ---
++ 🆘 **Needs a person** · the build stopped on a question it cannot answer alone.
+Tests  1 failed | 120 skipped (121)
+```
+
+Green after `oneLineReason`: `runs.test.ts` `Tests  121 passed (121)`. The test asserts *"…: a build stage escalated"*, *"…: no reason recorded"* for the comment alone, and no newline, no `🤖` and no `timone takeover` in either reason.
+
+*Decision 1's test* (*cuts the reason the same way on a run an earlier build already converted and wrote*): a cancelled run with the prefix and the whole comment, and a cancelled run with a person's reason. Written first, seen red:
+
+```
+× … > cuts the reason the same way on a run an earlier build already converted and wrote
+  → expected { id: 'timone#106/1', …(10) } to deeply equal { id: 'timone#106/1', …(10) }
+-   "cancellation": "stopped before the old code was removed: a build stage escalated",
++   "cancellation": "stopped before the old code was removed: a build stage escalated: 🤖 **Timone** · automatic message — …
+Tests  1 failed | 1 passed | 120 skipped (122)
+```
+
+Green after the second branch: `Tests  122 passed (122)`.
+
+*(2) An old failed run with a one-line failure keeps that line* is 41c's test *loads each failed run as cancelled, keeping what stopped it, …*, unchanged. It passes before and after, so it could not be red. Break: `oneLineReason` cuts its result to 40 characters. Result, then restored (`diff` against a saved copy empty):
+
+```
+× runs the old code left in the ledger become runs the runner can read > loads each failed run as cancelled, keeping what stopped it, …
+  → expected { id: 'scratch-app#21/1', …(12) } to deeply equal { id: 'scratch-app#21/1', …(12) }
+-   "cancellation": "stopped before the old code was removed: the execution stage finished without committing anything to gate",
++   "cancellation": "stopped before the old code was removed: the execution stage finished without com",
+Tests  1 failed | 3 passed | 117 skipped (121)
+restored: Tests  4 passed | 117 skipped (121)
+```
+
+41c's other three tests, 41c's three tests in `poll.test.ts` and its three in `status.test.ts` pass unchanged: the fixture's failures are one line each.
+
+*(3) A takeover of a ticket with no run and the label `wayfinder:grilling`* (`takeover.test.ts` › *opens a session on a `wayfinder:grilling` ticket whose prompt names wayfinding and the `timone-wayfind` skill*, through `runTakeover`). It asserts the held run is at `wayfinding`, the prompt carries `- its step: talking a question through (wayfinding)`, `**The run's step is a conversation: talking a question through.**` and `` `timone-wayfind` ``, and the run goes back parked at `wayfinding`. Beside it, *gives the new run the step its label names: a decision ticket at wayfinding, a map at charting* (through `resolveTakeover`; it also asserts the wait is ended by that step). Both written first, seen red:
+
+```
+× … > gives the new run the step its label names: a decision ticket at wayfinding, a map at charting
+  → expected [ { id: 'scratch-app#12/1', …(8) } ] to deeply equal [ ObjectContaining{…} ]
+× … > opens a session on a `wayfinder:grilling` ticket whose prompt names wayfinding and the `timone-wayfind` skill
+  → expected { id: 'scratch-app#12/1', …(9) } to match object { status: 'active', …(1) }
+-   "stage": "wayfinding",
+Tests  2 failed | 1 passed | 40 skipped (43)
+```
+
+Green after `enrolFromTracker` read the label: `Tests  3 passed | 40 skipped (43)`.
+
+*(4) A takeover of a ticket with no run and no `wayfinder:` label* (`takeover.test.ts` › *opens the session with no step on a ticket with no `wayfinder:` label, as before*, through `runTakeover`). It asserts the held run has no step and a wait ended by triage, the prompt says `- its step: none yet`, and it holds no conversation and names neither `timone-wayfind` nor `timone-grill`. It passes before and after, so it could not be red. My first version also asserted the wait after the session ended, and failed on the old code: `waitOf` gives back a run with no step without `resolvableBy`. That is how it already behaves, so the assertion moved to the wait the run holds during the session. Break: a ticket with no label is put at wayfinding (`wayfinderStage(ticket.labels) ?? "wayfinding"`). Result, then restored (`diff` empty):
+
+```
+× … > opens the session with no step on a ticket with no `wayfinder:` label, as before
+  → expected { id: 'scratch-app#5/1', …(10) } to match object { status: 'active', wait: { …(3) } }
+Tests  1 failed | 42 skipped (43)
+restored: Tests  1 passed | 42 skipped (43)
+```
+
+Validation commands, as run. `npm run build` was **not** run: a daemon is running from this folder, and the build rewrites `dist/`. The orchestrator asked for `npx tsc --noEmit && npx vitest run` instead.
+
+```
+$ npx tsc --noEmit && npx vitest run 2>&1 | tail -5
+(tsc exit 0)
+ Test Files  56 passed (56)
+      Tests  1404 passed (1404)
+$ git status --short .timone ; echo "(expected: nothing — no test touched the real ledger)"
+(expected: nothing — no test touched the real ledger)
+```
+
+1404 = 1399 + 2 (`runs.test.ts`) + 3 (`takeover.test.ts`). One test re-based, none deleted. The one test that runs `dist/cli.js` (`src/cli.test.ts`, the removed retry command) does not touch these files, so the old build does not affect it.
+
+- [x] Red-green evidence for each of the four cases is in the handoff. Cases (1) and (3) were seen red, then green. Cases (2) and (4) pass before and after; the breaks above make each fail. **PASS**
+- `npx tsc --noEmit && npx vitest run`: 1404 passed. **PASS** (`npm run build && npm test` not run, as instructed.)
+- `git status --short .timone` is empty. **PASS**
+
+**What the orchestrator must know.**
+
+- **A takeover of timone #91, #92 or #95 to #98 does not reach this change if their runs are `done`.** The runner ended those runs. `resolveTakeover` answers a ticket whose last run is `done` with *"timone #95 is finished — see the ticket."* and opens nothing; a `cancelled` one gets the cancelled sentence. Only a ticket the ledger has no run for at all is enrolled. Checked with a scratch script (not committed) on a temp ledger: a `done` run on a `wayfinder:grilling` ticket gives `{"kind":"nothing-to-do","message":"timone #95 is finished — see the ticket."}`. So the plan's premise, that a later `timone takeover timone#95` finds no run, holds only if the run is gone from the ledger. Changing what a takeover of a finished run does is not in this plan.
+- **The real ledger is not changed by this slice.** The one-line reason reaches the file the next time the daemon writes it, once the daemon runs the new build. The running daemon still uses the code it loaded at start.
+- **`dist/` is behind `src/` for `runs.ts` and `takeover.ts`** until the next `npm run build`.
+- **Seen, not changed (outside this slice's files):** `waitOf` in `src/daemon/session.ts` does not carry `resolvableBy`. A run with no step that a takeover gives back is parked on a wait with no `resolvableBy` at all; a run with a step gets `[step]` from `applyPark`. This was so before 41m.
+- **Refactoring I would do but did not:** the takeover tests now have three ways to run a takeover on a fresh ledger (`takeOver` in *a takeover of a run that is queued or running*, `takeOverWithNoRun`, and the inline one in *holds the new run for the terminal…*). One helper could serve all three.
+
+### ✏ 2026-10-02 — 41m extended: case (5), a takeover of an open ticket whose run is settled
+
+**Built.** The plan was amended after the finding above. A takeover of a ticket whose latest run is `done` or `cancelled` now asks the tracker whether the ticket is open, with the same listing it already read for a ticket with no run (`listOpenTickets`). If the ticket is open, the takeover registers the ticket's next run through `register`, puts it at the step its `wayfinder:` label names, and opens the session, exactly as for a ticket with no run. If it is closed, the answer is the same as before: *"… is finished — see the ticket."* for a done run, the cancelled sentence for a cancelled one, and nothing is opened. Decision 1 above (the one-line cut on a run already written as cancelled) is accepted and stays.
+
+**Files touched, in addition to the list above.**
+
+- `src/commands/takeover.ts` — `resolveTakeover` is now `findTakeover` (reads the ledger and the tracker, writes nothing) followed by `enrolFromTracker` (the write). New `Finding`, `openTicketOf` and `settledMessage`. The `done` and `cancelled` arms share one arm. `enrolFromTracker` takes the open ticket and is no longer async. `claimForTakeover` asks `findTakeover` while a daemon holds the ledger (decision 6). Doc comments brought in line.
+- `src/commands/takeover.test.ts` — case (5): three tests. One more test for the ledger's one writer (decision 6). The 41m helper became `takeOverOnFreshLedger(ticket, { before, open })`, and the 41m describe is renamed *a takeover that opens a new run, at the step its `wayfinder:` label names (41m)*. One test re-based (below).
+
+**Decisions taken inside the extension.**
+
+6. **A takeover that cannot get the ledger still writes nothing.** While a daemon holds the ledger, the command used to call `resolveTakeover` for a ticket the ledger knows, because for such a ticket it wrote nothing. Case (5) makes it write for a settled run on an open ticket. So the resolution is split. `findTakeover` reads only, and says `enrol` where a new run is needed. The command asks it while the daemon holds the ledger, and hands an `enrol` to the daemon with the `claim-takeover` request, as it already does for a ticket with no run. The daemon's request goes through `resolveTakeover`, so the daemon registers the run. A closed ticket is still refused at the terminal, from the tracker's answer.
+7. **A cancelled run is treated as a done run**, as the amendment says. On a closed ticket, the cancelled sentence is unchanged, including its way out through `heldStepWayOut`.
+8. **The tracker is asked once, through the open listing.** A closed ticket and a ticket that no longer exists are not told apart for a settled run: the ledger already says the ticket existed.
+
+**Test re-based, because it asserted what case (5) changes.** `takeover.test.ts` › *runTakeover* › *does not read the ticket at all when the ledger already says there is nothing to take over* started from a `done` run and asserted the tracker was not asked. After the change it failed: `→ expected [ 'scratch-app' ] to deeply equal []` (the open listing was read). For a done run the ledger no longer answers alone. The test now starts from a run at work (`active`), where the ledger still does, and asserts the same three things: the ticket not read, the listing not read, nothing opened. A dated comment in the test says so.
+
+**Validation evidence for case (5).**
+
+*New run on an open ticket* (`… (41m)` › *registers a new run of an open `wayfinder:grilling` ticket whose latest run is done, at wayfinding, and opens the session*, through `runTakeover`). It asserts that the held run is `scratch-app#12/2`, active, at `wayfinding`; that the prompt carries `- its step: talking a question through (wayfinding)` and `` `timone-wayfind` ``; and that afterwards the ticket has `#12/1` done and `#12/2` parked at `wayfinding`. Beside it, *registers the next run of an open ticket whose latest run is done or cancelled* (through `resolveTakeover`, both statuses). Written first, seen red:
+
+```
+× … > registers a new run of an open `wayfinder:grilling` ticket whose latest run is done, at wayfinding, and opens the session
+  → expected 1 to be +0 // Object.is equality
+× … > registers the next run of an open ticket whose latest run is done or cancelled
+  → expected { kind: 'nothing-to-do', …(1) } to match object { kind: 'escalation', run: { …(3) } }
+✓ … > gives the finished answer, and opens nothing, when that ticket is closed
+Tests  2 failed | 4 passed | 40 skipped (46)
+```
+
+Green after the change: `takeover.test.ts` `Tests  46 passed (46)`, with the re-based test.
+
+*The same ticket closed* (*gives the finished answer, and opens nothing, when that ticket is closed*). It asserts exit code 1, no session, the one line *"scratch-app #12 is finished — see the ticket."*, no new run, and no request left. It passes before and after, so it could not be red. Break: the settled arm opens a new run without asking whether the ticket is open. Result, then restored (`diff` against a saved copy empty):
+
+```
+× … > gives the finished answer, and opens nothing, when that ticket is closed
+  → expected +0 to be 1 // Object.is equality
+Tests  1 failed | 46 skipped (47)
+restored: Tests  1 passed | 46 skipped (47)
+```
+
+*Decision 6* (`takeover and the ledger's one writer` › *creates no new run of an open ticket whose latest run is done while a daemon holds the ledger*). Written after the first change, before the split, and seen red: the command wrote the new run while the daemon held the ledger.
+
+```
+× takeover and the ledger's one writer > creates no new run of an open ticket whose latest run is done while a daemon holds the ledger
+  → expected [ 'scratch-app#12/1', …(1) ] to deeply equal [ 'scratch-app#12/1' ]
++   "scratch-app#12/2",
+Tests  1 failed | 46 skipped (47)
+```
+
+Green after the split: `takeover.test.ts` `Tests  47 passed (47)`. The test also asserts that the daemon was asked and the ask taken back, and that nothing was opened.
+
+Cases (1) to (4) are unchanged by the extension and still pass. Case (4)'s break line (`const stage = wayfinderStage(ticket.labels);`) is unchanged in `enrolFromTracker`.
+
+**Validation commands, run again.** `npm run build` was again **not** run, as instructed.
+
+```
+$ npx tsc --noEmit && npx vitest run 2>&1 | tail -5
+(tsc exit 0)
+ Test Files  56 passed (56)
+      Tests  1408 passed (1408)
+$ git status --short .timone ; echo "(expected: nothing — no test touched the real ledger)"
+(expected: nothing — no test touched the real ledger)
+```
+
+1408 = 1404 + 3 (case (5)) + 1 (decision 6). One more test re-based, none deleted.
+
+- [x] Red-green evidence for each of the five cases is in the handoff. Cases (1), (3) and (5)'s new-run half were seen red, then green. Cases (2), (4) and (5)'s closed half pass before and after; the breaks above make each fail. **PASS**
+- `npx tsc --noEmit && npx vitest run`: 1408 passed. **PASS** (`npm run build && npm test` not run, as instructed.)
+- `git status --short .timone` is empty. **PASS**
+
+**What the orchestrator must know, updated.**
+
+- **The first point under *What the orchestrator must know* above is out of date.** A takeover of timone #91, #92 or #95 to #98 now opens a new run at wayfinding if the ticket is still open, and answers "finished" only if it is closed.
+- **A takeover now opens work on a ticket whose run a person cancelled, if the ticket is still open.** `timone cancel` holds the ticket, and the poll loop does not pick a held ticket up. A takeover does not check the hold: it opens a new run and a session, as the amendment says for any open ticket. When that session ends, the run goes back to the runner, which reads the ticket.
+- **The takeover's new run skips the poll loop's `successorHeldBack` check** (the check that holds back a ticket's next run while its approved pieces are all built, or its list of pieces has grown since it was approved). That check lives in `src/daemon/poll.ts` and runs only for marked tickets the cycle lists. A takeover of a map ticket whose last run is done can therefore open a new run at charting while the map's pieces are all built. The runner then decides from the ticket.
+- **`dist/` is behind `src/` for `runs.ts` and `takeover.ts`** until the next `npm run build`. The running daemon still uses the code it loaded at start, so a `claim-takeover` request it carries out still has the old behaviour until it is restarted on a new build.

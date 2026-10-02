@@ -1535,7 +1535,9 @@ const STOPPED_BEFORE_REMOVAL = "stopped before the old code was removed: ";
  * - **A failed run becomes cancelled.** Nothing re-arms a failed run any
  *   more: `timone retry` was removed. What stopped it is kept
  *   where {@link RunStore.cancel} keeps its reason, after
- *   {@link STOPPED_BEFORE_REMOVAL}.
+ *   {@link STOPPED_BEFORE_REMOVAL}, as one line ({@link oneLineReason}).
+ *   ✏ 2026-10-02 (41m): a run an earlier build converted and wrote kept
+ *   the whole old failure. Its reason is cut to one line the same way.
  * - **A parked run's old kind of wait becomes the runner's.** A gate, a
  *   conversation, a review, an escalation, or a wait of no kind was a
  *   stage's own wait, and no stage waits on its own any more. What it waits
@@ -1551,27 +1553,59 @@ const STOPPED_BEFORE_REMOVAL = "stopped before the old code was removed: ";
  * `version` stays `1` and no file is rewritten because of a read. The
  * converted runs reach the file the next time something writes it.
  *
- * **Idempotent, because it runs on every read.** A cancelled run, and a run
- * already waiting for the runner, are returned untouched, so the reason is
- * never prefixed twice.
+ * **Idempotent, because it runs on every read.** A cancelled run whose reason
+ * is already one line, and a run already waiting for the runner, are returned
+ * untouched, so the reason is never prefixed twice.
  */
 function normaliseOldPath(run: unknown): unknown {
   if (typeof run !== "object" || run === null) return run;
   const old = run as Record<string, unknown>;
   if (old.status === "failed") {
     const failure =
-      typeof old.failure === "string" ? old.failure : "no reason recorded";
+      typeof old.failure === "string" ? oneLineReason(old.failure) : "no reason recorded";
     return {
       ...old,
       status: "cancelled",
       cancellation: `${STOPPED_BEFORE_REMOVAL}${failure}`,
     };
   }
+  if (
+    old.status === "cancelled" &&
+    typeof old.cancellation === "string" &&
+    old.cancellation.startsWith(STOPPED_BEFORE_REMOVAL)
+  ) {
+    const reason = oneLineReason(old.cancellation.slice(STOPPED_BEFORE_REMOVAL.length));
+    const cut = `${STOPPED_BEFORE_REMOVAL}${reason}`;
+    return cut === old.cancellation ? run : { ...old, cancellation: cut };
+  }
   if (old.status !== "parked") return run;
   const { wait } = old;
   if (typeof wait !== "object" || wait === null) return run;
   if ("kind" in wait && wait.kind === "runner") return run;
   return { ...old, wait: { ...wait, kind: "runner" } };
+}
+
+/**
+ * The start of the banner every machine comment opens with
+ * (`MACHINE_MARKER` in `src/adapters/ticketing.ts`).
+ */
+const MACHINE_BANNER = "🤖 **Timone**";
+
+/**
+ * A failed run's reason as one line: the first line of `failure`, cut before
+ * the machine's banner where the line carries one, with spaces and a trailing
+ * colon trimmed. An empty result is *"no reason recorded"*.
+ *
+ * ✏ 2026-10-02 (41m, [timone#166](https://github.com/fvermaut/timone/issues/166)):
+ * the old code could keep a whole machine comment as a run's failure. On
+ * timone #106 `timone status` printed all of it, with a command to type.
+ */
+function oneLineReason(failure: string): string {
+  const first = failure.split("\n", 1)[0] ?? "";
+  const banner = first.indexOf(MACHINE_BANNER);
+  const line = banner === -1 ? first : first.slice(0, banner);
+  const reason = line.trim().replace(/:$/, "").trimEnd();
+  return reason === "" ? "no reason recorded" : reason;
 }
 
 /**

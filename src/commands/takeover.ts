@@ -6,12 +6,14 @@ import type { Command } from "commander";
 
 import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
 import type {
+  Ticket,
   TicketingAdapter,
   TicketingProject,
 } from "../adapters/ticketing.js";
 import { loadManifest, namedPeople, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import { escalationPrompt } from "../daemon/prompts.js";
+import { wayfinderStage } from "../daemon/pipeline.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
 import { takeHold, type Holder } from "../daemon/holder.js";
@@ -131,11 +133,33 @@ export function parseTarget(raw: string): TakeoverTarget {
  * gets one here ({@link enrolFromTracker}) rather than being refused, so this
  * is no longer a question that can be asked idly: every caller outside a test
  * must hold the ledger lock, which is why {@link runTakeover} is the only one.
+ * ✏ 2026-10-02 (41m): so does an open ticket whose latest run is done or
+ * cancelled. {@link findTakeover} is the half that writes nothing.
  */
 export async function resolveTakeover(
   target: TakeoverTarget,
   deps: TakeoverResolutionDeps,
 ): Promise<TakeoverResolution> {
+  const found = await findTakeover(target, deps);
+  return found.kind === "enrol" ? enrolFromTracker(target, found.ticket, deps) : found;
+}
+
+/**
+ * What a takeover finds before it writes anything: the answer, or an open
+ * ticket that needs a new run first.
+ */
+type Finding = TakeoverResolution | { kind: "enrol"; ticket: Ticket };
+
+/**
+ * {@link resolveTakeover} without the write: it reads the ledger and the
+ * tracker, and where a new run is needed it says so instead of registering
+ * one. A takeover that could not get the ledger asks this, because it must
+ * not write (41m).
+ */
+async function findTakeover(
+  target: TakeoverTarget,
+  deps: TakeoverResolutionDeps,
+): Promise<Finding> {
   const { manifest, store } = deps;
 
   if (!(target.project in manifest.projects)) {
@@ -149,7 +173,14 @@ export async function resolveTakeover(
   }
 
   const run = store.runsForTicket(target.project, target.ticket).at(-1);
-  if (run === undefined) return enrolFromTracker(target, deps);
+  if (run === undefined) {
+    // The refusal survives for the two cases where there is genuinely
+    // nothing to pick up, each with a sentence of its own, because "closed"
+    // and "no such ticket" are different things to have got wrong.
+    const { ticket, project } = await openTicketOf(target, deps);
+    if (ticket === undefined) return notOpen(target, project, deps.adapter);
+    return { kind: "enrol", ticket };
+  }
 
   switch (run.status) {
     case "queued":
@@ -172,35 +203,64 @@ export async function resolveTakeover(
       // code between steps.
       return { kind: "escalation", run };
     case "done":
-      return {
-        kind: "nothing-to-do",
-        message: `${target.project} #${target.ticket} is finished — see the ticket.`,
-      };
     case "cancelled": {
-      // Abandoned, not broken — so the words say it was cancelled, and never
-      // that something went wrong. Its reason lives in `cancellation` rather
-      // than `failure` for exactly that reason, and dropping the clause when
-      // there is none beats a sentence reading "cancelled: " with nothing
-      // after it.
-      const because =
-        run.cancellation === undefined || run.cancellation === ""
-          ? "."
-          : `: ${run.cancellation}.`;
-      return {
-        kind: "nothing-to-do",
-        message:
-          `${target.project} #${target.ticket} was cancelled${because} ` +
-          "Cancelled work isn't picked up again — " +
-          (heldStepWayOut(store, target.project, target.ticket) ??
-            "reopen the ticket and mark it for me, and I'll start it afresh " +
-              "on my next pass."),
-      };
+      // ✏ 2026-10-02 (41m): **a settled run on an open ticket gets a new
+      // run**, as a ticket with no run does. A takeover opens a terminal
+      // session on any run (PRD-05.R11). The runner ends a run whose ticket
+      // lost its mark, and a takeover of that ticket used to answer
+      // "finished" and open nothing. A closed ticket still gets the answer.
+      const { ticket } = await openTicketOf(target, deps);
+      if (ticket !== undefined) return { kind: "enrol", ticket };
+      return { kind: "nothing-to-do", message: settledMessage(target, run, store) };
     }
   }
 }
 
+/** What a takeover of a closed ticket whose latest run is done or cancelled says. */
+function settledMessage(target: TakeoverTarget, run: Run, store: RunStore): string {
+  if (run.status !== "cancelled") {
+    return `${target.project} #${target.ticket} is finished — see the ticket.`;
+  }
+  // Abandoned, not broken — so the words say it was cancelled, and never
+  // that something went wrong. Its reason lives in `cancellation` rather
+  // than `failure` for exactly that reason, and dropping the clause when
+  // there is none beats a sentence reading "cancelled: " with nothing
+  // after it.
+  const because =
+    run.cancellation === undefined || run.cancellation === ""
+      ? "."
+      : `: ${run.cancellation}.`;
+  return (
+    `${target.project} #${target.ticket} was cancelled${because} ` +
+    "Cancelled work isn't picked up again — " +
+    (heldStepWayOut(store, target.project, target.ticket) ??
+      "reopen the ticket and mark it for me, and I'll start it afresh " +
+        "on my next pass.")
+  );
+}
+
 /**
- * Take a ticket the ledger has never heard of, and make it a run
+ * The ticket as the tracker lists it among the open ones, or undefined when
+ * it is not open. The project is returned too, for the caller that must then
+ * tell a closed ticket from one that does not exist.
+ */
+async function openTicketOf(
+  target: TakeoverTarget,
+  deps: TakeoverResolutionDeps,
+): Promise<{ ticket: Ticket | undefined; project: TicketingProject }> {
+  const project = {
+    name: target.project,
+    repoUrl: deps.manifest.projects[target.project].repo_url,
+  };
+  const open = await deps.adapter.listOpenTickets(project);
+  return {
+    ticket: open.find((candidate) => candidate.number === target.ticket),
+    project,
+  };
+}
+
+/**
+ * Take an open ticket the ledger has never heard of, and make it a run
  * ([ADR-0024](../../doc/adr/0024-every-open-ticket-answers-for-itself.md)).
  *
  * **This is the refusal's replacement**, and the refusal — *"I'm not working
@@ -214,8 +274,7 @@ export async function resolveTakeover(
  * nothing to add and errors.
  *
  * The refusal survives for the two cases where there is genuinely nothing to
- * pick up, each with a sentence of its own, because "closed" and "no such
- * ticket" are different things to have got wrong.
+ * pick up; {@link findTakeover} gives it, before this is called.
  *
  * ✏ 2026-09-30: **the new run waits for the runner**
  * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)),
@@ -225,33 +284,39 @@ export async function resolveTakeover(
  * it back with a request to wake the runner. Until then the run was parked
  * on a conversation at the stage its labels named, and a ticket at a stage
  * with no conversation of its own was refused.
+ *
+ * ✏ 2026-10-02 (41m): a ticket whose `wayfinder:` label names a step gets
+ * that step on its new run, so the session is told which conversation to
+ * hold. Without it, a takeover of a decision ticket opened a session that did
+ * not know it was a wayfinding conversation.
+ *
+ * ✏ 2026-10-02 (41m): the same for an open ticket whose latest run is done
+ * or cancelled. `register` opens its next run.
  */
-async function enrolFromTracker(
+function enrolFromTracker(
   target: TakeoverTarget,
+  ticket: Ticket,
   deps: TakeoverResolutionDeps,
-): Promise<TakeoverResolution> {
-  const { manifest, store, adapter } = deps;
-  const project = {
-    name: target.project,
-    repoUrl: manifest.projects[target.project].repo_url,
-  };
-
-  const open = await adapter.listOpenTickets(project);
-  const ticket = open.find((candidate) => candidate.number === target.ticket);
-  if (ticket === undefined) return notOpen(target, project, adapter);
-
+): TakeoverResolution {
+  const { store } = deps;
   const created = store.register(target.project, target.ticket).run;
   if (created.status === "queued") {
     return { kind: "nothing-to-do", message: queuedMessage(target) };
   }
 
-  // Opened when the run was, and ended by the step a new ticket starts at,
-  // as the runner's own first wait is.
+  // ✏ 2026-10-02 (41m): **at the step the ticket's `wayfinder:` label
+  // names**, as the runner's own order reads it: a decision ticket at
+  // wayfinding, a map at charting. The prompt then tells the session to hold
+  // that conversation. A ticket with no such label gets no step, as before.
+  const stage = wayfinderStage(ticket.labels);
+  // Opened when the run was, and ended by the step it is at, or by the step a
+  // new ticket starts at, as the runner's own first wait is.
   const run = store.park(created.id, {
     waitingOn: RUNNER_DEFAULT_WAIT,
     kind: "runner",
+    ...(stage === undefined ? {} : { stage }),
     waitCursor: created.updatedAt,
-    resolvableBy: ["triage"],
+    resolvableBy: [stage ?? "triage"],
   });
   return { kind: "escalation", run };
 }
@@ -387,6 +452,8 @@ type Claim = { kind: "claimed"; run: Run } | { kind: "no"; code: number };
  * gets the same sentence they have always got about a queued run, a running
  * one, a finished one. Only enrolling a ticket the ledger has never heard of
  * is a write, and only that case is handed to the daemon whole.
+ * ✏ 2026-10-02 (41m): so is a new run for an open ticket whose latest run is
+ * done or cancelled. It is handed to the daemon whole too.
  */
 async function claimForTakeover(
   raw: string,
@@ -432,12 +499,14 @@ async function claimForTakeover(
     return { kind: "no", code: 1 };
   }
 
-  // The ledger knows this ticket, so resolving it writes nothing and the
-  // refusals stay exactly as verified against R14.
+  // The ledger knows this ticket, so the refusals stay exactly as verified
+  // against R14. ✏ 2026-10-02 (41m): working out the answer writes nothing
+  // here. A new run for an open ticket whose latest run is settled is a
+  // write, so the daemon makes it, from the request.
   if (store.runsForTicket(target.project, target.ticket).length > 0) {
-    const resolution = await resolveTakeover(target, deps);
-    if (resolution.kind === "nothing-to-do") {
-      log(resolution.message);
+    const found = await findTakeover(target, deps);
+    if (found.kind === "nothing-to-do") {
+      log(found.message);
       return { kind: "no", code: 1 };
     }
   }

@@ -477,11 +477,12 @@ describe("runTakeover", () => {
     // Amended by ADR-0024, and only in its GIVEN: a ticket the *ledger* has
     // never heard of is now resolved **from** the tracker, so reading it is
     // the answer rather than a wasted call. Where the ledger answers on its
-    // own — this run finished — the tracker is still not asked at all.
+    // own — this run is at work — the tracker is still not asked at all.
+    // ✏ 2026-10-02 (41m): the run was a finished one. A finished run now gets
+    // a new run when its ticket is still open, so the tracker is asked.
     const store = newStore();
     const { run } = store.register("scratch-app", 6);
     store.activate(run.id, "session-1");
-    store.complete(run.id);
     const { adapter, asked, listings } = fakeAdapter([decisionTicket]);
     const { launcher, calls } = fakeLauncher();
 
@@ -586,6 +587,48 @@ describe("takeover and the ledger's one writer", () => {
     expect(calls).toEqual([]);
     expect(listings).toEqual([]);
     expect(store.all()).toEqual([]);
+  });
+
+  it("creates no new run of an open ticket whose latest run is done while a daemon holds the ledger", async () => {
+    // ✏ 2026-10-02 (41m): a takeover of such a ticket registers a new run.
+    // That is a write, so it is the daemon's to make, from the request, as
+    // for a ticket with no run.
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-settled-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-08-03T10:00:00Z" });
+    const { run } = store.register("scratch-app", 12);
+    store.activate(run.id, "session-1");
+    store.complete(run.id);
+    const daemon = acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    expect(daemon.ok).toBe(true);
+    const { launcher, calls } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#12", {
+      manifest,
+      store,
+      statePath,
+      adapter: fakeAdapter([decisionTicket]).adapter,
+      launcher,
+      root: "/root",
+      wait: { intervalMs: 1, boundMs: 3, sleep: async () => {} },
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(1);
+    expect(calls).toEqual([]);
+    // The daemon was asked, and the ask taken back when it did not answer.
+    expect(said.join("\n")).toContain("timone daemon");
+    expect(pending(statePath).requests).toEqual([]);
+    expect(store.runsForTicket("scratch-app", 12).map((each) => each.id)).toEqual([
+      "scratch-app#12/1",
+    ]);
   });
 });
 
@@ -1087,28 +1130,27 @@ describe("takeover claims through the run, not the lock", () => {
 describe("a takeover of a ticket with no run", () => {
   // The runner drives every run (ADR-0060), so a run a takeover opens is
   // opened the way the runner would hold it: waiting for the runner, with
-  // no step chosen. A ticket nobody has classified and a decision ticket
-  // off a map get the same run.
-  it("registers a run waiting for the runner, and resolves to the session bound to no step", async () => {
-    for (const ticket of [decisionTicket, unmarkedTicket]) {
-      const store = newStore();
-      const { adapter } = fakeAdapter([ticket]);
+  // no step chosen. ✏ 2026-10-02 (41m): for a ticket nobody has classified.
+  // A decision ticket off a map is opened at its step: see the describe
+  // below.
+  it("registers a run waiting for the runner, and resolves to the session bound to no step, for a ticket with no `wayfinder:` label", async () => {
+    const store = newStore();
+    const { adapter } = fakeAdapter([unmarkedTicket]);
 
-      const resolution = await resolveTakeover(
-        { project: "scratch-app", ticket: ticket.number },
-        { manifest, store, adapter },
-      );
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: unmarkedTicket.number },
+      { manifest, store, adapter },
+    );
 
-      expect(resolution.kind).toBe("escalation");
-      expect(resolution).not.toHaveProperty("stage");
-      const runs = store.runsForTicket("scratch-app", ticket.number);
-      expect(runs).toHaveLength(1);
-      expect(runs[0]).toMatchObject({
-        status: "parked",
-        wait: { kind: "runner", on: RUNNER_DEFAULT_WAIT, resolvableBy: ["triage"] },
-      });
-      expect(runs[0]?.stage).toBeUndefined();
-    }
+    expect(resolution.kind).toBe("escalation");
+    expect(resolution).not.toHaveProperty("stage");
+    const runs = store.runsForTicket("scratch-app", unmarkedTicket.number);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      status: "parked",
+      wait: { kind: "runner", on: RUNNER_DEFAULT_WAIT, resolvableBy: ["triage"] },
+    });
+    expect(runs[0]?.stage).toBeUndefined();
   });
 
   it("holds the new run for the terminal, then gives it back to the runner and asks for a wake", async () => {
@@ -1164,6 +1206,203 @@ describe("a takeover of a ticket with no run", () => {
     expect(said.at(-1)).toBe(
       "scratch-app #12 goes back to the runner. It reads what the session left as soon as the daemon runs.",
     );
+  });
+});
+
+describe("a takeover that opens a new run, at the step its `wayfinder:` label names (41m)", () => {
+  // On 2026-10-02 the runner ended the runs of six of Timone's own decision
+  // tickets, because their mark had been removed. A takeover of a ticket
+  // with no run then gave the new run no step, so the session was not told
+  // it was a wayfinding conversation.
+
+  /** A map ticket the ledger has never heard of. */
+  const mapTicket: Ticket = {
+    ...decisionTicket,
+    number: 13,
+    title: "dark mode, all of it",
+    labels: ["wayfinder:map"],
+  };
+
+  /**
+   * Take over `ticket` on a fresh ledger, and say what the session saw.
+   * `before` writes the ledger first; `open` is the tracker's open listing,
+   * `ticket` alone unless given.
+   */
+  async function takeOverOnFreshLedger(
+    ticket: Ticket,
+    options: { before?: (store: RunStore) => void; open?: readonly Ticket[] } = {},
+  ): Promise<{
+    code: number;
+    store: RunStore;
+    statePath: string;
+    during: { run?: Run; prompt?: string }[];
+    said: string[];
+  }> {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-step-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath);
+    options.before?.(store);
+    const during: { run?: Run; prompt?: string }[] = [];
+    const launcher: ProcessLauncher = {
+      async run(_command, args) {
+        during.push({
+          run: store.runsForTicket("scratch-app", ticket.number).at(-1),
+          prompt: args[0],
+        });
+        return 0;
+      },
+    };
+    const said: string[] = [];
+    const code = await runTakeover(`scratch-app#${ticket.number}`, {
+      manifest,
+      store,
+      statePath,
+      adapter: fakeAdapter(options.open ?? [ticket]).adapter,
+      launcher,
+      root: dir,
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+    return { code, store, statePath, during, said };
+  }
+
+  it("gives the new run the step its label names: a decision ticket at wayfinding, a map at charting", async () => {
+    for (const [ticket, step] of [
+      [decisionTicket, "wayfinding"],
+      [mapTicket, "charting"],
+    ] as const) {
+      const store = newStore();
+
+      const resolution = await resolveTakeover(
+        { project: "scratch-app", ticket: ticket.number },
+        { manifest, store, adapter: fakeAdapter([ticket]).adapter },
+      );
+
+      expect(resolution.kind).toBe("escalation");
+      expect(store.runsForTicket("scratch-app", ticket.number)).toEqual([
+        expect.objectContaining({
+          status: "parked",
+          stage: step,
+          wait: expect.objectContaining({
+            kind: "runner",
+            on: RUNNER_DEFAULT_WAIT,
+            resolvableBy: [step],
+          }),
+        }),
+      ]);
+    }
+  });
+
+  it("opens a session on a `wayfinder:grilling` ticket whose prompt names wayfinding and the `timone-wayfind` skill", async () => {
+    const { code, store, during } = await takeOverOnFreshLedger(decisionTicket);
+
+    expect(code).toBe(0);
+    expect(during).toHaveLength(1);
+    expect(during[0]?.run).toMatchObject({ status: "active", stage: "wayfinding" });
+    const prompt = during[0]?.prompt ?? "";
+    expect(prompt).toContain("- its step: talking a question through (wayfinding)");
+    expect(prompt).toContain(
+      "**The run's step is a conversation: talking a question through.**",
+    );
+    expect(prompt).toContain("`timone-wayfind`");
+    // Given back to the runner at that step.
+    expect(store.get("scratch-app#12/1")).toMatchObject({
+      status: "parked",
+      stage: "wayfinding",
+      wait: { kind: "runner", on: RUNNER_DEFAULT_WAIT },
+    });
+  });
+
+  it("opens the session with no step on a ticket with no `wayfinder:` label, as before", async () => {
+    const { code, store, during } = await takeOverOnFreshLedger(unmarkedTicket);
+
+    expect(code).toBe(0);
+    expect(during).toHaveLength(1);
+    expect(during[0]?.run).toMatchObject({
+      status: "active",
+      wait: { kind: "runner", on: RUNNER_DEFAULT_WAIT, resolvableBy: ["triage"] },
+    });
+    expect(during[0]?.run?.stage).toBeUndefined();
+    const prompt = during[0]?.prompt ?? "";
+    expect(prompt).toContain("- its step: none yet");
+    expect(prompt).not.toMatch(/hold that conversation/i);
+    expect(prompt).not.toContain("`timone-wayfind`");
+    expect(prompt).not.toContain("`timone-grill`");
+    expect(store.get("scratch-app#5/1")?.stage).toBeUndefined();
+  });
+
+  // ✏ 2026-10-02 (41m, case 5): the runner ended the runs of six decision
+  // tickets, so they were `done`, and a takeover of one answered "finished"
+  // and opened nothing. PRD-05.R11 clause 2: a takeover opens a terminal
+  // session on any run. An open ticket whose latest run is settled gets a new
+  // run, as a ticket with no run does.
+
+  /** Ticket #12's first run, ended by the runner. */
+  function endedFirstRun(store: RunStore): void {
+    const { run } = store.register("scratch-app", 12);
+    store.activate(run.id, "session-1");
+    store.complete(run.id);
+  }
+
+  it("registers a new run of an open `wayfinder:grilling` ticket whose latest run is done, at wayfinding, and opens the session", async () => {
+    const { code, store, during } = await takeOverOnFreshLedger(decisionTicket, {
+      before: endedFirstRun,
+    });
+
+    expect(code).toBe(0);
+    expect(during).toHaveLength(1);
+    expect(during[0]?.run).toMatchObject({
+      id: "scratch-app#12/2",
+      status: "active",
+      stage: "wayfinding",
+    });
+    const prompt = during[0]?.prompt ?? "";
+    expect(prompt).toContain("- its step: talking a question through (wayfinding)");
+    expect(prompt).toContain("`timone-wayfind`");
+    // The finished run stays as it was; the new one goes back to the runner.
+    expect(
+      store.runsForTicket("scratch-app", 12).map((run) => [run.id, run.status, run.stage]),
+    ).toEqual([
+      ["scratch-app#12/1", "done", undefined],
+      ["scratch-app#12/2", "parked", "wayfinding"],
+    ]);
+  });
+
+  it("registers the next run of an open ticket whose latest run is done or cancelled", async () => {
+    for (const end of ["done", "cancelled"] as const) {
+      const store = newStore();
+      const { run } = store.register("scratch-app", 12);
+      store.activate(run.id, "session-1");
+      if (end === "done") store.complete(run.id);
+      else store.cancel(run.id, "fvermaut: not now");
+
+      const resolution = await resolveTakeover(
+        { project: "scratch-app", ticket: 12 },
+        { manifest, store, adapter: fakeAdapter([decisionTicket]).adapter },
+      );
+
+      expect(resolution).toMatchObject({
+        kind: "escalation",
+        run: { id: "scratch-app#12/2", status: "parked", stage: "wayfinding" },
+      });
+      expect(store.get(run.id)?.status).toBe(end);
+    }
+  });
+
+  it("gives the finished answer, and opens nothing, when that ticket is closed", async () => {
+    const { code, store, statePath, during, said } = await takeOverOnFreshLedger(
+      decisionTicket,
+      { before: endedFirstRun, open: [] },
+    );
+
+    expect(code).toBe(1);
+    expect(during).toEqual([]);
+    expect(said).toEqual(["scratch-app #12 is finished — see the ticket."]);
+    expect(store.runsForTicket("scratch-app", 12).map((run) => run.id)).toEqual([
+      "scratch-app#12/1",
+    ]);
+    expect(pending(statePath).requests).toEqual([]);
   });
 });
 
