@@ -150,3 +150,33 @@ PASS #110 — Send the step a message to run only the tests its change affects. 
 ```
 
 **Every case passes three tries of three**, for the first time. #120 passes after 40z's sentence; #115 still passes after 40t. This is the first run on the runner's rules as they will be merged: no change to the runner's instructions has been made since `23b9186`.
+
+## Run 8 — 2026-10-02, phase 41 (#166), after 41k: 19 of 19 passed, $2.50
+
+Run by fvermaut from his own terminal, on the branch `timone/166-the-old-code-between-steps-is-removed` at `3afc263` (after 41k, before 41m).
+
+```
+Replaying 19 cases, 3 tries each, on claude-opus-5-5.
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+PASS #140 — Read planning as done, and start the build. 3 of 3 tries.
+PASS #144 — Not wait on the person. Choose the next step. 3 of 3 tries.
+PASS #143, #161 — Try the start again. If it keeps failing, say so on the ticket. 3 of 3 tries.
+PASS #99 — End the run, and free the project. 3 of 3 tries.
+PASS #115 — Start nothing on it. 3 of 3 tries.
+PASS #142 — Clear the hold, then start the work. 3 of 3 tries.
+PASS #108 — Start a session that corrects the requirements, then check again. 3 of 3 tries.
+PASS #111 — Start again from that discussion, as PRD-03.R1 says. Do not ask. 3 of 3 tries.
+PASS #159 — Open the pull request with that check listed as not run. 3 of 3 tries.
+PASS #117 — List the skip as a departure, and carry on to the pull request. 3 of 3 tries.
+PASS #120 — Not offer the same command again. Say what is actually needed. 3 of 3 tries.
+PASS #125, #135 — Carry the question to the pull request, and open it. 3 of 3 tries.
+PASS #132 — Act on the word. 3 of 3 tries.
+PASS #147 — Say on the pull request that the change is being made, then start it. 3 of 3 tries.
+PASS #104 — Skip the interview and start planning. Post the departure on the ticket. 3 of 3 tries.
+PASS scratch-app#37 — Write the requirements. Record no approval. Post that the approval was skipped, and carry on. 3 of 3 tries.
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+19 of 19 cases passed. The runner's sessions cost $2.50 in all.
+```
+
+**Every case passes three tries of three** on the build with the old code between steps removed. The runner's instructions are unchanged since run 7. 41m changed `src/daemon/runs.ts` and `src/commands/takeover.ts` after this run, so a replay on the final build is still owed before the pull request.
