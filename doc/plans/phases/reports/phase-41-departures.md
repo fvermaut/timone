@@ -78,3 +78,10 @@
 **Agreed:** the Goal Description and 41c: the conversion asks for no wake, so no comment appears on the tickets of converted runs, and `timone takeover timone#95` opens a session told which step the ticket was at.
 **Did instead:** on the real ledger, the new daemon's first cycle woke the runner for the six converted conversation runs on Timone's own tickets (#91, #92, #95 to #98), because their `timone` label had been removed on 2026-09-11. The runner ended all six runs and posted a short comment on four tickets, for about $0.50. New sub-phase 41m makes a takeover of such a ticket give its new run the step the ticket's label names, and cuts a converted failed run's reason to one line.
 **Why:** 41c's test of "no wake" put every waiting run's ticket open and marked. The real tickets were not marked, and the runner is told when a ticket leaves the listing. Ending a run whose ticket is no longer marked is the runner following its rules, so it stays.
+
+## 2026-10-02 — timone#166, execution
+
+**Kind:** plan step
+**Agreed:** 41m makes a takeover of a ticket with no run start at the step its label names.
+**Did instead:** 41m also makes a takeover of a ticket that is still open, whose latest run is done or cancelled, register a new run in the same way. And it cuts the reason of a run an earlier build already converted and wrote, not only of a run still failed on disk.
+**Why:** the runs of timone #91, #92 and #95 to #98 are done, because the runner ended them, so a takeover found a finished run and opened nothing. PRD-05.R11 says a takeover opens a terminal session. And the daemon started for the live check had already written timone #106's converted run, with the long reason, to the ledger.

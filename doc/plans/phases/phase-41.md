@@ -403,9 +403,11 @@ node dist/cli.js projects list --manifest timone.example.yaml
 
 **[MODIFY]** `src/daemon/runs.ts` — when an old failed run is converted, the reason it keeps is one line: the first line of the old failure, cut before the machine's banner (`🤖 **Timone**`) where the line carries one, with spaces and a trailing colon trimmed. An old failure that is empty after that keeps *"no reason recorded"*.
 **[MODIFY]** `src/commands/takeover.ts` — a takeover of a ticket with no run gives the new run the step the ticket's `wayfinder:` label names, as the runner's own order reads it (`wayfinderStage` in `src/daemon/pipeline.ts`, or the runner's `ticketKindOf` in `src/runner/order.ts`, whichever already maps the label): a decision ticket is at wayfinding, a map ticket at charting. A ticket with no such label gets no step, as today.
+> ✏ 2026-10-02 (build, timone#166): 41m found that the runner's ending of the six runs left them `done`, and a takeover of a ticket whose run is done answers "finished — see the ticket" and opens nothing. PRD-05.R11 clause 2 says a takeover opens a terminal session on any run. So **a takeover of a ticket that is still open, whose latest run is done or cancelled, registers a new run for it, at the step its `wayfinder:` label names, exactly as for a ticket with no run.** A closed ticket still gets the "finished" answer. Case (5). Also kept: 41m's own addition, that the one-line cut applies too to a run an earlier build already converted and wrote as cancelled.
+
 **[MODIFY]** `src/daemon/runs.test.ts`, `src/commands/takeover.test.ts`
 
-**Seams under test (TDD):** the store's load from a file, and `runTakeover` / `resolveTakeover` with the prompt it builds. Red-green: (1) an old failed run whose failure is a whole machine comment loads with a one-line reason that carries no banner and no command; (2) an old failed run with a one-line failure keeps that line, as 41c's tests already say; (3) a takeover of a ticket with no run and the label `wayfinder:grilling` opens a session whose prompt names wayfinding and the `timone-wayfind` skill; (4) a takeover of a ticket with no run and no `wayfinder:` label opens the session with no step, as today.
+**Seams under test (TDD):** the store's load from a file, and `runTakeover` / `resolveTakeover` with the prompt it builds. Red-green: (1) an old failed run whose failure is a whole machine comment loads with a one-line reason that carries no banner and no command; (2) an old failed run with a one-line failure keeps that line, as 41c's tests already say; (3) a takeover of a ticket with no run and the label `wayfinder:grilling` opens a session whose prompt names wayfinding and the `timone-wayfind` skill; (4) a takeover of a ticket with no run and no `wayfinder:` label opens the session with no step, as today. ✏ 2026-10-02 (build, timone#166): (5) a takeover of an open ticket labelled `wayfinder:grilling` whose latest run is done registers a new run of that ticket at wayfinding and opens the session; the same ticket closed gets the "finished" answer and opens nothing.
 
 > Sub-phase 41k must be complete before starting this sub-phase. It may run while 41l's watched run is under way: it changes neither the path a watched ticket takes nor any file a step reads.
 
@@ -416,7 +418,7 @@ npm run build && npm test 2>&1 | tail -5
 git status --short .timone ; echo "(expected: nothing — no test touched the real ledger)"
 ```
 
-- [ ] Red-green evidence for each of the four cases is in the handoff.
+- [ ] Red-green evidence for each of the five cases is in the handoff.
 
 ---
 
