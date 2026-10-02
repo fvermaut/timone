@@ -1,14 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  CLARIFICATION_MARKER,
-  HANDBACK_MARKER,
-  HANDBACK_STEP_PREFIX,
-  CONVERSATION_RECORD_MARKER,
   MACHINE_MARKER,
-  STAGE_DONE_MARKER,
-  STAGE_ESCALATED_MARKER,
-  STAGE_HANDED_MARKER,
+  NEEDED_FROM_YOU,
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
@@ -21,12 +15,12 @@ import { stageLabel } from "./pipeline.js";
 import {
   PROMPTED_STAGES,
   approvalRecordPrompt,
-  conversationSubject,
-  escalationPrompt,
   stagePrompt,
   takeoverPrompt,
   workBranch,
   type PromptContext,
+  type TakeoverFacts,
+  type TakeoverRun,
 } from "./prompts.js";
 
 const project: TicketingProject = {
@@ -118,17 +112,42 @@ describe("every stage prompt", () => {
   it.each(PROMPTED_STAGES)("%s writes back for someone new to all this", (stage) => {
     expect(stagePrompt(stage, context)).toMatch(/knows nothing about/i);
   });
+});
 
-  it.each(PROMPTED_STAGES)("%s carries the human's words when a gate sent it back", (stage) => {
-    const words = "it's not about phones, it's about losing the draft";
-    const prompt = stagePrompt(stage, { ...context, feedback: words });
+/**
+ * The marker lines a step was once told to write, as they were written. The
+ * runner reads a step's plain comment, not a marker, so no step is told to
+ * write one any more. Written out here rather than imported: most of their
+ * constants were deleted with the last code that read them (41g).
+ */
+const RETIRED_MARKERS = [
+  "✅ **Agreed** · the record of a conversation, accepted by the human",
+  "❓ **Still open** · written by the machine when a written answer left something unsettled",
+  "🏁 **Step finished** · written by the machine when a stage completed its work",
+  "🙋 **Needs a person** · written by the machine when a stage stopped and is asking for help",
+  "🆘 **Needs more than a reply** · written by the machine when a stage cannot act on the answer it was given",
+  "🔁 **Picking it back up** · written by the machine when a stop has been cleared and the work goes on without you",
+  "Carrying on at:",
+  "📌 **Where this stands** · what this ticket needs right now, kept up to date by the machine",
+];
 
-    expect(prompt).toContain(words);
-    expect(prompt).toMatch(/again/i);
+describe("what a step is told matches the runner (41g)", () => {
+  it.each(PROMPTED_STAGES)("%s is told to write none of the retired marker lines", (stage) => {
+    const prompt = stagePrompt(stage, { ...context, branch: "timone/6-typing-in-the-box" });
+
+    for (const marker of RETIRED_MARKERS) {
+      expect(prompt, `${stage} still carries: ${marker}`).not.toContain(marker);
+    }
   });
 
-  it.each(PROMPTED_STAGES)("%s says nothing about feedback when there was none", (stage) => {
-    expect(stagePrompt(stage, context)).not.toMatch(/asked for a change/i);
+  it.each(PROMPTED_STAGES)("%s is still told to end with the line `askedFor` reads", (stage) => {
+    // `askedFor` takes what a step asked for from the line that starts with
+    // NEEDED_FROM_YOU, and the runner's wait and `timone status` say those
+    // words. A step never told the exact words writes something close, and
+    // then the ticket waits on nothing anyone asked.
+    const prompt = stagePrompt(stage, { ...context, branch: "timone/6-typing-in-the-box" });
+
+    expect(prompt).toContain(`End every message to them with one line that starts with ${NEEDED_FROM_YOU}`);
   });
 });
 
@@ -183,16 +202,6 @@ describe("the triage prompt", () => {
 describe("the clarification prompt", () => {
   const prompt = stagePrompt("clarification", context);
 
-  it("tells the session someone is present and waiting, when one is", () => {
-    // ✏ Re-pointed at the session a human actually opened. The prompt used to
-    // claim this unconditionally, which was false the moment ADR-0022 let the
-    // daemon start this stage to ingest an answer written on the ticket — and
-    // it is the sentence most likely to make such a session behave wrongly.
-    expect(stagePrompt("clarification", { ...context, interactive: true })).toMatch(
-      /at the keyboard/i,
-    );
-  });
-
   it("carries what triage decided, so the interview does not start from nothing", () => {
     expect(prompt).toContain("feature");
   });
@@ -201,9 +210,11 @@ describe("the clarification prompt", () => {
     expect(prompt).not.toMatch(/the problem is|they want|you should build/i);
   });
 
-  it("requires an accepted summary, marked so the machine can find it again", () => {
+  it("requires an accepted summary before it posts one as agreed", () => {
+    // ✏ 2026-09-30: no marker line under it. The runner reads the summary
+    // itself.
     expect(prompt).toMatch(/accept/i);
-    expect(prompt).toContain(CONVERSATION_RECORD_MARKER);
+    expect(prompt).toMatch(/record of what was agreed/i);
   });
 
   it("forbids treating the conversation itself as a record", () => {
@@ -222,25 +233,11 @@ describe("the clarification prompt", () => {
 describe("the wayfinding prompt", () => {
   const prompt = stagePrompt("wayfinding", context);
 
-  it("is a stage a takeover can hold a conversation for", () => {
-    // `runTakeover` refuses any stage the prompts module cannot instruct, so
-    // this membership is what turns the CTA on a wayfinder ticket from an
-    // instruction the human cannot follow into one that works.
+  it("is a step the runner can start a session for", () => {
+    // ✏ 2026-09-30: `isPrompted` reads this list, and the runner refuses to
+    // start a step that is not on it. A takeover no longer uses a step's
+    // prompt at all.
     expect(PROMPTED_STAGES).toContain("wayfinding");
-  });
-
-  it("tells the session someone is present and waiting, when one is", () => {
-    expect(stagePrompt("wayfinding", { ...context, interactive: true })).toMatch(
-      /at the keyboard/i,
-    );
-  });
-
-  it("marks the resolution so the machinery knows the run is over", () => {
-    // ✏ The amendment's third settled question. Nothing follows wayfinding,
-    // so the record marker is what turns a resolved decision ticket into a
-    // finished run instead of one parked forever on a question already
-    // answered.
-    expect(prompt).toContain(CONVERSATION_RECORD_MARKER);
   });
 
   it("sends the session to this one ticket on its map", () => {
@@ -260,109 +257,22 @@ describe("the wayfinding prompt", () => {
   });
 });
 
-describe("a conversation prompt built for a written answer", () => {
+describe("a conversation prompt, with nobody at the keyboard", () => {
   const CONVERSATION_STAGES = ["clarification", "wayfinding"] as const;
-  const answer = "it's the draft they lose, not the phone layout";
-
-  /** The thread as it stands once the machine has already asked once more. */
-  function afterOneRound(): TicketThread {
-    return {
-      ...ticket,
-      comments: [
-        ...ticket.comments,
-        {
-          author: "fvermaut",
-          body: `${MACHINE_MARKER}\n\n${CLARIFICATION_MARKER}\n\nwhich of the two first?`,
-          createdAt: "2026-08-03T10:00:00Z",
-          fromTimone: true,
-        },
-      ],
-    };
-  }
 
   it.each(CONVERSATION_STAGES)(
-    "%s does not claim anyone is at the keyboard when nobody is",
+    "%s does not claim anyone is at the keyboard, or that a written answer started it",
     (stage) => {
-      // The daemon started this session because they wrote on the ticket. A
-      // session told a human is waiting in front of it will behave as though
-      // its reply is being read in the moment — and nothing it says reaches
-      // them except as a comment.
-      const prompt = stagePrompt(stage, { ...context, feedback: answer });
+      // The runner starts this step, and nothing it says reaches them except
+      // as a comment. ✏ 2026-09-30: the reason it used to give — they
+      // answered in writing — was the old code's, and is gone with it.
+      const prompt = stagePrompt(stage, context);
 
       expect(prompt).not.toMatch(/at the keyboard/i);
-      expect(prompt).toMatch(/in writing/i);
-      expect(prompt).toMatch(/comment/i);
+      expect(prompt).not.toMatch(/because they answered/i);
+      expect(prompt).toMatch(/posted as a comment on the ticket/i);
     },
   );
-
-  it.each(CONVERSATION_STAGES)("%s carries what they wrote, as an answer", (stage) => {
-    const prompt = stagePrompt(stage, { ...context, feedback: answer });
-
-    expect(prompt).toContain(answer);
-    // Not as a gate's change request: they answered a question, they did not
-    // reject a document.
-    expect(prompt).not.toMatch(/asked for a change/i);
-  });
-
-  it.each(CONVERSATION_STAGES)(
-    "%s forbids re-asking what the answer already settles",
-    (stage) => {
-      expect(stagePrompt(stage, { ...context, feedback: answer })).toMatch(
-        /do not ask .*again|already answered/i,
-      );
-    },
-  );
-
-  it.each(CONVERSATION_STAGES)(
-    "%s allows exactly one more question, marked so it can be counted",
-    (stage) => {
-      const prompt = stagePrompt(stage, { ...context, feedback: answer });
-
-      expect(prompt).toContain(CLARIFICATION_MARKER);
-      expect(prompt).toMatch(/once/i);
-    },
-  );
-
-  it.each(CONVERSATION_STAGES)(
-    "%s hands back the takeover instead of asking a third time",
-    (stage) => {
-      // ADR-0022's bound, and the one thing this slice guarantees: escalation
-      // is the session's judgement, but a second unsettled answer must
-      // produce the takeover rather than another question.
-      const prompt = stagePrompt(stage, {
-        ...context,
-        ticket: afterOneRound(),
-        feedback: "still not sure really",
-      });
-
-      expect(prompt).toContain("timone takeover scratch-app#6");
-      expect(prompt).toMatch(/not ask (them )?again|no more questions|third/i);
-      // The marker itself is still in the prompt — it is in the thread the
-      // prompt renders, which is exactly how the round was counted. What must
-      // be gone is the *authorisation* to spend another one.
-      expect(prompt).not.toMatch(/you may ask/i);
-    },
-  );
-});
-
-describe("conversationSubject", () => {
-  it("says what is about to be talked through, in the ticket's own terms", () => {
-    const subject = conversationSubject(ticket);
-
-    expect(subject).toContain(ticket.title);
-    expect(subject.toLowerCase()).not.toContain("stage");
-    expect(subject.toLowerCase()).not.toContain("timone-");
-  });
-});
-
-describe("takeoverPrompt", () => {
-  it("is the stage's own prompt, framed for a human who just opened it", () => {
-    const prompt = takeoverPrompt("scratch-app", "clarification", ticket);
-
-    expect(prompt).toContain(ticket.body);
-    expect(prompt).toMatch(/Timone \(you\), earlier/);
-    expect(prompt).toContain("timone takeover scratch-app#6");
-  });
 });
 
 describe("the planning prompt", () => {
@@ -389,18 +299,13 @@ describe("the planning prompt", () => {
     expect(prompt).toMatch(/push it/i);
   });
 
-  it("asks for the outcome record the daemon reads it by", () => {
-    // Found live on 2026-08-15, twice, on scratch-app #31. Every wait-free
-    // working stage is judged by `afterStage` reading an outcome record off
-    // the ticket; `planning` was gated until this morning, so the approval
-    // reply was its signal and it never carried this block. ADR-0030 D1 made
-    // it wait-free and nobody moved the block across, so the session wrote
-    // the plan, posted a comment nothing could read, and the run failed with
-    // "the planning stage ended without recording an outcome, and the branch
-    // carries what it planned". No unit test could have caught it: the tests
-    // inject the outcome.
-    expect(prompt).toContain(STAGE_DONE_MARKER);
-    expect(prompt).toContain(STAGE_HANDED_MARKER);
+  it("asks for the closing comment the runner reads", () => {
+    // Found live on 2026-08-15, twice, on scratch-app #31: `planning` had been
+    // gated until that morning, never carried the block that asks for a
+    // closing comment, and its run failed for want of one. ✏ 2026-09-30: the
+    // comment no longer opens on a marker line; the runner reads it as it is.
+    expect(prompt).toMatch(/exactly one comment on the ticket/i);
+    expect(prompt).toMatch(/the runner reads this comment/i);
   });
 
   it("still asks the human for nothing", () => {
@@ -441,17 +346,12 @@ describe("the execution prompt", () => {
     // so nothing here may refuse to build over a `Status:` line — every chunk's
     // phase file is unstamped by construction and execution would refuse all of
     // them. **Both halves are asserted in one test on purpose**: they live four
-    // lines apart in the prompt, and the closing flip is what `session.ts` reads
-    // with `/^Complete\b/` to judge whether the run succeeded. Delete it with
-    // the entry gate and every chunk fails its own outcome check, silently.
+    // lines apart in the prompt, and the closing flip is the `Status:` line the
+    // runner is shown for the branch's phase file. Delete it with the entry
+    // gate and every built chunk looks unfinished, silently.
     expect(prompt).not.toMatch(/authority on whether you may/i);
     expect(prompt).not.toContain("Approved for execution");
     expect(prompt).toContain("Complete — see <report>");
-  });
-
-  it("carries both outcome markers, verbatim", () => {
-    expect(prompt).toContain(STAGE_DONE_MARKER);
-    expect(prompt).toContain(STAGE_HANDED_MARKER);
   });
 
   it("asks for exactly one closing comment", () => {
@@ -483,11 +383,6 @@ describe("the verification prompt", () => {
     expect(prompt).toContain("timone/6-typing-in-the-box");
   });
 
-  it("carries both outcome markers, verbatim", () => {
-    expect(prompt).toContain(STAGE_DONE_MARKER);
-    expect(prompt).toContain(STAGE_HANDED_MARKER);
-  });
-
   it("says why the context is empty, so the session does not go looking", () => {
     expect(prompt).toMatch(/did not watch the build/i);
   });
@@ -510,11 +405,6 @@ describe("the delivery prompt", () => {
     expect(prompt).toMatch(/ticket.*links|link.*on the ticket/i);
   });
 
-  it("carries both outcome markers, verbatim", () => {
-    expect(prompt).toContain(STAGE_DONE_MARKER);
-    expect(prompt).toContain(STAGE_HANDED_MARKER);
-  });
-
   it("never merges the pull request — that stays a human act", () => {
     // Narrowed rather than dropped (ADR-0030 D2): the daemon now merges chunk
     // zero itself, once, so a blanket "never merge" would be a rule the
@@ -529,11 +419,13 @@ describe("the remediation prompt", () => {
   const prompt = stagePrompt("remediation", {
     ...context,
     branch: "timone/6-typing-in-the-box",
-    feedback: "Please rename this variable, it shadows the prop.",
   });
 
-  it("carries the review comment as the defect brief", () => {
-    expect(prompt).toContain("shadows the prop");
+  it("takes the review comment on the pull request as the defect brief", () => {
+    // ✏ 2026-09-30: the comment is no longer carried in the prompt. The
+    // runner says in its instructions which comment to act on.
+    expect(prompt).toMatch(/review comment on the pull request is your instruction/i);
+    expect(prompt).toMatch(/runner's instructions/i);
   });
 
   it("commits with the review-fix convention on the same branch", () => {
@@ -566,11 +458,6 @@ describe("the remediation prompt", () => {
 
   it("asks only about a point it would have to guess at", () => {
     expect(prompt).toMatch(/ask about that point only/i);
-  });
-
-  it("carries both outcome markers, verbatim", () => {
-    expect(prompt).toContain(STAGE_DONE_MARKER);
-    expect(prompt).toContain(STAGE_HANDED_MARKER);
   });
 
   it("answers on the pull request's own thread", () => {
@@ -766,65 +653,24 @@ describe("workBranch — one branch per chunk, not one per ticket", () => {
   });
 });
 
-describe("the rule every stage carries about an answer it may not act on", () => {
-  // ADR-0033 D2, appended in `stagePrompt` beside the checkout and provenance
-  // blocks. Ten copies of a trigger rule is ten chances to word it
-  // differently, and the one stage that got it wrong would be invisible.
+describe("the rule every step carries for when it cannot go on", () => {
+  // Appended in `stagePrompt` beside the checkout and provenance blocks. Ten
+  // copies of a rule is ten chances to word it differently, and the one stage
+  // that got it wrong would be invisible. ✏ 2026-09-30: the step writes no
+  // marker line and no command. It says why it stopped and what it needs, and
+  // the runner reads that.
 
   it.each(PROMPTED_STAGES)("is carried by the %s prompt", (stage) => {
     const prompt = stagePrompt(stage, context);
 
-    expect(prompt).toContain(STAGE_ESCALATED_MARKER);
     expect(prompt).toMatch(/outside what this (step|stage) may do/i);
+    expect(prompt).toMatch(/the runner reads your comment/i);
   });
-
-  it.each(PROMPTED_STAGES)(
-    "asks the %s prompt for the machine header above the marker, in that order",
-    (stage) => {
-      // Found live on `scratch-app` #34, 2026-08-18: the session posted the
-      // marker as the comment's first line and left the header off. The daemon
-      // read its own words as the human's — no escalation park, and the run
-      // resumed on the machine talking to itself.
-      const prompt = stagePrompt(stage, context);
-      const marker = prompt.indexOf(STAGE_ESCALATED_MARKER);
-      const header = prompt.lastIndexOf(MACHINE_MARKER, marker);
-
-      expect(marker).toBeGreaterThan(-1);
-      expect(header).toBeGreaterThan(-1);
-      expect(prompt.slice(header, marker)).toMatch(/header|exact line/i);
-    },
-  );
-
-  it("forbids inviting another answer, and still leaves them something to do", () => {
-    // Two live findings, one sentence apart. The first session escalated *and*
-    // closed with "reply go ahead and I'll carry on" — a handoff and an
-    // escalation in one comment, which is the loop again. The correction went
-    // too far: the next one closed with "What I need from you: nothing", on a
-    // stop only a person can clear. The comment must refuse the answer and
-    // hand over the command.
-    const prompt = stagePrompt("clarification", context);
-
-    expect(prompt).toMatch(/do not invite another answer/i);
-    expect(prompt).toMatch(/never leave them with nothing to do/i);
-  });
-
-  it.each(PROMPTED_STAGES)(
-    "gives the %s prompt the exact command its comment must close on",
-    (stage) => {
-      // The standing note carries the same command, and is *upserted* — edited
-      // where it already sits, which on a long thread is nowhere near the
-      // bottom. A reader who has just read the stage's own comment must not
-      // have to go looking.
-      expect(stagePrompt(stage, context)).toContain(
-        `timone takeover ${project.name}#${ticket.number}`,
-      );
-    },
-  );
 
   it("says what is not a reason to stop, beside what is", () => {
-    // The counter-example is what stops over-firing. A step that has asked
-    // nothing yet, or that merely finds the work hard, has nothing to hand
-    // over.
+    // The counter-example is what stops over-firing. A step that merely finds
+    // the work hard, or needs an answer it can simply ask for, has no reason
+    // to stop.
     const prompt = stagePrompt("execution", context);
 
     expect(prompt).toMatch(/hard|difficult/i);
@@ -832,10 +678,152 @@ describe("the rule every stage carries about an answer it may not act on", () =>
   });
 });
 
-describe("the escalation prompt", () => {
-  // ADR-0033 D5. The session this prompt starts is bound to no stage: it is
-  // opened on a run the machine stopped and cannot take further, and its job
-  // is to work out what that run actually needs.
+describe("the takeover prompt for a run the runner waits on (41g)", () => {
+  const waiting: TakeoverRun = {
+    id: "scratch-app#6/1",
+    stage: "requirements",
+    branch: "timone/6-typing-in-the-box",
+    wait: {
+      on: "your answer to the two questions in my last comment",
+      opened: "2026-08-03T09:30:00Z",
+    },
+  };
+  const facts: TakeoverFacts = { record: { ok: true, value: [] }, namedPeople: ["fvermaut"] };
+
+  it("names the run's step and what it waits on, and says nothing about a hand-back line", () => {
+    const prompt = takeoverPrompt("scratch-app", waiting, ticket, facts);
+
+    expect(prompt).toContain(stageLabel("requirements"));
+    expect(prompt).toContain("your answer to the two questions in my last comment");
+    expect(prompt).not.toContain("Picking it back up");
+    expect(prompt).not.toContain("Carrying on at:");
+    expect(prompt).not.toMatch(/hand (the work|it) back/i);
+  });
+
+  it.each([
+    ["wayfinding", "timone-wayfind"],
+    ["clarification", "timone-grill"],
+    ["charting", "timone-wayfind"],
+  ] as const)("tells the session to hold the %s conversation with the person, with `%s`", (stage, skill) => {
+    const prompt = takeoverPrompt("scratch-app", { ...waiting, stage }, ticket, facts);
+
+    expect(prompt).toContain(`\`${skill}\``);
+    expect(prompt).toMatch(/hold that conversation with the person/i);
+  });
+
+  it("holds no conversation for a step that is not one", () => {
+    const prompt = takeoverPrompt("scratch-app", { ...waiting, stage: "execution" }, ticket, facts);
+
+    expect(prompt).not.toMatch(/hold that conversation/i);
+    expect(prompt).not.toContain("timone-grill");
+    expect(prompt).not.toContain("timone-wayfind");
+  });
+
+  it("says the runner wakes when the session ends and reads what it left on the ticket", () => {
+    // Nothing in the terminal reaches the runner. The ticket does, so the
+    // session's last act is to write there what it did and what comes next.
+    const prompt = takeoverPrompt("scratch-app", waiting, ticket, facts);
+
+    expect(prompt).toMatch(/when this session ends, the runner wakes/i);
+    expect(prompt).toMatch(/reads what you left on the ticket/i);
+    expect(prompt).toMatch(/what you did and what should happen next/i);
+  });
+
+  it("says what the run record says happened on this run, and on no other", () => {
+    const prompt = takeoverPrompt("scratch-app", waiting, ticket, {
+      ...facts,
+      record: {
+        ok: true,
+        value: [
+          { kind: "step-ended", at: "2026-08-01T08:00:00Z", runId: "scratch-app#6/0", stage: "execution", sessionId: "s0", ok: false, costUsd: 1, error: "an older run's failure" },
+          { kind: "step-started", at: "2026-08-03T09:10:00Z", runId: "scratch-app#6/1", stage: "requirements", sessionId: "s1" },
+          { kind: "step-ended", at: "2026-08-03T09:25:00Z", runId: "scratch-app#6/1", stage: "requirements", sessionId: "s1", ok: true, costUsd: 0.8 },
+          { kind: "decision", at: "2026-08-03T09:30:00Z", runId: "scratch-app#6/1", action: "post", reason: "two questions only the operator can answer" },
+        ],
+      },
+    });
+
+    expect(prompt).toContain("two questions only the operator can answer");
+    expect(prompt).toMatch(/2026-08-03T09:25:00Z.*writing down what it needs.*finished/);
+    expect(prompt).not.toContain("an older run's failure");
+  });
+
+  it("says so when the run record cannot be read", () => {
+    const prompt = takeoverPrompt("scratch-app", waiting, ticket, {
+      ...facts,
+      record: { ok: false, error: { line: 3, message: "The run record .timone/records/scratch-app/6.jsonl cannot be read: line 3 is not JSON." } },
+    });
+
+    expect(prompt).toContain("line 3 is not JSON");
+  });
+
+  it("carries what the named people wrote since the run began waiting, and nobody else's words", () => {
+    const thread: TicketThread = {
+      ...ticket,
+      comments: [
+        ...ticket.comments,
+        { author: "fvermaut", body: "only the draft matters", createdAt: "2026-08-03T09:40:00Z", fromTimone: false },
+        { author: "drive-by-dave", body: "make it purple", createdAt: "2026-08-03T09:45:00Z", fromTimone: false },
+      ],
+    };
+
+    const prompt = takeoverPrompt("scratch-app", waiting, thread, facts);
+    const since = prompt.slice(
+      prompt.indexOf("--- what they wrote ---"),
+      prompt.indexOf("--- end of what they wrote ---"),
+    );
+
+    expect(since).toContain("only the draft matters");
+    // Written before the run began waiting: the runner already read it.
+    expect(since).not.toContain("it's worse in landscape");
+    // Not named for the project, so not an instruction.
+    expect(since).not.toContain("make it purple");
+  });
+
+  it("compares when a comment was written with when the wait opened as instants, whatever their spelling", () => {
+    // The ledger writes an instant with milliseconds, and GitHub writes one
+    // without. As text, "…T10:00:00Z" sorts after "…T10:00:00.500Z", though
+    // it is half a second before it.
+    const opened: TakeoverRun = {
+      ...waiting,
+      wait: { on: "an answer", opened: "2026-08-03T10:00:00.500Z" },
+    };
+    const thread: TicketThread = {
+      ...ticket,
+      comments: [
+        { author: "fvermaut", body: "written just before the wait opened", createdAt: "2026-08-03T10:00:00Z", fromTimone: false },
+        { author: "fvermaut", body: "written just after the wait opened", createdAt: "2026-08-03T10:00:01Z", fromTimone: false },
+      ],
+    };
+
+    const prompt = takeoverPrompt("scratch-app", opened, thread, facts);
+    const since = prompt.slice(
+      prompt.indexOf("--- what they wrote ---"),
+      prompt.indexOf("--- end of what they wrote ---"),
+    );
+
+    expect(since).toContain("written just after the wait opened");
+    expect(since).not.toContain("written just before the wait opened");
+  });
+
+  it("asks a session that ran no step's skill to sign its commits `Timone-Stage: interactive`", () => {
+    // The value CLAUDE.md, the session's start and the check at its end all
+    // give for a session in which no step was running.
+    const { stage: _none, ...noStep } = waiting;
+
+    const prompt = takeoverPrompt("scratch-app", noStep, ticket, facts);
+
+    expect(prompt).toContain(
+      "Timone-Stage: <the stage whose skill you ran, or `interactive` if none>",
+    );
+    expect(prompt).not.toMatch(/Timone-Stage:.*escalation/);
+  });
+});
+
+describe("the takeover prompt for a run that stopped at a step", () => {
+  // ADR-0033 D5. The session this prompt starts is bound to no stage. ✏
+  // 2026-09-30: it is the prompt for every takeover of a run, and the run
+  // here is one that stopped at a step.
 
   const stopped = "2026-08-17T10:00:00Z";
   const account =
@@ -870,70 +858,56 @@ describe("the escalation prompt", () => {
     branch: "timone/31-slow-page",
     wait: { on: "me — I can't take this one further myself.", opened: stopped },
   };
+  const facts: TakeoverFacts = { record: { ok: true, value: [] }, namedPeople: ["fvermaut"] };
 
   it("is not any stage's prompt, wearing a hat", () => {
     // Asserted by identity against every prompt a stage has, not by looking
     // for a word: a session handed a stage's instructions is the bound
     // session ADR-0033 rejected, whatever it is called.
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     for (const stage of PROMPTED_STAGES) {
       expect(prompt).not.toBe(
         stagePrompt(stage, {
           project: { name: "scratch-app", repoUrl: "" },
           ticket: stuck,
-          interactive: true,
         }),
       );
     }
-    expect(prompt).not.toBe(takeoverPrompt("scratch-app", "verification", stuck));
   });
 
   it("carries the ticket and its thread, with the voices told apart", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toContain("the page is slow when I add many items");
     expect(prompt).toContain("how many times do I need to say YES?");
   });
 
   it("says where the run stopped, and what it holds", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toContain("scratch-app#31/1");
     expect(prompt).toContain("verification");
     expect(prompt).toContain("timone/31-slow-page");
   });
 
-  it("carries the stopped stage's account, and says it may be wrong", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+  it("carries the stopped step's account, and says the machine's comments may be wrong", () => {
+    // ✏ 2026-09-30: the account is read in the thread, not quoted apart. It
+    // was found by the comment posted at the instant the wait opened, which
+    // only the old code between steps arranged.
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toContain("the check would prove nothing");
-    // Quoted without the thread's own plumbing: the marker is how the ticket
-    // tells the voices apart, and reading it back as part of the account
-    // would have the session treat punctuation as evidence.
-    expect(
-      prompt.slice(
-        prompt.indexOf("--- what the stage said ---"),
-        prompt.indexOf("--- end of what the stage said ---"),
-      ),
-    ).not.toContain(MACHINE_MARKER);
     // The account is evidence, not an instruction — and the prompt has to say
-    // why: the stage that wrote it could not read the source, the decisions or
-    // the diff. On ivtrends #1 an account like this named two promises as
-    // broken when only one was.
+    // why: the step that wrote it could not read what the session can. On
+    // ivtrends #1 an account like this named two promises as broken when only
+    // one was.
     expect(prompt).toMatch(/may be wrong/i);
     expect(prompt).toMatch(/could not read|cannot read|never read/i);
   });
 
-  it("names what normally follows as the pipeline's default, not as a decision", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck);
-
-    expect(prompt).toContain("delivery");
-    expect(prompt).toMatch(/you may|need not|not a decision/i);
-  });
-
-  it("carries what the human wrote after it stopped", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+  it("carries what a named person wrote after the run began waiting", () => {
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/how many times do I need to say YES\?/);
   });
@@ -941,14 +915,14 @@ describe("the escalation prompt", () => {
   it("copes with a stop nobody wrote an account for, and with silence after it", () => {
     const bare: TicketThread = { ...stuck, comments: [] };
 
-    const prompt = escalationPrompt("scratch-app", run, bare);
+    const prompt = takeoverPrompt("scratch-app", run, bare, facts);
 
     expect(prompt).toContain("scratch-app#31/1");
     expect(prompt).not.toContain("undefined");
   });
 
   it("grants the authority a stage does not have, in as many words", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/whichever .*skill/i);
     expect(prompt).toMatch(/depart/i);
@@ -958,7 +932,7 @@ describe("the escalation prompt", () => {
     // The only audit an unbound session has. Its absence is a failure, not a
     // nit: nothing else records what was done or why it departed from a
     // default.
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/commit/i);
     expect(prompt).toMatch(/record/i);
@@ -969,14 +943,15 @@ describe("the escalation prompt", () => {
   });
 
   // ADR-0035. Everything below is the half phase 25 left out: where this
-  // session's job ends, and how it gives the work back.
+  // session's job ends. ✏ 2026-09-30: it no longer names a step to carry on
+  // at; the runner decides that from the session's closing comment.
 
   it("says building is not its job, and says why", () => {
     // scratch-app #37, 2026-08-18: the session got the approval and then
     // carried the whole feature to a pull request in the terminal. The rule
     // needs the reason with it — a rule with no reason is one a capable
     // session talks itself out of.
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/do not write .*code/i);
     expect(prompt).toMatch(/pull request/i);
@@ -985,44 +960,13 @@ describe("the escalation prompt", () => {
 
   it("names what it may write instead", () => {
     // The line is artifacts, not code: the decision, the promises, the record.
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toMatch(/requirements|promises|decision/i);
   });
 
-  it("gives the exact shape of the note that hands the work back", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck);
-
-    expect(prompt).toContain(HANDBACK_MARKER);
-    expect(prompt).toContain(HANDBACK_STEP_PREFIX);
-  });
-
-  it("lists every step it may name, and only steps that can be started", () => {
-    // Generated from the same map the reader resolves against, so a step
-    // added later cannot leave the prompt offering a name the loop refuses —
-    // and an unstartable one is never offered, since naming it would fail the
-    // run rather than carry it on.
-    const prompt = escalationPrompt("scratch-app", run, stuck);
-
-    for (const stage of PROMPTED_STAGES) {
-      expect(prompt).toContain(stageLabel(stage));
-    }
-    // ✏ The examples of an unstartable step used to be `research` and
-    // `feedback`; phase 27 built both, so they are now offered like any other.
-    // The property is unchanged and is asserted where it still bites: the
-    // map's own stage is built and starts no session, so its name must not be
-    // on the list.
-    expect(prompt).not.toContain(stageLabel("charting"));
-  });
-
-  it("warns that a name off that list is refused, not guessed", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck);
-
-    expect(prompt).toMatch(/refuse|won't|will not/i);
-  });
-
   it("names the other honest ending, for work that should not happen", () => {
-    const prompt = escalationPrompt("scratch-app", run, stuck);
+    const prompt = takeoverPrompt("scratch-app", run, stuck, facts);
 
     expect(prompt).toContain("timone cancel scratch-app#31");
   });

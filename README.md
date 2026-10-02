@@ -5,10 +5,10 @@
 ## How it works
 
 - **One process, written down.** [process.md](process.md) defines every lifecycle stage, its artifact and its gate. Each stage is implemented by a skill under `.claude/skills/`.
-- **Driven by tickets.** A daemon watches the managed projects' issue trackers, picks up tickets carrying the `timone` label, and walks them through the process. You never name a stage or a skill — write the ticket in plain language.
-- **You are asked, never assumed.** A ticket waiting on you says so and says what to do about it: reply on the ticket, or run the `timone takeover` line it hands you. **Merging stays yours.**
+- **Driven by tickets.** A daemon watches the managed projects' issue trackers and picks up tickets carrying the `timone` label. For each ticket, **the runner decides each step**. The runner is an agent: it reads the ticket and the work so far, and chooses what happens next. The order in [process.md](process.md) is its default. You never name a stage or a skill — write the ticket in plain language.
+- **You are asked, never assumed.** The newest comment on a ticket says what it needs from you. Answer on the ticket in plain words, or open a terminal session on it with `timone takeover`. **Merging stays yours:** the machine never merges a pull request, and nothing reaches a default branch without your yes.
 - **Everything is traceable.** Every commit Timone makes ends with `Timone-Stage:`, `Timone-Session:` and, when a ticket drove it, `Timone-Run: <project>#<ticket>` — so auditing a repo is a `git log --grep` away.
-- **Every state is written down.** [manual/how-the-daemon-works.md](manual/how-the-daemon-works.md) draws what the daemon does: the states a piece of work can be in, the moves between them, and what makes it move.
+- **Every state is written down.** [manual/how-the-daemon-works.md](manual/how-the-daemon-works.md) says what the daemon does in one cycle, how the runner moves a run, what a run waits for, and what code keeps whatever the runner decides.
 - **Client repos receive only process artifacts** (`doc/…`, `CONTEXT.md`). Harness files never leave this repository.
 
 Sessions always run at the timone repo root, never inside a managed project ([ADR-0007](doc/adr/0007-sessions-at-timone-root.md)).
@@ -62,8 +62,7 @@ If it says *borrowed from this machine's Claude login* instead, the variable did
 ```bash
 timone daemon                    # watch the tickets and run what is marked
 timone status                    # what each project is working, and what waits on you
-timone takeover <project>#<n>    # pick up a ticket that wants a conversation
-timone retry <project>#<n>       # re-arm a failed run at the stage where it stopped
+timone takeover <project>#<n>    # work on a ticket in this terminal, then give it back to the runner
 timone cancel <project>#<n>      # stop a ticket's work for good
 timone projects add|update <name> --repo <url> …   # register or correct a project
 ```
@@ -72,27 +71,28 @@ Only one daemon works at a time; a second one exits saying who holds the lock. R
 
 Two credentials keep a boxed run alive, and neither is yours to manage after setup. The model login comes from the token above. The GitHub token is minted per run, scoped to the one repository, and refreshed into the running container every twenty minutes — a minted token dies after an hour and runs last longer than that. [manual/how-the-daemon-works.md](manual/how-the-daemon-works.md) has both in full.
 
-## Projects run by the runner
+## The runner
 
-By default, the daemon moves a ticket through the stages in a fixed order. On a **runner project**, the runner decides each step instead. The runner is an agent. It reads the ticket and the work so far, and chooses what to do next. The order in [process.md](process.md) is its default. It may leave that order when it has a reason. Each time it does, it says so on the ticket, with the reason, and the pull request lists each change to the order in its first lines. It never merges a pull request. The decision is [ADR-0060](doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md).
+Every project is driven by the runner. The runner is an agent. Each time something happens on a run, it reads the ticket and the work so far, and chooses what to do next. The order in [process.md](process.md) is its default. It may leave that order when it has a reason. Each time it does, it says so on the ticket, with the reason, and the pull request lists each change to the order in its first lines. It never merges a pull request. The decision is [ADR-0060](doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md).
 
-To switch a project, add `driver: runner` to its entry in `timone.yaml`. Without it, the project keeps the fixed order. The same `timone daemon` runs both kinds. scratch-app is a runner project. ivtrends stays on the fixed order until a watched run on scratch-app has passed ([what that run checks](doc/plans/phases/reports/phase-40-live-gate.md)).
+There is nothing to switch on, and there is no `driver` line to set. A manifest that still has one does not load: the error names the project and says to delete the line.
 
 ```yaml
-operator: your-login           # may instruct every runner project
+operator: your-login           # may instruct the runner on every project
 projects:
   scratch-app:
     # … repo_url, path, stack, bindings, as before
-    driver: runner
     instructors: [your-login]  # optional: these people instead of the operator
     ticket_limit_usd: 150      # optional: what one ticket may spend, in dollars
 ```
 
-**Who may instruct it.** The people in `instructors` on the project, or the `operator` when the project names nobody. The runner sees only their comments; anyone else's are left out. If a runner project has no `instructors` and there is no `operator`, `timone.yaml` is refused when it is read, and the error names the project.
+**Who may instruct it.** The people in `instructors` on the project, or the `operator` when the project names nobody. `instructors` replaces the operator, so list the operator there too if they should still instruct it. The runner sees only these people's comments; anyone else's are left out. The daemon does not start while a project names nobody — no `instructors` and no `operator` — and it says which project, and what to add. `timone projects list` and `timone workspace sync` still read such a manifest.
 
-**How you talk to it.** Write in plain words on the ticket or the pull request. `timone takeover` still opens a terminal session; when it ends, the runner reads what it left. `timone cancel` stops the run and any step still running, even when the runner cannot start. `timone retry` refuses on a runner project and tells you to write on the ticket instead.
+**How you talk to it.** Write in plain words on the ticket or the pull request. Each comment by a person who may instruct it wakes the runner. `timone takeover` opens a terminal session on a ticket nothing is working on right now; when the session ends, the runner reads what it left. `timone cancel` stops the run and any step still running, and puts the `timone:held` label on the ticket so it is not started again. It also works when no daemon is running. The retry command was removed: typed, it says to write on the ticket instead.
 
-**The limit.** One ticket may spend $150 across all its runs, the runner's own sessions included. `ticket_limit_usd` on the project changes it. At the limit, no new session starts, and the ticket says so. Reply "continue", or any words that mean it, to allow the same amount again.
+**The limit.** One ticket may spend $150 across all its runs, the runner's own sessions included. `ticket_limit_usd` on the project changes it. At the limit, no new session starts, and the ticket says what was spent and where the work stands. Reply "continue", or any words that mean it, to allow the same amount again. Only a reply from a person who may instruct the runner counts.
+
+**What it did.** The machine writes down each step, each decision of the runner with its reason, and what each session cost. `timone record` shows it. The replay checks the runner itself.
 
 ```bash
 timone record <project>#<n>    # each step with its times and cost, each decision with its reason,
@@ -105,7 +105,7 @@ The real replay calls the model, so it costs money and needs a terminal where yo
 
 ## The stages
 
-Name one yourself when you want to (`/timone-<stage> <project> …`); otherwise the daemon routes for you.
+Name one yourself when you want to (`/timone-<stage> <project> …`); otherwise the runner decides each step for you.
 
 | # | Skill | What it does |
 |---|-------|--------------|

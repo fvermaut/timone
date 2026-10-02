@@ -2,6 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-04
+- **Amended by:** [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), 2026-09-30 — the holder stays, and the wait loses its four kinds: a parked run now waits only for the runner
 - **Source:** the grooming of 2026-09-03, which read all forty open issues at once. Seven of them are one fault: [timone#78](https://github.com/fvermaut/timone/issues/78), [#76](https://github.com/fvermaut/timone/issues/76), [#75](https://github.com/fvermaut/timone/issues/75), [#63](https://github.com/fvermaut/timone/issues/63), [#27](https://github.com/fvermaut/timone/issues/27), [#12](https://github.com/fvermaut/timone/issues/12), [#11](https://github.com/fvermaut/timone/issues/11)
 - **Extends:** [ADR-0025](0025-a-lock-holders-proof-of-life-is-its-process.md) — a lock already has a named holder and is judged by asking its process. This gives a run the same thing, for the same reason
 - **Amends:** [ADR-0020](0020-liveness-is-judged-only-over-witnessed-time.md) for runs. Witnessed time stays the rule where no holder is recorded, which is every run written before this

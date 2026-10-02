@@ -510,9 +510,6 @@ function recordingForge(moment: Moment, project: TicketingProject, log: CallLog)
         log.push({ kind: "other", what: `commented on ${on.name}#${number}` });
       }
     },
-    async upsertComment(on, number) {
-      log.push({ kind: "other", what: `rewrote a standing comment on ${on.name}#${number}` });
-    },
     async applyLabel(on, number, label) {
       if (!isTicket(on, number)) {
         log.push({ kind: "other", what: `labelled ${on.name}#${number} ${label}` });

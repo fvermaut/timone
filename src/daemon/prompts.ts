@@ -1,24 +1,18 @@
 import {
-  CLARIFICATION_MARKER,
-  CONVERSATION_RECORD_MARKER,
-  HANDBACK_MARKER,
-  HANDBACK_STEP_PREFIX,
   MACHINE_MARKER,
-  STAGE_DONE_MARKER,
-  STAGE_ESCALATED_MARKER,
-  STAGE_HANDED_MARKER,
+  NEEDED_FROM_YOU,
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
 import { takeoverCommand } from "../channels/terminal.js";
 import { breakdownPath } from "./breakdown.js";
-import { clarifyingRounds } from "./gates.js";
 import {
-  stageAfter,
   stageLabel,
   type Classification,
   type PipelineStage,
 } from "./pipeline.js";
+import { isNamedPerson } from "../runner/brief.js";
+import type { readRecord, RecordEntry } from "../runner/record.js";
 
 /** The stages that have a prompt. Extended as stages are built. */
 export const PROMPTED_STAGES = [
@@ -40,24 +34,8 @@ export interface PromptContext {
   ticket: TicketThread;
   /** What triage decided, once it has. */
   classification?: Classification;
-  /**
-   * The human's words, when they are what resumed this stage: a gate's change
-   * request at a gated stage, or the answer they wrote on the ticket at a
-   * conversation stage (ADR-0022). One field, because it is one fact — what
-   * they said, to the stage that has to act on it — and each prompt frames it
-   * for what its own stage was waiting on.
-   */
-  feedback?: string;
   /** The work branch this run owns, at the stages that own one. */
   branch?: string;
-  /**
-   * Questions an earlier build stage asked a person and did not get answered,
-   * carried here so the pull request can state them
-   * ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
-   */
-  carried?: readonly { stage: string; words: string }[];
-  /** True when a human opened this session themselves and is waiting in it. */
-  interactive?: boolean;
 }
 
 /**
@@ -145,12 +123,19 @@ function reentryBlock(): string {
   ].join("\n");
 }
 
-/** How the session must write, and how it must sign what it posts. */
+/**
+ * How the session must write, and how it must sign what it posts.
+ *
+ * **The closing line is named in its exact words**, because it is read as
+ * well as written: `askedFor` takes what a step asked for from the line that
+ * starts with {@link NEEDED_FROM_YOU}, and the runner's wait says those words.
+ */
 function writingBlock(): string {
   return [
     "Write anything you post for someone who knows nothing about this process:",
-    "no stage numbers, no skill names, no process jargon. End every message to",
-    "them with one explicit line saying what, if anything, you need from them.",
+    "no stage numbers, no skill names, no process jargon.",
+    `End every message to them with one line that starts with ${NEEDED_FROM_YOU}`,
+    "and says what you need from them, or \"nothing\".",
     "",
     "**Every comment you post on the ticket must start with this exact line,**",
     "followed by a blank line, `---` and a blank line, then your text. You are",
@@ -190,199 +175,62 @@ function provenanceBlock(stage: string, context: PromptContext): string {
 }
 
 /**
- * How this conversation session came to exist, said truthfully.
+ * Where a conversation step's words have to go, said truthfully.
  *
- * Both openings used to be the first: *"A human has just opened this session
- * by running `timone takeover…`. They are at the keyboard now, waiting for
- * you."* ADR-0022 made that flatly false for a session the **daemon** starts
- * to ingest an answer written on the ticket — and it is the sentence most
- * likely to make such a session behave wrongly, since a session that believes
+ * ✏ 2026-09-30: one opening. A human who opened the session in their
+ * terminal used to be told they were at the keyboard, and a session the
+ * daemon started was told it was started because they answered in writing.
+ * The takeover now opens a session bound to no step, and the runner starts
+ * every step session with nobody at the keyboard. A session that believes
  * someone is reading along will ask a question and wait for a reply that
- * cannot arrive. Which side started the session changes who is waiting and
- * where the words have to land; it does not change what the stage is.
+ * cannot arrive, so this is said first.
  */
 function conversationOpening(context: PromptContext): string[] {
-  const { project, ticket } = context;
-  const opening = `You are resuming work on the managed project **${project.name}**.`;
-
-  if (context.interactive === true) {
-    return [
-      opening,
-      "A human has just opened this session by running",
-      `\`${takeoverCommand(project.name, ticket.number)}\`.`,
-      "**They are at the keyboard now, waiting for you.** This is a conversation, not a batch job.",
-    ];
-  }
-
   return [
-    opening,
-    "**Nobody is reading along as you work.** You were started by the",
-    "machinery because they answered this ticket in writing, and everything",
-    "you want to say to them has to be posted as a comment on the ticket —",
-    "there is no other way for it to reach them, and nothing you leave",
-    "unsaid here survives the end of your turn.",
+    `You are resuming work on the managed project **${context.project.name}**.`,
+    "**Nobody is reading along as you work.** Everything you want to say to",
+    "them has to be posted as a comment on the ticket — there is no other way",
+    "for it to reach them, and nothing you leave unsaid here survives the end",
+    "of your turn.",
   ];
 }
 
 /**
- * The human's written answer to the question this ticket was waiting on, and
- * the bound on what the session may do about it (ADR-0022).
- *
- * Deliberately not {@link feedbackBlock}, though both carry the human's words
- * back into a stage. A gate's feedback is a rejection — "you did this, do it
- * again differently" — and reading a written answer that way would have the
- * session apologise for a document nobody complained about. This is the
- * opposite: they answered a question, and the session's job is to see whether
- * the answer settles it.
- *
- * **The bound is expressed here because here is where it can be.** Whether an
- * answer "settles" the question is the session's judgement and no code's, so
- * nothing downstream can decide it — what is guaranteed instead is that a
- * second unsettled answer produces the takeover rather than a third question,
- * and this block is what guarantees it: the round already spent is read off
- * the thread, and the instruction changes accordingly.
- */
-function writtenAnswerBlock(context: PromptContext): string {
-  const answer = context.feedback;
-  if (answer === undefined || answer.trim() === "") return "";
-
-  const spent = clarifyingRounds(context.ticket);
-  const { project, ticket } = context;
-
-  return [
-    "",
-    "**They have answered this ticket in writing.** This is what they wrote,",
-    "in their words — read it as the answer to what this ticket was waiting",
-    "on, exactly as you would read a reply given out loud:",
-    "",
-    "--- what they wrote ---",
-    answer,
-    "--- end of what they wrote ---",
-    "",
-    "**Do not ask them again anything it already answers**, and do not make",
-    "them repeat themselves. Answer from the codebase whatever the codebase",
-    "can answer. If it settles the question, resolve this ticket now.",
-    "",
-    ...(spent === 0
-      ? [
-          "If something real is genuinely still open, you may ask **once**, and",
-          "only about what is still open — post exactly one comment whose first",
-          "content line is this line, exactly as written:",
-          "",
-          CLARIFICATION_MARKER,
-          "",
-          "That line is how the machinery knows the one question has been spent.",
-          "Then stop and change nothing else. Asking about something they have",
-          "already settled, or asking several things at once, wastes the one",
-          "question on nothing.",
-        ]
-      : [
-          "**You have already asked once, and this is their answer to that.**",
-          "You may not ask a third time. If it still does not settle the",
-          "question, say so plainly on the ticket and hand it back — tell them",
-          "the rest is quicker talked through, and give them this to run:",
-          "",
-          "```",
-          takeoverCommand(project.name, ticket.number),
-          "```",
-          "",
-          "Then change nothing else. Do not ask them another question in",
-          "writing: this ticket has had its written round, and typing at them",
-          "again is the failure that bound exists to prevent.",
-        ]),
-    "",
-  ].join("\n");
-}
-
-/** The human's words, when a gate sent this stage back to do it again. */
-function feedbackBlock(feedback: string | undefined): string {
-  if (feedback === undefined || feedback.trim() === "") return "";
-
-  return [
-    "",
-    "**You have done this stage before, and they asked for a change.** This is",
-    "what they said, in their words:",
-    "",
-    "--- what they replied ---",
-    feedback,
-    "--- end of reply ---",
-    "",
-    "Do the stage again with that in hand. Do not defend the previous version,",
-    "and do not ask them to repeat themselves.",
-    "",
-  ].join("\n");
-}
-
-/**
- * The one ending every stage owes, whatever else its own instructions say
- * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)
- * D2).
+ * What every step does when it cannot go on, whatever else its own
+ * instructions say.
  *
  * Appended in {@link stagePrompt} rather than written into each stage, for
  * the reason the checkout and provenance blocks are: ten copies of a rule is
  * ten chances to word it differently, and the one stage that got it subtly
  * wrong would be the one nobody checked.
  *
- * **The counter-example carries as much weight as the rule.** The failure
- * mode this opens is a stage summoning a person it did not need, and what
- * holds that back is saying plainly what does *not* qualify: work that is
- * merely hard, and a question nobody has answered yet.
+ * ✏ 2026-09-30: no marker line and no command. The step used to write a
+ * marker line that parked the run on a person, and close on the takeover
+ * command ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)
+ * D2). The runner now reads the step's plain comment and decides what happens
+ * next, so the step says why it stopped and what it needs, and ends.
  *
- * **And it names the command the comment must close on.** The first live gate
- * on 2026-08-18 produced a comment ending *"What I need from you: nothing"*:
- * true about answers, and false about the reader, who was left with no way to
- * act on what they had just read. The standing call to action carries the same
- * command, but it is *upserted* — edited where it already sits, often far up
- * the thread — so it is not what a reader reaches at the bottom.
+ * **The counter-example carries as much weight as the rule.** The failure
+ * mode this opens is a step stopping when it did not need to, and what holds
+ * that back is saying plainly what does *not* qualify: work that is merely
+ * hard, and a question the step can simply ask.
  */
-function stuckBlock(context: PromptContext): string {
+function stuckBlock(): string {
   return [
-    "**If you are given an answer you may not act on, stop and say so.** Not",
-    "every hard case — this one: you were given an answer, and doing what it",
-    "asks is outside what this step may do. Doing it anyway would break the",
-    "thing this step exists for, and asking them again gets you the same",
-    "answer, because they already answered.",
+    "**If you cannot go on, say so on the ticket and stop.** For example: you",
+    "were given an answer, and doing what it asks is",
+    "outside what this step may do.",
+    "Doing it anyway would break the thing this step exists for.",
     "",
-    "In that case post **exactly one comment**. It starts with the machine",
-    "header like every other comment you post — that line, a blank line, `---`,",
-    "a blank line — and the next line is this one, exactly as written:",
+    "Then post one comment. Say in plain words what you were asked to do, why",
+    "this step cannot do it, and what you think should happen instead. End it",
+    "with the line that says what you need from them, as every message ends.",
+    "Then stop and change nothing else.",
+    "The runner reads your comment and decides what happens next.",
     "",
-    STAGE_ESCALATED_MARKER,
-    "",
-    "**Both lines, in that order.** Without the header the ticket reads as",
-    "though the person wrote your words, and the machinery reads them back as",
-    "their answer — so a comment missing it does the opposite of what you meant",
-    "by posting it.",
-    "",
-    "Under the marker, in plain words: what you were asked to do, why this step",
-    "may not do it, and what you think should happen instead. Then stop and",
-    "change nothing else. A person picks it up from there with your words in",
-    "front of them, and they can do things you cannot.",
-    "",
-    "**Do not ask them another question, and do not invite another answer.**",
-    "No \"reply and I'll carry on\": they have already answered, and another",
-    "answer starts nothing — it spends a whole pass to reach the judgement you",
-    "have just made.",
-    "",
-    "**But never leave them with nothing to do.** End the comment the way every",
-    "message ends, with one line saying what you need from them — and what you",
-    "need is not an answer. It is this, on its own, in a fenced block:",
-    "",
-    "```",
-    takeoverCommand(context.project.name, context.ticket.number),
-    "```",
-    "",
-    "Say in your own words that writing another answer will not move it, and",
-    "that running this opens the ticket with you in their terminal, where you",
-    "can do what you could not do here. **A message that ends \"nothing\" on a",
-    "stop only a person can clear is the fault this whole rule exists to end** —",
-    "the thread's standing note says the same thing, and a reader who has just",
-    "read your comment must not have to go looking for it.",
-    "",
-    "**This is not for work that is hard, and not for a question nobody has",
-    "answered yet.** If you have asked something and are waiting, wait. If the",
-    "job is difficult, do the job. This is only for the answer you may not act",
-    "on.",
+    "**This is not for work that is hard, and not for a question you need",
+    "answered.** If the job is difficult, do the job. If you need an answer,",
+    "ask for it in your comment.",
   ].join("\n");
 }
 
@@ -405,7 +253,7 @@ export function stagePrompt(
   return [
     stageBody(stage, context),
     "",
-    stuckBlock(context),
+    stuckBlock(),
     "",
     checkoutBlock(context),
     "",
@@ -462,13 +310,13 @@ function remediationPrompt(context: PromptContext): string {
     `A reviewer commented on the open pull request for ticket #${ticket.number} on **${context.project.name}**.`,
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
     "",
     reentryBlock(),
     "",
-    "The words above under “what they replied” are a **review comment from the",
-    "pull request**, and they are your instruction: the human named the change",
-    "themselves, which is what authorises acting on it without asking again.",
+    "**The review comment on the pull request is your instruction.**",
+    "The runner's instructions at the end of this prompt say which comment it",
+    "is. The human named the change themselves, which is what authorises",
+    "acting on it without asking again.",
     "",
     `**Stay on the branch \`${branch ?? "the run's work branch"}\`** — the pull`,
     "request's head. **Judge each point of the comment on its own.** A comment",
@@ -515,41 +363,6 @@ function remediationPrompt(context: PromptContext): string {
 }
 
 /**
- * What an earlier build stage stopped to ask, for the stage that writes the
- * pull request ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
- *
- * Empty for the ordinary run, and deliberately loud when it is not: these are
- * the words a stage put in front of a person when it had no authority to stop
- * for an answer. The run carried on without one, so the pull request is where
- * they have to appear — otherwise the question is lost and the only record of
- * it is a ticket comment nobody is coming back to.
- */
-function carriedBlock(carried: PromptContext["carried"]): string {
-  if (carried === undefined || carried.length === 0) return "";
-
-  const asked = carried
-    .map(
-      (one) =>
-        `--- asked while ${one.stage === "execution" ? "building" : one.stage === "verification" ? "checking the result" : "sending it for review"} ---\n${one.words}`,
-    )
-    .join("\n\n");
-
-  return [
-    "",
-    "**An earlier step stopped to ask a person something, and was not",
-    "allowed to.** Nobody answered it and nobody is going to: the run carried",
-    "on without an answer, and this pull request is where the question has to",
-    "land. Put every one of them in the body's departures section, first",
-    "section, in your own plain words — what was asked, and what the work did",
-    "instead. Never treat one as a reason to refuse this stage, and never ask",
-    "it again yourself.",
-    "",
-    asked,
-    "--- end ---",
-  ].join("\n");
-}
-
-/**
  * Stage 8: present the finished work for human judgement, as a pull request.
  */
 function deliveryPrompt(context: PromptContext): string {
@@ -559,8 +372,6 @@ function deliveryPrompt(context: PromptContext): string {
     `Present the finished work for ticket #${ticket.number} on **${context.project.name}** for review.`,
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
-    carriedBlock(context.carried),
     "",
     reentryBlock(),
     "",
@@ -620,7 +431,6 @@ function verificationPrompt(context: PromptContext): string {
     "**without having watched it being built.**",
     "",
     `Project: ${context.project.name} — touch only \`projects/${context.project.name}/…\`.`,
-    feedbackBlock(context.feedback),
     "",
     "You are running at the timone root. Follow `process.md` and `CLAUDE.md`.",
     "",
@@ -657,9 +467,12 @@ function verificationPrompt(context: PromptContext): string {
 
 /**
  * The two honest endings of an unattended work stage, as instruction text.
- * Shared by every back-half prompt: the closing comment is half of how the
- * daemon judges the stage (the artifact is the other half), so the markers
- * are quoted verbatim rather than described.
+ * Shared by every back-half prompt.
+ *
+ * ✏ 2026-09-30: no marker lines. The closing comment used to open on one of
+ * two marker lines, which the old code between steps read to judge the
+ * stage. The runner reads the comment itself, and the work on the branch, so
+ * the step says in plain words how it ended.
  */
 function outcomeBlock(done: string, handed: string): string {
   return [
@@ -671,25 +484,21 @@ function outcomeBlock(done: string, handed: string): string {
     "a live delivery once produced nothing: it launched its reviews in the",
     "background and finished, and the reviews died with it.",
     "",
-    "Then close with **exactly one comment on the ticket**, and make its first",
-    "content line one of these two, exactly as written:",
+    "Then close with **exactly one comment on the ticket**. Its first line",
+    "says in plain words which of these two ways the step ended:",
     "",
-    `${STAGE_DONE_MARKER}`,
+    `- **It is done:** ${done}`,
+    `- **It stopped:** ${handed}`,
     "",
-    `— ${done}`,
+    "The runner reads this comment, and what you committed, to decide what",
+    "happens next. Say the step is done only when the work is done: the",
+    "runner builds on what you say.",
     "",
-    `${STAGE_HANDED_MARKER}`,
-    "",
-    `— ${handed}`,
-    "",
-    "That line is how the machinery knows how this ended. A session that posts",
-    "neither leaves the ticket looking abandoned, and a session that posts the",
-    "first without having done the work asks the machinery to build on nothing.",
-    "",
-    "**If you post the second line, the comment must end on one question they",
-    "can answer.** That question is the whole of what a person is given to act",
-    "on, and where the run does park on it, it is the words the ticket waits",
-    "on. A comment closing \"What I need from you: nothing\" stops and asks for",
+    "**If it stopped, the comment must end on one question they can",
+    `answer**, on the line that starts with ${NEEDED_FROM_YOU} That line is`,
+    "the whole of what a person is given to act on, and its words are what",
+    "the ticket waits on.",
+    "A comment closing \"What I need from you: nothing\" stops and asks for",
     "nothing, and it sits there until somebody notices — that is `ivtrends`",
     "#111. Ask one thing, say what a useful answer looks like, and ask it in",
     "this comment rather than pointing at something said earlier.",
@@ -714,9 +523,10 @@ function outcomeBlock(done: string, handed: string): string {
  * still taken against it; only which document is in front of the human moved.
  *
  * **The closing flip to `Complete — see <report>` is a different thing and
- * survives untouched.** It is not a gate trace: `session.ts` tests it with
- * `/^Complete\b/` as this stage's artifact witness, so a prompt that stopped
- * asking for it would leave every chunk failing its own outcome check.
+ * survives untouched.** It is not a gate trace: the runner is shown each
+ * phase file's `Status:` line on the branch, so a prompt that stopped asking
+ * for it would leave every built chunk looking unfinished. ✏ 2026-09-30: the
+ * old code between steps read it with `/^Complete\b/`; that code is gone.
  */
 function executionPrompt(context: PromptContext): string {
   const { ticket, branch } = context;
@@ -725,7 +535,6 @@ function executionPrompt(context: PromptContext): string {
     `Build what was planned for ticket #${ticket.number} on **${context.project.name}**.`,
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
     "",
     reentryBlock(),
     "",
@@ -746,7 +555,7 @@ function executionPrompt(context: PromptContext): string {
     "handoffs and the completion report where the stage requires them, and",
     "**push everything you commit**. When the phase is done, flip the phase",
     "file's `Status:` line to `Complete — see <report>`, exactly as the stage",
-    "requires — that flip is half of how the machinery reads your outcome.",
+    "requires — the runner reads that line to see that the phase is built.",
     "",
     outcomeBlock(
       "every slice landed and validated. Follow it with a plain-words account " +
@@ -946,7 +755,6 @@ function requirementsPrompt(context: PromptContext): string {
     `Write down what ticket #${ticket.number} on **${context.project.name}** is asking for.`,
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
     "",
     reentryBlock(),
     "",
@@ -993,7 +801,6 @@ function researchPrompt(context: PromptContext): string {
     `Answer the question on ticket #${context.ticket.number} of **${context.project.name}** yourself.`,
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
     "",
     reentryBlock(),
     "",
@@ -1046,7 +853,6 @@ function triagePrompt(context: PromptContext): string {
     `A ticket was filed on the managed project **${context.project.name}** and marked for Timone.`,
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
     "",
     reentryBlock(),
     "",
@@ -1096,10 +902,11 @@ function triagePrompt(context: PromptContext): string {
 /**
  * Stage 2: the interview.
  *
- * Usually an interactive session, because the work *is* the conversation. The
- * daemon runs it in exactly one case (ADR-0022): the human answered on the
- * ticket in writing, and this session exists to ingest what they wrote. See
- * {@link conversationOpening} for why the difference has to be said out loud.
+ * The work *is* the conversation, but the runner starts this step with nobody
+ * at the keyboard: it asks on the ticket, and a person answers there. See
+ * {@link conversationOpening} for why that has to be said out loud. A person
+ * who wants the conversation in their terminal takes the ticket over, and the
+ * takeover prompt names this step's skill.
  */
 function clarificationPrompt(context: PromptContext): string {
   const { classification } = context;
@@ -1108,7 +915,6 @@ function clarificationPrompt(context: PromptContext): string {
     ...conversationOpening(context),
     "",
     ticketBlock(context),
-    writtenAnswerBlock(context),
     "",
     reentryBlock(),
     "",
@@ -1128,18 +934,12 @@ function clarificationPrompt(context: PromptContext): string {
     "",
     "When every branch is resolved, summarize what you agreed — decisions and",
     "risks — and ask them, in plain words, whether that summary is right. If",
-    "they accept it, post it to the ticket as the record, starting the comment",
-    "with the machine line below, then a blank line, then this exact line:",
+    "they accept it, post it to the ticket as the record of what was agreed.",
     "",
-    CONVERSATION_RECORD_MARKER,
-    "",
-    "That line is how the machinery knows the two of you finished; without it",
-    "this ticket will sit waiting for a conversation that already happened.",
-    "",
-    "**If they leave without accepting the summary, post nothing carrying that",
-    "line.** Say on the ticket that the conversation is unfinished and what is",
-    "still open, and change nothing else — an unaccepted conversation decided",
-    "nothing.",
+    "**If they leave without accepting the summary, do not post it as",
+    "agreed.** Say on the ticket that the conversation is unfinished and what",
+    "is still open, and change nothing else — an unaccepted conversation",
+    "decided nothing.",
     "",
     "The conversation itself is not a process artifact: nothing may cite it,",
     "and no transcript is kept. What survives is the summary on the ticket and",
@@ -1165,7 +965,6 @@ function wayfindingPrompt(context: PromptContext): string {
     ...conversationOpening(context),
     "",
     ticketBlock(context),
-    writtenAnswerBlock(context),
     "",
     reentryBlock(),
     "",
@@ -1186,18 +985,9 @@ function wayfindingPrompt(context: PromptContext): string {
     "carries a real trade-off, record it as an ADR at decision time, exactly as",
     "that stage requires — a decision that lives only on a ticket is lost.",
     "",
-    "Start the resolution comment with the machine line below, then a blank",
-    "line, then this exact line:",
-    "",
-    CONVERSATION_RECORD_MARKER,
-    "",
-    "That line is how the machinery knows this decision is settled and the",
-    "ticket's journey is over. Without it the question stays open as far as",
-    "anything downstream can tell, however plainly you wrote the answer.",
-    "",
-    "**If nothing was settled, post nothing carrying that line.** Say what is",
-    "still open and change nothing else — an unresolved decision is not a",
-    "decision, and marking one would close a question nobody answered.",
+    "**If nothing was settled, do not close the ticket.** Say what is still",
+    "open and change nothing else — an unresolved decision is not a decision,",
+    "and closing one would close a question nobody answered.",
     "",
     "**Do not write the destination artifact.** No requirements, no PRD, no",
     "phase file, and no application code: the map produces decisions, and what",
@@ -1245,7 +1035,6 @@ function breakdownPrompt(context: PromptContext): string {
     `Break the work for ticket #${ticket.number} on **${context.project.name}** into pieces.`,
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
     "",
     reentryBlock(),
     "",
@@ -1316,7 +1105,6 @@ function planningPrompt(context: PromptContext): string {
     `Plan the work for ticket #${ticket.number} on **${context.project.name}**.`,
     "",
     ticketBlock(context),
-    feedbackBlock(context.feedback),
     "",
     reentryBlock(),
     "",
@@ -1362,34 +1150,15 @@ function planningPrompt(context: PromptContext): string {
 }
 
 /**
- * The one line the ticket shows about a conversation before it happens.
- * Written from the ticket's own title, because that is what the human wrote
- * and the only thing the machinery knows before the interview.
- */
-export function conversationSubject(ticket: TicketThread): string {
-  return (
-    `Before I write down what "${ticket.title}" actually needs, there are a ` +
-    "few things I want to check with you — the kind of thing that's quicker " +
-    "talked through than typed back and forth."
-  );
-}
-
-/**
- * The prompt for a session a human opened themselves with `timone takeover`.
- *
- * The same stage prompt the daemon would use: which side started the session
- * changes who is waiting, not what the stage is.
- */
-/**
- * A run the machine stopped on, as much of it as the escalation session needs
- * to know without reading the ledger itself.
+ * A run a takeover opens a session on, as much of it as that session needs to
+ * know without reading the ledger itself.
  *
  * Structural rather than `Run`, so this module stays a pure prompt builder
  * with no opinion about where a run is stored — a real `Run` satisfies it.
  */
-export interface StoppedRun {
+export interface TakeoverRun {
   id: string;
-  /** The stage that stopped. */
+  /** The run's step: the one running, or the last one it started. */
   stage?: PipelineStage;
   /** The work branch it holds, at the stages that hold one. */
   branch?: string;
@@ -1400,89 +1169,99 @@ export interface StoppedRun {
   wait?: {
     /** What the ticket says it is waiting on. */
     on: string;
-    /** The instant it stopped — the stage's own account is the comment there. */
+    /** The instant the run began waiting. */
     opened?: string;
   };
 }
 
+/** What the takeover prompt is given beside the run and its ticket. */
+export interface TakeoverFacts {
+  /** The ticket's run record, as `readRecord` returned it. */
+  record: ReturnType<typeof readRecord>;
+  /** Who may instruct work on the project, as `namedPeople` gives them. */
+  namedPeople: readonly string[];
+}
+
 /**
- * The prompt for a session opened on a run the machine stopped and cannot
- * take further itself
+ * The prompt for a session a person opens on a run with `timone takeover`
  * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)
- * D5).
+ * D5, [ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
  *
  * **It is not a stage prompt and must never read as one.** Every other prompt
  * in this file tells a session what stage it is running and what that stage
- * may do; the whole reason this session exists is that no stage could do what
- * was needed. So it carries the evidence and grants the authority, and names
- * no stage to run as. If a fresh context could mistake it for a stage's
- * instructions, it has failed at its one job.
+ * may do. This session is bound to no step: it carries what is known about
+ * the run and grants the authority, and names no stage to run as. If a fresh
+ * context could mistake it for a stage's instructions, it has failed at its
+ * one job.
  *
  * What it carries, and why each part is here:
  *
  * - **The ticket and its thread**, voices told apart, because the human's
  *   words are the reason someone is reading this at all.
- * - **The ledger entry**, so the session knows what the run holds — a branch
- *   above all, since work may be sitting on it unmerged.
- * - **The stopped stage's own account, marked as evidence.** A stage sees its
- *   ticket and its own work; it does not read the source, the decisions under
- *   `doc/adr/`, or the diff. On ivtrends #1 exactly such an account told the
- *   human to reword two promises when only one needed new words.
- * - **What the pipeline would have done next**, named as a default and not as
- *   a decision.
+ * - **Where the run stands**: its step, its branch and what it waits on, so
+ *   the session knows what the run holds — a branch above all, since work may
+ *   be sitting on it unmerged.
+ * - **What the run record says happened** on this run: each step, how it
+ *   ended, and each decision of the runner with its reason.
+ * - **What the named people wrote since the run began waiting.** Only they
+ *   may instruct the work, and the runner has not yet acted on these words.
+ * - **The conversation to hold**, when the run's step is one.
  * - **The authority**, in as many words: invoke whichever skill fits, depart
  *   from a default where the case demands it.
- * - **The record it owes**, which is the only audit an unbound session has.
+ * - **How it ends.** The runner wakes when the session ends and reads the
+ *   ticket, not the terminal, so the session ends by writing there.
+ *
+ * ✏ 2026-09-30: the hand-back note, the hint of what the pipeline does next,
+ * and the stopped stage's account are gone. The runner decides what happens
+ * next, and it reads a plain comment. The account was found by the comment
+ * posted at the instant the wait opened, which only the old code between
+ * steps arranged.
  */
-export function escalationPrompt(
+export function takeoverPrompt(
   project: string,
-  run: StoppedRun,
+  run: TakeoverRun,
   ticket: TicketThread,
+  facts: TakeoverFacts,
 ): string {
   const context: PromptContext = {
     project: { name: project, repoUrl: "" },
     ticket,
-    interactive: true,
   };
   const stage = run.stage;
-  const next = stage === undefined ? undefined : stageAfter(stage);
 
   return [
-    `You are picking up **${project} #${ticket.number}**, which the machinery`,
-    "stopped on and cannot take any further by itself. A human has just opened",
+    `You are picking up **${project} #${ticket.number}**. A human has just opened`,
     `this session by running \`${takeoverCommand(project, ticket.number)}\`.`,
     "**They are at the keyboard now, waiting for you.**",
     "",
-    "**No stage is running here, and none has been chosen for you.** Every",
-    "other session Timone starts is one step of the process with a fixed job.",
-    "This one exists because no single step could do what this ticket needs:",
-    "the stage that stopped was given something it may not act on, and said so",
-    "rather than doing it. You have the authority it did not have.",
+    "**No step is running here, and none has been chosen for you.** Every",
+    "other session Timone starts is one step of the work, with a fixed job,",
+    "started by the runner: the part of Timone that decides what happens next",
+    "on a ticket. This session was opened by a person instead, and the runner",
+    "does nothing on this ticket while it is open.",
     "",
     ticketBlock(context),
     "",
-    "**Where the run stands, from the ledger:**",
+    "The machine's comments in the thread are what the steps and the runner",
+    "said. **They may be wrong.** A step sees its own ticket and its own work;",
+    "it cannot read everything you can. Check what they say before you act on",
+    "it.",
+    "",
+    "**Where the run stands:**",
     "",
     `- run: \`${run.id}\``,
-    `- the stage that stopped: ${stage ?? "none recorded"}`,
+    `- its step: ${stage === undefined ? "none yet" : `${stageLabel(stage)} (${stage})`}`,
     `- work branch: ${run.branch ?? "none — it holds no branch"}`,
-    `- it stopped at: ${run.wait?.opened ?? "not recorded"}`,
-    `- what the ticket says it waits on: ${run.wait?.on ?? "not recorded"}`,
+    `- what it waits on: ${run.wait?.on ?? "not recorded"}`,
+    `- waiting since: ${run.wait?.opened ?? "not recorded"}`,
     "",
-    stoppedAccountBlock(run, ticket),
+    recordBlock(run, facts.record),
     "",
-    ...(next === undefined
-      ? []
-      : [
-          `**What ordinarily follows ${stage} is ${next}.** That is what the`,
-          "pipeline does next, not a decision about this run. You may take it",
-          "somewhere else entirely, or nowhere.",
-          "",
-        ]),
-    humanWordsBlock(run, ticket),
+    namedWordsBlock(run, ticket, facts.namedPeople),
+    conversationBlock(stage),
     "**Clear what is in the way — and stop there.** Read enough to understand",
-    "the stop: the source, the phase files, the decisions under `doc/adr/`, the",
-    "diff on the branch. Then do what unblocks it.",
+    "where the run stands: the source, the phase files, the decisions under",
+    "`doc/adr/`, the diff on the branch. Then do what unblocks it.",
     "",
     "You may invoke whichever stage skill fits, more than one, or none at all,",
     "and **where a skill's default does not fit this case, depart from it** —",
@@ -1502,15 +1281,19 @@ export function escalationPrompt(
     "way to a pull request buys an hour and spends all five. **This happened on",
     "2026-08-18**, which is why you are being told.",
     "",
-    "**Leave a committed record before you finish.** Name what you did, why,",
-    "and every place you departed from a default. Nothing else records an",
-    "unbound session: the ledger holds only that the run stopped, and the next",
-    "person to read this ticket has your commit and nothing else.",
+    "**Leave a committed record of anything you change.** Name what you did,",
+    "why, and every place you departed from a default. The run record says",
+    "nothing about this session, so your commit and your closing comment are",
+    "the only account of it.",
     "",
-    handbackBlock(project, ticket, run),
+    "**When this session ends, the runner wakes and reads what you left on the ticket.**",
+    "It reads the ticket, not this conversation. So before you finish, post",
+    "one comment on the ticket that says, in plain words,",
+    "what you did and what should happen next.",
+    "The runner decides from that comment.",
     "",
     "**If the right answer is that no work should happen at all**, that is an",
-    "answer too. Do not hand it back — end it, and say why:",
+    "answer too. End it, and say why:",
     "",
     "```",
     `timone cancel ${project}#${ticket.number}`,
@@ -1524,7 +1307,10 @@ export function escalationPrompt(
     "below any `Co-Authored-By:` line:",
     "",
     "```",
-    "Timone-Stage: <the stage whose skill you ran, or `escalation` if none>",
+    // ✏ 2026-10-02: `interactive`, not `escalation`, when no step's skill ran.
+    // It is the value CLAUDE.md and the session's start give for a session
+    // with no step, and the check at the session's end names it too.
+    "Timone-Stage: <the stage whose skill you ran, or `interactive` if none>",
     `Timone-Run: ${project}#${ticket.number}`,
     "Timone-Session: <the id you were given at the start of this session>",
     "```",
@@ -1535,111 +1321,127 @@ export function escalationPrompt(
 }
 
 /**
- * Why the stage says it stopped, quoted, and bounded.
+ * What the run record says happened on this run, one line per entry, oldest
+ * first.
  *
- * The account is the comment the stage posted at the instant the run's wait
- * opened — `session.ts` sets the cursor to that comment's own timestamp, so
- * the two are one comment by construction rather than by a search that could
- * pick up the wrong one.
+ * **This run only**, and the ticket's spending. The record holds every run
+ * of the ticket, and a step an earlier run did is not one this run has done.
+ * The entries that are the machine's own bookkeeping — a wake, the end of a
+ * runner session, a thread read, a notice given — are left out: the
+ * decisions and the steps say what they led to.
  */
-function stoppedAccountBlock(run: StoppedRun, ticket: TicketThread): string {
-  const said = ticket.comments.find(
-    (comment) => comment.fromTimone && comment.createdAt === run.wait?.opened,
-  );
-
-  if (said === undefined) {
-    return [
-      "**The stage left no account of why it stopped.** Work out the stop from",
-      "the thread above and from the repository — and treat anything you infer",
-      "with the same suspicion the paragraph below asks for.",
-    ].join("\n");
+function recordBlock(run: TakeoverRun, record: TakeoverFacts["record"]): string {
+  if (!record.ok) {
+    return `**The run record cannot be read.** ${record.error.message}`;
   }
+  const lines = record.value.flatMap((entry) =>
+    "runId" in entry && entry.runId !== run.id ? [] : recordLine(entry),
+  );
+  if (lines.length === 0) {
+    return "**The run record has nothing written about this run yet.**";
+  }
+  return [
+    "**What the run record says happened on this run**, oldest first. The",
+    "machine wrote it as the run went:",
+    "",
+    ...lines,
+  ].join("\n");
+}
+
+/** One entry of the run record as a line of the prompt, or none. */
+function recordLine(entry: RecordEntry): string[] {
+  switch (entry.kind) {
+    case "step-started":
+      return [
+        entry.records === undefined
+          ? `- ${entry.at}: ${stageLabel(entry.stage)} (${entry.stage}) started.`
+          : `- ${entry.at}: a session started to write down the approval of the ${entry.records}.`,
+      ];
+    case "step-ended": {
+      const how = entry.ok ? "finished" : `failed: ${entry.error ?? "no error was given"}`;
+      const by = entry.stoppedBy === undefined ? "" : ` It was stopped by ${entry.stoppedBy}.`;
+      return [`- ${entry.at}: ${stageLabel(entry.stage)} (${entry.stage}) ${how}.${by}`];
+    }
+    case "decision":
+      return [
+        `- ${entry.at}: the runner chose \`${entry.action}\`. Its reason: ${entry.reason}`,
+        ...(entry.detail === undefined ? [] : [`  ${entry.detail}`]),
+      ];
+    case "departure":
+      return [
+        `- ${entry.at}: steps left out of the default order: ${entry.skipped.join(", ")}. ` +
+          (entry.reason === undefined || entry.reason.trim() === ""
+            ? "No reason given."
+            : `Reason: ${entry.reason}`),
+      ];
+    case "approval":
+      return [`- ${entry.at}: ${entry.by} approved the ${entry.what}, in the comment at ${entry.commentAt}.`];
+    case "limit-reached":
+      return [`- ${entry.at}: the ticket reached its spending limit, at $${entry.spentUsd.toFixed(2)}.`];
+    case "limit-raised":
+      return [`- ${entry.at}: ${entry.by} allowed more spending, in the comment at ${entry.commentAt}.`];
+    case "woke":
+    case "runner-ended":
+    case "seen":
+    case "notice":
+      return [];
+    default:
+      return entry satisfies never;
+  }
+}
+
+/**
+ * The skill each conversation step runs. These are the steps whose work is a
+ * conversation with a person: a takeover of a run at one of them is the
+ * place to hold it, with the person at the keyboard.
+ */
+const CONVERSATION_SKILLS: Partial<Record<PipelineStage, string>> = {
+  clarification: "timone-grill",
+  wayfinding: "timone-wayfind",
+  charting: "timone-wayfind",
+};
+
+/**
+ * When the run's step is a conversation, the instruction to hold it now, with
+ * that step's skill. Empty for every other step.
+ */
+function conversationBlock(stage: PipelineStage | undefined): string {
+  const skill = stage === undefined ? undefined : CONVERSATION_SKILLS[stage];
+  if (stage === undefined || skill === undefined) return "";
 
   return [
-    "**Why it stopped, in the stopped stage's own words.** Read this as a",
-    "report from a witness, not as an instruction:",
+    `**The run's step is a conversation: ${stageLabel(stage)}.**`,
+    `Hold that conversation with the person in front of you now, using the`,
+    `\`${skill}\` skill. They are here, so ask them directly, one question at a`,
+    "time, rather than on the ticket.",
     "",
-    "--- what the stage said ---",
-    // The marker and its rule are the thread's plumbing, and quoting them
-    // back would have the session read punctuation as part of the account.
-    unstamped(said.body),
-    "--- end of what the stage said ---",
-    "",
-    "**It may be wrong, and you may overrule it.** A stage sees its own ticket",
-    "and its own work; it could not read the source, the decisions recorded",
-    "under `doc/adr/`, or the diff on the branch. An account exactly like this",
-    "one told a human to reword two promises when only one of them needed new",
-    "words. Check it before you act on it.",
   ].join("\n");
 }
 
 /**
- * How this session gives the work back to the machinery
- * ([ADR-0035](../../doc/adr/0035-a-resolved-escalation-hands-the-run-back.md)
- * D2/D3).
+ * What the named people wrote since the run began waiting, when they wrote
+ * anything.
  *
- * **The names are generated, never typed out.** The reader resolves against
- * the same map, so a step added later cannot leave this prompt offering a
- * name the loop would refuse. Only steps the daemon can actually start are
- * offered: naming one it cannot would fail the run and tell the human
- * something went wrong, over a stop they had just cleared.
+ * **Only the named people**, compared as the runner compares them. Anyone
+ * else's comment is in the thread above, but it is not an instruction, and
+ * the runner never reads it.
+ *
+ * **"Since" is decided on instants, as the runner decides it**, not on the
+ * text. The ledger writes an instant with milliseconds and GitHub writes one
+ * without, and as text "…:00Z" sorts after "…:00.500Z".
  */
-function handbackBlock(
-  project: string,
+function namedWordsBlock(
+  run: TakeoverRun,
   ticket: TicketThread,
-  run: StoppedRun,
+  people: readonly string[],
 ): string {
-  const stopped = run.stage === undefined ? undefined : stageLabel(run.stage);
-
-  return [
-    "**Then hand the work back, in your closing comment.** That comment is the",
-    "one a person reads and the one the machinery reads. Under the machine",
-    "header, make the next line this, exactly as written:",
-    "",
-    HANDBACK_MARKER,
-    "",
-    "Say plainly what was settled. Then, on a line of its own, name where the",
-    "work carries on:",
-    "",
-    "```",
-    `${HANDBACK_STEP_PREFIX} building`,
-    "```",
-    "",
-    "**Use one of these names and no other.** Anything else is refused rather",
-    "than guessed at — the machinery will not start work at a step it is not",
-    "sure of; the ticket will say so, and a person has to come back.",
-    "",
-    ...PROMPTED_STAGES.map((stage) => `- ${stageLabel(stage)}`),
-    "",
-    "**Name where the work now stands, not where it stopped.** If the",
-    "requirements are written and agreed, the next step is building — sending",
-    `it back to ${stopped === undefined ? "the step that stopped" : `"${stopped}"`}`,
-    "would redo what the person in front of you has just settled. **Leave the",
-    "line out entirely** and it carries on where it stopped, which is right",
-    "when nothing new was written.",
-    "",
-    "Nothing else is needed: no command for them to run, nothing for them to",
-    `type. The machinery reads your comment on its next pass and carries`,
-    `${project} #${ticket.number} on by itself.`,
-  ].join("\n");
-}
-
-/** A machine comment's text, without the marker every one of them carries. */
-function unstamped(body: string): string {
-  const stripped = body.trimStart().startsWith(MACHINE_MARKER)
-    ? body.trimStart().slice(MACHINE_MARKER.length)
-    : body;
-  return stripped.replace(/^\s*(---\s*)?/, "").trimEnd();
-}
-
-/** What the human wrote after the run stopped, when they wrote anything. */
-function humanWordsBlock(run: StoppedRun, ticket: TicketThread): string {
-  const cursor = run.wait?.opened;
+  const since = run.wait?.opened;
   const words = ticket.comments
     .filter(
       (comment) =>
         !comment.fromTimone &&
-        (cursor === undefined || comment.createdAt > cursor),
+        isNamedPerson(people, comment.author) &&
+        (since === undefined || Date.parse(comment.createdAt) > Date.parse(since)),
     )
     .map((comment) => comment.body.trim())
     .filter((body) => body !== "");
@@ -1647,25 +1449,13 @@ function humanWordsBlock(run: StoppedRun, ticket: TicketThread): string {
   if (words.length === 0) return "";
 
   return [
-    "**They have written since it stopped.** Their words are here because",
-    "refusing to act on an answer and losing it are different things, and only",
-    "the first was decided:",
+    "**They have written since the run began waiting.** These are the words of",
+    `the people who may instruct this work (${people.join(", ")}), and the`,
+    "runner has not acted on them yet:",
     "",
     "--- what they wrote ---",
     words.join("\n\n---\n\n"),
     "--- end of what they wrote ---",
     "",
   ].join("\n");
-}
-
-export function takeoverPrompt(
-  project: string,
-  stage: (typeof PROMPTED_STAGES)[number],
-  ticket: TicketThread,
-): string {
-  return stagePrompt(stage, {
-    project: { name: project, repoUrl: "" },
-    ticket,
-    interactive: true,
-  });
 }

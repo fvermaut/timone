@@ -1,6 +1,6 @@
 # ADR-0054: An ask check stands in front of every question put to a person, and may only make it cheaper
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md) — ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): ADR-0060 left to the build whether the ask check stays, and phase 41 removed it with the old code, because the runner writes every question with the whole run in view.
 - **Date:** 2026-09-11
 - **Source:** fvermaut's rulings of 2026-09-11, in the grill session on [timone#128](https://github.com/fvermaut/timone/issues/128) — four questions, each answered against a recommendation
 - **Extends:** [ADR-0052](0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), which ruled that a typed reply always moves the work, and did not say what becomes of a reply that is neither of the two answers a gate expects

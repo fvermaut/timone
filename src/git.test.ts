@@ -1,14 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  checkoutVersion,
-  isCommitOnRemote,
-  uncommittedFiles,
-} from "./git.js";
+import { checkoutVersion, isCommitOnRemote } from "./git.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
 const tempDirs: string[] = [];
@@ -70,38 +66,6 @@ describe("what version a checkout is", () => {
     tempDirs.push(dir);
 
     expect(await checkoutVersion(dir)).toBeUndefined();
-  });
-});
-
-describe("what a checkout has not committed", () => {
-  it("names an edited file and a file nobody added", async () => {
-    const { dir } = checkout();
-    writeFileSync(join(dir, "process.md"), "the rules, edited\n");
-    writeFileSync(join(dir, "notes.md"), "a new file nobody added\n");
-
-    expect((await uncommittedFiles(dir)).sort()).toEqual([
-      "notes.md",
-      "process.md",
-    ]);
-  });
-
-  it("does not name a file git was told to ignore", async () => {
-    // `node_modules/` and `dist/` are not work anybody has to commit, and a
-    // daemon that refused to start over them would never start at all.
-    const { dir } = checkout();
-    writeFileSync(join(dir, ".gitignore"), "node_modules/\n");
-    git(dir, "add", "-A");
-    git(dir, "commit", "-q", "-m", "ignore the installed things");
-    mkdirSync(join(dir, "node_modules"), { recursive: true });
-    writeFileSync(join(dir, "node_modules", "left-pad.js"), "module.exports=1\n");
-
-    expect(await uncommittedFiles(dir)).toEqual([]);
-  });
-
-  it("says nothing is outstanding in a checkout with nothing outstanding", async () => {
-    const { dir } = checkout();
-
-    expect(await uncommittedFiles(dir)).toEqual([]);
   });
 });
 

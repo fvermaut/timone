@@ -1,6 +1,6 @@
 # ADR-0035: A resolved escalation hands the run back
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
 - **Date:** 2026-08-19
 - **Source:** [timone#30](https://github.com/fvermaut/timone/issues/30), filed from [phase 25's live gate](../plans/phases/reports/phase-25-live-gate.md), and fvermaut's rulings of 2026-08-19 across three questions — every one of them taken with the recommendation
 - **Completes:** [ADR-0033](0033-a-stage-that-cannot-act-on-an-answer-escalates.md), which settles how a person **enters** an escalation and is silent on what ends one

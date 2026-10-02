@@ -15,7 +15,7 @@ Me (fvermaut) — solo freelancer managing multiple independent projects (person
 
 ## Business goals — in priority order
 
-1. **Complete process coverage** (requirement #1): every stage of software engineering — intake, requirements, architecture, planning, implementation, verification, delivery, feedback, deployment, maintenance — is covered by an explicit Timone skill producing a defined artifact behind a defined gate. One written process, enforced identically on every project.
+1. **Complete process coverage** (requirement #1): every stage of software engineering — intake, requirements, architecture, planning, implementation, verification, delivery, feedback, deployment, maintenance — is covered by an explicit Timone skill producing a defined artifact behind a defined gate. One written process, enforced identically on every project. ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): every project now runs on the runner of [ADR-0060](../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md). The process is followed by default, and every departure is shown.
 2. **Inversion of control**: agents run that process autonomously; my involvement reduces to decisions and reviews delivered through tickets, PRs, and previews.
 3. **Client-ready**: artifacts (specs, PRs, previews) presentable to customers; client code and credentials stay isolated per project on my own infrastructure.
 

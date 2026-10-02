@@ -1,0 +1,219 @@
+{
+  "version": 1,
+  "runs": [
+    {
+      "id": "scratch-app#12/1",
+      "project": "scratch-app",
+      "ticket": 12,
+      "seq": 1,
+      "status": "done",
+      "stage": "delivery",
+      "branch": "timone/12-a-due-date-on-each-task",
+      "pr": 19,
+      "sessionId": "0b7e4c1a-5d2f-4a8e-9c61-3f2d8e7a1b40",
+      "flags": [],
+      "createdAt": "2026-09-08T09:14:02.118Z",
+      "updatedAt": "2026-09-11T16:52:40.903Z"
+    },
+    {
+      "id": "scratch-app#15/1",
+      "project": "scratch-app",
+      "ticket": 15,
+      "seq": 1,
+      "status": "cancelled",
+      "stage": "triage",
+      "sessionId": "5a1f9e33-2c4b-4d07-8e6a-91b0c2d4f7e5",
+      "cancellation": "fvermaut: not needed any more",
+      "flags": [],
+      "createdAt": "2026-09-12T10:03:55.470Z",
+      "updatedAt": "2026-09-12T10:21:08.332Z"
+    },
+    {
+      "id": "scratch-app#21/1",
+      "project": "scratch-app",
+      "ticket": 21,
+      "seq": 1,
+      "status": "failed",
+      "stage": "execution",
+      "branch": "timone/21-show-the-due-date-on-each-task",
+      "sessionId": "c4d8a2e7-61b3-4f95-a0d2-7e3b9c15f846",
+      "heartbeatAt": "2026-09-22T14:37:19.664Z",
+      "failure": "the execution stage finished without committing anything to gate",
+      "flags": [],
+      "createdAt": "2026-09-22T11:02:47.905Z",
+      "updatedAt": "2026-09-22T14:38:01.227Z"
+    },
+    {
+      "id": "scratch-app#24/1",
+      "project": "scratch-app",
+      "ticket": 24,
+      "seq": 1,
+      "status": "parked",
+      "stage": "delivery",
+      "wait": {
+        "on": "your review of pull request #31",
+        "kind": "review",
+        "opened": "2026-09-26T16:40:12Z",
+        "resolvableBy": ["remediation"],
+        "acknowledgedAt": "2026-09-27T08:02:00Z"
+      },
+      "branch": "timone/24-sort-tasks-by-due-date",
+      "pr": 31,
+      "sessionId": "e91a6f04-3b7d-4c28-b5e0-2d8f4a7c9b13",
+      "flags": [],
+      "createdAt": "2026-09-24T09:31:16.582Z",
+      "updatedAt": "2026-09-26T16:40:14.019Z"
+    },
+    {
+      "id": "ivtrends#60/1",
+      "project": "ivtrends",
+      "ticket": 60,
+      "seq": 1,
+      "status": "done",
+      "stage": "delivery",
+      "branch": "timone/60-weekly-summary-email",
+      "pr": 118,
+      "sessionId": "7f2c0b9d-84a1-4e36-9d5f-0c6e1a3b8d27",
+      "flags": [],
+      "createdAt": "2026-09-03T08:44:30.071Z",
+      "updatedAt": "2026-09-09T13:05:22.640Z"
+    },
+    {
+      "id": "ivtrends#61/1",
+      "project": "ivtrends",
+      "ticket": 61,
+      "seq": 1,
+      "status": "cancelled",
+      "stage": "clarification",
+      "cancellation": "fvermaut: a duplicate of #60",
+      "flags": [],
+      "createdAt": "2026-09-03T09:10:12.918Z",
+      "updatedAt": "2026-09-04T07:58:46.205Z"
+    },
+    {
+      "id": "ivtrends#88/1",
+      "project": "ivtrends",
+      "ticket": 88,
+      "seq": 1,
+      "status": "failed",
+      "stage": "triage",
+      "consumedAnswerAt": "2026-09-24T11:03:00Z",
+      "sessionId": "2d6b8f1e-0a47-4c93-8e25-b1f7d3a9c064",
+      "failure": "triage recorded no classification",
+      "flags": [],
+      "createdAt": "2026-09-23T15:20:41.337Z",
+      "updatedAt": "2026-09-24T11:09:57.482Z"
+    },
+    {
+      "id": "ivtrends#90/1",
+      "project": "ivtrends",
+      "ticket": 90,
+      "seq": 1,
+      "status": "parked",
+      "stage": "requirements",
+      "wait": {
+        "on": "your approval of the requirements I wrote down",
+        "kind": "gate",
+        "opened": "2026-09-25T09:12:44Z",
+        "resolvableBy": ["requirements"]
+      },
+      "sessionId": "9e3a7c52-1f08-4b6d-a4c9-5d2e0b8f7a31",
+      "flags": [],
+      "createdAt": "2026-09-24T16:05:09.764Z",
+      "updatedAt": "2026-09-25T09:12:46.190Z"
+    },
+    {
+      "id": "ivtrends#91/1",
+      "project": "ivtrends",
+      "ticket": 91,
+      "seq": 1,
+      "status": "parked",
+      "stage": "clarification",
+      "wait": {
+        "on": "your answer to the question in my last comment.",
+        "kind": "conversation",
+        "opened": "2026-09-26T10:47:31Z",
+        "resolvableBy": ["clarification"]
+      },
+      "reAsksAfterAnswer": 1,
+      "sessionId": "4b0d9e6a-7c13-4f82-9a5e-e8c2f1b3d706",
+      "flags": [],
+      "createdAt": "2026-09-25T14:18:22.051Z",
+      "updatedAt": "2026-09-26T10:47:33.876Z"
+    },
+    {
+      "id": "ivtrends#92/1",
+      "project": "ivtrends",
+      "ticket": 92,
+      "seq": 1,
+      "status": "parked",
+      "stage": "wayfinding",
+      "wait": {
+        "on": "me — I can't take this one further on my own.",
+        "kind": "escalation",
+        "opened": "2026-09-27T12:30:05Z",
+        "resolvableBy": ["wayfinding"]
+      },
+      "sessionId": "b8f1c3a0-5e92-4d7b-86a4-0f3d7e2c9b58",
+      "flags": [],
+      "createdAt": "2026-09-26T17:40:58.612Z",
+      "updatedAt": "2026-09-27T12:30:07.344Z"
+    },
+    {
+      "id": "ivtrends#93/1",
+      "project": "ivtrends",
+      "ticket": 93,
+      "seq": 1,
+      "status": "parked",
+      "stage": "triage",
+      "wait": {
+        "on": "the next stage to be built",
+        "resolvableBy": ["triage"]
+      },
+      "sessionId": "f0a4e8b2-9d61-4c3e-b7f5-a2c9d0e6b184",
+      "flags": [],
+      "createdAt": "2026-09-27T15:02:13.905Z",
+      "updatedAt": "2026-09-27T15:09:40.127Z"
+    },
+    {
+      "id": "ivtrends#94/1",
+      "project": "ivtrends",
+      "ticket": 94,
+      "seq": 1,
+      "status": "parked",
+      "stage": "triage",
+      "wait": {
+        "on": "the next thing that happens on this ticket",
+        "kind": "runner",
+        "opened": "2026-09-29T14:00:00Z",
+        "resolvableBy": ["triage"]
+      },
+      "flags": [],
+      "createdAt": "2026-09-29T13:58:36.440Z",
+      "updatedAt": "2026-09-29T14:00:00.518Z"
+    }
+  ],
+  "introductions": {
+    "ivtrends#95": {
+      "project": "ivtrends",
+      "ticket": 95,
+      "at": "2026-09-28T07:15:03.296Z"
+    }
+  },
+  "observedAt": "2026-09-30T08:59:01.402Z",
+  "observingSince": "2026-09-29T21:14:37.019Z",
+  "workedUntil": "2026-09-30T08:59:03.877Z",
+  "daemon": {
+    "commit": "5044fc4",
+    "tip": "5044fc4",
+    "holder": {
+      "token": "3c1e7b9a-0d54-4f28-a6e3-8b2f5d9c1e70",
+      "command": "timone daemon",
+      "pid": 48213,
+      "since": "2026-09-29T21:14:36.880Z",
+      "observedAt": "2026-09-30T08:59:01.402Z",
+      "host": "fvermaut-mac"
+    },
+    "at": "2026-09-30T08:59:01.402Z"
+  }
+}

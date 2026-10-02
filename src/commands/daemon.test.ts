@@ -24,7 +24,7 @@ import {
   noRunnerCalls,
   noMerges, noStepWrites } from "../adapters/ticketing.stubs.js";
 import { RunStore } from "../daemon/runs.js";
-import { pollOnce, type SessionSpawner } from "../daemon/poll.js";
+import { pollOnce } from "../daemon/poll.js";
 import { stateLockPath } from "../daemon/lock.js";
 import {
   DEFAULT_IMAGE,
@@ -35,6 +35,8 @@ import {
 } from "./daemon.js";
 import { agentSdkRuntime } from "../daemon/session.js";
 import { enqueue } from "../daemon/requests.js";
+import { RunnerDriver } from "../runner/driver.js";
+import { RunningSteps } from "../runner/actions.js";
 
 const tempDirs: string[] = [];
 
@@ -63,6 +65,7 @@ function clockedStore(): {
   };
 }
 
+/** scratch-app, with fvermaut the one person who may instruct it (ADR-0060 D6). */
 const manifest: Manifest = {
   projects: {
     "scratch-app": {
@@ -70,6 +73,7 @@ const manifest: Manifest = {
       path: "projects/scratch-app",
       stack: [],
       bindings: { ticketing: "github" },
+      instructors: ["fvermaut"],
     },
   },
 };
@@ -102,7 +106,6 @@ function quietAdapter(): TicketingAdapter {
     },
     async postPullRequestComment(): Promise<void> {},
     async upsertPullRequestComment(): Promise<void> {},
-    async upsertComment(): Promise<void> {},
     async listOpenTickets(): Promise<never[]> {
       return [];
     },
@@ -110,17 +113,33 @@ function quietAdapter(): TicketingAdapter {
   };
 }
 
-const idleSpawner: SessionSpawner = {
-  async spawn(): Promise<void> {},
-};
-
 /**
- * A root with no project checkouts under it, for the tests that are about the
- * lock and the cadence rather than about what a merge means. Nothing in them
- * reaches a breakdown, and a directory that does not exist is read as "this
- * ticket has no list of pieces" rather than throwing.
+ * The real runner driver over the test's store and forge, its record kept in
+ * a fresh folder, with a stand-in for its sessions that does nothing when a
+ * wake is asked for.
  */
-const noCheckouts = "/nowhere";
+function standInRunner(store: RunStore, adapter: TicketingAdapter): RunnerDriver {
+  const root = mkdtempSync(join(tmpdir(), "timone-daemon-runner-"));
+  tempDirs.push(root);
+  return new RunnerDriver({
+    store,
+    adapter,
+    manifest: manifest,
+    root,
+    sessionsFor: () => ({
+      async wake(): Promise<void> {},
+      stop(): void {},
+    }),
+    running: new RunningSteps(),
+    consult: async () => undefined,
+    startStep: async () => {
+      throw new Error("no step starts in this test");
+    },
+    timonePin: async () => undefined,
+    clock: () => "2026-09-27T12:00:00Z",
+    log: () => {},
+  });
+}
 
 describe("runDaemon — one writer, and it says who holds it", () => {
   it("refuses a second daemon while the first holds the ledger, naming the holder", async () => {
@@ -140,27 +159,27 @@ describe("runDaemon — one writer, and it says who holds it", () => {
       },
     };
     const first = runDaemon({
-      manifest,
+      manifest: manifest,
       store,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
       adapter: blocking,
-      spawner: idleSpawner,
+      runner: standInRunner(store, blocking),
       log: () => {},
     });
 
     const said: string[] = [];
+    const second = RunStore.open(statePath);
+    const other = quietAdapter();
     const code = await runDaemon({
-      manifest,
-      store: RunStore.open(statePath),
+      manifest: manifest,
+      store: second,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
-      adapter: quietAdapter(),
-      spawner: idleSpawner,
+      adapter: other,
+      runner: standInRunner(second, other),
       log: (line) => said.push(line),
     });
 
@@ -177,33 +196,115 @@ describe("runDaemon — one writer, and it says who holds it", () => {
     // function, so every test that drives a cycle by hand keeps working and
     // no unit had to learn about locking to keep passing.
     const { store, statePath } = clockedStore();
+    const seven: Ticket = {
+      number: 7,
+      title: "typing in the box is fiddly on my phone",
+      body: "the message box is hard to use on mobile",
+      labels: ["timone"],
+      url: "https://github.com/fvermaut/scratch-app/issues/7",
+      author: "fvermaut",
+      createdAt: "2026-08-06T09:00:00Z",
+    };
     const marked: TicketingAdapter = {
       ...quietAdapter(),
       async listMarkedTickets(): Promise<Ticket[]> {
-        return [
-          {
-            number: 7,
-            title: "typing in the box is fiddly on my phone",
-            body: "the message box is hard to use on mobile",
-            labels: ["timone"],
-            url: "https://github.com/fvermaut/scratch-app/issues/7",
-            author: "fvermaut",
-            createdAt: "2026-08-06T09:00:00Z",
-          },
-        ];
+        return [seven];
+      },
+      // The runner reads the ticket of the run it is told about.
+      async getTicket() {
+        return { ...seven, comments: [] };
       },
     };
 
     const result = await pollOnce({
-      manifest,
+      manifest: manifest,
       store,
       adapter: marked,
-      spawner: idleSpawner,
+      runner: standInRunner(store, marked),
       log: () => {},
     });
 
     expect(result.pickedUp).toEqual(["scratch-app#7/1"]);
     expect(existsSync(stateLockPath(statePath))).toBe(false);
+  });
+});
+
+describe("runDaemon — it does not start while a project names nobody who may instruct it", () => {
+  /** scratch-app with no `instructors` of its own, under `operator` when given. */
+  function manifestNaming(operator?: string): Manifest {
+    return {
+      ...(operator === undefined ? {} : { operator }),
+      projects: {
+        "scratch-app": {
+          repo_url: "https://github.com/fvermaut/scratch-app.git",
+          path: "projects/scratch-app",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+      },
+    };
+  }
+
+  /** A forge with nothing marked, which counts how often it is listed. */
+  function countingAdapter(): { adapter: TicketingAdapter; listings: () => number } {
+    let listed = 0;
+    return {
+      adapter: {
+        ...quietAdapter(),
+        async listMarkedTickets(): Promise<Ticket[]> {
+          listed += 1;
+          return [];
+        },
+      },
+      listings: () => listed,
+    };
+  }
+
+  it("refuses to start, and says which project and what to add", async () => {
+    // The runner takes instructions only from people the manifest names. A
+    // project that names nobody could be instructed by no one, so the daemon
+    // says so before it takes the ledger or looks at any ticket.
+    const { store, statePath } = clockedStore();
+    const { adapter, listings } = countingAdapter();
+    const said: string[] = [];
+
+    const code = await runDaemon({
+      manifest: manifestNaming(),
+      store,
+      statePath,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter,
+      runner: standInRunner(store, adapter),
+      log: (line) => said.push(line),
+    });
+
+    expect(code).toBe(1);
+    expect(said).toEqual([
+      'The daemon does not start: project "scratch-app" names nobody who may instruct it. ' +
+        "Add `instructors` to the project, or `operator` at the top of the manifest.",
+    ]);
+    expect(listings()).toBe(0);
+    expect(existsSync(stateLockPath(statePath))).toBe(false);
+  });
+
+  it("starts when the manifest names an operator, though the project names nobody of its own", async () => {
+    const { store, statePath } = clockedStore();
+    const { adapter, listings } = countingAdapter();
+
+    const code = await runDaemon({
+      manifest: manifestNaming("fvermaut"),
+      store,
+      statePath,
+      intervalMs: 60 * 1000,
+      once: true,
+      adapter,
+      runner: standInRunner(store, adapter),
+      log: () => {},
+    });
+
+    expect(code).toBe(0);
+    expect(listings()).toBe(1);
   });
 });
 
@@ -217,7 +318,11 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     store.claimBranch(run.id, "timone/7-slow");
   }
 
-  /** One cycle, at `at`, with the loop told to poll every `intervalMs`. */
+  /**
+   * One cycle, at `at`, with the loop told to poll every `intervalMs`. The
+   * quiet run's ticket can be read, because the runner reads it once the run
+   * is handed back.
+   */
   async function cycle(
     store: RunStore,
     set: (iso: string) => void,
@@ -225,15 +330,29 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     intervalMs: number,
   ): Promise<void> {
     set(at);
+    const adapter: TicketingAdapter = {
+      ...quietAdapter(),
+      async getTicket(_project, number) {
+        return {
+          number,
+          title: "the page feels slow",
+          body: "it drags",
+          labels: ["timone"],
+          url: `https://github.com/fvermaut/scratch-app/issues/${number}`,
+          author: "fvermaut",
+          createdAt: "2026-08-06T09:00:00Z",
+          comments: [],
+        };
+      },
+    };
     await runDaemon({
-      manifest,
+      manifest: manifest,
       store,
-      root: noCheckouts,
       intervalMs,
       staleAfterMs: FOUR_INTERVALS,
       once: true,
-      adapter: quietAdapter(),
-      spawner: idleSpawner,
+      adapter,
+      runner: standInRunner(store, adapter),
       log: () => {},
     });
   }
@@ -260,114 +379,10 @@ describe("runDaemon — the cadence it keeps is the cadence it judges by", () =>
     await cycle(store, set, "2026-08-06T10:01:00Z", 5 * 60 * 1000);
     await cycle(store, set, "2026-08-06T10:05:00Z", 5 * 60 * 1000);
 
-    expect(store.get("scratch-app#7/1")?.status).toBe("failed");
-  });
-});
-
-describe("runDaemon — the loop reads a ticket's breakdown from the forge", () => {
-  it("does not close over a list that has regrown, without any checkout on disk", async () => {
-    // ✏ Rewritten by phase 30's 30d. This test used to build a real clone
-    // under `projects/scratch-app`, commit the breakdown to its default
-    // branch, and assert that `runDaemon` passed its root down far enough for
-    // the poll loop to read the file — the plumbing being the subject.
-    //
-    // **That plumbing is gone.** The loop reads the approved list off the
-    // project's default branch *on the forge*
-    // ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)),
-    // so there is no root to pass and no checkout to build. The observable
-    // end of the thread is unchanged and is still what is asserted: a list
-    // that grew after it was approved must leave the ticket open, because the
-    // human is asked rather than the ticket being finished on their behalf.
-    //
-    // The root handed to `runDaemon` below is a directory holding no
-    // checkouts at all. A loop that had gone on reading disk would find
-    // nothing, read that as "no breakdown", and close the ticket.
-    const { store, statePath } = clockedStore();
-
-    const { run } = store.register("scratch-app", 7);
-    store.activate(run.id, "s1");
-    store.claimBranch(run.id, "timone/7-slow");
-    store.recordPullRequest(run.id, 9);
-    store.park(run.id, {
-      waitingOn: "your review of pull request #9",
-      kind: "review",
-      stage: "delivery",
-      waitCursor: "2026-08-06T10:00:00Z",
-    });
-
-    const marked: Ticket = {
-      number: 7,
-      title: "typing in the box is fiddly on my phone",
-      body: "the message box is hard to use on mobile",
-      labels: ["timone"],
-      url: "https://github.com/fvermaut/scratch-app/issues/7",
-      author: "fvermaut",
-      createdAt: "2026-08-06T09:00:00Z",
-    };
-
-    // The stamp names two pieces and the list holds three: a re-proposal.
-    const breakdown = [
-      "# Breakdown",
-      "",
-      "**Status:** Approved by fvermaut 2026-08-15 — 2 pieces",
-      "",
-      "1. **The ledger learns chunks** — a run carries its sequence number.",
-      "2. **The next chunk opens** — a merged pull request opens the next one.",
-      "3. **The ticket closes** — the last merge ends the conversation.",
-      "",
-    ].join("\n");
-
-    const asked: { branch: string; path: string }[] = [];
-    const closed: string[] = [];
-    const merged: TicketingAdapter = {
-      ...quietAdapter(),
-      async readBranches() {
-        return { defaultBranch: "main", defaultHead: "aaaaaaa" };
-      },
-      async readFile(_project, branch, path) {
-        asked.push({ branch, path });
-        return path.endsWith("ticket-07.md") ? breakdown : undefined;
-      },
-      async listMarkedTickets(): Promise<Ticket[]> {
-        return [marked];
-      },
-      async getTicket() {
-        return { ...marked, comments: [] };
-      },
-      async getPullRequestThread(): Promise<PullRequestThread> {
-        return {
-          number: 9,
-          title: "piece one",
-          url: "https://github.com/fvermaut/scratch-app/pull/9",
-          state: "merged",
-          headSha: "aaaaaaa",
-          comments: [],
-        };
-      },
-      async closeTicket(_project, number, reason): Promise<void> {
-        closed.push(`${number}:${reason}`);
-      },
-    };
-
-    await runDaemon({
-      manifest,
-      store,
-      statePath,
-      root: noCheckouts,
-      intervalMs: 60 * 1000,
-      once: true,
-      adapter: merged,
-      spawner: idleSpawner,
-      log: () => {},
-    });
-
-    expect(store.get("scratch-app#7/1")?.status).toBe("done");
-    expect(closed).toEqual([]);
-    // And it asked the forge, on the default branch, for the path the
-    // breakdown lives at — rather than looking anywhere on disk.
-    expect(asked).toContainEqual({
-      branch: "main",
-      path: "doc/plans/breakdowns/ticket-07.md",
+    // Reclaimed: the quiet run goes back to the runner.
+    expect(store.get("scratch-app#7/1")).toMatchObject({
+      status: "parked",
+      wait: { kind: "runner" },
     });
   });
 });
@@ -382,20 +397,23 @@ describe("runDaemon — the requests waiting beside the ledger it holds", () => 
   it("carries out a request left beside the ledger", async () => {
     const { store, statePath } = clockedStore();
     const { run } = store.register("scratch-app", 31);
-    store.activate(run.id, "session-1");
-    store.fail(run.id, "the execution stage stopped");
+    store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
     enqueue(statePath, { kind: "cancel", project: "scratch-app", ticket: 31 });
 
     const said: string[] = [];
+    const adapter = quietAdapter();
     const code = await runDaemon({
-      manifest,
+      manifest: manifest,
       store,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
-      adapter: quietAdapter(),
-      spawner: idleSpawner,
+      adapter,
+      runner: standInRunner(store, adapter),
       log: (line) => said.push(line),
     });
 
@@ -609,15 +627,15 @@ describe("the daemon says when its own process is running old code", () => {
     const store = options.store ?? made.store;
     const statePath = options.statePath ?? made.statePath;
     const said: string[] = [];
+    const adapter = quietAdapter();
     await runDaemon({
-      manifest,
+      manifest: manifest,
       store,
       statePath,
-      root: noCheckouts,
       intervalMs: 60 * 1000,
       once: true,
-      adapter: quietAdapter(),
-      spawner: idleSpawner,
+      adapter,
+      runner: standInRunner(store, adapter),
       version,
       log: (line) => said.push(line),
     });
@@ -676,15 +694,15 @@ describe("the daemon says when its own process is running old code", () => {
       return store.witness(options);
     };
 
+    const adapter = quietAdapter();
     await runDaemon({
-      manifest,
+      manifest: manifest,
       store: stopping,
       statePath,
-      root: noCheckouts,
       intervalMs: 0,
       once: false,
-      adapter: quietAdapter(),
-      spawner: idleSpawner,
+      adapter,
+      runner: standInRunner(stopping, adapter),
       version: async () => ({ commit: BEHIND, tip: TIP }),
       log: (line) => said.push(line),
     }).catch(() => {});

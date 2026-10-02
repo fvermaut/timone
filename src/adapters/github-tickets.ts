@@ -899,59 +899,6 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     ]);
   }
 
-  async upsertComment(
-    project: TicketingProject,
-    number: number,
-    marker: string,
-    body: string,
-  ): Promise<void> {
-    const slug = repoSlug(project.repoUrl);
-
-    const raw = await this.run("gh", [
-      "issue",
-      "view",
-      String(number),
-      "--repo",
-      slug,
-      "--json",
-      "comments",
-    ]);
-    const { comments } = parseGhJson(
-      z.looseObject({ comments: z.array(ghCommentSchema) }),
-      raw,
-      `reading comments on ${slug}#${number}`,
-    );
-
-    // Ours *and* carrying the marker. Matching the marker alone would let a
-    // human quoting the CTA back at the machine capture the edit — and since
-    // Timone comments under the human's own account, the machine header is
-    // the only thing that tells the two apart.
-    const existing = comments.find(
-      (comment) =>
-        isMachineComment(comment.body) && comment.body.includes(marker),
-    );
-    if (existing === undefined) {
-      await this.postComment(project, number, body);
-      return;
-    }
-    if (existing.url === undefined) {
-      throw new Error(
-        `gh returned a comment on ${slug}#${number} with no url, so it cannot be edited`,
-      );
-    }
-
-    // A ticket comment and a pull request's conversation comment are one and
-    // the same resource to GitHub, so this is the endpoint its twin patches.
-    await this.run("gh", [
-      "api",
-      "--method",
-      "PATCH",
-      `repos/${slug}/issues/comments/${commentDatabaseId(existing.url)}`,
-      "-f",
-      `body=${stampMachineComment(body)}`,
-    ]);
-  }
-
   async applyLabel(
     project: TicketingProject,
     number: number,

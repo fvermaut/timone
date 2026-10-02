@@ -10,9 +10,7 @@ import {
   type Chunk,
 } from "./breakdown.js";
 import type { Run, RunStore } from "./runs.js";
-// `session.ts` imports this module back. That is safe only because nothing
-// here reads these two names while the modules load, only when a merge runs.
-import { failedComment, mergeMessage } from "./session.js";
+import { mergeMessage } from "./session.js";
 import {
   HELD_LABEL,
   HELD_LABEL_DESCRIPTION,
@@ -25,9 +23,9 @@ import {
  * branch, and opening one ticket per step of the approved breakdown
  * (ADR-0030 D2, ADR-0040).
  *
- * Moved out of `AgentSessionSpawner` so that the runner calls the same code
- * rather than a copy of it. The seams are the spawner's options of the same
- * names, with the same defaults.
+ * Moved out of the old spawner so that the runner called the same code rather
+ * than a copy of it. The spawner was removed on 2026-09-30; the runner is the
+ * one caller left.
  */
 export interface ChunkZeroDeps {
   store: RunStore;
@@ -67,63 +65,29 @@ export type ChunkZeroRefusal = Extract<MergeOutcome, { merged: false }>;
 /**
  * Merge chunk zero — the branch carrying the specification and the approved
  * breakdown — into the project's default branch, with no pull request
- * (ADR-0030 D2). Returns false when it did not happen, having failed the run
- * and said why on the ticket, exactly as a failed approval record does:
- * chunk 1 cuts from the default branch, so a silently failed merge would
- * have it build against a default branch that does not carry the
- * specification, and nothing downstream would notice.
- *
- * This is the current daemon's form. The runner's path merges through
- * {@link tryMergeChunkZero}, which fails nothing (40x): on a project the
- * runner drives, a failed run is one nothing wakes again.
+ * (ADR-0030 D2). Returns the refusal, or undefined when the branch is on the
+ * default branch now. It writes nothing about a refusal: no run is failed and
+ * no ticket is told. What a refusal means for the run, and what the ticket is
+ * told, is the caller's to decide (40x).
  *
  * **`approval` is required, so no caller can merge without one** (PRD-05 R3:
  * only a named person's yes lets work reach a default branch with no pull
- * request). Both paths that close chunk zero merge through here or through
- * {@link tryMergeChunkZero}, and each must name the approval that allows it:
- * the runner's path takes it only from the run record's `approval` entry,
- * and the daemon's from the person's reply it has just read. The check is
- * the compiler's — a call without an approval does not build — so nothing
- * here reads it again.
+ * request). The runner takes it only from the run record's `approval` entry.
+ * The check is the compiler's — a call without an approval does not build —
+ * so nothing here reads it again.
  *
- * {@link attemptMerge} below takes no approval. It is exported only for the
- * spawner's delegator of the same name, which its tests reach; nothing else
- * may call it.
- */
-export async function mergeChunkZero(
-  deps: ChunkZeroDeps,
-  run: Run,
-  project: TicketingProject,
-  approval: ChunkZeroApproval,
-): Promise<boolean> {
-  const refusal = await tryMergeChunkZero(deps, run, project, approval);
-  if (refusal === undefined) return true;
-
-  const reason =
-    refusal.conflict === true
-      ? "the approved breakdown and the default branch have changes that clash — " +
-        `a merge conflict, and nothing was merged (${refusal.reason}). ` +
-        "Somebody has to decide which side wins; trying again changes nothing."
-      : `could not merge the approved breakdown into the default branch: ${refusal.reason}`;
-  deps.store.fail(run.id, reason);
-  await deps.adapter.postComment(project, run.ticket, failedComment(reason));
-  return false;
-}
-
-/**
- * Merge chunk zero as {@link mergeChunkZero} does, and write nothing about a
- * refusal: no run is failed and no ticket is told. Returns the refusal, or
- * undefined when the branch is on the default branch now.
+ * {@link attemptMerge} below takes no approval. Only this function may call
+ * it.
  *
- * The runner's form (40x). What a refusal means for the run, and what the
- * ticket is told, is the caller's to decide.
+ * ✏ 2026-09-30: `mergeChunkZero`, the old daemon's form, which failed the
+ * run and posted on the ticket, was deleted. Nothing called it.
  */
 export async function tryMergeChunkZero(
   deps: ChunkZeroDeps,
   run: Run,
   project: TicketingProject,
-  // Required and not read: see {@link mergeChunkZero}. Named with an
-  // underscore only so a reader does not look for where it is used.
+  // Required and not read: see above. Named with an underscore only so a
+  // reader does not look for where it is used.
   _approval: ChunkZeroApproval,
 ): Promise<ChunkZeroRefusal | undefined> {
   const branch = deps.store.get(run.id)?.branch;
@@ -144,10 +108,10 @@ export async function tryMergeChunkZero(
 /**
  * The merge itself, with a thrown git failure reduced to a refusal.
  *
- * Exported beside {@link mergeChunkZero} because the spawner still answers to
- * this name: its tests reach the merge through it.
+ * Not exported: it takes no approval, so only {@link tryMergeChunkZero} may
+ * call it.
  */
-export async function attemptMerge(
+async function attemptMerge(
   deps: ChunkZeroDeps,
   project: TicketingProject,
   branch: string | undefined,

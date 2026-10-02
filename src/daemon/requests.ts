@@ -29,11 +29,6 @@ import { holderSchema } from "./holder.js";
  */
 const bodySchema = z.discriminatedUnion("kind", [
   z.object({
-    kind: z.literal("retry"),
-    project: z.string().min(1),
-    ticket: z.number().int().positive(),
-  }),
-  z.object({
     kind: z.literal("cancel"),
     project: z.string().min(1),
     ticket: z.number().int().positive(),
@@ -96,6 +91,26 @@ const envelopeSchema = z.object({
   body: bodySchema,
 });
 
+/**
+ * A request of a kind that was removed: `retry`, since 2026-09-30
+ * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+ * D6). A command of an earlier build may have left one here before it was
+ * removed. It is read so that it can be settled and reported once, not left
+ * on disk as an unreadable file and reported on every cycle.
+ */
+const removedSchema = z.object({
+  askedAt: z.string().min(1),
+  askedBy: z.string().min(1),
+  body: z.object({
+    kind: z.literal("retry"),
+    project: z.string().min(1),
+    ticket: z.number().int().positive(),
+  }),
+});
+
+/** A request of a removed kind, and where it was found. */
+export type RemovedRequest = z.infer<typeof removedSchema> & { path: string };
+
 /** A request found on disk, and where it was found. */
 export interface QueuedRequest {
   /** The file it came from — what {@link settle} is given once it is applied. */
@@ -109,6 +124,12 @@ export interface QueuedRequest {
 export interface PendingRequests {
   /** Readable requests, oldest first. */
   requests: QueuedRequest[];
+  /**
+   * Requests of a kind that was removed, oldest first. What each one asked
+   * for is known and can no longer be done, so it is not kept as evidence the
+   * way an unreadable file is: the daemon settles it and says so once.
+   */
+  removed: RemovedRequest[];
   /**
    * Paths of files that are request-shaped and could not be understood. They
    * are reported rather than thrown on, so one corrupt file cannot stop the
@@ -175,10 +196,11 @@ export function pending(statePath: string): PendingRequests {
   try {
     names = readdirSync(dir);
   } catch {
-    return { requests: [], unreadable: [] };
+    return { requests: [], removed: [], unreadable: [] };
   }
 
   const requests: QueuedRequest[] = [];
+  const removed: RemovedRequest[] = [];
   const unreadable: string[] = [];
 
   // Sorted by name, which sorts by the instant in it and then by the counter
@@ -186,12 +208,18 @@ export function pending(statePath: string): PendingRequests {
   // `fileName`, where that ordering is built.
   for (const name of names.filter(isRequestFile).sort()) {
     const path = join(dir, name);
-    const parsed = read(path);
-    if (parsed === undefined) unreadable.push(path);
-    else requests.push({ path, ...parsed });
+    const data = readJson(path);
+    const parsed = envelopeSchema.safeParse(data);
+    if (parsed.success) {
+      requests.push({ path, ...parsed.data });
+      continue;
+    }
+    const old = removedSchema.safeParse(data);
+    if (old.success) removed.push({ path, ...old.data });
+    else unreadable.push(path);
   }
 
-  return { requests, unreadable };
+  return { requests, removed, unreadable };
 }
 
 /**
@@ -272,16 +300,13 @@ function isRequestFile(name: string): boolean {
   return name.endsWith(".json");
 }
 
-function read(path: string): Omit<QueuedRequest, "path"> | undefined {
-  let data: unknown;
+/** The file's JSON, or undefined when it is not JSON at all. */
+function readJson(path: string): unknown {
   try {
-    data = JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync(path, "utf8"));
   } catch {
     return undefined;
   }
-
-  const parsed = envelopeSchema.safeParse(data);
-  return parsed.success ? parsed.data : undefined;
 }
 
 /**

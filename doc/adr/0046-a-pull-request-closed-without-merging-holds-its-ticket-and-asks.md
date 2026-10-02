@@ -1,6 +1,6 @@
 # ADR-0046: A pull request closed without merging holds its ticket and asks
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
 - **Date:** 2026-08-30
 - **Source:** fvermaut's ruling of 2026-08-30, taken after an accidental close cost a piece of work and started a run nobody wanted
 - **Amends:** the unmerged half of `concludeReview` in [`src/daemon/poll.ts`](../../src/daemon/poll.ts). It **corrects the code toward** [ADR-0040](0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md), which already says a step ticket closes when its pull request *merges*, and reverses nothing that ADR decided

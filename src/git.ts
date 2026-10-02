@@ -125,30 +125,6 @@ export async function isCommitOnRemote(
   }
 }
 
-/**
- * The paths in `dir` carrying changes that are not committed — staged,
- * unstaged and untracked alike — renames counted at their destination.
- *
- * **Files git was told to ignore are never among them.** That is not a filter
- * applied here: `git status --porcelain` leaves them out, which is what makes
- * `node_modules/` and `dist/` not work anybody has to commit.
- *
- * Throws when `dir` is not a checkout, as everything else in this module
- * does. Empty means the tree is clean, and only that.
- */
-export async function uncommittedFiles(dir: string): Promise<string[]> {
-  const status = await runGit(["status", "--porcelain"], dir);
-  return status
-    .split("\n")
-    .filter((line) => line.trim() !== "")
-    .map((line) => {
-      const path = line.slice(3);
-      const arrow = path.indexOf(" -> ");
-      return arrow === -1 ? path : path.slice(arrow + 4);
-    })
-    .map((path) => path.replace(/^"|"$/g, ""));
-}
-
 /** Name of the currently checked-out branch (or "HEAD" when detached). */
 export async function currentBranch(dir: string): Promise<string> {
   return (await runGit(["rev-parse", "--abbrev-ref", "HEAD"], dir)).trim();

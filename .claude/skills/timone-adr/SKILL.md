@@ -17,11 +17,11 @@ You record one architectural decision as an ADR under a managed project — or y
 3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
 4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
 5. From here on, every file you read or write lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `process.md`, `standards/`, and `timone.yaml`.
-6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
+6. In a session the runner started, the target project arrives in the session's prompt; the same validation applies. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md))
 
 ## Standalone at decision time
 
-An ADR is written **the moment the decision is made** — in a grill session, during planning, or mid-execution. It is a standalone artifact, never a scheduled task: "write ADR for X" must not appear as plan work in any phase file. If you are invoked from another stage (grilling, planning, execution), record the ADR now and return to that stage; if planning surfaces a significant undocumented decision, the plan waits until the ADR exists.
+An ADR is written **the moment the decision is made** — in a grill session, during planning, or mid-execution. It is a standalone artifact, never a scheduled task: "write ADR for X" must not appear as plan work in any phase file. If you are invoked from another stage (grilling, planning, execution), record the ADR now and return to that stage; if planning surfaces a significant undocumented decision, the plan waits until the ADR exists. ✏ 2026-10-02 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): recording an ADR is not a step of the default order. In a session the runner started, you record it inside the step that made the decision, and when that step ends, the runner chooses the next step itself.
 
 ## The significance gate (three parts, all required)
 

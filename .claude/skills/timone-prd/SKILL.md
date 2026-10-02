@@ -12,7 +12,7 @@ Implement **stage 3 — Requirements** of [the Timone process](../../../process.
 
 The PRD pair is the **single source of truth** for what is being built (ADR-0006). Tickets scope work and point here; they never hold requirement detail.
 
-Pipeline position: `timone-grill` → **`timone-prd`** → `timone-plan` → `timone-execute` → `timone-verify` → … and back here for amendments, which this skill owns since [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired stage 9.
+Pipeline position: `timone-grill` → **`timone-prd`** → `timone-plan` → `timone-execute` → `timone-verify` → … and back here for amendments, which this skill owns since [ADR-0036](../../../doc/adr/0036-feedback-is-triage-with-the-documents-open.md) retired stage 9. ✏ 2026-10-02 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): these steps are the default order; in a session the runner started, the runner chooses the next step itself.
 
 ---
 
@@ -23,7 +23,7 @@ Pipeline position: `timone-grill` → **`timone-prd`** → `timone-plan` → `ti
 3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
 4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
 5. From here on, every file this skill reads or writes lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `process.md`, `standards/`, and `timone.yaml`.
-6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
+6. In a session the runner started, the target project arrives in the session's prompt; the same validation applies. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md))
 
 ---
 
@@ -186,8 +186,8 @@ When **any requirement covers user-facing functionality**, the criteria register
     - Is anything missing, or captured that was never agreed?
     - Is the out-of-scope list complete?
     - For user-facing requirements: are the proposed accessibility criteria right?
-4. **Write the pair, then gate on it** ([ADR-0014](../../../doc/adr/0014-artifact-first-gates.md)). Write both files on the work branch with the narrative stamped `Draft`, commit and push them, and ask for approval **against the committed register** — not against a paraphrase of it in conversation. The register's precision is the whole reason it exists; summarising it for approval approves a different object from the one that gets kept (ADR-0006). Where the work is daemon-driven the approval arrives as a ticket reply (ADR-0012); in a hand-run session it is the conversation itself. **A change request re-enters this stage**, which rewrites the pair in place — renumbering requirement IDs freely, because until the gate closes nothing is ratified and IDs are not yet stable. On approval, flip the narrative to `Active`: that flip is the gate's written trace, and until it happens stage 5 will refuse to plan against the PRD.
-5. **Hand off:** suggest running `timone-plan` with a pointer to the new PRD. If the PRD came from a grill session, note that in the narrative's Problem section as the source.
+4. **Write the pair, then gate on it** ([ADR-0014](../../../doc/adr/0014-artifact-first-gates.md)). Write both files on the work branch with the narrative stamped `Draft`, commit and push them, and ask for approval **against the committed register** — not against a paraphrase of it in conversation. The register's precision is the whole reason it exists; summarising it for approval approves a different object from the one that gets kept (ADR-0006). ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). In a session the runner started, the approval arrives as a comment on the ticket (ADR-0012) by a named person: someone listed for the project in `timone.yaml` as allowed to instruct its runner. The runner records it by naming that comment, and starts a short session that writes it into the narrative. In a hand-run session the approval is the conversation itself. The runner may also skip this approval and say so on the ticket; `timone-plan` then plans against the `Draft` pair, and the person still approves the pull request. **A change request re-enters this stage**, which rewrites the pair in place — renumbering requirement IDs freely, because until the gate closes nothing is ratified and IDs are not yet stable. On approval, flip the narrative to `Active`: that flip is the gate's written trace, and until it happens stage 5 will refuse to plan against the PRD, unless the runner skipped the approval.
+5. **Hand off:** suggest running `timone-plan` with a pointer to the new PRD. If the PRD came from a grill session, note that in the narrative's Problem section as the source. ✏ 2026-10-02 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): in a session the runner started, the runner chooses the next step itself; the default one is a named person's approval of the requirements, then working out the pieces.
 
 ---
 

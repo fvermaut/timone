@@ -1,6 +1,6 @@
 # ADR-0022: A ticket waiting on a conversation can be answered in writing
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
 - **Date:** 2026-08-09
 - **Source:** grill session of 2026-08-09, prompted by six unanswerable tickets on `ivtrends`
 - **Amends:** [ADR-0012](0012-conversation-channels.md), whose conversation bullet this extends; [ADR-0010](0010-wayfinder-discovery-maps.md)'s tickets are the class that exposed the gap

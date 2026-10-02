@@ -1,8 +1,6 @@
 import { takeHold } from "./holder.js";
 import { closingLine, tickLine, type SessionSummary } from "./progress.js";
 import type { RunStore } from "./runs.js";
-// `session.ts` imports this module back. That is safe only because nothing
-// here reads `waitOf` while the modules load, only when a start fails.
 import {
   waitOf,
   type ProgressReader,
@@ -84,8 +82,8 @@ export interface StepSession {
 }
 
 /**
- * Start one session for a run and watch it: the one place a session is
- * started, which both the spawner and the runner call.
+ * Start one session for a run and watch it: the one place a step's session
+ * is started. The runner calls it.
  *
  * **Claim the run, then start its session — in that order (ADR-0023).** The
  * claim is what tells a second process the run is taken, so it has to be on

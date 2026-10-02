@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { HELD_LABEL } from "./steps.js";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
@@ -10,28 +9,20 @@ import {
   type Holder,
   type Liveness,
 } from "./holder.js";
-import { BUILD_ESCALATION_PREFIX, isBuildEscalation } from "./faults.js";
-import {
-  PIPELINE_STAGES,
-  inBuild,
-  resolvableBy,
-  stageAfter,
-  type PipelineStage,
-  type WaitKind,
-} from "./pipeline.js";
+import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
 
 /**
  * A run's lifecycle. `queued` is where a pickup lands while another run holds
- * the project; the rest is the plan's `picked-up → active → parked | done |
- * failed`.
+ * the project; the rest is `picked-up → active → parked | done | cancelled`.
  *
- * `parked` — waiting on a human — is deliberately **not** terminal: the run
- * is unfinished and will resume where it stopped.
+ * `parked` — waiting for the runner — is deliberately **not** terminal: the
+ * run is unfinished, and the next thing that happens on its ticket wakes the
+ * runner.
  *
- * `cancelled` is the abandoned ending, and it is deliberately **not**
- * `failed`: `failed` means the work broke and `timone retry` re-arms it, while
- * a run that should never have existed must not be one keystroke from
- * restarting. See {@link TRANSITIONS}, where it is the second dead end.
+ * `cancelled` is the one ending that is not success. ✏ 2026-09-30: `failed`
+ * was removed with the old code between steps, which was the only code that
+ * wrote it. A run an older ledger holds as failed is read as cancelled — see
+ * {@link normaliseOldPath}.
  */
 export type RunStatus =
   | "queued"
@@ -39,7 +30,6 @@ export type RunStatus =
   | "active"
   | "parked"
   | "done"
-  | "failed"
   | "cancelled";
 
 /**
@@ -51,40 +41,26 @@ const RUNNING: readonly RunStatus[] = ["picked-up", "active"];
 
 /**
  * Statuses that end a run's hold on its project: it is over, so the next
- * queued ticket may be promoted. `failed` belongs here — a dead session must
- * not freeze the project behind it — and so does `cancelled`, for the same
- * reason: abandoned work must not keep a project to itself.
+ * queued ticket may be promoted. `cancelled` belongs here as `done` does:
+ * abandoned work must not keep a project to itself.
  *
- * See {@link isSettled}, which is deliberately narrower and is *not* a
- * duplicate of this.
+ * See {@link isSettled}, which asks a different question. ✏ 2026-09-30: the
+ * two lists now hold the same statuses. They differed only on `failed`, which
+ * was removed.
  */
-const TERMINAL: readonly RunStatus[] = ["done", "failed", "cancelled"];
+const TERMINAL: readonly RunStatus[] = ["done", "cancelled"];
 
 /**
  * Statuses that **settle** a chunk: the ticket is finished with it and may
  * open its next one
  * ([ADR-0029](../../doc/adr/0029-a-chunk-advances-only-on-success.md)).
  *
- * The next reader will assume this duplicates {@link TERMINAL}. It does not —
- * the two answer different questions, and `failed` answers them differently:
- *
- * - {@link TERMINAL} is about the **project lock**. A failed run is over, so
- *   it stops holding the project and whatever queued behind it is promoted.
- * - Settledness is about the **ticket's succession**. A failed chunk is still
- *   its ticket's current business, because `timone retry <project>#<ticket>`
- *   re-arms *that* chunk in place. Letting the ticket move on would open a
- *   chunk beside the failure — the poll loop registers every marked ticket on
- *   every cycle, so within a minute — and the one-session guard would then
- *   refuse the retry, deleting the only road a broken chunk has back to
- *   working.
- *
- * A chunk advances only on success — or on being abandoned. `cancelled` is
- * **both** terminal and settled, and it has to be both: nobody is going to
- * retry it, so a cancelled chunk that stayed unsettled would hold its ticket
- * for ever and no work could ever be run on that ticket again. It is also what
- * makes the poll loop's closed-ticket cancellation self-healing — a ticket
- * reopened and re-marked simply takes its next chunk from {@link
- * RunStore.register}.
+ * {@link TERMINAL} is about the **project lock**; this is about the
+ * **ticket's succession**. A chunk advances only on success — or on being
+ * abandoned. `cancelled` is **both** terminal and settled, and it has to be
+ * both: a cancelled chunk that stayed unsettled would hold its ticket for
+ * ever and no work could ever be run on that ticket again. A ticket reopened
+ * and re-marked simply takes its next chunk from {@link RunStore.register}.
  */
 const SETTLED: readonly RunStatus[] = ["done", "cancelled"];
 
@@ -100,52 +76,29 @@ function isSettled(status: RunStatus): boolean {
  * and starts the next without a human in between re-activates under a new
  * session id, since each stage is its own session.
  *
- * `picked-up → parked` is the other one worth explaining. A run that enters
- * the pipeline at a stage waiting on a conversation — a wayfinder decision
- * ticket does, since it skips triage (ADR-0010, ADR-0022) — has never had a
- * session attached to it, and `active` means precisely that one is: `activate`
- * takes a session id. What such a run waits for is a *human*, and the session
- * that will serve them does not exist yet and may never be started by the
- * daemon at all. Routing it through `active` first would mint an id for a
- * session nobody started, and `timone status` would call the run running for
- * as long as the human took to answer.
+ * `picked-up → parked` is the other one worth explaining. The runner puts a
+ * run it has just picked up on its own wait before it looks at it, and a
+ * takeover of a ticket with no run does the same. Neither has had a session
+ * attached to it, and `active` means precisely that one is: `activate` takes
+ * a session id. Routing such a run through `active` first would mint an id
+ * for a session nobody started, and `timone status` would call the run
+ * running while nothing was.
  *
- * `active → picked-up` is the run's next stage failing to start
- * ([timone#161](https://github.com/fvermaut/timone/issues/161)). One stage
- * finished and the session for the next one never began, so no session is
- * running and nothing broke: the run is back to waiting for the daemon to
- * start it, exactly as a run fresh from `timone retry` is. Left `active`, it
- * was held by a daemon that was not running anything for it, and nothing ever
- * started it again.
+ * ✏ 2026-09-30: every move into and out of `failed`, and `active →
+ * picked-up`, were removed with the old code between steps, which was the
+ * only code that made them.
  */
 const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   queued: ["picked-up", "cancelled"],
-  "picked-up": ["active", "parked", "failed", "cancelled"],
-  active: ["active", "picked-up", "parked", "done", "failed", "cancelled"],
-  parked: ["active", "done", "failed", "cancelled"],
+  "picked-up": ["active", "parked", "cancelled"],
+  active: ["active", "parked", "done", "cancelled"],
+  parked: ["active", "done", "cancelled"],
+  // `done` is a dead end: finished work is history, and a new ticket — not an
+  // abandonment — is how it is reopened.
   done: [],
-  // Abandoned, and abandoned for good. An empty list here is the whole of
-  // "`cancelled` is deliberately not `failed`": a failure can be re-armed by
-  // `timone retry`, and a run that should never have existed must not be one
-  // keystroke from restarting. A ticket that deserves another go gets a
-  // *fresh chunk* from `register`, because cancellation settles this one.
+  // Abandoned, and abandoned for good. A ticket that deserves another go gets
+  // a *fresh chunk* from `register`, because cancellation settles this one.
   cancelled: [],
-  // Failure has two roads out, and they are not the same road. `timone retry`
-  // re-arms the run at the stage it failed; `timone cancel` abandons it. The
-  // second was added by fvermaut's ruling of 2026-08-15, because without it
-  // clearing a failed run meant retrying it *first* — and the window between
-  // the two commands is one the daemon polls, so a run somebody was trying to
-  // delete could be picked up and spend real money before the second command
-  // landed. One command now ends a run whatever state it is in.
-  //
-  // `done` stays a dead end: finished work is history, and a new ticket — not
-  // an abandonment — is how it is reopened.
-  //
-  // ✏ `parked` is the third road, and only `timone takeover` takes it
-  // ([ADR-0059](../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md)):
-  // a failed run a person opens with the machine becomes a run waiting on
-  // that person, so the session opened on it can hand it back like any other.
-  failed: ["picked-up", "parked", "cancelled"],
 };
 
 const runSchema = z.strictObject({
@@ -170,15 +123,7 @@ const runSchema = z.strictObject({
    * anything reads it.
    */
   seq: z.number().int().positive(),
-  status: z.enum([
-    "queued",
-    "picked-up",
-    "active",
-    "parked",
-    "done",
-    "failed",
-    "cancelled",
-  ]),
+  status: z.enum(["queued", "picked-up", "active", "parked", "done", "cancelled"]),
   /** Lifecycle stage the run has reached, for `timone status` and for resuming. */
   stage: z.enum([...PIPELINE_STAGES]).optional(),
   /**
@@ -189,10 +134,8 @@ const runSchema = z.strictObject({
    * read apart.
    *
    * **Its absence carries meaning and is not the same as an empty one.** A
-   * parked run with no wait at all is a run stopped because a stage's
-   * machinery does not exist — `resolveWait` has a case of its own for it —
-   * and that is a different thing from a wait nothing can resolve, which D6
-   * refuses outright.
+   * parked run with no wait at all is a different thing from a wait nothing
+   * can resolve, which D6 refuses outright.
    *
    * Old ledgers are folded into this shape on load, as {@link
    * normaliseSequences} folds a run with no chunk number.
@@ -202,28 +145,23 @@ const runSchema = z.strictObject({
       /** What it is waiting for, in the human's terms. */
       on: z.string(),
       /**
-       * Which *kind* of wait it is — what an arriving answer may resolve.
-       *
-       * `escalation` resolves to nothing arriving: it is a run stopped where
-       * no written answer can help, waiting on a person to pick it up
-       * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
-       *
-       * `runner` is a run of a project the runner drives, waiting for the
-       * next thing that happens on its ticket
+       * `runner`: the run waits for the next thing that happens on its
+       * ticket
        * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
-       * No answer resumes it the way one resumes a gate or a conversation:
-       * whatever happens wakes the runner, and the runner decides.
+       * Whatever happens wakes the runner, and the runner decides.
        *
-       * **Optional, and its absence is its own state**: a run parked at a
-       * stage whose machinery does not exist has words for the human and no
-       * kind of answer that would end the wait.
+       * ✏ 2026-09-30: the one kind left. The gate, the conversation, the
+       * review and the escalation were the old code's own waits, and the
+       * ledger reads each of them as the runner's. The field stays because
+       * the runner reads it: `handBack` in `src/runner/driver.ts` and
+       * `settle` in `src/runner/session.ts` keep a wait's words only when
+       * its kind is `runner`.
+       *
+       * **Optional, and its absence is its own state**: a wait that names no
+       * kind has words for the human and nothing else.
        */
-      kind: z.enum(["gate", "conversation", "review", "escalation", "runner"]).optional(),
-      /**
-       * The instant the wait was opened — the gate comment, or the invitation
-       * to a conversation. Anything at or before it belongs to an earlier
-       * question and cannot answer this one.
-       */
+      kind: z.enum(["runner"]).optional(),
+      /** The instant the wait was opened. */
       opened: z.string().optional(),
       /**
        * Which stages may end this wait (ADR-0049 D5), recorded when it is
@@ -240,86 +178,6 @@ const runSchema = z.strictObject({
        * the stage it was parked at.
        */
       resolvableBy: z.array(z.enum([...PIPELINE_STAGES])).optional(),
-      /**
-       * The instant of the newest comment this wait has already told the
-       * human it read ([timone#147](https://github.com/fvermaut/timone/issues/147)).
-       *
-       * **It is a receipt, not a cursor.** A review park never advances its
-       * cursor — everything written after the park is the answer, joined —
-       * so without a second field the loop cannot tell "they have just
-       * written this" from "they wrote this and I said so a cycle ago", and
-       * a run whose spawn is refused posts the same acknowledgement every
-       * sixty seconds.
-       */
-      acknowledgedAt: z.string().optional(),
-    })
-    .optional(),
-  /**
-   * How many times running this run has read a written answer and then asked
-   * again at the same stage — the count ADR-0033's floor keeps.
-   *
-   * Absent means none, which is what every run written before it existed
-   * means too. It is here rather than only in `applyPark`'s head because the
-   * ticket's words depend on it: a run that said it was stuck reads
-   * differently from one that had to be caught being stuck, and only this
-   * number tells them apart.
-   */
-  reAsksAfterAnswer: z.number().int().nonnegative().optional(),
-  // Left outside {@link Run.wait} deliberately, with `consumedAnswerAt`
-  // below. ADR-0049 D5 groups both into the wait, and they cannot go there:
-  // every clearing of a wait — `activate`, `fail` — must keep them. The
-  // marker exists precisely to outlive the wait it was read under, and the
-  // count accumulates across parks separated by activations, so a version of
-  // either living inside the wait would be reset by the transition it was
-  // added to survive. See 31g's finding, recorded in the ADR.
-  /**
-   * The instant of the written answer this run has read and not yet acted on
-   * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)).
-   *
-   * **It exists because {@link waitCursor} cannot carry it.** Reading an answer
-   * consumes it — the cursor advances past it as part of deciding to resume —
-   * and then {@link RunStore.activate} clears the wait, cursor included. A
-   * session killed after that left the run `failed` with nothing pointing at
-   * the answer, so `timone retry` had nothing to rewind and re-posted the
-   * original question instead. That is a silent re-ask, which is not the trade
-   * ADR-0023 accepted: it undertook that retry rewinds the marker.
-   *
-   * **Present only while the answer is outstanding.** It is written when the
-   * answer is consumed, survives `activate` and {@link RunStore.fail} — the
-   * whole point — and is dropped the moment the run shows the answer was acted
-   * on: a new wait ({@link applyPark}), the next stage ({@link
-   * RunStore.setStage}), or the run resolving ({@link RunStore.complete}). So a
-   * marker that is present always names an answer nobody has finished with, and
-   * `timone retry` can rewind to it without asking the human anything.
-   *
-   * Optional, and its absence is a legitimate state: a run that consumed
-   * nothing has none, and neither has one parked by a daemon predating the
-   * field — `retry` falls back to the cursor for those, as it did before.
-   */
-  consumedAnswerAt: z.string().optional(),
-  /**
-   * The question the ask check has standing on this run's ticket, if any
-   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
-   *
-   * **It is here because a call to action is rewritten every cycle.** The
-   * check replaces an expensive message with a short question, and the loop
-   * comes back a minute later to reconcile the same ticket. Without a record
-   * of what was already asked, every pass would consult a model again, word
-   * the question differently, and edit the comment for ever — which is the
-   * notification storm `reconcileCtas` guards against, arriving by a new
-   * door.
-   *
-   * `for` is the composed message the question stood in front of, compared
-   * whole: when what the ticket needs changes, the question standing in front
-   * of the old need is not an answer to the new one. `askedAt` is what spends
-   * the one-question budget — a reply later than it means the check has had
-   * its turn.
-   */
-  askCheck: z
-    .strictObject({
-      for: z.string(),
-      question: z.string(),
-      askedAt: z.string(),
     })
     .optional(),
   /**
@@ -370,100 +228,19 @@ const runSchema = z.strictObject({
    * `updatedAt` for both, which is when the run last actually moved.
    */
   heartbeatAt: z.string().optional(),
-  /** Why a failed run failed. */
-  failure: z.string().optional(),
   /**
    * Why a cancelled run was cancelled.
    *
-   * **Its own field rather than {@link failure}, because a cancelled chunk was
-   * abandoned and not broken.** The two words are read by people: `timone
-   * status` prints a failure as *"stopped early"* beside the command that
-   * restarts it, and `timone takeover` reports one as something that went
-   * wrong. A cancellation is neither — nothing broke, and nothing is going to
-   * be retried — and a reason stored under `failure` would be one substitution
-   * away from being announced as a fault at every one of those surfaces.
+   * The words are read by people, in `timone status` and `timone takeover`.
+   * A run the old code left failed is read as cancelled, and its reason lands
+   * here — see {@link normaliseOldPath}.
    *
    * Optional, like every field added since the ledger was written, so a state
    * file from before this existed loads unchanged at `version: 1`.
    */
   cancellation: z.string().optional(),
-  /**
-   * Every time this run's holder was found gone, in the words of what was
-   * observed, oldest first
-   * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
-   * D4).
-   *
-   * **It is the re-arm count and the reasons at once**, because the second
-   * park has to carry both: a run stopped twice tells the human what happened
-   * on each attempt, and one number could not.
-   *
-   * It is not {@link Run.seq} — a re-armed run keeps its chunk number, since
-   * it is the same chunk being built again — and it is not
-   * {@link Run.reAsksAfterAnswer}, which counts a stage asking the same
-   * question twice. Those are three different things and each has cost a
-   * defect by being confused with another.
-   *
-   * Absent means none, which is what every run written before this means too.
-   */
-  deaths: z.array(z.string()).optional(),
-  /**
-   * The daemon's standing refusal to start this run, when it has one
-   * (ADR-0049 D4, second half).
-   *
-   * **It counts consecutive refusals for the same reason**, and it is reset
-   * by a run actually starting or by the reason changing. That is what bounds
-   * timone#75: a refusal that never clears was said once a minute into a
-   * terminal nobody was reading, and the ticket meanwhile said "I've picked
-   * this up".
-   *
-   * **Written without touching `updatedAt`**, exactly as
-   * {@link RunStore.heartbeat} is and for the opposite reason. `staleRuns`
-   * reads the later of the heartbeat and `updatedAt`, so a refusal recorded
-   * through an ordinary write would be a run proving itself alive by failing
-   * to start — which is the 83 minutes that issue measured.
-   */
-  refusal: z
-    .strictObject({
-      /** What the spawner said, in its own words. */
-      reason: z.string(),
-      /** How many cycles running it has said it. */
-      count: z.number().int().positive(),
-      /** When it first said it. */
-      since: z.string(),
-      /** Whether the human has already been told. Told once, not once a cycle. */
-      told: z.boolean().optional(),
-    })
-    .optional(),
   /** Guardrail-hook violations recorded against this run (R15). */
   flags: z.array(z.string()),
-  /**
-   * Questions a build stage asked that it had no business asking, kept so
-   * they reach the pull request
-   * ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
-   *
-   * [ADR-0052](../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md)
-   * ruled such a question a fault to file rather than a wait to serve, and
-   * the daemon filed it by failing the run — which stopped the work one step
-   * short of the pull request and made a person type a command to start it
-   * again. ADR-0056 keeps the fault and drops the stop: the stage's own words
-   * are written here, the run carries on, and stage 8 puts them in the pull
-   * request's departures section.
-   *
-   * Optional, because every ledger written before ADR-0056 has no such field
-   * and a run that never asked anything has nothing to carry.
-   */
-  carried: z
-    .array(
-      z.strictObject({
-        /** The stage that asked. */
-        stage: z.enum([...PIPELINE_STAGES]),
-        /** When it asked. */
-        at: z.string(),
-        /** What it said, verbatim — the comment it posted on the ticket. */
-        words: z.string(),
-      }),
-    )
-    .optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -667,14 +444,6 @@ export type Run = z.infer<typeof runSchema>;
  */
 export type RunWait = NonNullable<Run["wait"]>;
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
-
-/**
- * What the ledger remembers about a question the ask check asked. The same
- * shape as `AskCheckMemory` in `ask-check.ts`, derived from the schema here
- * because the ledger is what persists it — the check itself holds no state and
- * is handed this, never the other way round.
- */
-export type AskCheckRecord = NonNullable<z.infer<typeof runSchema>["askCheck"]>;
 export type IntroductionRecord = z.infer<typeof introductionRecordSchema>;
 export type InitiativeRecord = z.infer<typeof initiativeRecordSchema>;
 export type DaemonRecord = z.infer<typeof daemonRecordSchema>;
@@ -741,40 +510,21 @@ export function defaultStatePath(root: string): string {
   return join(root, ".timone", "state.json");
 }
 
-/** Options for parking a run against a human wait. */
+/** Options for parking a run on a wait. */
 export interface ParkOptions {
   /** What it is waiting for, in the human's terms. */
   waitingOn: string;
-  /**
-   * Which kind of wait it is, when the daemon will resume it from an answer —
-   * or `escalation`, the wait no answer resumes (ADR-0033), or `runner`, the
-   * wait of a run the runner drives (ADR-0060).
-   */
-  kind?: "gate" | "conversation" | "review" | "escalation" | "runner";
+  /** `runner`, the wait of a run the runner drives (ADR-0060). */
+  kind?: "runner";
   /** The stage it parked at, when parking moves it. */
   stage?: PipelineStage;
-  /** The instant the wait was opened; answers before it are not answers to it. */
+  /** The instant the wait was opened. */
   waitCursor?: string;
   /**
-   * Which stages may end this wait (ADR-0049 D5). Absent means "work it out
-   * from the kind and the stage" — {@link resolvableBy} — which is what every
-   * ordinary park wants. A caller passes one only when it knows something the
-   * table does not, and `handBack` is the caller that does.
+   * Which stages may end this wait (ADR-0049 D5). Absent means the stage the
+   * run parks at, which is what the runner writes too.
    */
   resolvableBy?: PipelineStage[];
-  /**
-   * The instant of the answer this park has read and not yet acted on — set
-   * only by the consume that read it (ADR-0023). Absent on every ordinary
-   * park, which is what makes an ordinary park *forget* a marker the run was
-   * carrying: see {@link Run.consumedAnswerAt}.
-   */
-  consumedAnswerAt?: string;
-  /**
-   * The instant of the newest comment the human has already been told was
-   * read. Set only by the acknowledgement that posted it; every ordinary
-   * park leaves it out and so forgets it.
-   */
-  acknowledgedAt?: string;
 }
 
 /**
@@ -851,7 +601,7 @@ export class RunStore {
    * one is live, since {@link register} only opens a new sequence number once
    * nothing of the ticket is live, and otherwise the chunk the ticket last
    * finished on. That is what the surfaces addressed to a human ask for:
-   * `timone retry`, `timone takeover` and a ticket's call to action all speak
+   * `timone takeover`, `timone cancel` and a ticket's call to action all speak
    * about a ticket, and the chunk they mean is its most recent one, whether or
    * not it is still going.
    *
@@ -868,11 +618,9 @@ export class RunStore {
    *
    * At most one can exist: {@link register} refuses to open a chunk while
    * another lives, which is what keeps a ticket's work a *sequence* rather
-   * than a fan-out. `parked` counts as living — a run waiting on a human is
-   * unfinished — and so does **`failed`**, which is the surprising half: a
-   * failed chunk is what `timone retry` re-arms, so the ticket is not done
-   * with it. Only `done` (and, from 22b, `cancelled`) ends a chunk's claim on
-   * its ticket. See {@link isSettled} for why that is not {@link TERMINAL}.
+   * than a fan-out. `parked` counts as living — a run waiting for the runner
+   * is unfinished. Only `done` and `cancelled` end a chunk's claim on its
+   * ticket; see {@link isSettled}.
    */
   liveRunForTicket(project: string, ticket: number): Run | undefined {
     this.refresh();
@@ -893,29 +641,6 @@ export class RunStore {
   occupyingRun(project: string): Run | undefined {
     this.refresh();
     return this.loadedOccupyingRun(project);
-  }
-
-  /**
-   * The run occupying `project`'s single session slot — running, or picked up
-   * and awaiting a spawn. Undefined when no session is in flight, however
-   * many runs are parked. Reads the file, as {@link occupyingRun} does and
-   * for the same reason.
-   */
-  runningRun(project: string): Run | undefined {
-    this.refresh();
-    return this.loadedRunningRun(project);
-  }
-
-  /**
-   * Every run of `project` parked on a human, in pickup order. Reads the
-   * file, as {@link occupyingRun} does and for the same reason — this is the
-   * list the poll loop walks when it looks for a run to resume.
-   */
-  parkedRuns(project: string): Run[] {
-    this.refresh();
-    return this.state.runs
-      .filter((run) => run.project === project && run.status === "parked")
-      .map((run) => ({ ...run }));
   }
 
   /**
@@ -957,7 +682,11 @@ export class RunStore {
     return run === undefined ? undefined : { ...run };
   }
 
-  /** {@link runningRun} over the state already in hand. */
+  /**
+   * The run occupying `project`'s single session slot — running, or picked
+   * up and about to start — over the state already in hand. Undefined when no
+   * session is in flight, however many runs are parked.
+   */
   private loadedRunningRun(project: string): Run | undefined {
     const run = this.state.runs.find(
       (candidate) =>
@@ -986,12 +715,6 @@ export class RunStore {
    * a ticket with an unsettled chunk yields that chunk and `created: false`,
    * so re-polling a marked ticket never doubles it — and a ticket whose chunks
    * are all settled opens the next one.
-   *
-   * **A failed chunk is unsettled**, so it is handed back rather than
-   * succeeded (ADR-0029): a chunk advances only on success, and `timone retry`
-   * is how a broken one recovers. A failure that nobody will retry is ended by
-   * `timone cancel` instead, which settles it — that is what lets its ticket
-   * move on rather than being held for ever by a chunk that will never run.
    *
    * Until phase 22 it was idempotent by the ticket in *any* state, finished
    * included, which is what made a ticket and a run the same object. A ticket
@@ -1023,19 +746,12 @@ export class RunStore {
 
   /**
    * Mark a run as running under `sessionId`. A resuming run stops waiting:
-   * whatever it was parked on has been answered, and leaving the wait behind
-   * would let a later poll try to resolve it twice.
-   *
-   * **What it does not clear is {@link Run.consumedAnswerAt}.** The answer has
-   * been *read*, not acted on — that is the window ADR-0023 accepts — and this
-   * is the transition a session dies just after. A marker cleared here is the
-   * live fault of 2026-08-13: nothing left to rewind, so the question is asked
-   * again.
+   * whatever it was parked on has been dealt with, and leaving the wait
+   * behind would let it be read as still open.
    */
   activate(id: string, sessionId: string, holder?: Holder): Run {
     return this.transition(id, "active", (run) => {
       run.sessionId = sessionId;
-      run.refusal = undefined;
       // The session is the holder now, replacing the claim's (ADR-0049 D1).
       // A claim is a slot held for a session that may never start; once one
       // has, the process worth asking about is the one running it.
@@ -1136,66 +852,10 @@ export class RunStore {
     return { ...run };
   }
 
-  /**
-   * Remember the question the ask check put on this run's ticket, so the next
-   * cycle reuses those words instead of consulting a model again
-   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
-   *
-   * **Writing this is not deciding anything.** The check itself is handed no
-   * store and cannot call this; the loop does, with what the check returned.
-   * The run's stage, wait and status are untouched here, which is the whole of
-   * PRD-04.R3 at this end of the seam.
-   */
-  rememberAskCheck(id: string, asked: Omit<AskCheckRecord, "askedAt">): Run {
-    const run = this.mutable(id);
-    // Stamped here rather than by the caller, like every other instant in the
-    // ledger. The one-question budget is decided by comparing this against
-    // when the person last spoke, and two clocks would make that comparison a
-    // question about which of them was right.
-    const askedAt = this.now();
-    run.askCheck = { ...asked, askedAt };
-    run.updatedAt = askedAt;
-    this.persist();
-    return { ...run };
-  }
-
-  /**
-   * Finish a run, promoting whatever is queued behind it.
-   *
-   * A finished run holds no consumed answer: whatever it read has been acted
-   * on, and that is what "resolved" means. Left behind, the marker would let a
-   * later rewind reach back past a settled decision (ADR-0023).
-   */
+  /** Finish a run, promoting whatever is queued behind it. */
   complete(id: string): Run {
     return this.transition(id, "done", (run) => {
       run.wait = undefined;
-      run.consumedAnswerAt = undefined;
-      run.holder = undefined;
-    });
-  }
-
-  /**
-   * End a run in failure, promoting whatever is queued behind it.
-   *
-   * **The whole wait goes, not just the words for it.** It used to clear
-   * `waitingOn` alone and leave the kind and the cursor behind, which made a
-   * failed run the one state carrying a wait nothing was waiting on — `ctaFor`
-   * answers on the status before it ever reaches a wait branch, and `activate`
-   * cleared the leftovers on the next retry. Dead data that looks live is what
-   * a later reader builds on, so it is cleared here, where the wait ends.
-   *
-   * **What survives is {@link Run.consumedAnswerAt}, deliberately** (ADR-0023).
-   * That is the marker `timone retry` rewinds a re-armed run to, and it is the
-   * one fact about a dead session that is still owed to somebody: they wrote an
-   * answer, it was read, and nothing acted on it. The `waitCursor` fallback
-   * beside it in `retry` is only ever reached on a **parked** run — a failed one
-   * takes the `store.retry` path — so clearing the cursor here costs that
-   * fallback nothing.
-   */
-  fail(id: string, reason: string): Run {
-    return this.transition(id, "failed", (run) => {
-      run.failure = reason;
-      stopWaiting(run);
       run.holder = undefined;
     });
   }
@@ -1205,42 +865,21 @@ export class RunStore {
    *
    * The reason is written where a person will read it — `timone status` and
    * `timone cancel`'s own answer — and it is a statement of what was observed
-   * rather than a verdict: the poll loop cancels on a ticket having left the
-   * marked-and-open listing, which is what it can actually see.
+   * rather than a verdict.
    *
-   * Everything the run was waiting for goes with it, the consumed marker
-   * included. A cancelled run is nobody's business any more, and a marker left
-   * behind would let a later rewind reach back past it (ADR-0023) — the same
-   * reason {@link complete} clears it.
+   * Everything the run was waiting for goes with it.
    */
   cancel(id: string, reason: string): Run {
     return this.transition(id, "cancelled", (run) => {
       run.cancellation = reason;
       stopWaiting(run);
-      run.consumedAnswerAt = undefined;
       run.holder = undefined;
     });
   }
 
-  /**
-   * Record which lifecycle stage a run reached.
-   *
-   * A run that has *moved on* has acted on whatever answer it was holding, so
-   * the consumed marker goes with the stage it belonged to (ADR-0023). Only a
-   * real change counts: the stage is also re-recorded before a resumed session
-   * runs the very stage it is resuming, and clearing the marker there would
-   * discard the answer that session was started on.
-   */
+  /** Record which lifecycle stage a run reached. */
   setStage(id: string, stage: PipelineStage): Run {
     const run = this.mutable(id);
-    // A run reaching another stage is what progress looks like, so the floor's
-    // count starts again there (ADR-0033). Resetting on any park would never
-    // accumulate; resetting on nothing would eventually stop a run that was
-    // legitimately asked twice, months apart.
-    if (run.stage !== stage) {
-      run.consumedAnswerAt = undefined;
-      run.reAsksAfterAnswer = undefined;
-    }
     run.stage = stage;
     run.updatedAt = this.now();
     this.persist();
@@ -1259,249 +898,6 @@ export class RunStore {
     this.promoteHead(project);
     this.persist();
     return this.loadedRunningRun(project);
-  }
-
-  /**
-   * Re-arm a failed run at the stage it failed, keeping its branch, stage
-   * and pull request — they are what "picking up where it stopped" means.
-   * The transition guards still apply: a project that has moved on to
-   * another run refuses, because re-arming would put two sets of work on
-   * one repository.
-   *
-   * What it does *not* keep is everything belonging to the attempt that
-   * died: its failure, its session, and its guardrail flags. The flags were
-   * missed until 14g, where a re-armed run carried a warning about a file
-   * whose cause had already been fixed — so `timone status` complained about
-   * something that no longer existed. They are cleared here rather than in
-   * `runRetry` so there is one answer to what re-arming resets.
-   */
-  retry(id: string): Run {
-    const run = this.mutable(id);
-    // Before the generic refusal, and written as a sentence: `timone retry`
-    // prints whatever this throws, verbatim and with no case of its own for a
-    // cancelled run, so these words are what a person sees after typing a
-    // command. What they need is why there is nothing to retry and what would
-    // start the work again — never that a status failed a comparison.
-    if (run.status === "cancelled") {
-      const because =
-        run.cancellation === undefined || run.cancellation === ""
-          ? "."
-          : `: ${run.cancellation}.`;
-      // The way out depends on whether this ticket is a **step**. A dropped
-      // step is held — by the label — and stays stopped until a human takes
-      // the hold off. Any other ticket's cancelled chunk is settled, so the
-      // next cycle simply opens a fresh one, which is what it has always
-      // done. One sentence for each, and neither is said to the other.
-      const held =
-        this.loadedInitiativeFor(run.project, run.ticket) !== undefined
-          ? `remove the \`${HELD_LABEL}\` label from the ticket and I'll start ` +
-            "it afresh, or close it and I'll carry on without it."
-          : "reopen the ticket and mark it for me, and I'll start it afresh " +
-            "on my next pass.";
-      throw new Error(
-        `${run.project} #${run.ticket} was cancelled${because} Cancelled work ` +
-          `isn't retried — ${held}`,
-      );
-    }
-    if (run.status !== "failed") {
-      throw new Error(
-        `Run ${id} is ${run.status}, not failed — only a failed run can be retried`,
-      );
-    }
-    // **A run filed for asking a question inside the build resumes at the
-    // *next* stage, carrying what it asked**
-    // ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
-    // The stage did its work and left its artifact on the branch; only its
-    // last sentence was out of order, and re-running it buys the same
-    // sentence again — which is literally what `ivtrends` #93 did when it was
-    // retried. Nothing files a run this way any anymore, so this is the way
-    // back for the ones filed before that changed.
-    const escalated =
-      run.failure !== undefined &&
-      isBuildEscalation(run.failure) &&
-      run.stage !== undefined &&
-      inBuild(run.stage)
-        ? {
-            stage: run.stage,
-            // Without the prefix: it is the daemon's own bookkeeping, and
-            // what rides to the pull request is the stage's words.
-            words: run.failure.slice(BUILD_ESCALATION_PREFIX.length),
-          }
-        : undefined;
-
-    return this.transition(id, "picked-up", (rearmed) => {
-      rearmed.failure = undefined;
-      rearmed.sessionId = undefined;
-      rearmed.flags = [];
-      // Cleared for the flags' reason: it belongs to the attempt that died.
-      // The stage runs again and asks again if it still wants to, and a
-      // question carried twice would reach the pull request twice.
-      rearmed.carried = undefined;
-      if (escalated !== undefined) {
-        rearmed.carried = [
-          { stage: escalated.stage, at: this.now(), words: escalated.words },
-        ];
-        rearmed.stage = stageAfter(escalated.stage) ?? escalated.stage;
-      }
-      // Whoever held the attempt that died is not holding this one. The
-      // holder belongs to the session, as the session id beside it does.
-      rearmed.holder = undefined;
-    });
-  }
-
-  /**
-   * Turn a failed run into one waiting on a person, so `timone takeover` can
-   * open it
-   * ([ADR-0059](../../doc/adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md)).
-   *
-   * Until this a failed run refused the takeover its own ticket offered, and
-   * `timone retry` ran the same step into the same stop: `ivtrends` #126,
-   * twice in one day. The run keeps its branch, stage and what earlier steps
-   * asked; the failure becomes what it waits on, and the wait is the kind a
-   * session bound to no stage opens on (ADR-0033). Its cursor is now: the
-   * session's hand-back is read from here on.
-   */
-  reopenForTakeover(id: string): Run {
-    const run = this.mutable(id);
-    if (run.status !== "failed") {
-      throw new Error(
-        `Run ${id} is ${run.status}, not failed — only a failed run is reopened for a takeover`,
-      );
-    }
-    const failure = run.failure ?? "no reason recorded";
-    return this.transition(id, "parked", (reopened) => {
-      reopened.failure = undefined;
-      reopened.sessionId = undefined;
-      reopened.flags = [];
-      applyPark(reopened, {
-        waitingOn: `a person, because the run stopped: ${failure}`,
-        kind: "escalation",
-        waitCursor: this.now(),
-      });
-    });
-  }
-
-  /**
-   * Record that the daemon refused to start this run, and answer how many
-   * times running it has refused for the same reason (ADR-0049 D4).
-   *
-   * **`updatedAt` is deliberately left alone**, as {@link heartbeat} leaves
-   * it alone. A refusal is not the run moving and it is certainly not the run
-   * living: `staleRuns` reads the later of `updatedAt` and the heartbeat, so
-   * stamping it here would make a run immortal by failing to start.
-   */
-  refuse(id: string, reason: string): Run {
-    const run = this.mutable(id);
-    const same = run.refusal?.reason === reason;
-    run.refusal = same
-      ? { ...(run.refusal as NonNullable<Run["refusal"]>), count: run.refusal!.count + 1 }
-      : { reason, count: 1, since: this.now() };
-    this.persist();
-    return { ...run };
-  }
-
-  /**
-   * Forget a standing refusal, because the run got past it.
-   *
-   * Called where a spawn succeeded rather than where a session ends: what the
-   * count measures is the daemon's ability to *start* the run, and a session
-   * that started and then failed is a different piece of news.
-   */
-  started(id: string): Run {
-    const run = this.mutable(id);
-    if (run.refusal === undefined) return { ...run };
-    run.refusal = undefined;
-    this.persist();
-    return { ...run };
-  }
-
-  /**
-   * Put a run back to waiting for its next session, because that session
-   * never started ([timone#161](https://github.com/fvermaut/timone/issues/161)).
-   *
-   * This is for a run that is `active` between two stages: the last session
-   * ended well, and starting the next one threw. The session id and the
-   * holder belong to the session that ended, so both go. The stage stays,
-   * so the next cycle starts the stage that failed to start and not the one
-   * that finished. What the run carries — its flags, its questions for the
-   * pull request — stays too, because none of it belonged to a session that
-   * died.
-   */
-  unstarted(id: string): Run {
-    return this.transition(id, "picked-up", (run) => {
-      run.sessionId = undefined;
-      run.holder = undefined;
-    });
-  }
-
-  /**
-   * Say that a standing refusal has been put in front of the human, so it is
-   * not put there again on the next cycle.
-   */
-  refusalTold(id: string): Run {
-    const run = this.mutable(id);
-    if (run.refusal === undefined) return { ...run };
-    run.refusal = { ...run.refusal, told: true };
-    this.persist();
-    return { ...run };
-  }
-
-  /**
-   * Record that a run's holder was found gone, and do what ADR-0049 D4 says:
-   * re-arm it once, and park it on the human the second time.
-   *
-   * **Re-armed rather than failed, following ADR-0034.** A machine that broke
-   * is not the ticket's business while the machine still has a way through,
-   * and terminal `failed` on the first death is what made timone#27, #63 and
-   * #78 each end in a hand fix — the human typing `timone retry` for a
-   * decision the daemon could have taken.
-   *
-   * **The second one parks, and a park is not a dead end.** The human can
-   * answer it, where a failure has to be left by typing a command. Both
-   * reasons go on it, because two attempts that died differently are two
-   * different pieces of news.
-   *
-   * The re-arm is `active → failed → picked-up`, both legal moves in
-   * {@link TRANSITIONS}, applied as **one** write. Doing it as two calls would
-   * let the queue promote a run of the same project into the gap between them,
-   * and the re-arm would then be refused by the run that took its place.
-   */
-  reclaim(id: string, reason: string): { run: Run; rearmed: boolean } {
-    const current = this.mutable(id);
-    if (current.status === "cancelled") {
-      throw new Error(
-        `Run ${id} was cancelled, so there is nothing to re-arm — a run ` +
-          "somebody abandoned is not started again on the machine's own say-so.",
-      );
-    }
-    const deaths = [...(current.deaths ?? []), reason];
-
-    if (deaths.length > RE_ARM_LIMIT) {
-      const run = this.transition(id, "parked", (parked) => {
-        parked.deaths = deaths;
-        parked.holder = undefined;
-        applyPark(parked, {
-          waitingOn: stoppedTwiceWait(deaths),
-          kind: "escalation",
-        });
-      });
-      return { run, rearmed: false };
-    }
-
-    // Both hops checked against the table, and neither taken through
-    // `transition`, so nothing is promoted between them.
-    assertAllowed(id, current.status, "failed");
-    assertAllowed(id, "failed", "picked-up");
-    current.status = "picked-up";
-    current.failure = undefined;
-    current.sessionId = undefined;
-    current.flags = [];
-    current.holder = undefined;
-    current.deaths = deaths;
-    stopWaiting(current);
-    current.updatedAt = this.now();
-    this.persist();
-    return { run: { ...current }, rearmed: true };
   }
 
   /**
@@ -1538,9 +934,9 @@ export class RunStore {
    * ago, which has never ticked, would be reclaimed instantly, and a run left
    * `active` by a daemon predating the field would be immortal. Without
    * taking the later of the two, a heartbeat from a *previous* session
-   * outlives the session that wrote it: a run re-armed by `timone retry`
-   * carries the old tick, and the next cycle reclaims it before it has had a
-   * chance to start. That happened live on 2026-08-07.
+   * outlives the session that wrote it: a re-armed run carries the old tick,
+   * and the next cycle reclaims it before it has had a chance to start. That
+   * happened live on 2026-08-07.
    */
   staleRuns(thresholdMs: number, now?: string): Run[] {
     const cutoff = Date.parse(now ?? this.now()) - thresholdMs;
@@ -1727,18 +1123,6 @@ export class RunStore {
     );
   }
 
-  /** {@link initiativeFor} without a reload, for use inside a mutation. */
-  private loadedInitiativeFor(
-    project: string,
-    ticket: number,
-  ): InitiativeRecord | undefined {
-    return Object.values(this.state.initiatives ?? {}).find(
-      (record) =>
-        record.project === project &&
-        (record.initiative === ticket || record.steps.includes(ticket)),
-    );
-  }
-
   /**
    * Every initiative of `project` the daemon has a picture of, oldest ticket
    * first — what `timone status` needs to say that an initiative is alive
@@ -1802,24 +1186,6 @@ export class RunStore {
       [key]: { project, ticket, at: this.now() },
     };
     this.persist();
-  }
-
-  /**
-   * Record a question a build stage asked and may not have asked, and which
-   * therefore rides to the pull request instead of stopping the run
-   * ([ADR-0056](../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)).
-   *
-   * Appends rather than replaces: two stages of one run may each ask, and the
-   * pull request owes the reader both. Kept beside {@link flag} because they
-   * are the same kind of thing — something recorded against a run that does
-   * not change where the run is going.
-   */
-  carry(id: string, stage: PipelineStage, words: string): Run {
-    const run = this.mutable(id);
-    run.carried = [...(run.carried ?? []), { stage, at: this.now(), words }];
-    run.updatedAt = this.now();
-    this.persist();
-    return { ...run };
   }
 
   /** Record a guardrail violation against a run (R15). */
@@ -1943,7 +1309,7 @@ export class RunStore {
  * them apart.
  *
  * **The human never types the sequence.** `timone takeover ivtrends#1` and
- * `timone retry ivtrends#1` still name a ticket, because a ticket is what a
+ * `timone cancel ivtrends#1` still name a ticket, because a ticket is what a
  * person has an opinion about; the sequence is the machine's bookkeeping and
  * is resolved from the ledger.
  */
@@ -1976,39 +1342,6 @@ export function introductionKey(project: string, ticket: number): string {
 }
 
 /**
- * How many times a run whose holder died is put back to work before the
- * human is asked (ADR-0049 D4).
- *
- * One. A machine that broke once is worth another go; twice running is a
- * machine that is going to keep breaking, and paying for a third attempt
- * before saying so is spending money to delay the same question.
- */
-const RE_ARM_LIMIT = 1;
-
-/**
- * What a run stopped twice by its own machinery says it is waiting on.
- *
- * Both reasons, in the order they happened, because they are usually not the
- * same reason and the second one is what the human can act on.
- */
-function stoppedTwiceWait(deaths: readonly string[]): string {
-  return (
-    "me — it stopped twice on its own and I've run out of ways through: " +
-    `first ${deaths[0]}, then ${deaths[deaths.length - 1]}.`
-  );
-}
-
-/** Refuse a move the lifecycle does not allow, in {@link RunStore.transition}'s words. */
-function assertAllowed(id: string, from: RunStatus, to: RunStatus): void {
-  const allowed = TRANSITIONS[from];
-  if (allowed.includes(to)) return;
-  throw new Error(
-    `Run ${id} cannot go from ${from} to ${to} ` +
-      `(allowed: ${allowed.join(", ") || "nothing — it is finished"})`,
-  );
-}
-
-/**
  * One plain sentence for a claim refused by somebody who is still there.
  *
  * It names the command and the pid, because "the run is already claimed"
@@ -2033,79 +1366,11 @@ function stopWaiting(run: Run): void {
 }
 
 /**
- * How many times running a run may read an answer and ask again at the same
- * stage before the machinery stops it
- * ([ADR-0033](../../doc/adr/0033-a-stage-that-cannot-act-on-an-answer-escalates.md)).
+ * Write a wait onto a run. Shared by {@link RunStore.park} and `repark`. A
+ * wait is written whole, absent fields included.
  *
- * Two, not one. Once is a stage that asked badly and may well settle the
- * question with the next answer; twice running is a stage that has proved the
- * answer does not reach what is blocking it. On ivtrends #1 it happened five
- * times.
- */
-const RE_ASK_LIMIT = 2;
-
-/**
- * What a run stopped by the floor says it is waiting on.
- *
- * The same words `escalate` writes in `session.ts` for the stage that
- * declares its own stop, and one copy of them, because from the ledger's side
- * and the reader's side the two are the same situation: the difference is only
- * who noticed.
- */
-export const ESCALATION_WAIT = "me — I can't take this one further on my own.";
-
-/**
- * What a run says it is waiting for when nobody is being waited on and the
- * machine is going to carry it on by itself
- * ([ADR-0049](../../doc/adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md)
- * D6).
- *
- * **A shared constant for the same reason {@link ESCALATION_WAIT} is one:**
- * `timone takeover` writes it and `ctaFor` reads it, and the two must not
- * drift. Without it the ticket and the terminal both fall into the branch for
- * a run stopped for want of machinery, which says a person is being waited
- * on — so a run that had just been handed back to the machine read *"waiting
- * on you: nothing"*, which is [timone#14](https://github.com/fvermaut/timone/issues/14)'s
- * self-contradicting sentence in a new place. Found by phase 31's live gate,
- * check 4, on the run it had just watched work.
- */
-export const CARRY_ON_WAIT = "nothing — I'll carry on from where you left it.";
-
-/**
- * Whether this park is a run reading an answer and asking the same stage's
- * question again — the loop ADR-0033's floor is under.
- *
- * **Computed here because here is the only place both halves exist.** The
- * consumed marker is transient by design (see {@link applyPark}), so the
- * incoming `run` still carries it for exactly the instant before this
- * function overwrites it, and `options` says what the run is about to wait
- * for. Detecting this anywhere else would need the marker to live longer,
- * which is the contract phase 19 was built to fix.
- */
-function isReAskAfterAnswer(run: Run, options: ParkOptions): boolean {
-  return (
-    run.consumedAnswerAt !== undefined &&
-    options.kind === "conversation" &&
-    options.stage !== undefined &&
-    options.stage === run.stage
-  );
-}
-
-/**
- * Write a wait onto a run. Shared by {@link RunStore.park} and `repark`.
- *
- * A wait is written whole, absent fields included, which is what makes the
- * consumed marker ({@link Run.consumedAnswerAt}) transient: only the consume
- * passes one, so every other park clears it. That is the honest reading of a
- * park — the run is waiting on something new, so whatever answer it was
- * holding has been acted on.
- *
- * **And it is where the floor lives** (ADR-0033's second detector). The
- * transience above is what puts both facts here at once: the answer this run
- * read, and the wait it is about to open. A stage that read an answer and
- * asked the same question again has spent a pass to arrive where it started —
- * twice running, and the park becomes one no answer resumes, whether or not
- * the stage ever noticed anything was wrong.
+ * ✏ 2026-09-30: ADR-0033's floor, which turned a second re-ask at the same
+ * stage into an escalation, was removed with the old code between steps.
  */
 function applyPark(run: Run, options: ParkOptions): void {
   // A parked run is waiting on a person, and nobody is holding it. A holder
@@ -2113,19 +1378,12 @@ function applyPark(run: Run, options: ParkOptions): void {
   // by a process that stopped caring, which is timone#78's refusal in a
   // different disguise.
   run.holder = undefined;
-  const reAsked = isReAskAfterAnswer(run, options);
-  const count = reAsked ? (run.reAsksAfterAnswer ?? 0) + 1 : run.reAsksAfterAnswer;
-  const caught = reAsked && (count ?? 0) >= RE_ASK_LIMIT;
-
-  const kind = caught ? ("escalation" as const) : options.kind;
   const stage = options.stage ?? run.stage;
   // **Recorded, not derived later** (ADR-0049 D5). A wait with no stage at all
   // is the one case nothing can be worked out for, and it is also the one no
   // park produces: every caller either names a stage or the run already has
   // one.
-  const endedBy =
-    options.resolvableBy ??
-    (stage === undefined ? undefined : resolvableBy(kind, stage));
+  const endedBy = options.resolvableBy ?? (stage === undefined ? undefined : [stage]);
   if (endedBy !== undefined && endedBy.length === 0) {
     throw new Error(
       `Refusing to park ${run.id} on a wait no stage can end. A wait with ` +
@@ -2134,16 +1392,11 @@ function applyPark(run: Run, options: ParkOptions): void {
     );
   }
   run.wait = {
-    on: caught ? ESCALATION_WAIT : options.waitingOn,
-    ...(kind === undefined ? {} : { kind }),
+    on: options.waitingOn,
+    ...(options.kind === undefined ? {} : { kind: options.kind }),
     ...(options.waitCursor === undefined ? {} : { opened: options.waitCursor }),
     ...(endedBy === undefined ? {} : { resolvableBy: endedBy }),
-    ...(options.acknowledgedAt === undefined
-      ? {}
-      : { acknowledgedAt: options.acknowledgedAt }),
   };
-  run.consumedAnswerAt = options.consumedAnswerAt;
-  run.reAsksAfterAnswer = count;
   if (options.stage !== undefined) run.stage = options.stage;
 }
 
@@ -2195,7 +1448,11 @@ function normaliseSequences(data: unknown): unknown {
   if (!("runs" in data) || !Array.isArray(data.runs)) return data;
   return {
     ...data,
-    runs: data.runs.map(normaliseSequence).map(normaliseWait),
+    runs: data.runs
+      .map(normaliseSequence)
+      .map(normaliseWait)
+      .map(normaliseOldPath)
+      .map(normaliseRemovedFields),
   };
 }
 
@@ -2242,18 +1499,13 @@ function normaliseWait(run: unknown): unknown {
   // the normalisation does not write it either.
   if (typeof waitingOn !== "string") return rest;
   // An old wait carries no `resolvableBy`, so it is given the one the stage
-  // and the kind imply — the same answer `applyPark` would write today. A run
-  // with no stage recorded gets none, and `resolveWait` reads it as it always
-  // did.
+  // and the kind implied when the old code wrote it: a review was ended by
+  // remediation, every other wait by the stage it opened at. A run with no
+  // stage recorded gets none.
   const stage = typeof rest.stage === "string" ? rest.stage : undefined;
   const kind = typeof waitingKind === "string" ? waitingKind : undefined;
   const endedBy =
-    stage === undefined
-      ? undefined
-      : resolvableBy(
-          kind as WaitKind | undefined,
-          stage as PipelineStage,
-        );
+    stage === undefined ? undefined : kind === "review" ? ["remediation"] : [stage];
   return {
     ...rest,
     wait: {
@@ -2263,6 +1515,158 @@ function normaliseWait(run: unknown): unknown {
       ...(endedBy === undefined ? {} : { resolvableBy: endedBy }),
     },
   };
+}
+
+/**
+ * What goes in front of a failed run's reason when the ledger is read, so a
+ * person can tell it from a cancel somebody asked for. See
+ * {@link normaliseOldPath}.
+ */
+const STOPPED_BEFORE_REMOVAL = "stopped before the old code was removed: ";
+
+/**
+ * Turn a run the old code between steps left in the ledger into one the
+ * runner can read, before the schema is asked to validate it
+ * ([timone#166](https://github.com/fvermaut/timone/issues/166)).
+ *
+ * Since 2026-09-30 the runner drives every project, and two things the old
+ * code wrote mean nothing to it:
+ *
+ * - **A failed run becomes cancelled.** Nothing re-arms a failed run any
+ *   more: `timone retry` was removed. What stopped it is kept
+ *   where {@link RunStore.cancel} keeps its reason, after
+ *   {@link STOPPED_BEFORE_REMOVAL}, as one line ({@link oneLineReason}).
+ *   ✏ 2026-10-02 (41m): a run an earlier build converted and wrote kept
+ *   the whole old failure. Its reason is cut to one line the same way.
+ * - **A parked run's old kind of wait becomes the runner's.** A gate, a
+ *   conversation, a review, an escalation, or a wait of no kind was a
+ *   stage's own wait, and no stage waits on its own any more. What it waits
+ *   on and when the wait opened are kept, so the ticket and `timone status`
+ *   still say what it waits for.
+ *
+ * **Nothing else changes.** A parked run holds its project only while it
+ * owns a branch, exactly as before. A parked run with no wait at all is left
+ * as it is, because there is nothing to say it waits on. Nothing here asks
+ * for a wake.
+ *
+ * **It normalises rather than migrating**, as {@link normaliseWait} does:
+ * `version` stays `1` and no file is rewritten because of a read. The
+ * converted runs reach the file the next time something writes it.
+ *
+ * **Idempotent, because it runs on every read.** A cancelled run whose reason
+ * is already one line, and a run already waiting for the runner, are returned
+ * untouched, so the reason is never prefixed twice.
+ */
+function normaliseOldPath(run: unknown): unknown {
+  if (typeof run !== "object" || run === null) return run;
+  if (!("status" in run)) return run;
+  if (run.status === "failed") {
+    const failure =
+      "failure" in run && typeof run.failure === "string"
+        ? oneLineReason(run.failure)
+        : "no reason recorded";
+    return {
+      ...run,
+      status: "cancelled",
+      cancellation: `${STOPPED_BEFORE_REMOVAL}${failure}`,
+    };
+  }
+  if (
+    run.status === "cancelled" &&
+    "cancellation" in run &&
+    typeof run.cancellation === "string" &&
+    run.cancellation.startsWith(STOPPED_BEFORE_REMOVAL)
+  ) {
+    const reason = oneLineReason(run.cancellation.slice(STOPPED_BEFORE_REMOVAL.length));
+    const cut = `${STOPPED_BEFORE_REMOVAL}${reason}`;
+    return cut === run.cancellation ? run : { ...run, cancellation: cut };
+  }
+  if (run.status !== "parked" || !("wait" in run)) return run;
+  const { wait } = run;
+  if (typeof wait !== "object" || wait === null) return run;
+  if ("kind" in wait && wait.kind === "runner") return run;
+  return { ...run, wait: { ...wait, kind: "runner" } };
+}
+
+/**
+ * The start of the banner every machine comment opens with
+ * (`MACHINE_MARKER` in `src/adapters/ticketing.ts`).
+ */
+const MACHINE_BANNER = "🤖 **Timone**";
+
+/**
+ * A failed run's reason as one line: the first line of `failure`, cut before
+ * the machine's banner where the line carries one, with spaces and a trailing
+ * colon trimmed. An empty result is *"no reason recorded"*.
+ *
+ * ✏ 2026-10-02 (41m, [timone#166](https://github.com/fvermaut/timone/issues/166)):
+ * the old code could keep a whole machine comment as a run's failure. On
+ * timone #106 `timone status` printed all of it, with a command to type.
+ */
+function oneLineReason(failure: string): string {
+  const first = failure.split("\n", 1)[0] ?? "";
+  const banner = first.indexOf(MACHINE_BANNER);
+  const line = banner === -1 ? first : first.slice(0, banner);
+  const reason = line.trim().replace(/:$/, "").trimEnd();
+  return reason === "" ? "no reason recorded" : reason;
+}
+
+/**
+ * The fields only the old code between steps wrote, which nothing reads any
+ * more: the ask check's question, the deaths of a run's holder, a refusal to
+ * start it, a build stage's questions carried to the pull request, the count
+ * of re-asks at one stage, the written answer read and not yet acted on, and
+ * why a run failed. A run the ledger reads as cancelled keeps its reason in
+ * `cancellation`, which {@link normaliseOldPath} writes before this runs.
+ */
+const REMOVED_FIELDS = [
+  "askCheck",
+  "deaths",
+  "refusal",
+  "carried",
+  "reAsksAfterAnswer",
+  "consumedAnswerAt",
+  "failure",
+] as const;
+
+/**
+ * Drop from a run what the old code between steps left on it and nothing
+ * reads, before the schema is asked to validate it
+ * ([timone#166](https://github.com/fvermaut/timone/issues/166)).
+ *
+ * - The fields in {@link REMOVED_FIELDS} are dropped, and so is a wait's
+ *   `acknowledgedAt`: the instant of the newest comment an old wait had told
+ *   the human it read.
+ * - A wait of an old kind on a run that is not parked is read as the
+ *   runner's, as {@link normaliseOldPath} reads a parked one. The old code
+ *   could leave a run claimed for a session, still holding the wait it was
+ *   parked on, and `runner` is now the only kind the schema has.
+ *
+ * It runs after {@link normaliseOldPath}, on every read, and like it writes
+ * nothing: the runs reach the file without these fields the next time
+ * something writes it. A run with none of them is returned untouched.
+ */
+function normaliseRemovedFields(run: unknown): unknown {
+  if (typeof run !== "object" || run === null) return run;
+  const wait =
+    "wait" in run && typeof run.wait === "object" && run.wait !== null
+      ? run.wait
+      : undefined;
+  const oldKind = wait !== undefined && "kind" in wait && wait.kind !== "runner";
+  const acknowledged = wait !== undefined && "acknowledgedAt" in wait;
+  if (!oldKind && !acknowledged && !REMOVED_FIELDS.some((field) => field in run)) {
+    return run;
+  }
+  const kept = Object.fromEntries(
+    Object.entries(run).filter(
+      ([field]) => !(REMOVED_FIELDS as readonly string[]).includes(field),
+    ),
+  );
+  if (wait === undefined) return kept;
+  const waitKept = Object.fromEntries(
+    Object.entries(wait).filter(([field]) => field !== "acknowledgedAt"),
+  );
+  return { ...kept, wait: oldKind ? { ...waitKept, kind: "runner" } : waitKept };
 }
 
 /** {@link normaliseSequences} for one run: an id with no `/` is chunk 1. */

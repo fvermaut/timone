@@ -106,9 +106,9 @@ const GIT_USERS: Record<string, string> = {
     "before starting a boxed run that could not follow it (30k). The " +
     "**timone** checkout, offline, read-only — never a project's.",
   "daemon/session.ts":
-    "Reads the **timone** checkout — which version of Timone is running, and " +
-    "what in it is uncommitted (ADR-0041 D2, phase 30's 30f). Never a " +
-    "project's: this file resolves no path under `projects/` at all any more.",
+    "Reads the **timone** checkout — which version of Timone is running " +
+    "(ADR-0041 D2, phase 30's 30f). Never a project's: this file resolves no " +
+    "path under `projects/` at all any more.",
 };
 
 /** Every `.ts` file under `src`, excluding tests, as paths relative to `src`. */

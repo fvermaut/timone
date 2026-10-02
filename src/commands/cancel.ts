@@ -5,7 +5,7 @@ import type { Command } from "commander";
 
 import { MARK_LABEL, type TicketingAdapter } from "../adapters/ticketing.js";
 import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
-import { driverOf, loadManifest, type Manifest } from "../manifest.js";
+import { loadManifest, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock, type LockHolder } from "../daemon/lock.js";
@@ -17,9 +17,8 @@ export interface CancelDeps {
   store: RunStore;
   /**
    * Where the ledger lives, so a cancellation is the only thing writing it
-   * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)) — the same
-   * reason `timone retry` takes the lock: ending a run is a ledger mutation
-   * and the daemon may be mid-cycle over the same file.
+   * ([ADR-0023](../../doc/adr/0023-one-answer-one-session.md)): ending a run
+   * is a ledger mutation and the daemon may be mid-cycle over the same file.
    *
    * Absent means no lock is taken, which is the shape the refusal tests use.
    */
@@ -27,8 +26,8 @@ export interface CancelDeps {
   /** Why, in the human's own words. */
   reason?: string;
   /**
-   * The forge, to put the hold on a runner project's ticket once its run is
-   * cancelled here (40u; see {@link holdCancelledTicket}).
+   * The forge, to put the hold on a ticket once its run is cancelled here
+   * (40u; see {@link holdCancelledTicket}).
    *
    * Absent in the daemon's own call, which holds the ticket itself once the
    * cancelled run's work is stopped: the forge can take a minute to answer,
@@ -52,19 +51,20 @@ export interface CancelDeps {
 const ASKED_TO_STOP = "you asked me to stop";
 
 /**
- * Put the hold on a ticket whose run was just cancelled, when the runner
- * drives its project (40u), and say what that means for the ticket.
+ * Put the hold on a ticket whose run was just cancelled (40u), and say what
+ * that means for the ticket.
  *
- * **The dropped-step rule, applied to a runner ticket** (ADR-0044 D7). A
+ * **The dropped-step rule, applied to every ticket** (ADR-0044 D7). A
  * cancelled run is settled, so a ticket still open and marked for the machine
  * is taken up again as a new run on the next pass — within seconds, on the
  * verification of phase 40, with the command then reporting a failure. The
  * hold is what the registration passes over, and only a person takes it off.
  *
- * Nothing is done for a project the current daemon drives, where a cancelled
- * ticket starting afresh is what has always happened and what `timone cancel`
- * says; nor for a step ticket, which carries the hold since its pickup and
- * whose way back {@link heldStepWayOut} has already told.
+ * Nothing is done for a step ticket, which carries the hold since its pickup
+ * and whose way back {@link heldStepWayOut} has already told.
+ *
+ * ✏ 2026-09-30: until the runner drove every project, a project the old
+ * daemon drove got no hold, and its cancelled ticket started afresh.
  *
  * **Never throws.** The run is cancelled whatever the forge answers, so a
  * forge that fails is said, with what the person can do instead.
@@ -75,7 +75,7 @@ export async function holdCancelledTicket(
   log: (message: string) => void,
 ): Promise<void> {
   const config = deps.manifest.projects[target.project];
-  if (config === undefined || driverOf(config) !== "runner") return;
+  if (config === undefined) return;
   if (heldStepWayOut(deps.store, target.project, target.ticket) !== undefined) return;
   const project = { name: target.project, repoUrl: config.repo_url };
   try {
@@ -101,10 +101,9 @@ export async function holdCancelledTicket(
  * not carry on, and the end of hand-editing `.timone/state.json` to do it.
  *
  * **Cancelling is not failing.** A cancelled chunk is finished business: it is
- * settled, so the ticket may take a fresh chunk, and it has no way back —
- * `timone retry` refuses it in as many words. Everything that cannot be
- * cancelled is refused with a sentence about what the ticket *is* doing, in
- * the same discipline as `timone retry` and `timone takeover`.
+ * settled, so the ticket may take a fresh chunk, and it has no way back.
+ * Everything that cannot be cancelled is refused with a sentence about what
+ * the ticket *is* doing, in the same discipline as `timone takeover`.
  */
 export async function runCancel(raw: string, deps: CancelDeps): Promise<number> {
   const log = deps.log ?? ((message: string) => console.log(message));
@@ -265,17 +264,6 @@ async function cancel(
         `${name} was already cancelled: ${run.cancellation ?? "no reason recorded"}.`,
       );
       return 1;
-    // A failure is cancellable, and this is the arm that used to refuse it.
-    // Ruled by fvermaut 2026-08-15: a failure has two exits, not one. `timone
-    // retry` re-arms the chunk and this abandons it, and the refusal that
-    // stood here made abandoning a failure a two-command dance — retry first,
-    // to get it out of `failed`, then cancel — with a window in between that
-    // the daemon polls, so a run somebody was trying to delete could be picked
-    // up and spend real money before the second command landed. Nothing about
-    // a failure is worth protecting from a person who has typed `cancel`: the
-    // branch, stage and pull request the old wording defended are still there
-    // in the ledger, and a ticket that deserves another go takes a fresh chunk.
-    case "failed":
     case "queued":
     case "picked-up":
     case "active":
@@ -296,28 +284,22 @@ async function cancel(
   }
 
   const stepWayOut = heldStepWayOut(store, run.project, run.ticket);
-  const config = manifest.projects[run.project];
-  // ✏ A runner project's ticket is held once its run is cancelled (40u), so
-  // "I'll start it afresh" is not said of it: what happens to the ticket is
-  // said by {@link holdCancelledTicket}, here when this command has the forge
-  // and in the daemon once the work is stopped.
-  if (stepWayOut === undefined && config !== undefined && driverOf(config) === "runner") {
-    log(`Stopped work on ${name}: ${reason}. I won't pick this up again.`);
-    if (deps.adapter !== undefined) {
-      await holdCancelledTicket(
-        { manifest, store, adapter: deps.adapter },
-        { project: run.project, ticket: run.ticket },
-        log,
-      );
-    }
+  if (stepWayOut !== undefined) {
+    log(`Stopped work on ${name}: ${reason}. I won't pick this up again — ${stepWayOut}`);
     return 0;
   }
-  log(
-    `Stopped work on ${name}: ${reason}. I won't pick this up again — ` +
-      (stepWayOut ??
-        "if the ticket is open and marked for me, I'll start it afresh on " +
-          "my next pass."),
-  );
+  // ✏ The ticket is held once its run is cancelled (40u), so "I'll start it
+  // afresh" is not said of it: what happens to the ticket is said by
+  // {@link holdCancelledTicket}, here when this command has the forge and in
+  // the daemon once the work is stopped.
+  log(`Stopped work on ${name}: ${reason}. I won't pick this up again.`);
+  if (deps.adapter !== undefined) {
+    await holdCancelledTicket(
+      { manifest, store, adapter: deps.adapter },
+      { project: run.project, ticket: run.ticket },
+      log,
+    );
+  }
   return 0;
 }
 
@@ -367,9 +349,9 @@ export function registerCancelCommand(program: Command): void {
           store,
           statePath,
           reason: options.reason,
-          // Used only when no daemon runs and the ticket's project is driven
-          // by the runner: the hold then goes on under the person's own
-          // login, as `timone takeover` reads the ticket under it.
+          // Used only when no daemon runs: the hold then goes on under the
+          // person's own login, as `timone takeover` reads the ticket under
+          // it.
           adapter: new GitHubTicketingAdapter(),
         });
       },

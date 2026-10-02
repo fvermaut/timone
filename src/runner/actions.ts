@@ -860,9 +860,9 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       // with no stage yet keeps the new one: the ledger has no way to clear
       // it, and it names the step the runner is trying to start.
       //
-      // `setStage` also clears `consumedAnswerAt` and `reAsksAfterAnswer`
-      // when the stage changes. The runner's runs never set either — both
-      // belong to the daemon's conversation waits — so nothing is lost.
+      // `setStage` changes nothing but the stage. ✏ 2026-09-30: it once also
+      // cleared `consumedAnswerAt` and `reAsksAfterAnswer`, which belonged to
+      // the old code's conversation waits; both were removed from the ledger.
       const stageBefore = current().stage;
       deps.store.setStage(run.id, stage);
       let session: StepSession;

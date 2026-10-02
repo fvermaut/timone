@@ -16,6 +16,10 @@
 #   bindings   (required)  Integrations used by the project:
 #     ticketing (required)  Ticketing backend. Supported: "github".
 #     preview   (optional)  Preview-environment backend. Supported: "docker".
+#   instructors
+#              (optional)  The forge logins who may instruct the runner on this
+#                          project. They replace `operator` below; they do not
+#                          join it.
 #
 # Unknown keys are rejected, so typos fail fast at load time — which matters
 # most for `introduce_unmarked`, whose every misspelling would otherwise read
@@ -59,10 +63,15 @@ identity:
   login: timone-agent[bot]
   commit_email: 1234567+timone-agent[bot]@users.noreply.github.com
 
+# The operator's own forge login. Only named people may instruct the runner,
+# and a project that names no `instructors` is instructed by the operator.
+# The daemon does not start while a project names nobody.
+operator: fvermaut
+
 projects:
-  # Fully-populated project: ticketing, Docker-based previews, and a
-  # repository whose tickets Timone may introduce itself on — a greenfield
-  # pilot with no backlog to shout at.
+  # Fully-populated project: ticketing, Docker-based previews, a repository
+  # whose tickets Timone may introduce itself on — a new pilot with no open
+  # backlog — and its own list of people who may instruct it.
   pilot-app:
     repo_url: git@github.com:fvermaut/pilot-app.git
     path: projects/pilot-app
@@ -74,9 +83,15 @@ projects:
     bindings:
       ticketing: github
       preview: docker
+    # Only these people may instruct the runner on this project, in place of
+    # the operator. The operator is listed again, so they still may.
+    instructors:
+      - fvermaut
+      - a-colleague
 
   # Minimal project: empty stack, no preview binding, and no introductions —
-  # the default, and what an existing repository with open issues keeps.
+  # the default, and what an existing repository with open issues keeps. It
+  # names no instructors, so the operator instructs it.
   internal-tools:
     repo_url: git@github.com:fvermaut/internal-tools.git
     path: projects/internal-tools

@@ -2,12 +2,11 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
-import { driverOf, loadManifest, ticketLimitOf, type Manifest } from "../manifest.js";
+import { loadManifest, ticketLimitOf, type Manifest } from "../manifest.js";
 import {
   fromDefaultBranch,
   type SyncBreakdownSource,
 } from "../daemon/breakdown.js";
-import { ctaFor, type Cta, type InitiativeProgress } from "../daemon/cta.js";
 import {
   holderLiveness,
   type Hold,
@@ -15,10 +14,15 @@ import {
   type Liveness,
 } from "../daemon/holder.js";
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
-import { initiativeProgressSync, progressOf } from "../daemon/poll.js";
+import {
+  initiativeProgressSync,
+  progressOf,
+  type InitiativeProgress,
+} from "../daemon/poll.js";
 import { daemonRecordNotice } from "../daemon/version.js";
 import { allowanceOf, spentOn } from "../runner/limit.js";
 import { readRecord } from "../runner/record.js";
+import { RUNNER_DEFAULT_WAIT } from "../runner/session.js";
 
 /**
  * Where a project's checkout is, under the timone root.
@@ -126,9 +130,8 @@ export interface RenderStatusOptions {
    * on can show what it has spent against its limit
    * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
    *
-   * **Read only for runs of projects the runner drives**, and only for the
-   * runs this command names: a project the daemon drives has no record, and
-   * reading a file per ticket there would cost time and say nothing.
+   * **Read only for the runs this command names**, one file per ticket, on
+   * every project: the runner drives them all.
    *
    * Absent means say nothing about spending, which is what a fixture wants.
    */
@@ -154,7 +157,7 @@ interface RenderContext {
   initiativesOf: (project: string) => readonly InitiativeRecord[];
   /**
    * What this run's ticket has spent against its limit, as the words that
-   * end its phrase — or nothing, for a project the runner does not drive.
+   * end its phrase — or nothing, when no reader of records was given.
    */
   spendingOf: (run: Run) => string;
 }
@@ -162,11 +165,14 @@ interface RenderContext {
 /**
  * The reader `timone status` resolves every ticket's progress through.
  *
- * **It is `poll.ts`'s {@link initiativeProgress}, called the same way, and
- * that is the whole of R21 clause 8's guarantee**: the terminal and the ticket
- * cannot disagree about where an initiative stands, because there is no second
+ * **It is `poll.ts`'s {@link initiativeProgressSync}, and that was the whole
+ * of R21 clause 8's guarantee**: the terminal and the ticket could not
+ * disagree about where an initiative stands, because there was no second
  * computation for them to disagree between. Memoized per ticket so a project
  * with several waiting tickets reads each breakdown once.
+ *
+ * ✏ 2026-09-30: the cycle's standing call to action, the ticket's side of
+ * that guarantee, went with the old daemon's path.
  */
 function progressReader(
   root: string | undefined,
@@ -198,11 +204,13 @@ function progressReader(
 }
 
 /**
- * What a ticket of a project the runner drives has spent against its limit,
- * ` — $12.34 of $150.00 spent`, from the functions that decide whether
- * another session may start — so the number here is the number that stops
- * the work. Nothing at all for any other project, or when no reader of
- * records was given.
+ * What a ticket has spent against its limit, ` — $12.34 of $150.00 spent`,
+ * from the functions that decide whether another session may start — so the
+ * number here is the number that stops the work. Nothing at all when no
+ * reader of records was given.
+ *
+ * ✏ 2026-09-30: every project, since the runner drives every project. Until
+ * then a project the old daemon drove showed no spending.
  */
 function spendingReader(
   manifest: Manifest,
@@ -210,9 +218,7 @@ function spendingReader(
 ): (run: Run) => string {
   return (run) => {
     const config = manifest.projects[run.project];
-    if (records === undefined || config === undefined || driverOf(config) !== "runner") {
-      return "";
-    }
+    if (records === undefined || config === undefined) return "";
     const record = records(run.project, run.ticket);
     // Said rather than left out: a missing number would read as a ticket
     // that has spent nothing, and the record is what the limit is counted
@@ -259,47 +265,50 @@ function humanDuration(ms: number): string {
 }
 
 /**
- * What one run's ticket is asking of the human.
+ * Whether one run's ticket is waiting on the reader, which is what the
+ * closing line names it for.
  *
- * **The only place this file decides that**, and it decides it by asking
- * (ADR-0024). What a ticket needs is computed once and rendered onto both the
- * ticket and this command; a second opinion here is how `timone status` came
- * to ask for an answer on a ticket whose own body said nothing was needed.
+ * - **A parked run waits on the reader when the runner asked one for
+ *   something** (40i). Its wait holds what the runner last asked for on the
+ *   ticket, or `RUNNER_DEFAULT_WAIT` when it asked nothing. The runner is told
+ *   to end every message with what it needs from the reader, "or nothing",
+ *   so an ask that opens on that word asks nothing either.
+ * - **A done run waits on the reader when its initiative does**
+ *   ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
+ *   D4): the list of pieces grew since it was approved, or pieces are left
+ *   and none of them can start.
+ * - A run queued, picked up, at work or cancelled waits on nobody.
+ *
+ * ✏ 2026-09-30: decided here. It was `ctaFor` in `src/daemon/cta.ts`, one
+ * calculation for the ticket's standing note and for this command. The
+ * standing note went with the old code between steps, and every wait a run
+ * is read with now is the runner's, so this is all of it that was left.
  */
-function ctaOf(run: Run, context: RenderContext): Cta {
-  return ctaFor({
-    project: run.project,
-    ticket: run.ticket,
-    run,
-    progress: context.progressOf(run),
-  });
+function waitsOnYou(run: Run, context: RenderContext): boolean {
+  if (run.status === "parked") {
+    const on = run.wait?.on ?? RUNNER_DEFAULT_WAIT;
+    return on !== RUNNER_DEFAULT_WAIT && !/^nothing\b/i.test(on.trim());
+  }
+  if (run.status !== "done") return false;
+  const progress = context.progressOf(run);
+  if (progress === undefined) return false;
+  if (progress.reproposed === true) return true;
+  return progress.next === undefined && progress.done < progress.total;
 }
 
 /**
- * What a parked run is waiting for, in the words the ticket itself carries —
- * and the command that moves it, where one does.
+ * What a parked run is waiting for, in its own words, saying only that the
+ * run waits (ADR-0060). Whether a person is being waited on is the runner's
+ * to say on the ticket; the closing line names the ticket when one is.
  *
- * The command is shown for the same reason it is put on the ticket: a line
- * saying *run this command* without the command in it asks the reader to
- * guess, and a run stopped where nothing written can restart it has no other
- * way out to guess at.
+ * ✏ 2026-09-30: **every parked run waits for the runner.** The ledger loads
+ * a run parked on an older kind of wait as the runner's, so the words for a
+ * gate, a review, a conversation and a stop, and the command some of them
+ * printed, went with the old code between steps. A parked run with no wait
+ * at all is named with the words the runner gives a run that asked nothing.
  */
-function describeWait(run: Run, context: RenderContext): string {
-  // ✏ The runner's wait is named in its own words, and says only that the
-  // run waits (ADR-0060): whether a person is being waited on is the
-  // runner's to say on the ticket, and the shared calculation claims neither.
-  if (run.wait?.kind === "runner") return `waiting: ${run.wait.on}`;
-  const cta = ctaOf(run, context);
-  const how = cta.command === undefined ? "" : ` — ${cta.command}`;
-  // **The words follow the answer rather than being printed over it**
-  // ([timone#14](https://github.com/fvermaut/timone/issues/14)). The shared
-  // calculation already says whether the human is being waited on, and this
-  // renderer used to say "waiting on you" whatever it answered — so a map
-  // still working through its own questions read "waiting on you: nothing
-  // right now", which is a sentence that contradicts itself. Seen live on the
-  // trading app on 2026-08-16.
-  const opening = cta.waitingOnYou ? "waiting on you: " : "";
-  return `${opening}${cta.needFromYou}${how}`;
+function describeWait(run: Run): string {
+  return `waiting: ${run.wait?.on ?? RUNNER_DEFAULT_WAIT}`;
 }
 
 /** One run's phrase: the ticket, how far it got, and what it is doing. */
@@ -327,7 +336,7 @@ function describeRun(run: Run, context: RenderContext): string {
       : `working on it now${on}${howLong(run, now)}`;
   const what =
     run.status === "parked"
-      ? describeWait(run, context)
+      ? describeWait(run)
       : run.status === "active"
         ? working
         : "picked up, about to start";
@@ -463,25 +472,12 @@ export function renderStatus(
     (name) => `${name.padEnd(width)}  ${describeProject(name, runs, context)}`,
   );
 
-  // Every failure names the way back, in the same breath as the bad news.
-  // A run reclaimed from a dead daemon arrives here like any other failure,
-  // which is the point: the reader does not need to know it was reclaimed,
-  // only what happened and what to type.
-  const failures = runs
-    .filter((run) => run.status === "failed" && run.failure !== undefined)
-    .flatMap((run) => {
-      const { command } = ctaOf(run, context);
-      return [
-        `${run.project} #${run.ticket} stopped early: ${run.failure}`,
-        ...(command === undefined
-          ? []
-          : [`  to pick it up from where it stopped: ${command}`]),
-      ];
-    });
-
-  // Beside the failures rather than among them, and in its own words. A
-  // cancelled chunk was abandoned, not broken: there is no way back into it —
-  // `timone retry` refuses one — so it is stated and nothing is offered. It is
+  // ✏ 2026-09-30: there is no list of failures any more. No run can be read
+  // as failed: the ledger loads a failed run as cancelled, so it is listed
+  // below with what stopped it.
+  //
+  // In its own words. A cancelled chunk was abandoned, not broken: there is
+  // no way back into it, so it is stated and nothing is offered. It is
   // reported at all because typing `timone cancel` has to change something the
   // person who typed it can see.
   const cancelled = runs
@@ -498,7 +494,7 @@ export function renderStatus(
   // re-proposed list of pieces is), naming the run would put the same ticket
   // in this line once per piece it has had.
   const waiting = runs
-    .filter((run) => ctaOf(run, context).waitingOnYou)
+    .filter((run) => waitsOnYou(run, context))
     .map((run) => `${run.project} #${run.ticket}`)
     .filter((name, index, all) => all.indexOf(name) === index);
 
@@ -518,7 +514,6 @@ export function renderStatus(
       : ["Nothing has run yet — start it with `timone daemon`.", ""]),
     ...(outOfDate === undefined ? [] : [outOfDate, ""]),
     ...lines,
-    ...(failures.length > 0 ? ["", ...failures] : []),
     ...(cancelled.length > 0 ? ["", ...cancelled] : []),
     "",
     closing,

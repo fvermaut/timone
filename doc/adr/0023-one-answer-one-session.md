@@ -1,6 +1,6 @@
 # ADR-0023: One answer, one session
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
 - **Date:** 2026-08-11
 - **Source:** fvermaut's ruling of 2026-08-11 on the two failures found at [phase 18](../plans/phases/phase-18.md)'s stage-7 pass, from four options laid out with their trade-offs
 - **Extends:** [ADR-0022](0022-a-conversation-ticket-can-be-answered-in-writing.md), whose written path this makes safe to use; [ADR-0020](0020-liveness-is-judged-only-over-witnessed-time.md), whose "two-daemon ledger hazard" this closes and which [phase 17](../plans/phases/phase-17.md) deliberately left open

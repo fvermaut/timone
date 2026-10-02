@@ -1,6 +1,6 @@
 # ADR-0056: A build stage's question rides to the pull request
 
-- **Status:** accepted
+- **Status:** superseded by [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
 - **Date:** 2026-09-12
 - **Source:** fvermaut, on [ivtrends#93](https://github.com/fvermaut/ivtrends/issues/93), 2026-09-12: *"a piece of work should go to the PR no matter what, and report any issue in the PR"* — said, by his count, for at least the fifth time. Amends [ADR-0052](0052-a-run-that-enters-the-build-ends-at-its-pull-request.md).
 

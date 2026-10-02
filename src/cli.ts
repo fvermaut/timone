@@ -9,7 +9,6 @@ import { registerDaemonCommand } from "./commands/daemon.js";
 import { registerGuardrailsCommand } from "./commands/guardrails.js";
 import { registerProjectsCommand } from "./commands/projects.js";
 import { registerRecordCommand } from "./commands/record.js";
-import { registerRetryCommand } from "./commands/retry.js";
 import { registerStageCommand } from "./commands/stage.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { registerTranscriptCommand } from "./commands/transcript.js";
@@ -27,6 +26,43 @@ function packageVersion(): string {
     readFileSync(join(here, "..", "package.json"), "utf8"),
   ) as { version: string };
   return pkg.version;
+}
+
+/**
+ * What `timone retry` says since it was removed. The runner reads the ticket
+ * each time it wakes, so writing there is how to ask it for anything
+ * ([ADR-0060](../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
+ * D6).
+ */
+const RETRY_REMOVED =
+  "`timone retry` was removed. Write on the ticket instead: say what you want done.";
+
+/**
+ * `timone retry`, kept only to answer a person who still types it. Every way
+ * in says {@link RETRY_REMOVED} on stderr and exits 1: with any arguments,
+ * with `--help`, and as `timone help retry`.
+ *
+ * Commander answers `timone help retry` by calling this command's `help()`,
+ * which would print a usage line for it and exit 0. So `help()` gives the
+ * sentence instead. `--help` is switched off, so it reaches the action like
+ * any other argument.
+ */
+class RemovedRetryCommand extends Command {
+  constructor() {
+    super("retry");
+    this.argument("[anything...]")
+      .allowUnknownOption()
+      .helpOption(false)
+      .action(() => {
+        console.error(RETRY_REMOVED);
+        process.exitCode = 1;
+      });
+  }
+
+  override help(): never {
+    console.error(RETRY_REMOVED);
+    process.exit(1);
+  }
 }
 
 /**
@@ -49,7 +85,8 @@ export function buildProgram(): Command {
   registerTranscriptCommand(program);
   registerRecordCommand(program);
   registerTakeoverCommand(program);
-  registerRetryCommand(program);
+  // Hidden, so the help does not offer it.
+  program.addCommand(new RemovedRetryCommand(), { hidden: true });
   registerCancelCommand(program);
   registerStageCommand(program);
 

@@ -1,7 +1,5 @@
 import {
   NEEDED_FROM_YOU,
-  STAGE_DONE_MARKER,
-  STAGE_HANDED_MARKER,
   stampMachineComment,
   type PullRequestThread,
   type TicketComment,
@@ -143,21 +141,18 @@ export const REPLAY_MANIFEST: Manifest = {
       path: "projects/ivtrends",
       stack: ["typescript", "nextjs"],
       bindings: { ticketing: "github" },
-      driver: "runner",
     },
     "scratch-app": {
       repo_url: "https://github.com/fvermaut/scratch-app.git",
       path: "projects/scratch-app",
       stack: ["typescript", "nextjs"],
       bindings: { ticketing: "github" },
-      driver: "runner",
     },
     timone: {
       repo_url: "https://github.com/fvermaut/timone.git",
       path: "projects/timone",
       stack: ["typescript"],
       bindings: { ticketing: "github" },
-      driver: "runner",
     },
   },
 };
@@ -190,6 +185,21 @@ const AFTER_STEP_WAIT = "the runner to look at what the step did";
 
 /** What the step skills write on the line that ends a closing comment that asks nothing. */
 const NOTHING = `${NEEDED_FROM_YOU} nothing.`;
+
+/**
+ * The line a step's closing comment opened on when its work was done, as the
+ * comments these cases replay were written. Its constant in `ticketing.ts`
+ * was deleted on 2026-09-30: no step writes it now, and no code reads it.
+ */
+const STAGE_DONE_MARKER = "🏁 **Step finished** · written by the machine when a stage completed its work";
+
+/**
+ * The line a step's closing comment opened on when it stopped and asked a
+ * person for help, as the comments these cases replay were written. Its
+ * constant in `ticketing.ts` was deleted on 2026-09-30, for the same reason.
+ */
+const STAGE_HANDED_MARKER =
+  "🙋 **Needs a person** · written by the machine when a stage stopped and is asking for help";
 
 /** A step ticket of an initiative. */
 const STEP_TICKET: TicketContext = { isStep: true, isRemediation: false };

@@ -10,20 +10,20 @@ import type { RunStore } from "./runs.js";
  * - A **step** the machine dropped is *held*, by {@link HELD_LABEL}, and stays
  *   stopped until somebody takes the hold off
  *   ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
- *   D2 and D7).
- * - **Any other ticket's** cancelled chunk is settled, so `register` opens a
- *   fresh one on the next cycle — which is what has always happened and is
- *   still what happens.
+ *   D2 and D7). Closed instead, it lets the initiative carry on without it.
+ * - **Any other ticket** has no initiative to carry on. `timone cancel` puts
+ *   the hold on it too, but a ticket cancelled before 40u, or whose run the
+ *   old code failed, has none. So each caller says its way back in its own
+ *   words.
  *
- * Telling an unheld ticket to remove a label it does not carry names a gesture
- * with no effect and promises a stop that is not coming; telling a held step
- * it will be picked up again promises the opposite. A slice that assumed every
- * cancelled run was a dropped step shipped the first of those, and asking what
- * a poll cycle would post on a real non-step ticket is what caught it.
+ * Telling a ticket to remove a label it does not carry names a gesture with
+ * no effect. A slice that assumed every cancelled run was a dropped step
+ * shipped that once, and asking what a poll cycle would post on a real
+ * non-step ticket is what caught it.
  *
- * **Its own module because four surfaces ask the question** — the ticket's
- * standing note, `timone cancel`, `timone takeover` and `timone retry`'s
- * refusal. Each keeps its own lead-in; only the way out is shared.
+ * **Its own module because two commands ask the question**: `timone cancel`
+ * and `timone takeover`. Each keeps its own lead-in; only the way out is
+ * shared.
  */
 export function heldStepWayOut(
   store: RunStore,

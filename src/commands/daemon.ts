@@ -1,12 +1,11 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
-import type { AskCheckDeps } from "../daemon/ask-check.js";
 import { sdkConsult } from "../daemon/consult.js";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
-import { loadManifest, type Manifest } from "../manifest.js";
+import { loadManifest, namedPeople, type Manifest } from "../manifest.js";
 import {
   checkoutVersion,
   isCommitOnRemote,
@@ -34,14 +33,9 @@ import {
   withStateLock,
   type StateLock,
 } from "../daemon/lock.js";
-import {
-  DEFAULT_POLL_INTERVAL_SECONDS,
-  pollOnce,
-  type SessionSpawner,
-} from "../daemon/poll.js";
+import { DEFAULT_POLL_INTERVAL_SECONDS, pollOnce } from "../daemon/poll.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import {
-  AgentSessionSpawner,
   agentSdkRuntime,
   intervalTicker,
   readTimoneCheckout,
@@ -110,6 +104,31 @@ export function daemonCredentials(
     privateKeyPath: resolve(root, identity.private_key_path),
     ...(mint === undefined ? {} : { mint }),
   });
+}
+
+/**
+ * Why the daemon may not start on `manifest`: one sentence for each project
+ * that names nobody who may instruct it — no `instructors` of its own and no
+ * `operator` at the top of the manifest. Undefined when every project names
+ * someone.
+ *
+ * ✏ 2026-09-30: this was refused where the manifest is read, for a project
+ * the runner drove. The runner drives every project now, and refusing there
+ * would refuse every manifest without an operator, including the ones
+ * `projects list` and `workspace sync` read. So it is refused here, as the
+ * missing `identity` block is: the runner takes instructions only from named
+ * people (ADR-0060 D6), and a project that names nobody could be instructed
+ * by no one.
+ */
+function nobodyInstructs(manifest: Manifest): string | undefined {
+  const lines = Object.keys(manifest.projects)
+    .filter((name) => namedPeople(manifest, name).length === 0)
+    .map(
+      (name) =>
+        `The daemon does not start: project "${name}" names nobody who may instruct it. ` +
+        "Add `instructors` to the project, or `operator` at the top of the manifest.",
+    );
+  return lines.length === 0 ? undefined : lines.join("\n");
 }
 
 export function machineAdapter(
@@ -352,28 +371,11 @@ export interface RunDaemonOptions {
    * `pollOnce` is reachable without one exactly as it always was.
    */
   statePath?: string;
-  /**
-   * The timone root.
-   *
-   * ✏ **Narrowed by phase 30's 30d.** It used to be here so the poll cycle
-   * could reach `projects/<name>/` and read a ticket's breakdown; the cycle
-   * reads the forge now and takes no root at all
-   * ([ADR-0043](../../doc/adr/0043-the-humans-checkout-is-theirs-alone.md)).
-   * What it is still for is the **timone** checkout — the spawner's version
-   * pin and its refusal to start on a dirty tree (ADR-0041 D2).
-   */
-  root: string;
   intervalMs: number;
   /** How long a run may go silent before it is treated as orphaned. */
   staleAfterMs?: number;
   once: boolean;
   adapter: TicketingAdapter;
-  spawner: SessionSpawner;
-  /**
-   * How the ask check puts its question to a model. The real one when absent
-   * ([ADR-0054](../../doc/adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)).
-   */
-  consultAskCheck?: AskCheckDeps["consult"];
   /** How previews are served. Absent means no project gets one. */
   previews?: PreviewAdapter;
   /**
@@ -391,14 +393,12 @@ export interface RunDaemonOptions {
    */
   version?: () => Promise<DaemonVersion | undefined>;
   /**
-   * ✏ The runner, for the projects whose entry says `driver: runner`
+   * ✏ The runner, which drives every project
    * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)
    * D9). One for the daemon's life, because a step it starts outlives the
-   * cycle that asked for it. Absent means those projects are left alone —
-   * which is what every test of the cadence and the lock wants, since none of
-   * them names such a project.
+   * cycle that asked for it.
    */
-  runner?: RunnerDriver;
+  runner: RunnerDriver;
   log?: (message: string) => void;
 }
 
@@ -409,6 +409,13 @@ export interface RunDaemonOptions {
  */
 export async function runDaemon(options: RunDaemonOptions): Promise<number> {
   const log = options.log ?? ((message: string) => console.log(message));
+  // Before the lock and before any cycle: a project nobody may instruct is a
+  // manifest to fix, not a ledger to hold.
+  const refused = nobodyInstructs(options.manifest);
+  if (refused !== undefined) {
+    log(refused);
+    return 1;
+  }
   if (options.statePath === undefined) return poll(options, log);
 
   const staleAfterMs =
@@ -470,18 +477,10 @@ async function poll(
       manifest: options.manifest,
       store: options.store,
       adapter: options.adapter,
-      spawner: options.spawner,
       // The same path the lock was taken on, so the cycle serves the requests
       // waiting beside the ledger it is holding (ADR-0032).
       statePath: options.statePath,
       staleAfterMs: options.staleAfterMs,
-      // How a message about to be sent to a person gets a second, cheaper
-      // shape (ADR-0054). **No default here**: this function is what the
-      // tests drive, and a default would have every one of them reach a real
-      // model the moment a fixture ticket asked a person for something — which
-      // is exactly how it was found, as a twenty-second timeout. The real one
-      // is supplied at the command, beside the other live seams.
-      consultAskCheck: options.consultAskCheck,
       // The cadence this loop actually keeps, so the unwitnessed-gap threshold
       // is derived from it rather than assumed (ADR-0020). A daemon told to
       // poll every five minutes must not read a four-minute gap as an absence.
@@ -506,7 +505,7 @@ async function poll(
   // here, before the command reports: the cycle's effects are then what a
   // person inspecting it afterwards finds. A step a wake started is not waited
   // for; its end is handled when it comes, for as long as the process lives.
-  await options.runner?.drain();
+  await options.runner.drain();
 
   return failures > 0 ? 1 : 0;
 }
@@ -688,21 +687,12 @@ export function registerDaemonCommand(program: Command): void {
       // No guardrail bracket here any more (ADR-0018): the checks live in
       // `.claude/settings.json`'s SessionStart/Stop hooks, which every session
       // at the timone root passes through — including the ones a human starts.
-      const spawner = new AgentSessionSpawner({
-        manifest,
-        store,
-        adapter,
-        runtime,
-        root: process.cwd(),
-        progressIntervalMs: progressInterval * 1000,
-        log,
-      });
-
-      // ✏ The runner, beside the spawner: the spawner goes on driving every
-      // project whose entry says nothing, and the runner drives the ones
-      // whose entry says `driver: runner` (ADR-0060 D9, PRD-05 R19). One of
-      // each for the daemon's life, sharing one list of running steps, so a
-      // wake's actions and the driver's checks see the same steps.
+      //
+      // ✏ The runner drives every project (ADR-0060 D9). One for the
+      // daemon's life, with one list of running steps, so a wake's actions
+      // and the driver's checks see the same steps. Until 2026-09-30 the old
+      // spawner stood beside it, for the projects whose entry named no
+      // driver.
       const running = new RunningSteps();
       const runner = new RunnerDriver({
         store,
@@ -723,8 +713,8 @@ export function registerDaemonCommand(program: Command): void {
             },
             input,
           ),
-        // Read at each step, as the spawner reads it: the version of Timone a
-        // step's box is built from is the one checked out when it starts.
+        // Read at each step: the version of Timone a step's box is built from
+        // is the one checked out when it starts.
         timonePin: async () => (await readTimoneCheckout(process.cwd())).pin,
         clock: () => new Date().toISOString(),
         log,
@@ -750,9 +740,6 @@ export function registerDaemonCommand(program: Command): void {
         manifest,
         store,
         statePath,
-        // The timone root — the spawner's, for the version pin and the
-        // dirty-checkout refusal (ADR-0041 D2). The cycle no longer takes one.
-        root: process.cwd(),
         // One adapter for every bound project: which projects get previews is
         // the manifest's answer, not this command's (ADR-0021).
         previews: new DockerPreviewAdapter({ root: process.cwd() }),
@@ -765,10 +752,6 @@ export function registerDaemonCommand(program: Command): void {
         staleAfterMs: 4 * progressInterval * 1000,
         once: options.once === true,
         adapter,
-        spawner,
-        // The ask check's model, beside the other live seams and for the same
-        // reason they are here (ADR-0054).
-        consultAskCheck: sdkConsult(),
         runner,
         // What this process is running, against what the default branch has
         // moved to (timone#5). `ls-remote`, so fvermaut's own checkout is

@@ -372,12 +372,14 @@
     - GIVEN a run whose daemon was killed mid-session
       WHEN a daemon polls and finds the run `active` or `picked-up` with a heartbeat older than the staleness threshold
       THEN the run is failed with a plain reason, the failure is posted on its ticket, its project is released and any queued run for that project is promoted
+    > ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): a stale run is no longer failed. It goes back to the runner's wait, and the runner is woken and decides what happens next ([PRD-05.R16](prd-05-a-runner-decides-each-step.criteria.md)).
     - GIVEN a run whose session is alive and its work progressing
       WHEN any daemon polls
       THEN the run is left untouched — however long the session has been running, and whatever has happened to the host machine meanwhile
     - GIVEN a run reclaimed this way
       WHEN `timone retry` is invoked for it
       THEN it is re-armed at the stage it was reclaimed from, exactly as any other failed run
+    > ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): this clause, and the last check in the hint below, name `timone retry`. The command was removed by [PRD-05.R11](prd-05-a-runner-decides-each-step.criteria.md). The runner now decides whether a step is tried again ([ADR-0060](../../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md) D6). The older notes above that mention the command are history, and stay.
 - **Verification hint:** kill a daemon mid-execution and confirm the next daemon reclaims the run, comments, and frees the project; run a long stage to completion and confirm no reclaim fires; confirm `timone retry` then re-arms the reclaimed run.
 
 ## R19 — Machine-authored commits are identifiable from git history
@@ -516,6 +518,7 @@
     - GIVEN a ticket whose current chunk is `failed`
       WHEN the daemon polls the project on that cycle and on every later one
       THEN **no further chunk is opened** — the ledger still names the failed chunk as the ticket's current one — and `timone retry <project>#<ticket>` re-arms that same chunk in place, at the stage it died, keeping its branch and its sequence number
+    > ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): this clause, and the hint below, name `timone retry`. The command was removed by [PRD-05.R11](prd-05-a-runner-decides-each-step.criteria.md). The runner now decides whether a step is tried again ([ADR-0060](../../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md) D6). The older notes above that mention the command are history, and stay.
     - GIVEN an approved specification for a ticket whose work is more than one chunk
       WHEN the planning stage runs
       THEN the breakdown listing the steps in order is committed at `doc/plans/breakdowns/ticket-NN.md`, its readable list is posted as a ticket comment, and the ticket waits on **exactly one** approval — the reply that gives it stamps the breakdown `Approved`, merges chunk zero, and **opens one ticket per step as a child of the initiative's ticket**, each carrying that step's line, a link to the breakdown, and any step it depends on; the initiative's ticket becomes a map of those children, and no second gate comment appears before the first step starts building
@@ -531,6 +534,7 @@
     - GIVEN a run in any state the ledger admits — queued, parked, active or failed
       WHEN `timone cancel <project>#<ticket>` is run against it
       THEN the chunk ends `cancelled` carrying a reason, its project is released, and `.timone/state.json` needs no hand-edit for any of it
+    > ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): the ledger no longer admits `failed`. A failed run in an older ledger is read as `cancelled`, and the reason it stopped is kept.
     - GIVEN a ticket that has been closed, or had its mark removed, while a run for it stands in the ledger
       WHEN the daemon next polls the project
       THEN that run is cancelled with a reason and **no session is spawned for it**, asserted on the spawn itself rather than on the absence of a log line

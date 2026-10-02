@@ -19,13 +19,13 @@ Delivery presents finished work for human judgement. It does not improve the wor
 3. Validate the name against `timone.yaml`. Unknown name → abort, listing the valid names.
 4. Check `projects/<name>/` exists on disk. Not cloned → abort, suggesting `node dist/cli.js workspace sync`.
 5. From here on, every file you read or write lives under `projects/<name>/…` — the only exceptions are *reading* timone's own `process.md`, `standards/`, and `timone.yaml`.
-6. In loop mode (daemon-initiated sessions), the target project arrives in the event context; the same validation applies.
+6. In a session the runner started, the target project arrives in the session's prompt; the same validation applies. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md))
 
 ## The gates
 
 Each gate stops delivery. When one fires you write **nothing** into the project, push nothing, open nothing, state which gate fired and why in one short paragraph, and name the skill or the human to route to. A stopped delivery is a valid, complete outcome of this skill.
 
-**Two things reach you from earlier steps that are not gates and must never be treated as one.** ✏ Added 2026-09-12 ([ADR-0056](../../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)). A departures record, and — new here — **a question an earlier step stopped to ask a person and never got answered**. The daemon does not let a step inside the build wait for a person, so it carries what was asked to you instead, in your own prompt. Put every one in the departures section, first section of the pull request body: what was asked, and what the work did instead. Never refuse for one, and never ask it again yourself — the reader of the pull request is the person it was for.
+**Two things reach you from earlier steps that are not gates and must never be treated as one.** ✏ Added 2026-09-12 ([ADR-0056](../../../doc/adr/0056-a-build-stages-question-rides-to-the-pull-request.md)). A departures record, and — new here — **a question an earlier step stopped to ask a person and never got answered**. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): once building has started, a question a step asks does not stop the run. The runner carries it to you: when it starts this step, its instructions tell you to put the question on the pull request. You find it in your prompt, under *The runner's instructions for this step*. Put every one in the departures section, first section of the pull request body: what was asked, and what the work did instead. Never refuse for one, and never ask it again yourself — the reader of the pull request is the person it was for.
 
 **Their order is fixed: 1 → 2 → 3 → 4 → 5.** Gates about the work precede gates about where it goes, so a project whose phase was never verified hears *that* rather than a complaint about its git host. Fire the first one that applies and stop; do not report the others speculatively.
 
@@ -84,7 +84,7 @@ Two reviews, run as **parallel fresh contexts**, each with its own read list, ea
 
 **They report; they never block, and they never refactor.** Findings do not withhold the PR: a review that withheld it would hide its own findings from the only person who can act on them. Remediation goes through **stage 9**. Committing a refactor here would put code into the branch that no verification pass has ever seen — landing after the report that certifies the behaviour and before the human reads it, invalidating stage 7's evidence at the moment it is being presented.
 
-**Mechanism is an example, never a requirement.** Today the obvious instrument is two sub-agents spawned from this session, each with its read list as its prompt; PRD-02's daemon will spawn the same contract through the Agent SDK. Anything that receives those inputs, in isolation from the other axis, and returns a report in the shape below satisfies the contract.
+**Mechanism is an example, never a requirement.** Today the obvious instrument is two sub-agents spawned from this session, each with its read list as its prompt. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): this is the same when the runner started this session — the runner starts the step, and the step spawns its own sub-agents. Anything that receives those inputs, in isolation from the other axis, and returns a report in the shape below satisfies the contract.
 
 ```markdown
 ## <Standards | Spec> review — phase NN

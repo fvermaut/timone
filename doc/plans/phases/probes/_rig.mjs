@@ -44,15 +44,25 @@ if (!fs.existsSync(CLI)) {
 
 // ---------------------------------------------------------------- fixture
 //
-// opts.projects: { name: { driver, instructors, limit, labels } } — defaults to one
-//   runner project named "fixture".
+// opts.projects: { name: { driver, driverLine, instructors, limit, labels } } — defaults to one
+//   project named "fixture".
 // opts.operator: the top-level operator login, or null for none.
 // opts.issues:   { project: { number: {title, body, labels, author, comments} } }
 // opts.timoneRepo: true adds a `timone` project so the runner has a Timone repo.
+// opts.cli:      the built cli.js to run (default: this tree's dist/cli.js). A break leg can
+//   point it at an older build, from _old-build.mjs.
+//
+// ✏ 2026-10-02 (phase 41 verification): every project is on the runner, and a `driver`
+// line no longer loads (PRD-05.R19's note, R20). `driver: 'runner'` is still accepted from
+// older probes and writes nothing. `driverLine: '<value>'` writes the line on purpose, for a
+// probe that checks it is refused. Any other `driver` value is an error in the probe.
 export function fixture(opts = {}) {
   const base = process.env.PROBE_TMP || os.tmpdir();
   const dir = fs.mkdtempSync(path.join(base, 'prd05-'));
-  const projects = opts.projects ?? { fixture: { driver: 'runner' } };
+  const projects = opts.projects ?? { fixture: {} };
+  for (const [name, p] of Object.entries(projects)) {
+    if (p.driver && p.driver !== 'runner') throw new Error(`rig: project ${name} asks for driver "${p.driver}"; a driver line no longer loads — use driverLine to plant one on purpose`);
+  }
   const operator = opts.operator === undefined ? OPERATOR : opts.operator;
   fs.mkdirSync(path.join(dir, 'bin'));
   fs.mkdirSync(path.join(dir, 'remote'));
@@ -96,7 +106,7 @@ export function fixture(opts = {}) {
     remotes[slug] = bare;
     gitConfig.push([`url.${bare}.insteadOf`, `https://github.com/${slug}.git`]);
     yaml += `  ${name}:\n    repo_url: https://github.com/${slug}.git\n    path: projects/${name}\n    stack:\n      - typescript\n    bindings:\n      ticketing: github\n`;
-    if (p.driver) yaml += `    driver: ${p.driver}\n`;
+    if (p.driverLine) yaml += `    driver: ${p.driverLine}\n`;
     if (p.instructors) yaml += `    instructors: [${p.instructors.join(', ')}]\n`;
     if (p.limit !== undefined) yaml += `    ticket_limit_usd: ${p.limit}\n`;
   }
@@ -132,6 +142,7 @@ export function fixture(opts = {}) {
 
   const fx = {
     dir,
+    cliPath: opts.cli ?? CLI,
     manifest: path.join(dir, 'timone.yaml'),
     statePath: path.join(dir, 'state.json'),
     forgePath: path.join(dir, 'forge.json'),
@@ -228,7 +239,7 @@ export function fixture(opts = {}) {
     },
     cli(args, { port } = {}) {
       try {
-        const out = execFileSync(process.execPath, [CLI, ...args], { cwd: dir, env: fx.env(port), stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 });
+        const out = execFileSync(process.execPath, [fx.cliPath, ...args], { cwd: dir, env: fx.env(port), stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 });
         return { code: 0, out: out.toString(), err: '' };
       } catch (e) {
         return { code: e.status ?? 1, out: (e.stdout ?? '').toString(), err: (e.stderr ?? '').toString() };
@@ -346,7 +357,7 @@ export async function model(plan = {}) {
 //
 // Runs the built daemon until until(fx) holds or timeoutMs passes, then stops it.
 export async function daemon(fx, m, { until = () => false, timeoutMs = 60000, interval = 2, settleMs = 0 } = {}) {
-  const args = [CLI, 'daemon', '--manifest', fx.manifest, '--interval', String(interval), '--runtime', 'in-process', '--state', fx.statePath];
+  const args = [fx.cliPath ?? CLI, 'daemon', '--manifest', fx.manifest, '--interval', String(interval), '--runtime', 'in-process', '--state', fx.statePath];
   const child = spawn(process.execPath, args, { cwd: fx.dir, env: fx.env(m?.port), stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   child.stdout.on('data', (d) => (out += d));

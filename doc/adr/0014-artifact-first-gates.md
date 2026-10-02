@@ -2,6 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-08-05
+- **Amended by:** [ADR-0060](0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), 2026-09-30 — the runner may skip a gate, and says so on the ticket and on the pull request
 - **Source:** grill session of 2026-08-05, prompted by a false gate found during [phase 12](../plans/phases/phase-12.md)'s 12g live proof
 
 ## Context

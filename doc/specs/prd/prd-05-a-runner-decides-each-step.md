@@ -3,7 +3,7 @@
 > **Status:** Active
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-05-a-runner-decides-each-step.criteria.md](prd-05-a-runner-decides-each-step.criteria.md)
-> **Phases:** [phase 40](../../plans/phases/phase-40.md) (piece 1, #165)
+> **Phases:** [phase 40](../../plans/phases/phase-40.md) (piece 1, #165), [phase 41](../../plans/phases/phase-41.md) (piece 2, #166)
 
 ## Problem
 
@@ -53,4 +53,5 @@ The failures recorded since 5 September become a replay set that the runner must
 ## Open Questions
 
 - **Does the ask check stay?** The ask check ([ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md)) was added because a step could not see enough to ask a cheap question. The runner writes with the whole run in view. The build decides whether the check is still needed, and says so on its pull request.
+    > ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): **it does not stay.** Phase 41 removed the ask check with the old code between steps. The check was added because a step could not see enough to ask a cheap question. The runner writes every question with the whole run in view, so the check is no longer needed. [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md) is marked as superseded by [ADR-0060](../../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md).
 - **Should a step still running when the limit is reached be stopped?** As written, the step finishes and no new one starts. A ticket can therefore go over its limit by one step's cost, which was $231 at most in the last five weeks. The first live run on scratch-app shows whether this matters.
