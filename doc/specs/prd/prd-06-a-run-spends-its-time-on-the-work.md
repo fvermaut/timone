@@ -3,7 +3,7 @@
 > **Status:** Active — approved by fvermaut on 2026-10-02, in the terminal, together with ADR-0061
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-06-a-run-spends-its-time-on-the-work.criteria.md](prd-06-a-run-spends-its-time-on-the-work.criteria.md)
-> **Phases:** none yet
+> **Phases:** [phase 42](../../plans/phases/phase-42.md) (#185, with #110)
 
 ## Problem
 
