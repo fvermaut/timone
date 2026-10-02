@@ -71,3 +71,10 @@
 **Agreed:** 41i marks the records ADR-0060 lists, the R19 and R11-related notes, and the product overview.
 **Did instead:** 41i also notes four more places that described the old code as current: PRD-02.R18 clause 1, PRD-02.R22 clause 7, the ask-check requirements of PRD-04, and ADR-0060's Consequences.
 **Why:** the slice found them while working. A change of this kind has to reach every document that describes it, or a later reader follows a rule that no longer exists.
+
+## 2026-10-02 — timone#166, execution
+
+**Kind:** plan step
+**Agreed:** the Goal Description and 41c: the conversion asks for no wake, so no comment appears on the tickets of converted runs, and `timone takeover timone#95` opens a session told which step the ticket was at.
+**Did instead:** on the real ledger, the new daemon's first cycle woke the runner for the six converted conversation runs on Timone's own tickets (#91, #92, #95 to #98), because their `timone` label had been removed on 2026-09-11. The runner ended all six runs and posted a short comment on four tickets, for about $0.50. New sub-phase 41m makes a takeover of such a ticket give its new run the step the ticket's label names, and cuts a converted failed run's reason to one line.
+**Why:** 41c's test of "no wake" put every waiting run's ticket open and marked. The real tickets were not marked, and the runner is told when a ticket leaves the listing. Ending a run whose ticket is no longer marked is the runner following its rules, so it stays.

@@ -397,6 +397,29 @@ node dist/cli.js projects list --manifest timone.example.yaml
 
 ---
 
+### Sub-phase 41m: What the live check found on the real ledger
+
+> ✏ 2026-10-02 (build, timone#166): added during 41l. On the real ledger, the new daemon's first cycle showed two faults this phase made. **(1)** A converted failed run keeps its whole old failure as its reason. For timone #106 that is a whole machine comment, and `timone status` printed it, with a command to run. **(2)** The runner ended the six converted conversation runs on Timone's own tickets (#91, #92, #95 to #98), because their `timone` label was removed on 2026-09-11, and posted on four of them. That is the runner following its rules, and it stays. But a later `timone takeover timone#95` now finds no run, and 41e's takeover of a ticket with no run gives the new run no step, so the session is not told it is a wayfinding conversation. Recorded in [phase-41-departures.md](reports/phase-41-departures.md).
+
+**[MODIFY]** `src/daemon/runs.ts` — when an old failed run is converted, the reason it keeps is one line: the first line of the old failure, cut before the machine's banner (`🤖 **Timone**`) where the line carries one, with spaces and a trailing colon trimmed. An old failure that is empty after that keeps *"no reason recorded"*.
+**[MODIFY]** `src/commands/takeover.ts` — a takeover of a ticket with no run gives the new run the step the ticket's `wayfinder:` label names, as the runner's own order reads it (`wayfinderStage` in `src/daemon/pipeline.ts`, or the runner's `ticketKindOf` in `src/runner/order.ts`, whichever already maps the label): a decision ticket is at wayfinding, a map ticket at charting. A ticket with no such label gets no step, as today.
+**[MODIFY]** `src/daemon/runs.test.ts`, `src/commands/takeover.test.ts`
+
+**Seams under test (TDD):** the store's load from a file, and `runTakeover` / `resolveTakeover` with the prompt it builds. Red-green: (1) an old failed run whose failure is a whole machine comment loads with a one-line reason that carries no banner and no command; (2) an old failed run with a one-line failure keeps that line, as 41c's tests already say; (3) a takeover of a ticket with no run and the label `wayfinder:grilling` opens a session whose prompt names wayfinding and the `timone-wayfind` skill; (4) a takeover of a ticket with no run and no `wayfinder:` label opens the session with no step, as today.
+
+> Sub-phase 41k must be complete before starting this sub-phase. It may run while 41l's watched run is under way: it changes neither the path a watched ticket takes nor any file a step reads.
+
+#### Agent Validation Steps
+
+```bash
+npm run build && npm test 2>&1 | tail -5
+git status --short .timone ; echo "(expected: nothing — no test touched the real ledger)"
+```
+
+- [ ] Red-green evidence for each of the four cases is in the handoff.
+
+---
+
 ### Sub-phase 41l: The live check — the replay, and one watched run on scratch-app
 
 This slice needs fvermaut: the model login the daemon and the replay use lives in his terminal.
@@ -441,6 +464,7 @@ node dist/cli.js status 2>&1 | head -40
 41j → 41h               process.md, the skills and the glossary          ├ may run in parallel
 41k → 41h               the README and the manual                        ┘
 41l → 41i, 41j, 41k     the replay, the real ledger, one watched run
+41m → 41k               ✏ 2026-10-02: what the live check found (may run beside 41l)
 ```
 
 The code slices run one after another: each deletes what the one before left without a caller, and most of them share `poll.ts`, `runs.ts` or `status.ts`.
