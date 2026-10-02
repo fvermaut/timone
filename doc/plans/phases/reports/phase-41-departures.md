@@ -85,3 +85,10 @@
 **Agreed:** 41m makes a takeover of a ticket with no run start at the step its label names.
 **Did instead:** 41m also makes a takeover of a ticket that is still open, whose latest run is done or cancelled, register a new run in the same way. And it cuts the reason of a run an earlier build already converted and wrote, not only of a run still failed on disk.
 **Why:** the runs of timone #91, #92 and #95 to #98 are done, because the runner ended them, so a takeover found a finished run and opened nothing. PRD-05.R11 says a takeover opens a terminal session. And the daemon started for the live check had already written timone #106's converted run, with the long reason, to the ledger.
+
+## 2026-10-02 — timone#166, verification
+
+**Kind:** check not run
+**Agreed:** PRD-05.R18: the replay of the recorded failures on the real model, three tries per case, on the build the pull request carries. With it, the runner's own part of PRD-05.R7 clause 1 (replay case scratch-app#37).
+**Did instead:** Not run. Reported BLOCKED in [phase-41-verification.md](phase-41-verification.md). The newest recorded replay is run 8 (19 of 19, three tries of three), at `3afc263`. Four files under `src/` changed after it, in 41m (`d82be1a`). PRD-05.R18 and R7 keep their `verified` status: nothing was seen to be wrong.
+**Why:** The replay calls the real model, costs money, and needs fvermaut's own logged-in terminal. It is owed on this branch before the pull request is merged: run `npm run --silent replay` at the branch's head, and record it as run 9 in [phase-40-replay.md](phase-40-replay.md).

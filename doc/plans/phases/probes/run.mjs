@@ -47,7 +47,9 @@ const results = await Promise.all(
     const file = path.join(PROBE_DIR, `${c.id.toLowerCase()}.mjs`);
     if (!fs.existsSync(file)) return { ...c, verdict: 'NO PROBE', out: '' };
     const r = await run(file);
-    return { ...c, verdict: r.code === 0 ? 'PASS' : 'FAIL', out: r.out };
+    // A probe exits 3 when none of its clauses could be judged: all were BLOCKED (_rig.mjs's finish()).
+    // ✏ 2026-10-02 (phase 41 verification): that used to be counted as FAIL here.
+    return { ...c, verdict: r.code === 0 ? 'PASS' : r.code === 3 ? 'BLOCKED' : 'FAIL', out: r.out };
   }),
 );
 
@@ -64,5 +66,6 @@ for (const r of results) {
 }
 const passing = results.filter((r) => r.verdict === 'PASS').length;
 const failing = results.filter((r) => r.verdict === 'FAIL').length;
-console.log(`\n${passing} passing, ${failing} failing, ${results.length - passing - failing} with no probe.`);
+const blockedN = results.filter((r) => r.verdict === 'BLOCKED').length;
+console.log(`\n${passing} passing, ${failing} failing, ${blockedN} blocked, ${results.length - passing - failing - blockedN} with no probe.`);
 process.exit(failing > 0 ? 1 : 0);

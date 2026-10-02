@@ -209,7 +209,8 @@
     - GIVEN the command line
       WHEN `timone retry` is typed
       THEN it does not exist, and the message says to write on the ticket instead
-- **Evidence:** ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): this phase's part passes: cancel, takeover (with and without a running daemon), and retry refusing on a runner project. Clause 3 as written ("it does not exist") is #166's.
+- **Evidence:** ✏ 2026-10-02 — phase 41 verification ([report](../../plans/phases/reports/phase-41-verification.md)): all three clauses pass. Clause 3 is now checked as written: `timone retry` is not offered, typing it changes nothing, and the message says to write on the ticket. Every check was seen to fail first. It stays draft: its claim is universal ("any run", "any running session") and this block names no `Falsified-by` check. The probe `prd-05.r11.mjs`, proved able to fail, could be named here.
+  ✏ 2026-09-29 — partial, phase 40 verification ([report](../../plans/phases/reports/phase-40-verification.md)): this phase's part passes: cancel, takeover (with and without a running daemon), and retry refusing on a runner project. Clause 3 as written ("it does not exist") is #166's.
 - **Verification hint:** `src/commands/cancel.ts` must not start or wait for a runner. The takeover case replaces the handback note of ADR-0035: the runner reads the session's closing comment in plain words.
 
 ## R12 — The runner wakes on events, and checks every 15 minutes while a step runs
@@ -364,6 +365,7 @@
 - **Verify-via:** api
 - **Criteria:** a project's entry in `timone.yaml` says which one drives its tickets. The daemon drives each project the way its entry says, and two projects can differ. scratch-app moves first, and ivtrends moves only after a supervised run on scratch-app has passed R9, R12, R13 and R15.
     > ✏ 2026-09-30 (phase 41, [timone#166](https://github.com/fvermaut/timone/issues/166)): every project has moved to the runner. The `driver` line went with the old code (R20): a `timone.yaml` that still has one does not load, and says to delete the line. So the period R19 covers is over. Its status is left to verification.
+- **Evidence:** ✏ 2026-10-02 — phase 41 verification ([report](../../plans/phases/reports/phase-41-verification.md)): checked against the note above. The three projects in `timone.yaml` are on the runner, and a `timone.yaml` with a `driver` line does not load and says to delete the line. Both checks were seen to fail first on the build from just before phase 41. The status stays `verified`: the title bounds the claim ("until every project has moved"), and nothing seen contradicts it. Marking it `deprecated` would be a change to the requirements, which verification does not make.
 
 ## R20 — The old code between steps is removed once every project runs on the runner
 
@@ -371,3 +373,4 @@
 - **Status:** draft
 - **Verify-via:** api
 - **Criteria:** once no project in `timone.yaml` runs on the current daemon, the code that chooses the next step, reads a step's end from an exact line, and decides where a run waits is deleted. The ADRs that ADR-0060 lists as superseded get their status lines changed in that same pull request. `process.md` and the step skills say that the order is the default, and describe the runner.
+- **Evidence:** ✏ 2026-10-02 — phase 41 verification ([report](../../plans/phases/reports/phase-41-verification.md)): every part passes, and each check was seen to fail first on the build from just before phase 41. A `driver` line does not load, so no project can go back to the old code. On a project, only the steps the runner chose ran; a step that ended with no closing line still ended and woke the runner; a person's comment on the quiet run reached the runner. The nine records ADR-0060 names as superseded say so in their status lines, changed in this pull request. `process.md` says the order is the default and that a runner decides each step. Each of the nine step skills names the runner; two of them also say the order is the default. The probe checks these words, not whether each description is complete. It stays draft: its claim is universal ("no project", "the code … is deleted") and this block names no `Falsified-by` check. The probe `prd-05.r20.mjs`, proved able to fail, could be named here.

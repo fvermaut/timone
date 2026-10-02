@@ -88,6 +88,12 @@ if (stale) {
 // Clause 2. The one change in scope is this pull request's; its last change to the runner's
 // instructions is the newest code commit. The run must be on that code, and its record must be
 // on the branch the pull request is opened from (as this clone last saw the remote).
+// ✏ 2026-10-02 (phase 41 verification): when the newest recorded run is older than this build,
+// clause 2 is BLOCKED too, as _replay.mjs says every clause judged on such a run is: the run that
+// would be on the pull request has not been made yet. The break leg of 2a used run 7's commit, which
+// is not in this branch's history once phase 40 was merged, so it went red on a git error rather
+// than on the fact; it now uses the commit just before the newest change outside doc/plans/ and
+// doc/specs/, which always differs from HEAD.
 const branch = execFileSync('git', ['-C', REPO_ROOT, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
 function assertOnThisCode(r) {
   assert(r?.commit, `run ${r?.n ?? '(none)'} does not name the commit it ran on`);
@@ -100,17 +106,24 @@ function assertOnTheBranch(ref, r) {
   const there = runsIn(text).find((x) => x.n === r.n);
   assert(there && there.result === r.result, `run ${r.n}'s result is not in ${RECORD} at ${ref}`);
 }
-const previous = runsIn(fs.readFileSync(path.join(REPO_ROOT, RECORD), 'utf8')).filter((r) => r.n < run.n && r.commit).at(-1);
-await clause('PRD-05.R18 clause 2a', 'the replay set was run on the runner\'s instructions as the pull request carries them', {
-  broken: async () => assertOnThisCode(previous),
-  correct: async () => assertOnThisCode(run),
-});
-let before = '';
-try { before = execFileSync('git', ['-C', REPO_ROOT, 'log', '-1', '--format=%H', `${run.commit}`], { encoding: 'utf8' }).trim(); } catch {}
-await clause('PRD-05.R18 clause 2b', 'its result is on the pull request: the record holding it is on the branch the pull request is opened from', {
-  broken: async () => assertOnTheBranch(before || 'HEAD~1', run),
-  correct: async () => assertOnTheBranch(`origin/${branch}`, run),
-});
-console.log(`    (the pull request itself is not read here: nothing in this probe reaches GitHub. Its description is written when the work is delivered.)`);
+if (stale) {
+  blocked('PRD-05.R18 clause 2a', 'the replay set was run on the runner\'s instructions as the pull request carries them',
+    `the newest recorded replay is older than this build: ${stale}. The replay owed on this build has not been run yet.`);
+  blocked('PRD-05.R18 clause 2b', 'its result is on the pull request: the record holding it is on the branch the pull request is opened from',
+    'no replay on this build is recorded yet, so there is no result to look for on the branch.');
+} else {
+  const lastCode = execFileSync('git', ['-C', REPO_ROOT, 'log', '-1', '--format=%H', '--', '.', ':!doc/plans', ':!doc/specs'], { encoding: 'utf8' }).trim();
+  await clause('PRD-05.R18 clause 2a', 'the replay set was run on the runner\'s instructions as the pull request carries them', {
+    broken: async () => assertOnThisCode({ ...run, commit: `${lastCode}^` }),
+    correct: async () => assertOnThisCode(run),
+  });
+  let before = '';
+  try { before = execFileSync('git', ['-C', REPO_ROOT, 'log', '-1', '--format=%H', `${run.commit}`], { encoding: 'utf8' }).trim(); } catch {}
+  await clause('PRD-05.R18 clause 2b', 'its result is on the pull request: the record holding it is on the branch the pull request is opened from', {
+    broken: async () => assertOnTheBranch(before || 'HEAD~1', run),
+    correct: async () => assertOnTheBranch(`origin/${branch}`, run),
+  });
+  console.log(`    (the pull request itself is not read here: nothing in this probe reaches GitHub. Its description is written when the work is delivered.)`);
+}
 
 finish('PRD-05.R18');
