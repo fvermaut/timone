@@ -1307,7 +1307,10 @@ export function escalationPrompt(
     "below any `Co-Authored-By:` line:",
     "",
     "```",
-    "Timone-Stage: <the stage whose skill you ran, or `escalation` if none>",
+    // ✏ 2026-10-02: `interactive`, not `escalation`, when no step's skill ran.
+    // It is the value CLAUDE.md and the session's start give for a session
+    // with no step, and the check at the session's end names it too.
+    "Timone-Stage: <the stage whose skill you ran, or `interactive` if none>",
     `Timone-Run: ${project}#${ticket.number}`,
     "Timone-Session: <the id you were given at the start of this session>",
     "```",
@@ -1422,6 +1425,10 @@ function conversationBlock(stage: PipelineStage | undefined): string {
  * **Only the named people**, compared as the runner compares them. Anyone
  * else's comment is in the thread above, but it is not an instruction, and
  * the runner never reads it.
+ *
+ * **"Since" is decided on instants, as the runner decides it**, not on the
+ * text. The ledger writes an instant with milliseconds and GitHub writes one
+ * without, and as text "…:00Z" sorts after "…:00.500Z".
  */
 function namedWordsBlock(
   run: StoppedRun,
@@ -1434,7 +1441,7 @@ function namedWordsBlock(
       (comment) =>
         !comment.fromTimone &&
         isNamedPerson(people, comment.author) &&
-        (since === undefined || comment.createdAt > since),
+        (since === undefined || Date.parse(comment.createdAt) > Date.parse(since)),
     )
     .map((comment) => comment.body.trim())
     .filter((body) => body !== "");

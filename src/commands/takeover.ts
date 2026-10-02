@@ -5,10 +5,11 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
-import type {
-  Ticket,
-  TicketingAdapter,
-  TicketingProject,
+import {
+  MARK_LABEL,
+  type Ticket,
+  type TicketingAdapter,
+  type TicketingProject,
 } from "../adapters/ticketing.js";
 import { loadManifest, namedPeople, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
@@ -206,9 +207,10 @@ async function findTakeover(
     case "cancelled": {
       // ✏ 2026-10-02 (41m): **a settled run on an open ticket gets a new
       // run**, as a ticket with no run does. A takeover opens a terminal
-      // session on any run (PRD-05.R11). The runner ends a run whose ticket
-      // lost its mark, and a takeover of that ticket used to answer
-      // "finished" and open nothing. A closed ticket still gets the answer.
+      // session on any run nothing is working on (PRD-05.R11). The runner
+      // ends a run whose ticket lost its mark, and a takeover of that ticket
+      // used to answer "finished" and open nothing. A closed ticket still
+      // gets the answer.
       const { ticket } = await openTicketOf(target, deps);
       if (ticket !== undefined) return { kind: "enrol", ticket };
       return { kind: "nothing-to-do", message: settledMessage(target, run, store) };
@@ -230,12 +232,18 @@ function settledMessage(target: TakeoverTarget, run: Run, store: RunStore): stri
     run.cancellation === undefined || run.cancellation === ""
       ? "."
       : `: ${run.cancellation}.`;
+  // ✏ 2026-10-02: a cancel puts the hold on every ticket since 40u, and the
+  // cycle passes a held ticket over. So reopening and marking it starts
+  // nothing; taking the hold off does. The cycle lists only marked tickets,
+  // and a run cancelled before 40u left no hold, so the words name the mark
+  // and take the hold off only "if it has it".
   return (
     `${target.project} #${target.ticket} was cancelled${because} ` +
     "Cancelled work isn't picked up again — " +
     (heldStepWayOut(store, target.project, target.ticket) ??
-      "reopen the ticket and mark it for me, and I'll start it afresh " +
-        "on my next pass.")
+      `reopen the ticket, make sure it has the \`${MARK_LABEL}\` label, and ` +
+        `take the \`${HELD_LABEL}\` label off if it has it. Then I'll start ` +
+        "it afresh on my next pass.")
   );
 }
 

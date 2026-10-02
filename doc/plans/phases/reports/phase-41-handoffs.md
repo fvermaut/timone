@@ -1741,3 +1741,177 @@ $ git status --short .timone ; echo "(expected: nothing — no test touched the 
 - [x] **Human gate** — fvermaut ran the replay, started the daemon, answered the questions and approved the requirements and the list of pieces on the ticket.
 
 **What delivery must know.** Pull request scratch-app #73 is open and is fvermaut's to merge or close; nothing in Timone waits on it. The daemon is still running on `3afc263`; 41m's change to the ledger read reaches it only when it is restarted. One more replay is owed on the final build.
+
+## 41n — The review's code findings that change what the code does
+
+**Built.** (1) `timone help retry` now prints the same sentence as `timone retry`, on stderr, and exits 1. Before, it printed `Usage: timone retry [anything...]` and exited 0. (2) The takeover prompt decides which named people's comments came after the wait opened by comparing instants (`Date.parse`), not text. A comment written half a second before a wait that opened at `…:00.500Z` is no longer shown as written since. (3) The takeover prompt asks a session that ran no step's skill to sign its commits `Timone-Stage: interactive`, not `escalation`. (4) A takeover of a closed ticket whose run was cancelled now says the way back that works: *"reopen the ticket and take the `timone:held` label off it, and I'll start it afresh on my next pass."* It used to say "reopen the ticket and mark it for me", which starts nothing on a held ticket. The comment that said a takeover opens a session "on any run" now says "on any run nothing is working on". (5) `normaliseOldPath` and `normaliseRemovedFields` read the unknown ledger data through `in` checks, as `normaliseSequence` does, and no longer cast it with `as`. What a ledger loads as is unchanged.
+
+**Files touched.**
+
+- `src/cli.ts` — the hidden `retry` command is now the class `RemovedRetryCommand`, added with `program.addCommand(…, { hidden: true })`. Its action is unchanged. It overrides `help()` to print `RETRY_REMOVED` on stderr and exit 1.
+- `src/cli.test.ts` — case (1): `help retry` added to the `it.each` list.
+- `src/daemon/prompts.ts` — `namedWordsBlock` compares with `Date.parse`, and its doc comment says why. The trailer line of `escalationPrompt` says `interactive`, with a dated comment.
+- `src/daemon/prompts.test.ts` — cases (2) and (3), two tests in *the takeover prompt for a run the runner waits on (41g)*.
+- `src/commands/takeover.ts` — `settledMessage` names `HELD_LABEL` as the way back, with a dated comment. The "on any run" comment in `findTakeover`.
+- `src/commands/takeover.test.ts` — case (4): one test re-based (below). The same "on any run" sentence in the comment above `endedFirstRun`.
+- `src/daemon/runs.ts` — `normaliseOldPath` and `normaliseRemovedFields`, as above. Nothing else.
+- `doc/plans/phases/reports/phase-41-handoffs.md` — this section.
+
+`src/daemon/runs.test.ts` is in the grant but was not changed: case (5) is that its tests pass unchanged.
+
+**What the session-end check accepts.** `checkProvenance` in `src/daemon/hooks.ts` passes a commit when any of its trailer lines starts with `Timone-Stage:`. It does not read the value, so `interactive` is accepted, and so is any other word. Its own advice for a commit without the trailer is `Timone-Stage: interactive` "when no process stage was running". `trailerInstruction` in `src/commands/guardrails.ts`, which every session is given at its start, says `<the process stage you are running, or \`interactive\` if none>`. So the check accepts `interactive`, and the prompt now matches what the start of the session and `CLAUDE.md` say.
+
+**Decisions taken inside the slice.**
+
+1. **`help retry` is answered by overriding `help()` on a subclass of `Command`.** Commander answers `help <name>` by calling that command's `help()` directly; no hook or event runs on that path. `help()` is public and declared in commander's types, so overriding it is the smallest change that reaches it. It ends with `process.exit(1)`, as commander's own `help()` ends with `process.exit`. The other way I saw needs three pieces (`configureHelp` for the text, `configureOutput` for stderr, an event to set the exit code).
+2. **`Date.parse`, not the driver's `ms()`.** `ms` is private to `src/runner/driver.ts`, which this slice may only read. `ms` is one line, `Date.parse(instant)`, so the decision is now made the same way in both places. The comparison stays strict (`>`), as the driver's is.
+3. **The trailer line is the same for every run**, not only for a run with no step: "the stage whose skill you ran, or `interactive` if none". A session on a run with a step may run no skill, and a session on a run with no step may run one. Case (3) builds the prompt for a run with no step, as the plan says.
+4. **The new way back names the label, through `HELD_LABEL`.** `takeover.ts` already imported it and did not use it (41e noted this). A step ticket still gets `heldStepWayOut`'s words, unchanged.
+5. **Case (4) re-bases an existing test instead of adding one.** *resolveTakeover › says a cancelled chunk was abandoned, and what would start the work again* asserted the opposite: `/mark it for me/`, and no `timone:held`. Its comment said the hold belonged only to a dropped step, which stopped being true in 40u. It is renamed *…a cancelled chunk on a closed ticket was abandoned…*, passes `fakeAdapter([])` so the closed ticket is explicit, and asserts `reopen the ticket`, `take the \`timone:held\` label off`, and no `mark it for me`. Its other assertions are unchanged.
+6. **In `normaliseRemovedFields`, the wait's `acknowledgedAt` is dropped with `Object.entries(…).filter(…)`.** After an `in` check the wait's type is `object`, and taking a named field out of `object` by destructuring does not type-check. The result is the same for an object read from JSON.
+7. **`normaliseOldPath` returns at once for a run with no `status`.** The old code reached the same `return run` for it, one branch later.
+8. **`(REMOVED_FIELDS as readonly string[])` stays.** It widens a constant list; it does not narrow ledger data, and the finding and the validation grep are about `as Record<string, unknown>`.
+
+**Validation evidence.**
+
+*(1) `timone help retry`* (`src/cli.test.ts` › *the removed retry command* › *exits 1 and sends the person to the ticket: \`timone help retry\`*). Built, then run, seen red:
+
+```
+✓ … `timone retry scratch-app#1`   ✓ … `timone retry`   ✓ … --state elsewhere.json   ✓ … `timone retry --help`
+× the removed retry command > exits 1 and sends the person to the ticket: `timone help retry` 119ms
+  → expected +0 to be 1 // Object.is equality
+✓ the removed retry command > is not listed in the help
+Tests  1 failed | 5 passed (6)
+```
+
+Built again after the change: `Tests  6 passed (6)`. The test also asserts stdout is empty and stderr is exactly the sentence. `timone help cancel` still prints the cancel command's help and exits 0, and `timone --help` still does not list `retry`.
+
+*(2) Instants, not text* (`prompts.test.ts` › *compares when a comment was written with when the wait opened as instants, whatever their spelling*). The wait opens at `2026-08-03T10:00:00.500Z`; fvermaut wrote at `…T10:00:00Z` and at `…T10:00:01Z`. Seen red:
+
+```
+× the takeover prompt for a run the runner waits on (41g) > compares when a comment was written with when the wait opened as instants, whatever their spelling 4ms
+  → expected '--- what they wrote ---\nwritten just…' not to contain 'written just before the wait opened'
+Tests  1 failed | 188 skipped (189)
+```
+
+Green after `Date.parse`: `prompts.test.ts` `Tests  189 passed (189)`.
+
+*(3) `Timone-Stage: interactive`* (`prompts.test.ts` › *asks a session that ran no step's skill to sign its commits \`Timone-Stage: interactive\`*). The run has no step. The test asserts the exact trailer line, and that no `Timone-Stage:` line names `escalation`. Seen red:
+
+```
+× … > asks a session that ran no step's skill to sign its commits `Timone-Stage: interactive` 7ms
+  → expected 'You are picking up **scratch-app #6**…' to contain 'Timone-Stage: <the stage whose skill …'
+Tests  1 failed | 189 skipped (190)
+```
+
+Green after the line changed: `Tests  190 passed (190)`.
+
+*(4) The way back from a cancelled run on a closed ticket* (`takeover.test.ts` › *resolveTakeover* › *says a cancelled chunk on a closed ticket was abandoned, and what would start the work again*). Re-based first, seen red:
+
+```
+× resolveTakeover > says a cancelled chunk on a closed ticket was abandoned, and what would start the work again 7ms
+  → expected 'scratch-app #4 was cancelled: the tic…' to contain 'take the `timone:held` label off'
+Tests  1 failed | 46 skipped (47)
+```
+
+Green after `settledMessage` changed: `takeover.test.ts` `Tests  47 passed (47)`.
+
+*(5) The old-ledger load tests pass unchanged.* There is no new behaviour, so nothing could be red. Before the change, the eleven tests in *the wait as one value* (three), *runs the old code left in the ledger become runs the runner can read* (four), *fields only the old code wrote are dropped when the ledger is read (41h)* (two) and *a failed run the old code left keeps a reason of one line (41m)* (two): `Tests  11 passed | 111 skipped (122)`; the whole file `Tests  122 passed (122)`. After it: the same eleven names, `Tests  11 passed | 111 skipped (122)`, and `122 passed (122)`. `git diff -- src/daemon/runs.test.ts` is empty. `npx tsc --noEmit` exit 0.
+
+To show the tests watch the new narrowing, I broke one `in` check at a time, ran the eleven tests, and put the file back from a saved copy (`diff` empty after each):
+
+```
+break: "failure" in run  →  "failures" in run          (normaliseOldPath)
+× … > loads each failed run as cancelled, keeping what stopped it, and leaves done and cancelled runs as they were
+  → expected { id: 'scratch-app#21/1', …(12) } to deeply equal { id: 'scratch-app#21/1', …(12) }
+× … (41m) > loads an old failed run whose failure is a whole machine comment with one line, and no banner and no command
+Tests  2 failed | 9 passed | 111 skipped (122)
+
+break: !("wait" in run)  →  !("waits" in run)          (normaliseOldPath)
+× the wait as one value > folds a real pre-collapse ledger into the new shape
+× … > loads each old kind of wait as the runner's, keeping what it waits on and when it opened
+  → expected { id: 'ivtrends#93/1', …(10) } to deeply equal { id: 'ivtrends#93/1', …(10) }
+Tests  2 failed | 9 passed | 111 skipped (122)
+
+break: "cancellation" in run  →  "cancelation" in run  (normaliseOldPath)
+× … (41m) > cuts the reason the same way on a run an earlier build already converted and wrote
+  → expected { id: 'timone#106/1', …(10) } to deeply equal { id: 'timone#106/1', …(10) }
+Tests  1 failed | 10 passed | 111 skipped (122)
+
+break: "wait" in run  →  "waits" in run                (normaliseRemovedFields)
+× (41c's four and 41h's two)
+  → Invalid daemon state file "…/state.json": runs.3.wait: Unrecognized key: "acknowledgedAt"
+  → (41h's second) runs.0.wait.kind: Invalid input: expected "runner"
+Tests  6 failed | 5 passed | 111 skipped (122)
+
+break: field !== "acknowledgedAt"  →  field !== "acknowledged"   (normaliseRemovedFields)
+  → Invalid daemon state file "…/state.json": runs.3.wait: Unrecognized key: "acknowledgedAt"
+Tests  5 failed | 6 passed | 111 skipped (122)
+
+restored: Tests  122 passed (122)
+```
+
+Validation commands, as run:
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+ Test Files  56 passed (56)
+      Tests  1411 passed (1411)
+$ node dist/cli.js help retry ; echo "exit: $? (expected 1)"
+`timone retry` was removed. Write on the ticket instead: say what you want done.
+exit: 1 (expected 1)
+$ grep -n " as Record<string, unknown>" src/daemon/runs.ts
+1483:  const old = run as Record<string, unknown>;
+```
+
+Line 1483 is in `normaliseWait`. 1411 = 1408 + 1 (case (1)) + 2 (cases (2) and (3)). Case (4) re-based one test; none deleted. `git status --short .timone` is empty.
+
+- [x] Red-green evidence for each of the five cases is in the handoff. Cases (1) to (4) were seen red, then green. Case (5) adds no behaviour: the tests pass before and after, and the five breaks above make them fail. **PASS**
+- [x] The last command prints only the line in `normaliseWait`, which is older than this phase. **PASS**
+
+**What 41o and 41p must know.**
+
+- **`dist/` is built from this slice's code.** The running daemon still uses the code it loaded at start.
+- **A run cancelled before a cancel put the hold on** (before 40u), and a failed run 41c reads as cancelled, carry no `timone:held` label. For those, the new message names a label the ticket does not have; reopening it is enough while it still carries the `timone` mark. The message also does not say the ticket needs the mark. A cancel and a close leave the mark on, so an ordinary cancelled ticket still has it. I kept the plan's words.
+- **Left as they were, outside this slice's findings:**
+  - `src/commands/takeover.ts`, `settledMessage`: the comment says the reason "lives in `cancellation` rather than `failure`". `failure` no longer exists (41h noted it).
+  - `src/daemon/dropped.ts`, the doc of `heldStepWayOut`: it says any other ticket's cancelled chunk is opened again on the next cycle, "which is … still what happens". That stopped being true in 40u. Not in this slice's files.
+  - The names finding 4 lists (`escalation` as a resolution kind, `escalate`, `escalationPrompt`, `StoppedRun`, `ASK_CHECK_MODEL`) are unchanged. This slice changed only the trailer value.
+- **The CLI test runs the built `dist/cli.js`**, so build before running it.
+- **Refactoring I would do but did not:** export the driver's `ms()` from one shared place, so the runner and the takeover prompt use the same helper, not two copies of `Date.parse`. Narrow `normaliseWait` with `in` checks too; its cast is older than this phase and the plan leaves it.
+
+### ✏ 2026-10-02 — 41n, case (4) adjusted at the orchestrator's request
+
+**Built.** The message on a closed ticket whose run was cancelled is now true for every cancelled ticket, the old ones too: *"… Cancelled work isn't picked up again — reopen the ticket, make sure it has the `timone` label, and take the `timone:held` label off if it has it. Then I'll start it afresh on my next pass."* The cycle lists only tickets with the `timone` label, and a run cancelled before 40u, or a failed run 41c reads as cancelled, has no hold. A step ticket still gets `heldStepWayOut`'s words, unchanged.
+
+**Files touched, in addition to the list above.** `src/commands/takeover.ts` — the message and its comment; `MARK_LABEL` imported from `src/adapters/ticketing.ts`, as `cancel.ts` does. `src/commands/takeover.test.ts` — the case (4) test asserts `make sure it has the \`timone\` label` and `take the \`timone:held\` label off if it has it`, and its comment says why.
+
+**Evidence.** The test was changed first and seen red:
+
+```
+× resolveTakeover > says a cancelled chunk on a closed ticket was abandoned, and what would start the work again 7ms
+  → expected 'scratch-app #4 was cancelled: the tic…' to contain 'make sure it has the `timone` label'
+Tests  1 failed | 46 skipped (47)
+```
+
+Green after the message changed: `npx tsc --noEmit` exit 0, `takeover.test.ts` `Tests  47 passed (47)`.
+
+Validation commands, run again:
+
+```
+$ npm run build && npm test 2>&1 | tail -5
+ Test Files  56 passed (56)
+      Tests  1411 passed (1411)
+$ node dist/cli.js help retry ; echo "exit: $? (expected 1)"
+`timone retry` was removed. Write on the ticket instead: say what you want done.
+exit: 1 (expected 1)
+$ grep -n " as Record<string, unknown>" src/daemon/runs.ts
+1483:  const old = run as Record<string, unknown>;
+```
+
+The test count is unchanged: case (4) was changed, not added to. `git status --short .timone` is empty.
+
+- [x] Red-green evidence for each of the five cases is in the handoff. Case (4) is shown above and in the section before it. **PASS**
+- [x] The last command prints only the line in `normaliseWait`, which is older than this phase. **PASS**
+
+The second bullet under *What 41o and 41p must know* above is out of date: the message now names the mark, and takes the hold off only if the ticket has it.

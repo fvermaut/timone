@@ -1559,30 +1559,33 @@ const STOPPED_BEFORE_REMOVAL = "stopped before the old code was removed: ";
  */
 function normaliseOldPath(run: unknown): unknown {
   if (typeof run !== "object" || run === null) return run;
-  const old = run as Record<string, unknown>;
-  if (old.status === "failed") {
+  if (!("status" in run)) return run;
+  if (run.status === "failed") {
     const failure =
-      typeof old.failure === "string" ? oneLineReason(old.failure) : "no reason recorded";
+      "failure" in run && typeof run.failure === "string"
+        ? oneLineReason(run.failure)
+        : "no reason recorded";
     return {
-      ...old,
+      ...run,
       status: "cancelled",
       cancellation: `${STOPPED_BEFORE_REMOVAL}${failure}`,
     };
   }
   if (
-    old.status === "cancelled" &&
-    typeof old.cancellation === "string" &&
-    old.cancellation.startsWith(STOPPED_BEFORE_REMOVAL)
+    run.status === "cancelled" &&
+    "cancellation" in run &&
+    typeof run.cancellation === "string" &&
+    run.cancellation.startsWith(STOPPED_BEFORE_REMOVAL)
   ) {
-    const reason = oneLineReason(old.cancellation.slice(STOPPED_BEFORE_REMOVAL.length));
+    const reason = oneLineReason(run.cancellation.slice(STOPPED_BEFORE_REMOVAL.length));
     const cut = `${STOPPED_BEFORE_REMOVAL}${reason}`;
-    return cut === old.cancellation ? run : { ...old, cancellation: cut };
+    return cut === run.cancellation ? run : { ...run, cancellation: cut };
   }
-  if (old.status !== "parked") return run;
-  const { wait } = old;
+  if (run.status !== "parked" || !("wait" in run)) return run;
+  const { wait } = run;
   if (typeof wait !== "object" || wait === null) return run;
   if ("kind" in wait && wait.kind === "runner") return run;
-  return { ...old, wait: { ...wait, kind: "runner" } };
+  return { ...run, wait: { ...wait, kind: "runner" } };
 }
 
 /**
@@ -1645,23 +1648,24 @@ const REMOVED_FIELDS = [
  */
 function normaliseRemovedFields(run: unknown): unknown {
   if (typeof run !== "object" || run === null) return run;
-  const old = run as Record<string, unknown>;
   const wait =
-    typeof old.wait === "object" && old.wait !== null
-      ? (old.wait as Record<string, unknown>)
+    "wait" in run && typeof run.wait === "object" && run.wait !== null
+      ? run.wait
       : undefined;
   const oldKind = wait !== undefined && "kind" in wait && wait.kind !== "runner";
   const acknowledged = wait !== undefined && "acknowledgedAt" in wait;
-  if (!oldKind && !acknowledged && !REMOVED_FIELDS.some((field) => field in old)) {
+  if (!oldKind && !acknowledged && !REMOVED_FIELDS.some((field) => field in run)) {
     return run;
   }
   const kept = Object.fromEntries(
-    Object.entries(old).filter(
+    Object.entries(run).filter(
       ([field]) => !(REMOVED_FIELDS as readonly string[]).includes(field),
     ),
   );
   if (wait === undefined) return kept;
-  const { acknowledgedAt: _acknowledged, ...waitKept } = wait;
+  const waitKept = Object.fromEntries(
+    Object.entries(wait).filter(([field]) => field !== "acknowledgedAt"),
+  );
   return { ...kept, wait: oldKind ? { ...waitKept, kind: "runner" } : waitKept };
 }
 

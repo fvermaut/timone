@@ -38,6 +38,34 @@ const RETRY_REMOVED =
   "`timone retry` was removed. Write on the ticket instead: say what you want done.";
 
 /**
+ * `timone retry`, kept only to answer a person who still types it. Every way
+ * in says {@link RETRY_REMOVED} on stderr and exits 1: with any arguments,
+ * with `--help`, and as `timone help retry`.
+ *
+ * Commander answers `timone help retry` by calling this command's `help()`,
+ * which would print a usage line for it and exit 0. So `help()` gives the
+ * sentence instead. `--help` is switched off, so it reaches the action like
+ * any other argument.
+ */
+class RemovedRetryCommand extends Command {
+  constructor() {
+    super("retry");
+    this.argument("[anything...]")
+      .allowUnknownOption()
+      .helpOption(false)
+      .action(() => {
+        console.error(RETRY_REMOVED);
+        process.exitCode = 1;
+      });
+  }
+
+  override help(): never {
+    console.error(RETRY_REMOVED);
+    process.exit(1);
+  }
+}
+
+/**
  * Build the root commander program. Future sub-phases register commands here
  * (e.g. `program.addCommand(makeFooCommand())`) before it is parsed.
  */
@@ -57,17 +85,8 @@ export function buildProgram(): Command {
   registerTranscriptCommand(program);
   registerRecordCommand(program);
   registerTakeoverCommand(program);
-  // Kept only to answer a person who still types it: with any arguments, it
-  // says the sentence above and exits 1. Hidden, so the help does not offer it.
-  program
-    .command("retry", { hidden: true })
-    .argument("[anything...]")
-    .allowUnknownOption()
-    .helpOption(false)
-    .action(() => {
-      console.error(RETRY_REMOVED);
-      process.exitCode = 1;
-    });
+  // Hidden, so the help does not offer it.
+  program.addCommand(new RemovedRetryCommand(), { hidden: true });
   registerCancelCommand(program);
   registerStageCommand(program);
 

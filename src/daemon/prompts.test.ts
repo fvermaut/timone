@@ -779,6 +779,45 @@ describe("the takeover prompt for a run the runner waits on (41g)", () => {
     // Not named for the project, so not an instruction.
     expect(since).not.toContain("make it purple");
   });
+
+  it("compares when a comment was written with when the wait opened as instants, whatever their spelling", () => {
+    // The ledger writes an instant with milliseconds, and GitHub writes one
+    // without. As text, "…T10:00:00Z" sorts after "…T10:00:00.500Z", though
+    // it is half a second before it.
+    const opened: StoppedRun = {
+      ...waiting,
+      wait: { on: "an answer", opened: "2026-08-03T10:00:00.500Z" },
+    };
+    const thread: TicketThread = {
+      ...ticket,
+      comments: [
+        { author: "fvermaut", body: "written just before the wait opened", createdAt: "2026-08-03T10:00:00Z", fromTimone: false },
+        { author: "fvermaut", body: "written just after the wait opened", createdAt: "2026-08-03T10:00:01Z", fromTimone: false },
+      ],
+    };
+
+    const prompt = escalationPrompt("scratch-app", opened, thread, facts);
+    const since = prompt.slice(
+      prompt.indexOf("--- what they wrote ---"),
+      prompt.indexOf("--- end of what they wrote ---"),
+    );
+
+    expect(since).toContain("written just after the wait opened");
+    expect(since).not.toContain("written just before the wait opened");
+  });
+
+  it("asks a session that ran no step's skill to sign its commits `Timone-Stage: interactive`", () => {
+    // The value CLAUDE.md, the session's start and the check at its end all
+    // give for a session in which no step was running.
+    const { stage: _none, ...noStep } = waiting;
+
+    const prompt = escalationPrompt("scratch-app", noStep, ticket, facts);
+
+    expect(prompt).toContain(
+      "Timone-Stage: <the stage whose skill you ran, or `interactive` if none>",
+    );
+    expect(prompt).not.toMatch(/Timone-Stage:.*escalation/);
+  });
 });
 
 describe("the escalation prompt", () => {

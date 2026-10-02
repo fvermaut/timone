@@ -36,6 +36,9 @@ describe("the removed retry command", () => {
     "retry",
     "retry scratch-app#1 --state elsewhere.json",
     "retry --help",
+    // Commander answers `help <command>` itself, by printing that command's
+    // help, so this way in needs its own case.
+    "help retry",
   ])("exits 1 and sends the person to the ticket: `timone %s`", (line) => {
     const ran = timone(...line.split(" "));
 

@@ -304,7 +304,7 @@ describe("resolveTakeover", () => {
     });
   });
 
-  it("says a cancelled chunk was abandoned, and what would start the work again", async () => {
+  it("says a cancelled chunk on a closed ticket was abandoned, and what would start the work again", async () => {
     // 22b: `cancelled` is not `parked`. With no arm of its own it fell past the
     // parked case and told the human their ticket was parked on nothing — with
     // the reason sitting in `cancellation`, unread, all along.
@@ -313,9 +313,10 @@ describe("resolveTakeover", () => {
     store.activate(run.id, "session-1");
     store.cancel(run.id, "the ticket is no longer open and marked for me");
 
+    // No open ticket: #4 is closed. An open one gets a new run (41m).
     const resolution = await resolveTakeover(
       { project: "scratch-app", ticket: 4 },
-      { manifest, store, adapter: fakeAdapter().adapter },
+      { manifest, store, adapter: fakeAdapter([]).adapter },
     );
 
     expect(resolution).toMatchObject({
@@ -328,12 +329,16 @@ describe("resolveTakeover", () => {
     // Abandoned, not broken, and never parked: the words a person reads must
     // not hand them a fault to look for, nor a chunk to count.
     const said = resolution.kind === "escalation" ? "" : resolution.message;
-    // ✏ 29j, corrected: `#4` is **not** a step of any initiative, so its
-    // cancelled chunk is opened again on the next cycle exactly as it always
-    // was. The hold label belongs to a dropped step and naming it here would
-    // point at a gesture with no effect.
-    expect(said).toMatch(/mark it for me/);
-    expect(said).not.toMatch(/timone:held/);
+    // ✏ 2026-10-02: a cancel holds every ticket since 40u, step or not, and
+    // the cycle passes a held ticket over. So reopening and marking it starts
+    // nothing: the way back is to reopen it and take the hold off. Until then
+    // this test said the opposite, because only a dropped step was held. The
+    // cycle also lists only marked tickets, and a run cancelled before 40u has
+    // no hold, so the words name the mark and say "if it has it".
+    expect(said).toMatch(/reopen the ticket/);
+    expect(said).toContain("make sure it has the `timone` label");
+    expect(said).toContain("take the `timone:held` label off if it has it");
+    expect(said).not.toMatch(/mark it for me/);
     expect(said).not.toMatch(/parked|failed|stopped early|scratch-app#4/);
   });
 });
@@ -1335,8 +1340,8 @@ describe("a takeover that opens a new run, at the step its `wayfinder:` label na
   // ✏ 2026-10-02 (41m, case 5): the runner ended the runs of six decision
   // tickets, so they were `done`, and a takeover of one answered "finished"
   // and opened nothing. PRD-05.R11 clause 2: a takeover opens a terminal
-  // session on any run. An open ticket whose latest run is settled gets a new
-  // run, as a ticket with no run does.
+  // session on any run nothing is working on. An open ticket whose latest run
+  // is settled gets a new run, as a ticket with no run does.
 
   /** Ticket #12's first run, ended by the runner. */
   function endedFirstRun(store: RunStore): void {
