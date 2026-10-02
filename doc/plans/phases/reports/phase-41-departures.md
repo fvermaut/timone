@@ -106,3 +106,10 @@
 **Agreed:** the phase closed at 41m and was delivered as pull request #189, with the reviews' findings listed for later.
 **Did instead:** three slices were added, 41n to 41p, to fix the reviews' 12 findings on the pull request before it merges and to reword PRD-05.R11 clause 2. The two `Falsified-by` lines fvermaut asked for on R11 and R20 are written by the re-check after 41p, not by a build slice.
 **Why:** fvermaut's answers on 2026-10-02: fix first, change the words, and yes to the `Falsified-by` lines. Those lines name verification's own checks, which a build step may not name or open.
+
+## 2026-10-02 — timone#166, verification (iteration 3)
+
+**Kind:** check not run
+**Agreed:** PRD-05.R18: the replay of the recorded failures on the real model, three tries per case, on the build the pull request carries. With it, the runner's own part of PRD-05.R7 clause 1 (replay case scratch-app#37).
+**Did instead:** Not run. Reported BLOCKED in [iteration 3 of phase-41-verification.md](phase-41-verification.md#iteration-3--after-the-reviews-fixes-41n-to-41p). The newest recorded replay is run 9 (19 of 19, three tries of three), at `45ab65b`. 41n (`a30bdd4`) and 41o (`a0fa4d7`) changed files under `src/` after it. PRD-05.R18 and R7 keep their `verified` status: nothing was seen to be wrong.
+**Why:** The replay calls the real model, costs money, and needs fvermaut's own logged-in terminal. It is owed on this branch's final commit before the pull request is merged: run `npm run --silent replay` there, and record it as run 10 in [phase-40-replay.md](phase-40-replay.md).

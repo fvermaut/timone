@@ -213,6 +213,12 @@ await clause('PRD-05.R20 clause 4a', 'process.md says that the order is the defa
   broken: async () => assertProcessDoc(readBefore),
   correct: async () => assertProcessDoc(readNow),
 });
+// ✏ 2026-10-02 (phase 41 verification, iteration 3): 4b now also checks that each step skill says the
+// order is the default, as the criterion's words ask of `process.md` "and the step skills". The first
+// pass checked only that each names the runner, and said so. A skill passes this part when it says
+// "default order", the order is the default, or that the runner chooses the next step and one
+// "is the default one" — the words several skills use.
+const SAYS_DEFAULT = /\bdefault order\b|\border\b[^.\n]{0,80}\bdefault\b|\bis the default one\b/i;
 function assertSkills(read) {
   assert(SKILLS.length >= 8, `process.md's table named only ${SKILLS.length} step skills: ${SKILLS.join(', ')}`);
   const bad = [];
@@ -220,16 +226,17 @@ function assertSkills(read) {
     const t = read(`.claude/skills/${s}/SKILL.md`);
     if (!t) { bad.push(`${s}: no SKILL.md`); continue; }
     if (!/\brunner\b/i.test(t)) bad.push(`${s}: never names the runner`);
+    if (!SAYS_DEFAULT.test(t)) bad.push(`${s}: does not say the order is the default`);
     if (retryGivenToRun(t).length) bad.push(`${s}: still gives \`timone retry\` to run`);
   }
   assert(bad.length === 0, bad.join('; '));
 }
-await clause('PRD-05.R20 clause 4b', 'the step skills describe the runner', {
+await clause('PRD-05.R20 clause 4b', 'the step skills say that the order is the default, and describe the runner', {
   broken: async () => assertSkills(readBefore),
   correct: async () => assertSkills(readNow),
 });
-const says = (s) => /\bdefault order\b|\border\b[^.\n]{0,80}\bdefault\b/i.test(readNow(`.claude/skills/${s}/SKILL.md`));
+const said = (s) => (readNow(`.claude/skills/${s}/SKILL.md`).match(SAYS_DEFAULT) ?? [''])[0];
 console.log(`    (the step skills, from process.md's table, stages 1 to 8: ${SKILLS.join(', ')})`);
-console.log(`    (each names the runner. Those that also say in their own words that the order is the default: ${SKILLS.filter(says).join(', ') || 'none'}. The words are checked, not whether the description is complete.)`);
+console.log(`    (each names the runner, and says the order is the default in these words: ${SKILLS.map((s) => `${s} "${said(s)}"`).join('; ')}. The words are checked, not whether the description is complete.)`);
 
 finish('PRD-05.R20');

@@ -9,14 +9,24 @@
 //   1. GIVEN the runner cannot start, for example because the model service cannot be reached
 //      WHEN the operator runs `timone cancel <ticket>`
 //      THEN the run stops, any running session is stopped, and the project is free for the next ticket
-//   2. GIVEN any run WHEN the operator runs `timone takeover <ticket>`
+//   2. GIVEN any run that nothing is working on, and that is not waiting its turn behind another run
+//      WHEN the operator runs `timone takeover <ticket>`
 //      THEN a terminal session opens on that ticket, and when it ends the runner wakes and reads what it left
+//      Note under it, 2026-10-02 (in part): "A takeover of a run the machine is working on opens no
+//      session, and says what is happening. Nor does a takeover of a run waiting its turn: it waits
+//      because another run holds the project, and a terminal session on it would work in the same
+//      repository at the same time."
 //   3. GIVEN the command line WHEN `timone retry` is typed
 //      THEN it does not exist, and the message says to write on the ticket instead
 //   Phase 40's header: "In this phase retry refuses on a runner project and says to write on the
 //   ticket instead. Deleting the command is #166's, with R20."
 //   ✏ 2026-10-02 (phase 41, #166): clause 3 is now checked as written, and its old split is gone.
 //   The fixtures no longer carry a `driver` line, which no longer loads (see _rig.mjs).
+//   ✏ 2026-10-02 (phase 41 verification, iteration 3): clause 2 was reworded on fvermaut's answer on
+//   pull request #189. It used to say "GIVEN any run". Its checks are re-authored from the new words;
+//   see the comment above clause 2 below.
+//   Since the same day the register names this file in R11's `Falsified-by` line, so a run that
+//   cannot go red on a break leg leaves that line naming a check that does not work.
 //
 // Clause 1c added 2026-09-29 (re-check after 40u). Clause 1a closes the ticket right after the cancel,
 // so it never saw what the first check found outside its verdicts: the cancelled ticket, still open and
@@ -130,49 +140,87 @@ await clause('PRD-05.R11 clause 1c', 'the ticket left open and marked: after tim
 console.log(`    (the command said, exit ${leftOpen.out.code}: "${(leftOpen.out.out + leftOpen.out.err).trim().replace(/\n/g, ' ')}")`);
 console.log(`    (the ticket's labels after the cancel: ${JSON.stringify(leftOpen.labels)}; the next ticket's run: ${leftOpen.next ? `${leftOpen.next.id} ${leftOpen.next.status}` : 'none'})`);
 
-// Clause 2: takeover opens a terminal session on the ticket; when it ends, the runner wakes and reads what it left.
+// Clause 2, re-authored 2026-10-02 (phase 41 verification, iteration 3) from the register's words as
+// they now stand: "GIVEN any run that nothing is working on, and that is not waiting its turn behind
+// another run WHEN the operator runs `timone takeover <ticket>` THEN a terminal session opens on that
+// ticket, and when it ends the runner wakes and reads what it left." The phase-40 version said
+// "GIVEN any run" and checked one kind of run. This version states and checks the GIVEN for each
+// fixture, and checks two kinds of run nothing is working on: one the runner left with nothing to do
+// (2a, 2b), and one the operator stopped with `timone cancel` (2c). The note under the clause names
+// the two runs it leaves out; each is checked under its own "note" label. Their break legs use the
+// takeover of a run nothing is working on, where a session does open: an instrument that cannot
+// tell a session opening from none cannot go red there.
+//
+// One case is printed and not judged: a run nothing is working on, not in the queue, while another
+// run of the same project holds it. The clause's words cover it; the note's reason ("a terminal
+// session on it would work in the same repository at the same time") and R15 clause 2 ("only one
+// runs at a time") argue against it. Which is meant is a question for the human, asked in
+// phase-41-verification.md, iteration 3. When it is answered, judge it here.
 const CLOSING = `${MACHINE_HEADER}🔁 **Picking it back up** · written by the machine when a stop has been cleared and the work goes on without you\n\nPROBE-R11-LEFT: we agreed to build only the count.\n\nCarrying on at: building\n\n**What I need from you:** nothing.`;
-async function takeover({ doTakeover, daemonUp = true }) {
-  const fx = fixture({ issues: { fixture: { [N]: {} } } });
-  // The stand-in session posts through the person's account, as the real one does from their terminal.
+// A stand-in `claude` on PATH plays the terminal session. It posts through the person's account, as
+// the real one does from their terminal.
+function standIn(fx, ticket = N) {
   fs.writeFileSync(path.join(fx.dir, 'closing.md'), CLOSING);
   fs.writeFileSync(path.join(fx.dir, 'bin', 'claude'), [
     '#!/bin/sh',
     `printf '%s\\n' "$@" > "${path.join(fx.dir, 'takeover-prompt.txt')}"`,
-    `FAKE_BOT_LOGIN=${OPERATOR} gh issue comment ${N} --repo probe-owner/fixture --body-file - < "${path.join(fx.dir, 'closing.md')}" > /dev/null`,
+    `FAKE_BOT_LOGIN=${OPERATOR} gh issue comment ${ticket} --repo probe-owner/fixture --body-file - < "${path.join(fx.dir, 'closing.md')}" > /dev/null`,
     'exit 0', '',
   ].join('\n'));
   fs.chmodSync(path.join(fx.dir, 'bin', 'claude'), 0o755);
+}
+const promptOf = (fx) => (fs.existsSync(path.join(fx.dir, 'takeover-prompt.txt')) ? fs.readFileSync(path.join(fx.dir, 'takeover-prompt.txt'), 'utf8') : '');
+const takeoverCmd = (fx, t = N) => fx.cli(['takeover', `fixture#${t}`, '--manifest', fx.manifest, '--state', fx.statePath]);
+const runsOf = (fx) => fx.state().runs.map((r) => `${r.id} ${r.status}`).join(', ');
+// The GIVEN, read from the ledger before the takeover: nothing is working on the run (it is not
+// active), it is not waiting its turn (it is not queued), and no other run holds the project.
+function givenOf(fx, t = N) {
+  const runs = fx.state().runs;
+  const mine = runs.filter((r) => r.ticket === t).at(-1);
+  const others = runs.filter((r) => r.ticket !== t && ['active', 'queued'].includes(r.status));
+  return { status: mine?.status, ok: mine && !['active', 'queued'].includes(mine.status) && others.length === 0, runs: runsOf(fx) };
+}
+// kind: 'idle' — the runner woke on the new ticket and chose to do nothing, so the run waits on nothing.
+//       'cancelled' — the same, then `timone cancel` stopped it.
+async function takeover({ doTakeover, daemonUp = true, kind = 'idle' }) {
+  const fx = fixture({ issues: { fixture: { [N]: {} } } });
+  standIn(fx);
   const m = await model({ runner: () => say() });
   await daemon(fx, m, { until: () => fx.record(N).some((e) => e.kind === 'runner-ended'), timeoutMs: 20000, settleMs: 500 });
+  if (kind === 'cancelled') cancel(fx);
+  const given = givenOf(fx);
   const before = m.runner().length;
-  let out = { code: null, out: '' };
+  let out = { code: null, out: '', err: '' };
   if (daemonUp) {
     const d = daemon(fx, m, { until: () => m.runner().length > before, timeoutMs: 15000, settleMs: 1000 });
     await sleep(1500);
-    if (doTakeover) out = fx.cli(['takeover', `fixture#${N}`, '--manifest', fx.manifest, '--state', fx.statePath]);
+    if (doTakeover) out = takeoverCmd(fx);
     await d;
   } else {
     // No daemon while the session runs; the daemon is started again afterwards.
-    if (doTakeover) out = fx.cli(['takeover', `fixture#${N}`, '--manifest', fx.manifest, '--state', fx.statePath]);
+    if (doTakeover) out = takeoverCmd(fx);
     await daemon(fx, m, { until: () => m.runner().length > before, timeoutMs: 15000, settleMs: 1000 });
   }
   await m.stop();
-  const prompt = fs.existsSync(path.join(fx.dir, 'takeover-prompt.txt')) ? fs.readFileSync(path.join(fx.dir, 'takeover-prompt.txt'), 'utf8') : '';
   const after = m.runner().slice(before);
-  const r = { out, prompt, woke: after.length > 0, sawLeft: after.some((q) => q.brief.includes('PROBE-R11-LEFT')), fx };
-  return r;
+  return { kind, given, out, prompt: promptOf(fx), woke: after.length > 0, sawLeft: after.some((q) => q.brief.includes('PROBE-R11-LEFT')), fx };
 }
 const took = await takeover({ doTakeover: true });
 const didNotTake = await takeover({ doTakeover: false });
+function assertGiven(r) {
+  assert(r.given.ok, `setup: the run is not one nothing is working on and not waiting its turn (${r.given.runs})`);
+}
 function assertSessionOpened(r) {
+  assertGiven(r);
   assert(r.prompt.includes(`fixture #${N}`) || r.prompt.includes(`fixture#${N}`), 'no terminal session was opened on the ticket');
 }
-await clause('PRD-05.R11 clause 2a', 'timone takeover opens a terminal session on that ticket', {
+await clause('PRD-05.R11 clause 2a', 'a run that nothing is working on and that is not waiting its turn: timone takeover opens a terminal session on that ticket', {
   broken: async () => assertSessionOpened(didNotTake),
   correct: async () => assertSessionOpened(took),
 });
+console.log(`    (the run before the takeover: ${took.given.runs}; no other run on the project)`);
 function assertWokeAndRead(r) {
+  assertGiven(r);
   assert(r.woke, 'the terminal session ended and left its closing comment, but the runner did not wake');
   assert(r.sawLeft, 'the runner woke without what the session left');
 }
@@ -188,6 +236,97 @@ await clause('PRD-05.R11 clause 2b (daemon stopped)', 'takeover with no daemon r
   correct: async () => assertWokeAndRead(tookWhileDown),
 });
 console.log(`    (takeover with no daemon said, exit ${tookWhileDown.out.code}: "${tookWhileDown.out.out.trim().replace(/\n/g, ' ')}")`);
+const tookCancelled = await takeover({ doTakeover: true, kind: 'cancelled' });
+const noTakeoverCancelled = await takeover({ doTakeover: false, kind: 'cancelled' });
+await clause('PRD-05.R11 clause 2c', 'a run stopped with timone cancel is also one nothing is working on: timone takeover opens a terminal session on that ticket, and when it ends the runner wakes and reads what it left', {
+  broken: async () => { assert(noTakeoverCancelled.given.status === 'cancelled', `setup: the run is ${noTakeoverCancelled.given.status}`); assertSessionOpened(noTakeoverCancelled); assertWokeAndRead(noTakeoverCancelled); },
+  correct: async () => { assert(tookCancelled.given.status === 'cancelled', `setup: the run is ${tookCancelled.given.status}`); assertSessionOpened(tookCancelled); assertWokeAndRead(tookCancelled); },
+});
+console.log(`    (takeover of the cancelled run said, exit ${tookCancelled.out.code}: "${tookCancelled.out.out.trim().replace(/\n/g, ' ')}"; runs after: ${runsOf(tookCancelled.fx)})`);
+
+// The note's two runs. A run the machine is working on: a step is running on it.
+async function busyTakeover() {
+  const fx = fixture({ issues: { fixture: { [N]: {} } } });
+  standIn(fx);
+  const m = await model({
+    runner: (c) => (c.wake === 0 && c.turn === 0 ? act('start_step', { stage: 'execution', instructions: 'build', reason: 'p', skipReason: 'p' }) : say()),
+    step: () => ({ hang: true }),
+  });
+  let out = null, status;
+  const d = daemon(fx, m, { until: () => out, timeoutMs: 30000, settleMs: 1500 });
+  while (!m.steps().length) await sleep(200);
+  await sleep(1500);
+  status = fx.run(N)?.status;
+  out = takeoverCmd(fx);
+  await d;
+  await m.stop();
+  return { status, out, said: (out.out + out.err).trim(), prompt: promptOf(fx), fx };
+}
+// A run waiting its turn: ticket 13's step holds the project when ticket 12 arrives.
+async function queuedTakeover() {
+  const fx = fixture({ issues: { fixture: { 13: { title: 'The ticket ahead' } } } });
+  standIn(fx);
+  const m = await model({
+    runner: (c) => (c.turn === 0 ? act('start_step', { stage: 'execution', instructions: 'build', reason: 'p', skipReason: 'p' }) : say()),
+    step: () => ({ hang: true }),
+  });
+  let out = null, status;
+  const d = daemon(fx, m, { until: () => out, timeoutMs: 45000, settleMs: 1500 });
+  while (!m.steps().length) await sleep(200);
+  fx.editForge((f) => { f.issues[N] = { number: N, title: 'Add a count of open to-dos', body: 'x', labels: ['timone'], state: 'OPEN', author: OPERATOR, createdAt: new Date().toISOString(), comments: [] }; });
+  { const t0 = Date.now(); while (!fx.run(N) && Date.now() - t0 < 20000) await sleep(200); }
+  await sleep(1500);
+  status = fx.run(N)?.status;
+  out = takeoverCmd(fx);
+  await d;
+  await m.stop();
+  return { status, out, said: (out.out + out.err).trim(), prompt: promptOf(fx), runs: runsOf(fx), fx };
+}
+const busy = await busyTakeover();
+const queued = await queuedTakeover();
+const noSession = (r) => assert(!r.prompt, `a terminal session was opened on the ticket: "${r.prompt.split('\n')[0].slice(0, 120)}"`);
+await clause('PRD-05.R11 clause 2, note 1', 'a takeover of a run the machine is working on opens no session, and says what is happening', {
+  broken: async () => { noSession(took); assert(/working on/i.test(took.out.out + took.out.err), `it does not say what is happening: "${(took.out.out + took.out.err).trim().slice(0, 160)}"`); },
+  correct: async () => {
+    assert(busy.status === 'active', `setup: the run is ${busy.status}, not one the machine is working on`);
+    noSession(busy);
+    assert(/working on/i.test(busy.said) && busy.said.includes(`#${N}`), `it does not say what is happening: "${busy.said.slice(0, 160)}"`);
+  },
+});
+console.log(`    (takeover of the busy run said, exit ${busy.out.code}: "${busy.said.replace(/\n/g, ' ')}")`);
+await clause('PRD-05.R11 clause 2, note 2', 'nor does a takeover of a run waiting its turn behind another run open a session', {
+  broken: async () => noSession(took),
+  correct: async () => {
+    assert(queued.status === 'queued', `setup: the run is ${queued.status}, not waiting its turn`);
+    noSession(queued);
+  },
+});
+console.log(`    (takeover of the run waiting its turn said, exit ${queued.out.code}: "${queued.said.replace(/\n/g, ' ')}"; runs: ${queued.runs})`);
+
+// Printed, not judged — the question above. Ticket 12's run waits on nothing (the runner chose to do
+// nothing); then ticket 13 arrives and its step holds the project.
+async function idleWhileHeld() {
+  const fx = fixture({ issues: { fixture: { [N]: {} } } });
+  standIn(fx);
+  const m = await model({
+    runner: (c) => (c.turn === 0 && c.brief.includes('fixture #13') ? act('start_step', { stage: 'execution', instructions: 'build', reason: 'p', skipReason: 'p' }) : say()),
+    step: () => ({ hang: true }),
+  });
+  await daemon(fx, m, { until: () => fx.record(N).some((e) => e.kind === 'runner-ended'), timeoutMs: 20000, settleMs: 500 });
+  fx.editForge((f) => { f.issues[13] = { number: 13, title: 'Next ticket', body: 'x', labels: ['timone'], state: 'OPEN', author: OPERATOR, createdAt: new Date().toISOString(), comments: [] }; });
+  let out = null, runs = '';
+  const d = daemon(fx, m, { until: () => out, timeoutMs: 40000, settleMs: 1500 });
+  while (!m.steps().length) await sleep(200);
+  await sleep(1500);
+  runs = runsOf(fx);
+  out = takeoverCmd(fx);
+  await d;
+  await m.stop();
+  const why = fs.readFileSync(path.join(fx.dir, 'daemon.log'), 'utf8').split('\n').filter((l) => /takeover/i.test(l)).at(-1) ?? '';
+  return { runs, out, said: (out.out + out.err).trim(), prompt: promptOf(fx), why, fx };
+}
+const held = await idleWhileHeld();
+console.log(`    (seen, a question for the human and not judged here: a run waiting on nothing, not in the queue, while another run holds the project — runs: ${held.runs}. Takeover said, exit ${held.out.code}: "${held.said.replace(/\n/g, ' ')}"; a session opened: ${held.prompt ? 'yes' : 'no'}; the daemon's log: "${held.why.trim().slice(0, 200)}")`);
 
 // Clause 3, re-authored 2026-10-02 (phase 41 verification) from the register's clause as it now
 // stands: "it does not exist, and the message says to write on the ticket instead". The phase-40
@@ -256,5 +395,5 @@ const helpRetry = (() => { withFailedRun.cliPath = path.join(REPO_ROOT, 'dist', 
 console.log(`    (seen, not part of the clause: \`timone help retry\` prints, exit ${helpRetry.code}: "${(helpRetry.out + helpRetry.err).trim()}")`);
 withFailedRun.cleanup();
 
-for (const r of [cancelledDead, notCancelledDead, stepCancelled, stepNotCancelled, leftOpen, leftOpenUnheld, took, didNotTake, tookWhileDown, noTakeoverWhileDown]) r.fx.cleanup();
+for (const r of [cancelledDead, notCancelledDead, stepCancelled, stepNotCancelled, leftOpen, leftOpenUnheld, took, didNotTake, tookWhileDown, noTakeoverWhileDown, tookCancelled, noTakeoverCancelled, busy, queued, held]) r.fx.cleanup();
 finish('PRD-05.R11');
