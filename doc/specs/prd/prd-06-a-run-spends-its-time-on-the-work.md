@@ -1,6 +1,6 @@
 # PRD-06: A run spends its time on the work, not on repeats
 
-> **Status:** Draft
+> **Status:** Active — approved by fvermaut on 2026-10-02, in the terminal, together with ADR-0061
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-06-a-run-spends-its-time-on-the-work.criteria.md](prd-06-a-run-spends-its-time-on-the-work.criteria.md)
 > **Phases:** none yet
