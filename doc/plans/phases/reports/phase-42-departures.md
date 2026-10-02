@@ -15,3 +15,10 @@
 **Agreed:** Sub-phase 42b edits the shared probes' `README.md` (:30-39, in the probe folder under `standards/baseline`) to state the new break-run rule.
 **Did instead:** The edit is moved to phase 42's checking step. The plan is amended in place.
 **Why:** The file sits in the shared probe folder. Only the checking step may write there (ADR-0048 D1), and the hook refuses the folder to a building session, which this session declared itself to be. The hook also refuses any command or sub-agent prompt that contains the folder's path as text, even to forbid it; that is filed as a fault of its own.
+
+## 2026-10-02 — timone#185, build
+
+**Kind:** plan step
+**Agreed:** The box spawn asks for a token that lives `FORGE_REFRESH_MS + BOX_TOKEN_MARGIN_MS`.
+**Did instead:** It asks for the interval the box's own refresh loop will wait, plus the margin. The plan is amended in place.
+**Why:** The loop waits `options.refreshIntervalMs` when one is set. With the plan's wording, an interval longer than 20 minutes would hand a box a token that dies before its first refresh.
