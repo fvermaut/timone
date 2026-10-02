@@ -2,42 +2,42 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-09-30.
+**Last updated:** 2026-10-02.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** ivtrends runs on the runner. Its first real ticket, [#59](https://github.com/fvermaut/ivtrends/issues/59), reached its pull request by itself, with no stop on the way: [ivtrends #142](https://github.com/fvermaut/ivtrends/pull/142).
+> **Read this first.** The old code between steps is gone. Every project now runs on the runner, and `timone retry` no longer exists. It is all in [pull request #189](https://github.com/fvermaut/timone/pull/189). A session that did not build it checked it and found no fault.
 
-**1. Review ivtrends [#142](https://github.com/fvermaut/ivtrends/pull/142).** `npm run nightly:run` now shows one line saying where it has got to. The pull request asks you to look at three things first:
+**1. Review [#189](https://github.com/fvermaut/timone/pull/189).** It asks you three things at the top:
 
-- It also fixes a bug that was already on `main`: the history fill's time figure went back to zero at each restart (commit `45a3396`).
-- Some browser tests fail. They fail the same way on `main`, and this work changes no page.
-- One check in the plan was changed during the build, and it says why.
+- The two reviews found 12 small things: dead code, old comments and names, a takeover message that now points the wrong way, and five step skills that do not yet say the order is only the default. Fix them on this pull request first, or file them as tickets?
+- A takeover opens nothing while the machine works on a ticket. The requirement says it opens a session on any run. Change the code, or the words?
+- Two requirements pass but stay unticked, because they name no check that can fail. Adding one line to each would tick them.
 
-When you merge it, the runner should end the run, close #59, and close the map [#57](https://github.com/fvermaut/ivtrends/issues/57), whose last piece it is. The daemon must be running for that.
+One check is still owed before you merge: the replay on the last commit. In `~/dev/timone`, run `npm run --silent replay` (about $2.50). After you merge, restart the daemon so it runs the merged code.
 
-It cost $20.41. Checking took 2 h 50 min of that, because ivtrends' checks all run twice ([#110](https://github.com/fvermaut/timone/issues/110)).
+**What I need from you:** run the replay, then answer the three questions on #189.
 
-**What I need from you:** review #142, then merge it or close it.
+**2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
-**2. What is left of [#164](https://github.com/fvermaut/timone/issues/164).** Only [#166](https://github.com/fvermaut/timone/issues/166): the old code is deleted. One more pull request, in a new session.
+**What I need from you:** nothing, unless you want #73 or #70 merged.
 
-Open for later, none blocking: [#176](https://github.com/fvermaut/timone/issues/176) (review findings), [#177](https://github.com/fvermaut/timone/issues/177), [#178](https://github.com/fvermaut/timone/issues/178) and [#179](https://github.com/fvermaut/timone/issues/179) (from the watched run).
+**3. On ivtrends.** [#142](https://github.com/fvermaut/ivtrends/pull/142) is merged, and the runner closed #59 and the map #57 by itself. Pull request [#150](https://github.com/fvermaut/ivtrends/pull/150) (for #146) asks you six questions, and [#149](https://github.com/fvermaut/ivtrends/issues/149) asks three.
 
-**What I need from you:** say when to start #166.
+**What I need from you:** answer them when you want that work to go on.
 
-**3. On scratch-app, from the watched run.** [Pull request #70](https://github.com/fvermaut/scratch-app/pull/70) is open: a small tidy-up the run built. It asks you one real question: with JavaScript turned off, the built app shows a blank page after adding a to-do, on `main` too. [#69](https://github.com/fvermaut/scratch-app/pull/69) was closed by the machine without merging; its branch is kept.
+**4. Timone's own conversation tickets.** On 2 October the runner stopped waiting on [#91](https://github.com/fvermaut/timone/issues/91), [#92](https://github.com/fvermaut/timone/issues/92) and [#95](https://github.com/fvermaut/timone/issues/95) to [#98](https://github.com/fvermaut/timone/issues/98), because their `timone` label was taken off in September, and it said so on four of them. Your questions there are still open. Once the daemon runs the merged code, `timone takeover timone#95` opens the conversation again, at the right step.
 
-**What I need from you:** nothing, unless you want #70 merged or a ticket for the blank page.
+**What I need from you:** nothing until you want one of them.
 
-**4. Older questions, no hurry.**
+**5. Older questions, no hurry.**
 
-- [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal. It has never been marked, so nothing starts it.
-- [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47): three questions about moving a row. Step 1, [#46](https://github.com/fvermaut/scratch-app/issues/46), is held for the same reason.
-- [#92](https://github.com/fvermaut/timone/issues/92): the page to watch the work has four questions for you.
-- [#127](https://github.com/fvermaut/timone/issues/127): two shared accessibility checks are broken. Nothing is blocked on it.
+- [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal.
+- [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47): three questions about moving a row; [#46](https://github.com/fvermaut/scratch-app/issues/46) waits on it.
+- [#127](https://github.com/fvermaut/timone/issues/127): two shared accessibility checks are broken.
+- Faults found on the way, filed for later: [#182](https://github.com/fvermaut/timone/issues/182), [#186](https://github.com/fvermaut/timone/issues/186), [#187](https://github.com/fvermaut/timone/issues/187), [#188](https://github.com/fvermaut/timone/issues/188).
 
 **What I need from you:** nothing until you want one of them.
 
@@ -90,6 +90,10 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**2 October — the old code between steps is removed ([#166](https://github.com/fvermaut/timone/issues/166), [pull request #189](https://github.com/fvermaut/timone/pull/189)).** It was built in 13 slices from 30 September to 2 October. Every project now runs on the runner, Timone's own included. The code that picked the next step, read a step's end from a fixed line and chose where a run waits is deleted, and so is `timone retry`. About 28,000 lines went. `process.md`, the step skills, the glossary, the README and the manual now describe the runner, and nine decision records are marked as replaced. Old runs in the ledger are converted when it is read.
+
+You restarted the daemon on the new code and ran the replay: 19 of 19. A watched run on scratch-app then went from a new ticket to [pull request #73](https://github.com/fvermaut/scratch-app/pull/73), stopping only for your answers and approvals; when the checking step asked a question, the runner carried it to the pull request instead of stopping. That check also found two faults this work had made, both fixed before the pull request. A session that did not build the work then checked it and found no fault.
 
 **30 September — #173 is ready to merge.** Replay run 6 found one case passing two tries of three. One sentence in the runner's rules fixed it, and run 7, which you ran, passed 19 of 19. A fourth check found no fault. The watched run is filed as [#175](https://github.com/fvermaut/timone/issues/175), to run after the merge, and the review findings left for later as [#176](https://github.com/fvermaut/timone/issues/176).
 
