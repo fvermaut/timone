@@ -1,6 +1,6 @@
 # Phase 42: A run spends its time on the work — the box's token, the checking step's re-runs, the building step's suites
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-42-complete.md](reports/phase-42-complete.md).
 
 > **Companion phases:** [phase 41](phase-41.md) removed the old code between steps and left the box's token handling untouched; this phase changes `src/daemon/container-runtime.ts` and `src/adapters/credentials.ts`, which phase 41 did not. [phase 30](phase-30.md) built the box and its token refresh (`keepForgeTokenFresh`). Governing decisions: [ADR-0061](../../adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) — the decision this phase builds; [ADR-0048](../../adr/0048-a-verification-probe-is-kept-proved-able-to-fail-and-hidden-from-the-builder.md) — D1, D3, D4 and D5 still bind the probes, only D2 is amended; [ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) — D4's narrowing of the first pass stays exactly as it is; [ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) and [ADR-0042](../../adr/0042-timone-acts-under-its-own-identity.md) — the box holds one token scoped to one repository, and that does not change.
 
