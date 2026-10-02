@@ -192,3 +192,75 @@ Most of the work matches the requirements. The code that chose the next step (`s
 - **Older faults found on the way**, not caused by this work: [#186](https://github.com/fvermaut/timone/issues/186), [#187](https://github.com/fvermaut/timone/issues/187), [#188](https://github.com/fvermaut/timone/issues/188), and [#182](https://github.com/fvermaut/timone/issues/182) (the session check on Timone's own work branch).
 - **Older tickets this work may have made moot**, worth a look before closing any of them: #116 (takeover refusing a failed run: no run can be failed now), #142 (a retried ticket keeps its hold: `timone retry` is gone), #171 (the terminal session gets the old instructions: the takeover prompt was rewritten).
 - **`dist/`** still holds the output of the deleted files; nothing imports them. Clean it when no daemon runs from it.
+
+## ✏ Iteration 2 — 2026-10-02, after the reviews' fixes
+
+- **Branch:** `timone/166-the-old-code-between-steps-is-removed` @ `d030132`; base `main`, unchanged.
+- **Pull request:** [#189](https://github.com/fvermaut/timone/pull/189), body refreshed; no second pull request.
+- **Departures:** [phase-41-departures.md](phase-41-departures.md) — 17 entries.
+
+**What changed since the first delivery.** fvermaut answered the pull request's three questions on 2026-10-02: fix the findings first, change the words of PRD-05.R11 clause 2, and add `Falsified-by` lines to R11 and R20. Three slices were added and built: 41n (`a30bdd4`, the findings that change behaviour), 41o (`a0fa4d7`, the tidy-up) and 41p (`bcc18b1`, the skills, the manual, the glossary and R11's words). R11 clause 2 was refined twice more to name the whole rule the code keeps (`1bc992a`, `fb3f88a`). The replay was run three more times from fvermaut's terminal: run 9 at `45ab65b`, and run 10 at `4686ef4`, the commit with all the code — both 19 of 19. Verification ran three more iterations.
+
+**The subject changed, so both reviews were run again,** from fresh contexts, each reading the first review's section to say what was fixed.
+
+### Verification outcome, now
+
+Latest iterations of [phase-41-verification.md](phase-41-verification.md) — 0 of 2 fix loops consumed.
+
+| ID | Priority | Channel | Verdict | Status after |
+| --- | --- | --- | --- | --- |
+| PRD-05.R11 | MUST | api | PASS (iteration 4) | `verified` |
+| PRD-05.R20 | SHOULD | api | PASS (iteration 3) | `verified` |
+| PRD-01.R2, PRD-01.R3 | MUST | api | PASS (regression, iteration 3) | `verified` |
+| PRD-05.R2, R3, R4, R5, R10 | MUST | api | PASS (regression, iteration 3) | `verified` |
+| PRD-05.R7 | MUST | api | PASS (regression, iteration 4), the runner's part included | `verified` |
+| PRD-05.R18 | MUST | api | PASS (regression, iteration 4, replay run 10) | `verified` |
+| PRD-05.R19 | SHOULD | api | PASS (outside the derived scope) | `verified` |
+
+The closing gate is met. Nothing is outstanding for the human before merging.
+
+### Standards review — phase 41, second delivery
+
+First review's findings: 1 fixed; 2 fixed; 3 fixed; 4 fixed; 5 fixed for every place listed, two more places found (finding 2 below); 6 partly fixed (finding 1 below); 7 fixed; 8 partly fixed (finding 3 below); 9 fixed.
+
+- **Read:** the "Standards review — phase 41" section of this report; `standards/typescript.md`, `standards/testing.md`, `standards/code-smells.md`, the first rule in `CLAUDE.md`, and the "Writing to the human" section of `process.md`; `tsconfig.json` and `vitest.config.ts`; the diff `main...HEAD` for `src/`, `timone.yaml`, `timone.example.yaml`, `README.md`, `manual/`, `process.md`, `CONTEXT.md` and `.claude/skills/`, including the full diffs of `a30bdd4`, `a0fa4d7` and `bcc18b1`; the current text of the relevant parts of `src/daemon/{runs,dropped,chunk-zero,consult,pipeline,prompts,poll,session,faults,outcomes}.ts`, `src/commands/{takeover,cancel,daemon,status}.ts`, `src/cli.ts`, `src/cli.test.ts` and `manual/how-the-daemon-works.md` (the takeover table); for comparison only, short parts of `src/runner/driver.ts`, `src/adapters/github-tickets.ts` and `src/daemon/register.test.ts`. Checks run: `tsc --noEmit`, clean, and `tsc --noEmit --noUnusedLocals`, which lists six unused names, all already on `main`.
+- **Diff:** `main...HEAD` — 116 files, +10,971/−28,515. The reviewed paths are 80 files, +6,433/−28,407.
+- **Findings:** 3 — all three filed as [#191](https://github.com/fvermaut/timone/issues/191), because each needs a code change and any code change makes the recorded replay out of date.
+
+#### 1. A takeover of a closed step ticket still asks for two actions that do nothing — Writing to the human (process.md); what remains of the first review's finding 6
+
+- **Where:** `src/commands/takeover.ts:222–247` (the step-ticket branch at `242`); `src/daemon/dropped.ts:28–37`; `manual/how-the-daemon-works.md:509`
+- **What:** Since 41m, `settledMessage` is reached only when the ticket is not open. 41n fixed the words for an ordinary ticket. A step ticket still gets `heldStepWayOut`'s words: "remove the `timone:held` label from the ticket and I'll start it afresh, or close it and I'll carry on without it." On a closed ticket, "close it" has already happened, and removing the label starts nothing, because the cycle lists only open tickets. The manual row added in 41p records this behaviour. `dropped.ts` still says both commands share these words, which fits `timone cancel` (the ticket is open) and no longer fits `timone takeover` (the ticket is closed).
+- **Why it matters:** a message tells a person to act, and the action has no effect.
+- **Suggested remediation:** give a closed step ticket its own words (reopen it and take the hold off, or leave it closed so the work goes on without it); change the manual row to match; add a test for this branch — not applied here.
+
+#### 2. Two comments in `runs.ts` still describe the ticket's call to action and standing note, which this diff removed — Obsolete comment
+
+- **Where:** `src/daemon/runs.ts:597–606`; `src/daemon/runs.ts:1117–1121`
+- **What:** `runsForTicket`'s docblock says "`timone takeover`, `timone cancel` and a ticket's call to action all speak about a ticket"; this diff edited that line and kept "a ticket's call to action", which it deleted. In `initiativeFor`, the comment says the map ticket "is the one whose standing note most needs to say how far the work has got"; the standing note is gone.
+- **Why it matters:** both tell the next reader something false about code this diff changed.
+- **Suggested remediation:** drop "and a ticket's call to action"; restate the second comment's reason for its current readers (`timone status` and `heldStepWayOut`), or delete it — not applied here.
+
+#### 3. One type assertion is left in the ledger reader — typescript.md, "Traps that bite"; what remains of the first review's finding 8
+
+- **Where:** `src/daemon/runs.ts:1622–1630`, `1662`
+- **What:** `([field]) => !(REMOVED_FIELDS as readonly string[]).includes(field),`, where `REMOVED_FIELDS` is declared `[…] as const` and nothing reads its literal type.
+- **Why it matters:** typescript.md allows `as` only for brand constructors, `as const` and test fixtures. The risk is low; it only widens the type.
+- **Suggested remediation:** declare `const REMOVED_FIELDS: readonly string[] = [...]` — not applied here.
+
+### Spec review — phase 41, second delivery
+
+First review's findings: 1 fixed; 2 fixed; 3 decided by changing the words, and partly closed at the time of the review (finding 1 below), since closed by `fb3f88a`.
+
+- **Read:** the "Spec review — phase 41" section of this report; `doc/specs/prd/prd-05-a-runner-decides-each-step.md`; R11, R19 and R20 in the criteria register at HEAD; `doc/plans/phases/phase-41.md` up to the end of `## Requirements`; `doc/plans/breakdowns/ticket-164.md`; the commits `a30bdd4`, `a0fa4d7`, `bcc18b1`, `1bc992a` in full on the subject paths; the `main...HEAD` diff of `.claude/skills/`, `README.md`, `manual/README.md`, `timone.yaml`, `timone.example.yaml`; the head of `process.md`'s diff; the current content of `src/commands/takeover.ts`, `src/cli.ts`, `src/daemon/outcomes.ts`, and parts of `src/daemon/runs.ts`, `src/daemon/poll.ts`, `src/runner/driver.ts`, `src/runner/actions.ts`, `src/runner/session.ts`, `src/commands/takeover.test.ts`. The built `dist/cli.js` and one `tsx` script were run, only in a scratch folder.
+- **Diff:** `main...HEAD` — 116 files, +10,971/−28,515
+- **Findings:** 1
+
+#### 1. A parked run beside another run that holds a work branch fits R11 clause 2's new words but gets no session — R11
+
+- **Where:** the criteria register, R11 clause 2; `src/commands/takeover.ts:197–205` and `:497`; `src/daemon/runs.ts:1255–1261` and `:536–546`; `manual/how-the-daemon-works.md:503`
+- **What:** The clause read "GIVEN a run that nothing is working on, on a project where no other run is working and nothing waits its turn", and its note said it named "the whole rule the code keeps, one session per project at a time". The ledger keeps two rules: one session per project, and one work branch per project. With run A parked on a branch and run B parked without one, a takeover of B is refused by the ledger, and the refusal is not caught: the terminal prints a stack trace and exits 1. The manual row says a parked run's session opens, with no exception.
+- **Why it matters:** R11 clause 2 promised a session in a case the code refuses.
+- **Suggested remediation:** fvermaut to choose: name the second rule in the clause, or allow the session. In both cases, catch the refusal and say it in one sentence, with a test — not applied here.
+
+**What was done with it.** The words were refined once more, on fvermaut's answer "change the words" (`fb3f88a`): "GIVEN a run that nothing is working on, on a project where no other run is working, holds a work branch, or waits its turn". Verification iteration 4 judged R11 against these words: PASS, and `verified`. The uncaught refusal is older than this work (the same claim is unguarded on `main`) and is filed as [#190](https://github.com/fvermaut/timone/issues/190), with the manual's row.
