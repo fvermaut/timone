@@ -78,7 +78,7 @@ git grep -n "tokenFor(" -- 'src/*.ts' ':!*.test.ts'   # every call site listed; 
 
 **[MODIFY]** `.claude/skills/timone-verify/SKILL.md`
 **[MODIFY]** `process.md` — the stage 7 paragraph only (:46)
-**[MODIFY]** `standards/baseline/probes/README.md` — :30-39
+~~**[MODIFY]** `standards/baseline/probes/README.md` — :30-39~~ ✏ 2026-10-02 (build, timone#185): moved out of this slice. The file sits in the shared probe folder, which only the checking step may write ([ADR-0048](../../adr/0048-a-verification-probe-is-kept-proved-able-to-fail-and-hidden-from-the-builder.md) D1), and the hook refuses it to a building session. Phase 42's checking step makes item 7's change instead; see the departures record.
 
 **Seams under test (TDD):** no behaviour-carrying code in this sub-phase, so no seams are declared; validation is checklist-based. The text is what a checking session follows, and PRD-06.R1–R3 are checked by watching one follow it.
 
@@ -92,15 +92,15 @@ Write each change from ADR-0061 and PRD-06's criteria, and mark each `✏ Revise
 4. **Old and new smoke failures (R3, ADR-0061 D4).** At :52-54, add: when the build-health smoke has failing tests, mark each old or new by the list of smoke failures in the last check report on the default branch, and name that report; never build or run the default branch to compare; with no earlier list, report the failures unmarked and say so. The report template's smoke line (:225) asks for that list, so the next check has one to compare with.
 5. **The report shows every skip.** *Probes* (:259): add the list, by criterion ID, of probes that ran without a break run. *Fix-loop accounting* (:266): per loop, the probes run again and every probe in scope not run again, each with its reason.
 6. **`process.md` stage 7** (:46): replace *"every run does both legs"* and *"one full re-verify of everything except already-scripted HUMAN-CHECKs"* with the rules of items 1 and 2 in one or two sentences each, and add the smoke rule of item 4 after the sentence on the build-health smoke.
-7. **`standards/baseline/probes/README.md`** (:30-39): the same rule as item 1, for the shared probes, including the page reading.
+7. ~~**`standards/baseline/probes/README.md`** (:30-39): the same rule as item 1, for the shared probes, including the page reading.~~ ✏ 2026-10-02 (build, timone#185): moved to phase 42's checking step, for the reason given at the file list above.
 
 #### Agent Validation Steps
 
 ```bash
-git grep -n -E "every run does both legs|One full re-verify|full re-verify \(which repeats|in this run, on this build|catches decay for free" -- process.md .claude/skills/timone-verify standards/baseline/probes; echo "exit: $?"   # expect 1: no old sentence left
-for f in process.md .claude/skills/timone-verify/SKILL.md standards/baseline/probes/README.md; do git grep -c "ADR-0061" -- "$f" || echo "MISSING in $f"; done   # expect a count for each file, no MISSING
+git grep -n -E "every run does both legs|One full re-verify|full re-verify \(which repeats|in this run, on this build|catches decay for free" -- process.md .claude/skills/timone-verify; echo "exit: $?"   # expect 1: no old sentence left (✏ 2026-10-02: the probe folder is out of this slice)
+for f in process.md .claude/skills/timone-verify/SKILL.md; do git grep -c "ADR-0061" -- "$f" || echo "MISSING in $f"; done   # expect a count for each file, no MISSING
 git grep -n -E "name-only" -- .claude/skills/timone-verify/SKILL.md   # the exception and the fix re-check both name it
-git diff --stat -- . ':!process.md' ':!.claude/skills/timone-verify' ':!standards/baseline/probes/README.md' ':!doc/plans/phases/reports/phase-42-handoffs.md'   # expect empty
+git diff --stat -- . ':!process.md' ':!.claude/skills/timone-verify' ':!doc/plans/phases/reports/phase-42-handoffs.md'   # expect empty
 ```
 
 - [ ] From the skill alone, a reader can say in which four cases a probe does its break run, what runs after a fix, and how a smoke failure is marked old or new.
