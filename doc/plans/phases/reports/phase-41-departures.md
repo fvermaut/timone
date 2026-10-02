@@ -99,3 +99,10 @@
 **Agreed:** The entry above: the replay for PRD-05.R18 on this branch, and with it the runner's part of PRD-05.R7 clause 1.
 **Did instead:** fvermaut ran the replay at `45ab65b` and recorded it as run 9 in [phase-40-replay.md](phase-40-replay.md): 19 of 19 cases, three tries of three. Only documents changed after that commit. Iteration 2 of [phase-41-verification.md](phase-41-verification.md#iteration-2--r18-and-r7-clause-1-after-replay-run-9) checked it: PRD-05.R18 and R7 pass, each check seen to fail first.
 **Why:** This entry closes the one above, which is left as it was written. Nothing from it is still to do.
+
+## 2026-10-02 — timone#166, execution (after delivery)
+
+**Kind:** plan step
+**Agreed:** the phase closed at 41m and was delivered as pull request #189, with the reviews' findings listed for later.
+**Did instead:** three slices were added, 41n to 41p, to fix the reviews' 12 findings on the pull request before it merges and to reword PRD-05.R11 clause 2. The two `Falsified-by` lines fvermaut asked for on R11 and R20 are written by the re-check after 41p, not by a build slice.
+**Why:** fvermaut's answers on 2026-10-02: fix first, change the words, and yes to the `Falsified-by` lines. Those lines name verification's own checks, which a build step may not name or open.

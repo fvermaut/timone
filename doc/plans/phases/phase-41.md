@@ -1,6 +1,6 @@
 # Phase 41: The old code between steps is removed — every project on the runner, `timone retry` gone, the documents describe the runner
 
-> **Status:** Complete — see [reports/phase-41-complete.md](reports/phase-41-complete.md).
+> **Status:** Complete — see [reports/phase-41-complete.md](reports/phase-41-complete.md). ✏ 2026-10-02: reopened for 41n to 41p, the reviews' findings; closed again when they land.
 
 > **Companion phases:** [phase 40](phase-40.md) built the runner beside the current daemon and left what this phase removes: the `driver` line and `driverOf` (`src/manifest.ts`), the split of the cycle and `turnRunnerProjects` (`src/daemon/poll.ts`), `timone retry`'s refusal on runner projects (`src/commands/retry.ts`), and the old spawner, which already delegates to `startStepSession` (`src/daemon/step-session.ts`) and the moved chunk-zero functions (`src/daemon/chunk-zero.ts`). [Phase 39](phase-39.md) left `src/daemon/consult.ts`, which the runner keeps using after the ask check is gone. Governing decisions: [ADR-0060](../../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), whose D9 orders this deletion and whose header lists the records whose status lines this phase changes; [ADR-0059](../../adr/0059-a-live-check-only-the-operator-can-run-rides-to-the-pull-request.md) D1, because the live check this phase owes rides to the pull request if it cannot be run before it; [ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D4, which narrows the regression set below; [ADR-0048](../../adr/0048-a-verification-probe-is-kept-proved-able-to-fail-and-hidden-from-the-builder.md), because two kept checks test what this phase removes on purpose, and the build must not open them; [ADR-0049](../../adr/0049-a-runs-proof-of-life-is-its-holder-and-its-wait-is-one-value.md) D1 to D3, because the holder stays when the wait kinds go; [ADR-0047](../../adr/0047-a-cancel-stops-the-work-it-cancels.md), because `timone cancel` must still stop a step and its runner.
 
@@ -451,6 +451,81 @@ node dist/cli.js status 2>&1 | head -40
 
 ---
 
+### Sub-phase 41n: The review's code findings that change what the code does
+
+> ✏ 2026-10-02 (build, timone#166): added after delivery. Both reviews of [pull request #189](https://github.com/fvermaut/timone/pull/189) are in [phase-41-delivery.md](reports/phase-41-delivery.md). fvermaut answered on 2026-10-02: fix the findings on the pull request first, change the words of PRD-05.R11 clause 2 rather than the code, and add a `Falsified-by` line to R11 and R20. 41n takes the findings that change behaviour, 41o the tidy-up, 41p the documents. The two `Falsified-by` lines name verification's own checks, which the build may not name or open, so the re-check after 41p writes them. Recorded in [phase-41-departures.md](reports/phase-41-departures.md).
+
+**[MODIFY]** `src/cli.ts`, `src/cli.test.ts` — Spec finding 2: `timone help retry` prints the same sentence as `timone retry` and exits 1.
+**[MODIFY]** `src/daemon/prompts.ts`, `src/daemon/prompts.test.ts` — Standards finding 7: the takeover prompt decides which named people's comments came after the wait opened by comparing times as instants (`Date.parse`, or the helper `src/runner/driver.ts` already uses), not as strings. Standards finding 4, its trailer part: a takeover session that ran no step's skill writes `Timone-Stage: interactive`, the value `CLAUDE.md` gives for a session with no step, instead of `escalation`; check first that the session-end check (`src/daemon/hooks.ts`, `src/commands/guardrails.ts`) accepts `interactive`, and say in the handoff what it accepts.
+**[MODIFY]** `src/commands/takeover.ts`, `src/commands/takeover.test.ts` — Standards finding 6, its message part: on a closed ticket whose run was cancelled, the message says what really starts it again — reopen the ticket and take the `timone:held` label off — because a cancel now puts the hold on. The comment that says a takeover opens a session "on any run" says "on any run nothing is working on", as PRD-05.R11 will after 41p.
+**[MODIFY]** `src/daemon/runs.ts`, `src/daemon/runs.test.ts` — Standards finding 8: `normaliseOldPath` and `normaliseRemovedFields` narrow the unknown ledger data with `in` checks, as `normaliseSequences` does, instead of `as`.
+
+**Seams under test (TDD):** the built command line (`src/cli.test.ts`), the takeover prompt builder (`src/daemon/prompts.test.ts`), `resolveTakeover` / `runTakeover`, and the store's load from a file. Red-green: (1) `timone help retry` exits 1 with the sentence; (2) for a wait opened at `…T10:00:00.500Z`, a named person's comment at `…T10:00:00Z` is not shown as written since, and one at `…T10:00:01Z` is; (3) the takeover prompt for a run with no step asks for `Timone-Stage: interactive`; (4) a takeover of a closed ticket whose run was cancelled names the `timone:held` label in its message; (5) every old-ledger load test passes unchanged after the `as` casts go (no new behaviour: prove the tests can fail by breaking the narrowing, then restore).
+
+> No dependency on other new sub-phases.
+
+#### Agent Validation Steps
+
+```bash
+npm run build && npm test 2>&1 | tail -5
+node dist/cli.js help retry ; echo "exit: $? (expected 1)"
+grep -n " as Record<string, unknown>" src/daemon/runs.ts
+```
+
+- [ ] Red-green evidence for each of the five cases is in the handoff.
+- [ ] The last command prints only the line in `normaliseWait`, which is older than this phase.
+
+---
+
+### Sub-phase 41o: The review's tidy-up findings, with no change in what the code does
+
+**[MODIFY]** `src/commands/daemon.ts`, `src/commands/daemon.test.ts` — Standards finding 1: `RunDaemonOptions.root`, which nothing reads, is removed, with the line at the call site and the test arguments.
+**[MODIFY]** `src/daemon/chunk-zero.ts` — Standards finding 2: `attemptMerge` is no longer exported.
+**[MODIFY]** `src/daemon/poll.test.ts` — Standards finding 3: the three test helpers with no caller (`threadedAdapter`, `staleReviewAdapter`, `staleWithPullRequest`) are deleted.
+**[MODIFY]** `src/commands/takeover.ts`, `src/daemon/prompts.ts`, `src/daemon/consult.ts`, and their tests — Standards finding 4, the names: the takeover's `escalation` kind, `escalate`, `escalationPrompt` and `StoppedRun` take takeover names (for example `open-session`, `openSession`, `takeoverPrompt`, `TakeoverRun`); `ASK_CHECK_MODEL` and its timeout become `CONSULT_MODEL` and `CONSULT_TIMEOUT_MS`, with a comment about the question they now serve (whether a reply at the spending limit means go on). Every importer follows.
+**[MODIFY]** `src/daemon/dropped.ts`, `src/commands/status.ts`, `src/commands/takeover.ts`, `src/daemon/outcomes.ts`, `src/daemon/pipeline.ts`, `timone.yaml` — Standards finding 5: each comment the review quotes is rewritten to say what the code does now, or deleted.
+**[MODIFY]** `src/daemon/pipeline.test.ts`, `src/daemon/poll.test.ts`, `src/commands/status.test.ts`, `src/commands/takeover.test.ts` — Standards finding 9: test names say behaviour, not the migration: the step-table test is named for what it checks, the `describe` that no longer holds a resume is renamed, and "whose entry names no driver" is dropped from three names.
+
+No behaviour-carrying code in this sub-phase, so no seams are declared; validation is checklist-based.
+
+> Sub-phase 41n must be complete before starting this sub-phase (both change `takeover.ts` and `prompts.ts`).
+
+#### Agent Validation Steps
+
+```bash
+npm run build && npm test 2>&1 | tail -5
+npx tsc --noEmit --noUnusedLocals 2>&1 | grep -c "threadedAdapter\|staleReviewAdapter\|staleWithPullRequest" ; echo "(expected 0)"
+grep -rnw "escalationPrompt\|ASK_CHECK_MODEL\|StoppedRun" src --include='*.ts' | grep -vE '^[^:]+:[0-9]+:\s*(//|/?\*)' ; echo "exit: $? (expected 1)"
+```
+
+- [ ] The number of tests is unchanged from 41n's end.
+
+---
+
+### Sub-phase 41p: The skills, the manual, the glossary and one requirement say what the code does
+
+**[MODIFY]** `.claude/skills/timone-triage/SKILL.md`, `timone-execute/SKILL.md`, `timone-grill/SKILL.md`, `timone-adr/SKILL.md`, `timone-prd/SKILL.md` — Spec finding 1: each says, where it names the next step, that this is the default order, and that in a session the runner started the runner chooses the next step. Triage's routing section says the runner reads the label as the default order, may leave it, and says so on the ticket. Use the words `timone-plan` and `timone-verify` already use for this.
+**[MODIFY]** `manual/how-the-daemon-works.md` — Standards finding 6: the takeover table's rows for `done`, `cancelled` and a ticket with no run say what the code does since 41m: an open ticket whose last run is done or cancelled gets a new run, at the step its `wayfinder:` label names; a closed one is answered and nothing opens; and the closed-and-cancelled message is 41n's.
+**[MODIFY]** `CONTEXT.md` — Standards finding 6: "behind one adapter seam" is dropped from the conversation channel entry.
+**[MODIFY]** `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` — on fvermaut's answer of 2026-10-02: R11 clause 2 reads "GIVEN any run nothing is working on", with a dated marker naming his answer on pull request #189. No Status line changes; verification decides.
+
+No behaviour-carrying code in this sub-phase, so no seams are declared; validation is checklist-based.
+
+> Sub-phase 41n must be complete before starting this sub-phase (the manual describes 41n's message). It shares no file with 41o and may run beside it.
+
+#### Agent Validation Steps
+
+```bash
+grep -c "default" .claude/skills/timone-triage/SKILL.md .claude/skills/timone-execute/SKILL.md .claude/skills/timone-grill/SKILL.md .claude/skills/timone-adr/SKILL.md .claude/skills/timone-prd/SKILL.md
+grep -n "adapter seam" CONTEXT.md ; echo "exit: $? (expected 1)"
+grep -n "nothing is working on" doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md
+```
+
+- [ ] Each of the five skills says the order is the default, in a sentence that reads as part of its section.
+- [ ] R11 clause 2 says "nothing is working on".
+
+---
+
 ## Dependency graph
 
 ```
@@ -467,6 +542,9 @@ node dist/cli.js status 2>&1 | head -40
 41k → 41h               the README and the manual                        ┘
 41l → 41i, 41j, 41k     the replay, the real ledger, one watched run
 41m → 41k               ✏ 2026-10-02: what the live check found (may run beside 41l)
+41n → (none)            ✏ 2026-10-02: the review's code findings that change behaviour
+41o → 41n               the review's tidy-up, no change in behaviour
+41p → 41n               the skills, the manual, the glossary, one requirement (may run beside 41o)
 ```
 
 The code slices run one after another: each deletes what the one before left without a caller, and most of them share `poll.ts`, `runs.ts` or `status.ts`.
