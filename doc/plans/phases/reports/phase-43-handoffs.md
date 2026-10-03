@@ -563,3 +563,127 @@ exit: 0
 - For unpushed commits on the default branch of the project it works, a run reads two lines after "Branch `main` is ahead of its upstream." The first is `` A run may not write `main`, so pushing these commits will be refused. `` The second is `` They belong on `<work branch>`: cherry-pick them there, then put the local `main` back to `origin/main`. `` With no work branch, the second is `` This step has no work branch, so they belong nowhere in the project. Put the local `main` back to `origin/main`. ``
 - `violationFeedback`'s closing paragraph is unchanged. It still lists "push the commits" and "put the file where it is read" as ways to fix a finding. A run reads that list right after a detail that says its push will be refused. No test has shown this to be a contradiction, so the plan says no change. If the process text says the rule's own detail is what to follow, that matches the code.
 - A run's `STATUS.md` commit that names no session, is on `main`, and is already on `origin/main` is not reported by this rule (decision 1). The plan's validation grep conflicts with its own text (see above). That needs a decision from whoever owns the plan.
+
+## 43e — The written process says where a run's status file goes
+
+**Built.** The text a session follows now says where a run's `STATUS.md` goes. In `process.md`, § Status reporting has a marked revision (✏ Revised 2026-10-03, timone#85, ADR-0060 D2). In a run, a step that owns a work branch writes `STATUS.md` on that branch, in its own `docs: STATUS.md — <theme>` commit, and it reaches the default branch with the pull request. A step that owns no branch writes no `STATUS.md` and commits nothing to the project; its account is its comment on the ticket. Nothing a run does is pushed to the default branch, and the push is refused if it tries. A session a person runs by hand writes the file on the default branch, as before. The "accepted consequence" sentence is kept. The cost from the plan's Goal Description is added. The earlier rule is kept, struck, as history. The artifact table and the "every stage pushes" paragraph match. The verify and deliver skills say the same in their "Status reporting" sections. Delivery's sentence "the PR's own branch never gains a `STATUS.md` edit" is gone. The wayfind skill's two "Update `STATUS.md`" lines say "per the process convention", which for a run means none. The triage, clarification, wayfinding and research prompts each carry one more sentence: "This step has no work branch, so it commits and pushes nothing to the project. What it did goes in its comment on the ticket."
+
+**Files touched.**
+
+- `process.md` — the artifact table's `STATUS.md` row; § Status reporting: the revised paragraph (new rule, kept "accepted consequence" sentence, "What this costs", the old paragraph struck as history); the "every stage pushes" paragraph loses "on the default branch".
+- `.claude/skills/timone-verify/SKILL.md` — § Status reporting: a run on the phase's work branch; a person by hand on the default branch, then back to the phase branch.
+- `.claude/skills/timone-deliver/SKILL.md` — § Status reporting: the same, and the "never gains a `STATUS.md` edit" sentence removed.
+- `.claude/skills/timone-wayfind/SKILL.md` — mode 1 step 6 and mode 2 step 6: "per the process convention (in a run this step owns no work branch, so that means no `STATUS.md` and no commit to the project)".
+- `src/daemon/prompts.ts` — new private `noWorkBranchBlock()`, placed just before `writingBlock()` in `triagePrompt`, `clarificationPrompt`, `wayfindingPrompt` and `researchPrompt`.
+- `src/daemon/prompts.test.ts` — new block "a step with no work branch commits nothing to the project (43e)" (case 4, 6 tests).
+- `src/process-text.test.ts` — created. Reads `process.md` and every `.claude/skills/*/SKILL.md` from the repository root (cases 1–3, 17 tests).
+- `doc/plans/phases/reports/phase-43-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **The two exact phrases case 2 asserts**, in `process.md` § Status reporting with struck passages removed: "In a run, a step that owns a work branch writes `STATUS.md` on that branch" and "A step that owns no branch writes no `STATUS.md`".
+2. **Case 3 asserts the phrase "**In a run, on the phase's work branch**"** (with its bold marks) in each skill's "Status reporting" section, and that delivery's section no longer contains "never gains a `STATUS.md` edit".
+3. **"Struck history" means `~~…~~` spans.** The test removes every `~~…~~` span (it may run over several lines) and checks what is left. A line with a struck span and live text still has its live text checked. Only strike-through is excluded; a passage quoted with a date is not, because none exists and nothing needs it.
+4. **History style.** The old paragraph is kept whole up to "has not finished.", struck, after "The rule before that date, kept as history:". This is the style `timone-verify/SKILL.md` already uses (`~~…~~ ✏ Since …`). The "accepted consequence" sentence was moved out of the struck part and placed after the new rule, word for word.
+5. **`process.md` names fvermaut's ruling of 2026-07-29** and links PRD-01.R22's anchor, so a reader sees why a person's session still writes on the default branch. R22 is not edited.
+6. **The prompt sentence is plain text, not bold**, so the test can match it exactly. The test collapses white space, because the sentence is split over two source lines. The expected sentence is a literal in the test, not imported from `prompts.ts`.
+7. **The sentence sits in each of the four prompts, not in `stagePrompt`'s shared tail**, because only those four stages own no branch. Case 4's mutation below shows the shared tail would be wrong.
+
+**Validation evidence.**
+
+*Case 1* — `src/process-text.test.ts`, "%s no longer says the file is written only on the default branch" (one row per file: `process.md` and 12 skills), plus "reads process.md and more than one skill". Red:
+
+```
+× … > process.md no longer says the file is written only on the default branch
+× … > .claude/skills/timone-deliver/SKILL.md no longer says the file is written only on the default branch
+× … > .claude/skills/timone-verify/SKILL.md no longer says the file is written only on the default branch
+AssertionError: expected '---\nname: timone-verify\ndescription…' not to contain 'on the project\'s default branch, nev…'
+ Test Files  1 failed (1)
+      Tests  3 failed | 11 passed (14)
+```
+
+Green after the old `process.md` paragraph was struck under the revision marker and both skills' phrase was replaced: `Tests  14 passed (14)`. The strike exclusion is load-bearing: with `unstruck` changed to return the text unchanged, `× … > process.md no longer says …` / `Tests  1 failed | 16 passed (17)` (the struck history still holds the old words). Reverted: `Tests  17 passed (17)`.
+
+*Case 2* — "process.md says a run writes it on its work branch, and a step with no branch writes none". Red:
+
+```
+× … > process.md says a run writes it on its work branch, and a step with no branch writes none
+AssertionError: expected '**Status reporting.** No owning skill…' to contain 'In a run, a step that owns a work bra…'
+ Test Files  1 failed (1)
+      Tests  1 failed | 14 passed (15)
+```
+
+Green after the new rule, the cost, the artifact table row and the "every stage pushes" change: `Tests  15 passed (15)`.
+
+*Case 3* — "%s, in its Status reporting section, sends a run to its work branch" (verify, deliver). Red:
+
+```
+× … > .claude/skills/timone-verify/SKILL.md, in its Status reporting section, sends a run to its work branch
+× … > .claude/skills/timone-deliver/SKILL.md, in its Status reporting section, sends a run to its work branch
+AssertionError: expected '## Status reporting\n\nBefore finishi…' to contain '**In a run, on the phase\'s work bran…'
+ Test Files  1 failed (1)
+      Tests  2 failed | 15 passed (17)
+```
+
+Green after both sections were rewritten: `Tests  17 passed (17)`. The wayfind skill was then edited; no case covers it, and the file still passes case 1.
+
+*Case 4* — `src/daemon/prompts.test.ts`, block "a step with no work branch commits nothing to the project (43e)". Red:
+
+```
+× … > triage is told it commits and pushes nothing, and where what it did goes
+× … > clarification is told it commits and pushes nothing, and where what it did goes
+× … > wayfinding is told it commits and pushes nothing, and where what it did goes
+× … > research is told it commits and pushes nothing, and where what it did goes
+✓ … > planning, which owns a work branch, is not told that
+✓ … > execution, which owns a work branch, is not told that
+AssertionError: expected 'A ticket was filed on the managed pro…' to contain 'This step has no work branch, so it c…'
+ Test Files  1 failed (1)
+      Tests  4 failed | 192 passed (196)
+```
+
+Green after `noWorkBranchBlock()`: `Tests  196 passed (196)`. The planning and execution rows were green from the start (the negative half). To show they are not empty, I put `noWorkBranchBlock()` into `stagePrompt`'s shared tail, which every stage gets:
+
+```
+× … > planning, which owns a work branch, is not told that
+× … > execution, which owns a work branch, is not told that
+AssertionError: expected 'Plan the work for ticket #6 on **scra…' not to contain 'commits and pushes nothing to the pro…'
+ Test Files  1 failed (1)
+      Tests  2 failed | 194 passed (196)
+```
+
+Reverted: `Tests  196 passed (196)`.
+
+*The validation block:*
+
+```
+$ npm run build
+> timone@0.1.0 build
+> tsc
+build exit: 0
+$ npx vitest run src/process-text.test.ts src/daemon/prompts.test.ts
+ ✓ src/process-text.test.ts (17 tests)
+ ✓ src/daemon/prompts.test.ts (196 tests)
+ Test Files  2 passed (2)
+      Tests  213 passed (213)
+$ npx vitest run
+ Test Files  59 passed (59)
+      Tests  1534 passed (1534)
+   Duration  3.06s
+$ npx tsc --noEmit
+tsc exit: 0
+$ git diff --stat origin/main -- doc/specs/prd/
+(no output; origin/main = b495bb6)
+```
+
+1534 is 23 more than 58/1511: 17 in the new `process-text.test.ts`, 6 in `prompts.test.ts`.
+
+- [x] Cases 1–4 each seen red before green, recorded above. Case 4's negative half was green from the start and was shown not to be empty by a mutation, a failure and a revert. **Pass.**
+- [x] The whole suite (`59 passed`, `1534 passed`) and the type check (exit 0) pass. **Pass.**
+- [x] `git diff --stat origin/main -- doc/specs/prd/` prints nothing. **Pass.**
+
+**What delivery must know.**
+
+- **A contradiction is left in the text, outside this slice's plan.** The wayfinding prompt still says "record it as an ADR at decision time", and the clarification prompt still says "Maintain the project's glossary". The `timone-wayfind`, `timone-grill` and `timone-adr` skills say the same. The wayfind skill's fallback for a project not on GitHub also commits every change to the map (`docs: wayfind NN — …`). All of these are commits to the project, from steps that own no branch. Those prompts now also say the step commits and pushes nothing, and since 43a the push is refused. So in a run, an ADR or glossary change written by one of these steps can never reach the project. The plan asked for one sentence and no more, so I did not change those instructions. A person must decide: either these steps put such a change in the ticket comment (and a later step that owns a branch writes it), or they get a branch.
+- 43d's note about `violationFeedback` is unchanged: no process text was added that says "follow the rule's own detail". The new process text and the finding's words agree on where the file goes.
+- `process.md`'s artifact table row carries "✏ 2026-10-03, timone#85" as plain text, because it sits in a code block where a link does not show.
+- `src/process-text.test.ts` reads every `SKILL.md` under `.claude/skills/`. A new skill is checked by case 1 without any change to the test.
