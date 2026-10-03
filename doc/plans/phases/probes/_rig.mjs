@@ -386,19 +386,27 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 //
 // Same contract and output as _lib.mjs's clause(), for async legs: the broken
 // leg must throw (red), the correct leg must not (green).
+//
+// ✏ 2026-10-02 (phase 42 verification, ADR-0061 D1): with PROBE_REAL_ONLY=1 the
+// broken leg is not run and the clause does its real run only. run.mjs sets it,
+// because the one command does real runs only; a probe owed a break run is run
+// on its own, without it. The output says which.
+export const REAL_ONLY = process.env.PROBE_REAL_ONLY === '1';
 const results = [];
 export async function clause(id, wording, { broken, correct, unproven }) {
   let redOk = false, redDetail = '';
   if (unproven) {
     redDetail = `NO BREAK STEP — ${unproven}`;
+  } else if (REAL_ONLY) {
+    redDetail = 'real run only (PROBE_REAL_ONLY=1); this probe was proved able to fail by an earlier check';
   } else {
     try { await broken(); redDetail = 'the assertion still held on the broken setup'; } catch (e) { redOk = true; redDetail = e.message; }
   }
   let greenOk = false, greenDetail = '';
   try { await correct(); greenOk = true; greenDetail = 'assertion held'; } catch (e) { greenDetail = e.message; }
-  const verdict = unproven ? (greenOk ? 'PASS-UNPROVEN' : 'FAIL') : !redOk ? 'INSTRUMENT-BROKEN' : greenOk ? 'PASS' : 'FAIL';
+  const verdict = unproven ? (greenOk ? 'PASS-UNPROVEN' : 'FAIL') : REAL_ONLY ? (greenOk ? 'PASS' : 'FAIL') : !redOk ? 'INSTRUMENT-BROKEN' : greenOk ? 'PASS' : 'FAIL';
   console.log(`=== ${id} — ${wording}`);
-  console.log(`    break leg: ${unproven ? 'none' : redOk ? 'RED (as required)' : 'GREEN — instrument broken'} — ${oneLine(redDetail)}`);
+  console.log(`    break leg: ${unproven ? 'none' : REAL_ONLY ? 'not run' : redOk ? 'RED (as required)' : 'GREEN — instrument broken'} — ${oneLine(redDetail)}`);
   console.log(`    green leg: ${greenOk ? 'PASS' : 'FAIL'} — ${oneLine(greenDetail)}`);
   results.push({ id, verdict });
   return verdict;
@@ -416,6 +424,6 @@ export function finish(criterionId) {
   const bad = decided.filter((r) => r.verdict !== 'PASS' && r.verdict !== 'PASS-UNPROVEN');
   const verdict = bad.some((r) => r.verdict === 'INSTRUMENT-BROKEN') ? 'INSTRUMENT-BROKEN' : bad.length ? 'FAIL' : decided.length === 0 ? 'BLOCKED' : 'PASS';
   const nb = results.length - decided.length;
-  console.log(`--- ${criterionId}: ${verdict} (${results.length} clause labels, ${decided.length - bad.length} passing${nb ? `, ${nb} blocked` : ''})`);
+  console.log(`--- ${criterionId}: ${verdict} (${results.length} clause labels, ${decided.length - bad.length} passing${nb ? `, ${nb} blocked` : ''}${REAL_ONLY ? ', real run only' : ''})`);
   process.exit(verdict === 'PASS' ? 0 : verdict === 'BLOCKED' ? 3 : 1);
 }

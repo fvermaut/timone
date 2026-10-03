@@ -64,8 +64,14 @@ export interface CredentialProvider {
   /**
    * A token authorising `repository` — given as GitHub's `owner/name` — and
    * no other repository. Cached until it is close to expiry.
+   *
+   * `minLifeMs` is for a caller that holds on to the token: a running box
+   * keeps the one it is handed until the daemon writes the next. The cached
+   * token is reused only if it has more life left than that, and otherwise a
+   * new one is minted. Without it, a token is reused until five minutes are
+   * left, which is enough for a call made now (PRD-06.R5).
    */
-  tokenFor(repository: string): Promise<string>;
+  tokenFor(repository: string, options?: { minLifeMs?: number }): Promise<string>;
 }
 
 export interface GitHubAppCredentialOptions {
@@ -193,13 +199,17 @@ export function githubAppCredentials(
   }
 
   return {
-    async tokenFor(repository) {
+    async tokenFor(repository, tokenOptions) {
       const name = repositoryName(repository);
+
+      // Never less than the margin: a caller that asks for less life than
+      // that must not get a token the machine itself would not use.
+      const minLifeMs = Math.max(EXPIRY_MARGIN_MS, tokenOptions?.minLifeMs ?? 0);
 
       const cached = cache.get(name);
       if (
         cached !== undefined &&
-        Date.parse(cached.expiresAt) - now().getTime() > EXPIRY_MARGIN_MS
+        Date.parse(cached.expiresAt) - now().getTime() > minLifeMs
       ) {
         return cached.token;
       }

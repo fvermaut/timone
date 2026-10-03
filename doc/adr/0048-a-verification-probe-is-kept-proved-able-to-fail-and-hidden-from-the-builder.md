@@ -2,6 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-01
+- **Amended by:** [ADR-0061](0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md), 2026-10-02 — D2: the break leg runs when a probe is new, rewritten or in doubt, not on every run; and after a fix only the probes the fix can affect run again
 - **Source:** fvermaut's request of 2026-09-01 — *"the verify stage on ivtrends takes an awful lot of time. It seems the agent is running every tests one by one. There surely must be a more efficient solution than this."* — and the six answers given in the grill that followed
 - **Amends:** [`process.md` stage 7](../../process.md), which today requires that all criterion evidence come from *"verifier-authored throwaway probes, in scratch space, never committed"*. That sentence is replaced by the decisions below. Nothing else about stage 7 changes: the closed read list, the channels, the verdicts, the fix loop and its two-loop cap, the register writes and the report's required elements all stand
 - **Closes:** [timone#36](https://github.com/fvermaut/timone/issues/36) — *"Verification passed a probe that could not fail"* — whose own diagnosis is that the calibration rule is *"written as prose the verifier is asked to honour, with nothing that makes it observable whether it did"*

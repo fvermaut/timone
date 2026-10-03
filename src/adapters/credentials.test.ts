@@ -124,6 +124,54 @@ describe("a credential scoped to one repository", () => {
   });
 });
 
+describe("a token that must live a given time", () => {
+  it("mints again when the cached token would die before the life asked for", async () => {
+    // PRD-06.R5. On 6 September a box was handed a cached token with about
+    // 13 minutes left. Its next token came 20 minutes later, and the session
+    // waited 12.5 minutes without one.
+    const { mint, calls } = recorder((_request, index) =>
+      index === 0
+        ? { token: "ghs_first", expiresAt: "2026-08-22T13:00:00Z" }
+        : { token: "ghs_second", expiresAt: "2026-08-22T13:35:00Z" },
+    );
+    let clock = new Date("2026-08-22T12:00:00Z");
+    const credentials = provider(mint, () => clock);
+
+    await credentials.tokenFor("fvermaut/scratch-app");
+    // 25 minutes before the first token dies.
+    clock = new Date("2026-08-22T12:35:00Z");
+    const asked = await credentials.tokenFor("fvermaut/scratch-app", {
+      minLifeMs: 35 * 60 * 1000,
+    });
+    const after = await credentials.tokenFor("fvermaut/scratch-app");
+
+    expect(asked).toBe("ghs_second");
+    // The new token is the one kept: the next caller gets it too.
+    expect(after).toBe("ghs_second");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("still reuses a token with 25 minutes left when no life is asked for", async () => {
+    // The machine's own calls outside any box use the token at once, so
+    // 25 minutes is plenty for them, and minting each time would cost a
+    // request for nothing.
+    const { mint, calls } = recorder((_request, index) =>
+      index === 0
+        ? { token: "ghs_first", expiresAt: "2026-08-22T13:00:00Z" }
+        : { token: "ghs_second", expiresAt: "2026-08-22T13:35:00Z" },
+    );
+    let clock = new Date("2026-08-22T12:00:00Z");
+    const credentials = provider(mint, () => clock);
+
+    await credentials.tokenFor("fvermaut/scratch-app");
+    clock = new Date("2026-08-22T12:35:00Z");
+    const again = await credentials.tokenFor("fvermaut/scratch-app");
+
+    expect(again).toBe("ghs_first");
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe("the assertion it signs", () => {
   it("is an RS256 JWT issued by the app, expiring within ten minutes", async () => {
     const { mint, calls } = recorder();

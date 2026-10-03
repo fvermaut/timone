@@ -249,11 +249,26 @@ const FORGE_TOKEN_VAR = "TIMONE_FORGE_TOKEN";
 /**
  * How often the daemon writes a fresh forge token into a running box.
  *
- * A minted installation token lives one hour, and `tokenFor` re-mints once
- * five minutes are left. Twenty minutes is comfortably inside both, and the
- * cost of being early is one extra mint an hour.
+ * **Every token a box receives must outlive the next refresh by
+ * {@link BOX_TOKEN_MARGIN_MS}** (PRD-06.R5). A box keeps the token it was
+ * handed until the daemon writes the next one, so a token that dies before
+ * then leaves the box with no working token. The cache is shared with the
+ * machine's own calls, which reuse a token until five minutes are left, so a
+ * box must ask for the life it needs: on 6 September one was handed a cached
+ * token with about 13 minutes left, and its session waited 12.5 minutes for
+ * the next.
+ *
+ * A minted installation token lives one hour, so a fresh one always has the
+ * 35 minutes a box asks for.
  */
 const FORGE_REFRESH_MS = 20 * 60 * 1000;
+
+/**
+ * How much longer than the next refresh a token handed to a box must live.
+ * The requirement asks for at least ten minutes. Fifteen is above that, so a
+ * refresh that runs a little late still finds the box's token alive.
+ */
+const BOX_TOKEN_MARGIN_MS = 15 * 60 * 1000;
 
 /**
  * How long a command the agent runs is allowed to take before the CLI stops
@@ -812,7 +827,11 @@ export function keepForgeTokenFresh(
       if (stopped) return;
 
       try {
-        const token = await options.credentials.tokenFor(options.repository);
+        // From the interval this loop actually waits, so a shortened one
+        // keeps the rule too.
+        const token = await options.credentials.tokenFor(options.repository, {
+          minLifeMs: intervalMs + BOX_TOKEN_MARGIN_MS,
+        });
         const exit = await writeForgeToken(options.spawn, options.name, token);
         if (exit.code !== 0 && !stopped) {
           options.log?.(
@@ -887,12 +906,9 @@ export function containerRuntime(
         );
       }
 
-      const token =
-        options.credentials === undefined
-          ? undefined
-          : await options.credentials.tokenFor(
-              repoSlug(workspace.project.remote),
-            );
+      // Worked out once: the box's first token is sized on it, and its
+      // refresh loop below waits it. See FORGE_REFRESH_MS.
+      const refreshIntervalMs = options.refreshIntervalMs ?? FORGE_REFRESH_MS;
 
       // First of all, and before anything is created: this is an offline
       // question about what the checkout last saw, and the alternative is
@@ -937,6 +953,25 @@ export function containerRuntime(
       try {
         modelToken =
           options.modelToken === undefined ? undefined : await options.modelToken();
+      } catch (error) {
+        if (stack !== undefined) await stack.down().catch(() => undefined);
+        throw error;
+      }
+
+      // The box holds this token until the first refresh, so it must outlive
+      // that by the margin. It is taken last, just before the box's
+      // environment is built, so the minutes a stack takes to come up are not
+      // taken out of that margin (PRD-06.R5). The stack is up by now, so it
+      // is taken back down if this refuses.
+      let token: string | undefined;
+      try {
+        token =
+          options.credentials === undefined
+            ? undefined
+            : await options.credentials.tokenFor(
+                repoSlug(workspace.project.remote),
+                { minLifeMs: refreshIntervalMs + BOX_TOKEN_MARGIN_MS },
+              );
       } catch (error) {
         if (stack !== undefined) await stack.down().catch(() => undefined);
         throw error;
@@ -1032,9 +1067,8 @@ export function containerRuntime(
               name,
               repository: repoSlug(workspace.project.remote),
               credentials: options.credentials,
-              ...(options.refreshIntervalMs === undefined
-                ? {}
-                : { intervalMs: options.refreshIntervalMs }),
+              // The interval the box's first token was sized on above.
+              intervalMs: refreshIntervalMs,
               ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
               ...(options.log === undefined ? {} : { log: options.log }),
             });

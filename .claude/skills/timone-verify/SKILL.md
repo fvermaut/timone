@@ -36,6 +36,7 @@ Your independence is a **closed allowed list**; anything not on it is not read, 
 - **The phase file's `Status` line, requirements header and `Screens changed` line** — the stamp is the entry gate, the header (its requirement IDs, or its un-anchored stamp) is the claimed scope, and the screens line names the screens whose figures you read on the preview's data (below). **Never the sub-phase bodies**: they describe how the thing was built, which is exactly what you must not know.
 - **The completion report, whole** (`doc/plans/phases/reports/phase-NN-complete.md`) — it is the stage-6→7 interface, and its "context for the next agent" section was written for you: run instructions, suite commands, HUMAN-CHECK items carried forward, known-open observations, state left behind. Obey its stated gotchas rather than rediscovering them.
 - **A prior verification report's `## HUMAN-CHECK scripts` section, and nothing else of it** (`doc/plans/phases/reports/phase-MM-verification.md`) — when the completion report carries a HUMAN-CHECK forward, it names where the script lives rather than restating it, and this stage is required to re-issue such scripts **verbatim**. Without this the obligation could not be discharged from the allowed list at all. It is safe because a verification report is a stage-7 artifact written under these same rules: it carries evidence and scripts, never build knowledge. **Read that section alone** — the rest of the file holds another pass's verdicts and probe design, and reading them is how a verifier starts confirming its predecessor instead of the running app. Declare the line range you opened.
+- **The *Environment* section of the latest verification report on the default branch, and only its list of build-health smoke failures** ✏ Revised 2026-10-03 ([ADR-0061](../../../doc/adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md)) — the report there with the highest phase number (`doc/plans/phases/reports/phase-MM-verification.md`), and in it the latest iteration. You need this list to mark each failing smoke test old or new (below). Print the report with `git show <default-branch>:<path>` and cut it to the list, for example with `sed -n`. Never check the default branch out. The smoke's one-line result, just above the list, is part of it: it says whether the smoke passed whole. It is safe for the same reason as the HUMAN-CHECK section: a verification report is written under these same rules. **Read that list alone** — the rest of the report holds another pass's verdicts. Declare the report and the line range you opened.
 - **`README.md`, `CONTEXT.md`, `doc/standards.md`, `STATUS.md`** in the target project — operational instructions, the domain's canonical terms, the conventions record (whose open non-conformances may already predict a failure), and the status file you are obliged to update at the end.
 - **The operational configuration that stands the app up rather than implementing it** — compose files, `.env` / `.env.example`, the run and test scripts a package manifest declares. These tell you which port, which credentials, which command; they carry no behaviour under test. Reading the *application* config a criterion's behaviour depends on is a different act and stays forbidden.
 - **Timone's own `standards/` baseline** — the accessibility and UI/UX entries are what the browser channel's baseline leg enforces.
@@ -45,13 +46,15 @@ Your independence is a **closed allowed list**; anything not on it is not read, 
 **Never read:**
 
 - **`phase-NN-handoffs.md`** — the build narrative. One line of it and you know how the thing was made.
-- **Diffs, `git show` of code, `git log -p`** — source intent in another costume.
+- **Diffs, `git show` of code, `git log -p`** — source intent in another costume. ✏ Revised 2026-10-02 ([ADR-0061](../../../doc/adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) D2): **one exception — a list of changed file names is not a diff.** `git diff --name-only` and `git show --name-only --format=` print file names and nothing else. You read one such list for the phase, to narrow the regression set (*Scope*), and one for each fix commit, to choose what the re-verify runs (*The fix loop*). The exception covers those name lists only: the contents of a change, `git show` of code and `git log -p` stay forbidden.
 - **Anything under the source tree, including the committed test suite.** The suite encodes the builder's understanding of the requirements; verifying against it verifies the builder against the builder.
 - **ADRs** — build intent. Observable behaviour does not need them.
 
 The project's own suite may be run **once**, as a build-health smoke, and reported as exactly that — it is never criterion evidence. All criterion evidence comes from probes authored by a verifier — this pass or an earlier one — from the register's clauses alone.
 
 **A smoke that contradicts a probe is an instrument alarm, not a footnote.** When the build-health smoke fails on behaviour one of your probes passes — or passes behaviour your probes fail — one of the two instruments is measuring wrong, and the pass may not conclude until you know which. Resolve it instrument-side: run the probe's break step and prove what it actually transmits and observes. The suite stays non-evidence either way; what it is here is a tripwire, and filing the contradiction as "a discrepancy for the human" while your verdicts stand is exactly the false-negative path this rule exists to close.
+
+**When the smoke has failing tests, mark each one old or new.** ✏ Revised 2026-10-02 ([ADR-0061](../../../doc/adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) D4). Compare them with the list of smoke failures in the latest verification report on the project's default branch, read as the **Read:** list above allows. A failing test the list names is **old**; one it does not name is **new**. A report whose smoke passed whole gives an empty list, so every failure now is new. Name the report you compared with. **Never check out, build or run the default branch to compare.** When there is no earlier list — no earlier report, no smoke result in it, or failures counted but not named — report the failures unmarked and say there was no list to compare with. Either way, write this pass's own list in the report (the smoke line under *Environment*), so the next pass has one to compare with.
 
 ## The gates
 
@@ -124,12 +127,23 @@ A probe is a **committed artifact of this stage**, at `projects/<name>/doc/plans
 
 Reading a probe a previous verifier wrote is the same carve-out this skill already grants HUMAN-CHECK scripts — a stage-7 artifact carries evidence and scripts, never build knowledge. **It does not extend to the builder's suite**, which stays unreadable for the reason it always was.
 
-**Red before green — a probe's pass counts only after the probe has been seen to fail, in this run, on this build.** Every probe carries a step that breaks, on purpose, the thing it exists to catch. Every run does both legs, in order:
+**Red before green — a probe's pass counts only after the probe has been seen to fail.** Every probe carries a step that breaks, on purpose, the thing it exists to catch. Its **break run** is a run with that step applied, where the probe must fail. Its **real run** is a run on the build as it is, where the probe must pass.
+
+✏ Revised 2026-10-02 ([ADR-0061](../../../doc/adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) D1): a probe used to do both runs every time it ran. **Now it does its break run, then its real run, in these four cases only:**
+
+1. **It is written this pass** — the first check of its criterion, or a clause added to it to close a gap (see *Label the output per clause* below).
+2. **It is written again this pass because its criterion is `revised`.**
+3. **Its result is in doubt** — the build-health smoke fails behaviour its real run passes, or passes behaviour it fails (the instrument alarm under *Read before you verify*). Do its break run before the pass concludes; the pass does not conclude until it is done.
+4. **It is a shared baseline probe, run against a page it has never been run against.** When you cannot tell whether it has been, treat the page as new.
+
+**Every other run of a probe is its real run only.** That covers a probe an earlier pass already proved able to fail, and every probe run again after a fix. The report lists, by criterion ID, every probe that ran without a break run.
+
+When both runs happen, they go in this order:
 
 1. Break it. Run the probe. **It must go red.**
 2. Restore it. Run the probe. **It must go green.**
 
-Green alone is not evidence. Green on both legs means the instrument is broken, not that the app is right: stop there, say so, and record no pass for that criterion. This is the executed form of the rule that used to ask you to calibrate — [timone#36](https://github.com/fvermaut/timone/issues/36) is the record of what asking was worth, three passes running. It also catches decay for free: a probe whose query or selector has stopped matching the app cannot be made to go red either.
+Green alone is not evidence. When both runs happen, green on both legs means the instrument is broken, not that the app is right: stop there, say so, and record no pass for that criterion. This is the executed form of the rule that used to ask you to calibrate — [timone#36](https://github.com/fvermaut/timone/issues/36) is the record of what asking was worth, three passes running. **The accepted risk:** an old probe that has stopped being able to fail, because its query or selector no longer matches the app, is no longer caught by its break run, since it no longer does one on every pass.
 
 Where the clause asserts a **transformation of input** (trimming, normalization, rejection), the break step is the one that proves transport: show the probe delivers its input **verbatim** to the app's boundary, because tooling silently normalizes (a multipart flag that strips padding, a shell that eats quotes, a client that URL-encodes), and a probe that pre-applies the expected transformation can only agree with the app.
 
@@ -140,6 +154,8 @@ Where the clause asserts a **transformation of input** (trimming, normalization,
 **The baseline probes are Timone's, not the project's.** The accessibility and UI/UX checks live once under `standards/baseline/probes/`, take a page address, and are run by every project's browser channel. The project's own directory holds only what is specific to its rules and data.
 
 **Run the set with one command, in parallel.** `node doc/plans/phases/probes/run.mjs --regression` against the standing app, printing a verdict table and each probe's per-clause output. The report quotes that output, so its required elements are unchanged — commands as run, per-clause outcomes.
+
+✏ Revised 2026-10-02 ([ADR-0061](../../../doc/adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) D1): **the one command does real runs only.** A probe owed a break run — one of the four cases under *Red before green* — does it on its own, before its real run. The project's runner is a file this stage owns. If it always does both runs, add an option that does real runs only, and commit that change with the report. Without that, every probe still does its break run on every pass.
 
 ## Reading the figures on the preview's data
 
@@ -170,7 +186,11 @@ A finding is never a note in an observations paragraph. It is a FAIL or a questi
 
 1. Every FAIL (and REGRESSION) in the pass produces a **defect brief** in the template below — written from observation, quoting the register's clause, never speculating about cause in the code.
 2. A **fresh fix context** receives the brief, the repository, and `doc/standards.md`; it implements, commits `fix: verify NN — <criterion-id> <slug>` on the phase's branch, and returns the commit SHA plus a one-paragraph note. You ingest **only the SHA** — never its transcript, never its diff.
-3. **One full re-verify** — everything in scope except already-scripted HUMAN-CHECKs. A fix is a code change made by a context that did not watch the build; nothing short of a full re-run is defensible, because you cannot know what else it touched without reading it.
+3. **A narrowed re-verify.** ✏ Revised 2026-10-02 ([ADR-0061](../../../doc/adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) D2): this used to be a full re-run of everything in scope. Now run again only:
+   - **every probe that failed**; and
+   - **every probe whose criterion the fix commit's changed files can affect.** Get the names of those files with `git show --name-only --format= <sha>`, and compare them with each criterion's `Depends-on` lines. A criterion with no `Depends-on` line is judged from the file names alone; when you cannot tell whether the fix can affect it, run it again. Never read the fix commit's contents.
+
+   **A fix that changes a file many criteria rest on — a database schema, a shared layout, a configuration file — sends every probe in scope again.** Every probe run again here does its real run only (*Red before green*): its break run, if it has one, was done earlier in this pass or in an earlier pass. A `(browser)` clause is checked again when its criterion's probe is. **The screen read of *Reading the figures on the preview's data* is not narrowed: after every fix it runs again in full**, on every screen the phase file names. Write down every probe in scope you did not run again, each with its reason, for the report's fix-loop accounting. **No run of the whole probe set follows the last fix.** The first pass ran every probe in scope on the build; that is what makes this narrowed re-verify safe.
 4. That brief-fix-reverify cycle is **one loop**. **Max 2 loops after the initial pass.** ✏ Since [ADR-0052](../../../doc/adr/0052-a-run-that-enters-the-build-ends-at-its-pull-request.md), exhaustion no longer files a new ticket: remaining failures are recorded with evidence, their register lines flipped to `failed` exactly as before — that flip is still true evidence — and one entry is appended to the phase's departures record (`phase-NN-departures.md`) naming the remaining failures and why they were not resolved within the two loops. The stage posts its ordinary completion and the run proceeds to delivery; the report's carried-forward section (below) says exactly what remains.
 
 **Mechanism is an example, never a requirement.** Today the obvious instrument for the fix context is a sub-agent spawned from this session with the brief as its prompt. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)): this is the same when the runner started this session — the runner starts the step, and the step spawns its own sub-agents. Anything that receives those inputs and returns a SHA satisfies the contract.
@@ -222,7 +242,7 @@ A finding is never a note in an observations paragraph. It is a FAIL or a questi
 
 ## Environment
 
-<How the app was stood up, in production form: the commands, the order, and why the order mattered when it did. The build-health smoke's one-line result, reported as such.>
+<How the app was stood up, in production form: the commands, the order, and why the order mattered when it did. The build-health smoke's one-line result, reported as such. ✏ ADR-0061: when the smoke has failing tests, follow it with **Smoke failures** — one line per failing test, named as the suite prints it and marked old or new — and the path of the report it was compared with. With no earlier list, the failures unmarked and "no earlier list to compare with". The next pass compares with this list.>
 
 ## Independence declaration
 
@@ -259,11 +279,11 @@ Read: <the allowed-list artifacts actually read, by path>. Not read: handoffs, d
 
 ## Probes
 
-<The count, stated plainly: "N probes proven able to fail, M not." Then, per probe: its criterion, whether it was authored this pass or run from the directory, and the outcome of its break step. Every probe with no break step is named here with the reason it has none. Probes written or rewritten this pass are listed with why — first check of the criterion, or the criterion was `revised`. Clause coverage: any criterion whose register clause count exceeds the labels its probe printed, and what was written to close the gap.>
+<The count, stated plainly: "N probes proven able to fail, M not." Then, per probe: its criterion, whether it was authored this pass or run from the directory, and the outcome of its break run, or that it did none this pass. ✏ ADR-0061: then the list, by criterion ID, of every probe that ran without a break run this pass. Every probe with no break step is named here with the reason it has none. Probes written or rewritten this pass are listed with why — first check of the criterion, or the criterion was `revised`. Clause coverage: any criterion whose register clause count exceeds the labels its probe printed, and what was written to close the gap.>
 
 ## Fix-loop accounting
 
-<N of 2 loops consumed. Per loop: the briefs issued, the fix commits returned, the full re-verify's outcome. "0 of 2 — the initial pass was clean." when so.>
+<N of 2 loops consumed. Per loop: the briefs issued, the fix commits returned, the re-verify's outcome. ✏ ADR-0061: the probes run again, with their outcomes, and every probe in scope not run again, each with its reason (for example, "its `Depends-on` names no file the fix changed"). "0 of 2 — the initial pass was clean." when so.>
 
 ## Figures on the preview's data
 
@@ -294,9 +314,9 @@ Before finishing, update the target project's `STATUS.md` — **on the project's
 4. Check out the phase branch; merge in an unancestored parent's verification commits when stacked; refuse dirt.
 5. Derive the scope: claimed set + computed regression set, narrowed by `Depends-on` against this phase's diff. List both, and list what the narrowing removed.
 6. Stand up the environment in production form (gate 3 if it will not come up — everything BLOCKED, record a departure, report, and continue rather than stop).
-7. For every in-scope criterion, run its committed probe, or author one when there is none or the criterion is `revised`. Run the shared baseline probes for the browser channel. Every probe runs its break step first: red, then green. Compare each register clause list against the labels the probe printed and close any gap. Write HUMAN-CHECK scripts where only a human can look. **For a `live` criterion, write neither probe nor script** — report its last gate and whether this phase owes a fresh one.
+7. For every in-scope criterion, run its committed probe, or author one when there is none or the criterion is `revised`. Run the shared baseline probes for the browser channel. ✏ Revised 2026-10-02 ([ADR-0061](../../../doc/adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) D1): a probe does its break run first, red then green, only in the four cases under *Red before green*; every other probe does its real run only, and the report lists those by criterion ID. Compare each register clause list against the labels the probe printed and close any gap. Write HUMAN-CHECK scripts where only a human can look. **For a `live` criterion, write neither probe nor script** — report its last gate and whether this phase owes a fresh one.
 8. When the phase file names a changed screen: load the preview's sample data, open each screen, screenshot it, and read every figure against the fixed list. A finding a clause covers is a FAIL; one no clause covers is a question for the human.
-9. FAILs → defect briefs → fresh fix context → full re-verify (which repeats step 8). Max 2 loops, then exhaustion protocol.
+9. FAILs → defect briefs → fresh fix context → the narrowed re-verify of *The fix loop*, step 3. ✏ Revised 2026-10-02 ([ADR-0061](../../../doc/adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) D2): it runs the probes that failed and those the fix's changed files can affect, real run only, and it repeats step 8 in full. No run of the whole probe set follows the last fix. Max 2 loops, then exhaustion protocol.
 10. Write the report, commit the probes, and flip the register — all in one `docs: verify phase NN — <theme>` commit. Update `STATUS.md`.
 11. Report per Closing below.
 

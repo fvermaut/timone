@@ -1,0 +1,59 @@
+# Phase 42 — Departures
+
+> One dated entry per departure from the plan or the requirements, appended by the build, the check and delivery. Never rewritten.
+
+## 2026-10-02 — timone#185, build
+
+**Kind:** plan step
+**Agreed:** A ticket-driven piece is built only from an approved list of pieces at `doc/plans/breakdowns/ticket-NN.md`.
+**Did instead:** Built with no list file. fvermaut approved PRD-06 and ADR-0061 in the terminal on 2026-10-02, on the stated understanding that the work would be planned, built, checked and opened as one pull request, with nothing more asked of him.
+**Why:** That approval is the list of pieces, with one piece. Writing a file and asking him to approve it again would ask the same question twice.
+
+## 2026-10-02 — timone#185, build
+
+**Kind:** plan step
+**Agreed:** Sub-phase 42b edits the shared probes' `README.md` (:30-39, in the probe folder under `standards/baseline`) to state the new break-run rule.
+**Did instead:** The edit is moved to phase 42's checking step. The plan is amended in place.
+**Why:** The file sits in the shared probe folder. Only the checking step may write there (ADR-0048 D1), and the hook refuses the folder to a building session, which this session declared itself to be. The hook also refuses any command or sub-agent prompt that contains the folder's path as text, even to forbid it; that is filed as a fault of its own, [#192](https://github.com/fvermaut/timone/issues/192).
+
+## 2026-10-02 — timone#185, build
+
+**Kind:** plan step
+**Agreed:** The box spawn asks for a token that lives `FORGE_REFRESH_MS + BOX_TOKEN_MARGIN_MS`.
+**Did instead:** It asks for the interval the box's own refresh loop will wait, plus the margin. The plan is amended in place.
+**Why:** The loop waits `options.refreshIntervalMs` when one is set. With the plan's wording, an interval longer than 20 minutes would hand a box a token that dies before its first refresh.
+
+## 2026-10-02 — timone#185, build
+
+**Kind:** plan step
+**Agreed:** Sub-phase 42b rewrites the break-run rule and the steps that state it.
+**Did instead:** It also changes the paragraph on running the whole set with one command. The plan is amended in place.
+**Why:** That command is each project's own runner. If it still does every probe's break run, the new rule saves nothing. Found at the slice's gate, not by the plan.
+
+## 2026-10-03 — timone#185, check
+
+**Kind:** check not run
+**Agreed:** Every claimed requirement and every requirement of the regression set is checked by a probe.
+**Did instead:** Three were not decided. PRD-06.R5 (a box never holds a token that runs out before its next one) has no probe. PRD-05.R18, and the real-runner clause of PRD-05.R7, were reported BLOCKED by their probes.
+**Why:** For PRD-06.R5, the tool permission system refused the probe's instrument, a stand-in `docker` program that records what a box is handed, as *Credential Exploration*. Every token involved would have been a fake value from the probe's own stand-in for GitHub, but the refusal stands until a person allows it. PRD-05.R18 and PRD-05.R7 clause 1 need a replay against the real model on this build, which only the operator can run (`npm run --silent replay`). Details in [phase-42-verification.md](phase-42-verification.md), *Carried forward*.
+
+## 2026-10-03 — timone#185, build
+
+**Kind:** plan step
+**Agreed:** Sub-phase 42d moves the box's token call after the start-up steps, and changes nothing else about failure.
+**Did instead:** The call also takes the started stack down when the mint fails, before it throws again. One test covers it. The plan is amended in place.
+**Why:** After the move, a failed mint comes after the stack is up. Without this, the stack would be left running. The model token's call just above already does the same.
+
+## 2026-10-03 — timone#185, build
+
+**Kind:** plan step
+**Agreed:** Sub-phase 42e restores the full screen read after a fix in the checking skill.
+**Did instead:** It also says so in `process.md` stage 7. The plan is amended in place.
+**Why:** 42b's sentence in `process.md` named only probes, and `process.md` outranks the skill. Left alone, the two would disagree.
+
+## 2026-10-03 — timone#185, check
+
+**Kind:** check not run as written
+**Agreed:** PRD-06.R5 is checked by a probe the check writes and sees fail before it passes. The register's hint also asks to make the falsifying test fail on purpose, by handing the box the cached token.
+**Did instead:** The check ran the builder's test `"a box is never handed a token that dies before its next refresh"` by name, once, and read only whether it passed. It passed. The check wrote no probe, did not open the test, and did not see it fail. PRD-06.R5 was marked `verified` on that test.
+**Why:** fvermaut decided on 2026-10-03, in the terminal, that PRD-06.R5 is accepted on the test its `Falsified-by` line names ([comment on #193](https://github.com/fvermaut/timone/pull/193#issuecomment-5966801325)). The check's own probe could not run in iteration 1, and seeing the test fail would mean changing source, which the check may not do. Details in [phase-42-verification.md](phase-42-verification.md), *Iteration 2*.
