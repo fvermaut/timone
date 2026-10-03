@@ -147,8 +147,18 @@ function writeHook(dir: string, name: string, lines: readonly string[]): void {
 }
 
 /**
- * Write the guard's hooks into `dir`, and return the environment that makes
- * git use them.
+ * Where {@link installPushGuard} writes its `gh`: a folder of its own inside
+ * the guard's directory, so that putting it on a session's `PATH` adds `gh`
+ * and nothing else. The hooks' names are commands too — `pre-commit` is a
+ * common tool — and must not shadow them.
+ */
+export function forgeGuardBin(dir: string): string {
+  return join(resolve(dir), "bin");
+}
+
+/**
+ * Write the guard's hooks into `dir`, and a `gh` into {@link forgeGuardBin},
+ * and return the environment that makes git use the hooks.
  *
  * **The environment, not the checkout.** `core.hooksPath` set through
  * `GIT_CONFIG_COUNT` outranks the repository's own config, so a session cannot
@@ -160,6 +170,13 @@ function writeHook(dir: string, name: string, lines: readonly string[]): void {
  * The project's own hooks keep running: `pre-push` hands the same input to
  * the project's `pre-push` once the guard has passed it, and every other hook
  * name hands over its arguments and input unchanged.
+ *
+ * **The `gh` is the same guard for the forge's API** (`forge-guard.ts`): a
+ * run cannot merge, or write to any branch but its own, through `gh` either.
+ * It is used by whoever puts {@link forgeGuardBin} first on the session's
+ * `PATH`. It checks the call with Timone's own command, then runs the real
+ * `gh`, looked up on this process's own `PATH` — the one from before that
+ * folder was put in front — so the lookup never finds the wrapper itself.
  */
 export function installPushGuard(
   dir: string,
@@ -180,6 +197,18 @@ export function installPushGuard(
     OWN_HOOKS,
     '[ -x "$own/pre-push" ] || exit 0',
     '"$own/pre-push" "$@" < "$input"',
+  ]);
+  mkdirSync(forgeGuardBin(at), { recursive: true });
+  writeHook(forgeGuardBin(at), "gh", [
+    "# Written by Timone: this run may not merge, or write to any branch but its own, through gh.",
+    // Nothing on stdin for the check, which reads none: it is the real
+    // `gh`'s (`--input -`).
+    `node ${shellWord(options.cli)} guardrails forge-call${branch} -- "$@" < /dev/null || exit 1`,
+    `real=$(PATH=${shellWord(process.env.PATH ?? "")}; command -v gh) || {`,
+    '  echo "gh is not installed on this machine." >&2',
+    "  exit 127",
+    "}",
+    'exec "$real" "$@"',
   ]);
   for (const name of FORWARDED_HOOKS) {
     writeHook(at, name, [

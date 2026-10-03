@@ -1,8 +1,19 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { TicketingProject } from "../adapters/ticketing.js";
 import {
@@ -237,7 +248,9 @@ describe("the guard on an in-process session's pushes", () => {
   it("keeps the rest of the daemon's environment", async () => {
     const { seen } = await started("timone/7-x");
 
-    expect(seen.options?.env?.PATH).toBe(process.env.PATH);
+    // ✏ 43b: the guard's directory now comes first on `PATH`, and the
+    // daemon's own follows it whole.
+    expect(seen.options?.env?.PATH?.endsWith(`${delimiter}${process.env.PATH}`)).toBe(true);
     expect(seen.options?.env?.HOME).toBe(process.env.HOME);
   });
 
@@ -246,5 +259,101 @@ describe("the guard on an in-process session's pushes", () => {
     await session.completed;
 
     expect(existsSync(seen.options?.env?.GIT_CONFIG_VALUE_0 ?? "")).toBe(false);
+  });
+});
+
+/**
+ * A run cannot write to a branch or merge through the forge's API either
+ * (#85, 43b). The session finds `gh` on its `PATH`, so the guard's directory
+ * comes first there, and the `gh` in it checks the call before it hands over
+ * to the real one.
+ */
+describe("the guard on an in-process session's gh calls", () => {
+  /** Timone's build, which the guard's `gh` runs; built before these tests. */
+  const DIST = fileURLToPath(new URL("../../dist", import.meta.url));
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /**
+   * A session whose `query` runs each of `calls` as `gh`, found on the
+   * session's own `PATH`, while the session is running. The real `gh` is a
+   * fake one first on the daemon's `PATH`, which writes down what it was
+   * called with. The session's checkout holds Timone's build, as the timone
+   * root does, and every call runs with `HOME` in a temp directory.
+   */
+  async function sessionRunningGh(calls: string[][]) {
+    const root = mkdtempSync(join(tmpdir(), "timone-session-gh-"));
+    tempDirs.push(root);
+    const cwd = join(root, "cwd");
+    const home = join(root, "home");
+    const bin = join(root, "bin");
+    mkdirSync(cwd);
+    mkdirSync(home);
+    mkdirSync(bin);
+    symlinkSync(DIST, join(cwd, "dist"));
+    const called = join(root, "called");
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$*" >> '${called}'\n`, { mode: 0o755 });
+    vi.stubEnv("PATH", `${bin}${delimiter}${process.env.PATH ?? ""}`);
+
+    const seen: { env?: Record<string, string | undefined> } = {};
+    let firstOnPath: string[] = [];
+    const ran: { status: number | null; stderr: string }[] = [];
+    const query = (params: { prompt: string; options?: Options }) => {
+      seen.env = params.options?.env;
+      firstOnPath = readdirSync(seen.env?.PATH?.split(delimiter)[0] ?? "").sort();
+      for (const args of calls) {
+        const result = spawnSync("gh", args, {
+          env: { ...params.options?.env, HOME: home },
+          encoding: "utf8",
+        });
+        ran.push({ status: result.status, stderr: result.stderr });
+      }
+      return (async function* (): AsyncGenerator<SDKMessage> {
+        yield { type: "result", subtype: "success", session_id: "s1" } as SDKMessage;
+      })();
+    };
+    await agentSdkRuntimeWith(query).start({
+      cwd,
+      prompt: "go",
+      model: "claude-opus-4-6",
+      workBranch: "timone/7-x",
+    });
+    const realGhGot = existsSync(called)
+      ? readFileSync(called, "utf8").trim().split("\n")
+      : [];
+    return { seen, ran, realGhGot, firstOnPath, daemonPath: process.env.PATH };
+  }
+
+  it("puts a directory of the guard's first on the session's PATH", async () => {
+    const { seen, daemonPath } = await sessionRunningGh([]);
+
+    const [first, ...rest] = (seen.env?.PATH ?? "").split(delimiter);
+    expect(first?.startsWith(seen.env?.GIT_CONFIG_VALUE_0 ?? "-")).toBe(true);
+    expect(rest.join(delimiter)).toBe(daemonPath);
+  });
+
+  it("adds gh to the session's PATH and nothing else", async () => {
+    // The guard's hooks have names a session may run as commands: the
+    // `pre-commit` tool is the common one. They must not shadow anything.
+    const { firstOnPath } = await sessionRunningGh([]);
+
+    expect(firstOnPath).toEqual(["gh"]);
+  });
+
+  it("refuses a merge, and the real gh never runs", async () => {
+    const { ran, realGhGot } = await sessionRunningGh([["pr", "merge", "12", "--squash"]]);
+
+    expect(ran[0]?.status).toBe(1);
+    expect(ran[0]?.stderr).toContain("Refused: `gh pr merge`");
+    expect(realGhGot).toEqual([]);
+  });
+
+  it("hands a comment to the real gh", async () => {
+    const { ran, realGhGot } = await sessionRunningGh([["issue", "comment", "85", "--body", "hi"]]);
+
+    expect(ran[0]?.status).toBe(0);
+    expect(realGhGot).toEqual(["issue comment 85 --body hi"]);
   });
 });

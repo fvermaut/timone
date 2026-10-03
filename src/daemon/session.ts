@@ -1,5 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import {
   query,
@@ -18,7 +18,7 @@ import {
   type ProgressSnapshot,
   type SessionSummary,
 } from "./progress.js";
-import { installPushGuard } from "./push-guard.js";
+import { forgeGuardBin, installPushGuard } from "./push-guard.js";
 import type { ParkOptions, Run } from "./runs.js";
 
 /**
@@ -517,9 +517,10 @@ export function agentSdkRuntimeWith(query: QueryFunction): SessionRuntime {
       // the controller is the one thing here that really ends the work.
       const controller = new AbortController();
       // The guard on this session's pushes (#85): its `git push` reaches the
-      // run's work branch and nothing else. A fresh directory per session,
-      // because two sessions may run at once for different branches. Under
-      // `.timone/`, which is never committed.
+      // run's work branch and nothing else, and its `gh` cannot merge or
+      // write to another branch through the forge. A fresh directory per
+      // session, because two sessions may run at once for different
+      // branches. Under `.timone/`, which is never committed.
       const guardRoot = join(request.cwd, ".timone", "push-guard");
       mkdirSync(guardRoot, { recursive: true });
       const guardDir = mkdtempSync(join(guardRoot, "session-"));
@@ -546,7 +547,13 @@ export function agentSdkRuntimeWith(query: QueryFunction): SessionRuntime {
           ...(request.effort === undefined ? {} : { effort: request.effort }),
           // The SDK hands the CLI exactly this, not this on top of its own
           // environment, so the rest of the daemon's is spread in first.
-          env: { ...process.env, ...guardEnv },
+          // The guard's `gh` goes first on `PATH`, so the `gh` the session
+          // runs is the one that checks every call (#85).
+          env: {
+            ...process.env,
+            ...guardEnv,
+            PATH: `${forgeGuardBin(guardDir)}${delimiter}${process.env.PATH ?? ""}`,
+          },
         },
       });
 

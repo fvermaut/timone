@@ -26,6 +26,7 @@ import {
   parsePrePushInput,
   pushRefusal,
 } from "../daemon/push-guard.js";
+import { forgeCallRefusal } from "../daemon/forge-guard.js";
 
 /** How long a parked baseline outlives the session that wrote it. */
 const BASELINE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -389,6 +390,31 @@ export function registerGuardrailsCommand(program: Command): void {
         console.error(
           "Refused: Timone's push guard could not judge this push, so it lets " +
             `nothing through. ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exitCode = 1;
+      }
+    });
+
+  guardrails
+    .command("forge-call")
+    .description(
+      "Refuse a gh call that would merge or write to any branch but the run's work branch",
+    )
+    .option("--branch <name>", "the run's work branch; absent means nothing may be written")
+    .argument("[gh-args...]", "the gh command line, without the gh, after --")
+    .action((ghArgs: string[], options: { branch?: string }) => {
+      // **Refuses on an error, as `pre-push` does.** The wrapper runs the real
+      // `gh` only when this exits 0, so a check that let the call through when
+      // it broke would let through the merge it exists to stop (#85).
+      try {
+        const refusal = forgeCallRefusal(ghArgs, options.branch);
+        if (refusal === undefined) return;
+        console.error(refusal);
+        process.exitCode = 1;
+      } catch (error) {
+        console.error(
+          "Refused: Timone's guard on gh calls could not judge this call, so it does " +
+            `not run. ${error instanceof Error ? error.message : String(error)}`,
         );
         process.exitCode = 1;
       }

@@ -161,3 +161,141 @@ exit: 1
 - The guard's environment sets `GIT_CONFIG_COUNT=1`. Anything else that wants to add git config through `GIT_CONFIG_*` (in the box script or in `agentSdkRuntimeWith`'s `env`) must raise the count and use index 1 onwards, or it will replace the guard.
 - In the box, `$HOME/.timone/git-hooks` holds the hooks and `/tmp/timone-push-guard.log` holds what the install said. The guard is installed after the project's install, so nothing the box runs before that is judged.
 - `guardrails pre-push` reads stdin to the end itself; it does not use `readHookPayload`. If `forge-call` needs the same "an error refuses" posture, the `pre-push` action's `catch` is the model.
+
+## 43b — A run cannot write to a branch or merge through the forge's API either
+
+**Built.** Every `gh` call a run makes is now checked before the real `gh` runs. The check refuses: `gh pr merge` in any form; `gh repo sync`; a writing `gh api` call to `repos/<o>/<r>/merges`, `…/pulls/<n>/merge`, `…/git/refs…` or `…/contents/…` (a `contents` write is allowed only when its `branch` field names the run's work branch); and `gh api graphql` with one of the eight mutations that merge or move a branch. Everything else runs: reading, commenting, labelling, `pr create`, editing an issue. The rule is the pure function `forgeCallRefusal`. The command `guardrails forge-call [--branch <b>] -- <gh args…>` prints the refusal and exits 1, or exits 0; an internal error refuses. In the box, the existing `gh` wrapper runs the check before `exec /usr/local/bin/gh`, and refuses every call when `dist/cli.js` does not exist yet. In the in-process runtime, `installPushGuard` also writes a `gh` into `<guard dir>/bin/`, and `agentSdkRuntimeWith` puts that folder first on the session's `PATH`. That `gh` runs the check, then the real `gh` found on the daemon's own `PATH`. The daemon's own `gh` calls (`src/adapters/`) do not go through any of this.
+
+**Files touched.**
+
+- `src/daemon/forge-guard.ts` — created. `forgeCallRefusal(args, workBranch)`, pure, with a small reader for `gh api` command lines.
+- `src/daemon/forge-guard.test.ts` — created. Cases 1–3 (18 tests), plus 7 tests for other ways of writing the same calls.
+- `src/commands/guardrails.ts` — added `guardrails forge-call`. It refuses on an internal error, with a comment that says why. No other command changed: the diff on this file removes no line.
+- `src/daemon/container-runtime.ts` — the box's `gh` wrapper gains five lines at its top: the "not built yet" refusal, then the check with `|| exit 1`. The check's stdin is `/dev/null`.
+- `src/daemon/container-runtime.test.ts` — case 4: new block "the guard on a boxed run's gh calls" (4 tests). The exact-script test changed because the script changed on purpose: it now inserts the hand-written `FORGE_CALL_LINES` after the wrapper's `#!/bin/sh`. The 40d snapshot is left as it was.
+- `src/daemon/push-guard.ts` — `forgeGuardBin(dir)` (exported) and the `gh` wrapper written by `installPushGuard`.
+- `src/daemon/session.ts` — the session's `env.PATH` is `<guard dir>/bin` + the daemon's `PATH`.
+- `src/daemon/session.test.ts` — case 5: new block "the guard on an in-process session's gh calls" (4 tests). One 43a assertion changed on purpose: "keeps the rest of the daemon's environment" now checks that `PATH` ends with the daemon's whole `PATH`, not that it equals it.
+- `doc/plans/phases/reports/phase-43-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **The refusal has the 43a shape:** "Refused: `<the call>` `<what it does>`, and `<rule>`. Nothing reaches the project's default branch without a person's yes. `<next step>`." The rule is "a run never merges a pull request" for a merge, "this run may write only to `X`" otherwise, and "this step has no work branch, so it writes nothing to the project" when there is no work branch. The next step is "Commit on `X` and push that." or, with no work branch, "Say what you did on the ticket." An API call is named by method and path (`gh api -X PUT repos/o/r/contents/STATUS.md`), not by the whole line, because the line can hold a whole file's content.
+2. **The `gh` for the in-process session lives in `<guard dir>/bin/`, not in the guard directory itself.** The plan said "that directory first on the session's `PATH`". But the guard directory also holds 15 hook files, and their names are commands: a session that runs the `pre-commit` tool would have run Timone's forwarder instead. A test ("adds gh to the session's PATH and nothing else") was seen red before the move.
+3. **The host-side `gh` finds the real one at call time.** It runs `command -v gh` with `PATH` set to the daemon's `PATH` from when the guard was installed. That `PATH` never contains the wrapper's own folder, so the wrapper cannot call itself. A missing real `gh` exits 127 with one sentence.
+4. **The check never reads stdin** (`< /dev/null` in both wrappers), so `gh api --input -` still gets its input. This adds `< /dev/null` to the plan's command line.
+5. **A call the guard cannot read is refused.** `gh api graphql --input <file>` and `-F query=@file` are refused, with a sentence saying the guard cannot read the query. A `contents` write with `--input` is refused too: its `branch` is in a body the guard does not see. A contents write must name the work branch in every `branch` field it has.
+6. **The reader is wider than the plan's examples.** It reads `-X PUT`, `-XPUT`, `-X=PUT`, `--method PUT`, `--method=PUT`; a path with a leading `/`, a whole URL, or a `?query`; and `gh pr --repo o/r merge`. It checks every word that is not a flag, not only the first, so a flag it does not know cannot hide the path.
+7. **`gh pr merge --help` is refused.** The rule refuses `pr merge` in any form, and asking for help is one. This costs nothing.
+8. **`installPushGuard` always writes the `gh`, so the box's guard directory has one too** (`$HOME/.timone/git-hooks/bin/gh`). Nothing puts that folder on the box's `PATH`, so it is never run. The box's `gh` is the wrapper in `$HOME/.local/bin`.
+9. **The wrapper is only written when the box gets a token** (`if [ -n "${GH_TOKEN:-}" ]`), as before. A box with no token has no wrapper, and its `gh` is not checked. But a box with no token cannot write to the forge either.
+
+*What I would refactor (not done).* `guardrails.ts` now has two "refuse on error" actions (`pre-push`, `forge-call`) with the same `catch`. A third one would make it worth a shared helper. `forge-guard.test.ts` and the box/session tests repeat the fake-real-`gh` setup (three lines each); I left them as visible copies, as `testing.md` asks.
+
+*Known gaps, not in the plan.* `gh alias set m 'pr merge'` followed by `gh m 12` is not caught. `gh repo edit --default-branch`, `PUT …/pulls/<n>/update-branch`, and `gh workflow run` of a workflow that pushes are not refused. Like 43a's `--no-verify`, these are ways to get around the guard on purpose, not likely mistakes.
+
+**Validation evidence.**
+
+*Case 1* — refused calls (`forge-guard.test.ts`, block "what a run may not do through the forge", 8 command lines + 1 wording test). First run: module missing (`Error: Failed to load url ./forge-guard.js … Does the file exist?`). Then with a stub that returns undefined:
+
+```
+× … refuses merging a pull request, and says what it refused
+× … refuses syncing a branch on the forge, and says what it refused
+× … refuses merging one branch into another, and says what it refused
+× … refuses writing a file without naming a branch, and says what it refused
+× … refuses writing a file to another branch, and says what it refused
+× … refuses moving a branch, and says what it refused
+× … refuses merging a pull request by its API, and says what it refused
+× … refuses merging a pull request through GraphQL, and says what it refused
+× … never tells the reader to put anything on the default branch
+TypeError: .toMatch() expects to receive a string, but got undefined
+AssertionError: expected '' to contain 'Nothing reaches the project\'s defaul…'
+Tests  9 failed (9)
+```
+
+Green with the smallest code: a function that refuses every call and names it (`Tests  9 passed (9)`).
+
+*Case 2* — allowed calls (block "what a run may do through the forge", 6 tests). Red against case 1's refuse-everything code:
+
+```
+× … allows opening a pull request
+× … allows commenting on an issue
+× … allows reading an issue's comments
+× … allows commenting through the API
+× … allows writing a file to its own work branch
+× … allows running a GraphQL query
+AssertionError: expected 'Refused: `gh pr create` writes to the…' to be undefined
+Tests  6 failed | 9 passed (15)
+```
+
+After the rule was written, one case-1 test failed: `× … never tells the reader to put anything on the default branch` / `expected 'Refused: `gh api -X PUT repos/o/r/con…' not to match /(push|commit|merge|write)[^.]*\bto `?main`?/i`. My wording "writes a file to `main`" read like a direction. I changed it to "writes a file to the branch `main`": `Tests  15 passed (15)`.
+
+*Case 3* — no work branch (block "what a step with no work branch may do through the forge", 3 tests: branch named like a run's, branch named `undefined`, no branch field). Red:
+
+```
+× … refuses writing a file to a branch named like a run's, and says the step writes nothing
+× … refuses writing a file to a branch named undefined, and says the step writes nothing
+× … refuses writing a file to no branch at all, and says the step writes nothing
+AssertionError: expected 'Refused: `gh api -X PUT repos/o/r/con…' to contain 'this step has no work branch, so it w…'
+Tests  3 failed | 15 passed (18)
+```
+
+The calls were already refused, but in words that named `undefined` as the work branch. Before writing the code I corrected the test's last assertion. It had been `not.toContain("`undefined`")`, which is wrong for the row whose branch really is named `undefined`. It is now `not.toMatch(/(only to|Commit on) `undefined`/)`. The red above came from the first assertion and is unchanged by this. Green: `Tests  18 passed (18)`.
+
+*Case 4* — the box's `gh` wrapper (`container-runtime.test.ts`, block "the guard on a boxed run's gh calls", 4 tests). Three tests run the wrapper itself outside a box. The test takes the wrapper text out of the script, moves its two fixed paths (Timone's CLI and the real `gh`) to the built CLI and to a fake `gh` that writes down its arguments, and runs it with `HOME` in a temp folder. Red:
+
+```
+× … checks the call before it hands over to the real gh   (expected -1 to be greater than -1)
+× … refuses a merge, and the real gh never runs           (expected +0 to be 1)
+× … refuses every call while Timone is not built yet      (expected +0 to be 1)
+Tests  3 failed | 97 passed (100)
+```
+
+"Hands a comment to the real gh, with the token" passed from the start, because the old wrapper hands every call over. After the change, the exact-script test failed because the script changed on purpose. I updated it (see Files touched): `Tests  100 passed (100)`. To show the comment test is not empty, I made `forge-call` exit 1 on an allowed call and rebuilt. Result: `× … hands a comment to the real gh, with the token` / `AssertionError: expected 1 to be +0`. I reverted it, rebuilt, and saw `Tests  100 passed (100)`.
+
+*Case 5* — the in-process session (`session.test.ts`, block "the guard on an in-process session's gh calls"). The fake `query` runs `gh` by name with the session's own `env` (so `PATH` decides which `gh` runs) and `HOME` in a temp folder. The real `gh` is a fake one put first on the daemon's `PATH` with `vi.stubEnv`. The session's checkout has a `dist` link to Timone's build. Red:
+
+```
+× … puts the guard's directory first on the session's PATH   (expected '/tmp/timone-session-gh-Fg8t5k/bin:/wo…' to be '/tmp/timone-session-gh-Fg8t5k/cwd/.ti…')
+× … refuses a merge, and the real gh never runs               (expected +0 to be 1)
+Tests  2 failed | 17 passed (19)
+```
+
+After the change, 43a's "keeps the rest of the daemon's environment" failed on its `PATH` assertion, because the `PATH` changed on purpose. I changed it to check the ending: `Tests  19 passed (19)`. "Hands a comment to the real gh" passed from the start: before the change the fake `gh` was found directly. To show it is not empty, I used the same mutation as case 4 and saw `× … hands a comment to the real gh` / `AssertionError: expected 1 to be +0`. I reverted it: `Tests  19 passed (19)`. Then decision 2 was added test-first. "Adds gh to the session's PATH and nothing else" was red: `expected [ 'applypatch-msg', …(15) ] to deeply equal [ 'gh' ]` / `Tests  1 failed | 19 passed (20)`. After the move to `bin/` it was green: `Tests  38 passed (38)` (session + push-guard). The first test's name and assertion became "puts a directory of the guard's first on the session's PATH".
+
+*Extra* — other ways of writing the same calls (block "the same calls, written another way", 7 tests). These were written after the code they test, which came with case 2, so they could not be red first. To show they are not empty, I broke five parts of the reader at once: `--x=y` reading, `-XPUT` reading, the path match anywhere in the word, skipping `--repo`, and refusing `--input`. Result: all six "refuses …" rows failed (`Tests  6 failed | 19 passed (25)`). I reverted it: `Tests  25 passed (25)`. "Allows reading a file from any branch" failed when `writes()` was made to answer yes for every call (`expected 'Refused: `gh api -X POST repos/o/r/co…' to be undefined`). I reverted it: `Tests  25 passed (25)`.
+
+*The validation block* (run after the last change, with `HOME` in a temp folder for the two probes):
+
+```
+$ npm run build
+> tsc
+$ npx vitest run src/daemon/forge-guard.test.ts src/daemon/container-runtime.test.ts src/daemon/session.test.ts
+ Test Files  3 passed (3)
+      Tests  145 passed (145)
+$ node dist/cli.js guardrails forge-call --branch timone/7-x -- pr merge 12 --squash; echo "exit: $?"
+Refused: `gh pr merge` merges a pull request, and a run never merges a pull request. Nothing reaches the project's default branch without a person's yes. Commit on `timone/7-x` and push that.
+exit: 1
+$ node dist/cli.js guardrails forge-call --branch timone/7-x -- issue comment 85 --body hi; echo "exit: $?"
+exit: 0
+$ git diff --stat -- src/adapters/github-tickets.ts
+(no output)
+```
+
+`git diff --stat -- src/adapters/` gives no output either.
+
+- [x] Cases 1–5 each seen red before green, recorded above. The tests that could not honestly be red first are named: "hands a comment" in cases 4 and 5, and the extra block. Each was shown not to be empty by a code change, a failure, and a revert. **Pass.**
+- [x] The two probe commands gave exit 1, then exit 0. **Pass.**
+- [x] `src/adapters/github-tickets.ts` is unchanged by this slice: `git diff --stat` printed nothing. **Pass.**
+
+Nothing is written under the person's home folder by the tests. I touched a marker file, ran the whole suite, then ran `find "$HOME" -newer marker`, leaving out `~/.claude`, `~/.npm` and `~/.cache`. Nothing was found. Every `gh` wrapper and CLI the new tests start runs with `HOME` in a temp folder.
+
+*At slice end:* `npx tsc --noEmit` exit 0. Whole suite `npx vitest run`: `Test Files  58 passed (58)`, `Tests  1482 passed (1482)`, 2.6 s. That is 1 file and 33 tests more than 57/1449: 25 in `forge-guard.test.ts`, 4 in container-runtime, 4 in session.
+
+**What 43c must know.**
+
+- `forgeCallRefusal` holds the whole rule. Another refused call is one more branch in `forgeCallRefusal` or `refusedApiCall`, plus a row in the test's `it.each`.
+- The box's `gh` check is in the wrapper written inside `if [ -n "${GH_TOKEN:-}" ]`. A box started with no token has no wrapper.
+- In the in-process runtime, the session's `PATH` begins with `<cwd>/.timone/push-guard/session-*/bin`, which holds only `gh`. Anything else that wants to put a folder first on the session's `PATH` must keep this one ahead of the real `gh`.
+- The `gh` checks need `dist/` built, as the push guard's do: `npm run build` before `vitest` after changing `forge-guard.ts`, `push-guard.ts` or `guardrails.ts`.
+- The known gaps (aliases, `repo edit --default-branch`, `update-branch`, `workflow run`) are listed under the decisions above.

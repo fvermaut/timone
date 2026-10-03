@@ -468,8 +468,21 @@ function boxScript(
     // earlier on PATH sets the variable from the file and hands over to the
     // real binary. Every `gh` call is a new process, so every one of them
     // reads the current token.
+    //
+    // **Every call is checked first** (#85): a run cannot merge, or write to
+    // any branch but its own, through the forge's API. The check is Timone's
+    // own command, which does not exist until Timone is built further down.
+    // Nothing here calls `gh` before that, so a call that finds no build is
+    // refused rather than let through unchecked. The check reads nothing
+    // from stdin, which stays the real `gh`'s (`--input -`).
     `  cat > "${WRAPPER_DIR}/gh" <<'TIMONE_GH_WRAPPER'`,
     "#!/bin/sh",
+    `[ -f ${WORKSPACE}/timone/dist/cli.js ] || {`,
+    '  echo "Refused: Timone\'s guard on gh calls is not built yet, so this gh call does not run." >&2',
+    "  exit 1",
+    "}",
+    `node ${WORKSPACE}/timone/dist/cli.js guardrails forge-call` +
+      ' ${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"} -- "$@" < /dev/null || exit 1',
     `GH_TOKEN=$(cat "${FORGE_TOKEN_FILE}" 2>/dev/null)`,
     "GITHUB_TOKEN=$GH_TOKEN",
     "export GH_TOKEN GITHUB_TOKEN",
