@@ -10,7 +10,7 @@
 
 > **Read this first.** The old code between steps is gone: [#189](https://github.com/fvermaut/timone/pull/189) is merged. Every project now runs on the runner, and `timone retry` no longer exists. The work for [#185](https://github.com/fvermaut/timone/issues/185) and [#110](https://github.com/fvermaut/timone/issues/110) is merged too, in [#193](https://github.com/fvermaut/timone/pull/193). Restart the daemon so it runs both.
 
-**1. Restart the daemon** so it runs the merged code of #189. Its 4 small leftovers are [#190](https://github.com/fvermaut/timone/issues/190) and [#191](https://github.com/fvermaut/timone/issues/191).
+**1. Restart the daemon** so it runs the merged code of #189. Its 4 small leftovers are [#190](https://github.com/fvermaut/timone/issues/190) and [#191](https://github.com/fvermaut/timone/issues/191). The order of all open Timone tickets is item 6.
 
 **What I need from you:** restart the daemon.
 
@@ -35,9 +35,18 @@
 - [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal.
 - [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47): three questions about moving a row; [#46](https://github.com/fvermaut/scratch-app/issues/46) waits on it.
 - [#127](https://github.com/fvermaut/timone/issues/127): two shared accessibility checks are broken.
-- Faults found on the way, filed for later: [#182](https://github.com/fvermaut/timone/issues/182), [#186](https://github.com/fvermaut/timone/issues/186), [#187](https://github.com/fvermaut/timone/issues/187), [#188](https://github.com/fvermaut/timone/issues/188), [#190](https://github.com/fvermaut/timone/issues/190), [#191](https://github.com/fvermaut/timone/issues/191).
+- Faults found on the way: see item 6.
 
 **What I need from you:** nothing until you want one of them.
+
+**6. Timone's own tickets were sorted on 3 October.** 24 of 75 were closed: their work was merged, the runner replaced the code they were about, or another ticket has the same fault. Each closed ticket says why. One fault came back: [#12](https://github.com/fvermaut/timone/issues/12). A closed ticket can again start a paid session, because its fix was removed with #189. The 51 left, in order:
+
+- **First: a run can harm a project, or you have to answer twice.** [#85](https://github.com/fvermaut/timone/issues/85): a run can push to `main`, and `main` is not protected on any of the three repositories. [#113](https://github.com/fvermaut/timone/issues/113): a box runs whatever this folder has checked out. [#109](https://github.com/fvermaut/timone/issues/109): no rule stops a check from deleting real data. [#87](https://github.com/fvermaut/timone/issues/87): inside a box, the guard on the checking scripts does not work. [#73](https://github.com/fvermaut/timone/issues/73): box names collide, and a failed start can remove another run's box. [#183](https://github.com/fvermaut/timone/issues/183) and [#176](https://github.com/fvermaut/timone/issues/176) item 1: you approve two or three times. [#178](https://github.com/fvermaut/timone/issues/178): a stop written when closing a pull request is not taken. [#177](https://github.com/fvermaut/timone/issues/177): the runner held a build for a setting it did not need. [#22](https://github.com/fvermaut/timone/issues/22): the fixing step asks you to merge before its re-check. [#186](https://github.com/fvermaut/timone/issues/186): `timone status` names 80 finished tickets. #12.
+- **Next: real gaps.** #184 with #179 item 1, #181, #190 with #191 item 1 and #188 item 3, #124 #90 #101 #174 #192 (the end-of-session check reports correct work), #138, #121 with #134, #194, #107, #72, #20, #5 with #187, #127, the rest of #176.
+- **Later: small tidying, in one batch.** #195, #191, #188, #179, #168, #172, #10.
+- **Proposed for closing, waiting on your yes.** #91, #26, #18, #17, #7, #37, #54, #88, #62. They cost more than they give, or what is left of them is very small. The web page map, #92 with #95 to #98, is your call.
+
+**What I need from you:** say yes to close the nine, and say whether the web page map stays open.
 
 **Nothing else needs you.**
 
