@@ -421,3 +421,52 @@ $ git diff --stat -- . ':!.claude/skills/timone-verify' ':!process.md' ':!doc/pl
 - [x] The rules of 42b are otherwise unchanged: the four break-run cases, the narrowed re-verify of probes, the smoke comparison. The skill's `git diff -U0` hunks are at new lines 39, 49, 57, 139, 158, 189, 193, 245, 286 and 319. The four cases (lines 132–137) and the two bullets of step 3 (lines 190–191) have no hunk. At line 139 only "check" → "pass" changed. At line 193, "sends every probe in scope again" and the real-run-only rule are word for word the same. The smoke paragraph keeps its old/new rule, the empty-list case, *"**Never check out, build or run the default branch to compare.**"* and the no-list case word for word; only its pointer to the read changed. In `process.md` the D1 four cases, the D2 bold sentence (apart from "re-check" → "re-verify") and the D4 rule (apart from "last check report" → "latest verification report") are unchanged.
 
 **What 42f must know.** In `process.md` only line 46 (stage 7) changed. Each stage is one line, so no line numbers moved. Line 44 (stage 6) is untouched by this slice. `CONTEXT.md` still says "the checking step" and "Later checks" in the *Probe* entry that this branch added. That entry is the words used to the human, and it was outside this slice's files.
+
+## 42f — A slice is given the list of fast suites, and stage 6 requires the tests-run list
+
+**Built.** A slice is now given the suites that take under a minute. The building skill's list of what a slice receives has a seventh item: those suites, as decided for the phase, and how that was decided. The bullet *Which suites take under a minute* no longer says "you name them in each slice's prompt". It says each slice receives the list as item 7 of its inputs. In `process.md`, stage 6 now requires the same tests-run contents the skill's templates already carry. A handoff note carries the tests and suites run at sub-phase end. A completion report carries the tests and suites each sub-phase ran, and the whole run of every suite at the close.
+
+**Files touched.**
+
+- `.claude/skills/timone-execute/SKILL.md` — *The sub-agent contract*: a new item 7 in the list of what a slice receives (line 105). *The TDD loop inside a slice*: the bullet *Which suites take under a minute* (line 139) now points to item 7, in place of "you name them in each slice's prompt".
+- `process.md` — the stage 6 paragraph only (line 44): one item added to what a handoff note carries, and one to the completion report's required elements.
+- `doc/plans/phases/reports/phase-42-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **"How that was decided" is the source of each suite's time, not the orchestrator's reasoning.** Item 7 says it in those terms: each suite's time in the latest completion report, or, for a suite with no time there, the run before the first slice that is stopped after one minute. The paragraph after the list still says "not your reasoning about the phase". Item 7 gives facts about the project, so the two do not disagree, and I left that paragraph as it was.
+2. **Item 7 also says what to do when no suite takes under a minute: say so.** Without that line, a slice given nothing could not tell "no fast suite" from "not told".
+3. **The bullet keeps its 2026-10-02 marker on the sentence 42c wrote, and the new pointer carries its own 2026-10-03 marker.** Only the end of the first sentence changed ("and you name them in each slice's prompt" was removed). The pointer sentence follows the old marker, so a reader sees which text is new.
+4. **The bullet points to "item 7 of its inputs in *The sub-agent contract*"**, not to the list by its heading. The validation `awk` counts numbered lines from the first line that names that heading. A second line with the heading's words, below the list, would start a second count that runs to the end of the file.
+5. **In `process.md`, the new completion-report element goes at the end of the list**, after "context for the next agent", not after the outcome table where the template puts it. The new element holds its own "and". At the end of the list it reads as one item; in the middle it would read as two. `process.md` leaves the layout to the skill, so the order there does not set the order of the report. The plan's wording is used word for word, so the validation grep finds it.
+6. **Markers in `process.md` sit inside the lists, before the added item**, as 42e did with the new item in stage 7's closed list.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based. No tests or suites ran at sub-phase end: the slice changes rule text only. The three commands, run after the last edit:
+
+```
+$ awk '/What a slice context receives/,/What a slice context returns/' .claude/skills/timone-execute/SKILL.md | grep -c -E "^[0-9]+\. "
+7
+
+$ git grep -n -E "whole run of every suite at the close" -- process.md
+process.md:44:**6 — Implementation.** … the tests and suites each sub-phase ran, and the whole run of every suite at the close. **When a sub-phase still fails, concretely:** …
+
+$ git diff --stat -- . ':!.claude/skills/timone-execute' ':!process.md' ':!doc/plans/phases/reports/phase-42-handoffs.md'
+(empty)
+```
+
+The seven numbered lines the `awk` range counts are items 1 to 6 as before (`git diff -U0` has no hunk on them) and the new item 7. The grep matches once, on line 44, which is stage 6.
+
+- [x] A slice's input list names the fast suites, and nothing else was added to it.
+  - Line 105: *"7. **The suites that take under a minute**, as decided for the phase, and how that was decided: from each suite's time in the latest completion report, or, for a suite with no time there, from the run before the first slice that is stopped after one minute. ✏ Revised 2026-10-03 (…). The slice runs these suites whole at its end, so it needs this list, and it cannot work the list out itself, because the earlier completion report is not one of its inputs. When no suite takes under a minute, say so."*
+  - Line 139: *"**Which suites take under a minute** is decided once per phase, before the first slice. ✏ Revised 2026-10-02 (… D5). ✏ Revised 2026-10-03 (…): each slice receives the list, and how it was decided, as item 7 of its inputs in *The sub-agent contract*."*
+  - The skill's `git diff -U0` has two hunks: `@@ -104,0 +105 @@` (item 7 added, nothing else in the list) and `@@ -138 +139 @@` (the bullet). The paragraph after the list ("Nothing else. …") and the list of what a slice returns have no hunk.
+- [x] `process.md` stage 6 lists the tests-run contents for both the handoff and the completion report; stage 7's paragraph reads as 42e left it.
+  - Handoff notes: *"**Handoff notes** carry what the slice built, the files it touched, decisions taken inside the slice, its validation evidence including the red-green trace, ✏ Revised 2026-10-03 (…) the tests and suites run at sub-phase end, and anything the next slice must know;"*
+  - Completion report: *"… a per-sub-phase outcome table carrying commit SHAs, deviations from the plan, context for the next agent, and ✏ Revised 2026-10-03 (…) the tests and suites each sub-phase ran, and the whole run of every suite at the close."*
+  - `git diff -U0 process.md` has one hunk, `@@ -44 +44 @@`. The word diff shows only the two insertions above and "and context for the next agent." becoming "context for the next agent, and". The SHA-256 of line 46 is `5a980761…` before and after this slice, and the SHA-256 of every line but 44 is `5afee01b…` before and after.
+
+**What delivery must know.**
+
+- Spec findings 3 and 4 of the delivery report are answered by this slice. Findings 1, 2 and 5 were 42d's and 42e's.
+- `process.md` stage 6 opens with its own short list of what a slice is given: *"fresh context each, only the relevant plan excerpt, prior handoff, and file list."* It does not name the fast suites. It also never named `doc/standards.md`, the declared seams or the glossary terms, which the skill's list has carried for a long time. The plan allowed two changes to that paragraph, so I did not touch this sentence. A reviewer who reads "only" as a closed list may want it to name the fast suites, or to point to the skill's list.
+- The skill's line 118, *"say so in the slice's prompt"*, is about the never-read rule, not the fast suites. It is unchanged.
