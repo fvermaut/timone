@@ -29,3 +29,10 @@
 **Agreed:** Sub-phase 42b rewrites the break-run rule and the steps that state it.
 **Did instead:** It also changes the paragraph on running the whole set with one command. The plan is amended in place.
 **Why:** That command is each project's own runner. If it still does every probe's break run, the new rule saves nothing. Found at the slice's gate, not by the plan.
+
+## 2026-10-03 — timone#185, check
+
+**Kind:** check not run
+**Agreed:** Every claimed requirement and every requirement of the regression set is checked by a probe.
+**Did instead:** Three were not decided. PRD-06.R5 (a box never holds a token that runs out before its next one) has no probe. PRD-05.R18, and the real-runner clause of PRD-05.R7, were reported BLOCKED by their probes.
+**Why:** For PRD-06.R5, the tool permission system refused the probe's instrument, a stand-in `docker` program that records what a box is handed, as *Credential Exploration*. Every token involved would have been a fake value from the probe's own stand-in for GitHub, but the refusal stands until a person allows it. PRD-05.R18 and PRD-05.R7 clause 1 need a replay against the real model on this build, which only the operator can run (`npm run --silent replay`). Details in [phase-42-verification.md](phase-42-verification.md), *Carried forward*.

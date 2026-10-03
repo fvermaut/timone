@@ -241,6 +241,7 @@
       WHEN the execute skill runs a sub-phase
       THEN tests are written only at the declared seams, each written and run failing (red) before the implementation that makes it pass (green), one slice at a time; refactoring is deferred to the delivery review; at sub-phase end the tests the change can affect run, and the full suite runs once when the last sub-phase is done, as PRD-06.R4 says
 - **Verification hint:** inspect the sub-agent transcript/handoff for a sub-phase: the test-red evidence must precede the implementing change; look for the named anti-patterns (implementation-coupled, tautological, horizontal slicing) in the produced tests.
+- ✏ 2026-10-03 — **not yet checked on its new wording; the status stays `revised`.** [Phase 42's verification](../../plans/phases/reports/phase-42-verification.md#human-check--prd-01r16-the-tdd-loop-as-revised-on-2026-10-02) issued a HUMAN-CHECK script for it. A person performs it on the first build of two or more sub-phases made after the new rule is merged; phase 42 was itself built under the old rule, so its handoffs cannot show it.
 
 ## R17 — Two-axis delivery review
 

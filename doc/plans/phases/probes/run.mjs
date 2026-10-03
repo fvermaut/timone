@@ -6,6 +6,12 @@
 // MUST, verify-via api, status verified — never maintained as a second list.
 // A criterion with no probe file is printed as NO PROBE so the gap is a visible
 // number rather than a silent omission.
+//
+// ✏ 2026-10-02 (phase 42 verification, ADR-0061 D1): the one command does REAL
+// RUNS ONLY. Each probe is started with PROBE_REAL_ONLY=1, so its clauses skip
+// their break leg. A probe owed a break run (new, rewritten, in doubt) is run on
+// its own, `node doc/plans/phases/probes/<id>.mjs`, which does both legs.
+//   --with-break   does both legs for every probe, as every pass did before.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -33,11 +39,16 @@ function derive() {
 }
 
 const set = derive();
-console.log(`Derived regression set: ${set.length} criteria (MUST + api + verified)\n`);
+const withBreak = process.argv.includes('--with-break');
+console.log(`Derived regression set: ${set.length} criteria (MUST + api + verified)`);
+console.log(withBreak ? 'Mode: break run, then real run, for every probe (--with-break)\n' : 'Mode: real runs only (PROBE_REAL_ONLY=1)\n');
+const childEnv = { ...process.env };
+if (withBreak) delete childEnv.PROBE_REAL_ONLY;
+else childEnv.PROBE_REAL_ONLY = '1';
 
 const run = (file) =>
   new Promise((resolve) => {
-    execFile(process.execPath, [file], { cwd: REPO_ROOT }, (err, stdout, stderr) =>
+    execFile(process.execPath, [file], { cwd: REPO_ROOT, env: childEnv, maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) =>
       resolve({ code: err ? (err.code ?? 1) : 0, out: `${stdout}${stderr}` }),
     );
   });

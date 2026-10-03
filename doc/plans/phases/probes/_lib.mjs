@@ -31,17 +31,27 @@ export function cli(args, cwd) {
 
 // A clause runs twice: broken input must go red, correct input must go green.
 // Green alone is never evidence (process.md, stage 7).
+//
+// ✏ 2026-10-02 (phase 42 verification, ADR-0061 D1): with PROBE_REAL_ONLY=1 the
+// broken leg is not run and the clause does its real run only. run.mjs sets it,
+// because the one command does real runs only; a probe owed a break run is run
+// on its own, without it.
+export const REAL_ONLY = process.env.PROBE_REAL_ONLY === '1';
 const results = [];
 
 export function clause(id, wording, { broken, correct }) {
   let redOk = false;
   let redDetail = '';
-  try {
-    broken();
-    redDetail = 'the assertion still held on broken input';
-  } catch (e) {
-    redOk = true;
-    redDetail = e.message;
+  if (REAL_ONLY) {
+    redDetail = 'real run only (PROBE_REAL_ONLY=1)';
+  } else {
+    try {
+      broken();
+      redDetail = 'the assertion still held on broken input';
+    } catch (e) {
+      redOk = true;
+      redDetail = e.message;
+    }
   }
 
   let greenOk = false;
@@ -54,9 +64,9 @@ export function clause(id, wording, { broken, correct }) {
     greenDetail = e.message;
   }
 
-  const verdict = !redOk ? 'INSTRUMENT-BROKEN' : greenOk ? 'PASS' : 'FAIL';
+  const verdict = REAL_ONLY ? (greenOk ? 'PASS' : 'FAIL') : !redOk ? 'INSTRUMENT-BROKEN' : greenOk ? 'PASS' : 'FAIL';
   console.log(`=== ${id} — ${wording}`);
-  console.log(`    break leg: ${redOk ? 'RED (as required)' : 'GREEN — instrument broken'} — ${redDetail}`);
+  console.log(`    break leg: ${REAL_ONLY ? 'not run' : redOk ? 'RED (as required)' : 'GREEN — instrument broken'} — ${redDetail}`);
   console.log(`    green leg: ${greenOk ? 'PASS' : 'FAIL'} — ${greenDetail}`);
   results.push({ id, verdict });
   return verdict;
@@ -69,6 +79,6 @@ export function assert(cond, message) {
 export function finish(criterionId) {
   const bad = results.filter((r) => r.verdict !== 'PASS');
   const verdict = bad.length === 0 ? 'PASS' : bad.some((r) => r.verdict === 'INSTRUMENT-BROKEN') ? 'INSTRUMENT-BROKEN' : 'FAIL';
-  console.log(`--- ${criterionId}: ${verdict} (${results.length} clause labels, ${results.length - bad.length} passing)`);
+  console.log(`--- ${criterionId}: ${verdict} (${results.length} clause labels, ${results.length - bad.length} passing${REAL_ONLY ? ', real run only' : ''})`);
   process.exit(verdict === 'PASS' ? 0 : 1);
 }

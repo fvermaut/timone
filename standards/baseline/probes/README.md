@@ -27,20 +27,39 @@ finding is printed, not only the first.
 
 ## Red before green
 
-A probe's pass counts only after the probe has been seen to fail, on this build,
-in this run. Every probe here takes `--break`, which plants the exact fault it
-exists to catch before it looks:
+✏ Revised 2026-10-02 ([ADR-0061](../../../doc/adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) D1).
+This section used to say that a probe must be seen to fail on every build, in
+every run. That is no longer the rule.
+
+A probe's pass counts only after the probe has been seen to fail. Every probe
+here takes `--break`, which plants the exact fault it exists to catch before it
+looks. A run with `--break` is the probe's **break run**, and it must exit 1. A
+run without it is the **real run**, and it must exit 0:
 
 ```
-node standards/baseline/probes/axe.mjs --url … --modules … --break   # must exit 1
-node standards/baseline/probes/axe.mjs --url … --modules …           # must exit 0
+node standards/baseline/probes/axe.mjs --url … --modules … --break   # break run: must exit 1
+node standards/baseline/probes/axe.mjs --url … --modules …           # real run: must exit 0
 ```
 
-Green on both legs means the instrument is broken, not that the page is right.
-Stop there and say so; record no pass. This is the executed form of the rule
-that used to ask a verifier to calibrate, and
+**A probe here does its break run, then its real run, when it is run against a
+page it has never been run against.** A new page has a new layout, so the plant
+is not yet known to show up there. When you cannot tell whether the probe has
+run against that page before, treat the page as new. It also does both runs when
+its result is in doubt: when the project's own tests say the opposite of what
+its real run says.
+
+**Every other run is the real run only.** That covers a page an earlier check
+already ran this probe against, and every run again after a fix. The check
+report lists every probe that ran without a break run.
+
+When both runs happen, green on both means the instrument is broken, not that
+the page is right. Stop there and say so; record no pass. This is the executed
+form of the rule that used to ask a verifier to calibrate, and
 [timone#36](https://github.com/fvermaut/timone/issues/36) is the record of what
 asking alone was worth.
+
+The risk this accepts: a probe that has stopped being able to fail on a page it
+already checked is no longer caught by a break run there.
 
 The plant is made in the live page only, through the DOM, and the page is never
 reloaded between planting and scanning. Nothing reaches the project's files.
