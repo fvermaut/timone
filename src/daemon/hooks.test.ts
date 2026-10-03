@@ -130,6 +130,95 @@ describe("checkUnpushed", () => {
   });
 });
 
+/**
+ * [timone#85](https://github.com/fvermaut/timone/issues/85). A run's push to
+ * the default branch is refused, so a run's unpushed commit there is not one
+ * to push: it belongs on the run's work branch.
+ */
+describe("checkUnpushed — a run's commit on the default branch", () => {
+  /** Words that tell the reader to push what it holds. */
+  const PUSH_IT = /\bpush (it|them|these|the commits?)\b/i;
+
+  /** A run working `timone`, whose checkout holds `branch` unpushed. */
+  function runWithUnpushed(
+    branch: RepoEvidence["branches"][number],
+    workBranch: string | undefined,
+  ): SessionEvidence {
+    return {
+      target: "timone",
+      ...(workBranch === undefined ? {} : { workBranch }),
+      registers: [],
+      workspace: quietRepo("timone"),
+      projects: [
+        {
+          repo: "timone",
+          defaultBranch: "main",
+          branches: [branch],
+          commits: [],
+          workingTree: [],
+        },
+      ],
+    };
+  }
+
+  it("says the push will be refused and the commit belongs on the work branch", () => {
+    const evidence = runWithUnpushed(
+      { name: "main", unpushed: ["518252a"], hasUpstream: true },
+      "timone/39-primary-sources-owed-for-the-ui-ux-basel",
+    );
+
+    const violations = checkUnpushed(evidence);
+
+    expect(violations).toHaveLength(1);
+    const detail = violations[0].detail.join("\n");
+    expect(detail).toContain("518252a");
+    expect(detail).toContain("refused");
+    expect(detail).toContain(
+      "`timone/39-primary-sources-owed-for-the-ui-ux-basel`",
+    );
+    expect(detail).not.toMatch(PUSH_IT);
+  });
+
+  it("says a step with no work branch has no place in the project for the commit", () => {
+    const evidence = runWithUnpushed(
+      { name: "main", unpushed: ["abc1234"], hasUpstream: true },
+      undefined,
+    );
+
+    const violations = checkUnpushed(evidence);
+
+    expect(violations).toHaveLength(1);
+    const detail = violations[0].detail.join("\n");
+    expect(detail).toContain("refused");
+    expect(detail).toContain("nowhere in the project");
+    expect(detail).not.toContain("undefined");
+    expect(detail).not.toMatch(PUSH_IT);
+  });
+
+  it("keeps today's words for a run's unpushed commit on its work branch", () => {
+    const evidence = runWithUnpushed(
+      {
+        name: "timone/39-primary-sources-owed-for-the-ui-ux-basel",
+        unpushed: ["aaa1111"],
+        hasUpstream: true,
+      },
+      "timone/39-primary-sources-owed-for-the-ui-ux-basel",
+    );
+
+    expect(checkUnpushed(evidence)).toEqual([
+      {
+        rule: "unpushed",
+        summary:
+          "timone: 1 commit(s) on `timone/39-primary-sources-owed-for-the-ui-ux-basel` never reached the remote",
+        detail: [
+          "Branch `timone/39-primary-sources-owed-for-the-ui-ux-basel` is ahead of its upstream.",
+          "- aaa1111",
+        ],
+      },
+    ]);
+  });
+});
+
 describe("checkStatusPlacement", () => {
   it("flags STATUS.md committed off the default branch", () => {
     const evidence = cleanEvidence();
@@ -152,15 +241,6 @@ describe("checkStatusPlacement", () => {
     ];
 
     expect(checkStatusPlacement(evidence)).toHaveLength(1);
-  });
-
-  it("stays silent when STATUS.md is committed on the default branch", () => {
-    const evidence = cleanEvidence();
-    projectRepo(evidence).commits = [
-      { sha: "ccc3333", branch: "main", files: ["STATUS.md"], trailers: ["Timone-Stage: execution"] },
-    ];
-
-    expect(checkStatusPlacement(evidence)).toEqual([]);
   });
 
   it("stays silent when no commit touches STATUS.md", () => {
@@ -311,6 +391,282 @@ describe("checkStatusPlacement — what is not a stray status file", () => {
     ];
 
     expect(checkStatusPlacement(evidence)).toHaveLength(1);
+  });
+});
+
+/**
+ * [timone#85](https://github.com/fvermaut/timone/issues/85). A boxed run
+ * committed its status file on `main` and pushed it there, and the check
+ * looked only one way: a status file off the default branch. A run may not
+ * write the default branch at all — only a named person's yes lets work reach
+ * it (PRD-05.R3) — so for a run the default branch is the wrong place, and its
+ * own work branch is the right one.
+ */
+describe("checkStatusPlacement — a run's status file on the default branch", () => {
+  /** The work branch of the run on timone#39, from the ticket. */
+  const TICKET_39_BRANCH = "timone/39-primary-sources-owed-for-the-ui-ux-basel";
+
+  /** Words that would tell a run the default branch is where the file goes. */
+  const DEFAULT_AS_HOME = [
+    /not on `main`/i,
+    /Nobody reading/i,
+    /(belongs|goes|should be)[^.]*\bon `main`/i,
+    /(push|commit|write|move|put)[^.]*\b(to|onto) `?main`?\b/i,
+  ];
+
+  /** A run working `timone`, whose project checkout holds `commits`. */
+  function timoneRun(
+    commits: RepoEvidence["commits"],
+    workBranch: string | undefined,
+  ): SessionEvidence {
+    return {
+      target: "timone",
+      ...(workBranch === undefined ? {} : { workBranch }),
+      registers: [],
+      workspace: quietRepo("timone"),
+      projects: [
+        {
+          repo: "timone",
+          defaultBranch: "main",
+          branches: [],
+          commits,
+          workingTree: [],
+        },
+      ],
+    };
+  }
+
+  it("replays 518252a and names the run's work branch as the place for it", () => {
+    // The commit from the ticket, not an invented one. Author
+    // `timone-agent[bot] <319428833+timone-agent[bot]@users.noreply.github.com>`,
+    // 2026-09-04 20:39:42 +0000, subject "docs: STATUS.md — what the check on
+    // ticket 39 could and could not reach". It is on `origin/main` and on no
+    // other branch, because the run pushed it there.
+    const evidence = timoneRun(
+      [
+        {
+          sha: "518252a",
+          branch: "main",
+          files: ["STATUS.md"],
+          trailers: [
+            "Timone-Stage: verification",
+            "Timone-Run: timone#39",
+            "Timone-Session: 731c3c35-55ef-4d36-9456-9ac17eb4ec7f",
+          ],
+          onDefaultBranch: true,
+        },
+      ],
+      TICKET_39_BRANCH,
+    );
+
+    const violations = checkStatusPlacement(evidence);
+
+    expect(violations).toHaveLength(1);
+    const text = [violations[0].summary, ...violations[0].detail].join("\n");
+    expect(text).toContain("518252a");
+    expect(text).toContain(`\`${TICKET_39_BRANCH}\``);
+    for (const pattern of DEFAULT_AS_HOME) expect(text).not.toMatch(pattern);
+  });
+
+  it("tells a step with no work branch that it writes nothing to the project", () => {
+    // A sorting step owns no branch. Its account of what it did goes on the
+    // ticket, and nothing it does goes into the project.
+    const evidence = timoneRun(
+      [
+        {
+          sha: "abc1234",
+          branch: "main",
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: triage", "Timone-Run: timone#41"],
+          onDefaultBranch: false,
+        },
+      ],
+      undefined,
+    );
+
+    const violations = checkStatusPlacement(evidence);
+
+    expect(violations).toHaveLength(1);
+    const text = [violations[0].summary, ...violations[0].detail].join("\n");
+    expect(text).toContain("writes nothing to the project");
+    expect(text).toContain("ticket");
+    expect(text).not.toContain("undefined");
+    for (const pattern of DEFAULT_AS_HOME) expect(text).not.toMatch(pattern);
+  });
+
+  it("says nothing about a person's own session writing it on the default branch", () => {
+    // No run drove the session, so no work branch is owed, and the default
+    // branch is where a person's status file is read.
+    const evidence = timoneRun(
+      [
+        {
+          sha: "fff6666",
+          branch: "main",
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: interactive"],
+          onDefaultBranch: false,
+        },
+      ],
+      undefined,
+    );
+    delete evidence.target;
+
+    expect(checkStatusPlacement(evidence)).toEqual([]);
+  });
+
+  it("says nothing about a run writing it on its own work branch, in its own project", () => {
+    // Phase 32 D-2: this is where a run's status file is supposed to be.
+    const evidence = timoneRun(
+      [
+        {
+          sha: "aaa1111",
+          branch: TICKET_39_BRANCH,
+          files: ["STATUS.md"],
+          trailers: [
+            "Timone-Stage: verification",
+            "Timone-Run: timone#39",
+            "Timone-Session: 731c3c35-55ef-4d36-9456-9ac17eb4ec7f",
+          ],
+          onDefaultBranch: false,
+        },
+      ],
+      TICKET_39_BRANCH,
+    );
+
+    expect(checkStatusPlacement(evidence)).toEqual([]);
+  });
+
+  it("names the run's work branch, not the default branch, when a run writes it on another branch", () => {
+    const evidence = timoneRun(
+      [
+        {
+          sha: "bbb2222",
+          branch: "docs/status",
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: verification", "Timone-Run: timone#39"],
+          onDefaultBranch: false,
+        },
+      ],
+      TICKET_39_BRANCH,
+    );
+
+    const violations = checkStatusPlacement(evidence);
+
+    expect(violations).toHaveLength(1);
+    const text = [violations[0].summary, ...violations[0].detail].join("\n");
+    expect(text).toContain("bbb2222");
+    expect(text).toContain(`\`${TICKET_39_BRANCH}\``);
+    for (const pattern of DEFAULT_AS_HOME) expect(text).not.toMatch(pattern);
+  });
+
+  it("counts another run's work branch as another branch", () => {
+    // The run's own branch is the one it was given, by name. A `timone/…`
+    // branch for another ticket is not it.
+    const evidence = timoneRun(
+      [
+        {
+          sha: "ccc3333",
+          branch: "timone/40-another-ticket",
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: verification", "Timone-Run: timone#39"],
+          onDefaultBranch: false,
+        },
+      ],
+      TICKET_39_BRANCH,
+    );
+
+    const violations = checkStatusPlacement(evidence);
+
+    expect(violations).toHaveLength(1);
+    const text = [violations[0].summary, ...violations[0].detail].join("\n");
+    expect(text).toContain(`\`${TICKET_39_BRANCH}\``);
+    for (const pattern of DEFAULT_AS_HOME) expect(text).not.toMatch(pattern);
+  });
+
+  it("tells a step with no work branch, writing it on another branch, that it writes nothing", () => {
+    const evidence = timoneRun(
+      [
+        {
+          sha: "ddd4444",
+          branch: "docs/status",
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: triage", "Timone-Run: timone#41"],
+          onDefaultBranch: false,
+        },
+      ],
+      undefined,
+    );
+
+    const violations = checkStatusPlacement(evidence);
+
+    expect(violations).toHaveLength(1);
+    const text = [violations[0].summary, ...violations[0].detail].join("\n");
+    expect(text).toContain("writes nothing to the project");
+    expect(text).not.toContain("undefined");
+    for (const pattern of DEFAULT_AS_HOME) expect(text).not.toMatch(pattern);
+  });
+
+  it("still gives a person's own session today's finding, in today's words", () => {
+    // Phase 32 D-2 kept this sentence for a person's own branch, and it is
+    // still right there: a person's status file is read on the default branch.
+    const evidence = timoneRun(
+      [
+        {
+          sha: "eee5555",
+          branch: "docs/status",
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: interactive"],
+          onDefaultBranch: false,
+        },
+      ],
+      undefined,
+    );
+    delete evidence.target;
+
+    expect(checkStatusPlacement(evidence)).toEqual([
+      {
+        rule: "status-placement",
+        summary: "timone: STATUS.md was written on `docs/status`, not on `main`",
+        detail: [
+          "Commit eee5555 on `docs/status` touches STATUS.md.",
+          "Nobody reading `main` will see it until that branch merges.",
+        ],
+      },
+    ]);
+  });
+
+  it("says nothing about a commit that was on origin/main before the session", () => {
+    // How `collectEvidence` builds this. A commit's branch is the local branch
+    // that moved during the session and reaches it, so a run that updates its
+    // local `main` sees every commit it took from `origin/main` labelled
+    // `main`. `onDefaultBranch` is read when the session ends, so it is true
+    // for 518252a too, which the run pushed: it cannot tell the two apart.
+    // What can is the session trailer. Commits naming another session are
+    // dropped before any rule runs, so one that arrived from `origin/main`
+    // reaches this rule only when it names no session at all.
+    const evidence = timoneRun(
+      [
+        {
+          sha: "9a8b7c6",
+          branch: "main",
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: delivery", "Timone-Run: timone#38"],
+          onDefaultBranch: true,
+        },
+        {
+          // timone#70's shape: the same kind of commit, reached through the
+          // work branch after it merged `main` in.
+          sha: "9a8b7c6",
+          branch: TICKET_39_BRANCH,
+          files: ["STATUS.md"],
+          trailers: ["Timone-Stage: delivery", "Timone-Run: timone#38"],
+          onDefaultBranch: true,
+        },
+      ],
+      TICKET_39_BRANCH,
+    );
+
+    expect(checkStatusPlacement(evidence)).toEqual([]);
   });
 });
 

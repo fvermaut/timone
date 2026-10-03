@@ -18,6 +18,7 @@ import {
   runCheck,
   runForSession,
   runGuard,
+  sessionRun,
 } from "./guardrails.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
@@ -51,14 +52,14 @@ function git(dir: string, ...args: string[]): string {
 
 /**
  * A timone root with a real git repo in it, plus a real clone of a bare
- * "remote" as `projects/scratch-app`.
+ * "remote" as `projects/<project>` (`projects/scratch-app` unless named).
  *
  * Real repos rather than fabricated evidence, because this slice's risk is
  * not in the rules — those are pure functions and already shown red — but in
  * the plumbing between two processes: does the baseline survive, does the
  * evidence come back, does the session id find its run.
  */
-function workspace(): { root: string; projectDir: string } {
+function workspace(project = "scratch-app"): { root: string; projectDir: string } {
   const dir = mkdtempSync(join(tmpdir(), "timone-guardrails-"));
   tempDirs.push(dir);
   const root = join(dir, "timone");
@@ -84,9 +85,9 @@ function workspace(): { root: string; projectDir: string } {
   git(root, "push", "-q", "origin", "main");
 
   // A bare remote, then a clone of it, so "unpushed" is a real question.
-  const remote = join(dir, "scratch-app.git");
+  const remote = join(dir, `project-${project}.git`);
   git(dir, "init", "-q", "--bare", remote);
-  const projectDir = join(root, "projects", "scratch-app");
+  const projectDir = join(root, "projects", project);
   mkdirSync(join(root, "projects"), { recursive: true });
   git(dir, "clone", "-q", remote, projectDir);
   git(projectDir, "config", "user.email", "t@example.com");
@@ -126,6 +127,9 @@ async function stopOnce(
     manifest,
     store,
     sessionId,
+    // Never the test process's own: a `TIMONE_RUN_*` set there would turn
+    // every person's session below into a boxed run's.
+    env: {},
     print: (message) => printed.push(message),
     journal: (line) => journalled.push(line),
   });
@@ -194,6 +198,7 @@ describe("guarding the verifier's probes", () => {
       runGuard({
         store: ledgerAt(root, "execution"),
         sessionId: "session-abc",
+        env: {},
         toolInput: { file_path: "src/index.ts" },
       }),
     ).toBeUndefined();
@@ -204,6 +209,7 @@ describe("guarding the verifier's probes", () => {
     const reply = runGuard({
       store: ledgerAt(root, "execution"),
       sessionId: "session-abc",
+      env: {},
       toolInput: { file_path: "doc/plans/phases/probes/PRD-01.R3.mjs" },
     });
 
@@ -220,6 +226,7 @@ describe("guarding the verifier's probes", () => {
     const reply = runGuard({
       store: ledgerAt(root, "verification"),
       sessionId: "session-abc",
+      env: {},
       toolInput: { file_path: "doc/plans/phases/probes/PRD-01.R3.mjs" },
     });
 
@@ -233,6 +240,7 @@ describe("guarding the verifier's probes", () => {
     const reply = runGuard({
       store: newStore(root),
       sessionId: "session-nobody",
+      env: {},
       toolInput: { command: "cat standards/baseline/probes/axe.mjs" },
     });
 
@@ -255,6 +263,7 @@ describe("guarding the probes in a session run by hand (#169)", () => {
       root,
       store: newStore(root),
       sessionId: "session-hand",
+      env: {},
       toolInput: probe,
     });
 
@@ -271,6 +280,7 @@ describe("guarding the probes in a session run by hand (#169)", () => {
       root,
       store: newStore(root),
       sessionId: "session-hand",
+      env: {},
       toolInput: probe,
     });
 
@@ -288,6 +298,7 @@ describe("guarding the probes in a session run by hand (#169)", () => {
       root,
       store: newStore(root),
       sessionId: "session-hand",
+      env: {},
       toolInput: probe,
     });
 
@@ -309,6 +320,7 @@ describe("guarding the probes in a session run by hand (#169)", () => {
       root,
       store,
       sessionId: "session-daemon",
+      env: {},
       toolInput: probe,
     });
 
@@ -379,6 +391,162 @@ describe("finding the run that drove a session", () => {
     store.register("scratch-app", 7);
 
     expect(runForSession(store, "session-interactive")).toBeUndefined();
+  });
+});
+
+/**
+ * A run in a box (#85, 43c). The box clones Timone fresh, so its ledger is
+ * empty, and the box says which run it belongs to in its environment instead.
+ */
+describe("the run a session belongs to", () => {
+  /** What the box declares about its run. */
+  const boxed = {
+    TIMONE_RUN_PROJECT: "timone",
+    TIMONE_RUN_BRANCH: "timone/39-x",
+  };
+
+  it("is the box's declaration when the ledger has no run for the session", () => {
+    const { root } = workspace();
+
+    expect(sessionRun(newStore(root), "session-boxed", boxed)).toEqual({
+      project: "timone",
+      workBranch: "timone/39-x",
+    });
+  });
+
+  it("is the ledger's run when the ledger has one, whatever the environment says", () => {
+    const { root } = workspace();
+    const store = newStore(root);
+    const { run } = store.register("scratch-app", 40);
+    store.activate(run.id, "session-daemon");
+    store.claimBranch(run.id, "timone/40-y");
+
+    expect(sessionRun(store, "session-daemon", boxed)).toEqual({
+      project: "scratch-app",
+      workBranch: "timone/40-y",
+    });
+  });
+
+  it("is nobody's when neither the ledger nor the environment names a run", () => {
+    const { root } = workspace();
+
+    expect(sessionRun(newStore(root), "session-person", {})).toBeUndefined();
+  });
+
+  /** A manifest that names Timone as a managed project, as since ADR-0050. */
+  const timoneManifest: Manifest = {
+    projects: {
+      timone: {
+        repo_url: "https://github.com/fvermaut/timone.git",
+        path: "projects/timone",
+        stack: [],
+        bindings: { ticketing: "github" },
+      },
+    },
+  };
+
+  /**
+   * One `Stop` after a session whose only commit puts `STATUS.md` on
+   * `timone/39-x` in `projects/timone`, pushed. That is what a run on Timone
+   * is asked to do (ADR-0050 D-2), and what a person's own branch must not.
+   */
+  async function statusOnWorkBranch(env: NodeJS.ProcessEnv) {
+    const { root, projectDir } = workspace("timone");
+    const store = newStore(root);
+    await runBaseline({
+      root,
+      manifest: timoneManifest,
+      sessionId: "session-boxed",
+      now: new Date("2026-08-06T10:00:00Z"),
+    });
+    git(projectDir, "checkout", "-q", "-b", "timone/39-x");
+    writeFileSync(join(projectDir, "STATUS.md"), "# Status\n");
+    git(projectDir, "add", "-A");
+    git(projectDir, "commit", "-q", "-m", trailed("docs: the status file", "session-boxed"));
+    git(projectDir, "push", "-q", "origin", "HEAD:timone/39-x");
+
+    const printed: string[] = [];
+    const outcome = await runCheck({
+      root,
+      manifest: timoneManifest,
+      store,
+      sessionId: "session-boxed",
+      env,
+      print: (message) => printed.push(message),
+      journal: () => {},
+    });
+    return { ...outcome, printed };
+  }
+
+  it("is judged as a person's own session when nothing names a run", async () => {
+    const { returned } = await statusOnWorkBranch({});
+
+    expect(returned.map((violation) => violation.summary)).toContain(
+      "timone: STATUS.md was written on `timone/39-x`, not on `main`",
+    );
+  });
+
+  it("is judged as the box's run, with an empty ledger — the box case of ADR-0050 D-2", async () => {
+    const { returned, printed } = await statusOnWorkBranch(boxed);
+
+    expect(returned).toEqual([]);
+    expect(printed).toEqual([]);
+  });
+});
+
+/**
+ * A run's pushes go through a guard that git runs as a hook (43a). These
+ * commands switch that hook off, so a run is refused them before they run.
+ */
+describe("switching off the guard on a run's pushes", () => {
+  const boxed = {
+    TIMONE_RUN_PROJECT: "timone",
+    TIMONE_RUN_BRANCH: "timone/39-x",
+  };
+
+  /** What `PreToolUse` answers for one `Bash` command in this session. */
+  function guardOnBash(command: string, env: NodeJS.ProcessEnv) {
+    const { root } = workspace();
+    const reply = runGuard({
+      root,
+      store: newStore(root),
+      sessionId: "session-boxed",
+      env,
+      toolName: "Bash",
+      toolInput: { command },
+    });
+    return reply === undefined ? undefined : JSON.parse(reply);
+  }
+
+  it.each([
+    "git push --no-verify origin x",
+    "git -c core.hooksPath=/tmp/h push",
+    "GIT_CONFIG_COUNT=0 git push",
+  ])("refuses a run `%s`", (command) => {
+    const reply = guardOnBash(command, boxed);
+
+    expect(reply?.hookSpecificOutput.hookEventName).toBe("PreToolUse");
+    expect(reply?.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(reply?.hookSpecificOutput.permissionDecisionReason).toContain(
+      "keeps a run off the project's default branch",
+    );
+  });
+
+  it.each(["git push origin timone/39-x", "git commit --no-verify -m x"])(
+    "says nothing to a run about `%s`",
+    (command) => {
+      expect(guardOnBash(command, boxed)).toBeUndefined();
+    },
+  );
+
+  it.each([
+    "git push --no-verify origin x",
+    "git -c core.hooksPath=/tmp/h push",
+    "GIT_CONFIG_COUNT=0 git push",
+    "git push origin timone/39-x",
+    "git commit --no-verify -m x",
+  ])("says nothing about `%s` in a person's own session", (command) => {
+    expect(guardOnBash(command, {})).toBeUndefined();
   });
 });
 
@@ -611,6 +779,7 @@ describe("a session with no baseline", () => {
       manifest,
       store,
       sessionId: "session-never-started",
+      env: {},
       print: () => {},
       journal: () => {},
     });

@@ -128,6 +128,11 @@ export interface SessionEvidence {
    * under `projects/`.
    */
   target?: string;
+  /**
+   * The branch the run that drove this session works on. Absent for a
+   * person's own session, and for a step that owns no branch.
+   */
+  workBranch?: string;
   /** The timone repo, where every session runs (ADR-0007). */
   workspace: RepoEvidence;
   /**
@@ -217,6 +222,12 @@ const HARNESS_PATHS = [
 export function checkUnpushed(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
   for (const repo of [...evidence.projects, evidence.workspace]) {
+    // The project a run was sent to work, where its push guard refuses the
+    // default branch. Told to push there, a run would only be refused.
+    const runsHere =
+      repo !== evidence.workspace &&
+      evidence.target !== undefined &&
+      repo.repo === evidence.target;
     for (const branch of repo.branches) {
       if (branch.unpushed.length === 0) continue;
       violations.push({
@@ -226,12 +237,28 @@ export function checkUnpushed(evidence: SessionEvidence): Violation[] {
           branch.hasUpstream
             ? `Branch \`${branch.name}\` is ahead of its upstream.`
             : `Branch \`${branch.name}\` has no upstream — it was never pushed.`,
+          ...(runsHere && branch.name === repo.defaultBranch
+            ? unpushedOnDefaultBranch(repo.defaultBranch, evidence.workBranch)
+            : []),
           ...branch.unpushed.map((sha) => `- ${sha}`),
         ],
       });
     }
   }
   return violations;
+}
+
+/** What a run is told about its own commits on the default branch. */
+function unpushedOnDefaultBranch(
+  main: string,
+  workBranch: string | undefined,
+): string[] {
+  return [
+    `A run may not write \`${main}\`, so pushing these commits will be refused.`,
+    workBranch === undefined
+      ? `This step has no work branch, so they belong nowhere in the project. Put the local \`${main}\` back to \`origin/${main}\`.`
+      : `They belong on \`${workBranch}\`: cherry-pick them there, then put the local \`${main}\` back to \`origin/${main}\`.`,
+  ];
 }
 
 /**
@@ -256,6 +283,18 @@ export function checkUnpushed(evidence: SessionEvidence): Violation[] {
  * run is working**, is expected and silent. Everywhere else the finding
  * stands — including an interactive session's own branch, where it fired
  * twice on 2026-09-04 and was right both times.
+ *
+ * ✏ **A third direction, phase 43
+ * ([timone#85](https://github.com/fvermaut/timone/issues/85)).** The rule
+ * used to skip every commit on the default branch, which is right for a
+ * person's own session and wrong for a run. Nothing reaches a default branch
+ * without a named person's yes
+ * ([PRD-05.R3](../../doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md)),
+ * so a run's status file on the default branch of the project it works is
+ * reported, and the remedy named is the run's own work branch, where phase 32
+ * D-2 already expects it. A run is never told the default branch is where
+ * the file belongs, in this direction or the one above; a person's own
+ * session keeps the sentence it always had.
  */
 export function checkStatusPlacement(evidence: SessionEvidence): Violation[] {
   const violations: Violation[] = [];
@@ -274,13 +313,26 @@ export function checkStatusPlacement(evidence: SessionEvidence): Violation[] {
 
   for (const { repo, worksHere } of repos) {
     for (const commit of repo.commits) {
+      if (
+        worksHere &&
+        commit.branch === repo.defaultBranch &&
+        writtenInThisSession(commit) &&
+        commit.files.some((file) => file.endsWith("STATUS.md"))
+      ) {
+        violations.push(statusOnDefaultBranch(repo, commit, evidence.workBranch));
+        continue;
+      }
       if (commit.branch === repo.defaultBranch) continue;
       // It is on `main` already, whichever other branches also contain it.
       if (commit.onDefaultBranch === true) continue;
       // The run's own work branch, in the project it was sent to work. This
       // is where a status file is supposed to be written.
-      if (worksHere && commit.branch.startsWith(WORK_BRANCH_PREFIX)) continue;
+      if (worksHere && isOwnWorkBranch(commit.branch, evidence.workBranch)) continue;
       if (!commit.files.some((file) => file.endsWith("STATUS.md"))) continue;
+      if (evidence.target !== undefined) {
+        violations.push(statusOffWorkBranch(repo, commit, evidence.workBranch));
+        continue;
+      }
       violations.push({
         rule: "status-placement",
         summary: `${repo.repo}: STATUS.md was written on \`${commit.branch}\`, not on \`${repo.defaultBranch}\``,
@@ -292,6 +344,87 @@ export function checkStatusPlacement(evidence: SessionEvidence): Violation[] {
     }
   }
   return violations;
+}
+
+/**
+ * True unless the commit may have come from `origin`'s default branch rather
+ * than from this session.
+ *
+ * `onDefaultBranch` is read when the session ends, so it is true both for a
+ * commit the session took from `origin` (by updating its local default
+ * branch) and for one it wrote there and pushed — 518252a, timone#85. The
+ * session trailer tells them apart. `collectEvidence` drops every commit that
+ * names another session before any rule runs, so a commit that still names a
+ * session names this one. One that names none, already on `origin`, is not
+ * reported: it cannot be shown to be this session's work.
+ */
+function writtenInThisSession(commit: CommitEvidence): boolean {
+  if (commit.onDefaultBranch !== true) return true;
+  return commit.trailers.some((line) => line.startsWith(`${SESSION_TRAILER}:`));
+}
+
+/**
+ * True when `branch` is the run's own work branch. By name when the run says
+ * which branch that is; by the prefix when it does not, which is the answer
+ * evidence gave before it carried the name.
+ */
+function isOwnWorkBranch(branch: string, workBranch: string | undefined): boolean {
+  return workBranch === undefined
+    ? branch.startsWith(WORK_BRANCH_PREFIX)
+    : branch === workBranch;
+}
+
+/**
+ * What a step that owns no branch is told about a file it committed. It is the
+ * push guard's rule (`push-guard.ts`): with no work branch, nothing reaches
+ * the project.
+ */
+const NO_WORK_BRANCH =
+  "This step has no work branch, so it writes nothing to the project. What it did belongs in a comment on the ticket.";
+
+/** A run's status file written on the default branch it may not write. */
+function statusOnDefaultBranch(
+  repo: RepoEvidence,
+  commit: CommitEvidence,
+  workBranch: string | undefined,
+): Violation {
+  const main = repo.defaultBranch;
+  return {
+    rule: "status-placement",
+    summary: `${repo.repo}: STATUS.md was written on \`${main}\`, which a run may not write`,
+    detail: [
+      `Commit ${commit.sha} on \`${main}\` touches STATUS.md.`,
+      ...(workBranch === undefined
+        ? [
+            NO_WORK_BRANCH,
+            `Put the local \`${main}\` back to \`origin/${main}\`.`,
+          ]
+        : [
+            `Move the commit onto \`${workBranch}\`: for example, \`git cherry-pick ${commit.sha}\` there, then put the local \`${main}\` back to \`origin/${main}\`.`,
+            `The file reaches \`${main}\` when that branch's pull request is merged.`,
+          ]),
+    ],
+  };
+}
+
+/** A run's status file written on a branch that is neither its own nor the default. */
+function statusOffWorkBranch(
+  repo: RepoEvidence,
+  commit: CommitEvidence,
+  workBranch: string | undefined,
+): Violation {
+  return {
+    rule: "status-placement",
+    summary: `${repo.repo}: STATUS.md was written on \`${commit.branch}\`, which is not this run's work branch`,
+    detail: [
+      `Commit ${commit.sha} on \`${commit.branch}\` touches STATUS.md.`,
+      ...(workBranch === undefined
+        ? [NO_WORK_BRANCH]
+        : [
+            `A run writes its status file on its own work branch, \`${workBranch}\`. Move the commit there: for example, \`git cherry-pick ${commit.sha}\` on \`${workBranch}\`.`,
+          ]),
+    ],
+  };
 }
 
 /**
@@ -1113,7 +1246,7 @@ function readRegisters(
 export async function collectEvidence(
   root: string,
   baseline: SessionBaseline,
-  session: { sessionId: string; target?: string },
+  session: { sessionId: string; target?: string; workBranch?: string },
 ): Promise<SessionEvidence> {
   const projects: RepoEvidence[] = [];
   for (const [name, tips] of baseline.projects) {
@@ -1123,6 +1256,7 @@ export async function collectEvidence(
   }
   return {
     ...(session.target === undefined ? {} : { target: session.target }),
+    ...(session.workBranch === undefined ? {} : { workBranch: session.workBranch }),
     workspace: await collectRepo(root, "timone", baseline.workspace, session.sessionId),
     registers: [
       ...readRegisters(root, "timone", "workspace"),

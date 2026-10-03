@@ -61,6 +61,7 @@
     - GIVEN a run in which a named person approved the list of pieces in a comment
       WHEN the approval is recorded
       THEN chunk zero is merged as today, and the record names the comment the approval came from
+- **Evidence:** ✏ 2026-10-03 — phase 43 verification ([report](../../plans/phases/reports/phase-43-verification.md)): all three clauses pass again, and each was seen to fail first. The probe now also checks the title on the step sessions, in 16 checks that are not clauses. Each went red on the build before phase 43, then green. A step session's push and forge calls reach its own work branch and nothing else, on the host and in the box, and the checks inside a box know their run. A session that sets out to get round the guard still reaches the default branch (the report's *What the guard does not stop*), so no clause on step sessions is added here; the report asks whether one should be. Status unchanged.
 - **Verification hint:** today's only merge is `mergeChunkZero` in `src/daemon/session.ts`. The test gives it a run record with no approval and checks that the default branch has not moved.
 
 ## R4 — A run that changed the project's files ends at a pull request

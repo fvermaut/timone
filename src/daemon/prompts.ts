@@ -148,6 +148,24 @@ function writingBlock(): string {
 }
 
 /**
+ * What a step with no work branch is told about the project's repository
+ * ([timone#85](https://github.com/fvermaut/timone/issues/85)).
+ *
+ * Triage, the interview, wayfinding and research own no branch, so the guard
+ * on a run's pushes refuses everything they would push (43a). A session that
+ * learns that only from the refusal has already committed something it can
+ * never deliver — a `STATUS.md` on the default branch was the case that
+ * prompted this. So the prompt says it first: nothing goes to the project,
+ * and the comment on the ticket is the account of what the step did.
+ */
+function noWorkBranchBlock(): string {
+  return [
+    "This step has no work branch, so it commits and pushes nothing to the",
+    "project. What it did goes in its comment on the ticket.",
+  ].join("\n");
+}
+
+/**
  * What every commit this session makes must say about where it came from
  * (ADR-0019).
  *
@@ -839,6 +857,8 @@ function researchPrompt(context: PromptContext): string {
         "the one thing you need to know.",
     ),
     "",
+    noWorkBranchBlock(),
+    "",
     writingBlock(),
     "",
     "Then stop.",
@@ -892,6 +912,8 @@ function triagePrompt(context: PromptContext): string {
     "on the issue. **Say what you read**, so the person can see the answer came",
     "from the documents rather than from a guess.",
     "",
+    noWorkBranchBlock(),
+    "",
     writingBlock(),
     "",
     "Then stop. Whatever should happen next is started for you once the",
@@ -944,6 +966,8 @@ function clarificationPrompt(context: PromptContext): string {
     "The conversation itself is not a process artifact: nothing may cite it,",
     "and no transcript is kept. What survives is the summary on the ticket and",
     "whatever the glossary gained.",
+    "",
+    noWorkBranchBlock(),
     "",
     writingBlock(),
   ].join("\n");
@@ -1002,6 +1026,8 @@ function wayfindingPrompt(context: PromptContext): string {
     "The conversation itself is not a process artifact: nothing may cite it,",
     "and no transcript is kept. What survives is the resolution on the ticket,",
     "the gist on the map, whatever the glossary gained, and any ADR you wrote.",
+    "",
+    noWorkBranchBlock(),
     "",
     writingBlock(),
   ].join("\n");

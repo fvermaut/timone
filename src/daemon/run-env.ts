@@ -45,9 +45,17 @@ export function runEnvPath(root: string, project: string): string {
  * would silently redirect the run. A refusal that names the key is the only
  * safe answer, because the alternative — quietly ignoring the line — leaves a
  * human staring at a value he set and the machine did not use.
+ *
+ * `TIMONE_RUN_BRANCH` and `TIMONE_RUN_PROJECT` are here for
+ * [timone#85](https://github.com/fvermaut/timone/issues/85): they choose the
+ * branch a run's push may reach and the run the checks believe they belong
+ * to, and at a step with no work branch the box sets no `TIMONE_RUN_BRANCH`
+ * of its own, so a line in this file would have been the one the guard used.
  */
 const RESERVED = new Set([
   "TIMONE_REMOTE",
+  "TIMONE_RUN_BRANCH",
+  "TIMONE_RUN_PROJECT",
   "TIMONE_COMMIT",
   "TIMONE_PROMPT",
   "TIMONE_MODEL",

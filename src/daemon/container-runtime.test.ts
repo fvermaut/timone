@@ -1,8 +1,10 @@
+import { spawnSync } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { githubAppCredentials, type MintCall } from "../adapters/credentials.js";
 import {
@@ -704,7 +706,11 @@ describe("the project's dependencies", () => {
     // box before the agent has read a file.
     const { script } = await boxed();
 
-    const project = script.slice(script.indexOf("timone-project-install.log"));
+    // Up to the push guard, which comes next and is a refusal of its own (43a).
+    const project = script.slice(
+      script.indexOf("timone-project-install.log"),
+      script.indexOf("guardrails install-push-guard"),
+    );
     expect(project).not.toContain("exit 79");
     expect(script).toContain("the run has to install them itself");
   });
@@ -2043,7 +2049,238 @@ describe("a box that can take a message while a step runs", () => {
     ).completed;
 
     const run = calls.find((call) => call.args[0] === "run")!;
-    expect(run.args.slice(0, -1)).toEqual(ARGS_BEFORE_40D);
-    expect(run.args.at(-1)).toBe(SCRIPT_BEFORE_40D);
+    // ✏ 43c: the one change to the arguments since is the run's project,
+    // forwarded by name after the project's branch.
+    const branchAt = ARGS_BEFORE_40D.indexOf("PROJECT_BRANCH") + 1;
+    expect(run.args.slice(0, -1)).toEqual([
+      ...ARGS_BEFORE_40D.slice(0, branchAt),
+      "-e",
+      "TIMONE_RUN_PROJECT",
+      ...ARGS_BEFORE_40D.slice(branchAt),
+    ]);
+    // ✏ 43a: the one change since is the push guard, installed just before
+    // the CLI starts. ✏ 43b: and the check at the top of the `gh` wrapper.
+    // Everything else is the script as 40d left it.
+    const lines = SCRIPT_BEFORE_40D.split("\n");
+    const wrapperStart = lines.indexOf("#!/bin/sh") + 1;
+    expect(run.args.at(-1)).toBe(
+      [
+        ...lines.slice(0, wrapperStart),
+        ...FORGE_CALL_LINES,
+        ...lines.slice(wrapperStart, -1),
+        ...PUSH_GUARD_LINES,
+        ...lines.slice(-1),
+      ].join("\n"),
+    );
+  });
+});
+
+/**
+ * The lines 43a puts into the box script, written out by hand: the guard is
+ * installed through Timone's own command, the box stops if that fails, and
+ * the three variables that switch it on are exported for the CLI.
+ */
+const PUSH_GUARD_LINES: readonly string[] = [
+  'node /workspace/timone/dist/cli.js guardrails install-push-guard --dir "$HOME/.timone/git-hooks"' +
+    ' ${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"} > /tmp/timone-push-guard.log 2>&1 || {',
+  '  echo "could not install the guard that keeps this run\'s pushes on its own work branch.' +
+    " Refusing to work without it." +
+    ' It said: $(timone_reason /tmp/timone-push-guard.log)" >&2',
+  "  exit 79",
+  "}",
+  'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"',
+];
+
+/**
+ * The lines 43b puts at the top of the box's `gh` wrapper, written out by
+ * hand: no `gh` call runs before Timone is built, and every one is checked
+ * by Timone's own command first.
+ */
+const FORGE_CALL_LINES: readonly string[] = [
+  "[ -f /workspace/timone/dist/cli.js ] || {",
+  '  echo "Refused: Timone\'s guard on gh calls is not built yet, so this gh call does not run." >&2',
+  "  exit 1",
+  "}",
+  "node /workspace/timone/dist/cli.js guardrails forge-call" +
+    ' ${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"} -- "$@" < /dev/null || exit 1',
+];
+
+/**
+ * A run's `git push` reaches its own work branch and nothing else (#85, 43a).
+ * The guard is only as good as the place it is switched on, and in a box that
+ * place is the script.
+ */
+describe("the guard on a boxed run's pushes", () => {
+  function boxScriptOf(calls: { args: string[] }[]): string {
+    const run = calls.find((call) => call.args[0] === "run")!;
+    return run.args[run.args.length - 1];
+  }
+
+  async function boxed(workBranch?: string) {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({ image: "timone-box:test", spawn }).start(
+      workBranch === undefined ? request() : { ...request(), workBranch },
+    );
+    const run = calls.find((call) => call.args[0] === "run")!;
+    return { args: run.args, env: run.env, script: boxScriptOf(calls) };
+  }
+
+  it("is installed after the project's install and before the CLI starts", async () => {
+    const { script } = await boxed("timone/7-the-page-feels-slow");
+
+    const installed = script.indexOf("guardrails install-push-guard");
+    expect(installed).toBeGreaterThan(script.indexOf("/tmp/timone-project-install.log"));
+    expect(installed).toBeLessThan(script.indexOf("exec claude"));
+  });
+
+  it("is switched on for every git the session runs", async () => {
+    const { script } = await boxed("timone/7-the-page-feels-slow");
+
+    const exported = script.indexOf(
+      'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"',
+    );
+    expect(exported).toBeGreaterThan(script.indexOf("guardrails install-push-guard"));
+    expect(exported).toBeLessThan(script.indexOf("exec claude"));
+  });
+
+  it("names the work branch only when the box was given one", async () => {
+    const { script } = await boxed("timone/7-the-page-feels-slow");
+
+    expect(script).toContain('${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"}');
+    expect(script).not.toMatch(/--branch "\$TIMONE_RUN_BRANCH"(?!\})/);
+  });
+
+  it("stops the box when it cannot be installed, as a failed build of Timone does", async () => {
+    const { script } = await boxed("timone/7-the-page-feels-slow");
+
+    const after = script.slice(script.indexOf("guardrails install-push-guard"));
+    expect(after.slice(0, after.indexOf("exec claude"))).toContain("exit 79");
+  });
+
+  it("hands the box the run's work branch, by name", async () => {
+    const { args, env } = await boxed("timone/7-the-page-feels-slow");
+
+    expect(args.join(" ")).toContain("-e TIMONE_RUN_BRANCH");
+    expect(env?.TIMONE_RUN_BRANCH).toBe("timone/7-the-page-feels-slow");
+  });
+
+  it("hands the box no work branch when the step has none", async () => {
+    const { args, env } = await boxed();
+
+    expect(args).not.toContain("TIMONE_RUN_BRANCH");
+    expect(env?.TIMONE_RUN_BRANCH).toBeUndefined();
+  });
+});
+
+/**
+ * The checks inside a box know which run they belong to (#85, 43c). The box's
+ * ledger is empty, so the box tells them in its environment.
+ */
+describe("what the box tells the checks about its run", () => {
+  it("names the run's project, by name, even at a step with no work branch", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({ image: "timone-box:test", spawn }).start(request());
+
+    const run = calls.find((call) => call.args[0] === "run")!;
+    const at = run.args.indexOf("TIMONE_RUN_PROJECT");
+    expect(run.args[at - 1]).toBe("-e");
+    expect(run.env?.TIMONE_RUN_PROJECT).toBe("scratch-app");
+    expect(run.args.join(" ")).not.toContain("TIMONE_RUN_PROJECT=");
+  });
+});
+
+/**
+ * A run cannot write to a branch or merge through the forge's API either
+ * (#85, 43b). Every `gh` the session runs in a box is the wrapper the script
+ * writes, so the wrapper is where the check is switched on.
+ */
+describe("the guard on a boxed run's gh calls", () => {
+  /** Timone's command line as it ships; built before these tests run. */
+  const CLI = fileURLToPath(new URL("../../dist/cli.js", import.meta.url));
+
+  const tempDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** The `gh` wrapper, as the box script writes it. */
+  async function boxedWrapper(): Promise<string> {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({ image: "timone-box:test", spawn }).start(request());
+    const run = calls.find((call) => call.args[0] === "run")!;
+    const script = run.args[run.args.length - 1];
+    const start = script.indexOf("<<'TIMONE_GH_WRAPPER'\n") + "<<'TIMONE_GH_WRAPPER'\n".length;
+    return script.slice(start, script.indexOf("\nTIMONE_GH_WRAPPER", start));
+  }
+
+  /**
+   * Run the wrapper outside a box. Its two fixed paths — Timone's CLI and the
+   * real `gh` — are moved to `cli` and to a fake `gh` that writes down what
+   * it was called with. `HOME` is a temp directory holding the token file.
+   */
+  function runWrapper(wrapper: string, cli: string, args: string[]) {
+    const root = mkdtempSync(join(tmpdir(), "timone-box-gh-"));
+    tempDirs.push(root);
+    const home = join(root, "home");
+    mkdirSync(join(home, ".timone"), { recursive: true });
+    writeFileSync(join(home, ".timone", "gh-token"), "ghs_boxed");
+    const called = join(root, "called");
+    const realGh = join(root, "real-gh");
+    writeFileSync(realGh, `#!/bin/sh\necho "$GH_TOKEN $*" > '${called}'\n`, { mode: 0o755 });
+    const path = join(root, "gh");
+    writeFileSync(
+      path,
+      wrapper
+        .replaceAll("/workspace/timone/dist/cli.js", cli)
+        .replaceAll("/usr/local/bin/gh", realGh),
+      { mode: 0o755 },
+    );
+    const ran = spawnSync(path, args, {
+      env: { ...process.env, HOME: home, TIMONE_RUN_BRANCH: "timone/7-x" },
+      encoding: "utf8",
+    });
+    return {
+      status: ran.status,
+      stderr: ran.stderr,
+      realGhGot: existsSync(called) ? readFileSync(called, "utf8").trim() : undefined,
+    };
+  }
+
+  it("checks the call before it hands over to the real gh", async () => {
+    const wrapper = await boxedWrapper();
+
+    const checked = wrapper.indexOf(
+      'guardrails forge-call ${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"} -- "$@"',
+    );
+    expect(checked).toBeGreaterThan(-1);
+    expect(checked).toBeLessThan(wrapper.indexOf('exec /usr/local/bin/gh "$@"'));
+  });
+
+  it("refuses a merge, and the real gh never runs", async () => {
+    const ran = runWrapper(await boxedWrapper(), CLI, ["pr", "merge", "12", "--squash"]);
+
+    expect(ran.status).toBe(1);
+    expect(ran.stderr).toContain("Refused: `gh pr merge`");
+    expect(ran.realGhGot).toBeUndefined();
+  });
+
+  it("hands a comment to the real gh, with the token", async () => {
+    const ran = runWrapper(await boxedWrapper(), CLI, ["issue", "comment", "85", "--body", "hi"]);
+
+    expect(ran.status).toBe(0);
+    expect(ran.realGhGot).toBe("ghs_boxed issue comment 85 --body hi");
+  });
+
+  it("refuses every call while Timone is not built yet", async () => {
+    const root = mkdtempSync(join(tmpdir(), "timone-box-unbuilt-"));
+    tempDirs.push(root);
+
+    const ran = runWrapper(await boxedWrapper(), join(root, "dist", "cli.js"), [
+      "issue", "comment", "85", "--body", "hi",
+    ]);
+
+    expect(ran.status).toBe(1);
+    expect(ran.stderr).toContain("not built yet");
+    expect(ran.realGhGot).toBeUndefined();
   });
 });

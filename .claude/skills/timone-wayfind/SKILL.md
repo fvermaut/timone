@@ -164,7 +164,7 @@ Invoked with a loose idea. Charting is one session's work; it hand-resolves noth
 3. **Create the map** (`wayfinder:map` **and `timone`**): Destination and Notes filled, Decisions-so-far empty, the fog sketched into Not yet specified, and the map's own closing line as the body template has it.
 4. **Create the tickets you can specify now** — each labelled `wayfinder:<type>` **and `timone`**, each closing on the CTA block for its type — then wire blocking in a **second pass** (tickets need ids before they can reference each other).
 5. **Fire the research sub-agents** — each `research` ticket you just created gets a fresh-context sub-agent resolving it in parallel, posting findings as its resolution comment.
-6. Stop. Report the map by name with its link, the frontier, and the suggested first working session. Update `STATUS.md` per the process convention.
+6. Stop. Report the map by name with its link, the frontier, and the suggested first working session. Update `STATUS.md` per the process convention (in a run this step owns no work branch, so that means no `STATUS.md` and no commit to the project).
 
 ## Mode 2 — Work through the map
 
@@ -175,7 +175,7 @@ Invoked with a map (URL, number, or fallback path); a ticket is optional — wit
 3. **Read the thread before asking anything.** A human may already have answered in writing — that is one of the two paths every HITL ticket offers, and re-asking a question they have answered is the failure the path exists to avoid. Then **resolve it** per its type (table above), zooming as needed — fetch the full body of any related closed ticket on demand; consult the skills the map's Notes name.
 4. **Record the resolution**: post the answer as a resolution comment, **close** the ticket, append the one-line gist to the map's Decisions so far. If the decision was ADR-significant, the ADR was already written at decision time (see above).
 5. **Tend the map**: create-then-wire newly surfaced tickets; graduate sharpened fog; rule mis-scoped tickets out of scope; update or delete tickets the answer invalidated.
-6. **One ticket per session** — `research` tickets excepted. Update `STATUS.md`, then stop.
+6. **One ticket per session** — `research` tickets excepted. Update `STATUS.md` per the process convention (in a run this step owns no work branch, so that means no `STATUS.md` and no commit to the project), then stop.
 
 ## Closing the effort
 

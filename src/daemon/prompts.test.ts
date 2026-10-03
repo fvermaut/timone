@@ -151,6 +151,35 @@ describe("what a step is told matches the runner (41g)", () => {
   });
 });
 
+/**
+ * A step with no work branch may push nothing: the guard refuses it (43a).
+ * Its prompt says so before it tries, so the session does not commit a
+ * `STATUS.md` it can never deliver (timone#85).
+ */
+describe("a step with no work branch commits nothing to the project (43e)", () => {
+  const NOTHING_TO_THE_PROJECT =
+    "This step has no work branch, so it commits and pushes nothing to the project. " +
+    "What it did goes in its comment on the ticket.";
+
+  it.each(["triage", "clarification", "wayfinding", "research"] as const)(
+    "%s is told it commits and pushes nothing, and where what it did goes",
+    (stage) => {
+      const prompt = stagePrompt(stage, context);
+
+      expect(prompt.replace(/\s+/g, " ")).toContain(NOTHING_TO_THE_PROJECT);
+    },
+  );
+
+  it.each(["planning", "execution"] as const)(
+    "%s, which owns a work branch, is not told that",
+    (stage) => {
+      const prompt = stagePrompt(stage, { ...context, branch: "timone/6-typing-in-the-box" });
+
+      expect(prompt.replace(/\s+/g, " ")).not.toContain("commits and pushes nothing to the project");
+    },
+  );
+});
+
 describe("the triage prompt", () => {
   it("does not tell the session what kind of request it is", () => {
     // Working that out from the raw text is the entire job of the stage.

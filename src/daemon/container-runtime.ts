@@ -243,6 +243,12 @@ const FORGE_TOKEN_FILE = `${FORGE_TOKEN_DIR}/gh-token`;
 /** Where the `gh` shim goes. First on PATH, so it is the `gh` that runs. */
 const WRAPPER_DIR = "$HOME/.local/bin";
 
+/**
+ * Where the box writes the guard on its pushes (#85). Out of the workspace,
+ * for the forge token's reason: the workspace holds two git checkouts.
+ */
+const PUSH_GUARD_DIR = "$HOME/.timone/git-hooks";
+
 /** The variable a refreshed token travels in, host to box. Never an argument. */
 const FORGE_TOKEN_VAR = "TIMONE_FORGE_TOKEN";
 
@@ -462,8 +468,21 @@ function boxScript(
     // earlier on PATH sets the variable from the file and hands over to the
     // real binary. Every `gh` call is a new process, so every one of them
     // reads the current token.
+    //
+    // **Every call is checked first** (#85): a run cannot merge, or write to
+    // any branch but its own, through the forge's API. The check is Timone's
+    // own command, which does not exist until Timone is built further down.
+    // Nothing here calls `gh` before that, so a call that finds no build is
+    // refused rather than let through unchecked. The check reads nothing
+    // from stdin, which stays the real `gh`'s (`--input -`).
     `  cat > "${WRAPPER_DIR}/gh" <<'TIMONE_GH_WRAPPER'`,
     "#!/bin/sh",
+    `[ -f ${WORKSPACE}/timone/dist/cli.js ] || {`,
+    '  echo "Refused: Timone\'s guard on gh calls is not built yet, so this gh call does not run." >&2',
+    "  exit 1",
+    "}",
+    `node ${WORKSPACE}/timone/dist/cli.js guardrails forge-call` +
+      ' ${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"} -- "$@" < /dev/null || exit 1',
     `GH_TOKEN=$(cat "${FORGE_TOKEN_FILE}" 2>/dev/null)`,
     "GITHUB_TOKEN=$GH_TOKEN",
     "export GH_TOKEN GITHUB_TOKEN",
@@ -617,6 +636,25 @@ function boxScript(
     "  fi",
     `  cd ${WORKSPACE}/timone`,
     "fi",
+
+    // The guard on this run's pushes (#85): its `git push` reaches the run's
+    // own work branch and nothing else. Installed last, so the setup above
+    // pushes nothing and is not judged, and through Timone's own command, so
+    // the box and the tests install the same hooks. Switched on by the
+    // environment rather than by the project's config, so nothing about it
+    // is written into the project.
+    //
+    // **A box that cannot install it stops**, as one that cannot build Timone
+    // does: a run must not start with the guard missing, because that run is
+    // the one that can push to the default branch.
+    `node ${WORKSPACE}/timone/dist/cli.js guardrails install-push-guard --dir "${PUSH_GUARD_DIR}"` +
+      ' ${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"} > /tmp/timone-push-guard.log 2>&1 || {',
+    '  echo "could not install the guard that keeps this run\'s pushes on its own work branch.' +
+      " Refusing to work without it." +
+      ' It said: $(timone_reason /tmp/timone-push-guard.log)" >&2',
+    "  exit 79",
+    "}",
+    `export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="${PUSH_GUARD_DIR}"`,
 
     interactive
       ? // The daemon's messages, from the descriptor they were put aside on.
@@ -995,6 +1033,15 @@ export function containerRuntime(
         ...(workspace.project.branch === undefined
           ? {}
           : { PROJECT_BRANCH: workspace.project.branch }),
+        // Which run the box belongs to, for Timone's own checks inside it
+        // (#85). The box's ledger is empty, so this is how they know the
+        // session is a run's and not a person's.
+        TIMONE_RUN_PROJECT: workspace.project.name,
+        // The one branch this run's pushes may reach (#85). Absent at a step
+        // that owns none, and then the guard lets nothing through.
+        ...(request.workBranch === undefined
+          ? {}
+          : { TIMONE_RUN_BRANCH: request.workBranch }),
         // An interactive box reads its prompt from stdin, as the first
         // message the daemon writes there, so it carries no copy here.
         ...(interactive ? {} : { TIMONE_PROMPT: prompt }),

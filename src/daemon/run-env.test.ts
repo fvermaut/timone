@@ -38,6 +38,31 @@ describe("readRunEnv", () => {
     expect(env.present).toBe(true);
     expect(env.values).toEqual({ ALPHAVANTAGE_API_KEY: "abc123" });
   });
+
+  it("refuses TIMONE_RUN_BRANCH, the branch a run's push may reach", () => {
+    // At a step with no work branch the box sets no TIMONE_RUN_BRANCH, so a
+    // line in this file would have named the branch the push guard lets
+    // through (timone#85).
+    expect(() =>
+      readRunEnv({
+        root: "/root",
+        project: "ivtrends",
+        read: () => "TIMONE_RUN_BRANCH=main\n",
+      }),
+    ).toThrow(`${AT}:1 sets TIMONE_RUN_BRANCH, which is the box's own`);
+  });
+
+  it("refuses TIMONE_RUN_PROJECT, the run the checks believe they belong to", () => {
+    // The checks inside a box read it to know whose run they judge; a project
+    // file may not choose that for them (timone#85).
+    expect(() =>
+      readRunEnv({
+        root: "/root",
+        project: "ivtrends",
+        read: () => "TIMONE_RUN_PROJECT=timone\n",
+      }),
+    ).toThrow(`${AT}:1 sets TIMONE_RUN_PROJECT, which is the box's own`);
+  });
 });
 
 describe("parseRunEnv", () => {
