@@ -368,3 +368,56 @@ Whole suite, run once after `npm run build` (exit 0): `Test Files  56 passed (56
 - [x] `keepForgeTokenFresh` receives `intervalMs: refreshIntervalMs` (:1071). The start token's `minLifeMs` uses the same value (`refreshIntervalMs + BOX_TOKEN_MARGIN_MS`). No test catches a mismatch between the two (see case 2).
 
 **What 42e must know.** Nothing. This slice changed only the two files above.
+
+## 42e — The checking rules use one word per idea, allow the read they need, and look at every screen again after a fix
+
+**Built.** The verifier's allowed read list, in the skill and in `process.md`, now names one more read: the *Environment* section of the latest verification report on the default branch, and only its list of build-health smoke failures, printed with `git show <default-branch>:<path>`. The paragraph on old and new smoke failures now points at that item, and no longer calls itself an addition to the list. The text 42b added now uses the words the rest of stage 7 uses: **pass**, **verification report**, **re-verify**, and in `process.md` **stage 7** or **the verifier**. Fix-loop step 3 is now *A narrowed re-verify*. The sentence about the project's runner is now three short active sentences, in both files. After a fix, the read of the figures on the preview's data runs again in full on every screen, as it did before ADR-0061; a `(browser)` clause is checked again when its criterion's probe is; workflow step 9 says the re-verify repeats step 8 in full; the fix-loop accounting template no longer asks for the screens read again.
+
+**Files touched.**
+- `.claude/skills/timone-verify/SKILL.md` — *Read:* list: a new item at line 39, after the HUMAN-CHECK item. *Never read*: the file-name exception now says "to choose what the re-verify runs" (line 49). The old/new smoke paragraph (line 57). *Red before green*: "an earlier pass" (line 139). The runner paragraph after *Run the set with one command* (line 158). *The fix loop*: step 3's title (line 189) and its closing paragraph (line 193). Report template: *Environment* (line 245) and *Fix-loop accounting* (line 286). *Workflow*: step 9 (line 319).
+- `process.md` — the stage 7 paragraph only (line 46): the closed read list, the smoke sentence, the runner clause, the fix-loop sentences, and one pre-existing word ("re-checked" → "checked again").
+
+**Decisions taken inside the slice.**
+1. The new *Read:* item in the skill also allows the smoke's one-line result just above the list, and says so. The old/new rule needs it: it is what tells "the smoke passed whole, so the list is empty" apart from "no smoke result, so there is no list". `process.md` names only the list, worded as narrowly as the HUMAN-CHECK item; where the line sits in the report is the skill's layout.
+2. **`process.md` also gets the screen rule**, which the excerpt's item 4 lists only for the skill. Before this branch, `process.md` covered the screens with "one full re-verify of everything". 42b replaced that with a re-verify that names only probes. `process.md` wins over the skill, so leaving it silent could be read as narrowing the screens. The sentence that already ended the D2 passage was rewritten: *"No run of the whole probe set follows the last fix, but the read of the figures on the preview's data runs again in full after every fix."* It is the one change outside the excerpt's listed sites. Revert it if that is wrong.
+3. The validation grep matched one word this branch did not add: "re-checked" in stage 7's sentence on `revised` criteria (from commit `dd63f9f`). It became "checked again", so the grep can exit 1. It is not a 2026-10-02 sentence, so it carries its own `✏ Revised 2026-10-03` marker.
+4. The excerpt's example for the runner says "a file this step owns". The skill says "a file this stage owns", because the skill calls itself "this stage" when it speaks of probes ("only this stage writes there"). In the skill, "step" means the runner's step. `process.md` says "a file stage 7 owns" and "the verifier adds".
+5. "to choose what to check again" (line 49) is not on the grep list. It names what follows a fix, so it became "to choose what the re-verify runs".
+6. "No run of the whole set follows the last fix" became "the whole probe set", in fix-loop step 3, workflow step 9 and `process.md`. The screen read now runs in full after a fix, so "whole set" alone could be read as including it. R2 itself says "the whole probe set".
+7. The fix-loop accounting template's "and the re-check" became "the re-verify's outcome", the words it had before this branch, without "full".
+8. Markers. There are three new `✏ Revised 2026-10-03` markers: the new *Read:* item, the new item in `process.md`'s closed list, and "checked again". Every other change rewrites a sentence under a 2026-10-02 ADR-0061 marker that 42b wrote, so it uses that marker. The screen rule gets no new marker because, compared with `main`, it has not changed.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based. The four commands, run after the last edit:
+
+```
+$ git grep -n -i -E "check report|this check'?s?\b|an earlier check|the next check|re-check|the checking step, whose|screens read again|screens that had a FAIL" -- .claude/skills/timone-verify/SKILL.md process.md; echo "exit: $?"
+exit: 1
+
+$ git grep -n -E "Environment" -- .claude/skills/timone-verify/SKILL.md | head
+.claude/skills/timone-verify/SKILL.md:39:- **The *Environment* section of the latest verification report on the default branch, and only its list of build-health smoke failures** ✏ Revised 2026-10-03 (…
+.claude/skills/timone-verify/SKILL.md:57:**When the smoke has failing tests, mark each one old or new.** ✏ Revised 2026-10-02 (… D4). …
+.claude/skills/timone-verify/SKILL.md:73:**3 — Environment gate.** …
+.claude/skills/timone-verify/SKILL.md:243:## Environment
+
+$ git grep -n -E "repeats step 8" -- .claude/skills/timone-verify/SKILL.md
+.claude/skills/timone-verify/SKILL.md:319:9. FAILs → defect briefs → fresh fix context → the narrowed re-verify of *The fix loop*, step 3. ✏ Revised 2026-10-02 (… D2): it runs the probes that failed and those the fix's changed files can affect, real run only, and it repeats step 8 in full. …
+
+$ git diff --stat -- . ':!.claude/skills/timone-verify' ':!process.md' ':!doc/plans/phases/reports/phase-42-handoffs.md' ':!src/daemon/container-runtime.ts' ':!src/daemon/container-runtime.test.ts'
+(empty)
+```
+
+42b's own removal check, run again, still exits 1: `git grep -n -E "every run does both legs|One full re-verify|full re-verify \(which repeats|in this run, on this build|catches decay for free" -- process.md .claude/skills/timone-verify` → `exit: 1`.
+
+- [x] The **Read:** list and `process.md`'s closed list both name the one new read, and nothing else was added to either.
+  - Skill, line 39: *"**The *Environment* section of the latest verification report on the default branch, and only its list of build-health smoke failures** … Print the report with `git show <default-branch>:<path>` and cut it to the list … **Read that list alone** — the rest of the report holds another pass's verdicts. Declare the report and the line range you opened."* It is the only added line between lines 32 and 45 (`git diff -U0` hunk `@@ -38,0 +39 @@`).
+  - `process.md`: *"✏ Revised 2026-10-03 (…) the *Environment* section of the latest verification report on the default branch and only its list of build-health smoke failures, printed with `git show <default-branch>:<path>` and never by checking that branch out (marking smoke failures old or new, below, needs that list and nothing else of the report),"* — the word diff shows this as the only insertion in the closed list.
+  - Line 57 now refers to the item: *"Compare them with the list of smoke failures in the latest verification report on the project's default branch, read as the **Read:** list above allows."*
+- [x] A reader finds one word for each idea in the branch's additions: pass, verification report, re-verify. The grep above exits 1. Step 3 reads *"3. **A narrowed re-verify.**"*, next to the unchanged *"That brief-fix-reverify cycle"*. Line 57: *"write this pass's own list in the report …, so the next pass has one to compare with."* Line 139: *"a probe an earlier pass already proved able to fail"*. Line 193: *"earlier in this pass or in an earlier pass"*, *"this narrowed re-verify safe"*. `process.md`: *"followed by a narrowed re-verify"*, *"the re-verify runs, real run only"*, *"the latest verification report on the default branch"*, and *"The project's runner is a file stage 7 owns. If it always does both runs, the verifier adds an option that does real runs only, and commits that change with the report."* The skill: *"The project's runner is a file this stage owns. If it always does both runs, add an option that does real runs only, and commit that change with the report."*
+- [x] After a fix, every screen is read again; the text says so in the fix loop and in step 9.
+  - Fix loop, line 193: *"A `(browser)` clause is checked again when its criterion's probe is. **The screen read of *Reading the figures on the preview's data* is not narrowed: after every fix it runs again in full**, on every screen the phase file names."*
+  - Step 9, line 319: *"it runs the probes that failed and those the fix's changed files can affect, real run only, and it repeats step 8 in full."*
+  - Template, line 286: *"Per loop: the briefs issued, the fix commits returned, the re-verify's outcome. ✏ ADR-0061: the probes run again, with their outcomes, and every probe in scope not run again, each with its reason"* — "the screens read again" is gone.
+  - `process.md`: *"No run of the whole probe set follows the last fix, but the read of the figures on the preview's data runs again in full after every fix."*
+- [x] The rules of 42b are otherwise unchanged: the four break-run cases, the narrowed re-verify of probes, the smoke comparison. The skill's `git diff -U0` hunks are at new lines 39, 49, 57, 139, 158, 189, 193, 245, 286 and 319. The four cases (lines 132–137) and the two bullets of step 3 (lines 190–191) have no hunk. At line 139 only "check" → "pass" changed. At line 193, "sends every probe in scope again" and the real-run-only rule are word for word the same. The smoke paragraph keeps its old/new rule, the empty-list case, *"**Never check out, build or run the default branch to compare.**"* and the no-list case word for word; only its pointer to the read changed. In `process.md` the D1 four cases, the D2 bold sentence (apart from "re-check" → "re-verify") and the D4 rule (apart from "last check report" → "latest verification report") are unchanged.
+
+**What 42f must know.** In `process.md` only line 46 (stage 7) changed. Each stage is one line, so no line numbers moved. Line 44 (stage 6) is untouched by this slice. `CONTEXT.md` still says "the checking step" and "Later checks" in the *Probe* entry that this branch added. That entry is the words used to the human, and it was outside this slice's files.
