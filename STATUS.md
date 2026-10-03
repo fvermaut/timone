@@ -18,6 +18,10 @@
 
 **What I need from you:** restart the daemon so it runs the merged code. The rest can wait.
 
+**1c. A run can no longer push to `main` ([#85](https://github.com/fvermaut/timone/issues/85)): built and checked, on the branch `timone/85-a-boxed-run-pushed-status-md-straight-to`. No pull request is open yet.** A run's push to anything but its own work branch is refused, and so are GitHub calls that merge or write another branch. This holds on this machine and in a box. The check found nothing to fix. One check could not run here: the replay against the real model. Four questions from the plan and this check will be on the pull request. The first is whether to make `main` impossible to write on GitHub itself, because a run that sets out to get round the guard still can. This status file is on that branch, as the new rule says, and reaches `main` with the pull request. The report: [phase-43-verification.md](doc/plans/phases/reports/phase-43-verification.md) on that branch.
+
+**What I need from you:** nothing now. The pull request will ask.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
