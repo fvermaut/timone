@@ -8,19 +8,19 @@
 
 ## Waiting on you
 
-> **Read this first.** The old code between steps is gone: [#189](https://github.com/fvermaut/timone/pull/189) is merged. Every project now runs on the runner, and `timone retry` no longer exists. The work for [#185](https://github.com/fvermaut/timone/issues/185) and [#110](https://github.com/fvermaut/timone/issues/110) is built and checked, on branch `timone/185-a-run-spends-its-time-on-the-work`, with no pull request yet.
+> **Read this first.** The old code between steps is gone: [#189](https://github.com/fvermaut/timone/pull/189) is merged. Every project now runs on the runner, and `timone retry` no longer exists. The work for [#185](https://github.com/fvermaut/timone/issues/185) and [#110](https://github.com/fvermaut/timone/issues/110) is in [pull request #193](https://github.com/fvermaut/timone/pull/193), which asks you two questions.
 
 **1. Restart the daemon** so it runs the merged code of #189. Its 4 small leftovers are [#190](https://github.com/fvermaut/timone/issues/190) and [#191](https://github.com/fvermaut/timone/issues/191).
 
 **What I need from you:** restart the daemon.
 
-**1b. A run spends its time on the work (#185, with #110).** On branch `timone/185-a-run-spends-its-time-on-the-work`, no pull request yet. A box is no longer handed a GitHub token that dies before its next one, and the build and the check stop repeating work. The check found no failure and no regression ([report](https://github.com/fvermaut/timone/blob/timone/185-a-run-spends-its-time-on-the-work/doc/plans/phases/reports/phase-42-verification.md)). Three things wait on you when the pull request opens:
+**1b. A run spends its time on the work (#185, with #110): [pull request #193](https://github.com/fvermaut/timone/pull/193).** A box is no longer handed a GitHub token that dies before its next one. The check runs each old check script once instead of twice, and after a fix only the scripts the fix can affect. The build runs the whole test suite once at the end instead of after every part. The check found no failure and no regression.
 
-- The token fix could not be checked by a script: the tool permission system refused the script's stand-in for `docker`. You decide whether to allow it.
-- A watched run on scratch-app of a check and a build, to see the new rules followed.
-- A replay against the real model on this build (`npm run --silent replay`), which two older checks need.
+The two reviews were read separately. The general review found 3 things, all about wording or one repeated line of code. The review against the requirements found 5, and three of them matter: the box's first token is taken before a start-up of up to 4 minutes; the new rule for old test failures needs a read the checker's list still forbids; and the building rule names a list the part is not allowed to receive. None breaks the build.
 
-**What I need from you:** nothing now; the pull request will list these.
+The pull request asks two questions: how to check the token fix, since the permission system refused the check's fake `docker`; and whether to fix the 8 findings before merging (recommended) or after. It also lists what only you can run: a watched check and build on scratch-app, and the replay (`npm run --silent replay`).
+
+**What I need from you:** answer the two questions on #193.
 
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
