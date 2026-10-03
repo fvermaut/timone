@@ -298,3 +298,73 @@ $ git diff --stat -- . ':!process.md' ':!.claude/skills/timone-execute' ':!doc/p
 - `process.md` stage 6 lists what a handoff note carries and what a completion report must hold. Neither list names the tests run at sub-phase end or the new *Tests run* section. The plan allowed one change to that paragraph, the test-rhythm sentence, so I did not add them. The skill carries both, and stage 6 says the layout belongs to the skill, so the two do not disagree. A reviewer may still want the lists to name it.
 - On the first phase a project builds under this rule, the build runs each suite with no recorded time once before the first slice, stopped after one minute. Someone counting whole browser-suite runs in that session (PRD-06.R4's verification hint) will see that stopped run as a second call of the suite. It is not a whole run, and the *Tests run* section names it.
 - The new bullet *Which suites take under a minute* and decision 2 add one thing the orchestrating session tells each slice. It is information about the project, not more of the plan.
+
+## 42d — A box's first token is taken after the slow start-up, and its refresh interval is worked out once
+
+**Built.** `start` now works out the refresh interval once, at the top: `const refreshIntervalMs = options.refreshIntervalMs ?? FORGE_REFRESH_MS`. The box's first token asks for `refreshIntervalMs + BOX_TOKEN_MARGIN_MS`. The refresh loop gets `intervalMs: refreshIntervalMs`, so both use the same value. Before, the loop got `options.refreshIntervalMs` unresolved and applied the default itself. The `tokenFor` call moved from the top of `start` to after `commitIsPushed`, `runEnv`, `services` and `modelToken`, and before the box's environment is built. A stack that takes minutes to come up no longer uses up the token's margin. The comment says why the token is taken last. Because the token is now taken after the stack is up, a mint that fails now takes the stack down before it throws. The model token already does the same. This is a departure from the plan; see decision 2.
+
+**Files touched.**
+- `src/daemon/container-runtime.ts`: `refreshIntervalMs` at :911. The `tokenFor` call at :971 is in a `try`. Its `catch` takes the stack down and throws again. It comes after `services` (:946) and `modelToken` (:955), and before `const env` (:986). The refresh loop gets `intervalMs: refreshIntervalMs` (:1071).
+- `src/daemon/container-runtime.test.ts`: two new tests in the block "the forge token a running box works on". One is case 1, "takes the box's token after the slow start-up, so the start-up does not eat its margin" (:1538). The other is "takes the stack down again when no forge token can be minted" (:1597).
+
+**Decisions taken inside the slice.**
+1. Case 1 uses the same setup as 42a's falsifying test: a real `githubAppCredentials`, a fake mint on a fake clock, and an RSA key in a temp folder. I copied the setup into the new test and did not share it with 42a's test. Sharing it would be a refactor, and the plan does not ask for one. The fake `services` moves the clock forward 8 minutes and returns no stack. The times are fixed. The machine's own call is at 12:00, so its token dies at 13:00. The start begins at 12:23, when that token has 37 minutes left. The stack is up at 12:31. The test expects `ghs_minted_at_12:31`.
+2. **A departure from the plan: the stack is taken down if the token cannot be minted.** Before the move, `tokenFor` ran before anything was created, so a mint that failed left nothing running. After the move, it runs after `services` has brought the stack up. The plan as written would leave that stack running when GitHub refuses a mint. I used the same `try`/`catch` the model token uses just above it. I added one test for it and saw it fail first. If this is not wanted, remove the `try`/`catch` and that one test. Case 1 does not depend on either.
+3. The token is taken before `nameFor`, not right before `const env`. Only `nameFor`, `interactive` and `prompt` are between them, and none of them waits. With the token first, a mint that fails does not use up a box name. This was already true before the move.
+4. The refresh loop now always gets `intervalMs`, the value already worked out. Before, it got `intervalMs` only when the option was set. The loop's own `?? FORGE_REFRESH_MS` stays, for callers of `keepForgeTokenFresh` that pass no interval. That is why the grep finds 2.
+
+**Validation evidence.**
+
+*Case 1*. Red on the code before the move:
+
+```
+× the forge token a running box works on > takes the box's token after the slow start-up, so the start-up does not eat its margin 266ms
+  → expected 'ghs_minted_at_12:00' to be 'ghs_minted_at_12:31' // Object.is equality
+❯ src/daemon/container-runtime.test.ts:1591:23
+Tests  1 failed | 88 skipped (89)
+```
+
+The box got the noon token. At spawn it had 29 minutes left, and 9 at the first refresh. That is under the 10 minutes PRD-06.R5 asks for. Green after the move and the single interval: `Tests  89 passed (89)`. `tsc --noEmit` exit 0.
+
+*Case 2*. No new test, as the plan says. The block's existing tests stayed green. I also tried one mutation: the refresh loop was given `intervalMs: FORGE_REFRESH_MS` in place of `refreshIntervalMs`. All 90 tests still passed (`Tests  90 passed (90)`). Restored from a copy, and `diff` against it is empty. So no test checks that `start` passes its interval to the refresh loop. That was also true before this slice. The third checkbox therefore rests on the code (:1071), not on a test.
+
+*The stack teardown test (decision 2)*. Red before the `try`/`catch`:
+
+```
+× the forge token a running box works on > takes the stack down again when no forge token can be minted 5ms
+  → expected +0 to be 1 // Object.is equality
+❯ src/daemon/container-runtime.test.ts:1623:19
+Tests  1 failed | 89 skipped (90)
+```
+
+Green after it: `Tests  90 passed (90)`. `tsc --noEmit` exit 0.
+
+*Agent validation steps, run after the last edit.*
+
+```
+$ npx vitest run src/adapters/credentials.test.ts src/daemon/container-runtime.test.ts src/adapters/command-runner.test.ts; echo "exit: $?"
+ ✓ src/adapters/command-runner.test.ts (28 tests)
+ ✓ src/adapters/credentials.test.ts (10 tests)
+ ✓ src/daemon/container-runtime.test.ts (90 tests)
+ Test Files  3 passed (3)
+      Tests  128 passed (128)
+exit: 0
+
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ grep -c "?? FORGE_REFRESH_MS" src/daemon/container-runtime.ts
+2
+(:805 in keepForgeTokenFresh, :911 in start)
+
+$ git diff --stat -- . ':!src/daemon/container-runtime.ts' ':!src/daemon/container-runtime.test.ts' ':!doc/plans/phases/reports/phase-42-handoffs.md' ':!.claude/skills/timone-verify' ':!process.md'
+(empty)
+```
+
+Whole suite, run once after `npm run build` (exit 0): `Test Files  56 passed (56)`, `Tests  1419 passed (1419)`, exit 0. That is 1417 before the slice, plus the 2 new tests.
+
+- [x] Case 1 is seen red before the move, then green. The failure is quoted above.
+- [x] In `start`, `tokenFor` (:971) is called after `services` (:946) and `modelToken` (:955), and before the box's environment is built (:986).
+- [x] `keepForgeTokenFresh` receives `intervalMs: refreshIntervalMs` (:1071). The start token's `minLifeMs` uses the same value (`refreshIntervalMs + BOX_TOKEN_MARGIN_MS`). No test catches a mismatch between the two (see case 2).
+
+**What 42e must know.** Nothing. This slice changed only the two files above.

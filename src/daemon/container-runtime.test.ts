@@ -1535,6 +1535,95 @@ describe("the forge token a running box works on", () => {
     }
   });
 
+  it("takes the box's token after the slow start-up, so the start-up does not eat its margin", async () => {
+    // The cached token has 37 minutes left when the start begins, and the
+    // stack beside the box takes 8 minutes to come up. Taken at the start, it
+    // reaches the box with 29 minutes left, and has 9 left at the first
+    // refresh 20 minutes later: under the 10 PRD-06.R5 asks.
+    const dir = mkdtempSync(join(tmpdir(), "timone-box-token-"));
+    try {
+      const { privateKey } = generateKeyPairSync("rsa", {
+        modulusLength: 2048,
+        privateKeyEncoding: { type: "pkcs8", format: "pem" },
+        publicKeyEncoding: { type: "spki", format: "pem" },
+      });
+      const keyPath = join(dir, "app.private-key.pem");
+      writeFileSync(keyPath, privateKey, { mode: 0o600 });
+
+      let now = new Date("2026-09-06T12:00:00Z");
+      // Each token the fake forge mints lives one hour, as GitHub's do, and
+      // is named for the time it was minted.
+      const mint: MintCall = async () => ({
+        token: `ghs_minted_at_${now.toISOString().slice(11, 16)}`,
+        expiresAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
+      });
+      const credentials = githubAppCredentials({
+        appId: 4670926,
+        installationId: 155426497,
+        privateKeyPath: keyPath,
+        mint,
+        now: () => now,
+      });
+      const { spawn, calls } = fakeContainer([started, result()]);
+      const clock = handSleep();
+
+      // The machine's own call, at noon: its token dies at 13:00.
+      await credentials.tokenFor("fvermaut/scratch-app");
+
+      // 37 minutes before that token dies, a box starts.
+      now = new Date("2026-09-06T12:23:00Z");
+      await containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        credentials,
+        // The stack takes 8 minutes to come up, and there is none after.
+        services: async () => {
+          now = new Date(now.getTime() + 8 * 60 * 1000);
+          return undefined;
+        },
+        // Never ticked, so the only token the box gets is the spawn's own.
+        sleep: clock.sleep,
+      }).start(request());
+
+      const atStart = calls.find((call) => call.args[0] === "run")?.env?.GH_TOKEN;
+      // At 12:31 the noon token has 29 minutes left, less than 20 + 15, so
+      // the box gets a new one.
+      expect(atStart).toBe("ghs_minted_at_12:31");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("takes the stack down again when no forge token can be minted", async () => {
+    // The token is taken after the stack is up, so a refusal here must not
+    // leave the stack running.
+    let downs = 0;
+    const { spawn, calls } = fakeContainer([started, result()]);
+
+    await expect(
+      containerRuntime({
+        image: "timone-box:test",
+        spawn,
+        services: async () => ({
+          network: "n",
+          project: "p",
+          services: ["db"],
+          down: async () => {
+            downs += 1;
+          },
+        }),
+        credentials: {
+          async tokenFor() {
+            throw new Error("GitHub refused to mint a token");
+          },
+        },
+      }).start(request()),
+    ).rejects.toThrow(/refused to mint/);
+
+    expect(downs).toBe(1);
+    expect(calls.filter((call) => call.args[0] === "run")).toHaveLength(0);
+  });
+
   it("passes the token by name, so it is in no argument vector", async () => {
     const clock = handSleep();
     const { spawn, calls } = fakeContainer([]);

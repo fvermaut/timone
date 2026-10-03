@@ -906,21 +906,9 @@ export function containerRuntime(
         );
       }
 
-      // The box holds this token until the first refresh, so it must outlive
-      // that by the margin. The interval is the one the box's own refresh
-      // loop below will wait, so a longer one set in the options cannot
-      // break the rule. See FORGE_REFRESH_MS.
-      const token =
-        options.credentials === undefined
-          ? undefined
-          : await options.credentials.tokenFor(
-              repoSlug(workspace.project.remote),
-              {
-                minLifeMs:
-                  (options.refreshIntervalMs ?? FORGE_REFRESH_MS) +
-                  BOX_TOKEN_MARGIN_MS,
-              },
-            );
+      // Worked out once: the box's first token is sized on it, and its
+      // refresh loop below waits it. See FORGE_REFRESH_MS.
+      const refreshIntervalMs = options.refreshIntervalMs ?? FORGE_REFRESH_MS;
 
       // First of all, and before anything is created: this is an offline
       // question about what the checkout last saw, and the alternative is
@@ -965,6 +953,25 @@ export function containerRuntime(
       try {
         modelToken =
           options.modelToken === undefined ? undefined : await options.modelToken();
+      } catch (error) {
+        if (stack !== undefined) await stack.down().catch(() => undefined);
+        throw error;
+      }
+
+      // The box holds this token until the first refresh, so it must outlive
+      // that by the margin. It is taken last, just before the box's
+      // environment is built, so the minutes a stack takes to come up are not
+      // taken out of that margin (PRD-06.R5). The stack is up by now, so it
+      // is taken back down if this refuses.
+      let token: string | undefined;
+      try {
+        token =
+          options.credentials === undefined
+            ? undefined
+            : await options.credentials.tokenFor(
+                repoSlug(workspace.project.remote),
+                { minLifeMs: refreshIntervalMs + BOX_TOKEN_MARGIN_MS },
+              );
       } catch (error) {
         if (stack !== undefined) await stack.down().catch(() => undefined);
         throw error;
@@ -1060,9 +1067,8 @@ export function containerRuntime(
               name,
               repository: repoSlug(workspace.project.remote),
               credentials: options.credentials,
-              ...(options.refreshIntervalMs === undefined
-                ? {}
-                : { intervalMs: options.refreshIntervalMs }),
+              // The interval the box's first token was sized on above.
+              intervalMs: refreshIntervalMs,
               ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
               ...(options.log === undefined ? {} : { log: options.log }),
             });
