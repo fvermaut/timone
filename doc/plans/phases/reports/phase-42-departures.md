@@ -36,3 +36,10 @@
 **Agreed:** Every claimed requirement and every requirement of the regression set is checked by a probe.
 **Did instead:** Three were not decided. PRD-06.R5 (a box never holds a token that runs out before its next one) has no probe. PRD-05.R18, and the real-runner clause of PRD-05.R7, were reported BLOCKED by their probes.
 **Why:** For PRD-06.R5, the tool permission system refused the probe's instrument, a stand-in `docker` program that records what a box is handed, as *Credential Exploration*. Every token involved would have been a fake value from the probe's own stand-in for GitHub, but the refusal stands until a person allows it. PRD-05.R18 and PRD-05.R7 clause 1 need a replay against the real model on this build, which only the operator can run (`npm run --silent replay`). Details in [phase-42-verification.md](phase-42-verification.md), *Carried forward*.
+
+## 2026-10-03 — timone#185, build
+
+**Kind:** plan step
+**Agreed:** Sub-phase 42d moves the box's token call after the start-up steps, and changes nothing else about failure.
+**Did instead:** The call also takes the started stack down when the mint fails, before it throws again. One test covers it. The plan is amended in place.
+**Why:** After the move, a failed mint comes after the stack is up. Without this, the stack would be left running. The model token's call just above already does the same.
