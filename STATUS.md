@@ -8,7 +8,7 @@
 
 ## Waiting on you
 
-> **Read this first.** The old code between steps is gone: [#189](https://github.com/fvermaut/timone/pull/189) is merged. Every project now runs on the runner, and `timone retry` no longer exists. The work for [#185](https://github.com/fvermaut/timone/issues/185) and [#110](https://github.com/fvermaut/timone/issues/110) is in [pull request #193](https://github.com/fvermaut/timone/pull/193), which asks you two questions.
+> **Read this first.** The old code between steps is gone: [#189](https://github.com/fvermaut/timone/pull/189) is merged. Every project now runs on the runner, and `timone retry` no longer exists. The work for [#185](https://github.com/fvermaut/timone/issues/185) and [#110](https://github.com/fvermaut/timone/issues/110) is in [pull request #193](https://github.com/fvermaut/timone/pull/193). You answered its two questions on 3 October; the fixes are built on its branch and checked again.
 
 **1. Restart the daemon** so it runs the merged code of #189. Its 4 small leftovers are [#190](https://github.com/fvermaut/timone/issues/190) and [#191](https://github.com/fvermaut/timone/issues/191).
 
@@ -18,9 +18,11 @@
 
 The two reviews were read separately. The general review found 3 things, all about wording or one repeated line of code. The review against the requirements found 5, and three of them matter: the box's first token is taken before a start-up of up to 4 minutes; the new rule for old test failures needs a read the checker's list still forbids; and the building rule names a list the part is not allowed to receive. None breaks the build.
 
-The pull request asks two questions: how to check the token fix, since the permission system refused the check's fake `docker`; and whether to fix the 8 findings before merging (recommended) or after. It also lists what only you can run: a watched check and build on scratch-app, and the replay (`npm run --silent replay`).
+You answered on 3 October: fix all 8 findings before merging, and accept the token fix on the builder's test. The 8 findings are fixed on branch `timone/185-a-run-spends-its-time-on-the-work`, in three new parts. The work was then checked again ([report, iteration 2](https://github.com/fvermaut/timone/blob/timone/185-a-run-spends-its-time-on-the-work/doc/plans/phases/reports/phase-42-verification.md)). The token test passed, so the token fix is now marked checked, with your decision named as the reason. Nothing failed and nothing that worked before broke. The reviews run again next, and the pull request is updated with them.
 
-**What I need from you:** answer the two questions on #193.
+Still only you can run these, after the merge: a watched check and build on scratch-app, for the four new rules; and the replay (`npm run --silent replay`), which two old checks still wait on. One manual check of the new building rhythm waits for the first build after the merge.
+
+**What I need from you:** nothing yet. Wait for #193 to be updated, then read it.
 
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
