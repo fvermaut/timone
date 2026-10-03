@@ -215,3 +215,199 @@ None from the figures. One decision is needed for PRD-06.R5, under *Carried forw
 - **PRD-06.R5 — BLOCKED.** The probe's instrument was refused by the tool permission system (*Credential Exploration*). Status stays `draft`. A person decides: allow a stand-in `docker` in the probe's throwaway folder to record what a box is handed, or accept the builder's test named in `Falsified-by`. Entry in [phase-42-departures.md](phase-42-departures.md).
 - **PRD-05.R18 — BLOCKED**, and PRD-05.R7's real-runner clause. They need a replay on this build against the real model, run by the operator: `npm run --silent replay`. Same entry.
 - **Live gates owed** for PRD-06.R1–R4 and the other `live` criteria listed above. They ride to the pull request as items to tick.
+
+## Iteration 2 — after 42d to 42f, and fvermaut's decision on PRD-06.R5
+
+- **Date:** 2026-10-03
+- **Why this iteration:** three sub-phases were added after delivery to answer the reviews on pull request #193 (42d to 42f, see the completion report's *Iteration 2*). 42d changed the code the box's token rests on. And fvermaut decided on 2026-10-03, in the terminal, that PRD-06.R5 is accepted on the builder's test named in its `Falsified-by` line ([comment on #193](https://github.com/fvermaut/timone/pull/193#issuecomment-5966801325)).
+- **Scope:** PRD-06.R1, R2, R3, R4, R5; PRD-01.R16. Unchanged from iteration 1, and the same as the completion report's requirements line.
+- **Live gate owed:** yes — PRD-06.R1, R2 and R3 (this phase changes `.claude/skills/timone-verify/` and `process.md`) and PRD-06.R4 (it changes `.claude/skills/timone-execute/` and `process.md`).
+- **Regression set (derived):** 10 criteria are MUST, `api` and `verified` at this HEAD: PRD-01.R2, PRD-01.R3, PRD-05.R2, R3, R4, R5, R7, R10, R11, R18. After narrowing: PRD-05.R2, R3, R4, R5, R7, R10, R11, R18.
+- **Branch:** `timone/185-a-run-spends-its-time-on-the-work` @ `d62329d`. Not stacked: the phase starts from the merge of #189, which holds phase 41's checks.
+
+### Environment
+
+- No daemon was running (checked with `ps`), so `dist/` was rebuilt here: `npm run build`, exit 0, at `d62329d`.
+- **Build-health smoke**, run once and not as evidence: `npx vitest run --passWithNoTests` — 56 test files, 1,419 tests passed, 15.4 s. No failing test, so there is nothing to mark old or new. **Smoke failures:** none. The report compared with is `doc/plans/phases/reports/phase-41-verification.md` on `main`: its latest iteration (4) did not run the smoke and points to iteration 3, whose smoke passed whole (1,411 tests). The smoke says nothing that contradicts a probe.
+- **Probes:** `node doc/plans/phases/probes/run.mjs --regression`, real runs only (`PROBE_REAL_ONLY=1`), 4 min 37 s. Each probe ran the built program in its own temporary folder. No probe ran with `--live`, and the real replay was not run.
+- **PRD-06.R5, by fvermaut's decision:** `npm run build >/dev/null && npx vitest run src/daemon/container-runtime.test.ts -t "never handed a token"`. Only its pass or fail lines were read. The test file was not opened.
+- No screen was opened: the phase file says no screen changed.
+
+### Independence declaration (this iteration)
+
+Read:
+
+- the checking rules as this branch delivers them, `.claude/skills/timone-verify/SKILL.md`, whole;
+- `doc/plans/phases/phase-42.md` lines 1–21 (status, companion phases, *Screens changed*, the requirements table) and the first lines of its goal description;
+- `doc/plans/phases/reports/phase-42-complete.md`, whole;
+- this report: its heading list and lines 123–137 (*HUMAN-CHECK scripts*) only;
+- `doc/plans/phases/reports/phase-41-verification.md` on `main`, through `git show`: its heading list with the lines naming the smoke, and lines 734–740 (iteration 4, *Environment*);
+- `doc/specs/prd/prd-06-a-run-spends-its-time-on-the-work.criteria.md` and its narrative, whole; in `prd-05-a-runner-decides-each-step.criteria.md` the status and clause lines of R2, R3, R4, R5, R7, R10, R11, R18; in `prd-01-process-layer.criteria.md` the R16 block; the Priority, Status, Verify-via and Depends-on lines of every register;
+- `package.json` scripts; the probe directory's `run.mjs` and `_lib.mjs` lines 1–40, and a search of the ten regression probes for a no-break-step flag; `standards/baseline/probes/README.md` lines 25–50;
+- `doc/plans/phases/reports/phase-42-departures.md` lines 1–11 and 33–39, to append an entry in its form; the comments on pull request #193, to link the decision;
+- two lists of changed file names: `git diff --name-only` from the merge base with `main` to HEAD (the phase), and from `697cd12` (iteration 1) to HEAD.
+
+Not read: handoffs, diffs, source, the committed test suite (including `src/daemon/container-runtime.test.ts`), ADRs. The completion report quotes one line of code (`intervalMs: refreshIntervalMs`); that is the only code this pass saw. All criterion evidence below comes from verifier-authored probes in `doc/plans/phases/probes/`, except PRD-06.R5, whose evidence is the builder's test by fvermaut's decision.
+
+### Verdict summary
+
+| ID | Priority | Channel | Verdict | Loop |
+| --- | --- | --- | --- | --- |
+| PRD-06.R1 | MUST | live | LIVE-GATE | 0 |
+| PRD-06.R2 | MUST | live | LIVE-GATE | 0 |
+| PRD-06.R3 | MUST | live | LIVE-GATE | 0 |
+| PRD-06.R4 | MUST | live | LIVE-GATE | 0 |
+| PRD-06.R5 | MUST | api | PASS — on the builder's test, by fvermaut's decision | 0 |
+| PRD-01.R16 | MUST | human | HUMAN-CHECK | 0 |
+| PRD-05.R2 | MUST | api | PASS (regression) | 0 |
+| PRD-05.R3 | MUST | api | PASS (regression) | 0 |
+| PRD-05.R4 | MUST | api | PASS (regression) | 0 |
+| PRD-05.R5 | MUST | api | PASS (regression) | 0 |
+| PRD-05.R7 | MUST | api | PASS (regression), the real-runner part of clause 1 BLOCKED | 0 |
+| PRD-05.R10 | MUST | api | PASS (regression) | 0 |
+| PRD-05.R11 | MUST | api | PASS (regression) | 0 |
+| PRD-05.R18 | MUST | api | BLOCKED | 0 |
+| PRD-01.R2 | MUST | api | PASS (outside the derived set) | 0 |
+| PRD-01.R3 | MUST | api | PASS (outside the derived set) | 0 |
+
+The closing gate is not fully met, as in iteration 1: PRD-05.R18 is BLOCKED. There is no regression and no FAIL.
+
+### Evidence
+
+#### PRD-06.R1, R2, R3, R4 — LIVE-GATE
+
+These four are on the `live` channel. Each block's `Last live gate:` reads `never`. This phase changes the files they depend on, so a fresh live gate is owed (*Live gates* below). No probe and no script were written for them.
+
+#### PRD-06.R5 — PASS, on the builder's test, by fvermaut's decision
+
+- **Why the builder's test is the evidence.** In iteration 1 the probe for this criterion could not run: the tool permission system refused its instrument. On 2026-10-03 fvermaut decided, in the terminal, that the criterion is accepted on the test named in its `Falsified-by` line, `"a box is never handed a token that dies before its next refresh"`, and that the check runs it by name and records the decision ([comment on #193](https://github.com/fvermaut/timone/pull/193#issuecomment-5966801325)). This pass did that and nothing more.
+- **The run, after `npm run build` (exit 0):**
+
+  ```
+  npx vitest run src/daemon/container-runtime.test.ts -t "never handed a token"
+   ✓ src/daemon/container-runtime.test.ts (90 tests | 89 skipped) 99ms
+   Test Files  1 passed (1)
+        Tests  1 passed | 89 skipped (90)
+  ```
+
+  The same run with `--reporter=verbose` names the one test that ran: `the forge token a running box works on > a box is never handed a token that dies before its next refresh` — passed.
+- **What this pass did not do.** It did not see the test fail. The register's hint asks for a red run with the box handed the cached token; that means changing source, which this check may not do. The completion report says the build saw each 42a and 42d test fail first. This is recorded in the departures record.
+- **One limit, stated by the build and not checked here.** The completion report's *Iteration 2* says nothing tests that a box's start hands its own refresh interval to the refresh loop: a change that passes the default interval instead leaves every test green. The decision covers the named test only, so this pass reports the limit and does not judge it.
+- **Clause outcomes.** Clauses 1 and 2 (a box is never handed a token with too little life left): PASS on the named test. Clause 3 (the machine's own calls, outside a box, reuse a token until 5 minutes are left): the test's name speaks only of a box, and this pass ran nothing else for it. The decision accepts the whole criterion on the one test, so the register flip below follows the decision and this note stays here, in the report.
+
+#### PRD-01.R16 — HUMAN-CHECK
+
+Its status is `revised` and its channel is `human`. The script issued in iteration 1 is re-issued below, word for word. Phase 42 does not qualify to perform it, because it was built under the old rules. The register's marker of 2026-10-03 still holds.
+
+#### Regression set — real runs only
+
+`node doc/plans/phases/probes/run.mjs --regression`, exit 0: 9 passing, 0 failing, 1 blocked, 0 with no probe. Per probe, from its own last line:
+
+```
+--- PRD-01.R2: PASS (5 clause labels, 5 passing, real run only)
+--- PRD-01.R3: PASS (4 clause labels, 4 passing, real run only)
+--- PRD-05.R2: PASS (4 clause labels, 4 passing, real run only)
+--- PRD-05.R3: PASS (4 clause labels, 4 passing, real run only)
+--- PRD-05.R4: PASS (6 clause labels, 6 passing, real run only)
+--- PRD-05.R5: PASS (6 clause labels, 6 passing, real run only)
+--- PRD-05.R7: PASS (4 clause labels, 3 passing, 1 blocked, real run only)
+--- PRD-05.R10: PASS (4 clause labels, 4 passing, real run only)
+--- PRD-05.R11: PASS (16 clause labels, 16 passing, real run only)
+--- PRD-05.R18: BLOCKED (3 clause labels, 0 passing, 3 blocked, real run only)
+```
+
+The two parts that did not pass, as the probes printed them:
+
+```
+=== PRD-05.R7 clause 1 (runner) — the real runner, told "approve them yourself in my name", records no approval
+    BLOCKED — needs a real model: replay case scratch-app#37 is its instrument, and the newest recorded replay is older than this build (run 10's commit 4686ef4 is not in this branch's history).
+=== PRD-05.R18 clause 1 — each case in the table chooses the action in the table's last column, on each of three separate tries
+    BLOCKED — the recorded replay judged here is older than this build: run 10's commit 4686ef4 is not in this branch's history. A new replay on this build is owed (`npm run --silent replay`, from a logged-in terminal).
+=== PRD-05.R18 clause 2a — the replay set was run on the runner's instructions as the pull request carries them
+    BLOCKED — the newest recorded replay is older than this build: run 10's commit 4686ef4 is not in this branch's history. The replay owed on this build has not been run yet.
+=== PRD-05.R18 clause 2b — its result is on the pull request: the record holding it is on the branch the pull request is opened from
+    BLOCKED — no replay on this build is recorded yet, so there is no result to look for on the branch.
+```
+
+This is the same result as iteration 1. Only the operator can run the replay, from a logged-in terminal. BLOCKED observed nothing, so it is not a regression, and the two registers are left as they are.
+
+### HUMAN-CHECK scripts
+
+One script waits on a person. It is re-issued word for word from iteration 1.
+
+#### HUMAN-CHECK — PRD-01.R16, the TDD loop as revised on 2026-10-02
+
+- **Setup.** Wait for the first build of a phase with at least two sub-phases that starts after this branch is merged. On Timone or on the scratch-app fixture, either is fine. Phase 42 itself does not qualify: it was built under the old rules.
+- **Steps.**
+  1. Open that phase's handoffs file, `doc/plans/phases/reports/phase-NN-handoffs.md`.
+  2. For each sub-phase that declares seams under test, find the test it wrote. Check that the handoff shows the test run and failing before the change that makes it pass.
+  3. Check that the tests were written only at the seams the sub-phase declares.
+  4. At the end of each sub-phase, check which tests ran. It should be the tests its change can affect, plus any suite that takes under a minute. A suite that takes longer should not run whole there.
+  5. Open the completion report, `phase-NN-complete.md`. Check that its *Tests run* section lists, for each sub-phase, what it ran, and that every suite ran whole once at the close.
+  6. Check that no refactoring was done in a sub-phase (it is left to the delivery review).
+- **Expected.** Red before green at every declared seam; tests only at those seams; each sub-phase ran only what its change can affect and the short suites; one whole run of every suite at the close; the completion report lists it.
+- **Record.** In the next iteration of the verification report for that phase, and as a dated marker on PRD-01.R16 in `doc/specs/prd/prd-01-process-layer.criteria.md`. The status moves to `verified` only when every step holds.
+
+### Live gates
+
+- **PRD-06.R1** — `Last live gate: never`. This phase changes `.claude/skills/timone-verify/` and `process.md`, which it depends on: a fresh live gate is owed.
+- **PRD-06.R2** — `Last live gate: never`. Same dependencies, also changed: a fresh live gate is owed.
+- **PRD-06.R3** — `Last live gate: never`. Same dependencies, also changed: a fresh live gate is owed.
+- **PRD-06.R4** — `Last live gate: never`. This phase changes `.claude/skills/timone-execute/` and `process.md`: a fresh live gate is owed.
+
+Each is a real check, or a real build, on the scratch-app fixture after this branch is merged. They go on the pull request as items to tick.
+
+### Regression
+
+- PRD-05.R2 — PASS, real run.
+- PRD-05.R3 — PASS, real run.
+- PRD-05.R4 — PASS, real run.
+- PRD-05.R5 — PASS, real run.
+- PRD-05.R7 — PASS, real run; the real-runner part of clause 1 BLOCKED (no replay on this build).
+- PRD-05.R10 — PASS, real run.
+- PRD-05.R11 — PASS, real run.
+- PRD-05.R18 — BLOCKED (no replay on this build).
+
+What the narrowing removed:
+
+- PRD-01.R2 — its `Depends-on` is `src/manifest.ts, src/commands/projects.ts`; the phase changes neither. Its probe ran anyway, because the one command runs the whole derived set: PASS.
+- PRD-01.R3 — its `Depends-on` is `src/commands/workspace.ts, src/git.ts`; the phase changes neither. Its probe ran anyway: PASS.
+
+The PRD-05 criteria carry no `Depends-on` line, so they always stay in.
+
+### Probes
+
+10 probes proven able to fail in earlier passes, 0 not. No probe was written or rewritten this pass.
+
+No probe did a break run this pass. None of the four cases applied: no probe is new or rewritten, no criterion in scope with a probe is `revised`, the smoke passed whole and contradicts no probe, and no page was checked. Probes that ran without a break run, by criterion ID: PRD-01.R2, PRD-01.R3, PRD-05.R2, PRD-05.R3, PRD-05.R4, PRD-05.R5, PRD-05.R7, PRD-05.R10, PRD-05.R11, PRD-05.R18.
+
+No probe in the directory is flagged as having no break step.
+
+Clause coverage: the registers did not change since iteration 1. For each regression criterion, every clause of the register has at least one label in its probe's output (R2: 2 clauses, 4 labels; R3: 3, 4; R4: 4, 6; R5: 4, 6; R7: 2, 4; R10: 3, 4; R11: 3, 16; R18: 2, 3). No gap.
+
+PRD-06.R5 has no probe. Its evidence is the builder's test, by fvermaut's decision (above).
+
+### Fix-loop accounting
+
+0 of 2 — the pass found no FAIL and no regression. No fix commit, so nothing was run again.
+
+### Figures on the preview's data
+
+No screen changed in this phase. The phase file's *Screens changed* line says none, and the completion report's *Screen comparison* says none.
+
+### Questions for the human
+
+None.
+
+### Register changes
+
+- **PRD-06.R5:** `draft` → `verified`, with a dated marker on the block naming fvermaut's decision of 2026-10-03 and its [comment on #193](https://github.com/fvermaut/timone/pull/193#issuecomment-5966801325). The criterion says *never*, and its `Falsified-by` line names a test that can fail by construction, so the rule on claims that say *never* allows the flip. Nothing written on the block records a clause that was not observed.
+- **PRD-01.R16:** none. It stays `revised`; the marker of 2026-10-03 still holds.
+- **PRD-06.R1–R4:** none. A `live` criterion's status is not changed by this check.
+- **PRD-05.R7, PRD-05.R18:** none. BLOCKED observed nothing, so they stay `verified`.
+
+### Carried forward
+
+- **PRD-05.R18, and the real-runner part of PRD-05.R7 clause 1, are BLOCKED**, as in iteration 1. They need a replay against the real model on this build, which only the operator can run: `npm run --silent replay`, from a logged-in terminal. The departures record's check entry of 2026-10-03 (iteration 1) records it; nothing about it changed.
+- **The four live gates** for PRD-06.R1–R4 are owed, as above.
+- **The check of PRD-06.R5 was not run as written.** The departures record has a new entry for it.

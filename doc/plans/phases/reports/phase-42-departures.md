@@ -50,3 +50,10 @@
 **Agreed:** Sub-phase 42e restores the full screen read after a fix in the checking skill.
 **Did instead:** It also says so in `process.md` stage 7. The plan is amended in place.
 **Why:** 42b's sentence in `process.md` named only probes, and `process.md` outranks the skill. Left alone, the two would disagree.
+
+## 2026-10-03 — timone#185, check
+
+**Kind:** check not run as written
+**Agreed:** PRD-06.R5 is checked by a probe the check writes and sees fail before it passes. The register's hint also asks to make the falsifying test fail on purpose, by handing the box the cached token.
+**Did instead:** The check ran the builder's test `"a box is never handed a token that dies before its next refresh"` by name, once, and read only whether it passed. It passed. The check wrote no probe, did not open the test, and did not see it fail. PRD-06.R5 was marked `verified` on that test.
+**Why:** fvermaut decided on 2026-10-03, in the terminal, that PRD-06.R5 is accepted on the test its `Falsified-by` line names ([comment on #193](https://github.com/fvermaut/timone/pull/193#issuecomment-5966801325)). The check's own probe could not run in iteration 1, and seeing the test fail would mean changing source, which the check may not do. Details in [phase-42-verification.md](phase-42-verification.md), *Iteration 2*.

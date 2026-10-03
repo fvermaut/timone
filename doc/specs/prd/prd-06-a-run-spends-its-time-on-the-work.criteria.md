@@ -95,7 +95,7 @@
 ## R5 — A box never holds a GitHub token that runs out before its next one arrives
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Depends-on:** `src/adapters/credentials.ts`, `src/daemon/container-runtime.ts`
 - **Falsified-by:** a test in `src/daemon/container-runtime.test.ts` that, on a fake clock, gives the token cache a token with less life left than the refresh interval, starts a box and refreshes it, and fails if the box is handed that token
@@ -110,3 +110,4 @@
       WHEN it is taken from the cache
       THEN the cache reuses it as it does today, until 5 minutes of life are left
 - **Verification hint:** `npx vitest run src/adapters/credentials.test.ts src/daemon/container-runtime.test.ts`. Then make the falsifying test go red on purpose: hand the box the cached token regardless of its life, and the test must fail.
+- ✏ 2026-10-03 — **verified on the builder's test, by fvermaut's decision.** He decided on 2026-10-03, in the terminal ([comment on #193](https://github.com/fvermaut/timone/pull/193#issuecomment-5966801325)), that this criterion is accepted on the test its `Falsified-by` line names, `"a box is never handed a token that dies before its next refresh"`. [Phase 42's verification, iteration 2](../../plans/phases/reports/phase-42-verification.md#iteration-2--after-42d-to-42f-and-fvermauts-decision-on-prd-06r5) ran that test by name: it passed.
