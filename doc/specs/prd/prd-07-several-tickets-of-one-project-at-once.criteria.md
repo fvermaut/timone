@@ -241,7 +241,7 @@
       WHEN [PRD-02.R10](prd-02-inversion-of-control.criteria.md#r10--serialized-work-per-project) is read
       THEN it is marked as replaced by this PRD's R1, R2 and R3, with a dated note
     - GIVEN the same
-      WHEN [PRD-02.R22](prd-02-inversion-of-control.criteria.md#r22--a-ticket-hosts-a-sequence-of-chunks) clauses 1 and 6, [PRD-05.R15](prd-05-a-runner-decides-each-step.criteria.md#r15--one-projects-work-no-longer-holds-up-the-others) clause 2, and the out-of-scope line of [PRD-03](prd-03-a-run-ends-at-its-pull-request.md) on how a project is held are read
+      WHEN [PRD-02.R22](prd-02-inversion-of-control.criteria.md#r22--a-ticket-hosts-a-sequence-of-chunks) clauses 1 and 6, [PRD-05.R15](prd-05-a-runner-decides-each-step.criteria.md#r15--one-projects-work-no-longer-holds-up-the-others) clause 2, [PRD-05.R11](prd-05-a-runner-decides-each-step.criteria.md#r11--takeover-and-cancel-stay-and-retry-goes) clause 2, and the out-of-scope line of [PRD-03](prd-03-a-run-ends-at-its-pull-request.md) on how a project is held are read
       THEN each carries a dated note naming the requirement of this PRD that changes it
     - GIVEN the same
       WHEN [ADR-0026](../../adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md) is read
@@ -250,3 +250,46 @@
       WHEN `process.md` stage 6 is read
       THEN it no longer says that a ticket-driven run holds its project until its pull request ends
 - **Verification hint:** the handover lists these places. The code part, `RunStore` in `src/daemon/runs.ts`, is covered by R1 and R2.
+
+## R13 — A takeover is allowed while another ticket of the same project is building
+
+> ✏ 2026-10-03 — added on fvermaut's answer on [timone#197](https://github.com/fvermaut/timone/issues/197): "no" to "Is a takeover still refused while another ticket of the same project is being built?"
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** api
+- **Falsified-by:** a test that opens a takeover on a ticket nothing is working on, while a step of another ticket of the same project runs or another ticket holds a work branch, and fails if the takeover is refused for that reason
+- **Depends-on:** `src/commands/takeover.ts, src/daemon/runs.ts`
+- **Criteria:**
+    - GIVEN a ticket nothing is working on, and a step of another ticket of the same project running
+      WHEN a person runs `timone takeover <ticket>` on the first ticket
+      THEN a terminal session opens on it, and it is not refused because of the other ticket
+    - GIVEN a ticket nothing is working on, and another ticket of the same project holding a work branch or an open pull request
+      WHEN a person runs `timone takeover <ticket>` on the first ticket
+      THEN a terminal session opens on it, and it is not refused because of the other ticket
+    - GIVEN a ticket whose own step the machine is working on
+      WHEN a person runs `timone takeover <ticket>` on it
+      THEN no session opens, and the message says what is happening, as today
+- **Verification hint:** this replaces the part of [PRD-05.R11](prd-05-a-runner-decides-each-step.criteria.md#r11--takeover-and-cancel-stay-and-retry-goes) clause 2 that refuses a takeover while another run of the project is working or holds a work branch. Its probe, [`prd-05.r11.mjs`](../../plans/phases/probes/prd-05.r11.mjs), checks that refusal today and will have to change with it. The takeover takes no place (R2).
+
+## R14 — A pull request that opens behind the default branch is brought level at once
+
+> ✏ 2026-10-03 — added on fvermaut's answer on [timone#197](https://github.com/fvermaut/timone/issues/197): "yes" to "When a pull request opens and the default branch has moved on, should the machine bring it up to date at once?"
+
+- **Priority:** MUST
+- **Status:** draft
+- **Verify-via:** live
+- **Last live gate:** never
+- **Falsified-by:** a test on a fake forge that opens a pull request whose branch is behind the default branch, and fails if no update starts on it; and a test that opens one level with the default branch and fails if an update starts
+- **Depends-on:** `src/runner/, src/daemon/, .claude/skills/`
+- **Criteria:**
+    - GIVEN a ticket still building when another pull request of the same project merges
+      WHEN its own pull request opens, behind the default branch
+      THEN an update starts on it at once, as soon as a place is free, without waiting for the next merge
+    - GIVEN that update
+      WHEN it runs
+      THEN it does everything R7 asks of an update after a merge: it brings the branch level, fixes any conflict, runs the same three test sets, writes the same section at the top of the pull request, and stops for the person after two failed fixes
+    - GIVEN a pull request that opens level with the default branch
+      WHEN it opens
+      THEN no update starts on it
+- **Verification hint:** on scratch-app, in the same watched run as R7: two test tickets that change the same file, one built faster than the other. A named person merges the first pull request while the second ticket still builds. Watch the second pull request open and be brought level at once, before any further merge.
