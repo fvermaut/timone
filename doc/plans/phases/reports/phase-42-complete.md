@@ -4,7 +4,7 @@
 - **Plan:** [phase-42.md](../phase-42.md) — no list-of-pieces file: fvermaut approved PRD-06 and ADR-0061 in the terminal on 2026-10-02 as one piece and one pull request (first entry of the departures record)
 - **Requirements:** PRD-06.R1 (MUST) — `draft`; PRD-06.R2 (MUST) — `draft`; PRD-06.R3 (MUST) — `draft`; PRD-06.R4 (MUST) — `draft`; PRD-06.R5 (MUST) — `draft`; PRD-01.R16 (MUST) — `revised`
 - **Branch:** `timone/185-a-run-spends-its-time-on-the-work`
-- **Departures:** [`phase-42-departures.md`](phase-42-departures.md) — 4 entries.
+- **Departures:** [`phase-42-departures.md`](phase-42-departures.md) — 7 entries (4 at the first close, 1 from the check, 2 from 42d and 42e).
 
 ## Summary
 
@@ -50,3 +50,34 @@ None — the phase changes no screen.
 - **PRD-06.R1–R4** are `live`. Only a real check and a real build on the scratch-app fixture show a session following the new text. This phase touches what they depend on, so that watched run is owed; it rides to the pull request.
 - **Owed by the checking step itself:** the shared probes' README (in the probe folder under `standards/baseline`, lines 30-39) still says a probe must be seen to fail on every build. It needs the rule of ADR-0061 D1, including the reading that a shared probe on a page it has never checked does its break run there.
 - **PRD-01.R16** is `revised`, channel `human`: read a building session's handoffs for the new rhythm.
+
+## Iteration 2 — 2026-10-03, the reviews' findings on pull request #193
+
+fvermaut answered on 2026-10-03, in the terminal: fix all 8 review findings on this branch before merging, and accept the builder's test for PRD-06.R5. Three sub-phases were added to the plan after delivery and built.
+
+| Sub-phase | Outcome | Commit |
+| --- | --- | --- |
+| 42d — A box's first token is taken after the slow start-up, and its refresh interval is worked out once | Spec 1 and Standards 3. The token is taken after the services and the model token; one interval value sizes it and drives the refresh loop. 2 tests added, each seen red first. A failed mint now takes the started stack down (plan amended). | `5eac980` |
+| 42e — The checking rules use one word per idea, allow the read they need, and look at every screen again after a fix | Spec 2 and 5, Standards 1 and 2. `process.md` stage 7 also gets the screen rule (plan amended). | `f83c736` |
+| 42f — A slice is given the list of fast suites, and stage 6 requires the tests-run list | Spec 3 and 4. | `390d574` |
+
+### Tests run
+
+The suite takes 16 s on this project, so it is a suite under a minute and ran whole at each sub-phase end that carried code.
+
+- **42d:** `src/adapters/credentials.test.ts`, `src/daemon/container-runtime.test.ts`, `src/adapters/command-runner.test.ts` (128 tests); type-check; the whole suite, 1419 passed.
+- **42e:** no tests; text only. Its validation commands passed.
+- **42f:** no tests; text only. Its validation commands passed.
+- **Close:** `npm run build`, exit 0; the whole suite once, 56 files, 1419 tests passed, 16 s; `npx tsc --noEmit`, exit 0. Then the validation of 42a to 42f once each, in that order (none changes state outside the repository): all passed.
+
+### Deviations from the plan
+
+- ✏ 2026-10-03 (build, timone#185) — 42d: a mint that fails after the stack is up takes the stack down before it throws again.
+- ✏ 2026-10-03 (build, timone#185) — 42e: `process.md` stage 7 also states the full screen read after a fix.
+- Not tested, and stated: nothing tests that `start` hands its interval to the refresh loop. A mutation that passes the default instead leaves every test green. The value is the same variable in the code (`src/daemon/container-runtime.ts`, `intervalMs: refreshIntervalMs`).
+- Not changed, for the next reader: `process.md` stage 6 opens with its own short list of what a slice gets, which names neither the fast suites nor standards, seams or glossary terms. The skill's list is the full one.
+
+### Context for the next agent
+
+- PRD-06.R5: fvermaut decided on 2026-10-03 to accept the builder's test `"a box is never handed a token that dies before its next refresh"` as its evidence. The check runs that test by name and records the decision.
+- Everything under *Context for the next agent* above still holds.
