@@ -26,9 +26,9 @@
 
 **What I need from you:** answer them when you want that work to go on.
 
-**4. Timone's own conversation tickets.** On 2 October the runner stopped waiting on [#91](https://github.com/fvermaut/timone/issues/91), [#92](https://github.com/fvermaut/timone/issues/92) and [#95](https://github.com/fvermaut/timone/issues/95) to [#98](https://github.com/fvermaut/timone/issues/98), because their `timone` label was taken off in September, and it said so on four of them. Your questions there are still open. Once the daemon runs the merged code, `timone takeover timone#95` opens the conversation again, at the right step.
+**4. Timone's own conversation tickets are closed.** On 3 October you closed the web page map ([#92](https://github.com/fvermaut/timone/issues/92), with #95 to #98) and the idea of new document formats ([#91](https://github.com/fvermaut/timone/issues/91)). Making the runner reliable comes first. The original request for the page stays in `doc/triage/001-observability-dashboard.md`.
 
-**What I need from you:** nothing until you want one of them.
+**What I need from you:** nothing.
 
 **5. Older questions, no hurry.**
 
@@ -39,14 +39,13 @@
 
 **What I need from you:** nothing until you want one of them.
 
-**6. Timone's own tickets were sorted on 3 October.** 24 of 75 were closed: their work was merged, the runner replaced the code they were about, or another ticket has the same fault. Each closed ticket says why. One fault came back: [#12](https://github.com/fvermaut/timone/issues/12). A closed ticket can again start a paid session, because its fix was removed with #189. The 51 left, in order:
+**6. Timone's own tickets were sorted on 3 October.** 38 of 75 were closed. For 24, the work was merged, the runner replaced the code they were about, or another ticket has the same fault. You closed 14 more because they cost more than they give, or because they belong to the web page map. Each closed ticket says why. One fault came back: [#12](https://github.com/fvermaut/timone/issues/12). A closed ticket can again start a paid session, because its fix was removed with #189. The 37 left, in order:
 
 - **First: a run can harm a project, or you have to answer twice.** [#85](https://github.com/fvermaut/timone/issues/85): a run can push to `main`, and `main` is not protected on any of the three repositories. [#113](https://github.com/fvermaut/timone/issues/113): a box runs whatever this folder has checked out. [#109](https://github.com/fvermaut/timone/issues/109): no rule stops a check from deleting real data. [#87](https://github.com/fvermaut/timone/issues/87): inside a box, the guard on the checking scripts does not work. [#73](https://github.com/fvermaut/timone/issues/73): box names collide, and a failed start can remove another run's box. [#183](https://github.com/fvermaut/timone/issues/183) and [#176](https://github.com/fvermaut/timone/issues/176) item 1: you approve two or three times. [#178](https://github.com/fvermaut/timone/issues/178): a stop written when closing a pull request is not taken. [#177](https://github.com/fvermaut/timone/issues/177): the runner held a build for a setting it did not need. [#22](https://github.com/fvermaut/timone/issues/22): the fixing step asks you to merge before its re-check. [#186](https://github.com/fvermaut/timone/issues/186): `timone status` names 80 finished tickets. #12.
 - **Next: real gaps.** #184 with #179 item 1, #181, #190 with #191 item 1 and #188 item 3, #124 #90 #101 #174 #192 (the end-of-session check reports correct work), #138, #121 with #134, #194, #107, #72, #20, #5 with #187, #127, the rest of #176.
 - **Later: small tidying, in one batch.** #195, #191, #188, #179, #168, #172, #10.
-- **Proposed for closing, waiting on your yes.** #91, #26, #18, #17, #7, #37, #54, #88, #62. They cost more than they give, or what is left of them is very small. The web page map, #92 with #95 to #98, is your call.
 
-**What I need from you:** say yes to close the nine, and say whether the web page map stays open.
+**What I need from you:** nothing. Start with the first group when you want Timone's own work to go on.
 
 **Nothing else needs you.**
 
