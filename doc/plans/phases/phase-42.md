@@ -1,6 +1,6 @@
 # Phase 42: A run spends its time on the work — the box's token, the checking step's re-runs, the building step's suites
 
-> **Status:** Complete — see [reports/phase-42-complete.md](reports/phase-42-complete.md).
+> **Status:** Planned. ✏ 2026-10-03: reopened for 42d to 42f, the reviews' findings on pull request #193; closed again when they land.
 
 > **Companion phases:** [phase 41](phase-41.md) removed the old code between steps and left the box's token handling untouched; this phase changes `src/daemon/container-runtime.ts` and `src/adapters/credentials.ts`, which phase 41 did not. [phase 30](phase-30.md) built the box and its token refresh (`keepForgeTokenFresh`). Governing decisions: [ADR-0061](../../adr/0061-a-check-script-proves-itself-once-and-a-fix-re-runs-what-it-can-affect.md) — the decision this phase builds; [ADR-0048](../../adr/0048-a-verification-probe-is-kept-proved-able-to-fail-and-hidden-from-the-builder.md) — D1, D3, D4 and D5 still bind the probes, only D2 is amended; [ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) — D4's narrowing of the first pass stays exactly as it is; [ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) and [ADR-0042](../../adr/0042-timone-acts-under-its-own-identity.md) — the box holds one token scoped to one repository, and that does not change.
 
@@ -140,10 +140,104 @@ git diff --stat -- . ':!process.md' ':!.claude/skills/timone-execute' ':!doc/pla
 - [ ] Stage 7's paragraph in `process.md` reads as 42b left it.
 - [ ] Nothing else in stage 6 changed: TDD loop, gates, look check, commits and handoffs read as before.
 
+### Sub-phase 42d: A box's first token is taken after the slow start-up, and its refresh interval is worked out once
+
+> ✏ 2026-10-03 (build, timone#185): added after delivery. Both reviews of [pull request #193](https://github.com/fvermaut/timone/pull/193) are in [phase-42-delivery.md](reports/phase-42-delivery.md). fvermaut answered on 2026-10-03, in the terminal: fix all 8 findings on this branch before merging. This sub-phase answers Spec finding 1 and Standards finding 3.
+
+**[MODIFY]** `src/daemon/container-runtime.ts` — in `containerRuntime(...).start`, work out the refresh interval once, `const refreshIntervalMs = options.refreshIntervalMs ?? FORGE_REFRESH_MS`, and use that one value both for the box token's `minLifeMs` (`refreshIntervalMs + BOX_TOKEN_MARGIN_MS`) and as the `intervalMs` passed to `keepForgeTokenFresh` (today it passes `options.refreshIntervalMs` unresolved, :1057-1059). Move the box's `tokenFor` call from the top of `start` (:909-923) to just before the box's environment is built — after `commitIsPushed`, `runEnv`, `services` and `modelToken`, and before the `env` that carries `GH_TOKEN` (:1001). The token is used nowhere before that line. Update the comment: the token is taken last so the start-up time does not eat the margin.
+**[MODIFY]** `src/daemon/container-runtime.test.ts` — the case below, in the block *"the forge token a running box works on"*.
+
+**Seams under test (TDD):** `containerRuntime(...).start`, with a fake `services` that moves a fake clock forward, and a real `githubAppCredentials` behind a fake mint on the same clock — the same seam as 42a's falsifying test. Red-green:
+1. The cache holds a token with 37 minutes left when `start` begins, and `services` takes 8 minutes on the fake clock. The token handed to the box is a newer mint, not the cached one (which would have 29 minutes left at spawn, 9 minutes past the first refresh — under the 10 PRD-06.R5 asks). Red on the current code.
+2. The refactor of the interval carries no new behaviour; the existing tests in the block (the refresh waits its interval, the start asks for at least the interval plus 10 minutes, the longer-interval case) are its guard and must stay green.
+
+> No dependency on 42e or 42f. It shares no file with them and may run beside 42e.
+
+#### Agent Validation Steps
+
+```bash
+npx vitest run src/adapters/credentials.test.ts src/daemon/container-runtime.test.ts src/adapters/command-runner.test.ts; echo "exit: $?"   # expect 0
+npx tsc --noEmit; echo "exit: $?"   # expect 0
+grep -c "?? FORGE_REFRESH_MS" src/daemon/container-runtime.ts   # the default is applied once in start and once inside keepForgeTokenFresh: expect 2
+git diff --stat -- . ':!src/daemon/container-runtime.ts' ':!src/daemon/container-runtime.test.ts' ':!doc/plans/phases/reports/phase-42-handoffs.md' ':!.claude/skills/timone-verify' ':!process.md'   # expect empty (42e's files excluded, it may run beside this one)
+```
+
+- [ ] Case 1 is seen red before the move, then green, in the handoff.
+- [ ] In `start`, `tokenFor` is called after `services` and `modelToken` and before the box's environment is built.
+- [ ] `keepForgeTokenFresh` receives the same interval value the start token was sized on.
+
+---
+
+### Sub-phase 42e: The checking rules use one word per idea, allow the read they need, and look at every screen again after a fix
+
+> ✏ 2026-10-03 (build, timone#185): added after delivery, on fvermaut's answer above. This sub-phase answers Spec findings 2 and 5 and Standards findings 1 and 2.
+
+**[MODIFY]** `.claude/skills/timone-verify/SKILL.md`
+**[MODIFY]** `process.md` — the stage 7 paragraph only (:46)
+
+**Seams under test (TDD):** no behaviour-carrying code in this sub-phase, so no seams are declared; validation is checklist-based.
+
+> No dependency on 42d; it may run beside it. Sub-phase 42f edits `process.md` after this one.
+
+Each change is marked `✏ Revised 2026-10-03 ([ADR-0061](…))` at the point of change, or folds into the 2026-10-02 marker already there when it rewrites that same sentence.
+
+1. **The read the old/new rule needs (Spec 2, PRD-06.R3).** Add an item to the skill's **Read:** list (:38 is the HUMAN-CHECK item to model it on): the *Environment* section of the latest verification report on the default branch, and only its list of build-health smoke failures, read with `git show <default-branch>:<path>`. Say the same in `process.md`'s closed read list, worded as narrowly. Then the paragraph at :56 refers to that item instead of calling itself an addition to the list.
+2. **One word per idea (Standards 1).** In the text this branch added, use the words the rest of the skill and stage 7 already use: a **pass** is one run of the checking step; the **verification report** is its report; **re-verify** is what follows a fix (step 3 becomes *A narrowed re-verify*, matching *brief-fix-reverify* and lines 184 and 260); in `process.md`, **stage 7** or **the verifier**, never "the checking step". Remove "check report", "this check", "this check's", "an earlier check", "the next check" and "re-check" from the branch's additions.
+3. **The runner sentence (Standards 2).** Rewrite both the skill paragraph after *Run the set with one command* and `process.md`'s clause as short active sentences, for example: "The project's runner is a file this step owns. If it always does both runs, add an option that does real runs only, and commit that change with the report."
+4. **Every screen again after a fix (Spec 5, PRD-06.R2).** R2 and ADR-0061 D2 speak only of probes. Restore the old rule for screens: after a fix, the screen read of *Reading the figures on the preview's data* runs again in full, as it did before ADR-0061. A `(browser)` clause is checked again when its criterion's probe is. Step 9 says the re-verify repeats step 8. The fix-loop accounting template no longer asks for "the screens read again".
+
+#### Agent Validation Steps
+
+```bash
+git grep -n -i -E "check report|this check'?s?\b|an earlier check|the next check|re-check|the checking step, whose|screens read again|screens that had a FAIL" -- .claude/skills/timone-verify/SKILL.md process.md; echo "exit: $?"   # expect 1
+git grep -n -E "Environment" -- .claude/skills/timone-verify/SKILL.md | head   # the new Read: item is listed
+git grep -n -E "repeats step 8" -- .claude/skills/timone-verify/SKILL.md   # expect a match in step 9
+git diff --stat -- . ':!.claude/skills/timone-verify' ':!process.md' ':!doc/plans/phases/reports/phase-42-handoffs.md' ':!src/daemon/container-runtime.ts' ':!src/daemon/container-runtime.test.ts'   # expect empty (42d's files excluded)
+```
+
+- [ ] The **Read:** list and `process.md`'s closed list both name the one new read, and nothing else was added to either.
+- [ ] A reader finds one word for each idea in the branch's additions: pass, verification report, re-verify.
+- [ ] After a fix, every screen is read again; the text says so in the fix loop and in step 9.
+- [ ] The rules of 42b are otherwise unchanged: the four break-run cases, the narrowed re-verify of probes, the smoke comparison.
+
+---
+
+### Sub-phase 42f: A slice is given the list of fast suites, and stage 6 requires the tests-run list
+
+> ✏ 2026-10-03 (build, timone#185): added after delivery, on fvermaut's answer above. This sub-phase answers Spec findings 3 and 4.
+
+**[MODIFY]** `.claude/skills/timone-execute/SKILL.md`
+**[MODIFY]** `process.md` — the stage 6 paragraph only (:44)
+
+**Seams under test (TDD):** no behaviour-carrying code in this sub-phase, so no seams are declared; validation is checklist-based.
+
+> Sub-phase 42e must be complete before starting this sub-phase (both edit `process.md`).
+
+Each change is marked `✏ Revised 2026-10-03 ([ADR-0061](…))`.
+
+1. **The slice contract (Spec 3, PRD-06.R4).** Add a seventh item to *What a slice context receives — exactly this* (:97-106): the suites that take under a minute, as decided for the phase, and how that was decided. The *Which suites take under a minute* bullet then points to that item.
+2. **Stage 6's required contents (Spec 4, PRD-06.R4).** In `process.md` stage 6, add to what a handoff note carries "the tests and suites run at sub-phase end", and to the completion report's required elements "the tests and suites each sub-phase ran, and the whole run of every suite at the close".
+
+#### Agent Validation Steps
+
+```bash
+awk '/What a slice context receives/,/What a slice context returns/' .claude/skills/timone-execute/SKILL.md | grep -c -E "^[0-9]+\. "   # expect 7
+git grep -n -E "whole run of every suite at the close" -- process.md   # expect one match, in stage 6
+git diff --stat -- . ':!.claude/skills/timone-execute' ':!process.md' ':!doc/plans/phases/reports/phase-42-handoffs.md'   # expect empty
+```
+
+- [ ] A slice's input list names the fast suites, and nothing else was added to it.
+- [ ] `process.md` stage 6 lists the tests-run contents for both the handoff and the completion report; stage 7's paragraph reads as 42e left it.
+
+---
+
 ## Dependency graph
 
 ```
 42a → (none)    the box's token outlives its next refresh (code, PRD-06.R5)
 42b → (none)    the checking step's rules (text, PRD-06.R1–R3); may run beside 42a
 42c → 42b       the building step's rules (text, PRD-06.R4, PRD-01.R16); shares process.md with 42b
+42d → 42a       ✏ 2026-10-03: the box's first token after start-up; the interval worked out once (code, PRD-06.R5); may run beside 42e
+42e → 42b       ✏ 2026-10-03: the checking rules' words, read list and screens (text, PRD-06.R2, R3)
+42f → 42c, 42e  ✏ 2026-10-03: the slice contract and stage 6's required contents (text, PRD-06.R4); shares process.md with 42e
 ```
