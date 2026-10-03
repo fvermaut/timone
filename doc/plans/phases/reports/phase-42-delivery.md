@@ -136,3 +136,82 @@ Verified in [phase-42-verification.md](phase-42-verification.md) — 0 of 2 fix 
 
 - `STATUS.md` was updated on `main` by the checking step (`2d1a9f4`) and again by this delivery.
 - Filed on the way, not part of this pull request: [#192](https://github.com/fvermaut/timone/issues/192), the probe guard refuses a prompt or a commit that only names a probe folder.
+
+## Iteration 2 — 2026-10-03
+
+- **Branch:** `timone/185-a-run-spends-its-time-on-the-work` @ `7df29f9`
+- **What changed since the first delivery:** fvermaut answered both questions in the terminal on 2026-10-03 ([comment on #193](https://github.com/fvermaut/timone/pull/193#issuecomment-5966801325)): accept the builder's test for PRD-06.R5, and fix all 8 findings before merging. Sub-phases 42d, 42e and 42f fixed them (`5eac980`, `f83c736`, `390d574`); the phase was closed again (`d62329d`) and checked again ([phase-42-verification.md](phase-42-verification.md), *Iteration 2*, `7df29f9`): no FAIL, no regression, PRD-06.R5 `verified` on the builder's test by his decision.
+- **Axes re-run:** yes, both, because the review subject changed (code in `src/daemon/container-runtime.ts` and its test, both skills, `process.md`).
+- **The first delivery's 8 findings:** all 8 are answered by 42d–42f, and none is raised again below.
+- **New findings:** Standards 6, Spec 2. None breaks the build.
+- **Departures:** 8 entries now (3 added since the first delivery: two by the build, one by the check).
+
+### Standards review — phase 42, iteration 2
+
+- **Read:** the review-subject diff (`origin/main...7df29f9`, whole); `standards/code-smells.md`, `standards/typescript.md`, `standards/testing.md`; `tsconfig.json`; the `scripts` block of `package.json`; for context, parts of `src/daemon/container-runtime.ts`, `src/adapters/credentials.ts`, `src/daemon/container-runtime.test.ts`, and greps of the `origin/main` and HEAD versions of the two skills and `process.md`.
+- **Diff:** `origin/main...7df29f9` — 7 files in the review subject
+- **Findings:** 6
+
+#### 1. The "take the stack down if this fails" block is copied a second time, and the cleanup line now appears four times in `start()` — Duplicated code (also Long function)
+
+- **Where:** `src/daemon/container-runtime.ts:966–978`, next to `:952–959`; the cleanup line at `:957`, `:976`, `:1044`, `:1159`
+- **What:** The new token fetch copies the shape of the model-token block above it, and adds the fourth copy of `if (stack !== undefined) await stack.down().catch(() => undefined);` in one function, which runs from line 900 to 1186.
+- **Why it matters:** code-smells.md, Duplicated code: "A repeated one-liner counts … the copies are what the fourth sibling will forget."
+- **Suggested remediation:** One local helper inside `start()`, used in all four places. — not applied here
+
+#### 2. The diff names the two runs "break run" and "real run", then calls them "legs" in the same sentence — Inconsistent vocabulary
+
+- **Where:** `.claude/skills/timone-verify/SKILL.md:146`; `process.md:46`
+- **What:** "When both runs happen, green on both legs means the instrument is broken." Elsewhere in the skill, "leg" means the browser channel's baseline leg.
+- **Why it matters:** one word per idea.
+- **Suggested remediation:** "when both runs happen and the probe passes on both, the probe is broken". — not applied here
+
+#### 3. A ✏ marker sits on a change of wording only, and links an ADR that changed nothing there — the ✏ marker convention
+
+- **Where:** `process.md:46` (stage 7, register writes)
+- **What:** The only change is `re-checked,` → `checked again ✏ Revised 2026-10-03 (…),`. No rule changed.
+- **Why it matters:** a dated marker means a rule changed there.
+- **Suggested remediation:** keep the words, remove the marker. — not applied here
+
+#### 4. A clause in the slice's input list can be read the wrong way — plain English
+
+- **Where:** `.claude/skills/timone-execute/SKILL.md:105` (item 7)
+- **What:** "from the run before the first slice that is stopped after one minute" reads as if the slice is stopped.
+- **Why it matters:** the reader has to work the sentence out.
+- **Suggested remediation:** "from one whole run of it before the first slice, stopped after one minute". — not applied here
+
+#### 5. Figurative wording and very long sentences in the new text — plain English
+
+- **Where:** `.claude/skills/timone-verify/SKILL.md:193`; `process.md:46`; `src/daemon/container-runtime.test.ts:1538`
+- **What:** "sends every probe in scope again"; a test named "…does not eat its margin"; sentences of about 65 words in `process.md` stage 7.
+- **Why it matters:** no metaphors, short sentences.
+- **Suggested remediation:** "every probe in scope runs again"; rename the test; split the sentences as the skill does. — not applied here
+
+#### 6. A doc comment states a computed number as a fixed fact — Magic number (in a comment)
+
+- **Where:** `src/daemon/container-runtime.ts:261–262`
+- **What:** "a fresh one always has the 35 minutes a box asks for" — true only for the default interval, since the interval is an option.
+- **Why it matters:** the comment goes wrong silently when a constant or the option changes.
+- **Suggested remediation:** state the rule in words: the refresh interval plus the margin must stay under the one hour a token lives. — not applied here
+
+### Spec review — phase 42, iteration 2
+
+- **Read:** the review-subject diff (`origin/main...7df29f9`, whole); the PRD-06 pair; the PRD-01.R16 block; `phase-42.md` down to the end of *Requirements*; for context, parts of `src/daemon/container-runtime.ts`, `src/adapters/credentials.ts`, the two skills and `process.md`.
+- **Diff:** `origin/main...7df29f9` — 7 files in the review subject
+- **Findings:** 2
+
+R5 holds against every clause: the box token is taken after the stack and the model token are ready, nothing waits between taking it and creating the box, and the refresh loop waits the same interval the token was sized on. R2 and R3 match their clauses. No scope creep.
+
+#### 1. The rules do not say what to do when a sub-phase's validation steps run a slow suite whole — PRD-06.R4
+
+- **Where:** `.claude/skills/timone-execute/SKILL.md:138`, `:184`, `:250`; `process.md:44`
+- **What:** A sub-phase must not run a slow suite whole, and its own validation steps must pass "as written". When a validation step itself runs the browser suite whole, the text does not say which rule wins. A session following it runs the suite at the sub-phase end and again at the close, so the repeated browser runs of #110 could survive.
+- **Why it matters:** R4 clause 1 ("not the other suites whole" and "its own validation steps pass") and clause 2 (each suite whole once at the close) conflict in that case.
+- **Suggested remediation:** say that such a step is not run at the sub-phase end, the close's whole run of that suite satisfies it, and the handoff records this; or have plans stop writing validation steps that run a slow suite whole. — not applied here
+
+#### 2. A probe that no pass has seen fail can now pass without a break run — PRD-06.R1
+
+- **Where:** `.claude/skills/timone-verify/SKILL.md:130–139`, `:282`; `process.md:46`
+- **What:** None of the four break-run cases covers an earlier probe that was never seen to fail (for example one whose earlier break run stayed green). Under the new text, its next pass is a real run only, and green counts as PASS. The verifier cannot tell such a probe from a proved one, because nothing it may read records which probes were proved.
+- **Why it matters:** R1 clause 1 is followed to the letter, but the rule's own premise — a pass counts only after the probe has been seen to fail — is broken for this case.
+- **Suggested remediation:** a fifth case: an earlier probe with no recorded red result does its break run, with that result recorded where the verifier may read it (for example a line in the probe file); amend R1 to name it. — not applied here
