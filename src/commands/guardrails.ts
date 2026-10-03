@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
 
 import {
@@ -20,6 +21,11 @@ import { loadManifest, type Manifest } from "../manifest.js";
 import { probeGuardDecision } from "../daemon/probeGuard.js";
 import { declaredStage } from "../daemon/declared-stage.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
+import {
+  installPushGuard,
+  parsePrePushInput,
+  pushRefusal,
+} from "../daemon/push-guard.js";
 
 /** How long a parked baseline outlives the session that wrote it. */
 const BASELINE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -359,6 +365,57 @@ export function registerGuardrailsCommand(program: Command): void {
       );
     }
   });
+
+  guardrails
+    .command("pre-push")
+    .description("Refuse a push to anything but the run's work branch (git pre-push hook)")
+    .option("--branch <name>", "the run's work branch; absent means nothing may be pushed")
+    .action(async (options: { branch?: string }) => {
+      // **The opposite posture to every other command here.** An error in this
+      // one refuses the push. A guard that lets everything through when it
+      // breaks is exactly the fault it exists to fix (#85): the push it fails
+      // to judge is the one that reaches the default branch.
+      try {
+        const chunks: Buffer[] = [];
+        for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+        const refusal = pushRefusal(
+          parsePrePushInput(Buffer.concat(chunks).toString("utf8")),
+          options.branch,
+        );
+        if (refusal === undefined) return;
+        console.error(refusal);
+        process.exitCode = 1;
+      } catch (error) {
+        console.error(
+          "Refused: Timone's push guard could not judge this push, so it lets " +
+            `nothing through. ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exitCode = 1;
+      }
+    });
+
+  guardrails
+    .command("install-push-guard")
+    .description("Write the hooks that keep a run's pushes on its work branch")
+    .requiredOption("--dir <path>", "where to write the hooks")
+    .option("--branch <name>", "the run's work branch; absent means nothing may be pushed")
+    .action((options: { dir: string; branch?: string }) => {
+      // Not a hook, and not quiet about failing: the box stops when this
+      // fails, and puts the first line it said on the ticket. So the reason
+      // is one line, not a stack trace. It installs the guard that runs this
+      // very command line, so the box and the tests share one way in.
+      try {
+        installPushGuard(options.dir, {
+          cli: fileURLToPath(new URL("../cli.js", import.meta.url)),
+          ...(options.branch === undefined ? {} : { workBranch: options.branch }),
+        });
+      } catch (error) {
+        console.error(
+          `guardrails install-push-guard: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exitCode = 1;
+      }
+    });
 
   commonOptions(
     guardrails

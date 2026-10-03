@@ -1589,3 +1589,50 @@ describe("the session that writes an approval into its file (40v)", () => {
     ]);
   });
 });
+
+/**
+ * The branch a step's pushes may reach (#85, 43a). The guard that holds a
+ * session to it is installed by the runtime; these say the runtime is told
+ * which branch that is, by both of the starts here.
+ */
+describe("the work branch a step's session is given", () => {
+  it("is the run's branch, for a step that owns one, with no pinned Timone version", async () => {
+    // `world` answers no Timone version, so the request carries no workspace.
+    // The branch must not depend on one.
+    const chore = { ...featureTicket(), labels: ["timone", "triage:chore"] };
+    const { actions, run, wrote, steps } = world(chore);
+    wrote(triageRan(run.id));
+
+    await actions.startStep({
+      stage: "planning",
+      instructions: "Plan the rename.",
+      reason: "The ticket is sorted as a chore.",
+    });
+
+    expect(steps[0]?.input.request.workspace).toBeUndefined();
+    expect(steps[0]?.input.request.workBranch).toBe(BRANCH);
+  });
+
+  it("is absent for a step that owns no branch", async () => {
+    const { actions, steps } = world();
+
+    await actions.startStep({ stage: "triage", instructions: "Sort this request.", reason: "A new ticket." });
+
+    expect(steps[0]?.input.request).not.toHaveProperty("workBranch");
+  });
+
+  it("is the run's branch for the session that writes an approval into its file", async () => {
+    const { actions, store, run, steps, wrote } = world(featureTicket(APPROVAL_THREAD));
+    store.claimBranch(run.id, BRANCH);
+    wrote(breakdownEnded(run.id));
+
+    await actions.recordApproval({
+      what: "pieces",
+      commentAt: "2026-09-27T11:58:40Z",
+      reason: "fvermaut approved the list of pieces.",
+    });
+
+    expect(steps[0]?.input.request.workspace).toBeUndefined();
+    expect(steps[0]?.input.request.workBranch).toBe(BRANCH);
+  });
+});

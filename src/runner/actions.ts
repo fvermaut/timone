@@ -850,6 +850,10 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         effort: effortFor(stage),
         ...workspaceFor(await deps.timonePin(), deps.project, branch.name),
         interactive: true,
+        // The one branch this step's pushes may reach (#85). Given whether or
+        // not Timone's version is known, because the guard does not depend
+        // on the workspace.
+        workBranch: branch.name,
       });
 
       // **The ledger learns the step before the step starts** (40r), as the
@@ -1004,6 +1008,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         ),
         model: APPROVAL_RECORD_MODEL,
         ...workspaceFor(await deps.timonePin(), deps.project, branch),
+        workBranch: branch,
       });
       let session: StepSession;
       try {

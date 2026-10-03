@@ -243,6 +243,12 @@ const FORGE_TOKEN_FILE = `${FORGE_TOKEN_DIR}/gh-token`;
 /** Where the `gh` shim goes. First on PATH, so it is the `gh` that runs. */
 const WRAPPER_DIR = "$HOME/.local/bin";
 
+/**
+ * Where the box writes the guard on its pushes (#85). Out of the workspace,
+ * for the forge token's reason: the workspace holds two git checkouts.
+ */
+const PUSH_GUARD_DIR = "$HOME/.timone/git-hooks";
+
 /** The variable a refreshed token travels in, host to box. Never an argument. */
 const FORGE_TOKEN_VAR = "TIMONE_FORGE_TOKEN";
 
@@ -617,6 +623,25 @@ function boxScript(
     "  fi",
     `  cd ${WORKSPACE}/timone`,
     "fi",
+
+    // The guard on this run's pushes (#85): its `git push` reaches the run's
+    // own work branch and nothing else. Installed last, so the setup above
+    // pushes nothing and is not judged, and through Timone's own command, so
+    // the box and the tests install the same hooks. Switched on by the
+    // environment rather than by the project's config, so nothing about it
+    // is written into the project.
+    //
+    // **A box that cannot install it stops**, as one that cannot build Timone
+    // does: a run must not start with the guard missing, because that run is
+    // the one that can push to the default branch.
+    `node ${WORKSPACE}/timone/dist/cli.js guardrails install-push-guard --dir "${PUSH_GUARD_DIR}"` +
+      ' ${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"} > /tmp/timone-push-guard.log 2>&1 || {',
+    '  echo "could not install the guard that keeps this run\'s pushes on its own work branch.' +
+      " Refusing to work without it." +
+      ' It said: $(timone_reason /tmp/timone-push-guard.log)" >&2',
+    "  exit 79",
+    "}",
+    `export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="${PUSH_GUARD_DIR}"`,
 
     interactive
       ? // The daemon's messages, from the descriptor they were put aside on.
@@ -995,6 +1020,11 @@ export function containerRuntime(
         ...(workspace.project.branch === undefined
           ? {}
           : { PROJECT_BRANCH: workspace.project.branch }),
+        // The one branch this run's pushes may reach (#85). Absent at a step
+        // that owns none, and then the guard lets nothing through.
+        ...(request.workBranch === undefined
+          ? {}
+          : { TIMONE_RUN_BRANCH: request.workBranch }),
         // An interactive box reads its prompt from stdin, as the first
         // message the daemon writes there, so it carries no copy here.
         ...(interactive ? {} : { TIMONE_PROMPT: prompt }),

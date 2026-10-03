@@ -1,11 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { afterEach, describe, expect, it } from "vitest";
 
 import type { TicketingProject } from "../adapters/ticketing.js";
 import {
+  agentSdkRuntimeWith,
   apiErrorFrom,
   sessionOutcomeFrom,
   sessionRequest,
 } from "./session.js";
+
+/** Temp directories made by these tests, removed together afterwards. */
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 const project: TicketingProject = {
   name: "scratch-app",
@@ -177,5 +189,62 @@ describe("the request builder", () => {
     });
 
     expect(Object.keys(request)).toEqual(["cwd", "prompt", "model"]);
+  });
+});
+
+describe("the guard on an in-process session's pushes", () => {
+  /**
+   * A `query` that starts nothing: it keeps the options it was handed, says
+   * whether the guard's `pre-push` was on disk at that moment, and ends the
+   * session at once.
+   */
+  function recordingQuery() {
+    const seen: { options?: Options; prePushThere?: boolean } = {};
+    const query = (params: { prompt: string; options?: Options }) => {
+      seen.options = params.options;
+      const dir = params.options?.env?.GIT_CONFIG_VALUE_0;
+      seen.prePushThere = dir !== undefined && existsSync(join(dir, "pre-push"));
+      return (async function* (): AsyncGenerator<SDKMessage> {
+        yield { type: "result", subtype: "success", session_id: "s1" } as SDKMessage;
+      })();
+    };
+    return { query, seen };
+  }
+
+  async function started(workBranch?: string) {
+    const cwd = mkdtempSync(join(tmpdir(), "timone-session-"));
+    tempDirs.push(cwd);
+    const { query, seen } = recordingQuery();
+    const session = await agentSdkRuntimeWith(query).start({
+      cwd,
+      prompt: "go",
+      model: "claude-opus-4-6",
+      ...(workBranch === undefined ? {} : { workBranch }),
+    });
+    return { cwd, seen, session };
+  }
+
+  it("points the session's git at a directory holding the guard's pre-push", async () => {
+    const { cwd, seen } = await started("timone/7-x");
+
+    const env = seen.options?.env;
+    expect(env?.GIT_CONFIG_COUNT).toBe("1");
+    expect(env?.GIT_CONFIG_KEY_0).toBe("core.hooksPath");
+    expect(env?.GIT_CONFIG_VALUE_0?.startsWith(join(cwd, ".timone", "push-guard"))).toBe(true);
+    expect(seen.prePushThere).toBe(true);
+  });
+
+  it("keeps the rest of the daemon's environment", async () => {
+    const { seen } = await started("timone/7-x");
+
+    expect(seen.options?.env?.PATH).toBe(process.env.PATH);
+    expect(seen.options?.env?.HOME).toBe(process.env.HOME);
+  });
+
+  it("removes the guard's directory once the session is over", async () => {
+    const { seen, session } = await started("timone/7-x");
+    await session.completed;
+
+    expect(existsSync(seen.options?.env?.GIT_CONFIG_VALUE_0 ?? "")).toBe(false);
   });
 });

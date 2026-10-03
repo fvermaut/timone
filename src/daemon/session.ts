@@ -1,4 +1,12 @@
-import { query, type EffortLevel } from "@anthropic-ai/claude-agent-sdk";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+
+import {
+  query,
+  type EffortLevel,
+  type Options,
+  type SDKMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 
 import { checkoutVersion } from "../git.js";
 import type { TicketingProject } from "../adapters/ticketing.js";
@@ -10,6 +18,7 @@ import {
   type ProgressSnapshot,
   type SessionSummary,
 } from "./progress.js";
+import { installPushGuard } from "./push-guard.js";
 import type { ParkOptions, Run } from "./runs.js";
 
 /**
@@ -119,6 +128,12 @@ export interface SessionRequest {
    * `phase-40-departures.md`); the box is where the runner's steps run.
    */
   interactive?: true;
+  /**
+   * The one branch this session's `git push` may reach (#85): the run's work
+   * branch. Absent at a step that owns none, and then it may push nothing.
+   * The guard that holds it to that is installed by the runtime.
+   */
+  workBranch?: string;
 }
 
 /** What {@link sessionRequest} is given to assemble a request from. */
@@ -132,6 +147,8 @@ export interface SessionRequestInput {
   workspace?: WorkspaceInput;
   /** Absent for a session nobody will speak to once it has started. */
   interactive?: true;
+  /** Absent, or undefined, for a step that owns no branch. */
+  workBranch?: string | undefined;
 }
 
 /** A git object name as `git rev-parse` reports one: 40 hexadecimal digits. */
@@ -169,6 +186,7 @@ export function sessionRequest(input: SessionRequestInput): SessionRequest {
       ? {}
       : { workspace: workspaceOf(input.workspace) }),
     ...(input.interactive === undefined ? {} : { interactive: input.interactive }),
+    ...(input.workBranch === undefined ? {} : { workBranch: input.workBranch }),
   };
 }
 
@@ -473,77 +491,112 @@ export function isPrompted(
  * lives here — since ADR-0018 it is a `Stop` hook in `.claude/settings.json`,
  * which is what makes it cover interactive sessions too.
  */
-export const agentSdkRuntime: SessionRuntime = {
-  async start(request: SessionRequest): Promise<StartedSession> {
-    // What a cancellation pulls (ADR-0047). The SDK's own `interrupt` needs a
-    // streaming input this runtime does not use, and abandoning the iterator
-    // would leave the session running inside the daemon's own process — so
-    // the controller is the one thing here that really ends the work.
-    const controller = new AbortController();
-    const session = query({
-      prompt: request.prompt,
-      options: {
-        abortController: controller,
-        cwd: request.cwd,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        model: request.model,
-        // The only honest live source of output tokens is the cumulative
-        // `usage` on a `message_delta`, and that arrives only as a partial
-        // message. Without this the progress line reports about a thirtieth
-        // of the truth (see `SessionProgress.observeStreamEvent`).
-        includePartialMessages: true,
-        // Omitted entirely when the stage declares none — Haiku 4.5 rejects
-        // the parameter, and sending it as undefined is not the same as not
-        // sending it.
-        ...(request.effort === undefined ? {} : { effort: request.effort }),
-      },
-    });
+export const agentSdkRuntime: SessionRuntime = agentSdkRuntimeWith(query);
 
-    let resolveId!: (id: string) => void;
-    const sessionId = new Promise<string>((resolve) => {
-      resolveId = resolve;
-    });
+/**
+ * The SDK's `query`, as {@link agentSdkRuntimeWith} uses it: options in, a
+ * stream of messages out. The real one returns more than this, and nothing
+ * here needs the rest.
+ */
+export type QueryFunction = (params: {
+  prompt: string;
+  options?: Options;
+}) => AsyncIterable<SDKMessage>;
 
-    // Fed as the stream is consumed rather than reconstructed afterwards:
-    // everything the tick reports has to be known *while* the session runs,
-    // and the stream is the only place it exists.
-    const progress = new SessionProgress();
+/**
+ * {@link agentSdkRuntime}, with the `query` it starts sessions through handed
+ * in, so a test can read the options a session is started with without
+ * starting one.
+ */
+export function agentSdkRuntimeWith(query: QueryFunction): SessionRuntime {
+  return {
+    async start(request: SessionRequest): Promise<StartedSession> {
+      // What a cancellation pulls (ADR-0047). The SDK's own `interrupt` needs a
+      // streaming input this runtime does not use, and abandoning the iterator
+      // would leave the session running inside the daemon's own process — so
+      // the controller is the one thing here that really ends the work.
+      const controller = new AbortController();
+      // The guard on this session's pushes (#85): its `git push` reaches the
+      // run's work branch and nothing else. A fresh directory per session,
+      // because two sessions may run at once for different branches. Under
+      // `.timone/`, which is never committed.
+      const guardRoot = join(request.cwd, ".timone", "push-guard");
+      mkdirSync(guardRoot, { recursive: true });
+      const guardDir = mkdtempSync(join(guardRoot, "session-"));
+      const guardEnv = installPushGuard(guardDir, {
+        cli: join(request.cwd, "dist", "cli.js"),
+        ...(request.workBranch === undefined ? {} : { workBranch: request.workBranch }),
+      });
+      const session = query({
+        prompt: request.prompt,
+        options: {
+          abortController: controller,
+          cwd: request.cwd,
+          permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          model: request.model,
+          // The only honest live source of output tokens is the cumulative
+          // `usage` on a `message_delta`, and that arrives only as a partial
+          // message. Without this the progress line reports about a thirtieth
+          // of the truth (see `SessionProgress.observeStreamEvent`).
+          includePartialMessages: true,
+          // Omitted entirely when the stage declares none — Haiku 4.5 rejects
+          // the parameter, and sending it as undefined is not the same as not
+          // sending it.
+          ...(request.effort === undefined ? {} : { effort: request.effort }),
+          // The SDK hands the CLI exactly this, not this on top of its own
+          // environment, so the rest of the daemon's is spread in first.
+          env: { ...process.env, ...guardEnv },
+        },
+      });
 
-    const completed = (async (): Promise<SessionOutcome> => {
-      let id = "unknown";
-      // The last thing the main thread said, when that was an API error.
-      // Assignment is unconditional so a later real message clears it: an
-      // error the CLI recovered from is not how the session ended.
-      let lastApiError: string | undefined;
-      try {
-        for await (const message of session) {
-          progress.observe(message);
-          if ("session_id" in message && typeof message.session_id === "string") {
-            id = message.session_id;
-            resolveId(id);
+      let resolveId!: (id: string) => void;
+      const sessionId = new Promise<string>((resolve) => {
+        resolveId = resolve;
+      });
+
+      // Fed as the stream is consumed rather than reconstructed afterwards:
+      // everything the tick reports has to be known *while* the session runs,
+      // and the stream is the only place it exists.
+      const progress = new SessionProgress();
+
+      const completed = (async (): Promise<SessionOutcome> => {
+        let id = "unknown";
+        // The last thing the main thread said, when that was an API error.
+        // Assignment is unconditional so a later real message clears it: an
+        // error the CLI recovered from is not how the session ended.
+        let lastApiError: string | undefined;
+        try {
+          for await (const message of session) {
+            progress.observe(message);
+            if ("session_id" in message && typeof message.session_id === "string") {
+              id = message.session_id;
+              resolveId(id);
+            }
+            if (message.type === "assistant" && message.parent_tool_use_id === null) {
+              lastApiError = apiErrorFrom(message);
+            }
+            if (message.type === "result") {
+              resolveId(id);
+              return sessionOutcomeFrom(id, message, lastApiError);
+            }
           }
-          if (message.type === "assistant" && message.parent_tool_use_id === null) {
-            lastApiError = apiErrorFrom(message);
-          }
-          if (message.type === "result") {
-            resolveId(id);
-            return sessionOutcomeFrom(id, message, lastApiError);
-          }
+          resolveId(id);
+          return { sessionId: id, ok: false, error: "session ended with no result" };
+        } catch (error) {
+          resolveId(id);
+          return { sessionId: id, ok: false, error: oneLine(error) };
+        } finally {
+          rmSync(guardDir, { recursive: true, force: true });
         }
-        resolveId(id);
-        return { sessionId: id, ok: false, error: "session ended with no result" };
-      } catch (error) {
-        resolveId(id);
-        return { sessionId: id, ok: false, error: oneLine(error) };
-      }
-    })();
+      })();
 
-    return {
-      sessionId: await sessionId,
-      completed,
-      progress,
-      stop: () => controller.abort(),
-    };
-  },
-};
+      return {
+        sessionId: await sessionId,
+        completed,
+        progress,
+        stop: () => controller.abort(),
+      };
+    },
+  };
+}

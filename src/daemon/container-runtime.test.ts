@@ -704,7 +704,11 @@ describe("the project's dependencies", () => {
     // box before the agent has read a file.
     const { script } = await boxed();
 
-    const project = script.slice(script.indexOf("timone-project-install.log"));
+    // Up to the push guard, which comes next and is a refusal of its own (43a).
+    const project = script.slice(
+      script.indexOf("timone-project-install.log"),
+      script.indexOf("guardrails install-push-guard"),
+    );
     expect(project).not.toContain("exit 79");
     expect(script).toContain("the run has to install them itself");
   });
@@ -2044,6 +2048,94 @@ describe("a box that can take a message while a step runs", () => {
 
     const run = calls.find((call) => call.args[0] === "run")!;
     expect(run.args.slice(0, -1)).toEqual(ARGS_BEFORE_40D);
-    expect(run.args.at(-1)).toBe(SCRIPT_BEFORE_40D);
+    // ✏ 43a: the one change since is the push guard, installed just before
+    // the CLI starts. Everything else is the script as 40d left it.
+    const lines = SCRIPT_BEFORE_40D.split("\n");
+    expect(run.args.at(-1)).toBe(
+      [...lines.slice(0, -1), ...PUSH_GUARD_LINES, ...lines.slice(-1)].join("\n"),
+    );
+  });
+});
+
+/**
+ * The lines 43a puts into the box script, written out by hand: the guard is
+ * installed through Timone's own command, the box stops if that fails, and
+ * the three variables that switch it on are exported for the CLI.
+ */
+const PUSH_GUARD_LINES: readonly string[] = [
+  'node /workspace/timone/dist/cli.js guardrails install-push-guard --dir "$HOME/.timone/git-hooks"' +
+    ' ${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"} > /tmp/timone-push-guard.log 2>&1 || {',
+  '  echo "could not install the guard that keeps this run\'s pushes on its own work branch.' +
+    " Refusing to work without it." +
+    ' It said: $(timone_reason /tmp/timone-push-guard.log)" >&2',
+  "  exit 79",
+  "}",
+  'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"',
+];
+
+/**
+ * A run's `git push` reaches its own work branch and nothing else (#85, 43a).
+ * The guard is only as good as the place it is switched on, and in a box that
+ * place is the script.
+ */
+describe("the guard on a boxed run's pushes", () => {
+  function boxScriptOf(calls: { args: string[] }[]): string {
+    const run = calls.find((call) => call.args[0] === "run")!;
+    return run.args[run.args.length - 1];
+  }
+
+  async function boxed(workBranch?: string) {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({ image: "timone-box:test", spawn }).start(
+      workBranch === undefined ? request() : { ...request(), workBranch },
+    );
+    const run = calls.find((call) => call.args[0] === "run")!;
+    return { args: run.args, env: run.env, script: boxScriptOf(calls) };
+  }
+
+  it("is installed after the project's install and before the CLI starts", async () => {
+    const { script } = await boxed("timone/7-the-page-feels-slow");
+
+    const installed = script.indexOf("guardrails install-push-guard");
+    expect(installed).toBeGreaterThan(script.indexOf("/tmp/timone-project-install.log"));
+    expect(installed).toBeLessThan(script.indexOf("exec claude"));
+  });
+
+  it("is switched on for every git the session runs", async () => {
+    const { script } = await boxed("timone/7-the-page-feels-slow");
+
+    const exported = script.indexOf(
+      'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"',
+    );
+    expect(exported).toBeGreaterThan(script.indexOf("guardrails install-push-guard"));
+    expect(exported).toBeLessThan(script.indexOf("exec claude"));
+  });
+
+  it("names the work branch only when the box was given one", async () => {
+    const { script } = await boxed("timone/7-the-page-feels-slow");
+
+    expect(script).toContain('${TIMONE_RUN_BRANCH:+--branch "$TIMONE_RUN_BRANCH"}');
+    expect(script).not.toMatch(/--branch "\$TIMONE_RUN_BRANCH"(?!\})/);
+  });
+
+  it("stops the box when it cannot be installed, as a failed build of Timone does", async () => {
+    const { script } = await boxed("timone/7-the-page-feels-slow");
+
+    const after = script.slice(script.indexOf("guardrails install-push-guard"));
+    expect(after.slice(0, after.indexOf("exec claude"))).toContain("exit 79");
+  });
+
+  it("hands the box the run's work branch, by name", async () => {
+    const { args, env } = await boxed("timone/7-the-page-feels-slow");
+
+    expect(args.join(" ")).toContain("-e TIMONE_RUN_BRANCH");
+    expect(env?.TIMONE_RUN_BRANCH).toBe("timone/7-the-page-feels-slow");
+  });
+
+  it("hands the box no work branch when the step has none", async () => {
+    const { args, env } = await boxed();
+
+    expect(args).not.toContain("TIMONE_RUN_BRANCH");
+    expect(env?.TIMONE_RUN_BRANCH).toBeUndefined();
   });
 });
