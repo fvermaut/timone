@@ -2,19 +2,25 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-02.
+**Last updated:** 2026-10-03.
 
 ---
 
 ## Waiting on you
 
-> **Read this first.** The old code between steps is gone. Every project now runs on the runner, and `timone retry` no longer exists. [Pull request #189](https://github.com/fvermaut/timone/pull/189) is ready to merge: your three answers are done, every check passes, and the replay passed 19 of 19 on the final code.
+> **Read this first.** The old code between steps is gone: [#189](https://github.com/fvermaut/timone/pull/189) is merged. Every project now runs on the runner, and `timone retry` no longer exists. The work for [#185](https://github.com/fvermaut/timone/issues/185) and [#110](https://github.com/fvermaut/timone/issues/110) is built and checked, on branch `timone/185-a-run-spends-its-time-on-the-work`, with no pull request yet.
 
-**1. Merge [#189](https://github.com/fvermaut/timone/pull/189).** The review findings you asked to fix first are fixed. The takeover requirement now says what the code does: a takeover opens a session on a run nothing is working on, when no other run of the project is working, holds a work branch, or waits its turn. R11 and R20 name the checks that can fail and are marked as passed. The second reviews found 4 small things left; they would each make the replay out of date again, so they are filed as [#190](https://github.com/fvermaut/timone/issues/190) and [#191](https://github.com/fvermaut/timone/issues/191).
+**1. Restart the daemon** so it runs the merged code of #189. Its 4 small leftovers are [#190](https://github.com/fvermaut/timone/issues/190) and [#191](https://github.com/fvermaut/timone/issues/191).
 
-After you merge, restart the daemon so it runs the merged code.
+**What I need from you:** restart the daemon.
 
-**What I need from you:** merge #189, then restart the daemon.
+**1b. A run spends its time on the work (#185, with #110).** On branch `timone/185-a-run-spends-its-time-on-the-work`, no pull request yet. A box is no longer handed a GitHub token that dies before its next one, and the build and the check stop repeating work. The check found no failure and no regression ([report](https://github.com/fvermaut/timone/blob/timone/185-a-run-spends-its-time-on-the-work/doc/plans/phases/reports/phase-42-verification.md)). Three things wait on you when the pull request opens:
+
+- The token fix could not be checked by a script: the tool permission system refused the script's stand-in for `docker`. You decide whether to allow it.
+- A watched run on scratch-app of a check and a build, to see the new rules followed.
+- A replay against the real model on this build (`npm run --silent replay`), which two older checks need.
+
+**What I need from you:** nothing now; the pull request will list these.
 
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
