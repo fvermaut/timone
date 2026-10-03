@@ -208,6 +208,12 @@ npx vitest run src/daemon/hooks.test.ts src/commands/guardrails.test.ts
 grep -n "will see it until that branch merges" src/daemon/hooks.ts | grep -v '^\s*[0-9]*:\s*\(//\|\*\)'; echo "exit: $?"
 ```
 
+✏ 2026-10-03 (build, timone#85): **the grep above contradicts this slice's own prose and case 5**, which keep today's sentence for a person's own session (phase 32 D-2). It cannot give "no output" while case 5 holds. It is replaced by this one, which expects exactly **one** line in code, the person's-session finding; cases 1 and 5 are what show a run never receives it:
+
+```bash
+grep -n "will see it until that branch merges" src/daemon/hooks.ts | grep -v '^\s*[0-9]*:\s*\(//\|\*\)' | wc -l
+```
+
 - [ ] Cases 1–8 each seen red before green (case 3, 4 and 8 are guards against change and are green throughout — say so), recorded in the handoff.
 - [ ] Case 1 uses `518252a` and the branch name from the ticket, not invented ones.
 

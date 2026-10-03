@@ -429,3 +429,137 @@ Nothing is written under the person's home folder by the tests. I touched a mark
 - To judge a box session in a test, call `runCheck` with an empty ledger and `env: { TIMONE_RUN_PROJECT, TIMONE_RUN_BRANCH }`. The helper `statusOnWorkBranch(env)` in `guardrails.test.ts` builds `projects/timone` with one pushed `STATUS.md` commit on `timone/39-x`. `workspace("timone")` gives a fixture whose project is named `timone`. Its baseline needs a manifest that names `timone` (`timoneManifest` in the same block).
 - `runCheck` and `runGuard` require `env`. Pass `{}` in tests, never `process.env`.
 - **A gap outside this slice's files.** `src/daemon/run-env.ts` keeps a `RESERVED` list of names a project's run file may not set. It has neither `TIMONE_RUN_BRANCH` (43a) nor `TIMONE_RUN_PROJECT`. `TIMONE_RUN_PROJECT` is always set by the box after the run file's values, so the box's value wins. `TIMONE_RUN_BRANCH` is set only when the step has a work branch. At a step with none, a project's run file could supply one, and the push guard and the checks would accept it. Adding both names to `RESERVED` closes this. Case 7, added after the plan amendment, did this: both names are now in `RESERVED`, so this gap is closed.
+
+## 43d — The status-file check looks both ways, and names the work branch as the remedy
+
+**Built.** The status-file check now looks both ways for a run. A run's `STATUS.md` commit on the default branch of the project it works is reported. Before, it was skipped. With a work branch, the finding says to move the commit onto that branch, and that the file reaches the default branch when that branch's pull request is merged. With no work branch, it says the step writes nothing to the project. A run's `STATUS.md` on any other branch is still reported, but the run is now told its own work branch, by name, and never that the default branch is where the file belongs. A person's own session gets exactly today's finding and today's words. "The run's own work branch" is now matched by name when the evidence carries one (43c's `workBranch`). It is still matched by the `timone/` prefix when it does not. `checkUnpushed` tells a run that its unpushed commits on the project's default branch cannot be pushed there, and names where they belong. Other branches keep today's wording. `violationFeedback` is unchanged.
+
+**Files touched.**
+
+- `src/daemon/hooks.ts` — `checkStatusPlacement`: the default-branch direction for a run, the run's wording for the other direction, and a third paragraph in its doc comment (PRD-05.R3, phase 32 D-2, timone#85). New private helpers: `writtenInThisSession`, `isOwnWorkBranch`, `statusOnDefaultBranch`, `statusOffWorkBranch`, and the constant `NO_WORK_BRANCH`. `checkUnpushed` gets extra detail lines from the new private `unpushedOnDefaultBranch`, used only for the default branch of the project a run works. `SessionEvidence`, `collectEvidence` and `violationFeedback` are unchanged.
+- `src/daemon/hooks.test.ts` — new block "checkStatusPlacement — a run's status file on the default branch" (cases 1–6, 9 tests). New block "checkUnpushed — a run's commit on the default branch" (case 7, 3 tests). One old test was removed on purpose: "checkStatusPlacement > stays silent when STATUS.md is committed on the default branch". Its fixture is `cleanEvidence()`, which is a run (`target: "scratch-app"`), so it said a run's `STATUS.md` on `main` is silent. This slice reverses exactly that. Case 3 covers the half that stays true: a person's own session.
+- `doc/plans/phases/reports/phase-43-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **Case 6: how a commit that was already on `origin/main` is told apart from 518252a.** I read `collectRepo`. A commit's `branch` is the local branch whose tip moved during the session and reaches the commit. `onDefaultBranch` is `git merge-base --is-ancestor <sha> refs/remotes/origin/<default>`, run when the session ends. So `onDefaultBranch` is `true` for 518252a too, because the run had pushed it before it stopped. `onDefaultBranch` alone cannot tell "already on `origin/main`" from "written on `main` and pushed by this session". The session trailer can. `madeElsewhere` drops every commit that names another session before any rule runs. So a commit that still names a session names this one. The rule: a commit on the default branch with `onDefaultBranch: true` counts only if it carries a `Timone-Session:` line (`writtenInThisSession`). With `onDefaultBranch` false or absent, it always counts. Case 1's fixture keeps `onDefaultBranch: true`, which is what 518252a's evidence really was. Case 6's fixture is a commit labelled `main` with `onDefaultBranch: true` and no session line. That is the only way such a commit can reach the rule. It also has a second row, timone#70's shape: the same commit reached through the work branch. *Limit:* a run that wrote `STATUS.md` on `main` with no session trailer at all, and pushed it, is not reported by this rule. The provenance rule still reports the missing trailer. Since 43a the push is refused anyway, so that commit would stay unpushed (`onDefaultBranch: false`) and is reported.
+2. **The run's own work branch is matched by name when the evidence has it.** 43c left the prefix test in place. Case 5's "some other branch" includes another run's `timone/40-…` branch, which the prefix would have kept silent. With no `workBranch` in the evidence, the prefix test is kept, so the existing tests and evidence built before 43c give the same answer.
+3. **Both summaries change for a run, not only the detail.** The old summary "…, not on `main`" also tells the reader that `main` is the place. New run summaries: "`<repo>`: STATUS.md was written on `` `main` ``, which a run may not write" and "`<repo>`: STATUS.md was written on `` `<branch>` ``, which is not this run's work branch". The second is used for the workspace and for other projects too, whenever a run drove the session.
+4. **The default-branch direction applies only to the project the run works** (`worksHere`), as the plan says. The workspace is never a run's target, so a run's `STATUS.md` on the workspace's `main` is still skipped, as before.
+5. **`checkUnpushed`'s new lines apply only to the default branch of the project the run works.** They do not apply to the workspace. The work branch lives in `projects/<target>/`, so "they belong on `<work branch>`" would be wrong for the workspace. The summary "… never reached the remote" is unchanged. It is a fact, not an instruction.
+6. **`violationFeedback` is unchanged.** No test was written to show a contradiction, so the plan says no change. But see "What 43e must know".
+7. **No line was added for a commit that is already on `origin/<default>`.** For 518252a the detail still says "put the local `main` back to `origin/main`", which does nothing once the commit is on `origin/main`. Nothing a run can do takes it off. I did not add a sentence for this case: the plan does not ask for one, and since 43a the push that put it there is refused.
+
+*What I would refactor (not done).* `commit.files.some((file) => file.endsWith("STATUS.md"))` now appears twice in `checkStatusPlacement`, so a `touchesStatusFile(commit)` helper would read better. "Is this repository the run's project?" is now worked out twice: as `worksHere` in `checkStatusPlacement` and as `runsHere` in `checkUnpushed`. A shared helper would keep the two from drifting apart. Today's person's-session finding is still built inline, next to the two new builder functions. Moving it into a third builder would make the three forms read side by side.
+
+**Validation evidence.**
+
+Each case was run with `npx vitest run src/daemon/hooks.test.ts`.
+
+*Case 1* — "checkStatusPlacement — a run's status file on the default branch > replays 518252a and names the run's work branch as the place for it". The fixture: target `timone`, `workBranch: "timone/39-primary-sources-owed-for-the-ui-ux-basel"`, and one commit `518252a` on `main` touching `STATUS.md`. Its trailers are `Timone-Stage: verification`, `Timone-Run: timone#39` and `Timone-Session: 731c3c35-55ef-4d36-9456-9ac17eb4ec7f`, with `onDefaultBranch: true`. The author, the date and the subject are in the test's comment. The test checks for exactly one finding. The finding must name 518252a and the work branch. It must not match any of these: `not on \`main\``, `Nobody reading`, `(belongs|goes|should be)…on \`main\``, `(push|commit|write|move|put)…(to|onto) \`main\``. Red:
+
+```
+FAIL  src/daemon/hooks.test.ts > checkStatusPlacement — a run's status file on the default branch > replays 518252a and names the run's work branch as the place for it
+AssertionError: expected [] to have a length of 1 but got +0
+Tests  1 failed | 65 passed (66)
+```
+
+Green after the default-branch clause and `statusOnDefaultBranch`. That change turned the old test red on purpose: `FAIL … checkStatusPlacement > stays silent when STATUS.md is committed on the default branch` / `AssertionError: expected [ { rule: 'status-placement', …(2) } ] to deeply equal []` / `Tests  1 failed | 65 passed (66)`. I removed that test (see Files touched): `Tests  65 passed (65)`.
+
+*Case 2* — "… tells a step with no work branch that it writes nothing to the project". Red:
+
+```
+FAIL  … > tells a step with no work branch that it writes nothing to the project
+AssertionError: expected 'timone: STATUS.md was written on `mai…' to contain 'writes nothing to the project'
+Tests  1 failed | 65 passed (66)
+```
+
+Green: `Tests  66 passed (66)`.
+
+*Case 3* — "… says nothing about a person's own session writing it on the default branch". This is a guard against change. It was green from the start: `Tests  67 passed (67)`. Mutation: I removed `worksHere &&` from the default-branch clause. Result: `FAIL … > says nothing about a person's own session writing it on the default branch` / `AssertionError: expected [ { rule: 'status-placement', …(2) } ] to deeply equal []` / `Tests  1 failed | 66 passed (67)`. I reverted it: `Tests  67 passed (67)`.
+
+*Case 4* — "… says nothing about a run writing it on its own work branch, in its own project". This is a guard against change. It was green from the start: `Tests  68 passed (68)`. Mutation: I removed the line `if (worksHere && commit.branch.startsWith(WORK_BRANCH_PREFIX)) continue;`. Result: `Tests  4 failed | 64 passed (68)`. The four failures were this test, the 32c test "says nothing about a status file on the run's own work branch", and both `checkAll — a Timone self-run that behaved` tests. I reverted it: `Tests  68 passed (68)`.
+
+*Case 5* — four tests. Red:
+
+```
+FAIL  … > names the run's work branch, not the default branch, when a run writes it on another branch
+AssertionError: expected 'timone: STATUS.md was written on `doc…' to contain '`timone/39-primary-sources-owed-for-t…'
+FAIL  … > counts another run's work branch as another branch
+AssertionError: expected [] to have a length of 1 but got +0
+FAIL  … > tells a step with no work branch, writing it on another branch, that it writes nothing
+AssertionError: expected 'timone: STATUS.md was written on `doc…' to contain 'writes nothing to the project'
+Tests  3 failed | 69 passed (72)
+```
+
+"… still gives a person's own session today's finding, in today's words" passed from the start. It is the negative half of the pair. It checks the whole finding: summary `` timone: STATUS.md was written on `docs/status`, not on `main` `` and detail `` Commit eee5555 on `docs/status` touches STATUS.md. `` / `` Nobody reading `main` will see it until that branch merges. ``. Green after `isOwnWorkBranch` and `statusOffWorkBranch`: `Tests  72 passed (72)`.
+
+*Case 6* — "… says nothing about a commit that was on origin/main before the session" (decision 1). Red:
+
+```
+FAIL  … > says nothing about a commit that was on origin/main before the session
+AssertionError: expected [ { rule: 'status-placement', …(2) } ] to deeply equal []
+Tests  1 failed | 72 passed (73)
+```
+
+Green after `writtenInThisSession`: `Tests  73 passed (73)`. timone#70's case stays silent. It is the second row of this test, and the existing 32c tests still pass.
+
+*Case 7* — block "checkUnpushed — a run's commit on the default branch", 3 tests. Red:
+
+```
+FAIL  … > says the push will be refused and the commit belongs on the work branch
+AssertionError: expected 'Branch `main` is ahead of its upstrea…' to contain 'refused'
+FAIL  … > says a step with no work branch has no place in the project for the commit
+AssertionError: expected 'Branch `main` is ahead of its upstrea…' to contain 'refused'
+Tests  2 failed | 74 passed (76)
+```
+
+"… keeps today's words for a run's unpushed commit on its work branch" passed from the start. It is the negative half, and it checks the whole finding as it is today. Green: `Tests  76 passed (76)`. The detail never matches `/\bpush (it|them|these|the commits?)\b/i`.
+
+*Case 8* — the existing "checkStatusPlacement — what is not a stray status file > replays ivtrends' 2026-08-30 pair and reports neither". This is a guard against change. It was green throughout: `Tests  1 passed | 75 skipped (76)` with `-t "replays ivtrends"`. Mutation: I removed `if (commit.onDefaultBranch === true) continue;`. Result: `FAIL … > replays ivtrends' 2026-08-30 pair and reports neither` / `AssertionError: expected [ …(2) ] to deeply equal []` (and the 32c test "says nothing about a commit that is already on the default branch") / `Tests  2 failed | 74 passed (76)`. I reverted it: `Tests  76 passed (76)`.
+
+*The validation block:*
+
+```
+$ npm run build
+> timone@0.1.0 build
+> tsc
+build exit: 0
+$ npx vitest run src/daemon/hooks.test.ts src/commands/guardrails.test.ts
+ Test Files  2 passed (2)
+      Tests  124 passed (124)
+$ grep -n "will see it until that branch merges" src/daemon/hooks.ts | grep -v '^\s*[0-9]*:\s*\(//\|\*\)'; echo "exit: $?"
+341:          `Nobody reading \`${repo.defaultBranch}\` will see it until that branch merges.`,
+exit: 0
+```
+
+**The grep does not give what it expects (no output, exit 1), and I did not change the code to make it pass.** The line it finds is the finding for a person's own session. The plan's own text keeps that sentence: "for a person's own session (no target) it keeps today's sentence, which phase 32 D-2 kept and which is still right there". Case 5 also requires it: "a person's own session in the same shape → today's finding and today's sentence". The grep and the plan text contradict each other. Removing the sentence would break case 5 and the plan text. Hiding it from the grep (for example by splitting the string) would satisfy the grep's letter while it still fails its intent. A run can no longer reach that line: it is built only when `evidence.target` is undefined. So the grep's purpose (a run never reads this sentence) is met. Its letter is not.
+
+- [x] Cases 1–8 each seen red before green, recorded above. Cases 3, 4 and 8 are guards against change and were green throughout. Each was shown not to be empty by a mutation, a failure, and a revert. The negative halves of cases 5 and 7 passed from the start, as their positive halves were red. **Pass.**
+- [x] Case 1 uses `518252a`, its three trailers, `origin/main`, and the branch `timone/39-primary-sources-owed-for-the-ui-ux-basel` from the ticket, with project `timone`. **Pass.**
+- [ ] The grep step: output one line, `exit: 0`, not the expected no output / exit 1. **Fail as written**, for the reason above. The plan needs one change: either the grep excludes the person's-session line, or the plan decides that a person's session loses that sentence too, which would also change case 5.
+
+*At slice end:* `npx tsc --noEmit` exit 0. Whole suite `npx vitest run`: `Test Files  58 passed (58)`, `Tests  1511 passed (1511)`, 3.1 s. That is 11 more than 58/1500: 12 new tests in `hooks.test.ts`, minus the 1 removed.
+
+**What 43e must know.**
+
+- The exact wording a run now reads, for `STATUS.md` committed on the default branch of the project it works (for example 518252a on `main`, work branch `timone/39-primary-sources-owed-for-the-ui-ux-basel`):
+
+  ```
+  timone: STATUS.md was written on `main`, which a run may not write
+      Commit 518252a on `main` touches STATUS.md.
+      Move the commit onto `timone/39-primary-sources-owed-for-the-ui-ux-basel`: for example, `git cherry-pick 518252a` there, then put the local `main` back to `origin/main`.
+      The file reaches `main` when that branch's pull request is merged.
+  ```
+
+  With no work branch, the last two lines are replaced by:
+
+  ```
+      This step has no work branch, so it writes nothing to the project. What it did belongs in a comment on the ticket.
+      Put the local `main` back to `origin/main`.
+  ```
+
+- For `STATUS.md` on any other branch, a run reads `` <repo>: STATUS.md was written on `<branch>`, which is not this run's work branch ``. The detail is `` Commit <sha> on `<branch>` touches STATUS.md. ``, then `` A run writes its status file on its own work branch, `<work branch>`. Move the commit there: for example, `git cherry-pick <sha>` on `<work branch>`. `` (or, with no work branch, the "writes nothing" sentence above). A person's own session reads the old finding, unchanged: `` …, not on `main` `` / `` Nobody reading `main` will see it until that branch merges. ``.
+- For unpushed commits on the default branch of the project it works, a run reads two lines after "Branch `main` is ahead of its upstream." The first is `` A run may not write `main`, so pushing these commits will be refused. `` The second is `` They belong on `<work branch>`: cherry-pick them there, then put the local `main` back to `origin/main`. `` With no work branch, the second is `` This step has no work branch, so they belong nowhere in the project. Put the local `main` back to `origin/main`. ``
+- `violationFeedback`'s closing paragraph is unchanged. It still lists "push the commits" and "put the file where it is read" as ways to fix a finding. A run reads that list right after a detail that says its push will be refused. No test has shown this to be a contradiction, so the plan says no change. If the process text says the rule's own detail is what to follow, that matches the code.
+- A run's `STATUS.md` commit that names no session, is on `main`, and is already on `origin/main` is not reported by this rule (decision 1). The plan's validation grep conflicts with its own text (see above). That needs a decision from whoever owns the plan.
