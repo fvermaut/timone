@@ -43,3 +43,10 @@
 **Agreed:** Sub-phase 42d moves the box's token call after the start-up steps, and changes nothing else about failure.
 **Did instead:** The call also takes the started stack down when the mint fails, before it throws again. One test covers it. The plan is amended in place.
 **Why:** After the move, a failed mint comes after the stack is up. Without this, the stack would be left running. The model token's call just above already does the same.
+
+## 2026-10-03 — timone#185, build
+
+**Kind:** plan step
+**Agreed:** Sub-phase 42e restores the full screen read after a fix in the checking skill.
+**Did instead:** It also says so in `process.md` stage 7. The plan is amended in place.
+**Why:** 42b's sentence in `process.md` named only probes, and `process.md` outranks the skill. Left alone, the two would disagree.
