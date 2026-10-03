@@ -128,6 +128,11 @@ export interface SessionEvidence {
    * under `projects/`.
    */
   target?: string;
+  /**
+   * The branch the run that drove this session works on. Absent for a
+   * person's own session, and for a step that owns no branch.
+   */
+  workBranch?: string;
   /** The timone repo, where every session runs (ADR-0007). */
   workspace: RepoEvidence;
   /**
@@ -1113,7 +1118,7 @@ function readRegisters(
 export async function collectEvidence(
   root: string,
   baseline: SessionBaseline,
-  session: { sessionId: string; target?: string },
+  session: { sessionId: string; target?: string; workBranch?: string },
 ): Promise<SessionEvidence> {
   const projects: RepoEvidence[] = [];
   for (const [name, tips] of baseline.projects) {
@@ -1123,6 +1128,7 @@ export async function collectEvidence(
   }
   return {
     ...(session.target === undefined ? {} : { target: session.target }),
+    ...(session.workBranch === undefined ? {} : { workBranch: session.workBranch }),
     workspace: await collectRepo(root, "timone", baseline.workspace, session.sessionId),
     registers: [
       ...readRegisters(root, "timone", "workspace"),

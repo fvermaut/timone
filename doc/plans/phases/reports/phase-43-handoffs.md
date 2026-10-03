@@ -299,3 +299,133 @@ Nothing is written under the person's home folder by the tests. I touched a mark
 - In the in-process runtime, the session's `PATH` begins with `<cwd>/.timone/push-guard/session-*/bin`, which holds only `gh`. Anything else that wants to put a folder first on the session's `PATH` must keep this one ahead of the real `gh`.
 - The `gh` checks need `dist/` built, as the push guard's do: `npm run build` before `vitest` after changing `forge-guard.ts`, `push-guard.ts` or `guardrails.ts`.
 - The known gaps (aliases, `repo edit --default-branch`, `update-branch`, `workflow run`) are listed under the decisions above.
+
+## 43c — The checks inside a box know which run they belong to
+
+**Built.** Timone's own checks inside a box now know which run the session belongs to. The box's ledger is empty, because the box clones Timone fresh. So the box now also passes `TIMONE_RUN_PROJECT` (the project's name in the manifest) with `-e`, next to 43a's `TIMONE_RUN_BRANCH`. The new `sessionRun(store, sessionId, env)` returns `{ project, workBranch? }`. It asks the ledger first (`runForSession`, with `run.branch` as the work branch). Only when the ledger has no run for the session does it read the box's two variables. It returns undefined for a person's own session. `runCheck` uses it for the evidence's `target`, and passes the work branch on to `collectEvidence`. `SessionEvidence` has a new `workBranch?` field. Who hears about a finding is unchanged: it is still decided by the ledger alone, so a box's findings go back to the session. `runGuard` now refuses a run a `Bash` command that contains `core.hooksPath`, `GIT_CONFIG_`, or both `push` and `--no-verify`. It says nothing about these in a person's own session. The probe guard's decision is untouched.
+
+**Files touched.**
+
+- `src/commands/guardrails.ts` — `SessionRun` and `sessionRun`. `CheckDeps.env` and `GuardDeps.env` (both required), `GuardDeps.toolName?`. `runCheck` gets `target`/`workBranch` from `sessionRun` and the report target from `runForSession`, as before. `runGuard` asks `pushGuardDecision` first and the probe guard second. There are two private helpers: `switchesOffPushGuard(command)` (text match) and `pushGuardDecision(deps)`. The `guard` command passes `process.env` and `payload.tool_name`. The `check` command passes `process.env`. Both keep their `try`/`catch`. The `guard` description names the new refusal.
+- `src/commands/guardrails.test.ts` — block "the run a session belongs to" (cases 1–4, 5 tests). Block "switching off the guard on a run's pushes" (case 5, 10 rows). `workspace()` takes an optional project name, and the project's bare remote is now `project-<name>.git`, so that it does not clash with the workspace's `timone.git`. `env: {}` is added to `stopOnce`, to the no-baseline test and to the 8 existing `runGuard` calls, because `env` is required.
+- `src/daemon/container-runtime.ts` — `TIMONE_RUN_PROJECT: workspace.project.name` in the box's environment, after `PROJECT_BRANCH`. It is forwarded by name like every other variable.
+- `src/daemon/container-runtime.test.ts` — block "what the box tells the checks about its run" (case 6). The exact-arguments test changed, because the vector changed on purpose. It now expects `ARGS_BEFORE_40D` with `-e TIMONE_RUN_PROJECT` inserted after `PROJECT_BRANCH`. The 40d snapshot itself is left as it was.
+- `src/daemon/hooks.ts` — `SessionEvidence.workBranch?` (documented). `collectEvidence`'s `session` argument gains `workBranch?` and copies it into the evidence. Nothing else.
+- `src/daemon/run-env.ts` and `src/daemon/run-env.test.ts` (case 7, added after the plan amendment of 2026-10-03). `TIMONE_RUN_BRANCH` and `TIMONE_RUN_PROJECT` are added to `RESERVED`, so a project's run environment file that sets either is refused with the existing "which is the box's own" message. The comment above `RESERVED` gains one paragraph saying why, with a link to timone#85. The test file gains two tests in the `readRunEnv` block, one per name.
+- `doc/plans/phases/reports/phase-43-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **`env` is required on `CheckDeps` and `GuardDeps`, not optional.** If it were optional, a caller that forgot it would judge every box as a person's session again. That is the fault this slice fixes. So the compiler now makes every caller choose. The tests pass `{}`, never `process.env`, so a `TIMONE_RUN_*` variable in the test process changes nothing. I checked this: with `TIMONE_RUN_PROJECT=scratch-app TIMONE_RUN_BRANCH=timone/39-x` set, the three files still gave `Tests 214 passed (214)`.
+2. **`toolName` is optional** (`string | undefined`), because the hook payload may not carry it. Only `"Bash"` is checked for the push-guard refusal. The probe guard ignores it, as before.
+3. **The push-guard refusal is decided before the probe guard.** A denial for switching off the push guard stands even when the probe guard would answer `allow` (a checking run reading its probes). For every command that does not switch off the guard, the probe guard's answer is the same as before.
+4. **How the text is matched.** `core.hooksPath` is matched in any case, because git reads config names that way. `push` is matched as a whole word, so `-m "pushed"` with `--no-verify` is not refused. `GIT_CONFIG_` is matched exactly as the plan says. This also refuses `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM`, which do not switch off the guard. That is accepted at the level of a check against mistakes.
+5. **An empty `TIMONE_RUN_PROJECT` or `TIMONE_RUN_BRANCH` counts as absent.** A run with a project and no branch gives `{ project }`. A branch with no project gives undefined: a session with no project is a person's own.
+6. **`runCheck` reads the ledger twice**, once through `sessionRun` (for the evidence) and once through `runForSession` (for who hears about it). The plan keeps the report target as it was, and two lookups say so more plainly than one value with two meanings.
+
+7. **Case 7 is tested through `readRunEnv`, not `parseRunEnv`.** The plan names the exported reader as the seam, so the two tests sit in the `readRunEnv` block and check the full message prefix, path and line included. (Added after the plan amendment.)
+
+*What I would refactor (not done).* `runGuard` now calls `runForSession` for the stage, and `pushGuardDecision` calls `sessionRun`, which calls it again. That is two passes over a small ledger on every tool call. One lookup passed to both would do. The refusal shape `{ permissionDecision, permissionDecisionReason }` is still named `ProbeGuardDecision` and lives in `probeGuard.ts`. A neutral name in a shared place would read better, but this slice may not touch that file.
+
+**Validation evidence.**
+
+*Case 1* — `sessionRun` with an empty ledger and the box's declaration ("the run a session belongs to > is the box's declaration when the ledger has no run for the session"). Red: `TypeError: (0 , sessionRun) is not a function` / `Tests  1 failed | 33 passed (34)`. Green after the environment-only `sessionRun`: `Tests  34 passed (34)`.
+
+*Case 2* — the ledger has a run with branch `timone/40-y`, and the environment says `timone/39-x` ("… is the ledger's run when the ledger has one, whatever the environment says"). Red: `AssertionError: expected { project: 'timone', …(1) } to deeply equal { project: 'scratch-app', …(1) }` / `Tests  1 failed | 34 passed (35)`. Green after the ledger came first: `Tests  35 passed (35)`.
+
+*Case 3* — neither ("… is nobody's when neither the ledger nor the environment names a run" and "… is judged as a person's own session when nothing names a run"). This could not honestly be red: `sessionRun` already returned undefined for `{}`, and `runCheck` already judged such a session as a person's own. Both passed at once (`Tests  37 passed (37)`). To show they are not empty, I changed `env.TIMONE_RUN_PROJECT` to `env.TIMONE_RUN_PROJECT ?? "timone"`. Before case 4 this gave `× … is nobody's …` / `AssertionError: expected { project: 'timone' } to be undefined`. After case 4, once `runCheck` used `sessionRun`, the same change failed both case-3 tests and one older test:
+
+```
+× the run a session belongs to > is nobody's when neither the ledger nor the environment names a run
+× the run a session belongs to > is judged as a person's own session when nothing names a run
+× a session a human drove > does not judge Timone's own work against a project it never had
+AssertionError: expected { project: 'timone' } to be undefined
+AssertionError: expected [] to include 'timone: STATUS.md was written on `tim…'
+Tests  3 failed | 35 passed (38)
+```
+
+I reverted it each time: `Tests  37 passed (37)`, then `Tests  38 passed (38)`.
+
+*Case 4* — the box case of ADR-0050 D-2 ("… is judged as the box's run, with an empty ledger — the box case of ADR-0050 D-2"). The session's only commit puts `STATUS.md` on `timone/39-x` in `projects/timone`, pushed. The ledger is empty, and the environment is `TIMONE_RUN_PROJECT=timone`, `TIMONE_RUN_BRANCH=timone/39-x`. Red, and the finding it printed:
+
+```
+× the run a session belongs to > is judged as the box's run, with an empty ledger — the box case of ADR-0050 D-2
+AssertionError: expected [ { rule: 'status-placement', …(2) } ] to deeply equal []
++     "detail": [
++       "Commit 9c42946 on `timone/39-x` touches STATUS.md.",
++       "Nobody reading `main` will see it until that branch merges.",
++     ],
++     "rule": "status-placement",
++     "summary": "timone: STATUS.md was written on `timone/39-x`, not on `main`",
+Tests  1 failed | 37 passed (38)
+```
+
+After `runCheck` used `sessionRun`, 13 older tests failed with `deps.env` undefined, because `env` is required (decision 1). I added `env: {}` to `stopOnce` and to the no-baseline test. Green: `Tests  38 passed (38)`. The `workBranch` passed to `collectEvidence` is not seen by any test in this slice: no rule reads it yet. 43d's rule is the first thing that will.
+
+*Case 5* — `runGuard` with an empty ledger ("switching off the guard on a run's pushes"). Red:
+
+```
+× … refuses a run `git push --no-verify origin x`
+× … refuses a run `git -c core.hooksPath=/tmp/h push`
+× … refuses a run `GIT_CONFIG_COUNT=0 git push`
+✓ … says nothing to a run about `git push origin timone/39-x`
+✓ … says nothing to a run about `git commit --no-verify -m x`
+✓ … says nothing about `…` in a person's own session   (5 rows)
+AssertionError: expected undefined to be 'PreToolUse' // Object.is equality
+Tests  3 failed | 45 passed (48)
+```
+
+Green: `Tests  48 passed (48)`. The seven "says nothing" rows could not be red, because today nothing is refused. To show they are not empty, I made two changes, one at a time. (A) `push` *or* `--no-verify` instead of *and*: `× … says nothing to a run about \`git push origin timone/39-x\`` and `× … about \`git commit --no-verify -m x\`` / `expected { hookSpecificOutput: { …(3) } } to be undefined` / `Tests  2 failed | 46 passed (48)`. (B) I removed the line that returns when `sessionRun` finds no run. The three switching-off rows in a person's own session failed / `Tests  3 failed | 45 passed (48)`. I reverted both: `Tests  48 passed (48)`. The two remaining person's-own rows (`git push origin timone/39-x`, `git commit --no-verify -m x`) fail only when (A) and (B) are applied together. They are kept as the full list the plan names.
+
+*Case 6* — the box request ("what the box tells the checks about its run > names the run's project, by name, even at a step with no work branch"). The request has no `workBranch`, so this also shows that the project is passed to every box. Red: `AssertionError: expected undefined to be '-e' // Object.is equality` / `Tests  1 failed | 100 passed (101)`. After the change, the exact-arguments test failed because the vector changed on purpose: `expected [ 'run', '--name', …(24) ] to deeply equal [ 'run', '--name', …(22) ]`. I updated it (see Files touched): `Tests  101 passed (101)`.
+
+*Case 7 (added after the plan amendment of 2026-10-03)* — a run environment file that sets `TIMONE_RUN_BRANCH` or `TIMONE_RUN_PROJECT` ("readRunEnv > refuses TIMONE_RUN_BRANCH, the branch a run's push may reach" and "readRunEnv > refuses TIMONE_RUN_PROJECT, the run the checks believe they belong to"), with `npx vitest run src/daemon/run-env.test.ts`. One name at a time.
+
+```
+FAIL  src/daemon/run-env.test.ts > readRunEnv > refuses TIMONE_RUN_BRANCH, the branch a run's push may reach
+AssertionError: expected [Function] to throw an error
+Tests  1 failed | 9 passed (10)
+```
+
+Green after `TIMONE_RUN_BRANCH` was added to `RESERVED`: `Tests  10 passed (10)`. Then:
+
+```
+FAIL  src/daemon/run-env.test.ts > readRunEnv > refuses TIMONE_RUN_PROJECT, the run the checks believe they belong to
+AssertionError: expected [Function] to throw an error
+Tests  1 failed | 10 passed (11)
+```
+
+Green after `TIMONE_RUN_PROJECT` was added: `Tests  11 passed (11)`. Then `npm run build` exit 0; the four files `guardrails.test.ts`, `container-runtime.test.ts`, `hooks.test.ts`, `run-env.test.ts`: `Test Files  4 passed (4)`, `Tests  225 passed (225)`; whole suite `Test Files  58 passed (58)`, `Tests  1500 passed (1500)`, 3.2 s (2 more than the 1498 below, both in `run-env.test.ts`); `npx tsc --noEmit` exit 0; `git diff --stat -- src/daemon/probeGuard.ts` printed nothing.
+
+*The validation block:*
+
+```
+$ npm run build
+> timone@0.1.0 build
+> tsc
+build exit: 0
+$ npx vitest run src/commands/guardrails.test.ts src/daemon/container-runtime.test.ts src/daemon/hooks.test.ts
+ ✓ src/daemon/hooks.test.ts (65 tests)
+ ✓ src/daemon/container-runtime.test.ts (101 tests)
+ ✓ src/commands/guardrails.test.ts (48 tests)
+ Test Files  3 passed (3)
+      Tests  214 passed (214)
+$ git diff --stat -- src/daemon/probeGuard.ts
+(no output)
+```
+
+The CLI wiring (`process.env`, `payload.tool_name`) by hand, with a temp root and no ledger. With the box's declaration, `{"tool_name":"Bash","tool_input":{"command":"git push --no-verify origin x"}}` piped to `node dist/cli.js guardrails guard` printed `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",…}}`, exit 0. With no declaration it printed nothing, exit 0. With the declaration, `git push origin timone/39-x` printed nothing, exit 0.
+
+- [x] Cases 1–6 each seen red before green, recorded above. Case 4's red run quotes the finding: `timone: STATUS.md was written on \`timone/39-x\`, not on \`main\``. Case 3 and the "says nothing" rows of case 5 could not honestly be red. Each was shown not to be empty by a code change, a failure, and a revert. **Pass.**
+- [x] `src/daemon/probeGuard.ts` is unchanged by this slice: `git diff --stat` printed nothing. **Pass.**
+
+Nothing is written under the person's home folder by the tests. I touched a marker file, ran `tsc` and the whole suite, then ran `find "$HOME" -newer marker`, leaving out `~/.claude`, `~/.npm` and `~/.cache`. Nothing was found.
+
+*At slice end:* `npx tsc --noEmit` exit 0. Whole suite `npx vitest run`: `Test Files  58 passed (58)`, `Tests  1498 passed (1498)`, 3.1 s. That is 16 tests more than 58/1482: 15 in `guardrails.test.ts`, 1 in `container-runtime.test.ts`.
+
+**What 43d must know.**
+
+- `SessionEvidence.workBranch` is now filled in for a run's session, from the ledger or from the box. No rule reads it yet. `checkStatusPlacement` still exempts any `timone/…` branch in the target project, not the work branch by name. 43d's rule is the first that can use it, and its tests will be the first to see it.
+- To judge a box session in a test, call `runCheck` with an empty ledger and `env: { TIMONE_RUN_PROJECT, TIMONE_RUN_BRANCH }`. The helper `statusOnWorkBranch(env)` in `guardrails.test.ts` builds `projects/timone` with one pushed `STATUS.md` commit on `timone/39-x`. `workspace("timone")` gives a fixture whose project is named `timone`. Its baseline needs a manifest that names `timone` (`timoneManifest` in the same block).
+- `runCheck` and `runGuard` require `env`. Pass `{}` in tests, never `process.env`.
+- **A gap outside this slice's files.** `src/daemon/run-env.ts` keeps a `RESERVED` list of names a project's run file may not set. It has neither `TIMONE_RUN_BRANCH` (43a) nor `TIMONE_RUN_PROJECT`. `TIMONE_RUN_PROJECT` is always set by the box after the run file's values, so the box's value wins. `TIMONE_RUN_BRANCH` is set only when the step has a work branch. At a step with none, a project's run file could supply one, and the push guard and the checks would accept it. Adding both names to `RESERVED` closes this. Case 7, added after the plan amendment, did this: both names are now in `RESERVED`, so this gap is closed.

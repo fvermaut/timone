@@ -1033,6 +1033,10 @@ export function containerRuntime(
         ...(workspace.project.branch === undefined
           ? {}
           : { PROJECT_BRANCH: workspace.project.branch }),
+        // Which run the box belongs to, for Timone's own checks inside it
+        // (#85). The box's ledger is empty, so this is how they know the
+        // session is a run's and not a person's.
+        TIMONE_RUN_PROJECT: workspace.project.name,
         // The one branch this run's pushes may reach (#85). Absent at a step
         // that owns none, and then the guard lets nothing through.
         ...(request.workBranch === undefined

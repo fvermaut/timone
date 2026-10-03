@@ -2049,7 +2049,15 @@ describe("a box that can take a message while a step runs", () => {
     ).completed;
 
     const run = calls.find((call) => call.args[0] === "run")!;
-    expect(run.args.slice(0, -1)).toEqual(ARGS_BEFORE_40D);
+    // ✏ 43c: the one change to the arguments since is the run's project,
+    // forwarded by name after the project's branch.
+    const branchAt = ARGS_BEFORE_40D.indexOf("PROJECT_BRANCH") + 1;
+    expect(run.args.slice(0, -1)).toEqual([
+      ...ARGS_BEFORE_40D.slice(0, branchAt),
+      "-e",
+      "TIMONE_RUN_PROJECT",
+      ...ARGS_BEFORE_40D.slice(branchAt),
+    ]);
     // ✏ 43a: the one change since is the push guard, installed just before
     // the CLI starts. ✏ 43b: and the check at the top of the `gh` wrapper.
     // Everything else is the script as 40d left it.
@@ -2161,6 +2169,23 @@ describe("the guard on a boxed run's pushes", () => {
 
     expect(args).not.toContain("TIMONE_RUN_BRANCH");
     expect(env?.TIMONE_RUN_BRANCH).toBeUndefined();
+  });
+});
+
+/**
+ * The checks inside a box know which run they belong to (#85, 43c). The box's
+ * ledger is empty, so the box tells them in its environment.
+ */
+describe("what the box tells the checks about its run", () => {
+  it("names the run's project, by name, even at a step with no work branch", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({ image: "timone-box:test", spawn }).start(request());
+
+    const run = calls.find((call) => call.args[0] === "run")!;
+    const at = run.args.indexOf("TIMONE_RUN_PROJECT");
+    expect(run.args[at - 1]).toBe("-e");
+    expect(run.env?.TIMONE_RUN_PROJECT).toBe("scratch-app");
+    expect(run.args.join(" ")).not.toContain("TIMONE_RUN_PROJECT=");
   });
 });
 

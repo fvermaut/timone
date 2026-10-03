@@ -18,7 +18,10 @@ import {
   type Violation,
 } from "../daemon/hooks.js";
 import { loadManifest, type Manifest } from "../manifest.js";
-import { probeGuardDecision } from "../daemon/probeGuard.js";
+import {
+  probeGuardDecision,
+  type ProbeGuardDecision,
+} from "../daemon/probeGuard.js";
 import { declaredStage } from "../daemon/declared-stage.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import {
@@ -139,6 +142,10 @@ export interface GuardDeps {
   root?: string;
   store: RunStore;
   sessionId: string;
+  /** Where a boxed run declares itself; see {@link sessionRun}. */
+  env: NodeJS.ProcessEnv;
+  /** Which tool is about to run. Only `Bash` can switch off the push guard. */
+  toolName?: string | undefined;
   toolInput: unknown;
 }
 
@@ -164,6 +171,9 @@ export interface GuardDeps {
  * itself, and that is accepted for the reason `mentionsProbeDirectory` in
  * `probeGuard.ts` gives: the guard stops the accident, not a builder working
  * to get around it.
+ *
+ * **It also refuses a run the commands that switch off the guard on its
+ * pushes** (#85). See {@link pushGuardDecision}.
  */
 export function runGuard(deps: GuardDeps): string | undefined {
   const run = runForSession(deps.store, deps.sessionId);
@@ -173,10 +183,12 @@ export function runGuard(deps: GuardDeps): string | undefined {
       : deps.root === undefined
         ? undefined
         : declaredStage(deps.root, deps.sessionId);
-  const decision = probeGuardDecision({
-    toolInput: deps.toolInput,
-    stage,
-  });
+  const decision =
+    pushGuardDecision(deps) ??
+    probeGuardDecision({
+      toolInput: deps.toolInput,
+      stage,
+    });
   if (decision === undefined) return undefined;
   return JSON.stringify({
     hookSpecificOutput: {
@@ -186,11 +198,55 @@ export function runGuard(deps: GuardDeps): string | undefined {
   });
 }
 
+/**
+ * Whether a shell command would switch off the guard on a run's pushes.
+ *
+ * The guard is a `pre-push` hook that git finds through `core.hooksPath`, set
+ * with `GIT_CONFIG_*` variables (43a). Setting either again replaces it, and
+ * `git push --no-verify` skips it. Plain text matching, blunt in the same way
+ * as `mentionsProbeDirectory` in `probeGuard.ts`: it stops the accident, not a
+ * session working to get around it. `core.hooksPath` is matched in any case,
+ * because git reads its config names that way.
+ */
+function switchesOffPushGuard(command: string): boolean {
+  return (
+    /core\.hookspath/i.test(command) ||
+    command.includes("GIT_CONFIG_") ||
+    (/\bpush\b/.test(command) && command.includes("--no-verify"))
+  );
+}
+
+/**
+ * `PreToolUse` for a run: refuse a `Bash` command that would switch off the
+ * guard on its pushes. A person's own session is not affected: the guard is
+ * never switched on there, so there is nothing to switch off.
+ */
+function pushGuardDecision(deps: GuardDeps): ProbeGuardDecision | undefined {
+  if (deps.toolName !== "Bash") return undefined;
+  const input = deps.toolInput;
+  if (typeof input !== "object" || input === null || !("command" in input)) {
+    return undefined;
+  }
+  const command = input.command;
+  if (typeof command !== "string" || !switchesOffPushGuard(command)) return undefined;
+  if (sessionRun(deps.store, deps.sessionId, deps.env) === undefined) return undefined;
+  return {
+    permissionDecision: "deny",
+    permissionDecisionReason:
+      "Refused: this command would switch off the guard that keeps a run off the " +
+      "project's default branch. Setting `core.hooksPath` or a `GIT_CONFIG_…` " +
+      "variable replaces that guard, and `git push --no-verify` skips it. Run the " +
+      "command without that part. A push to your own work branch goes through as it is.",
+  };
+}
+
 export interface CheckDeps {
   root: string;
   manifest: Manifest;
   store: RunStore;
   sessionId: string;
+  /** Where a boxed run declares itself; see {@link sessionRun}. */
+  env: NodeJS.ProcessEnv;
   print: (message: string) => void;
   journal: (line: string) => void;
 }
@@ -203,6 +259,44 @@ export interface CheckDeps {
  */
 export function runForSession(store: RunStore, sessionId: string): Run | undefined {
   return store.all().find((run) => run.sessionId === sessionId);
+}
+
+/** The run a session belongs to, as far as the checks need to know it. */
+export interface SessionRun {
+  /** The project the run works on: its name in the manifest. */
+  project: string;
+  /** The branch the run works on. Absent at a step that owns none. */
+  workBranch?: string;
+}
+
+/**
+ * The run that drove this session, or undefined for a person's own session.
+ *
+ * A boxed run's session has an empty ledger: the box clones Timone fresh and
+ * holds no daemon state. So the box says which run it belongs to in its
+ * environment instead, as `TIMONE_RUN_PROJECT` and `TIMONE_RUN_BRANCH` (#85).
+ *
+ * **The ledger wins whenever it has a run for the session**, for the reason
+ * {@link runGuard} gives: what the daemon recorded is not something a session
+ * can change by setting a variable.
+ */
+export function sessionRun(
+  store: RunStore,
+  sessionId: string,
+  env: NodeJS.ProcessEnv,
+): SessionRun | undefined {
+  const run = runForSession(store, sessionId);
+  if (run !== undefined) {
+    return run.branch === undefined
+      ? { project: run.project }
+      : { project: run.project, workBranch: run.branch };
+  }
+  const project = env.TIMONE_RUN_PROJECT;
+  if (project === undefined || project === "") return undefined;
+  const workBranch = env.TIMONE_RUN_BRANCH;
+  return workBranch === undefined || workBranch === ""
+    ? { project }
+    : { project, workBranch };
 }
 
 /** What `Stop` decided, for the caller that has to act on it. */
@@ -234,13 +328,21 @@ export async function runCheck(deps: CheckDeps): Promise<CheckOutcome> {
     };
   }
 
-  const run = runForSession(deps.store, deps.sessionId);
+  // The run the session belongs to decides what it is judged against. A
+  // boxed run is found here too, from its declaration. Without it, a box was
+  // judged as a person's own session, and writing its status file on its own
+  // work branch was reported as a fault.
+  const owner = sessionRun(deps.store, deps.sessionId, deps.env);
 
   const evidence = await collectEvidence(deps.root, parked.baseline, {
     sessionId: deps.sessionId,
-    ...(run === undefined ? {} : { target: run.project }),
+    ...(owner === undefined ? {} : { target: owner.project }),
+    ...(owner?.workBranch === undefined ? {} : { workBranch: owner.workBranch }),
   });
 
+  // Who hears about it is still the ledger's question. A box has no ledger to
+  // flag, so its findings go back to the session, as a person's do.
+  const run = runForSession(deps.store, deps.sessionId);
   const target: ReportTarget =
     run === undefined
       ? { kind: "interactive", sessionId: deps.sessionId }
@@ -337,7 +439,7 @@ export function registerGuardrailsCommand(program: Command): void {
     guardrails
       .command("guard")
       .description(
-        "Refuse a build run the verifier's probes (PreToolUse hook)",
+        "Refuse a build run the verifier's probes, and a run what switches off its push guard (PreToolUse hook)",
       ),
   ).action(async (options: { root: string; state?: string }) => {
     // Same posture as the other two: nothing here may fail a session. A guard
@@ -355,6 +457,8 @@ export function registerGuardrailsCommand(program: Command): void {
         root,
         store: RunStore.open(statePath),
         sessionId: payload.session_id,
+        env: process.env,
+        toolName: payload.tool_name,
         toolInput: payload.tool_input,
       });
       // Silence is the common case and the correct one: no opinion, no delay,
@@ -465,6 +569,7 @@ export function registerGuardrailsCommand(program: Command): void {
         manifest: loadManifest(resolve(root, options.manifest)),
         store: RunStore.open(statePath),
         sessionId: payload.session_id,
+        env: process.env,
         print: (message) => console.log(message),
         journal: (line) => appendJournal(root, line),
       });
