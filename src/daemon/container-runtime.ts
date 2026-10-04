@@ -6,6 +6,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { CredentialProvider } from "../adapters/credentials.js";
 import type { ModelTokenSource } from "../adapters/model-token.js";
 import { repoSlug } from "../adapters/github-tickets.js";
+import { mergeRulesConfig } from "../merge-rules.js";
 import { SessionProgress } from "./progress.js";
 import { RUN_ENV_DIR, type RunEnv } from "./run-env.js";
 import type { ServiceStack } from "./services.js";
@@ -248,6 +249,38 @@ const WRAPPER_DIR = "$HOME/.local/bin";
  * for the forge token's reason: the workspace holds two git checkouts.
  */
 const PUSH_GUARD_DIR = "$HOME/.timone/git-hooks";
+
+/**
+ * Where the box writes the attributes file that sends `STATUS.md` and the
+ * requirement registers to Timone's own merge rule (ADR-0064). Out of the
+ * workspace, for the push guard's reason.
+ */
+const MERGE_RULES_DIR = "$HOME/.timone/git-merge";
+
+/**
+ * One shell line that hands git these settings through its environment:
+ * `export GIT_CONFIG_COUNT=<n>`, then `GIT_CONFIG_KEY_<i>=<key>` and
+ * `GIT_CONFIG_VALUE_<i>="<value>"` for each pair, in order.
+ *
+ * Each value is in double quotes, so `$HOME` is expanded and a value with
+ * spaces stays one word. **A value holding `"`, `` ` `` or `\` is refused**:
+ * inside double quotes the shell reads those, and the line would then mean
+ * something else than the settings it was built from.
+ */
+export function gitConfigExport(settings: ReadonlyArray<readonly [string, string]>): string {
+  for (const [key, value] of settings) {
+    if (/["`\\]/.test(value)) {
+      throw new Error(
+        `the value for ${key} holds a ", a \` or a \\, which the shell would read inside double quotes: ${value}`,
+      );
+    }
+  }
+  const words = settings.flatMap(([key, value], index) => [
+    `GIT_CONFIG_KEY_${index}=${key}`,
+    `GIT_CONFIG_VALUE_${index}="${value}"`,
+  ]);
+  return [`export GIT_CONFIG_COUNT=${settings.length}`, ...words].join(" ");
+}
 
 /** The variable a refreshed token travels in, host to box. Never an argument. */
 const FORGE_TOKEN_VAR = "TIMONE_FORGE_TOKEN";
@@ -654,7 +687,27 @@ function boxScript(
       ' It said: $(timone_reason /tmp/timone-push-guard.log)" >&2',
     "  exit 79",
     "}",
-    `export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="${PUSH_GUARD_DIR}"`,
+
+    // Timone's own rule for `STATUS.md` and the requirement registers
+    // (ADR-0064), so a run that brings its branch up to date with the default
+    // branch does not stop on the two files every run writes. Installed and
+    // switched on as the push guard is. A box that cannot install it stops,
+    // as one without the guard does: without the rule, a run that stops on
+    // those two files hands its work to a person.
+    `node ${WORKSPACE}/timone/dist/cli.js guardrails install-merge-rules --dir "${MERGE_RULES_DIR}"` +
+      " > /tmp/timone-merge-rules.log 2>&1 || {",
+    '  echo "could not set up the rule that merges STATUS.md and the requirement registers without a person.' +
+      " Refusing to work without it." +
+      ' It said: $(timone_reason /tmp/timone-merge-rules.log)" >&2',
+    "  exit 79",
+    "}",
+    // **One export for both.** git reads one numbered list, so a second
+    // export would replace the first one's settings and switch the guard off.
+    // The hooks path stays at index 0.
+    gitConfigExport([
+      ["core.hooksPath", PUSH_GUARD_DIR],
+      ...mergeRulesConfig({ cli: `${WORKSPACE}/timone/dist/cli.js`, dir: MERGE_RULES_DIR }),
+    ]),
 
     interactive
       ? // The daemon's messages, from the descriptor they were put aside on.

@@ -197,3 +197,116 @@ Tests run at the end of the slice, by file: `src/merge-rules.test.ts`, `src/merg
 - **The box already exports `GIT_CONFIG_COUNT=1` with `core.hooksPath` at index 0.** The two sets of settings must go into one export: `GIT_CONFIG_COUNT=4`, with the hooks path at index 0 and the three merge settings at 1 to 3, or in another order. Exporting the environment from `installMergeRules` as it is would replace the hooks path at index 0 and switch the push guard off. The driver values hold spaces and `%`, so they must be quoted in the shell line.
 - `timone guardrails install-merge-rules --dir <path>` writes only `<path>/attributes`. It prints nothing when it works. It uses the CLI it runs from as the driver (`fileURLToPath(new URL("../cli.js", import.meta.url))`), which in the box is `/workspace/timone/dist/cli.js`. When it fails, it prints one line starting `guardrails install-merge-rules:` and exits 1.
 - git needs `node` on its `PATH` to run the driver.
+
+## 48c — The box switches the rule on for every git the session runs
+
+**Built.**
+
+- `MERGE_RULES_DIR = "$HOME/.timone/git-merge"` beside `PUSH_GUARD_DIR` in `src/daemon/container-runtime.ts`.
+- In `boxScript`, right after the push guard's install block, the install of the merge rule: `node /workspace/timone/dist/cli.js guardrails install-merge-rules --dir "$HOME/.timone/git-merge" > /tmp/timone-merge-rules.log 2>&1 || {`, the plan's sentence, `exit 79`, `}`.
+- `gitConfigExport(settings)`, exported from `src/daemon/container-runtime.ts`. It builds `export GIT_CONFIG_COUNT=<n>` and each `GIT_CONFIG_KEY_<i>=<key>` and `GIT_CONFIG_VALUE_<i>="<value>"`. It throws when a value holds `"`, `` ` `` or `\`, and the message names the key.
+- The hand-written export line is gone. The box now exports one line built from `[["core.hooksPath", PUSH_GUARD_DIR], ...mergeRulesConfig({ cli: "/workspace/timone/dist/cli.js", dir: MERGE_RULES_DIR })]`. In the script it reads:
+  ```
+  export GIT_CONFIG_COUNT=4 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks" GIT_CONFIG_KEY_1=core.attributesFile GIT_CONFIG_VALUE_1="$HOME/.timone/git-merge/attributes" GIT_CONFIG_KEY_2=merge.timone-status.driver GIT_CONFIG_VALUE_2="node /workspace/timone/dist/cli.js merge-file status %O %A %B %P" GIT_CONFIG_KEY_3=merge.timone-register.driver GIT_CONFIG_VALUE_3="node /workspace/timone/dist/cli.js merge-file register %O %A %B %P"
+  ```
+- `path.join("$HOME/.timone/git-merge", "attributes")` gives `$HOME/.timone/git-merge/attributes`, so the shell still expands `$HOME`.
+
+**Files touched.**
+
+- `src/daemon/container-runtime.ts` — the constant, `gitConfigExport`, the install block, the export line built by the function, one import of `mergeRulesConfig`.
+- `src/daemon/container-runtime.test.ts` — two new hand-written constants (`MERGE_RULE_LINES`, `GIT_CONFIG_EXPORT`), the changed expectations named below, and `describe("the merge rule in a boxed run")` with 6 tests.
+- `doc/plans/phases/reports/phase-48-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **Changed expectations of existing tests.** Two, as the plan says, because the line they pin now carries four settings:
+  1. `PUSH_GUARD_LINES`: the last entry was `'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"'`. It is now `GIT_CONFIG_EXPORT`, the four-setting line above, written out by hand.
+  2. "is switched on for every git the session runs": it looked for the same one-setting line. It now looks for `GIT_CONFIG_EXPORT`. Its two position checks are unchanged.
+- **PLAN PROBLEM (small) — `PUSH_GUARD_LINES` also gains the four install lines.** The test "builds exactly today's arguments and script for a request that is not interactive" pins the whole script, and it builds its expected script with `...PUSH_GUARD_LINES`. The new install lines sit between the guard's install and the export. So they must be in its expectation, or that test fails. The plan names only the last entry. I did the closest faithful thing: `PUSH_GUARD_LINES` is now the guard's four lines, then `...MERGE_RULE_LINES`, then `GIT_CONFIG_EXPORT`. The body of that test is not changed. Its comment on `PUSH_GUARD_LINES` says so with a `✏ 48c` note.
+- **`gitConfigExport` is exported for case 6.** The plan calls it "a small function in this file". Case 6 tests it directly, so the function is its own seam. No other module uses it.
+- **Only values are checked, not keys.** The plan says "no value may hold". Keys are fixed names in this file and in `mergeRulesConfig`.
+- **Case 3 also checks there is only one `GIT_CONFIG_COUNT=` in the script.** A second export would replace the first one's settings and switch the push guard off.
+- **Case 4 builds the shell's environment from nothing**: only `PATH`, `HOME` (a temporary folder) and `GIT_CONFIG_NOSYSTEM=1`. Its working folder is that temporary folder, so no repository's config is read.
+- **What I would refactor, later.** The install blocks of the push guard and the merge rule have the same shape (command, log file, sentence, `exit 79`). One helper that builds such a block would remove the copy. Not done: no case asks for it.
+
+**Validation evidence.**
+
+Red-green trace. Cases 1, 3, 4, then 2 and 5 were written and run against the unchanged `boxScript`, before `container-runtime.ts` was touched:
+
+- Case 1 (install after the build and the push guard, before `exec claude`): red.
+  ```
+  × the merge rule in a boxed run > is installed after Timone's build and the push guard, and before the CLI starts
+    → expected -1 to be greater than 1920
+  ```
+- Case 3 (the four-setting export after the install, before `exec claude`): red.
+  ```
+  × the merge rule in a boxed run > is switched on by one export after the install, the push guard's hooks first
+    → expected -1 to be greater than -1
+  ```
+- Case 4 (real `sh`, `git config --get` four times): red. Only the hooks path came back.
+  ```
+  × … read back by git in a real shell > gives git all four settings, the push guard's among them
+  - /tmp/timone-box-merge-h10Npm/.timone/git-hooks
+  - /tmp/timone-box-merge-h10Npm/.timone/git-merge/attributes
+  - node /workspace/timone/dist/cli.js merge-file status %O %A %B %P
+  - node /workspace/timone/dist/cli.js merge-file register %O %A %B %P
+  + /tmp/timone-box-merge-h10Npm/.timone/git-hooks
+  ```
+- Case 2 (the install line, `|| {`, the sentence, `exit 79`): red, `expected 'set -e\nif [ -n "${GH_TOKEN:-}" ]; th…' to contain 'node /workspace/timone/dist/cli.js gu…'`.
+- Case 5 (no work branch, same install and same export): red, the same message as case 2.
+- Then the code. Cases 1 to 5 went green. Two existing tests went red, as expected: "builds exactly today's arguments and script…" (`Object.is equality`) and "is switched on for every git the session runs" (`expected -1 to be greater than 3041`). Both went green after the changes named above. 106 of 106 passed.
+- Case 6 (throws on a value holding `"`): written after `gitConfigExport` existed without the check. Red: `expected [Function] to throw an error`. Green after the check was added. 107 of 107 passed.
+
+Validation commands, run at the end of the slice:
+
+```
+$ npm run build
+> tsc
+(exit 0)
+
+$ npx vitest run src/daemon/container-runtime.test.ts
+ Test Files  1 passed (1)
+      Tests  107 passed (107)
+
+$ grep -n 'GIT_CONFIG_COUNT=1 ' src/daemon/container-runtime.ts | grep -v '^\s*[0-9]*:\s*//'; echo "exit: $?"
+exit: 1
+
+$ npm run type-check
+> tsc --noEmit
+(exit 0)
+
+$ npx vitest run src/daemon/container-runtime.test.ts src/daemon/push-guard.test.ts src/merge-rules.git.test.ts
+ Test Files  3 passed (3)
+      Tests  149 passed (149)
+
+$ git diff --stat
+ src/daemon/container-runtime.test.ts | 141 ++++++++++++++++++++++++++++++++++-
+ src/daemon/container-runtime.ts      |  55 +++++++++++++-
+ 2 files changed, 191 insertions(+), 5 deletions(-)
+```
+
+The test file loses only these lines (`git diff src/daemon/container-runtime.test.ts | grep '^-'`):
+
+```
+-  'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"',
+-    const exported = script.indexOf(
+-      'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"',
+-    );
+```
+
+These are the last entry of `PUSH_GUARD_LINES` and the line pinned by "is switched on for every git the session runs". Every other change in the test file is an added line. So no other existing test's expectation changed, apart from the four install lines `PUSH_GUARD_LINES` gains (see "PLAN PROBLEM" above).
+
+Result per assertion:
+
+1. Cases 1, 3 and 4 shown red first against the unchanged `boxScript`: **met** (trace above).
+2. Case 4 passes, the shell reads all four settings back, the push guard's among them: **met**.
+3. The handoff names the changed expectation in `PUSH_GUARD_LINES` and in "is switched on for every git the session runs", and no other existing test's expectation changed: **met**, with the small plan problem above: `PUSH_GUARD_LINES` also gains the install lines, which the exact-script test needs.
+4. The full suite passes: **not run in this slice**, as the runner said. It runs once at the close of the phase.
+
+Tests run at the end of the slice, by file: `src/daemon/container-runtime.test.ts`, `src/daemon/push-guard.test.ts`, `src/merge-rules.git.test.ts`.
+
+**What 48d must know.**
+
+- A box now installs the merge rule into `$HOME/.timone/git-merge/attributes` and exports `GIT_CONFIG_COUNT=4`: `core.hooksPath` at 0, `core.attributesFile` at 1, `merge.timone-status.driver` at 2, `merge.timone-register.driver` at 3. Anything that adds a git setting to the box must add it to the list given to `gitConfigExport` in `boxScript`, never in a second export.
+- A box that cannot install the rule stops with exit 79 and the sentence "could not set up the rule that merges STATUS.md and the requirement registers without a person. …".
+- The drivers run `node /workspace/timone/dist/cli.js`, so they need Timone's build, which the box makes before both installs.

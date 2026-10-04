@@ -15,3 +15,10 @@
 **Agreed:** 48a case 11: for each of cases 2 to 9, every line either side added is in the merged text.
 **Did instead:** in case 3, the older `**Last updated:**` line is not looked for. The phase file carries the amendment at case 11.
 **Why:** case 3 keeps only the later `**Last updated:**` line, so the older one cannot also be in the text. The two cases contradicted each other; case 3 is what ADR-0064 D1 decides.
+
+## 2026-10-04 — timone#200, build
+
+**Kind:** plan step
+**Agreed:** 48c changes only the last entry of `PUSH_GUARD_LINES` in `src/daemon/container-runtime.test.ts`, and the test "is switched on for every git the session runs".
+**Did instead:** `PUSH_GUARD_LINES` also gained the five lines that install the merge rule, before the new export line. No test's body changed for this.
+**Why:** the test "builds exactly today's arguments and script" checks the whole script through `PUSH_GUARD_LINES`. The script now holds the install lines the plan asks for, so that list must hold them too.
