@@ -136,6 +136,19 @@ export interface RenderStatusOptions {
    * Absent means say nothing about spending, which is what a fixture wants.
    */
   records?: (project: string, ticket: number) => ReturnType<typeof readRecord>;
+  /**
+   * The runs of a project that wait for a place, in the order they will be
+   * given one, as `RunStore.waitingForPlace` gives them
+   * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+   * D3).
+   *
+   * **The ledger's order, not a second one.** The order that decides who gets
+   * the place is kept in one function, so this line cannot name a turn the
+   * ledger will not give.
+   *
+   * Absent means say nothing about waiting, which is what a fixture wants.
+   */
+  waitingForPlace?: (project: string) => readonly Run[];
 }
 
 /**
@@ -155,6 +168,8 @@ interface RenderContext {
   progressOf: (run: Run) => InitiativeProgress | undefined;
   /** Every initiative of a project the daemon has a picture of. */
   initiativesOf: (project: string) => readonly InitiativeRecord[];
+  /** The runs of a project that wait for a place, in the ledger's order. */
+  waitingForPlace: (project: string) => readonly Run[];
   /**
    * What this run's ticket has spent against its limit, as the words that
    * end its phrase — or nothing, when no reader of records was given.
@@ -397,6 +412,10 @@ function describeInitiative(picture: InitiativeRecord): string | undefined {
  * several tickets waiting on the reader at once — and a line showing one of
  * them would hide most of what is being asked of them, which is the one thing
  * this command exists to prevent.
+ *
+ * ✏ 2026-10-04: after the runs, the line names the ticket a place is given
+ * to and the tickets that wait for one, in their order (ADR-0063). It says
+ * nothing about a place when nobody waits.
  */
 function describeProject(
   project: string,
@@ -408,6 +427,19 @@ function describeProject(
   const parked = mine.filter((run) => run.status === "parked");
 
   const parts = [...running, ...parked].map((run) => describeRun(run, context));
+
+  // After the runs, because it is about them: which ticket a freed place is
+  // given to, then which tickets get one next, in the order the ledger will
+  // give it (ADR-0063 D3).
+  for (const run of mine.filter((one) => one.place?.givenAt !== undefined)) {
+    parts.push(`the place is given to #${run.ticket}`);
+  }
+  const waiting = context.waitingForPlace(project);
+  if (waiting.length > 0) {
+    parts.push(
+      `waiting for a place: ${waiting.map((run) => `#${run.ticket}`).join(", then ")}`,
+    );
+  }
 
   // An initiative whose live step already has a run above is not named again:
   // that run's own phrase says where it is. This is for the initiatives with
@@ -449,6 +481,7 @@ export function renderStatus(
     now: options.now,
     hold: (run) => (run.holder === undefined ? "none" : livenessOf(run.holder)),
     initiativesOf: (project) => options.pictures?.(project) ?? [],
+    waitingForPlace: (project) => options.waitingForPlace?.(project) ?? [],
     spendingOf: spendingReader(manifest, options.records),
     progressOf: progressReader(
       options.root,
@@ -562,6 +595,7 @@ export function registerStatusCommand(program: Command): void {
           now: new Date(),
           root: process.cwd(),
           pictures: (project) => store.initiativesFor(project),
+          waitingForPlace: (project) => store.waitingForPlace(project),
           records: (project, ticket) => readRecord(process.cwd(), project, ticket),
           // Undefined once the daemon's process is gone: nobody is running
           // old code when nothing is running.

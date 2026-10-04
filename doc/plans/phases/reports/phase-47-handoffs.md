@@ -426,3 +426,54 @@ Checkboxes of the excerpt:
 
 - **Verification must amend PRD-05.R11's probe** (`prd-05.r11.mjs`, owned by verification). Its clause 2 refusal — a takeover refused because another ticket of the project holds it — is gone after this slice, so the probe tests a refusal that no longer happens. The builder did not open the probe.
 - A taken-over run is `active` with `takenOver: true` and takes no place. `placeHolders` does not list it; `staleRuns` and anything that reads `RUNNING` still see it as running. `timone status` should not show a taken-over run as taking the project's place.
+
+## 47f — `timone status` says which tickets wait for a place, in their order
+
+**Built.** Each project's line in `timone status` now says, after its runs, which ticket a place is given to (`the place is given to #12`) and which tickets wait for a place, in the order the ledger will give it (`waiting for a place: #12, then #9`). The order is the ledger's own: the command passes `store.waitingForPlace(project)` to the renderer, and the renderer does not sort. When no ticket waits and no place is given, the line says nothing about a place.
+
+**Files touched.**
+
+- `src/commands/status.ts` — new option `waitingForPlace` on `RenderStatusOptions` (and the matching field on the private `RenderContext`); `describeProject` adds the two parts after the runs; the command passes `(project) => store.waitingForPlace(project)`; one dated note on `describeProject`'s doc comment.
+- `src/commands/status.test.ts` — new describe "renderStatus — the tickets that wait for a place (ADR-0063)", three tests (cases 1–3), with local helpers `ledger`, `stepRunning`, `asksForAPlace`, `scratchLine`. No existing test changed.
+- `doc/plans/phases/reports/phase-47-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **The renderer takes the waiting list as an option, `waitingForPlace?: (project) => readonly Run[]`**, beside `pictures`, rather than a `RunStore`. `renderStatus` takes plain runs and readers today, so it stays a pure function of what it is given. Absent means nothing is said about waiting, as with the other options.
+- **The given place is read off the run list**, from `place.givenAt` on the project's runs, not from `placeHolders`. A given place needs no order, and the run list is already there. A run with a step running is not named as holding the place: its own phrase already says it is working, and a taken-over run (47e) takes no place, so it must not be named as holding one.
+- **The two parts come after the run phrases and before the initiative parts**: the given place first, then the waiting list. With several runs given a place (piece 5), each is named in its own part.
+- The waiting list is joined with `, then `, so three tickets read `#12, then #9, then #4`.
+
+Refactor I would do but did not: `status.ts` still keeps its own copy of `RUNNING`; the test helpers `asksForAPlace` and `stepRunning` repeat `waitingForAPlace` from `runs.test.ts`, and a shared test helper for a ledger with places would serve both files.
+
+**Validation evidence.**
+
+Every red/green run was `npx vitest run src/commands/status.test.ts -t "<name>"`.
+
+1. *"names the tickets waiting for a place after the runs, in the order they get it, priority:high first"* — red: `AssertionError: expected 'scratch-app  #7 — working on it now  …' to match / {2}· {2}waiting for a place: #12, th…/`. Green after `describeProject` added the waiting part from `context.waitingForPlace`. The test is not tautological: #9 was opened first and has the lower number, so any second sort by ticket or by opening time would put #9 first; only the ledger's `priority:high` rule puts #12 first.
+2. *"names the ticket the place is given to, and no longer counts it as waiting"* — red: `AssertionError: expected 'scratch-app  #9 (sorting the request)…' to match / {2}· {2}the place is given to #12 {2…/`. Green after `describeProject` named each run with `place.givenAt`.
+3. *"says nothing about a place when no ticket waits for one"* — red: `AssertionError: expected 'scratch-app  #7 — working on it now  …' not to match /place/` (case 1's smallest code always added the part, even empty). Green after the part was added only when the list is not empty.
+
+*Validation commands* (from `projects/timone`):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/commands/status.test.ts; echo "exit: $?"
+ ✓ src/commands/status.test.ts (46 tests) 13ms
+ Test Files  1 passed (1)
+      Tests  46 passed (46)
+exit: 0
+```
+
+Checkboxes of the excerpt:
+
+- [x] Cases 1–3 pass, with red runs recorded — yes; each of the three was seen red first, above.
+
+*Test files run at the end*, after `npm run build` (then `rm -rf dist`, which was not there before): every test file under `src/commands` (11 files, including `status.test.ts`), `src/guards/checkouts.test.ts` and `src/cli.test.ts` (the two other files that import `status.ts`) — 13 files, 231 tests, all passed, exit 0.
+
+**What 47g must know.**
+
+- `timone status` no longer shows a queue and now shows the waiting list, so ADR-0063's last consequence ("It shows the runs waiting for a place, in the order they will get it") is true in the code. Any document 47g edits that describes the status line's queue can point at this.
+- The command's wiring (`waitingForPlace: (project) => store.waitingForPlace(project)` in `registerStatusCommand`) is not covered by a test: the declared seam is the renderer. It is one line.
