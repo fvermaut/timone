@@ -50,5 +50,5 @@ GitHub has no way to add a watcher to a ticket for someone else. Two ways remain
 
 ## Open Questions
 
-- **Pull requests.** The machine opens pull requests under its own identity too. Whether fvermaut is notified of them today depends on the settings of that account, and the ticket does not say. Owner: fvermaut. If the same is wanted the same for pull requests, it is a new ticket.
+- **Pull requests.** The machine opens pull requests under its own identity too. Whether fvermaut is notified of them today depends on the settings of that account, and the ticket does not say. Owner: fvermaut. If pull requests should name people too, that is a new ticket.
 - **A project with its own `instructors` that leave the operator out.** As written, the operator is not named on that project's tickets. No project is like this today. The question comes back when the first one is.
