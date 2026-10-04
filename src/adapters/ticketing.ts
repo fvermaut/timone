@@ -411,13 +411,13 @@ export interface TicketingAdapter {
    *
    * Phase 30's third widening, and it exists for the same reason as
    * {@link readBranches}: three of the daemon's checks read a *file* off a
-   * branch — the newest phase file's `Status:` line, the verification report
-   * beside it, and a ticket's approved breakdown — and every one of them did
-   * it with `git show` inside `projects/<name>`. Nothing fetched that
-   * checkout, so they worked only because the session that wrote the branch
-   * ran in the same folder. The moment a session runs anywhere else, the
-   * branch is on the forge and those reads answer "no such file" — which the
-   * callers read as *the stage produced nothing*.
+   * branch — the `Status:` line of the phase file the branch added, the
+   * verification report beside it, and a ticket's approved breakdown — and
+   * every one of them did it with `git show` inside `projects/<name>`.
+   * Nothing fetched that checkout, so they worked only because the session
+   * that wrote the branch ran in the same folder. The moment a session runs
+   * anywhere else, the branch is on the forge and those reads answer "no such
+   * file" — which the callers read as *the stage produced nothing*.
    *
    * **Absent is `undefined` and is an answer. A failure to read throws**, for
    * the same reason as `readBranches`.

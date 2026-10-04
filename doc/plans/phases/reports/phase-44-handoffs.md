@@ -191,3 +191,67 @@ Test Files  6 passed (6)      Tests  256 passed (256)
 
 
 **Gate note (orchestrator).** 44b and 44c ran at the same time: they share no file and no state outside the repository. Checked again before the commit: after `npm run build`, the three test files of the validation block, 77 tests passed; the removed-line probe gave `exit: 1`; the forge-guard probe printed `0`; type check exit 0.
+
+## 44c — the build and the check find their own phase file by what the branch added
+
+**Built.** The execution prompt and the verification prompt no longer say "the newest phase file under `doc/plans/phases/` on that branch". Both now say "the phase file this branch added under `doc/plans/phases/` — the one the default branch does not have".
+- The execution prompt still tells the session to stop and say so on the ticket when there is no such file.
+- The verification prompt still says "its own status line tells you whether it is yours to verify".
+- The comment in `src/adapters/ticketing.ts` now says "the `Status:` line of the phase file the branch added".
+- No prompt for any stage says "newest phase file" any more.
+
+**Files touched.**
+
+- `src/daemon/prompts.ts` — the wording in `verificationPrompt` and `executionPrompt`, as above.
+- `src/adapters/ticketing.ts` — the doc comment, with its paragraph re-wrapped to the file's line width. Comment only.
+- `src/daemon/prompts.test.ts` — a new block, "the build and the check find their own phase file by what the branch added (44c)", with cases 1 and 2.
+
+**Decisions taken inside the slice.**
+- **Where the new sentence breaks.** In the execution prompt, the old "— the plan for this piece, written there by the session before you" now reads "— the one the default branch does not have. It is the plan for this piece, written there by the session before you."
+- **Line breaks in the tests.** Both cases first turn every run of whitespace in the prompt into one space, as the 43e block does. The prompt is built from separate lines, so a phrase split across two lines would otherwise get past both checks.
+- **Branch in the tests.** Both cases build the prompt with a branch name set, as the execution and verification blocks do.
+
+**Validation evidence.**
+
+Case 2 (no prompt in `PROMPTED_STAGES` matches `/newest phase file/i`) was written first and seen red before any code changed:
+```
+$ npx vitest run src/daemon/prompts.test.ts
+× ... (44c) > execution never says the newest phase file
+× ... (44c) > verification never says the newest phase file
+AssertionError: expected 'Build what was planned for ticket #6 …' not to match /newest phase file/i
+AssertionError: expected 'Check what was just built for ticket …' not to match /newest phase file/i
+Tests  2 failed | 205 passed (207)
+```
+After the wording change in `prompts.ts`: `Tests  207 passed (207)`.
+
+Case 1 (the execution and verification prompts each say "the phase file this branch added") was written after the change that also satisfies it, so it was green when written. To show the test is not empty, I changed the code: "this branch added" became "on this branch" in both prompts. The test went red, and I then put the code back:
+```
+× ... (44c) > execution is pointed at the phase file this branch added
+× ... (44c) > verification is pointed at the phase file this branch added
+AssertionError: expected 'Build what was planned for ticket #6 …' to contain 'the phase file this branch added'
+AssertionError: expected 'Check what was just built for ticket …' to contain 'the phase file this branch added'
+Tests  2 failed | 207 passed (209)
+```
+
+Validation block:
+```
+$ npx vitest run src/daemon/prompts.test.ts
+Test Files  1 passed (1)      Tests  209 passed (209)
+$ grep -rn "newest phase file" src --include=*.ts | grep -v '\.test\.ts:'; echo "exit: $?"
+exit: 1
+$ npm run type-check
+> tsc --noEmit            (exit 0)
+$ npm test                -> not run; left to the close at the request of the person running this build
+```
+
+Tests run at the end:
+- `src/daemon/prompts.test.ts`: 209 passed.
+- The test files of the code that imports `prompts.ts` (`src/runner/actions.test.ts`, `src/runner/replay/harness.test.ts`, `src/commands/takeover.test.ts`, `src/daemon/session.test.ts`): 4 files, 122 tests passed.
+- No other test file checks the changed text.
+
+**What delivery must know.**
+- The only place "newest phase file" still appears in `src` is the titles of the new case 2 tests, which the grep leaves out on purpose.
+- The working tree also holds 44b's changes to `src/daemon/push-guard.ts` and `src/daemon/push-guard.test.ts`. 44c did not touch them, and they do not belong in 44c's commit.
+
+
+**Gate note (orchestrator).** Checked again before the commit: `src/daemon/prompts.test.ts`, 209 tests passed; the grep for "newest phase file" outside tests gave `exit: 1`; type check exit 0.
