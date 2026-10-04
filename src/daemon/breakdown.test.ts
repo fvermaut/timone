@@ -1,11 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
   isReproposal,
+  orderOf,
   parseBreakdown,
   fromDefaultBranch,
   fromWorkingTree,
@@ -79,6 +86,46 @@ describe("the breakdown round-trips", () => {
 
   it("preserves who approved, when, and how many pieces they saw", () => {
     expect(parseBreakdown(renderBreakdown(approved))).toEqual(approved);
+  });
+
+  it("keeps each piece's Needs: line, and leaves a piece without one without one", () => {
+    const withNeeds: ParsedBreakdown = {
+      stamp: { kind: "awaiting" },
+      chunks: [
+        { title: "One", delivers: "the first piece.", needsLine: "nothing." },
+        { title: "Two", delivers: "the second piece." },
+        {
+          title: "Three",
+          delivers: "the third piece.",
+          needsLine: "piece 1. It can be built at the same time as piece 2.",
+        },
+      ],
+    };
+
+    expect(parseBreakdown(renderBreakdown(withNeeds))).toStrictEqual(withNeeds);
+  });
+
+  it("reads a Needs: line whose label is in bold", () => {
+    const answer = parseBreakdown(
+      [
+        "# Breakdown",
+        "",
+        "**Status:** Awaiting approval",
+        "",
+        "1. **One** — the first piece.",
+        "2. **Two** — the second piece.",
+        "   - **Needs:** piece 1.",
+        "",
+      ].join("\n"),
+    );
+
+    expect(answer).toStrictEqual({
+      stamp: { kind: "awaiting" },
+      chunks: [
+        { title: "One", delivers: "the first piece." },
+        { title: "Two", delivers: "the second piece.", needsLine: "piece 1." },
+      ],
+    });
   });
 
   it("reads the stamp a real approval session wrote, timestamp and all", () => {
@@ -264,5 +311,325 @@ describe("where a breakdown is read from", () => {
     const answer = readBreakdownSync(TICKET, fromDefaultBranch(dir));
     expect(answer.kind).toBe("malformed");
     expect("reason" in answer && answer.reason).toContain("`Status:`");
+  });
+});
+
+/**
+ * Read a list as `parseBreakdown` does, and fail loudly if it does not parse,
+ * so a case about the order never passes on a list that was not read at all.
+ */
+function parsed(text: string): ParsedBreakdown {
+  const answer = parseBreakdown(text);
+  if ("kind" in answer) throw new Error(`fixture did not parse: ${answer.reason}`);
+  return answer;
+}
+
+describe("the order of the pieces, read from their Needs: lines", () => {
+  it("reads 2 and 3 needing 1, and 4 needing 2 and 3, as levels", () => {
+    const list = parsed(
+      [
+        "# Breakdown",
+        "",
+        "**Status:** Awaiting approval",
+        "",
+        "1. **One** — the first piece.",
+        "   - Needs: nothing.",
+        "2. **Two** — the second piece.",
+        "   - Needs: piece 1.",
+        "3. **Three** — the third piece.",
+        "   - Needs: piece 1.",
+        "4. **Four** — the fourth piece.",
+        "   - Needs: pieces 2 and 3.",
+        "",
+      ].join("\n"),
+    );
+
+    expect(orderOf(list)).toEqual({
+      kind: "clear",
+      needs: [[], [1], [1], [2, 3]],
+      words: "1, then 2 and 3 together, then 4.",
+    });
+  });
+
+  it("reads the committed list of ticket 197 as its writer wrote the order by hand", () => {
+    // The real file, not a copy: its "Order:" line was written by a person
+    // before this code existed, so it is an answer the code did not choose.
+    // Piece 4's line, "piece 3. It can be built at the same time as piece 5.",
+    // has a second sentence naming another piece, which must not be read.
+    const list = parsed(
+      readFileSync(
+        join(import.meta.dirname, "..", "..", "doc", "plans", "breakdowns", "ticket-197.md"),
+        "utf8",
+      ),
+    );
+
+    expect(orderOf(list)).toEqual({
+      kind: "clear",
+      needs: [[], [], [1, 2], [3], [3], []],
+      words:
+        "1 and 2 together, then 3, then 4 and 5 together. " +
+        "6 needs none of the others.",
+    });
+  });
+
+  it("reads a list with no Needs: lines as each piece needing the one above", () => {
+    // Every list written before the line existed, ticket-103.md among them,
+    // meant this order, and the step tickets it opened were chained this way.
+    const list = parsed(
+      [
+        "# Breakdown",
+        "",
+        "**Status:** Approved by fvermaut 2026-09-05 — 3 pieces",
+        "",
+        "1. **One** — the first piece.",
+        "2. **Two** — the second piece.",
+        "3. **Three** — the third piece.",
+        "",
+      ].join("\n"),
+    );
+
+    expect(orderOf(list)).toEqual({
+      kind: "clear",
+      needs: [[], [1], [2]],
+      words: "1, then 2, then 3.",
+    });
+  });
+
+  it("reads a list of one piece as that piece alone, with no others to mention", () => {
+    // ticket-128.md is such a list. "1 needs none of the others" would name
+    // others that do not exist.
+    const list = parsed(
+      [
+        "# Breakdown",
+        "",
+        "**Status:** Approved by fvermaut 2026-09-11 — 1 pieces",
+        "",
+        "1. **One** — the only piece.",
+        "",
+      ].join("\n"),
+    );
+
+    expect(orderOf(list)).toEqual({ kind: "clear", needs: [[]], words: "1." });
+  });
+
+  it("says what a piece waits for when it does not need the whole level before it", () => {
+    const list = parsed(
+      [
+        "# Breakdown",
+        "",
+        "**Status:** Awaiting approval",
+        "",
+        "1. **One** — the first piece.",
+        "   - Needs: nothing.",
+        "2. **Two** — the second piece.",
+        "   - Needs: piece 1.",
+        "3. **Three** — the third piece.",
+        "   - Needs: piece 1.",
+        "4. **Four** — the fourth piece.",
+        "   - Needs: piece 2.",
+        "",
+      ].join("\n"),
+    );
+
+    expect(orderOf(list)).toEqual({
+      kind: "clear",
+      needs: [[], [1], [1], [2]],
+      words: "1, then 2 and 3 together, then 4. 4 waits only for 2.",
+    });
+  });
+
+  it("names three pieces on one level with commas and a last and", () => {
+    const list = parsed(
+      [
+        "# Breakdown",
+        "",
+        "**Status:** Awaiting approval",
+        "",
+        "1. **One** — the first piece.",
+        "2. **Two** — the second piece.",
+        "   - Needs: piece 1.",
+        "3. **Three** — the third piece.",
+        "   - Needs: piece 1.",
+        "4. **Four** — the fourth piece.",
+        "   - Needs: piece 1.",
+        "",
+      ].join("\n"),
+    );
+
+    expect(orderOf(list)).toEqual({
+      kind: "clear",
+      needs: [[], [1], [1], [1]],
+      words: "1, then 2, 3 and 4 together.",
+    });
+  });
+});
+
+describe("a Needs: line that cannot be read is refused, not guessed", () => {
+  /** Three pieces, the second of which needs what `line` says. */
+  function threePiecesWithSecondNeeding(line: string): ParsedBreakdown {
+    return parsed(
+      [
+        "# Breakdown",
+        "",
+        "**Status:** Awaiting approval",
+        "",
+        "1. **One** — the first piece.",
+        "2. **Two** — the second piece.",
+        `   - Needs: ${line}`,
+        "3. **Three** — the third piece.",
+        "",
+      ].join("\n"),
+    );
+  }
+
+  it("refuses a piece that needs itself", () => {
+    const order = orderOf(threePiecesWithSecondNeeding("piece 2."));
+
+    expect(order.kind).toBe("unclear");
+    expect("reason" in order && order.reason).toContain("piece 2");
+    expect("reason" in order && order.reason).toContain('"piece 2."');
+  });
+
+  it("refuses a piece that needs a later piece", () => {
+    const order = orderOf(threePiecesWithSecondNeeding("piece 3."));
+
+    expect(order.kind).toBe("unclear");
+    expect("reason" in order && order.reason).toContain("piece 2");
+    expect("reason" in order && order.reason).toContain('"piece 3."');
+  });
+
+  it("refuses a piece that needs a number past the end of the list", () => {
+    const order = orderOf(threePiecesWithSecondNeeding("piece 9."));
+
+    expect(order.kind).toBe("unclear");
+    expect("reason" in order && order.reason).toContain("piece 2");
+    expect("reason" in order && order.reason).toContain('"piece 9."');
+    // Not "comes after it": there is no piece 9 to come after anything.
+    expect("reason" in order && order.reason).toContain("not in the list");
+  });
+
+  it("refuses a line that names no piece and does not say nothing or none", () => {
+    // Read as "needs nothing", this would let piece 2 start before the piece
+    // its writer meant, so it is refused rather than guessed.
+    const order = orderOf(threePiecesWithSecondNeeding("the first one."));
+
+    expect(order.kind).toBe("unclear");
+    expect("reason" in order && order.reason).toContain("piece 2");
+    expect("reason" in order && order.reason).toContain('"the first one."');
+  });
+});
+
+
+describe("every committed list reads as it did before the Needs: line", () => {
+  /** A committed list's text, read off this repository's own `doc/`. */
+  function committed(name: string): string {
+    return readFileSync(
+      join(import.meta.dirname, "..", "..", "doc", "plans", "breakdowns", name),
+      "utf8",
+    );
+  }
+
+  /** The stamp and each piece's title and description, and nothing else. */
+  function titlesAndStamp(text: string): unknown {
+    const answer = parseBreakdown(text);
+    if ("kind" in answer) return answer;
+    return {
+      stamp: answer.stamp,
+      chunks: answer.chunks.map(({ title, delivers }) => ({ title, delivers })),
+    };
+  }
+
+  // The four lists are named rather than found, so a list committed later
+  // does not change what this case checks. The expected values are copied by
+  // hand from the files, as the parser read them before this change.
+
+  it("reads ticket-103.md as before", () => {
+    expect(titlesAndStamp(committed("ticket-103.md"))).toEqual({
+      stamp: {
+        kind: "approved",
+        by: "fvermaut",
+        at: "2026-09-05T15:47:09Z",
+        pieces: 2,
+      },
+      chunks: [
+        {
+          title: "The run carries on instead of stopping",
+          delivers:
+            "from the agreement to the pull request the machine never parks and never asks: every departure from what was agreed — a wrong plan step, a contradicted requirement, a check it cannot run, a workaround, tests still failing — is written into one dated record on the work branch that names the run, the plan and the requirements are amended in place as the build needs, and the run always reaches a pull request; a stop that happens anyway is reported as a defect, and the stops left before the build are ones a typed reply settles.",
+        },
+        {
+          title: "The pull request carries the judgement",
+          delivers:
+            "the body opens on that record, listing what was bent or saying explicitly that nothing was, a screen is shown there with its preview address and its comparison against the reference instead of before, and closing the pull request without merging brings the work back as a fresh request rather than patching the rejected branch.",
+        },
+      ],
+    });
+  });
+
+  it("reads ticket-128.md as before", () => {
+    expect(titlesAndStamp(committed("ticket-128.md"))).toEqual({
+      stamp: { kind: "approved", by: "fvermaut", at: "2026-09-11", pieces: 1 },
+      chunks: [
+        {
+          title: "The ask check, everywhere a person is asked",
+          delivers:
+            "a reply that is neither a yes nor a change request gets one short question instead of a demand for a terminal session. The check has two outcomes and no route to a gate outcome or a run's state. It stands in front of every message that asks a person for something, not only the approval gate, and a written answer to its own question starts the session a terminal command starts today.",
+        },
+      ],
+    });
+  });
+
+  it("refuses ticket-164.md for its Status: line, as before", () => {
+    // This list could not be read before this change either: its stamp
+    // carries a sentence after the piece count. It must stay exactly as it
+    // was, not start being read now.
+    expect(titlesAndStamp(committed("ticket-164.md"))).toEqual({
+      kind: "malformed",
+      reason:
+        'unreadable `Status:` line "Approved by fvermaut 2026-09-26 — 2 pieces. Given in the terminal session `e9bd67c9-0d4c-4797-8329-7a5bfe529e75`: these two pieces were proposed, and he answered *"look I understand, it\'s more complex than I thought, do as you think it\'s best"*." — expected "Awaiting approval" or "Approved by <who> <date> — N pieces"',
+    });
+  });
+
+  it("reads ticket-197.md as before", () => {
+    expect(titlesAndStamp(committed("ticket-197.md"))).toEqual({
+      stamp: {
+        kind: "approved",
+        by: "fvermaut",
+        at: "2026-10-04T06:34:53Z",
+        pieces: 6,
+      },
+      chunks: [
+        {
+          title: "Numbered files never take the same number",
+          delivers:
+            "two tickets worked at the same time never give a phase file, an ADR or a triage record the same number.",
+        },
+        {
+          title: "STATUS.md and the requirement registers stop conflicting",
+          delivers:
+            "when one pull request merges, another that changed the same `STATUS.md` or register is brought level without a person, and nothing either wrote is lost.",
+        },
+        {
+          title: "The project is free when the pull request opens",
+          delivers:
+            "a ticket with an open pull request, or one waiting for a person, no longer stops the next ticket of its project from building.",
+        },
+        {
+          title: "The update after a merge",
+          delivers:
+            "after a pull request merges, every other open pull request of the project is brought level, fixed and tested again, and says on top what had to change.",
+        },
+        {
+          title: "Two places and the planner",
+          delivers:
+            "each project builds up to 2 tickets at once, or the number `timone.yaml` sets, and the planner decides from each plan which ticket may start.",
+        },
+        {
+          title: "The list of pieces shows what is built at the same time",
+          delivers:
+            "a list of pieces shows its order in plain words, and the step tickets it opens wait for each other exactly as that order says.",
+        },
+      ],
+    });
   });
 });
