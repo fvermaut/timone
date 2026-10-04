@@ -71,3 +71,9 @@
 **Agreed:** The `process.md` stage 6 sentence "becomes" the new words; the charting instructions' "Mode 2 item 5" is amended.
 **Did instead:** In `process.md` and in the charting instructions, the new words come first with a dated marker, and the old words are kept struck through after "The words before that date, kept as history:", as `process.md` already does once. The item amended is item 5 of "Closing the effort", the only item that says a map holds its project. It also gains one line: do not write in the route summary that other work on the project will stop.
 **Why:** Old text is kept, not deleted. The plan named the wrong section for the item. Without the added line, the old instruction to write that the queue stopped would still be partly in force.
+
+## Verification, 2026-10-04 — the replay could not run (PRD-05.R18 BLOCKED)
+
+- **What:** the replay of the runner's past decisions (`npm run --silent replay`, PRD-05.R18) is in this phase's regression set. It could not run in the checking container: all 19 cases stopped on "Not logged in · Please run /login". The container has no Claude login. The same replay is the instrument of PRD-05.R7's clause on the real runner, which is BLOCKED for the same reason.
+- **Why it matters:** this phase changed the runner's brief and rules, so the replay is the check most likely to show a change.
+- **What is owed:** a person runs `npm run --silent replay` from a logged-in terminal before merging, and records the result. The register is untouched. See [phase-47-verification.md](phase-47-verification.md), *Carried forward*.

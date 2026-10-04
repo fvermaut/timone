@@ -13,7 +13,7 @@
 ## R1 — A ticket frees its project when its pull request opens
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that gives the run store a project whose only other run has an open, unmerged pull request, or is waiting for a person, and fails if a second ticket of that project is refused a step for that reason
 - **Depends-on:** `src/daemon/runs.ts, src/runner/`
@@ -30,6 +30,8 @@
 - **Verification hint:** today `holdsProject` in `src/daemon/runs.ts` counts a run parked on a branch as holding the project, and `endRun` in `src/runner/actions.ts` ends a run only on the merge. Drive a copy of the ledger with `--state`, never the live file.
 
 ## R2 — Each project has a number of places, 2 unless `timone.yaml` says otherwise
+
+> ✏ 2026-10-04 — partial evidence: clauses 3 to 6 passed in [phase-47-verification.md](../../plans/phases/reports/phase-47-verification.md), with its probe [`prd-07.r2.mjs`](../../plans/phases/probes/prd-07.r2.mjs). Clause 4 was seen only as far as one place allows: its words "while the other steps keep running" need two places. Clauses 1 and 2, the number of places, are not built yet (piece 5), so the status stays `draft`.
 
 - **Priority:** MUST
 - **Status:** draft
@@ -60,7 +62,7 @@
 ## R3 — A freed place goes to one ticket: `priority:high` first, then the oldest
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test with two tickets waiting for one place, which frees it and fails if both are woken, or if the woken one's step is refused for want of a place
 - **Depends-on:** `src/daemon/runs.ts, src/runner/driver.ts`
@@ -195,7 +197,7 @@
 ## R9 — A ticket with an open pull request keeps its run and is not picked up again
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that gives the pickup a marked ticket whose pull request from an earlier run is open, and fails if a new run is started for it
 - **Depends-on:** `src/daemon/, src/runner/`
@@ -236,6 +238,8 @@
 
 ## R12 — The old rule is gone from every place it is written
 
+> ✏ 2026-10-04 — partial evidence: clauses 1, 3 and 4 passed in [phase-47-verification.md](../../plans/phases/reports/phase-47-verification.md), and clause 2 for PRD-02.R22 clause 6, PRD-05.R11 clause 2 and PRD-03's out-of-scope line, with its probe [`prd-07.r12.mjs`](../../plans/phases/probes/prd-07.r12.mjs). PRD-02.R22 clause 1 and PRD-05.R15 clause 2 are not changed yet (piece 5), so the status stays `draft`.
+
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** api
@@ -260,7 +264,7 @@
 > ✏ 2026-10-03 — added on fvermaut's answer on [timone#197](https://github.com/fvermaut/timone/issues/197): "no" to "Is a takeover still refused while another ticket of the same project is being built?"
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that opens a takeover on a ticket nothing is working on, while a step of another ticket of the same project runs or another ticket holds a work branch, and fails if the takeover is refused for that reason
 - **Depends-on:** `src/commands/takeover.ts, src/daemon/runs.ts`
