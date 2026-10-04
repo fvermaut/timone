@@ -78,3 +78,44 @@ Tests run at slice end: `src/daemon/people.test.ts`, `src/daemon/chunk-zero.test
 
 - `withPeopleNamed` and `NAMED_LINE_START` are exported from `src/daemon/people.ts`. Any other ticket the machine opens can pass its body through it.
 - During this slice, `.claude/skills/timone-wayfind/SKILL.md` showed as modified in the working tree (a "Named so that GitHub tells them…" line added to the map template). This slice did not make that change and did not touch the file.
+
+## 46c — The charting instructions name the project's people on every ticket they open
+
+**Built.** The charting instructions now tell the session to name the project's people on every ticket it opens: the map and each decision ticket. A new subsection, *Every ticket names the project's people*, carries the marker `✏ 2026-10-04 (PRD-08 R3)`. It says why the line is needed (the machine's account opens the tickets, so GitHub tells nobody), where the people are found (`timone.yaml`: the project's `instructors` when it lists any, otherwise the top-level `operator`), what the line is and where it goes (after the closing block, as the last line of the body), that it is plain text and never inside backticks or a code block, that nobody is assigned for this and the **Claiming:** rule does not change, and that a ticket opens without the line when the file names nobody. The map's body template ends with the line. Mode 1 steps 3 and 4 and Mode 2 step 5 each tell the session to add it and link to the subsection, with the same dated marker.
+
+**Files touched.**
+
+- `.claude/skills/timone-wayfind/SKILL.md` — new subsection `### Every ticket names the project's people`, after *Every ticket carries its own CTA* and before *How a question on the map is answered*; the line added to the map body template after the `**What I need from you:**` line; Mode 1 steps 3 and 4 and Mode 2 step 5 amended. No rule removed.
+
+**Decisions taken inside the slice.**
+
+- The subsection sits under `### Tickets`, after the section on the closing block, because the line goes right after that block.
+- In prose the line is quoted in backticks, and the next paragraph says that in the ticket body it is plain text. The map template shows it as plain text inside the template's fence, as the skill shows every body template.
+- Two short sentences the plan did not spell out: "When you rewrite the map's closing line later, keep this line at the end" (otherwise the rewrite when the effort closes could drop it), and "On the markdown fallback there is no GitHub ticket, so there is no line either."
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+```
+$ grep -n "Named so that GitHub tells them about this ticket and every comment on it" .claude/skills/timone-wayfind/SKILL.md
+61:Named so that GitHub tells them about this ticket and every comment on it: @<each login>
+142:**The line.** End the body with a blank line, then one line: the words `Named so that GitHub tells them about this ticket and every comment on it:`, ...
+$ grep -n "instructors" .claude/skills/timone-wayfind/SKILL.md; echo "exit: $?"
+140:**Where the people are found.** Read `timone.yaml`. Use the project's `instructors` when it lists any. Otherwise use the top-level `operator`. ...
+exit: 0
+$ grep -n "operator" .claude/skills/timone-wayfind/SKILL.md; echo "exit: $?"
+140:(same line)
+exit: 0
+$ npx vitest run src/process-text.test.ts
+ Test Files  1 passed (1)
+      Tests  41 passed (41)
+```
+
+- [x] Mode 1 steps 3 and 4 and Mode 2 step 5 each tell the session to name the people — pass; each links to the subsection.
+- [x] The subsection says where the people are found, that the names are plain text, that nobody is assigned, and what to do when the file names nobody — pass.
+- [x] The wording matches `NAMED_LINE_START` in `src/daemon/people.ts` word for word — pass. Checked by the orchestrator after 46a landed: the constant is `"Named so that GitHub tells them about this ticket and every comment on it:"`, the same words as lines 61 and 142.
+- [x] The amendment is marked with its date and PRD-08 R3; no other rule of the skill is changed — pass; the `Claiming:` rule is untouched.
+- [x] The text follows *Writing to the human* — pass: short sentences, plain words.
+
+Tests run at slice end: `src/process-text.test.ts` only (the slice changes no code). This slice ran in parallel with 46a: no shared files, and neither touches anything outside the working tree.
+
+**What 46b must know.** The skill quotes the line word for word. If the wording in `src/daemon/people.ts` ever changes, this skill must change with it.
