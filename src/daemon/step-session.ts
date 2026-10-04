@@ -92,10 +92,15 @@ export interface StepSession {
  * the two used to be as long as a session takes to answer, and for all of it
  * the ledger still advertised the run as waiting on a human.
  *
- * Only a parked run is claimed here, because a `picked-up` run is already
- * claimed: that status occupies the project's session slot and every guard
- * already excludes it. What was missing was never a claim for the entry path
- * — it was one for the resume path.
+ * Only a parked run is claimed here. A `picked-up` run takes no place on
+ * its project any more (ADR-0063 D1), but every guard already excludes it,
+ * so no second process can resume it: what was missing was never a claim
+ * for the entry path — it was one for the resume path. For a `picked-up`
+ * run, `activate` is where the ledger checks for a place.
+ *
+ * **A step needs a place on its project** (ADR-0063 D2). When every place
+ * is taken, the claim throws `NoPlaceError` before it writes anything: the
+ * error reaches the caller unchanged, and the run stays parked on its wait.
  *
  * If the start fails the run goes back to the wait it came from, and the
  * error goes on to whoever asked for the session. **A claim that outlives its

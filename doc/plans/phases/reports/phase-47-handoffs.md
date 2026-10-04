@@ -153,3 +153,73 @@ Checkboxes of the excerpt:
 - A run just picked up no longer blocks another run's step. `staleRuns` still reads `RUNNING` (`picked-up`, `active`), unchanged.
 - `takeover.ts` and the `claim-takeover` handler in `poll.ts` (around line 690) do not pass `{ takeover: true }` yet.
 - Departure for the orchestrator to record: the excerpt says the tests of `driver.ts` change "only where they built a `queued` run". Three tests in its 40u describe built no queued run, but relied on a `picked-up` run holding the project's one session, which ADR-0063 D1 removes. They could not pass unchanged, so their setup now gives the other run a step running. Their expected wakes did not change.
+
+## 47b — A step asks for a place, and a refused step leaves its run waiting for its turn
+
+**Built.** `startStep` in `src/runner/actions.ts` now asks the ledger for a place before a step starts. It calls `askPlace(run.id, { priority, openedAt })` with `priority` true when the ticket carries `priority:high` and `openedAt` the ticket's `createdAt`. When no place is free, the action refuses with the plan's words, for example: `No place is free on scratch-app: run scratch-app#7/1 has a step running. This ticket now waits for its turn, and you are woken when a place is given to it.` The ledger writes that the run waits; no branch is claimed, no comment is posted, the stage is not changed, and no step starts. When `deps.startStep` throws `NoPlaceError` (another run took the place between the ask and the start), the action asks for a place once more, which writes that the run waits, and gives the same refusal. The stage is put back by the existing `catch`. `branchFor` no longer catches a refusal, since `claimBranch` cannot refuse; it now returns the branch name or undefined. `PRIORITY_LABEL = "priority:high"` is exported from `src/daemon/steps.ts`, beside `HELD_LABEL`.
+
+**Files touched.**
+
+- `src/runner/actions.ts` — `askPlace` in `startStep`; the private `noPlace` refusal; the `NoPlaceError` answer in the `catch` around `deps.startStep`; `branchFor` simplified and its doc comment corrected; "The project is busy" is gone.
+- `src/runner/actions.test.ts` — new describe "a step asks for a place on the project (ADR-0063 D2)", with six tests and the helpers `noPlace`, `choreTicket`, `placeWorld`, `stepRunning` and `PLANNING`. No existing test changed.
+- `src/daemon/steps.ts` — `PRIORITY_LABEL` added and exported.
+- `src/daemon/step-session.ts` — doc comment only: a `picked-up` run no longer takes a slot, and a `NoPlaceError` from `claim` reaches the caller unchanged with the run still parked.
+- `doc/plans/phases/reports/phase-47-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **The ask comes after the skip-reason refusal, just before `branchFor`.** The plan says "after `stepBlocked` and before `branchFor`". The skip-reason check sits between the two. Asking after it means a try refused for a missing reason does not make the run wait. It is still before `branchFor`, the departure comment and `setStage`, so a refused try writes nothing else.
+- **The first sentence of the refusal is `NoPlaceError`'s message.** The action builds a `NoPlaceError` for the holder and adds the second sentence. This keeps one place in the code that words "who takes the place" (`whoTakesThePlace` in `runs.ts`, which is private).
+- **In the `NoPlaceError` path, the refusal names the holder from the second `askPlace`.** If that second ask answers ok (the place freed in the meantime), the run does not wait. The action then gives the old answer, `The step did not start: …`, because "this ticket now waits" would not be true.
+- **The approval session (`recordApproval`) does not ask for a place.** The excerpt changes only `startStep`. A `NoPlaceError` there gives the existing "The approval is written down, but the step that writes it into the file did not start: …" refusal.
+- **`placeWorld` in the test file uses a step starter that claims and activates the run as `startStepSession` does.** Without it, a test could not show that a run given the place starts its step and stops waiting, and could not make a place be taken between the ask and the start.
+
+Refactor I would do but did not: export a function from `runs.ts` that words the holder (today `whoTakesThePlace`, private), so `noPlace` does not build an error only for its message. The two test worlds `world` and `stageWatchingWorld` and the new `placeWorld` repeat the same `runnerActions` deps; one builder with options would do.
+
+**Validation evidence.**
+
+Every red/green run was `npx vitest run src/runner/actions.test.ts -t "asks for a place"`.
+
+1. *"refuses a step while another ticket's step runs, naming that run, and writes that the run waits"* — red: `"refused": "The step did not start: No place is free on scratch-app: run scratch-app#7/1 has a step running."` (expected the full plan sentence). Green after `askPlace` and `noPlace` (with `priority: false` at that point).
+2. *"starts a step while another ticket's run waits on its open pull request, with no step running (R1)"* — **passed on arrival** (47a made `claimBranch` a setter; the ask only counts places). Mutation in `actions.ts`: refuse when another run of the project owns a branch → `AssertionError: expected false to be true`. Reverted → green.
+3. *"starts a step when the place is given to this run, and the run no longer waits (R3 clause 3)"* — **passed on arrival** (`askPlace` answers ok for a run given the place). Mutation: refuse when `placeHolders` of the project is not empty → `AssertionError: expected false to be true`. Reverted → green.
+4. *"refuses a step while the place is given to another run, naming that run"* — **passed on arrival** (the words come from `NoPlaceError`). Mutation: always word the holder as "has a step running" → `AssertionError: expected { ok: false, …(1) } to deeply equal { ok: false, …(1) }`. Reverted → green.
+5. *"writes the order of a ticket labelled priority:high as first, when its step is refused"* — red: `expected { priority: false, …(2) } to match object { priority: true, …(1) }`. Green after `PRIORITY_LABEL` was added to `steps.ts` and read in `startStep`.
+6. `endRun`, the limit refusal and the skip-reason refusal: every existing test in `actions.test.ts` is unchanged and green (57 tests).
+- Extra, for the plan's `NoPlaceError` bullet: *"refuses a step whose place was taken between the ask and the start, in the same words, and writes that the run waits"* — red: `"refused": "The step did not start: No place is free on scratch-app: run scratch-app#7/1 has a step running."`. Green after the `NoPlaceError` answer in the `catch`. The test also checks that the stage is put back and the run stays parked.
+
+Mutations were temporary edits of `src/runner/actions.ts`, copied back from a saved copy straight after the run.
+
+*Validation commands* (from `projects/timone`):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/runner/actions.test.ts src/daemon/step-session.test.ts src/daemon/runs.test.ts; echo "exit: $?"
+ Test Files  3 passed (3)
+      Tests  210 passed (210)
+exit: 0
+
+$ grep -rn "The project is busy" src --include=*.ts | grep -vE '^\S+:[0-9]+:\s*(//|\*)'; echo "exit: $? (expected 1)"
+exit: 1 (expected 1)
+```
+
+Checkboxes of the excerpt:
+
+- [x] Cases 1–6 pass, with red runs recorded (cases 2, 3 and 4 passed on arrival; each has a mutation that fails it).
+- [x] The refusal sentence in a test matches the Goal Description's words exactly (`noPlace` in the test file, compared with `toEqual`).
+
+*Test files run at the end* (every test file of code that imports `runner/actions`, `daemon/steps` or `daemon/step-session`, plus all of `src/runner/`, `src/commands/` and `src/daemon/`):
+
+- `src/daemon/` (27 files, 975 tests): all pass.
+- `src/commands/` (11 files) and `src/runner/` except `driver.test.ts`: all pass.
+- **`src/runner/driver.test.ts`: 1 failed, 10 passed.** The failing test is "RunnerDriver — a run refused a step because its project was busy (40u) › wakes it again after a new refusal, once the project is free again": `NoPlaceError: No place is free on scratch-app: the place is given to run scratch-app#12/1.` at `store.activate` of #14, line 611 of the test. It passes with the action as it was at HEAD. Cause: #12's refused try now writes that it waits, so when #13 completes the ledger gives the place to #12 (ADR-0063 D3). The test's next line makes a third run, #14, start a step "meanwhile", which the ledger now refuses, as D3 intends. The test is in `driver.test.ts`, which is not in this slice's files, so it was not changed. 47c rewrites the 40u describe.
+
+**What 47c must know.**
+
+- `driver.test.ts` has one failing test, named above. Its setup can no longer happen under D3. 47c's rewrite of the 40u describe must replace it.
+- A refused `startStep` now leaves the run in `waitingForPlace`, and the ledger gives it the place as soon as one frees. Nothing wakes it yet: the driver still sends "The project is free now." from `projectFreeFor`, and that is 47c's to replace with `PLACE_GIVEN_EVENT` for the one run given the place.
+- Every `startStep` that reaches the ask writes `place` on the run, also when the step starts. So when that step ends (`active → parked`) the run waits again by itself (47a). The runner side must call `leaveTurn` when a wake ends with no step started and no try refused, and `giveBack` when a given place was not used. Nothing calls them yet.
+- `startStepSession` claims only a parked run. For a `picked-up` run, the place check happens in `activate`, after `runtime.start` has already started the session. A `NoPlaceError` there would leave a session running for a run the ledger did not mark active. In practice the runner's wake parks a `picked-up` run first, and the action asks before it starts, so this needs a race. It is not changed here (the excerpt says no change to the flow).
+- `recordApproval` does not ask for a place before its session.

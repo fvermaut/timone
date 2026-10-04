@@ -1719,3 +1719,189 @@ describe("the work branch a step's session is given", () => {
     expect(steps[0]?.input.request.workBranch).toBe(BRANCH);
   });
 });
+
+/** What the runner is told when every place on scratch-app is taken, held as `holder` says. */
+function noPlace(holder: string): string {
+  return (
+    `No place is free on scratch-app: ${holder}. This ticket now waits for its turn, ` +
+    "and you are woken when a place is given to it."
+  );
+}
+
+/** Ticket 12, sorted as a chore, so planning — a step that owns a branch — comes next. */
+function choreTicket(labels: string[] = []): TicketThread {
+  return { ...featureTicket(), labels: ["timone", "triage:chore", ...labels] };
+}
+
+/**
+ * The runner's actions on run `scratch-app#12/1`, parked on the runner's
+ * wait as a wake finds it, with the triage step in its record. `setup`
+ * arranges the project's other runs before the actions are built.
+ *
+ * The step starter does to the ledger what `startStepSession` does: it
+ * claims the parked run, then marks it active once the session has started.
+ * So the ledger refuses a step for want of a place as it does in the daemon.
+ * `beforeClaim` runs between the action's ask and the claim, for a place
+ * taken in between.
+ */
+function placeWorld(
+  ticket: TicketThread,
+  setup: (store: RunStore) => void,
+  beforeClaim: (store: RunStore) => void = () => {},
+) {
+  const root = mkdtempSync(join(tmpdir(), "timone-actions-"));
+  tempDirs.push(root);
+  const store = RunStore.open(join(root, ".timone", "state.json"));
+  const { run: registered } = store.register(PROJECT.name, 12);
+  const run = store.park(registered.id, {
+    waitingOn: "the next thing that happens on this ticket",
+    kind: "runner",
+    resolvableBy: ["triage"],
+  });
+  setup(store);
+  appendEntry(root, PROJECT.name, 12, triageRan(run.id));
+  const calls: string[] = [];
+  const { adapter, state } = fakeForge(ticket, calls);
+  const fake = fakeStarter(calls);
+  const startStep = async (input: StepSessionInput): Promise<StepSession> => {
+    beforeClaim(store);
+    if (store.get(input.runId)?.status === "parked") store.claim(input.runId);
+    const session = await fake.startStep(input);
+    store.activate(input.runId, session.sessionId);
+    return session;
+  };
+  const actions = runnerActions(
+    {
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      timonePin: async () => undefined,
+      project: PROJECT,
+      ticketContext: { isStep: false, isRemediation: false },
+      startStep,
+      running: new RunningSteps(),
+      stepEnded: async () => {},
+      clock: () => "2026-09-27T12:00:00.000Z",
+      log: () => {},
+    },
+    run,
+  );
+  return { store, run, actions, forge: state, steps: fake.steps };
+}
+
+/** Run `ticket` of scratch-app, picked up, with a step of it running. */
+function stepRunning(store: RunStore, ticket: number): Run {
+  const { run } = store.register(PROJECT.name, ticket);
+  return store.activate(run.id, `session-of-${ticket}`);
+}
+
+/** The try to start planning on ticket 12. */
+const PLANNING = {
+  stage: "planning" as const,
+  instructions: "Plan the rename.",
+  reason: "The ticket is sorted as a chore.",
+};
+
+describe("a step asks for a place on the project (ADR-0063 D2)", () => {
+  it("refuses a step while another ticket's step runs, naming that run, and writes that the run waits", async () => {
+    const { actions, store, run, steps, forge } = placeWorld(choreTicket(), (store) => {
+      stepRunning(store, 7);
+    });
+
+    const result = await actions.startStep(PLANNING);
+
+    expect(result).toEqual({ ok: false, refused: noPlace("run scratch-app#7/1 has a step running") });
+    expect(steps).toEqual([]);
+    expect(store.get(run.id)?.branch).toBeUndefined();
+    expect(forge.comments).toEqual([]);
+    const waiting = store.waitingForPlace(PROJECT.name);
+    expect(waiting.map((each) => each.id)).toEqual([run.id]);
+    expect(waiting[0]?.place).toMatchObject({ priority: false, openedAt: "2026-09-27T09:00:00Z" });
+  });
+
+  it("starts a step while another ticket's run waits on its open pull request, with no step running (R1)", async () => {
+    const { actions, store, run, steps } = placeWorld(choreTicket(), (store) => {
+      const other = stepRunning(store, 7);
+      store.claimBranch(other.id, "timone/7-export-to-csv");
+      store.recordPullRequest(other.id, 31);
+      store.park(other.id, {
+        waitingOn: "pull request #31",
+        kind: "runner",
+        resolvableBy: ["delivery"],
+      });
+    });
+
+    const result = await actions.startStep(PLANNING);
+
+    expect(result.ok).toBe(true);
+    expect(steps.map((step) => step.input.label)).toEqual(["scratch-app#12/1 (planning)"]);
+    expect(store.get(run.id)?.branch).toBe(BRANCH);
+    expect(store.placeHolders(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+
+  it("starts a step when the place is given to this run, and the run no longer waits (R3 clause 3)", async () => {
+    const { actions, store, run, steps } = placeWorld(choreTicket(), (store) => {
+      const other = stepRunning(store, 7);
+      store.askPlace("scratch-app#12/1", { priority: false, openedAt: "2026-09-27T09:00:00Z" });
+      store.park(other.id, { waitingOn: "fvermaut's answer", resolvableBy: ["planning"] });
+    });
+    expect(store.get(run.id)?.place?.givenAt).toBeDefined();
+
+    const result = await actions.startStep(PLANNING);
+
+    expect(result.ok).toBe(true);
+    expect(steps).toHaveLength(1);
+    expect(store.waitingForPlace(PROJECT.name)).toEqual([]);
+    expect(store.get(run.id)?.place?.givenAt).toBeUndefined();
+    expect(store.placeHolders(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+
+  it("refuses a step while the place is given to another run, naming that run", async () => {
+    const { actions, store, run, steps } = placeWorld(choreTicket(), (store) => {
+      const running = stepRunning(store, 8);
+      const { run: given } = store.register(PROJECT.name, 7);
+      store.askPlace(given.id, { priority: false, openedAt: "2026-09-20T09:00:00Z" });
+      store.park(running.id, { waitingOn: "fvermaut's answer", resolvableBy: ["planning"] });
+    });
+
+    const result = await actions.startStep(PLANNING);
+
+    expect(result).toEqual({ ok: false, refused: noPlace("the place is given to run scratch-app#7/1") });
+    expect(steps).toEqual([]);
+    expect(store.get(run.id)?.branch).toBeUndefined();
+    expect(store.waitingForPlace(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+
+  it("writes the order of a ticket labelled priority:high as first, when its step is refused", async () => {
+    const { actions, store, run } = placeWorld(choreTicket(["priority:high"]), (store) => {
+      stepRunning(store, 7);
+    });
+
+    await actions.startStep(PLANNING);
+
+    expect(store.get(run.id)?.place).toMatchObject({
+      priority: true,
+      openedAt: "2026-09-27T09:00:00Z",
+    });
+  });
+
+  it("refuses a step whose place was taken between the ask and the start, in the same words, and writes that the run waits", async () => {
+    const { actions, store, run, steps } = placeWorld(
+      choreTicket(),
+      () => {},
+      (store) => {
+        if (store.get("scratch-app#7/1") === undefined) stepRunning(store, 7);
+      },
+    );
+    store.setStage(run.id, "triage");
+
+    const result = await actions.startStep(PLANNING);
+
+    expect(result).toEqual({ ok: false, refused: noPlace("run scratch-app#7/1 has a step running") });
+    expect(steps).toEqual([]);
+    expect(store.get(run.id)?.stage).toBe("triage");
+    expect(store.get(run.id)?.status).toBe("parked");
+    expect(store.waitingForPlace(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+});
