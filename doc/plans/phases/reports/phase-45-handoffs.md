@@ -348,3 +348,60 @@ The check paragraph (with `<project>` and `<ticket>` filled in by the prompt):
 > **Before you commit it, run `node dist/cli.js breakdown <project> <ticket>`.** It prints the order of the pieces, or says what is wrong with the list. Write the `**Order:**` line with exactly what it prints. If the line is missing or says another order, the command prints the line to write: write that line, and run the command again. Fix the list until the command prints the order and ends without a problem.
 
 The sentence added to the closing comment: "Say the order of the pieces in the same words as the `**Order:**` line."
+
+## 45e — The planning skill and `process.md` say the same
+
+**Built.** The planning skill and `process.md` now say what the breakdown prompt says since 45d. Under each piece, a `Needs:` line names the pieces above it that this piece needs, or says `nothing`. A piece with no `Needs:` line needs the piece just above it. Under the list, the `**Order:**` line says the order in plain words. That line is what `node dist/cli.js breakdown <name> <ticket>` prints, and the list is not committed until that command ends without a problem. Each step ticket is blocked by exactly the steps its piece's `Needs:` line names. When two ways of cutting the work are equally good, the one with fewer pieces waiting for each other and fewer pieces changing the same files is chosen, and the rule that each piece works end to end (PRD-01.R25) comes first. The skill's shape block is now the same list as the prompt's.
+
+**Files touched.**
+
+- `.claude/skills/timone-plan/SKILL.md` — in *The breakdown — the one thing a human approves here*: one marked amendment (`✏ 2026-10-04 ([PRD-07.R10, R11](…))`) after "every piece costs a review."; three new lines in the shape block (two `Needs:` lines and the `**Order:**` line); one marked sentence at the end of the paragraph "Write the dependencies down…".
+- `process.md` — stage 5, *The breakdown, and what it gates*: one marked amendment (`✏ 2026-10-04 ([PRD-07.R10, R11](…))`).
+- `STATUS.md` — item **1e** in "Waiting on you", after **1d**. "Last updated" was already 2026-10-04, so it is unchanged.
+- `doc/plans/phases/reports/phase-45-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **The skill's amendment sits inside the paragraph, right after "…every piece costs a review."** The plan puts it after the "Order the pieces…" sentence. That sentence goes on to "prefer few real pieces…" in the same sentence, so the amendment starts after the full sentence. The paragraph then goes on with "It lives at…", which ends with the colon that brings in the shape block. The amendment ends with "The shape below shows the `Needs:` lines and the `**Order:**` line." That sentence is the dated record of the change to the shape block. A `✏` marker inside the block would make it differ from the prompt's list.
+- **The skill's amendment also says that a list whose `Needs:` lines cannot be read opens no step tickets.** This is a fact from 45b. It tells the writer why a list the command refuses must not be committed.
+- **The `process.md` amendment sits after "`TERMINAL` is untouched and keeps its own separate job.", not right after "…closes when every one of its children has."** The orchestrator suggested the second place. But the next sentence there starts "This retired settledness outright", and "This" points back to the ADR-0040 sentences. A new sentence in between would make "This" point to the wrong thing. The place I chose is still inside *The breakdown, and what it gates*, just before "Two shapes of work have no breakdown…".
+- **`process.md` names the command.** The plan text for `process.md` does not name it, but its validation greps for it in both files. Naming it satisfies both.
+- **Both markers write `PRD-07.R10, R11`**, so the grep for `PRD-07.R10` matches each file literally. The short marker on the "Write the dependencies down" sentence names R10 only, since it is about the `Needs:` lines alone.
+- **Links are relative to each file**: `../../../doc/specs/prd/…` from the skill, `doc/specs/prd/…` from `process.md`. The PRD-01.R25 link uses the anchor that `prd-07…criteria.md` already uses.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+```
+$ grep -n "Needs:" .claude/skills/timone-plan/SKILL.md
+78:  (the amendment paragraph; matches "`Needs:` line" four times)
+86:   - Needs: nothing.
+88:   - Needs: piece 1.
+99:  (…This is the single thing most likely to go wrong with the new shape. ✏ 2026-10-04 (…): the `Needs:` line under each piece is where they are written.)
+
+$ grep -n "dist/cli.js breakdown" .claude/skills/timone-plan/SKILL.md process.md
+.claude/skills/timone-plan/SKILL.md:78:…
+process.md:42:…
+
+$ grep -n "PRD-07.R10" process.md .claude/skills/timone-plan/SKILL.md
+.claude/skills/timone-plan/SKILL.md:78:…
+.claude/skills/timone-plan/SKILL.md:99:…
+process.md:42:…
+```
+
+(Lines 78 and 99 of the skill and line 42 of `process.md` are single long paragraphs, so they are cut short above.)
+
+Extra checks:
+
+- The shape block in the skill was compared line by line with the block in `breakdownPrompt` (`src/daemon/prompts.ts`), with the quotes and commas taken off the prompt's lines: `diff` printed nothing.
+- `git diff --word-diff=porcelain` on the three changed files shows 0 removed words. Every change is an addition.
+
+- [x] The skill's shape block and 45d's prompt example are the same list (the `diff` above printed nothing).
+- [x] The R11 sentence in both files says the end-to-end rule comes first. Skill: "But each piece must still work end to end on its own ([PRD-01.R25](…)), and that comes first." `process.md`: "The rule that each piece works end to end ([PRD-01.R25](…)) comes first."
+- [x] Each change carries a dated `✏` marker; no unmarked rewrite of existing text. Three markers, all `✏ 2026-10-04`: two in the skill, one in `process.md`. The three new lines of the shape block are covered by the skill's amendment, which names them. 0 words removed. `STATUS.md` gains a new item and changes no existing text.
+- [ ] The whole test suite passes (phase close). **Not run here.** The person running the build asked that the whole suite run once, at the end of the phase. The orchestrator runs it then. This slice changes no code and no test.
+
+**What delivery must know.**
+
+- The `process.md` amendment is not where the orchestrator suggested. It sits a few sentences later, so that "This retired settledness outright" still points to the ADR-0040 sentences (see the decisions above).
+- The skill now says the `**Order:**` line is written with what the command prints. The prompt says the same thing in its check paragraph. The two texts use different words, but they give the same rule.
+- `STATUS.md` item 1e says the piece has no pull request yet. Delivery should update that item when it opens the pull request.

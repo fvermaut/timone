@@ -26,6 +26,10 @@
 
 **What I need from you:** run the replay, then review and merge #205, and answer its question there.
 
+**1e. Piece 6 of #197 ([#204](https://github.com/fvermaut/timone/issues/204)) is built on the branch `timone/204-6-the-list-of-pieces-shows-what-is-built`.** Each piece of a list of pieces now says which pieces it needs. The list shows its order in plain words, for example "1, then 2 and 3 together, then 4." The step tickets wait for each other exactly as the list says. A check refuses a list whose written order is wrong. The work is not checked or reviewed yet, and it has no pull request yet.
+
+**What I need from you:** nothing yet. The pull request comes when the check and the reviews are done.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
