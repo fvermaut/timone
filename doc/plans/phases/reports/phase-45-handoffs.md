@@ -166,3 +166,102 @@ $ npm run build && npx vitest run
 - The initiative's map now has an `Order: <words>` line between the list of steps and the line `The list was approved in …`. The words come from `orderOf(...).words`, the same function 45a wrote.
 - When the order is unclear, `openStepTickets` returns its sentence before `ensureLabel`, so a run whose list has a bad `Needs:` line has opened nothing at all.
 - A risk the plan does not cover: when GitHub reports more relations than it hands over (`dependenciesIncomplete: true`), a relation that exists but was not handed over looks missing and is written again. If GitHub refuses a relation that already exists, the run reports `could not open the step tickets: …` instead of finishing. Reading `dependenciesIncomplete` here, or making `blockStep` accept a relation that already exists, would close the gap. Neither is in this slice.
+
+## 45c — A command that prints the order and refuses a list that says it wrongly
+
+**Built.** A new pure export `checkOrderLine(text)` in `breakdown.ts` reads a list of pieces, works out its order with `orderOf`, finds the `**Order:**` line and compares the two. It returns `{ kind: "ok", words }` when they agree, or `{ kind: "problem", problem }` with one plain sentence: the file cannot be read, a `Needs:` line is unclear, there is no `**Order:**` line, or the line says another order. A new command `timone breakdown <project> <ticket> [--manifest timone.yaml]` reads the ticket's list from the project's working tree and prints the order in words (exit 0), or prints the problem on stderr (exit 1). It also prints a sentence and exits 1 for an unknown project or a ticket with no list.
+
+**Files touched.**
+
+- `src/daemon/breakdown.ts` — `ORDER_LINE` pattern, exported type `OrderLineCheck`, exported `checkOrderLine`, private `withoutFinalStop`. Nothing that was there before changed.
+- `src/daemon/breakdown.test.ts` — one new `describe` with 6 cases (plan cases (1)–(5), plus one for a file that cannot be read). The import list gains `checkOrderLine`. No existing test changed.
+- `src/commands/breakdown.ts` — new: `registerBreakdownCommand`.
+- `src/commands/breakdown.test.ts` — new: 4 cases (plan cases (6), (7), (8) for an unknown project, (8) for a ticket with no list).
+- `src/cli.ts` — imports and registers the command right after `registerNumberCommand`.
+- `doc/plans/phases/reports/phase-45-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **The four problem sentences**, exactly (`<words>` is `orderOf`'s words, which end with a full stop):
+  - cannot be read: `The list of pieces cannot be read: <parser's reason>.`
+  - unclear: `The list of pieces does not say clearly what each piece needs: <orderOf's reason>.` (the same phrase 45b uses on the ticket)
+  - no line: `The list of pieces has no **Order:** line. Add this line under the list: **Order:** <words>`
+  - another order: `The **Order:** line says "<what the line says>", but the Needs: lines say "<words>". Change the line to: **Order:** <words>`
+  Each sentence ends with the exact line to write, so the session can copy it.
+- **Which line counts.** The first line in the file that starts (after spaces) with `Order:`, bold optional (`**Order:**` or `__Order:__`). Its text is taken with the spaces at the ends removed. Order of checks: the file is read, then the `Needs:` lines, then the `Order:` line. So a list with both an unclear `Needs:` line and no `Order:` line reports the `Needs:` line.
+- **Comparison.** Both sides lose the spaces at their ends and one final full stop, then must be equal letter for letter. Nothing else is forgiven (letter case, inner spaces, "and" against a comma).
+- **An extra case for "cannot be read".** The plan lists the problem but no numbered case covers it, and strict TDD does not allow untested code.
+- **The ticket argument is read with `Number(ticket)`.** A ticket that is not a number gives the path `ticket-NaN.md`, which is reported as "no list of pieces". The plan does not ask for a separate check, so I did not add one.
+- **The "no list" sentence**: `Ticket <ticket> of <project> has no list of pieces: there is no file <breakdownPath> in <project path from the manifest>.`
+- **A manifest that cannot be loaded** prints the loader's message and exits 1, copied from `number.ts`. Not tested, as in `number.test.ts`.
+- **The command test needs no git.** The command reads the working tree only, so the test writes a plain folder under `projects/app`. A git clone, as `number.test.ts` makes, would add nothing.
+
+Refactors I would do but did not, because they are outside the slice: the unknown-project sentence is now written in two commands (`number.ts`, `breakdown.ts`). The same is true of the "load the manifest or print the error" block. A small shared helper in `src/commands/` would remove both copies.
+
+**Validation evidence.**
+
+Each case was written alone and run with `npx vitest run <file> -t "<name>"`.
+
+1. *"accepts an Order: line that says what the Needs: lines say"* — red: `TypeError: (0 , checkOrderLine) is not a function`. Green after a `checkOrderLine` that parses, calls `orderOf` and returns the words.
+2. *"accepts the committed list of ticket 197, whose Order: line was written by hand"* — **passed on arrival** (case 1's code returns the words and did not yet compare the line). To show it is not vacuous, I changed the result to `words: ""`. It failed: `expected { kind: 'ok', words: '' } to deeply equal { kind: 'ok', …(1) }`. I reverted it, and it was green. After case 4 added the comparison, it still passed, which shows the hand-written line in `ticket-197.md` matches.
+3. *"gives the exact Order: line to add when the list has none"* — red: `expected 'ok' to be 'problem'`. Green after looking for the line with `ORDER_LINE`.
+4. *"quotes both orders when the Order: line says another one"* — red: `expected 'ok' to be 'problem'`. Green after the comparison, with `withoutFinalStop`.
+5. *"gives the reason when a Needs: line cannot be read"* — red: `expected '' to contain 'piece 2\'s Needs: line "piece 3." nam…'`. Green after the unclear sentence.
+   Extra: *"gives the reason when the file cannot be read as a list of pieces"* — red: `expected '' to contain 'no \`Status:\` line — a breakdown says …'`. Green after the "cannot be read" sentence.
+6. *"prints the order in words, and exits 0, when the Order: line says it"* — red: `Cannot find module './breakdown.js'`. Green after the command's good-file path.
+7. *"prints the problem on stderr, nothing on stdout, and exits 1, when the Order: line says another order"* — red: `expected { out: [], errors: [], …(1) } to deeply equal { out: [], …(2) }` (nothing printed). Green after printing the problem and setting the exit code to 1.
+8. *"names the projects it knows, and exits 1, for a project it does not know"* — red: the same "nothing printed" diff. Green after the unknown-project sentence.
+   *"says there is no list, and exits 1, for a ticket that has none"* — red: the same "nothing printed" diff. Green after the "no list" sentence.
+
+Validation commands:
+
+```
+$ npx vitest run src/daemon/breakdown.test.ts src/commands/breakdown.test.ts
+ Test Files  2 passed (2)
+      Tests  41 passed (41)
+
+$ npm run build
+> timone@0.1.0 build
+> tsc
+(exit 0)
+
+$ cd /workspace/timone
+$ node projects/timone/dist/cli.js breakdown timone 197 --manifest timone.yaml; echo "exit: $?"
+1 and 2 together, then 3, then 4 and 5 together. 6 needs none of the others.
+exit: 0
+
+$ node projects/timone/dist/cli.js breakdown timone 103 --manifest timone.yaml; echo "exit: $?"
+The list of pieces has no **Order:** line. Add this line under the list: **Order:** 1, then 2.
+exit: 1
+
+$ node projects/timone/dist/cli.js breakdown nosuchproject 1 --manifest timone.yaml; echo "exit: $?"
+I don't know a project called "nosuchproject"; the projects I know are: scratch-app, ivtrends, timone.
+exit: 1
+```
+
+- [x] Cases (1)–(8) pass. Each was seen failing first, except case (2), which passed on arrival and was shown to fail under a change to the code (recorded above).
+- [x] The first command prints `1 and 2 together, then 3, then 4 and 5 together. 6 needs none of the others.`
+- [x] The second command's sentence gives the exact line to add: `**Order:** 1, then 2.`
+
+Tests run at slice end, after `npm run build`:
+
+```
+$ npx vitest run src/daemon/breakdown.test.ts src/commands/breakdown.test.ts
+ Test Files  2 passed (2)
+      Tests  41 passed (41)
+$ npx vitest run src/cli.test.ts
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+$ npm run type-check
+(no output, exit 0)
+```
+
+The whole suite was not run, at the request of the person running the build. The orchestrator runs it once at the end of the phase.
+
+**What 45d must know.**
+
+- Exports from `src/daemon/breakdown.ts`: `checkOrderLine(text: string): OrderLineCheck`, with `OrderLineCheck = { kind: "ok"; words: string } | { kind: "problem"; problem: string }`.
+- The command a session runs, from the timone root: `node dist/cli.js breakdown <project> <ticket>` (`--manifest` defaults to `timone.yaml`). Exit 0 and one line on stdout, the order in words. Exit 1 and one sentence on stderr otherwise.
+- The sentences a prompt or a test can match on: a good list prints only the words. A missing line prints `The list of pieces has no **Order:** line. Add this line under the list: **Order:** <words>`. A wrong line prints `The **Order:** line says "…", but the Needs: lines say "…". Change the line to: **Order:** <words>`. So in both cases the text after the last `**Order:** ` is the line to write. An unclear `Needs:` line starts `The list of pieces does not say clearly what each piece needs: `. An unreadable file starts `The list of pieces cannot be read: `. No list: `Ticket <n> of <project> has no list of pieces: …`.
+- The command reads the **working tree** of the project's checkout (`fromWorkingTree`), so it checks what the session has just written, committed or not.
+- The line is found anywhere in the file, the first one only. A list with two `Order:` lines is judged by the first.

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { Command } from "commander";
 
+import { registerBreakdownCommand } from "./commands/breakdown.js";
 import { registerCancelCommand } from "./commands/cancel.js";
 import { registerDaemonCommand } from "./commands/daemon.js";
 import { registerGuardrailsCommand } from "./commands/guardrails.js";
@@ -91,6 +92,7 @@ export function buildProgram(): Command {
   registerCancelCommand(program);
   registerStageCommand(program);
   registerNumberCommand(program);
+  registerBreakdownCommand(program);
 
   return program;
 }

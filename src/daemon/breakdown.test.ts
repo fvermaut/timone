@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  checkOrderLine,
   isReproposal,
   orderOf,
   parseBreakdown,
@@ -631,5 +632,103 @@ describe("every committed list reads as it did before the Needs: line", () => {
         },
       ],
     });
+  });
+});
+
+describe("the Order: line of a list of pieces is checked against its Needs: lines", () => {
+  /**
+   * PRD-07 R10's own example: 2 and 3 need 1, and 4 needs 2 and 3. `order`
+   * is the `**Order:**` line placed under the list, or no line when absent.
+   */
+  function r10(order?: string): string {
+    return [
+      "# Breakdown",
+      "",
+      "**Status:** Awaiting approval",
+      "",
+      "1. **One** — the first piece.",
+      "   - Needs: nothing.",
+      "2. **Two** — the second piece.",
+      "   - Needs: piece 1.",
+      "3. **Three** — the third piece.",
+      "   - Needs: piece 1.",
+      "4. **Four** — the fourth piece.",
+      "   - Needs: pieces 2 and 3.",
+      "",
+      ...(order === undefined ? [] : [order, ""]),
+    ].join("\n");
+  }
+
+  it("accepts an Order: line that says what the Needs: lines say", () => {
+    expect(checkOrderLine(r10("**Order:** 1, then 2 and 3 together, then 4."))).toEqual({
+      kind: "ok",
+      words: "1, then 2 and 3 together, then 4.",
+    });
+  });
+
+  it("accepts the committed list of ticket 197, whose Order: line was written by hand", () => {
+    // Its line was written by a person before this code existed, so it is an
+    // answer the code did not choose.
+    const text = readFileSync(
+      join(import.meta.dirname, "..", "..", "doc", "plans", "breakdowns", "ticket-197.md"),
+      "utf8",
+    );
+
+    expect(checkOrderLine(text)).toEqual({
+      kind: "ok",
+      words:
+        "1 and 2 together, then 3, then 4 and 5 together. " +
+        "6 needs none of the others.",
+    });
+  });
+
+  it("gives the exact Order: line to add when the list has none", () => {
+    const check = checkOrderLine(r10());
+
+    expect(check.kind).toBe("problem");
+    expect(check.kind === "problem" ? check.problem : "").toContain(
+      "**Order:** 1, then 2 and 3 together, then 4.",
+    );
+  });
+
+  it("quotes both orders when the Order: line says another one", () => {
+    const check = checkOrderLine(r10("**Order:** 1, then 2, then 3, then 4."));
+
+    expect(check.kind).toBe("problem");
+    const problem = check.kind === "problem" ? check.problem : "";
+    expect(problem).toContain('"1, then 2, then 3, then 4."');
+    expect(problem).toContain('"1, then 2 and 3 together, then 4."');
+  });
+
+  it("gives the reason when a Needs: line cannot be read", () => {
+    const text = [
+      "# Breakdown",
+      "",
+      "**Status:** Awaiting approval",
+      "",
+      "1. **One** — the first piece.",
+      "2. **Two** — the second piece.",
+      "   - Needs: piece 3.",
+      "3. **Three** — the third piece.",
+      "",
+      "**Order:** 1, then 2, then 3.",
+      "",
+    ].join("\n");
+
+    const check = checkOrderLine(text);
+
+    expect(check.kind).toBe("problem");
+    expect(check.kind === "problem" ? check.problem : "").toContain(
+      'piece 2\'s Needs: line "piece 3." names piece 3, which comes after it',
+    );
+  });
+
+  it("gives the reason when the file cannot be read as a list of pieces", () => {
+    const check = checkOrderLine("# Breakdown\n\n1. **One** — the first piece.\n");
+
+    expect(check.kind).toBe("problem");
+    expect(check.kind === "problem" ? check.problem : "").toContain(
+      "no `Status:` line — a breakdown says whether it is approved",
+    );
   });
 });

@@ -548,6 +548,72 @@ function numbersIn(sentence: string): number[] {
   return [...new Set(numbers)].sort((a, b) => a - b);
 }
 
+/** `**Order:** <words>`, anywhere in the file, the bold optional. */
+const ORDER_LINE = /^\s*(?:\*\*|__)?Order:(?:\*\*|__)?\s*(.*?)\s*$/m;
+
+/** What {@link checkOrderLine} found. */
+export type OrderLineCheck =
+  | { kind: "ok"; words: string }
+  | { kind: "problem"; problem: string };
+
+/**
+ * Check a list's `**Order:**` line against what its `Needs:` lines say. Pure.
+ *
+ * The person who writes a list also writes its order in words, by hand, and
+ * nothing else compares the two: a reader trusts the line, the step tickets
+ * follow the `Needs:` lines. So the session that writes a list runs this
+ * before it commits, and a line that disagrees is refused rather than shown.
+ *
+ * Each problem is one plain sentence that says what to change. Comparing
+ * ignores the spaces at the ends of the line and one final full stop, which
+ * a person may leave off without saying a different order.
+ */
+export function checkOrderLine(text: string): OrderLineCheck {
+  const parsed = parseBreakdown(text);
+  if ("kind" in parsed) {
+    return {
+      kind: "problem",
+      problem: `The list of pieces cannot be read: ${parsed.reason}.`,
+    };
+  }
+  const order = orderOf(parsed);
+  if (order.kind === "unclear") {
+    return {
+      kind: "problem",
+      problem: `The list of pieces does not say clearly what each piece needs: ${order.reason}.`,
+    };
+  }
+
+  const line = ORDER_LINE.exec(text);
+  if (line === null) {
+    return {
+      kind: "problem",
+      problem:
+        "The list of pieces has no **Order:** line. " +
+        `Add this line under the list: **Order:** ${order.words}`,
+    };
+  }
+
+  const says = line[1] ?? "";
+  if (withoutFinalStop(says) !== withoutFinalStop(order.words)) {
+    return {
+      kind: "problem",
+      problem:
+        `The **Order:** line says "${says}", but the Needs: lines say ` +
+        `"${order.words}". Change the line to: **Order:** ${order.words}`,
+    };
+  }
+  return { kind: "ok", words: order.words };
+}
+
+/**
+ * An order without the spaces at its ends and one final full stop, so that
+ * "1, then 2" and "1, then 2. " count as the same order.
+ */
+function withoutFinalStop(order: string): string {
+  return order.trim().replace(/\.$/, "").trimEnd();
+}
+
 /**
  * Whether this breakdown has gained a chunk since the human read it
  * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
