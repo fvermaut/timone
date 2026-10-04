@@ -30,6 +30,10 @@
 
 **What I need from you:** run the replay, then review and merge #208, and answer its two questions there.
 
+**1f. Tickets the machine opens now name you ([#207](https://github.com/fvermaut/timone/issues/207), built as [#210](https://github.com/fvermaut/timone/issues/210)), on the branch `timone/210-1-every-ticket-the-machine-opens-names-t`. Its pull request is not open yet.** Each ticket the machine opens for a piece ends with a line that names the project's people with `@`, so GitHub tells them about it and every comment on it. An issue filed on Timone names Timone's people, never a client's. The charting instructions say to add the same line. Nobody is assigned. The check passed all of this, and found no fault. Still owed, and only you can run them: the check that GitHub really sends you the notification, on scratch-app; and the replay against the real model (`npm run --silent replay`, from a logged-in terminal). The report is [phase-46-verification.md](doc/plans/phases/reports/phase-46-verification.md). This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** run the replay on that branch when you can.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
