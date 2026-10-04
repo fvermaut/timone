@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-03.
+**Last updated:** 2026-10-04.
 
 ---
 
@@ -21,6 +21,10 @@
 **1c. A run can no longer push to `main` ([#85](https://github.com/fvermaut/timone/issues/85)): pull request [#196](https://github.com/fvermaut/timone/pull/196) is open for your review, from the branch `timone/85-a-boxed-run-pushed-status-md-straight-to`.** A run's push to anything but its own work branch is refused, and so are GitHub calls that merge or write another branch. The review of the code style found 3 things, all repeated code or naming. The review against the requirements found 2: a step with no branch is not warned about a status file on a branch, and the `STATUS.md` rule changes, which needs your yes. Before you merge: the replay against the real model was not run (`npm run --silent replay`, from a logged-in terminal), and a run that sets out to get round the guard can still push to `main`. The pull request asks nine questions; the first is whether to block `main` on GitHub itself. This status file is on that branch and reaches `main` with the pull request.
 
 **What I need from you:** review and merge #196 when you are ready, and answer its questions there.
+
+**1d. Two tickets of one project no longer take the same file number ([#199](https://github.com/fvermaut/timone/issues/199)), on the branch `timone/199-1-numbered-files-never-take-the-same-num`; no pull request yet.** A session now gets the number of a new phase file, ADR, triage record or PRD from `node dist/cli.js number <project> <kind>`, which reserves it on the project's remote. The check passed: six copies asking at once got six different numbers, and the work was checked again for what it could break. One older check could not run here: it needs the replay against the real model (`npm run --silent replay`, from a logged-in terminal). A watched run is owed too, and it is the only way to learn whether GitHub accepts the reservation from a box. The [check report](doc/plans/phases/reports/phase-44-verification.md) has the detail. This status file is on that branch.
+
+**What I need from you:** nothing yet; the pull request will ask.
 
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
