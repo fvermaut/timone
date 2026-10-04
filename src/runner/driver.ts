@@ -8,7 +8,7 @@ import type {
   TicketThread,
 } from "../adapters/ticketing.js";
 import { stageLabel, type PipelineStage } from "../daemon/pipeline.js";
-import type { Run, RunStatus, RunStore } from "../daemon/runs.js";
+import { PLACES_PER_PROJECT, type Run, type RunStatus, type RunStore } from "../daemon/runs.js";
 import { HELD_LABEL } from "../daemon/steps.js";
 import type { TimonePin } from "../daemon/session.js";
 import type {
@@ -268,7 +268,7 @@ export const CHECK_EVENT = "A 15-minute check on the running step.";
 
 /**
  * What the runner is told when the project it was refused a step on is free
- * again (40u): the run that held it ended, or waits with no branch.
+ * again (40u): no run takes its place any more.
  */
 export const PROJECT_FREE_EVENT = "The project is free now.";
 
@@ -541,10 +541,9 @@ export class RunnerDriver {
    *
    * **Found by the holder's run id, not by the refusal's words.** The
    * runner's actions keep the refusal in the record, as a sentence, and
-   * nowhere else. The ledger refuses a second session, a second work branch,
-   * and a branch claimed on a project another run holds; each of the three
-   * names the run that holds the project, and no other refusal names another
-   * run. A run id is the ledger's own and stays the same when a sentence is
+   * nowhere else. ✏ 2026-10-04: the ledger refuses a step when no place is
+   * free (ADR-0063), and the refusal names the run that takes the place; no
+   * other refusal names another run. A run id is the ledger's own and stays the same when a sentence is
    * reworded. A refusal that stopped naming the holder would also leave the
    * runner not knowing what it waits for.
    */
@@ -566,13 +565,17 @@ export class RunnerDriver {
   }
 
   /**
-   * Whether no run but `run` holds its project now: whatever held it is
-   * done, cancelled, failed or waiting with no branch. Read from the ledger's
-   * file, as every guard on the project is.
+   * Whether a place on its project is free for `run` now: fewer runs than
+   * {@link PLACES_PER_PROJECT} take one, or `run` is one of them. Read from
+   * the ledger's file, as every guard on the project is.
+   *
+   * ✏ 2026-10-04: reads the runs that take a place
+   * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+   * D1). A run parked on a branch no longer holds the project.
    */
   private projectFreeFor(run: Run): boolean {
-    const holder = this.deps.store.occupyingRun(run.project);
-    return holder === undefined || holder.id === run.id;
+    const holders = this.deps.store.placeHolders(run.project);
+    return holders.length < PLACES_PER_PROJECT || holders.some((holder) => holder.id === run.id);
   }
 
   /**

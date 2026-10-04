@@ -507,9 +507,12 @@ describe("RunnerDriver — a run refused a step because its project was busy (40
   };
 
   /**
-   * #12's run waiting for the runner with no branch, and #13's run just
-   * picked up behind it, so #13 holds the project's one session. The driver
-   * over them, whose steps claim the run as `startStepSession` does.
+   * #12's run waiting for the runner with no branch, and #13's run picked up
+   * beside it with a step running, so #13 takes the project's one place. The
+   * driver over them, whose steps claim the run as `startStepSession` does.
+   *
+   * ✏ 2026-10-04: #13's step now runs. A run just picked up takes no place
+   * any more (ADR-0063 D1), so it would not keep #12 from a step.
    */
   function pickedUpTogether(): {
     store: RunStore;
@@ -526,7 +529,7 @@ describe("RunnerDriver — a run refused a step because its project was busy (40
       now: () => "2026-09-29T10:00:00Z",
     });
     const first = store.park(store.register("scratch-app", 12).run.id, RUNNER_WAIT);
-    const second = store.register("scratch-app", 13).run;
+    const second = store.activate(store.register("scratch-app", 13).run.id, "step-session-9");
     const adapter = twoChores();
     const { sessions, wakes } = fakeWakes();
     const driver = new RunnerDriver({
@@ -558,7 +561,6 @@ describe("RunnerDriver — a run refused a step because its project was busy (40
     await driver.drain();
     expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([]);
 
-    store.activate(second.id, "step-session-9");
     store.complete(second.id);
     for (let cycle = 0; cycle < 3; cycle += 1) {
       await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
@@ -572,7 +574,7 @@ describe("RunnerDriver — a run refused a step because its project was busy (40
 
   it("wakes it once, with the event, when the run that held the project parks without a branch", async () => {
     const { store, first, second, driver, adapter, wakes } = pickedUpTogether();
-    // Preparing the work claims a branch, and #13's run holds the project.
+    // #13's step takes the project's one place, so #12's step is refused.
     const refused = await runnerActions(driver.actionsFor(first), first).startStep({
       stage: "planning",
       instructions: "Write the plan.",
@@ -601,13 +603,12 @@ describe("RunnerDriver — a run refused a step because its project was busy (40
         reason: "A new ticket starts with sorting.",
       });
     expect((await tryToSort()).ok).toBe(false);
-    store.activate(second.id, "step-session-9");
     store.complete(second.id);
     await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
     await driver.drain();
 
     // Woken, the runner tries again; a third ticket's run took the project meanwhile.
-    const third = store.register("scratch-app", 14).run;
+    const third = store.activate(store.register("scratch-app", 14).run.id, "step-session-14");
     expect((await tryToSort()).ok).toBe(false);
     await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
     await driver.drain();
@@ -631,7 +632,6 @@ describe("RunnerDriver — a run refused a step because its project was busy (40
     });
     expect(refused.ok).toBe(false);
 
-    store.activate(second.id, "step-session-9");
     store.complete(second.id);
     await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, cycleOver(adapter));
     await driver.drain();

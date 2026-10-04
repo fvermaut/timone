@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Holder } from "./holder.js";
-import { RunStore, runId, type Run } from "./runs.js";
+import { NoPlaceError, RunStore, runId, type Run } from "./runs.js";
 
 /**
  * A slice of the ledger the daemon was actually running on 2026-08-14, copied
@@ -64,18 +64,19 @@ describe("register", () => {
     expect(run.status).toBe("picked-up");
     expect(run.project).toBe("scratch-app");
     expect(run.ticket).toBe(7);
-    expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
+    // A run just picked up takes no place: no step of it runs (ADR-0063 D1).
+    expect(store.placeHolders("scratch-app")).toEqual([]);
   });
 
-  it("queues a pickup on a busy project", () => {
+  it("picks up a second ticket of a project beside the first, rather than queueing it", () => {
     const store = newStore();
     store.register("scratch-app", 7);
     const { run } = store.register("scratch-app", 8);
 
-    expect(run.status).toBe("queued");
-    expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
-    expect(store.queue("scratch-app").map((r) => r.ticket)).toEqual([8]);
-    expect(store.queuePosition(run.id)).toBe(1);
+    // A run waits for a place only once its runner tries a step (ADR-0063 D2).
+    expect(run.status).toBe("picked-up");
+    expect(store.placeHolders("scratch-app")).toEqual([]);
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
   });
 
   it("does not let another project's run make a project busy", () => {
@@ -186,10 +187,9 @@ describe("two chunks of one ticket", () => {
     expect(again.created).toBe(false);
     expect(again.run.id).toBe("scratch-app#7/1");
     expect(store.all()).toHaveLength(1);
-    expect(store.occupyingRun("scratch-app")?.id).toBe("scratch-app#7/1");
   });
 
-  it("queues a ticket's next chunk behind another ticket's work", () => {
+  it("picks up a ticket's next chunk while another ticket's run owns a branch", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
     store.activate(first.run.id, "session-1");
@@ -200,54 +200,57 @@ describe("two chunks of one ticket", () => {
 
     const second = store.register("scratch-app", 7);
 
-    expect(second.run.status).toBe("queued");
-    expect(store.queue("scratch-app").map((r) => r.id)).toEqual([
-      "scratch-app#7/2",
-    ]);
+    expect(second.run.id).toBe("scratch-app#7/2");
+    expect(second.run.status).toBe("picked-up");
   });
 });
 
-describe("the one-active-run invariant", () => {
-  it("refuses to activate a run while another occupies the project", () => {
+// ✏ 2026-10-04: the three describes below asserted PRD-02.R10's rule — one
+// session per project, and a parked run on a branch holding its project. They
+// now assert ADR-0063's place rule (PRD-07 R1, R2, R3): a run takes a place
+// only while a step of it runs or a place is given to it.
+describe("one step at a time on a project with one place", () => {
+  it("refuses to activate a run while another run's step takes the place", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
     const second = store.register("scratch-app", 8);
     store.activate(first.run.id, "session-1");
 
+    expect(() => store.activate(second.run.id, "session-2")).toThrow(NoPlaceError);
     expect(() => store.activate(second.run.id, "session-2")).toThrow(
-      /scratch-app/,
+      "No place is free on scratch-app: run scratch-app#7/1 has a step running.",
     );
   });
 
   it("refuses transitions the lifecycle does not allow", () => {
-    // Re-pointed when `picked-up → parked` became legal, so that a run
-    // entering at a conversation stage can wait on a human without first
-    // pretending a session is attached to it. The lifecycle must still refuse
-    // *something*, and this is the neighbour that stayed illegal: a run still
-    // queued behind another has not begun, so it cannot be waiting on anyone.
+    // Re-pointed when `queued` was removed (ADR-0063 D2): a queued run could
+    // not be parked, and no run is queued any more. A finished run cannot be
+    // parked either, and that stays illegal.
     const store = newStore();
-    store.register("scratch-app", 7);
-    const queued = store.register("scratch-app", 8);
+    const { run } = store.register("scratch-app", 7);
+    store.activate(run.id, "session-1");
+    store.complete(run.id);
 
-    expect(queued.run.status).toBe("queued");
-    expect(() => store.park(queued.run.id, { waitingOn: "the human" })).toThrow(
-      /queued/,
+    expect(() => store.park(run.id, { waitingOn: "the human" })).toThrow(
+      /cannot go from done to parked/,
     );
   });
 
-  it("keeps a parked run holding its project once it owns a branch", () => {
+  it("lets another ticket's step start while a parked run owns a branch", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-1");
     store.claimBranch(run.id, "timone/7-reset-password");
     store.park(run.id, { waitingOn: "approval on the ticket", kind: "runner" });
 
-    expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
-    expect(store.register("scratch-app", 8).run.status).toBe("queued");
+    expect(store.placeHolders("scratch-app")).toEqual([]);
+    const second = store.register("scratch-app", 8).run;
+    expect(second.status).toBe("picked-up");
+    expect(store.activate(second.id, "session-8").status).toBe("active");
   });
 });
 
-describe("the holds-the-project rule", () => {
+describe("what takes a place on a project", () => {
   /** A run parked at a stage that touches no repository. */
   function parkedBranchless(store: RunStore, ticket: number): string {
     const { run } = store.register("scratch-app", ticket);
@@ -256,23 +259,30 @@ describe("the holds-the-project rule", () => {
     return run.id;
   }
 
+  /** A run that asked for a place while another run's step ran, and waits. */
+  function waitingForAPlace(store: RunStore, ticket: number, openedAt: string): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "triage" });
+    store.askPlace(run.id, { priority: false, openedAt });
+    return run.id;
+  }
+
   it("lets a branchless parked run go, so one unanswered ticket cannot freeze a project", () => {
     const store = newStore();
     parkedBranchless(store, 7);
 
-    expect(store.occupyingRun("scratch-app")).toBeUndefined();
+    expect(store.placeHolders("scratch-app")).toEqual([]);
     expect(store.register("scratch-app", 8).run.status).toBe("picked-up");
   });
 
-  it("starts holding the project the moment a run claims a branch", () => {
+  it("takes no place when a parked run claims a branch", () => {
     const store = newStore();
     const id = parkedBranchless(store, 7);
 
-    expect(store.occupyingRun("scratch-app")).toBeUndefined();
     store.claimBranch(id, "timone/7-reset-password");
 
-    expect(store.occupyingRun("scratch-app")?.id).toBe(id);
-    expect(store.register("scratch-app", 8).run.status).toBe("queued");
+    expect(store.placeHolders("scratch-app")).toEqual([]);
+    expect(store.register("scratch-app", 8).run.status).toBe("picked-up");
   });
 
   it("parks several branchless runs side by side", () => {
@@ -285,116 +295,133 @@ describe("the holds-the-project rule", () => {
       .runsFor("scratch-app")
       .filter((run) => run.status === "parked");
     expect(parked.map((run) => run.ticket)).toEqual([7, 8, 9]);
-    expect(store.queue("scratch-app")).toEqual([]);
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
   });
 
-  it("still runs one session at a time, however many runs are parked", () => {
+  it("still runs one step at a time, however many runs are parked", () => {
     const store = newStore();
     parkedBranchless(store, 7);
     const second = store.register("scratch-app", 8);
     store.activate(second.run.id, "session-8");
 
-    // #7's answer arrives while #8's session is mid-flight: it has to wait
-    // its turn, because sessions serialize even when nothing is held.
+    // #7's answer arrives while #8's step runs: the one place is taken.
     const third = store.register("scratch-app", 9);
-    expect(third.run.status).toBe("queued");
+    expect(third.run.status).toBe("picked-up");
     expect(() => store.activate("scratch-app#7/1", "session-7b")).toThrow(
       /scratch-app#8/,
     );
   });
 
-  it("frees the session slot when a branchless run parks", () => {
+  it("gives the place to the waiting run when a branchless run's step ends", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
-    const second = store.register("scratch-app", 8);
     store.activate(first.run.id, "session-1");
+    const second = waitingForAPlace(store, 8, "2026-08-01T09:00:00Z");
 
     store.park(first.run.id, { waitingOn: "an answer", kind: "runner" });
 
-    expect(store.get(second.run.id)?.status).toBe("picked-up");
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual([second]);
   });
 
-  it("does not promote the queue behind a run that parked holding a branch", () => {
+  it("gives the place to the waiting run when a run on a branch parks", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
-    const second = store.register("scratch-app", 8);
     store.activate(first.run.id, "session-1");
     store.claimBranch(first.run.id, "timone/7-reset-password");
+    const second = waitingForAPlace(store, 8, "2026-08-01T09:00:00Z");
 
     store.park(first.run.id, { waitingOn: "approval", kind: "runner" });
 
-    expect(store.get(second.run.id)?.status).toBe("queued");
-    expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual([second]);
   });
 
-  it("promotes the queue when a branch-holding run finally ends", () => {
+  it("gives the place to the waiting run when a run on a branch ends with its step running", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
-    const second = store.register("scratch-app", 8);
     store.activate(first.run.id, "session-1");
     store.claimBranch(first.run.id, "timone/7-reset-password");
-    store.park(first.run.id, { waitingOn: "approval", kind: "runner" });
+    const second = waitingForAPlace(store, 8, "2026-08-01T09:00:00Z");
 
     store.complete(first.run.id);
 
-    expect(store.get(second.run.id)?.status).toBe("picked-up");
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual([second]);
   });
 
   it("enforces the rule in the store rather than trusting its callers", () => {
-    // Claiming a branch is a claim on a shared resource, so the store checks
-    // it rather than trusting the caller to have looked first.
+    // A step is what takes the place, so the store refuses the step. A branch
+    // takes nothing, so claiming one is not refused (ADR-0063 D1).
     const store = newStore();
     const first = parkedBranchless(store, 7);
     const second = store.register("scratch-app", 8);
     store.activate(second.run.id, "session-8");
 
-    expect(() => store.claimBranch(first, "timone/7-reset-password")).toThrow(
-      /scratch-app#8/,
+    expect(store.claimBranch(first, "timone/7-reset-password").branch).toBe(
+      "timone/7-reset-password",
     );
+    expect(() => store.claim(first)).toThrow(/scratch-app#8/);
   });
 
-  it("refuses to resume a parked run while another holds the project on a branch", () => {
+  it("resumes a parked run while another run waits on its own branch", () => {
     const store = newStore();
-    // #7 waits for an answer holding nothing, so #8 gets picked up, claims a
-    // branch and parks on its own gate.
+    // #7 waits for an answer, and #8 is picked up, claims a branch and parks
+    // on its own wait.
     const first = parkedBranchless(store, 7);
     const second = store.register("scratch-app", 8);
     store.activate(second.run.id, "session-8");
     store.claimBranch(second.run.id, "timone/8-export");
     store.park(second.run.id, { waitingOn: "approval", kind: "runner" });
 
-    // #7's answer now arrives. Its session slot is free, but the repository
-    // is not: it waits until #8 is finished with it.
-    expect(() => store.activate(first, "session-7b")).toThrow(
-      /scratch-app#8.*timone\/8-export/,
-    );
+    // #7's answer now arrives. #8 has no step running, so the place is free.
+    expect(store.activate(first, "session-7b").status).toBe("active");
   });
 
-  it("promotes a run left queued behind a park that no longer holds anything", () => {
-    // Exactly the ledger phase 11 leaves behind: one parked run that held
-    // its project under the old rule, and one queued behind it.
+  it("reads a run an older ledger queued behind a park on a branch as picked up, free to start", () => {
+    // The ledger the old rule leaves behind: one run parked on its branch,
+    // and one queued behind it.
     const path = statePath();
-    const store = newStore(path);
-    const first = store.register("scratch-app", 4);
-    const second = store.register("scratch-app", 6);
-    store.activate(first.run.id, "session-4");
-    store.park(first.run.id, { waitingOn: "the next stage", stage: "triage" });
-    // The park itself already promotes; a reopened store must reach the same
-    // conclusion from the file alone.
-    expect(store.get(second.run.id)?.status).toBe("picked-up");
+    mkdirSync(dirname(path), { recursive: true });
+    const run = (ticket: number, fields: Record<string, unknown>): Record<string, unknown> => ({
+      id: `scratch-app#${ticket}/1`,
+      project: "scratch-app",
+      ticket,
+      seq: 1,
+      flags: [],
+      createdAt: "2026-10-01T08:00:00Z",
+      updatedAt: "2026-10-01T08:00:00Z",
+      ...fields,
+    });
+    writeFileSync(
+      path,
+      JSON.stringify({
+        version: 1,
+        runs: [
+          run(4, {
+            status: "parked",
+            stage: "delivery",
+            branch: "timone/4-a-piece",
+            pr: 12,
+            wait: { on: "your review of pull request #12", kind: "runner" },
+          }),
+          run(6, { status: "queued" }),
+        ],
+      }),
+    );
 
-    const reopened = RunStore.open(path);
-    expect(reopened.promoteQueue("scratch-app")?.ticket).toBe(6);
+    const store = newStore(path);
+
+    expect(store.get("scratch-app#6/1")?.status).toBe("picked-up");
+    expect(store.placeHolders("scratch-app")).toEqual([]);
+    expect(store.activate("scratch-app#6/1", "session-6").status).toBe("active");
   });
 
-  it("promotes nothing while the project is held", () => {
+  it("gives no place while a run's step takes it", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
-    const second = store.register("scratch-app", 8);
     store.activate(first.run.id, "session-1");
+    const second = waitingForAPlace(store, 8, "2026-08-01T09:00:00Z");
 
-    expect(store.promoteQueue("scratch-app")?.ticket).toBe(7);
-    expect(store.get(second.run.id)?.status).toBe("queued");
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual([first.run.id]);
+    expect(store.waitingForPlace("scratch-app").map((run) => run.id)).toEqual([second]);
   });
 
   it("records what a parked run is waiting for, and when the wait opened", () => {
@@ -430,40 +457,365 @@ describe("the holds-the-project rule", () => {
   });
 });
 
-describe("promotion", () => {
-  it("promotes the head of the queue when a run completes", () => {
+describe("giving a freed place", () => {
+  /** A run that asked for a place while another run's step ran, and waits. */
+  function waitingForAPlace(store: RunStore, ticket: number, openedAt: string): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "triage" });
+    store.askPlace(run.id, { priority: false, openedAt });
+    return run.id;
+  }
+
+  it("gives the place to the first waiting run when a run completes", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
-    store.register("scratch-app", 8);
-    store.register("scratch-app", 9);
     store.activate(first.run.id, "session-1");
+    waitingForAPlace(store, 8, "2026-08-01T09:00:00Z");
+    waitingForAPlace(store, 9, "2026-08-02T09:00:00Z");
 
     store.complete(first.run.id);
 
-    expect(store.occupyingRun("scratch-app")?.ticket).toBe(8);
-    expect(store.queue("scratch-app").map((r) => r.ticket)).toEqual([9]);
+    expect(store.placeHolders("scratch-app").map((r) => r.ticket)).toEqual([8]);
+    expect(store.waitingForPlace("scratch-app").map((r) => r.ticket)).toEqual([9]);
   });
 
-  it("promotes in pickup order, not ticket order", () => {
+  it("gives the place by when the ticket was opened, not by pickup order", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
-    store.register("scratch-app", 12);
-    store.register("scratch-app", 3);
     store.activate(first.run.id, "session-1");
+    waitingForAPlace(store, 3, "2026-08-02T09:00:00Z");
+    waitingForAPlace(store, 12, "2026-08-01T09:00:00Z");
 
     store.complete(first.run.id);
 
-    expect(store.occupyingRun("scratch-app")?.ticket).toBe(12);
+    expect(store.placeHolders("scratch-app").map((r) => r.ticket)).toEqual([12]);
   });
 
-  it("leaves the project idle when nothing is queued", () => {
+  it("leaves the project idle when nothing waits", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
     store.activate(run.id, "session-1");
     store.complete(run.id);
 
-    expect(store.occupyingRun("scratch-app")).toBeUndefined();
-    expect(store.queue("scratch-app")).toEqual([]);
+    expect(store.placeHolders("scratch-app")).toEqual([]);
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
+  });
+});
+
+describe("places on a project (ADR-0063)", () => {
+  /** A ticket's order facts, as a runner reads them from the forge. */
+  const PLAIN = { priority: false, openedAt: "2026-08-01T09:00:00Z" };
+
+  /** A run that has had a step, and now waits for a person. */
+  function parkedAfterAStep(store: RunStore, ticket: number): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.activate(run.id, `session-${ticket}`);
+    store.park(run.id, { waitingOn: "your answer on the ticket", kind: "runner" });
+    return run.id;
+  }
+
+  /** A run just picked up, put on the runner's wait as the runner does. */
+  function waitingForRunner(store: RunStore, ticket: number): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "triage" });
+    return run.id;
+  }
+
+  it("lets another ticket's step start while a run waits on its open pull request (R1 clause 1)", () => {
+    const store = newStore();
+    const first = parkedAfterAStep(store, 7);
+    store.claimBranch(first, "timone/7-reset-password");
+    store.recordPullRequest(first, 9);
+    store.repark(first, { waitingOn: "your review of pull request #9", kind: "runner" });
+    const second = waitingForRunner(store, 8);
+
+    expect(store.askPlace(second, PLAIN)).toEqual({ ok: true });
+    store.claim(second);
+    expect(store.activate(second, "session-8").status).toBe("active");
+  });
+
+  it("lets another ticket's step start while a run on a branch waits for a person (R1 clause 2)", () => {
+    const store = newStore();
+    const first = parkedAfterAStep(store, 7);
+    store.claimBranch(first, "timone/7-reset-password");
+    const second = waitingForRunner(store, 8);
+
+    expect(store.askPlace(second, PLAIN)).toEqual({ ok: true });
+    store.claim(second);
+    expect(store.activate(second, "session-8").status).toBe("active");
+  });
+
+  it("picks a ticket up while another ticket's step runs, and writes it picked up (D2)", () => {
+    const store = newStore();
+    const { run: first } = store.register("scratch-app", 7);
+    store.activate(first.id, "session-7");
+
+    const { run } = store.register("scratch-app", 8);
+
+    expect(run.status).toBe("picked-up");
+    expect(store.get(run.id)?.status).toBe("picked-up");
+  });
+
+  it("reads a queued run an older ledger holds as picked up, and the same on every load (D2)", () => {
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    const written = JSON.stringify({
+      version: 1,
+      runs: [
+        {
+          id: "scratch-app#8/1",
+          project: "scratch-app",
+          ticket: 8,
+          seq: 1,
+          status: "queued",
+          flags: [],
+          createdAt: "2026-10-01T08:00:00Z",
+          updatedAt: "2026-10-01T08:00:00Z",
+        },
+      ],
+    });
+    writeFileSync(path, written);
+
+    const first = RunStore.open(path);
+    const second = RunStore.open(path);
+
+    expect(first.get("scratch-app#8/1")?.status).toBe("picked-up");
+    expect(second.all()).toEqual(first.all());
+    expect(readFileSync(path, "utf8")).toBe(written);
+  });
+
+  it("refuses a place while another ticket's step runs, naming that run, and writes that the run waits", () => {
+    const store = newStore();
+    const { run: first } = store.register("scratch-app", 7);
+    store.activate(first.id, "session-7");
+    const second = waitingForRunner(store, 8);
+
+    const answer = store.askPlace(second, PLAIN);
+
+    expect(answer.ok).toBe(false);
+    expect(answer.ok ? undefined : answer.holder.id).toBe("scratch-app#7/1");
+    expect(store.waitingForPlace("scratch-app").map((run) => run.id)).toEqual([
+      "scratch-app#8/1",
+    ]);
+    expect(() => store.claim(second)).toThrow(NoPlaceError);
+    expect(() => store.claim(second)).toThrow(/scratch-app#7\/1/);
+    expect(() => store.activate(second, "session-8")).toThrow(NoPlaceError);
+  });
+
+  it("gives the freed place to the ticket labelled priority:high, in the write that freed it (R3 clause 1)", () => {
+    const path = statePath();
+    const store = newStore(path);
+    const { run: first } = store.register("scratch-app", 7);
+    store.activate(first.id, "session-7");
+    const older = waitingForRunner(store, 8);
+    store.askPlace(older, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    const urgent = waitingForRunner(store, 9);
+    store.askPlace(urgent, { priority: true, openedAt: "2026-08-03T09:00:00Z" });
+
+    store.park(first.id, { waitingOn: "your answer on the ticket", kind: "runner" });
+
+    expect(RunStore.open(path).get(urgent)?.place?.givenAt).toBeDefined();
+    const again = store.askPlace(older, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    expect(again.ok ? undefined : again.holder.id).toBe("scratch-app#9/1");
+    expect(store.claim(urgent).status).toBe("active");
+  });
+
+  it("gives the freed place to the ticket opened first on the forge, not the one picked up first (R3 clause 2)", () => {
+    const store = newStore();
+    const { run: first } = store.register("scratch-app", 7);
+    store.activate(first.id, "session-7");
+    const newer = waitingForRunner(store, 8);
+    store.askPlace(newer, { priority: false, openedAt: "2026-08-02T09:00:00Z" });
+    const older = waitingForRunner(store, 9);
+    store.askPlace(older, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+
+    store.park(first.id, { waitingOn: "your answer on the ticket", kind: "runner" });
+
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#9/1"]);
+    expect(store.waitingForPlace("scratch-app").map((run) => run.id)).toEqual([
+      "scratch-app#8/1",
+    ]);
+  });
+
+  it("gives the freed place to the lower ticket number when both were opened at once (R3 clause 2)", () => {
+    const store = newStore();
+    const { run: first } = store.register("scratch-app", 7);
+    store.activate(first.id, "session-7");
+    const higher = waitingForRunner(store, 12);
+    store.askPlace(higher, PLAIN);
+    const lower = waitingForRunner(store, 8);
+    store.askPlace(lower, PLAIN);
+
+    store.park(first.id, { waitingOn: "your answer on the ticket", kind: "runner" });
+
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#8/1"]);
+  });
+
+  /**
+   * Run #7's step running, and #8 and #9 waiting behind it, #8 first. #7's
+   * step then ends, so the place is given to #8.
+   */
+  function placeGivenToEight(store: RunStore): void {
+    const { run: first } = store.register("scratch-app", 7);
+    store.activate(first.id, "session-7");
+    store.askPlace(waitingForRunner(store, 8), { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    store.askPlace(waitingForRunner(store, 9), { priority: false, openedAt: "2026-08-02T09:00:00Z" });
+    store.park(first.id, { waitingOn: "your answer on the ticket", kind: "runner" });
+  }
+
+  it("uses a given place when the run's step starts, so the step takes the place itself", () => {
+    const store = newStore();
+    placeGivenToEight(store);
+
+    const active = store.claim("scratch-app#8/1");
+
+    expect(active.place?.givenAt).toBeUndefined();
+    expect(active.place?.waitingSince).toBeUndefined();
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#8/1"]);
+  });
+
+  it("gives a place given back to the next run in order (R3 clause 4)", () => {
+    const store = newStore();
+    placeGivenToEight(store);
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#8/1"]);
+
+    store.giveBack("scratch-app#8/1");
+
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#9/1"]);
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
+  });
+
+  it("gives the place of a run that leaves its turn to the next run, and the run stops waiting (R3 clause 4)", () => {
+    const store = newStore();
+    placeGivenToEight(store);
+
+    store.leaveTurn("scratch-app#8/1");
+
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#9/1"]);
+    expect(store.waitingForPlace("scratch-app").map((run) => run.id)).not.toContain(
+      "scratch-app#8/1",
+    );
+  });
+
+  it("gives the place back to a run whose step just ended when nobody else waits (D2)", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.askPlace(run.id, PLAIN);
+    store.activate(run.id, "session-7");
+
+    store.park(run.id, { waitingOn: "the runner", kind: "runner" });
+
+    expect(store.placeHolders("scratch-app").map((each) => each.id)).toEqual(["scratch-app#7/1"]);
+    const other = waitingForRunner(store, 8);
+    const answer = store.askPlace(other, PLAIN);
+    expect(answer.ok ? undefined : answer.holder.id).toBe("scratch-app#7/1");
+    expect(() => store.claim(other)).toThrow(
+      "No place is free on scratch-app: the place is given to run scratch-app#7/1.",
+    );
+  });
+
+  it("gives the place to an older waiting ticket when a step ends, and the ended run waits behind it (D2)", () => {
+    const store = newStore();
+    const { run } = store.register("scratch-app", 7);
+    store.askPlace(run.id, { priority: false, openedAt: "2026-08-02T09:00:00Z" });
+    store.activate(run.id, "session-7");
+    const older = waitingForRunner(store, 8);
+    store.askPlace(older, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+
+    store.park(run.id, { waitingOn: "the runner", kind: "runner" });
+
+    expect(store.placeHolders("scratch-app").map((each) => each.id)).toEqual(["scratch-app#8/1"]);
+    expect(store.waitingForPlace("scratch-app").map((each) => each.id)).toEqual([
+      "scratch-app#7/1",
+    ]);
+  });
+
+  it("lets a takeover hold a run while another ticket's step runs, and the takeover takes no place (R2 clause 6, R13)", () => {
+    const store = newStore();
+    const { run: first } = store.register("scratch-app", 7);
+    store.activate(first.id, "session-7");
+    const taken = waitingForRunner(store, 8);
+
+    const claimed = store.claim(taken, undefined, { takeover: true });
+
+    expect(claimed.status).toBe("active");
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#7/1"]);
+    store.complete(first.id);
+    expect(store.askPlace(waitingForRunner(store, 9), PLAIN)).toEqual({ ok: true });
+  });
+
+  it("stops marking a run taken over once it leaves active", () => {
+    const store = newStore();
+    const taken = waitingForRunner(store, 8);
+    store.claim(taken, undefined, { takeover: true });
+
+    const parked = store.park(taken, { waitingOn: "the runner", kind: "runner" });
+
+    expect(parked.takenOver).toBeUndefined();
+  });
+
+  it("takes back a place given and not used when the daemon starts, and gives it again by order (D3)", () => {
+    const store = newStore();
+    placeGivenToEight(store);
+    const urgent = waitingForRunner(store, 10);
+    store.askPlace(urgent, { priority: true, openedAt: "2026-08-05T09:00:00Z" });
+    const { run: elsewhere } = store.register("ivtrends", 3);
+    store.askPlace(elsewhere.id, PLAIN);
+    store.activate(elsewhere.id, "session-3");
+    const before = store.get(elsewhere.id);
+
+    store.regivePlaces();
+
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#10/1"]);
+    expect(store.waitingForPlace("scratch-app").map((run) => run.id)).toEqual([
+      "scratch-app#8/1",
+      "scratch-app#9/1",
+    ]);
+    expect(store.get(elsewhere.id)).toEqual(before);
+  });
+
+  it("gives the place to the first waiting run when the run with a step running completes", () => {
+    const store = newStore();
+    const { run: first } = store.register("scratch-app", 7);
+    store.activate(first.id, "session-7");
+    store.askPlace(waitingForRunner(store, 8), PLAIN);
+
+    store.complete(first.id);
+
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#8/1"]);
+  });
+
+  it("gives the place to the next waiting run when the run it was given to is cancelled", () => {
+    const store = newStore();
+    placeGivenToEight(store);
+
+    const cancelled = store.cancel("scratch-app#8/1", "you asked me to stop");
+
+    expect(cancelled.place).toBeUndefined();
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#9/1"]);
+  });
+
+  it("lets a run claim a branch while another run of the project owns one and is parked (D1)", () => {
+    const store = newStore();
+    const first = parkedAfterAStep(store, 7);
+    store.claimBranch(first, "timone/7-reset-password");
+    const { run: second } = store.register("scratch-app", 8);
+    store.activate(second.id, "session-8");
+
+    const claimed = store.claimBranch(second.id, "timone/8-export");
+
+    expect(claimed.branch).toBe("timone/8-export");
+    expect(store.get(first)?.branch).toBe("timone/7-reset-password");
+  });
+
+  it("stops a run that leaves its turn before a place is given to it from waiting", () => {
+    const store = newStore();
+    placeGivenToEight(store);
+
+    store.leaveTurn("scratch-app#9/1");
+
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#8/1"]);
   });
 });
 
@@ -506,14 +858,14 @@ describe("persistence", () => {
     const reopened = RunStore.open(path);
 
     expect(reopened.all()).toEqual(store.all());
-    expect(reopened.occupyingRun("scratch-app")?.status).toBe("parked");
-    expect(reopened.queue("scratch-app").map((r) => r.ticket)).toEqual([8]);
+    expect(reopened.placeHolders("scratch-app")).toEqual([]);
+    expect(reopened.get("scratch-app#8/1")?.status).toBe("picked-up");
   });
 
   it("starts empty when no state file exists yet", () => {
     const store = RunStore.open(statePath());
     expect(store.all()).toEqual([]);
-    expect(store.occupyingRun("scratch-app")).toBeUndefined();
+    expect(store.placeHolders("scratch-app")).toEqual([]);
   });
 
   it("writes valid JSON a human can read", () => {
@@ -546,7 +898,7 @@ describe("persistence", () => {
     ]);
     expect(store.all().map((run) => run.seq)).toEqual([1, 1, 1, 1]);
     // Nothing else about the ledger moves.
-    expect(store.occupyingRun("scratch-app")).toBeUndefined();
+    expect(store.placeHolders("scratch-app")).toEqual([]);
     expect(store.introducedAt("scratch-app", 5)).toBe(
       "2026-08-14T12:53:58.173Z",
     );
@@ -620,7 +972,7 @@ describe("the pull request on a run", () => {
     expect(reopened?.stage).toBe("delivery");
   });
 
-  it("holds the project while parked on a review, and frees it on completion", () => {
+  it("frees the project while parked on a review, so another ticket's step starts (PRD-07 R1)", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);
     store.activate(run.id, "s1");
@@ -628,18 +980,17 @@ describe("the pull request on a run", () => {
     store.recordPullRequest(run.id, 9);
     store.park(run.id, { waitingOn: "your review", kind: "runner", stage: "delivery" });
 
-    // A queued ticket stays queued behind the open pull request…
-    const { run: queued } = store.register("scratch-app", 8);
-    expect(queued.status).toBe("queued");
+    // A ticket picked up behind the open pull request is not queued…
+    const { run: next } = store.register("scratch-app", 8);
+    expect(next.status).toBe("picked-up");
 
-    // …and starts the moment the PR's merge completes the run (R10).
-    store.complete(run.id);
-    expect(store.get(queued.id)?.status).toBe("picked-up");
+    // …and its step starts while the pull request waits for review.
+    expect(store.activate(next.id, "s2").status).toBe("active");
   });
 });
 
 describe("cancelling a run", () => {
-  it("cancels a queued run, recording why", () => {
+  it("cancels a run picked up while another ticket's step runs, recording why", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
     store.activate(first.run.id, "session-1");
@@ -708,18 +1059,20 @@ describe("cancelling a run", () => {
     expect(() => store.cancel(run.id, "again")).toThrow(/nothing — it is finished/);
   });
 
-  it("frees the project for whatever was queued behind it", () => {
+  it("gives the place to the run waiting for it when the run with a step running is cancelled", () => {
     const store = newStore();
     const first = store.register("scratch-app", 7);
     store.activate(first.run.id, "session-1");
     store.claimBranch(first.run.id, "timone/7-reset-password");
     const second = store.register("scratch-app", 8);
-    expect(second.run.status).toBe("queued");
+    store.park(second.run.id, { waitingOn: "the runner", kind: "runner", stage: "triage" });
+    expect(
+      store.askPlace(second.run.id, { priority: false, openedAt: "2026-08-01T09:00:00Z" }).ok,
+    ).toBe(false);
 
     store.cancel(first.run.id, "you asked me to stop");
 
-    expect(store.get(second.run.id)?.status).toBe("picked-up");
-    expect(store.occupyingRun("scratch-app")?.id).toBe(second.run.id);
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual([second.run.id]);
   });
 
   it("lets its ticket take a fresh chunk, because an abandoned one is settled", () => {
@@ -934,11 +1287,11 @@ describe("two processes writing the one ledger", () => {
     });
 
     const rival = newStore(path);
-    expect(rival.occupyingRun("scratch-app")).toBeUndefined();
+    expect(rival.placeHolders("scratch-app")).toEqual([]);
 
     daemon.claim(run.id);
 
-    expect(rival.occupyingRun("scratch-app")?.id).toBe(run.id);
+    expect(rival.placeHolders("scratch-app").map((each) => each.id)).toEqual([run.id]);
   });
 
   it("sees a run another process registered, rather than refusing it exists", () => {
@@ -1886,7 +2239,7 @@ describe("runs the old code left in the ledger become runs the runner can read",
 
     // Every one of these reads the file again. None of them may write it.
     const first = RunStore.open(path);
-    first.occupyingRun("scratch-app");
+    first.placeHolders("scratch-app");
     first.runsForTicket("ivtrends", 88);
     first.liveRunForTicket("ivtrends", 90);
     const second = RunStore.open(path);
@@ -1902,17 +2255,16 @@ describe("runs the old code left in the ledger become runs the runner can read",
     expect(RunStore.open(path).all()).toEqual(second.all());
   });
 
-  it("keeps a converted run on a branch holding its project, and one without a branch not", () => {
+  it("lets no converted run take a place, on a branch or not", () => {
     const store = RunStore.open(copyOfLedgerBefore166());
 
-    // scratch-app #24 waited on a review, on its branch. It still holds the
-    // project, now as a run waiting for the runner.
-    const holder = store.occupyingRun("scratch-app");
-    expect(holder?.id).toBe("scratch-app#24/1");
-    expect(holder?.wait?.kind).toBe("runner");
-    // No converted run of ivtrends owns a branch, so nothing holds it, and a
-    // new ticket there is picked up rather than queued.
-    expect(store.occupyingRun("ivtrends")).toBeUndefined();
+    // scratch-app #24 waited on a review, on its branch. It now waits for
+    // the runner, and a branch takes no place (ADR-0063 D1).
+    expect(store.get("scratch-app#24/1")?.wait?.kind).toBe("runner");
+    expect(store.placeHolders("scratch-app")).toEqual([]);
+    // No converted run of ivtrends takes one either, and a new ticket there
+    // is picked up.
+    expect(store.placeHolders("ivtrends")).toEqual([]);
     expect(store.register("ivtrends", 99).run.status).toBe("picked-up");
   });
 });

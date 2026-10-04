@@ -277,7 +277,7 @@ function humanDuration(ms: number): string {
  *   ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
  *   D4): the list of pieces grew since it was approved, or pieces are left
  *   and none of them can start.
- * - A run queued, picked up, at work or cancelled waits on nobody.
+ * - A run picked up, at work or cancelled waits on nobody.
  *
  * ✏ 2026-09-30: decided here. It was `ctaFor` in `src/daemon/cta.ts`, one
  * calculation for the ticket's standing note and for this command. The
@@ -406,7 +406,6 @@ function describeProject(
   const mine = runs.filter((run) => run.project === project);
   const running = mine.filter((run) => RUNNING.includes(run.status));
   const parked = mine.filter((run) => run.status === "parked");
-  const queued = mine.filter((run) => run.status === "queued");
 
   const parts = [...running, ...parked].map((run) => describeRun(run, context));
 
@@ -422,18 +421,13 @@ function describeProject(
 
   if (parts.length === 0) parts.push("idle");
 
-  if (queued.length > 0) {
-    const numbers = queued.map((run) => `#${run.ticket}`).join(", ");
-    parts.push(`${queued.length} queued (${numbers})`);
-  }
-
   return parts.join("  ·  ");
 }
 
 /**
  * Every project on one line: the ticket it is working, how far that ticket
- * got, whether it is waiting on the reader, what is queued behind it, and
- * whether the automatic checks complained. Written to be read at a glance
+ * got, whether it is waiting on the reader, and whether the automatic checks
+ * complained. Written to be read at a glance
  * by someone who knows nothing about the process (R9).
  */
 export function renderStatus(

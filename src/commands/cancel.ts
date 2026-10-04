@@ -264,7 +264,6 @@ async function cancel(
         `${name} was already cancelled: ${run.cancellation ?? "no reason recorded"}.`,
       );
       return 1;
-    case "queued":
     case "picked-up":
     case "active":
     case "parked":

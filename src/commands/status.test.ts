@@ -209,17 +209,19 @@ describe("renderStatus", () => {
     expect(lastLine).toMatch(/other-app #2/);
   });
 
-  it("shows how many tickets are queued behind the active one", () => {
+  it("names the tickets picked up beside the active one, and no queue", () => {
+    // ✏ 2026-10-04: nothing is queued any more (ADR-0063 D2). A ticket picked
+    // up while another ticket's step runs is picked up too.
     const runs = [
       run({ project: "scratch-app", ticket: 7, status: "active" }),
-      run({ project: "scratch-app", ticket: 8, status: "queued" }),
-      run({ project: "scratch-app", ticket: 9, status: "queued" }),
+      run({ project: "scratch-app", ticket: 8, status: "picked-up" }),
+      run({ project: "scratch-app", ticket: 9, status: "picked-up" }),
     ];
     const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
 
-    expect(line).toMatch(/2 queued/);
     expect(line).toMatch(/#8/);
     expect(line).toMatch(/#9/);
+    expect(line).not.toMatch(/queued/);
   });
 
   it("marks a run whose automatic checks failed", () => {

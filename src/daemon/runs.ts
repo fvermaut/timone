@@ -12,8 +12,13 @@ import {
 import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
 
 /**
- * A run's lifecycle. `queued` is where a pickup lands while another run holds
- * the project; the rest is `picked-up → active → parked | done | cancelled`.
+ * A run's lifecycle: `picked-up → active → parked | done | cancelled`.
+ *
+ * ✏ 2026-10-04: `queued` was removed
+ * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+ * D2). Every pickup opens a run as `picked-up`, and a run waits for a place
+ * only once its runner tries a step — see {@link Run.place}. A queued run an
+ * older ledger holds is read as picked up — see {@link normaliseQueued}.
  *
  * `parked` — waiting for the runner — is deliberately **not** terminal: the
  * run is unfinished, and the next thing that happens on its ticket wakes the
@@ -25,7 +30,6 @@ import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
  * {@link normaliseOldPath}.
  */
 export type RunStatus =
-  | "queued"
   | "picked-up"
   | "active"
   | "parked"
@@ -33,32 +37,40 @@ export type RunStatus =
   | "cancelled";
 
 /**
- * Statuses that occupy the one-session-at-a-time slot. A session is either
- * about to start or running, and two of those on one project would have two
- * agents in one working copy.
+ * Statuses in which a session is running or about to: what
+ * {@link RunStore.staleRuns} judges. ✏ 2026-10-04: no longer a rule about the
+ * project. Which runs may have a step running at once is the place rule —
+ * see {@link RunStore}.
  */
 const RUNNING: readonly RunStatus[] = ["picked-up", "active"];
 
 /**
- * Statuses that end a run's hold on its project: it is over, so the next
- * queued ticket may be promoted. `cancelled` belongs here as `done` does:
- * abandoned work must not keep a project to itself.
- *
- * See {@link isSettled}, which asks a different question. ✏ 2026-09-30: the
- * two lists now hold the same statuses. They differed only on `failed`, which
- * was removed.
+ * How many places each project has: how many of its runs may have a step
+ * running at once
+ * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+ * D1). One until the number of places is read from `timone.yaml`.
  */
-const TERMINAL: readonly RunStatus[] = ["done", "cancelled"];
+export const PLACES_PER_PROJECT = 1;
+
+/**
+ * A run refused `active` because every place on its project is taken
+ * (ADR-0063 D1, D2). The message names the run that takes the place, by its
+ * run id, so the runner and a person reading the record can find it.
+ */
+export class NoPlaceError extends Error {
+  constructor(project: string, holder: Run) {
+    super(`No place is free on ${project}: ${whoTakesThePlace(holder)}.`);
+    this.name = "NoPlaceError";
+  }
+}
 
 /**
  * Statuses that **settle** a chunk: the ticket is finished with it and may
  * open its next one
  * ([ADR-0029](../../doc/adr/0029-a-chunk-advances-only-on-success.md)).
  *
- * {@link TERMINAL} is about the **project lock**; this is about the
- * **ticket's succession**. A chunk advances only on success — or on being
- * abandoned. `cancelled` is **both** terminal and settled, and it has to be
- * both: a cancelled chunk that stayed unsettled would hold its ticket for
+ * This is about the **ticket's succession**. A chunk advances only on
+ * success — or on being abandoned. `cancelled` settles a chunk, and it has to: a cancelled chunk that stayed unsettled would hold its ticket for
  * ever and no work could ever be run on that ticket again. A ticket reopened
  * and re-marked simply takes its next chunk from {@link RunStore.register}.
  */
@@ -89,7 +101,6 @@ function isSettled(status: RunStatus): boolean {
  * only code that made them.
  */
 const TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
-  queued: ["picked-up", "cancelled"],
   "picked-up": ["active", "parked", "cancelled"],
   active: ["active", "parked", "done", "cancelled"],
   parked: ["active", "done", "cancelled"],
@@ -123,7 +134,7 @@ const runSchema = z.strictObject({
    * anything reads it.
    */
   seq: z.number().int().positive(),
-  status: z.enum(["queued", "picked-up", "active", "parked", "done", "cancelled"]),
+  status: z.enum(["picked-up", "active", "parked", "done", "cancelled"]),
   /** Lifecycle stage the run has reached, for `timone status` and for resuming. */
   stage: z.enum([...PIPELINE_STAGES]).optional(),
   /**
@@ -181,8 +192,9 @@ const runSchema = z.strictObject({
     })
     .optional(),
   /**
-   * The work branch this run owns, once it has one. Its presence is what
-   * makes a parked run hold its project — see {@link RunStore}.
+   * The work branch this run owns, once it has one. ✏ 2026-10-04: it takes
+   * no place on the project (ADR-0063 D1), so several runs of one project may
+   * own branches at the same time.
    */
   branch: z.string().optional(),
   /**
@@ -191,6 +203,36 @@ const runSchema = z.strictObject({
    * poll loop name the PR without re-asking the tracker.
    */
   pr: z.number().int().positive().optional(),
+  /**
+   * The run's place on its project
+   * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)),
+   * from the first time it asks for one.
+   *
+   * `priority` and `openedAt` are the two facts that decide its turn: whether
+   * its ticket carries the `priority:high` label, and when the ticket was
+   * opened on the forge. They are read from the ticket at each try to start a
+   * step, so a label added later counts from the next try (D2).
+   * `waitingSince` means the run waits for a place. `givenAt` means a place is
+   * given to it and not yet used: it takes the place until its next step
+   * starts, or until it gives the place back (D3).
+   *
+   * Optional, so every ledger written before places existed loads unchanged.
+   */
+  place: z
+    .strictObject({
+      priority: z.boolean(),
+      openedAt: z.string(),
+      waitingSince: z.string().optional(),
+      givenAt: z.string().optional(),
+    })
+    .optional(),
+  /**
+   * That a person's terminal holds this run through `timone takeover`, so it
+   * takes no place on its project (ADR-0063 D5). Set by a claim made for a
+   * takeover, and cleared when the run leaves `active`. Absent on every other
+   * run.
+   */
+  takenOver: z.literal(true).optional(),
   /** Agent SDK session identifier, once one has been spawned. */
   sessionId: z.string().optional(),
   /**
@@ -206,7 +248,7 @@ const runSchema = z.strictObject({
    * minutes because the daemon kept failing to start it (timone#75).
    *
    * **Absent means held by nobody**, and that is a legitimate state rather
-   * than a gap: a queued run, a parked one, a finished one, and every run
+   * than a gap: a run just picked up, a parked one, a finished one, and every run
    * written before this field existed. Those are judged by witnessed time
    * exactly as before (ADR-0020) — see {@link RunStore.hold}.
    */
@@ -528,27 +570,34 @@ export interface ParkOptions {
 }
 
 /**
- * The daemon's run ledger: which ticket each project is working, what is
- * queued behind it, and how each run ended. Persisted to `.timone/state.json`
- * (gitignored — it is machine state, never a process artifact) and written
- * atomically after every mutation, so a crash never leaves a half-file.
+ * The daemon's run ledger: which tickets each project is working, which runs
+ * take or wait for a place, and how each run ended. Persisted to
+ * `.timone/state.json` (gitignored — it is machine state, never a process
+ * artifact) and written atomically after every mutation, so a crash never
+ * leaves a half-file.
  *
- * **Two rules, not one**, and keeping them apart is what phase 12 changed:
+ * **The place rule**
+ * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)):
  *
- * - **One running session per project, always.** Two agents in one working
- *   copy is the collision R10 exists to prevent, so a run may only enter
- *   `picked-up` or `active` while no other run of that project is in either.
- * - **A parked run holds its project only once it owns a work branch.**
- *   Triage and clarification touch no repository — a ticket waiting there for
- *   an answer blocks nothing, and several may wait at once. From the moment a
- *   run claims a branch it holds the project until it reaches a terminal
- *   state, because from then on two runs would be two branches of work on the
- *   same repository.
+ * - **A run takes a place on its project while a step of it runs, or while a
+ *   place is given to it and not yet used.** Nothing else takes one: not a
+ *   work branch, not an open pull request, not a wait for a person, not a run
+ *   just picked up, not a terminal a person opened with `timone takeover`. A
+ *   project has {@link PLACES_PER_PROJECT} places, and a run may enter
+ *   `active` only while one is free or given to it.
+ * - **A run refused a place waits for one, and a freed place is given to one
+ *   waiting run in the same write that freed it**: a ticket labelled
+ *   `priority:high` first, then the ticket opened first on the forge, then
+ *   the lowest ticket number. No runner woken in between can take it first.
  *
- * Phase 11 had only the first rule and applied it to parked runs too, which
- * meant one unanswered question froze a project indefinitely. Both rules are
- * enforced here rather than by callers: a rule about a shared resource that
- * lives in the caller is a rule the next caller will not know about.
+ * ✏ 2026-10-04: this replaces the two rules phase 12 set — one session per
+ * project, and a parked run holding its project once it owns a work branch.
+ * Since ADR-0041 every run works in its own box, so two branches of one
+ * project no longer share a working copy.
+ *
+ * The rule is enforced here rather than by callers: a rule about a shared
+ * resource that lives in the caller is a rule the next caller will not know
+ * about.
  */
 export class RunStore {
   private constructor(
@@ -605,7 +654,8 @@ export class RunStore {
    * about a ticket, and the chunk they mean is its most recent one, whether or
    * not it is still going.
    *
-   * Reads the file, as {@link occupyingRun} does and for the same reason.
+   * Reads the file, as {@link placeHolders} does: a guard that answers from
+   * memory cannot see what another process has just written (ADR-0023).
    */
   runsForTicket(project: string, ticket: number): Run[] {
     this.refresh();
@@ -625,39 +675,6 @@ export class RunStore {
   liveRunForTicket(project: string, ticket: number): Run | undefined {
     this.refresh();
     return this.loadedLiveRunForTicket(project, ticket);
-  }
-
-  /**
-   * The run currently holding `project`: one whose session is running or
-   * about to, or one parked on a work branch it owns. Undefined when the
-   * project is free — including when runs are parked awaiting answers at a
-   * stage that touches no repository.
-   *
-   * Reads the file rather than this store's memory (ADR-0023). It is one of
-   * the three the poll loop guards on, and a guard that answers from memory
-   * cannot see the claim another process has just written — which is what let
-   * one answer buy two sessions.
-   */
-  occupyingRun(project: string): Run | undefined {
-    this.refresh();
-    return this.loadedOccupyingRun(project);
-  }
-
-  /**
-   * {@link occupyingRun} over the state already in hand.
-   *
-   * The split is not an optimisation. A mutation holds a live reference into
-   * `this.state` between {@link mutable} and {@link persist}, and a refresh in
-   * that window replaces the object the reference points into — so the change
-   * would be written to a state nobody persists. Every caller inside a
-   * mutation asks these; every caller outside one asks the public pair, which
-   * re-reads first.
-   */
-  private loadedOccupyingRun(project: string): Run | undefined {
-    const run = this.state.runs.find(
-      (candidate) => candidate.project === project && holdsProject(candidate),
-    );
-    return run === undefined ? undefined : { ...run };
   }
 
   /** {@link runsForTicket} over the state already in hand. */
@@ -683,33 +700,6 @@ export class RunStore {
   }
 
   /**
-   * The run occupying `project`'s single session slot — running, or picked
-   * up and about to start — over the state already in hand. Undefined when no
-   * session is in flight, however many runs are parked.
-   */
-  private loadedRunningRun(project: string): Run | undefined {
-    const run = this.state.runs.find(
-      (candidate) =>
-        candidate.project === project && RUNNING.includes(candidate.status),
-    );
-    return run === undefined ? undefined : { ...run };
-  }
-
-  /** Runs waiting behind the occupying one, in pickup order. */
-  queue(project: string): Run[] {
-    return this.state.runs
-      .filter((run) => run.project === project && run.status === "queued")
-      .map((run) => ({ ...run }));
-  }
-
-  /** 1-based position of a queued run, or 0 when it is not queued. */
-  queuePosition(id: string): number {
-    const run = this.get(id);
-    if (run === undefined || run.status !== "queued") return 0;
-    return this.queue(run.project).findIndex((queued) => queued.id === id) + 1;
-  }
-
-  /**
    * Register a pickup. **Idempotent by the ticket's *live* chunk, not by the
    * ticket** ([ADR-0026](../../doc/adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md)):
    * a ticket with an unsettled chunk yields that chunk and `created: false`,
@@ -727,14 +717,13 @@ export class RunStore {
     if (live !== undefined) return { run: live, created: false };
 
     const timestamp = this.now();
-    const holder = this.loadedOccupyingRun(project);
     const seq = nextSequence(this.loadedRunsForTicket(project, ticket));
     const run: Run = {
       id: runId(project, ticket, seq),
       project,
       ticket,
       seq,
-      status: holder === undefined ? "picked-up" : "queued",
+      status: "picked-up",
       flags: [],
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -776,7 +765,7 @@ export class RunStore {
    * of what the run was waiting for. {@link activate} clears it a moment
    * later, once there is really a session.
    */
-  claim(id: string, holder?: Holder): Run {
+  claim(id: string, holder?: Holder, options: { takeover?: boolean } = {}): Run {
     // The refusal is about the *existing* holder, so it is asked before the
     // transition: a run somebody is holding may not be taken from them, and
     // one whose holder's process is gone may (ADR-0049 D1, D2). Until this,
@@ -789,9 +778,102 @@ export class RunStore {
         throw new Error(heldRunMessage(current.holder, held));
       }
     }
-    return this.transition(id, "active", (run) => {
-      if (holder !== undefined) run.holder = holder;
-    });
+    // A person's terminal takes no place on the project (ADR-0063 D5), so
+    // the mark is written before the transition and no place is asked.
+    return this.transition(
+      id,
+      "active",
+      (run) => {
+        if (holder !== undefined) run.holder = holder;
+      },
+      { takeover: options.takeover === true },
+    );
+  }
+
+  /**
+   * Ask for a place on the run's project before a step starts (ADR-0063 D2).
+   * `order` is what decides the run's turn, read from its ticket at this try.
+   */
+  askPlace(
+    id: string,
+    order: { priority: boolean; openedAt: string },
+  ): { ok: true } | { ok: false; holder: Run } {
+    const run = this.mutable(id);
+    run.place = { ...run.place, priority: order.priority, openedAt: order.openedAt };
+    const holder = run.place.givenAt === undefined ? this.placeTakenFrom(run) : undefined;
+    if (holder !== undefined) run.place.waitingSince ??= this.now();
+    this.persist();
+    return holder === undefined ? { ok: true } : { ok: false, holder: { ...holder } };
+  }
+
+  /**
+   * Take back a place given to `id` and not used, and give it to the next
+   * waiting run (ADR-0063 D3). For a run whose runner's wake ended with no
+   * step started. The run does not wait any more.
+   */
+  giveBack(id: string): Run {
+    const run = this.mutable(id);
+    if (run.place !== undefined) run.place.givenAt = undefined;
+    this.givePlaces(run.project);
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Stop `id` waiting for a place, and take back a place given to it
+   * (ADR-0063 D2): its runner's wake ended with no step started and no try
+   * refused. The place goes to the next waiting run.
+   */
+  leaveTurn(id: string): Run {
+    const run = this.mutable(id);
+    if (run.place !== undefined) {
+      run.place.waitingSince = undefined;
+      run.place.givenAt = undefined;
+    }
+    this.givePlaces(run.project);
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Take back every place given and not used, and give each again by order
+   * (ADR-0063 D3). Called once when the daemon starts: no wake survives a
+   * restart, so a place given before one would otherwise never be used. A
+   * run whose place was taken back waits again. A run with a step running
+   * is not touched.
+   */
+  regivePlaces(): void {
+    this.refresh();
+    for (const run of this.state.runs) {
+      if (run.place?.givenAt === undefined || run.status === "active") continue;
+      run.place.givenAt = undefined;
+      run.place.waitingSince ??= this.now();
+    }
+    for (const project of new Set(this.state.runs.map((run) => run.project))) {
+      this.givePlaces(project);
+    }
+    this.persist();
+  }
+
+  /**
+   * The runs of `project` that wait for a place, in the order they will be
+   * given one (ADR-0063 D3): a ticket labelled `priority:high` first, then
+   * the ticket opened first on the forge, then the lowest ticket number.
+   */
+  waitingForPlace(project: string): Run[] {
+    this.refresh();
+    return this.loadedWaitingForPlace(project).map((run) => ({ ...run }));
+  }
+
+  /**
+   * The runs of `project` that take a place now: a step of theirs runs, or a
+   * place is given to them and not yet used (ADR-0063 D1).
+   */
+  placeHolders(project: string): Run[] {
+    this.refresh();
+    return this.state.runs
+      .filter((run) => run.project === project && takesPlace(run))
+      .map((run) => ({ ...run }));
   }
 
   /** Park a run against a human wait, naming what it waits for. */
@@ -824,19 +906,16 @@ export class RunStore {
   }
 
   /**
-   * Record the work branch a run owns. From here on it holds its project
-   * even while parked, so this is a claim on a shared resource and not a
-   * setter: the project must be free of other holders when it is made.
+   * Record the work branch a run owns.
+   *
+   * ✏ 2026-10-04: a setter, and nothing more
+   * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+   * D1). A work branch takes no place on the project, so several runs of one
+   * project may own branches at the same time. Until then a branch held the
+   * project, and the claim was refused while another run held it.
    */
   claimBranch(id: string, branch: string): Run {
     const run = this.mutable(id);
-    const holder = this.loadedOccupyingRun(run.project);
-    if (holder !== undefined && holder.id !== id) {
-      throw new Error(
-        `Run ${id} cannot claim a branch on ${run.project}: run ${holder.id} ` +
-          `(${holder.status}) already holds it`,
-      );
-    }
     run.branch = branch;
     run.updatedAt = this.now();
     this.persist();
@@ -852,11 +931,15 @@ export class RunStore {
     return { ...run };
   }
 
-  /** Finish a run, promoting whatever is queued behind it. */
+  /**
+   * Finish a run. A place it took or was given goes to the first waiting run
+   * (ADR-0063 D3).
+   */
   complete(id: string): Run {
     return this.transition(id, "done", (run) => {
       run.wait = undefined;
       run.holder = undefined;
+      run.place = undefined;
     });
   }
 
@@ -874,6 +957,7 @@ export class RunStore {
       run.cancellation = reason;
       stopWaiting(run);
       run.holder = undefined;
+      run.place = undefined;
     });
   }
 
@@ -884,20 +968,6 @@ export class RunStore {
     run.updatedAt = this.now();
     this.persist();
     return { ...run };
-  }
-
-  /**
-   * Promote the oldest queued run of `project` if the project is free, and
-   * return it. The poll loop calls this each cycle: promotion normally
-   * happens as a side effect of the run ahead moving, but a ledger written
-   * under the old rule — where every parked run held its project — can hold
-   * a queued run behind a park that no longer blocks anything.
-   */
-  promoteQueue(project: string): Run | undefined {
-    this.refresh();
-    this.promoteHead(project);
-    this.persist();
-    return this.loadedRunningRun(project);
   }
 
   /**
@@ -1224,15 +1294,16 @@ export class RunStore {
   }
 
   /**
-   * Move a run to `next`, refusing illegal transitions and refusing to break
-   * either rule above. Promotes the queue head whenever this move frees the
-   * project — which is at the end of a run, and also when a branchless run
-   * parks, since that releases the session slot while holding nothing.
+   * Move a run to `next`, refusing illegal transitions and refusing `active`
+   * when no place is free for the run (ADR-0063 D1). A run whose step ends
+   * waits for a place with its own order (D2). Whatever place the move frees
+   * is given to the first waiting run before the file is written (D3).
    */
   private transition(
     id: string,
     next: RunStatus,
     apply: (run: Run) => void,
+    options: { takeover?: boolean } = {},
   ): Run {
     const run = this.mutable(id);
     const allowed = TRANSITIONS[run.status];
@@ -1242,51 +1313,81 @@ export class RunStore {
           `(allowed: ${allowed.join(", ") || "nothing — it is finished"})`,
       );
     }
+    if (options.takeover === true) run.takenOver = true;
 
-    if (RUNNING.includes(next)) {
-      const running = this.loadedRunningRun(run.project);
-      if (running !== undefined && running.id !== id) {
-        throw new Error(
-          `Project ${run.project} already has a session for run ${running.id} ` +
-            `(${running.status}) — one session per project at a time`,
-        );
-      }
-
-      const holder = this.loadedOccupyingRun(run.project);
-      if (holder !== undefined && holder.id !== id) {
-        throw new Error(
-          `Project ${run.project} is held by run ${holder.id} ` +
-            `(${holder.status}, branch ${holder.branch}) — one work branch at a time`,
-        );
-      }
+    if (next === "active" && run.takenOver !== true && run.place?.givenAt === undefined) {
+      const holder = this.placeTakenFrom(run);
+      if (holder !== undefined) throw new NoPlaceError(run.project, holder);
     }
 
+    const stepEnds = run.status === "active" && run.takenOver !== true;
     run.status = next;
     apply(run);
     run.updatedAt = this.now();
-
-    if (TERMINAL.includes(next) || next === "parked") {
-      this.promoteHead(run.project);
+    // A person's terminal holds a run only while it is active (ADR-0063 D5).
+    if (next !== "active") run.takenOver = undefined;
+    // The step takes the place itself now, so the place is no longer given
+    // and the run no longer waits for one.
+    if (next === "active" && run.place !== undefined) {
+      run.place.givenAt = undefined;
+      run.place.waitingSince = undefined;
     }
+    // A run whose step has just ended waits for a place with its own order,
+    // until its runner decides what comes next (ADR-0063 D2). It keeps the
+    // place when it comes first.
+    if (next === "parked" && stepEnds && run.place !== undefined) {
+      run.place.waitingSince = this.now();
+    }
+    this.givePlaces(run.project);
 
     this.persist();
     return { ...run };
   }
 
   /**
-   * Move the oldest queued run of `project` into `picked-up`, if the project
-   * is free. "Free" is both rules at once: nothing running, and nothing
-   * parked on a branch.
+   * The run that keeps `run` from a place, or undefined when it may take one:
+   * {@link PLACES_PER_PROJECT} other runs of its project take a place, or a
+   * place is given to another run. Over the state already in hand.
    */
-  private promoteHead(project: string): void {
-    if (this.loadedRunningRun(project) !== undefined) return;
-    if (this.loadedOccupyingRun(project) !== undefined) return;
-    const head = this.state.runs.find(
-      (run) => run.project === project && run.status === "queued",
+  private placeTakenFrom(run: Run): Run | undefined {
+    const others = this.state.runs.filter(
+      (other) => other.project === run.project && other.id !== run.id,
     );
-    if (head === undefined) return;
-    head.status = "picked-up";
-    head.updatedAt = this.now();
+    const taking = others.filter(takesPlace);
+    const given = others.find((other) => other.place?.givenAt !== undefined);
+    if (taking.length < PLACES_PER_PROJECT && given === undefined) return undefined;
+    return given ?? taking[0];
+  }
+
+  /**
+   * Give each free place on `project` to the first waiting run, in the order
+   * of {@link waitingForPlace} (ADR-0063 D3). Called inside the mutation that
+   * freed the place, so the place is given in the same write: no runner woken
+   * in between can take it first.
+   */
+  private givePlaces(project: string): void {
+    for (;;) {
+      const taking = this.state.runs.filter(
+        (run) => run.project === project && takesPlace(run),
+      );
+      if (taking.length >= PLACES_PER_PROJECT) return;
+      const first = this.loadedWaitingForPlace(project)[0];
+      if (first?.place === undefined) return;
+      first.place.givenAt = this.now();
+      first.place.waitingSince = undefined;
+    }
+  }
+
+  /** {@link waitingForPlace} over the state already in hand. */
+  private loadedWaitingForPlace(project: string): Run[] {
+    return this.state.runs
+      .filter(
+        (run) =>
+          run.project === project &&
+          run.place?.waitingSince !== undefined &&
+          !takesPlace(run),
+      )
+      .sort(byPlaceOrder);
   }
 
   /** Write the state file atomically: temp file, then rename over. */
@@ -1413,12 +1514,36 @@ function lastSignOfLife(run: Run): number {
 }
 
 /**
- * Whether a run holds its project against every other ticket: its session is
- * running or about to, or it is parked on a work branch it owns.
+ * Whether a run takes a place on its project (ADR-0063 D1): a step of it
+ * runs, and a person's terminal does not hold it; or a place is given to it
+ * and not yet used. Nothing else takes one — not a work branch, not an open
+ * pull request, not a wait for a person.
  */
-function holdsProject(run: Run): boolean {
-  if (RUNNING.includes(run.status)) return true;
-  return run.status === "parked" && run.branch !== undefined;
+function takesPlace(run: Run): boolean {
+  return (
+    (run.status === "active" && run.takenOver !== true) ||
+    run.place?.givenAt !== undefined
+  );
+}
+
+/**
+ * The order in which waiting runs are given a place (ADR-0063 D3): a ticket
+ * labelled `priority:high` first, then the ticket opened first on the forge,
+ * then the lowest ticket number.
+ */
+function byPlaceOrder(left: Run, right: Run): number {
+  const priority = Number(right.place?.priority === true) - Number(left.place?.priority === true);
+  if (priority !== 0) return priority;
+  const opened = Date.parse(left.place?.openedAt ?? "") - Date.parse(right.place?.openedAt ?? "");
+  if (opened !== 0 && !Number.isNaN(opened)) return opened;
+  return left.ticket - right.ticket;
+}
+
+/** Who takes the place a run was refused, as the refusal says it. */
+function whoTakesThePlace(holder: Run): string {
+  return holder.place?.givenAt !== undefined
+    ? `the place is given to run ${holder.id}`
+    : `run ${holder.id} has a step running`;
 }
 
 /**
@@ -1452,7 +1577,8 @@ function normaliseSequences(data: unknown): unknown {
       .map(normaliseSequence)
       .map(normaliseWait)
       .map(normaliseOldPath)
-      .map(normaliseRemovedFields),
+      .map(normaliseRemovedFields)
+      .map(normaliseQueued),
   };
 }
 
@@ -1667,6 +1793,26 @@ function normaliseRemovedFields(run: unknown): unknown {
     Object.entries(wait).filter(([field]) => field !== "acknowledgedAt"),
   );
   return { ...kept, wait: oldKind ? { ...waitKept, kind: "runner" } : waitKept };
+}
+
+/**
+ * Read a run an older ledger holds as `queued` as `picked-up`, before the
+ * schema is asked to validate it
+ * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+ * D2).
+ *
+ * A queued run was a ticket picked up while another run held the project. It
+ * had not begun, which is what `picked-up` says: its runner is woken for it as
+ * for any new ticket, and it waits for a place only once it tries a step.
+ *
+ * Like the other normalisations it writes nothing, and it is idempotent: a
+ * run that is not queued is returned untouched, so a second load reads the
+ * same runs.
+ */
+function normaliseQueued(run: unknown): unknown {
+  if (typeof run !== "object" || run === null) return run;
+  if (!("status" in run) || run.status !== "queued") return run;
+  return { ...run, status: "picked-up" };
 }
 
 /** {@link normaliseSequences} for one run: an id with no `/` is chunk 1. */

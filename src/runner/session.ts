@@ -159,8 +159,8 @@ function putOnRunnersWait(deps: RunnerActionDeps, run: Run, waitingOn: string): 
 /**
  * How one wake ended.
  *
- * - `not-woken` — the run had ended, or was queued, or its ticket has spent
- *   its limit, so no session started and nothing was written.
+ * - `not-woken` — the run had ended, or its ticket has spent its limit, so
+ *   no session started and nothing was written.
  * - `ended` — the session ran to its end. What the runner did is in the
  *   record, as its actions wrote it.
  * - `failed` — the session did not run to its end. `retry` says whether
@@ -198,8 +198,8 @@ export async function wakeRunner(
   let current = actionDeps.store.get(run.id);
   // A wake is asked for when something happened, and by the time its turn
   // comes the run may be over: merging the list of pieces ends it while the
-  // step that recorded the approval is still reporting. A queued run is
-  // waiting for its project, not for the runner. Neither is woken.
+  // step that recorded the approval is still reporting. Such a run is not
+  // woken. ✏ 2026-10-04: no run is queued any more (ADR-0063 D2).
   if (current === undefined || !WAKEABLE.includes(current.status)) return { kind: "not-woken" };
   if (signal?.aborted === true) return { kind: "stopped" };
   const config = actionDeps.manifest.projects[actionDeps.project.name];

@@ -127,10 +127,11 @@ export interface PollResult {
    * runner.
    */
   reclaimed: string[];
-  /** Run ids newly picked up this cycle. */
+  /**
+   * Run ids newly picked up this cycle. ✏ 2026-10-04: every pickup lands
+   * here; nothing is queued any more (ADR-0063 D2).
+   */
   pickedUp: string[];
-  /** Run ids newly queued behind an occupying run this cycle. */
-  queued: string[];
   /**
    * What a human asked for and this cycle carried out, as `<kind> <target>`
    * ([ADR-0032](../../doc/adr/0032-a-human-command-asks-the-daemon-to-act.md)).
@@ -231,26 +232,6 @@ export function pickedUpComment(): string {
     "happen next. Whatever I work out gets written back here on this ticket.",
     "",
     "**What I need from you:** nothing right now — I'll comment here when I do.",
-  ].join("\n");
-}
-
-/**
- * The acknowledgement posted when a ticket has to wait: this project is
- * already working something else, and it works one thing at a time.
- */
-export function queuedComment(
-  aheadOfIt: number,
-  position: number,
-): string {
-  const place =
-    position <= 1 ? "It's next in line." : `It's number ${position} in line.`;
-  return [
-    "**This one is in the queue.**",
-    "",
-    `I'm already working on #${aheadOfIt} for this project, and I take one thing`,
-    `at a time so two pieces of work never collide. ${place}`,
-    "",
-    "**What I need from you:** nothing right now — I'll comment here when I start.",
   ].join("\n");
 }
 
@@ -363,7 +344,6 @@ export async function pollOnce(deps: PollDeps): Promise<PollResult> {
   const result: PollResult = {
     reclaimed: [],
     pickedUp: [],
-    queued: [],
     applied: [],
     errors: [],
   };
@@ -1145,7 +1125,6 @@ async function pollProject(
     // the project for every ticket behind it.
     if (await heldSinceListing(project, ticket.number, deps)) continue;
 
-    const occupier = store.occupyingRun(project.name);
     const { run, created } = store.register(project.name, ticket.number);
     if (!created) continue;
 
@@ -1159,29 +1138,19 @@ async function pollProject(
       await adapter.applyLabel(project, ticket.number, HELD_LABEL);
     }
 
-    if (run.status === "queued") {
-      result.queued.push(run.id);
-      log(`queued ${run.id}`);
-      await adapter.postComment(
-        project,
-        ticket.number,
-        queuedComment(occupier?.ticket ?? 0, store.queuePosition(run.id)),
-      );
-    } else {
-      result.pickedUp.push(run.id);
-      log(`pickup ${run.id}`);
-      await adapter.postComment(project, ticket.number, pickedUpComment());
-    }
+    // ✏ 2026-10-04: every pickup is a pickup (ADR-0063 D2). A ticket waits
+    // for a place only once its runner tries a step, so none is queued here.
+    result.pickedUp.push(run.id);
+    log(`pickup ${run.id}`);
+    await adapter.postComment(project, ticket.number, pickedUpComment());
   }
 
   // What happens next to each run is the runner's to decide (ADR-0060 D9,
-  // PRD-05 R19), so nothing here decides it. The queue is promoted first: one
-  // run per project at a time (R15). `promoteQueue` is what starts a run left
-  // queued behind a park that no longer holds anything — promotion is
-  // otherwise a side effect of the run ahead moving, and nothing moved. The
-  // runner's tick returns once it has asked for its wakes; it never waits for
-  // one, so this project's work does not hold up the next (R15).
-  store.promoteQueue(project.name);
+  // PRD-05 R19), so nothing here decides it. The runner's tick returns once
+  // it has asked for its wakes; it never waits for one, so this project's
+  // work does not hold up the next (R15). ✏ 2026-10-04: nothing is promoted
+  // here any more. The ledger gives a freed place in the write that frees it
+  // (ADR-0063 D3).
   const cycle = { tickets, isStep: frontier.isStep, threads };
   for (const line of await runner.tick(project, config, cycle)) {
     result.errors.push(line);
