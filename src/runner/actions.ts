@@ -31,6 +31,7 @@ import {
   type ChunkZeroDeps,
 } from "../daemon/chunk-zero.js";
 import { closeInitiativeIfDone } from "../daemon/poll.js";
+import { withPeopleNamed } from "../daemon/people.js";
 import {
   isPrompted,
   sessionRequest,
@@ -1054,7 +1055,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       if (timone === undefined) return { ok: false, refused: NO_TIMONE_PROJECT };
       const number = await deps.adapter.createIssue(timone, {
         title,
-        body,
+        body: withPeopleNamed(body, namedPeople(deps.manifest, "timone")),
         labels: [TIMONE_BUG_LABEL],
       });
       return { ok: true, said: `Filed Timone issue #${number}.` };

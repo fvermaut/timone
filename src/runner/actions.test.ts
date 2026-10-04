@@ -291,9 +291,10 @@ interface World {
 
 /**
  * The runner's actions on run `scratch-app#12/1`, active, with nothing running.
- * `setup` runs against the store before the actions are built.
+ * `setup` runs against the store before the actions are built. The manifest
+ * is {@link MANIFEST} unless the test gives its own.
  */
-function world(ticket: TicketThread = featureTicket()): World {
+function world(ticket: TicketThread = featureTicket(), manifest: Manifest = MANIFEST): World {
   const root = mkdtempSync(join(tmpdir(), "timone-actions-"));
   tempDirs.push(root);
   const store = RunStore.open(join(root, ".timone", "state.json"));
@@ -308,7 +309,7 @@ function world(ticket: TicketThread = featureTicket()): World {
     {
       store,
       adapter,
-      manifest: MANIFEST,
+      manifest,
       root,
       timonePin: async () => undefined,
       project: PROJECT,
@@ -430,10 +431,92 @@ describe("the runner's actions", () => {
       {
         project: { name: "timone", repoUrl: TIMONE_REPO },
         title: "A step is started twice when the box restarts",
-        body: "Seen on scratch-app #12 at 2026-09-27T11:40:00Z, in session 3f1c9a52.",
+        body:
+          "Seen on scratch-app #12 at 2026-09-27T11:40:00Z, in session 3f1c9a52.\n\n" +
+          "Named so that GitHub tells them about this ticket and every comment on it: @fvermaut",
         labels: ["bug"],
       },
     ]);
+  });
+
+  it("names the operator on a Timone issue when the timone project lists no instructors, under the runner's own words (R2)", async () => {
+    const { actions, forge } = world();
+
+    await actions.fileTimoneIssue({
+      title: "A step is started twice when the box restarts",
+      body: "Seen on scratch-app #12, in session 3f1c9a52.",
+      reason: "The failure came from Timone's own code.",
+    });
+
+    expect(forge.issues[0]?.body).toContain("@fvermaut");
+    expect(forge.issues[0]?.body.startsWith("Seen on scratch-app #12, in session 3f1c9a52.")).toBe(true);
+  });
+
+  it("names the timone project's people on a Timone issue, never those of the project the run is on (R2)", async () => {
+    const onScratchApp: Manifest = {
+      ...MANIFEST,
+      projects: {
+        ...MANIFEST.projects,
+        "scratch-app": { ...MANIFEST.projects["scratch-app"]!, instructors: ["client-person"] },
+      },
+    };
+    const { actions, forge } = world(featureTicket(), onScratchApp);
+
+    await actions.fileTimoneIssue({
+      title: "A step is started twice when the box restarts",
+      body: "Seen on scratch-app #12, in session 3f1c9a52.",
+      reason: "The failure came from Timone's own code.",
+    });
+
+    expect(forge.issues[0]?.body).toContain("@fvermaut");
+    expect(forge.issues[0]?.body).not.toContain("@client-person");
+  });
+
+  it("names the timone project's instructors on a Timone issue, and not the operator they replace", async () => {
+    const instructedTimone: Manifest = {
+      ...MANIFEST,
+      projects: {
+        ...MANIFEST.projects,
+        timone: { ...MANIFEST.projects["timone"]!, instructors: ["alice"] },
+      },
+    };
+    const { actions, forge } = world(featureTicket(), instructedTimone);
+
+    await actions.fileTimoneIssue({
+      title: "A step is started twice when the box restarts",
+      body: "Seen on scratch-app #12, in session 3f1c9a52.",
+      reason: "The failure came from Timone's own code.",
+    });
+
+    expect(forge.issues[0]?.body).toContain("@alice");
+    expect(forge.issues[0]?.body).not.toContain("@fvermaut");
+  });
+
+  it("files a Timone issue with the runner's body as it is when the manifest names nobody (R5)", async () => {
+    const namesNobody: Manifest = { projects: { ...MANIFEST.projects } };
+    const { actions, forge } = world(featureTicket(), namesNobody);
+
+    const result = await actions.fileTimoneIssue({
+      title: "A step is started twice when the box restarts",
+      body: "Seen on scratch-app #12, in session 3f1c9a52.",
+      reason: "The failure came from Timone's own code.",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(forge.issues[0]?.body).toBe("Seen on scratch-app #12, in session 3f1c9a52.");
+  });
+
+  it("keeps a Timone issue's title and its one label, bug, when it names people", async () => {
+    const { actions, forge } = world();
+
+    await actions.fileTimoneIssue({
+      title: "A step is started twice when the box restarts",
+      body: "Seen on scratch-app #12, in session 3f1c9a52.",
+      reason: "The failure came from Timone's own code.",
+    });
+
+    expect(forge.issues[0]?.title).toBe("A step is started twice when the box restarts");
+    expect(forge.issues[0]?.labels).toEqual(["bug"]);
   });
 
   it("refuses to end a run whose branch has two commits the default branch lacks and no pull request, and leaves it running", async () => {

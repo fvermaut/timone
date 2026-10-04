@@ -22,3 +22,10 @@
 **Agreed:** 46a case 10: keep the existing no-assignee test for `createStep` unchanged, and add one assertion that the argv carries the body it was given, "names included", right after `--body`.
 **Did instead:** The test's input was kept as it was. The added assertion checks that the value right after `--body` is exactly the body given, `"does the thing"`, which names nobody.
 **Why:** The two instructions cannot both hold: that test's body has no names, and giving it names would change the test. The adapter passes the body through unchanged, so the assertion still shows that names written into the body reach `gh`.
+
+## 2026-10-04 — timone#210, build
+
+**Kind:** plan step
+**Agreed:** 46b's first checkbox: cases 1–4 were red before the change and green after it.
+**Did instead:** Case 1, and the existing test of the exact body, were seen red. Cases 2 and 3 were green when written, because the one line that made case 1 green already reads the `timone` project. Case 4 checks that nothing is added when nobody is named, which the code already did before the change. For each of the three the code was broken on purpose (reading the run's own project, naming only the operator, always adding the line), the test was seen to fail, and the code was put back. The handoff shows each failure.
+**Why:** Writing wrong code only to see a test fail would be a false red. A test seen to fail against broken code shows it is not empty.
