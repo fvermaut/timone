@@ -1,10 +1,13 @@
+import { repoSlug } from "../adapters/github-tickets.js";
 import type {
+  Dependency,
   MergeOutcome,
   TicketingAdapter,
   TicketingProject,
 } from "../adapters/ticketing.js";
 import {
   fromForgeDefaultBranch,
+  orderOf,
   readBreakdown,
   type BreakdownSource,
   type Chunk,
@@ -164,6 +167,18 @@ export async function openStepTickets(
     );
   }
 
+  // Read before the forge is touched. A `Needs:` line that cannot be read is
+  // refused rather than guessed: falling back to the chain would write
+  // relations that contradict the order the person approved (R10).
+  const order = orderOf(read.breakdown);
+  if (order.kind === "unclear") {
+    return (
+      `the list of pieces at ${read.path} does not say clearly what each ` +
+      `piece needs: ${order.reason}, so no step tickets were opened`
+    );
+  }
+  const { needs } = order;
+
   try {
     // Before anything can be held, the label has to exist — a state nobody
     // created is a state nobody can be in, which is why `timone-wayfind`
@@ -180,7 +195,6 @@ export async function openStepTickets(
     const byTitle = new Map(existing.map((step) => [step.title, step.number]));
 
     const opened: { number: number; chunk: Chunk }[] = [];
-    let previous: number | undefined;
     for (const [index, chunk] of read.breakdown.chunks.entries()) {
       const title = stepTitle(index, chunk.title);
       let number = byTitle.get(title);
@@ -190,21 +204,36 @@ export async function openStepTickets(
           title,
           body: stepBody(chunk, run.ticket, read.path),
         });
-        // The chain is written only for a ticket this run opened. A step
-        // that already existed already carries its relation, and writing it
-        // again is the second `blockedBy` edge case (2) forbids.
-        if (previous !== undefined) {
-          await adapter.blockStep(project, number, previous);
+      }
+      opened.push({ number, chunk });
+    }
+
+    // Each step waits for the steps its piece directly needs, and no others:
+    // the forge already makes a wait carry through (R10). Every step is
+    // checked, not only the ones this run opened, because a run that stopped
+    // between opening a ticket and writing its relations left it waiting for
+    // nothing. Only what is missing is written, so a re-run writes nothing
+    // twice, and a relation is never removed — one a person added by hand
+    // stays. A step this run opened is in `existing` not at all, so it has
+    // no relations yet.
+    const blockedByOf = new Map(existing.map((step) => [step.number, step.blockedBy]));
+    for (const [index, step] of opened.entries()) {
+      const blockedBy = blockedByOf.get(step.number) ?? [];
+      for (const need of needs[index] ?? []) {
+        const waitsFor = opened[need - 1];
+        if (
+          waitsFor !== undefined &&
+          !blockedBy.some((dependency) => isStepOf(project, dependency, waitsFor.number))
+        ) {
+          await adapter.blockStep(project, step.number, waitsFor.number);
         }
       }
-      previous = number;
-      opened.push({ number, chunk });
     }
 
     await adapter.setTicketBody(
       project,
       run.ticket,
-      initiativeMap(opened, read.path),
+      initiativeMap(opened, order.words, read.path),
     );
     // Last, and only once the children exist: from here the daemon reads
     // this ticket as a map and never opens a run on it. Marking it before
@@ -219,6 +248,26 @@ export async function openStepTickets(
     // happen is this run carrying on as though the steps existed.
     return `could not open the step tickets: ${oneLine(error)}`;
   }
+}
+
+/**
+ * Whether a dependency is issue `number` of this project's own repository.
+ *
+ * The number alone is not enough: `blockedBy` can hold issues of other
+ * repositories, and their numbers collide with ours (see `dependencySchema`).
+ * A step waiting for another repository's #13 is not waiting for our #13.
+ * The dependency's URL is the only field that names its repository, so it is
+ * compared with the issue URL this project's own #`number` has. Letter case
+ * is ignored, because GitHub treats owner and repository names that way.
+ */
+function isStepOf(
+  project: TicketingProject,
+  dependency: Dependency,
+  number: number,
+): boolean {
+  if (dependency.number !== number) return false;
+  const own = `https://github.com/${repoSlug(project.repoUrl)}/issues/${number}`;
+  return dependency.url.toLowerCase() === own.toLowerCase();
 }
 
 /** How a step ticket is titled: the chunk's number, then its name. */
@@ -250,9 +299,16 @@ function stepBody(
  * Each line is the step's **number**, which GitHub renders as a live link
  * carrying its title and whether it is closed — so the map shows how far the
  * work has got without anything having to keep a tally up to date.
+ *
+ * The order follows the list in the same words the list of pieces uses, so
+ * the ticket says which steps are built at the same time. The numbers in it
+ * are the pieces' numbers, which are the map's line numbers. A blank line
+ * comes before it: a line right under a numbered item would be read as part
+ * of that item.
  */
 function initiativeMap(
   steps: { number: number; chunk: Chunk }[],
+  orderWords: string,
   breakdownPath: string,
 ): string {
   return [
@@ -261,6 +317,8 @@ function initiativeMap(
     ...steps.map(
       (step, index) => `${index + 1}. #${step.number} — ${step.chunk.delivers}`,
     ),
+    "",
+    `Order: ${orderWords}`,
     "",
     `The list was approved in \`${breakdownPath}\`.`,
   ].join("\n");

@@ -89,3 +89,80 @@ $ npm run build && npx vitest run
 - `orderInWords` expects a clear order: each piece needs only pieces above it. Call it with `orderOf`'s `needs`, or with needs you have checked yourself. It does not check them.
 - `orderOf` reports only the first unreadable line from the top.
 - A list of one piece reads "1." (see the decisions above).
+
+## 45b — The step tickets wait for each other exactly as the order says
+
+**Built.** `openStepTickets` reads the order with `orderOf` before it touches the forge. When the order is unclear it opens nothing, creates no label, writes no relation and no body, and returns `the list of pieces at <path> does not say clearly what each piece needs: <reason>, so no step tickets were opened`. When it is clear it opens the missing step tickets in list order, as before. Then, for every step, new or old, it writes a relation for each direct need that the step's `blockedBy` does not already hold. It never removes a relation. The chain through `previous` is gone. A list with no `Needs:` lines still gives the chain, because `orderOf` reads a missing line as "the piece above". The initiative's map now has the line `Order: <words>` after the list of steps.
+
+**Files touched.**
+
+- `src/daemon/chunk-zero.ts` — `orderOf` before the forge, the refusal for an unclear order, the relations written from the direct needs after all tickets are open, the private `isStepOf` (is this dependency our own issue N), and `initiativeMap` takes the order's words.
+- `src/daemon/chunk-zero.test.ts` — a fake forge built from `ticketing.stubs.ts`, and cases (1)–(8). The existing `tryMergeChunkZero` type-level test is unchanged.
+- `doc/plans/phases/reports/phase-45-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **How "this project's repository" is recognised.** Nothing in `src/` compared a dependency's URL with a project before this slice (`steps.ts` reads only `open`). So I reused the one existing rule for a project's repository: `repoSlug(project.repoUrl)` from `src/adapters/github-tickets.ts`, which the daemon already imports in `container-runtime.ts`. A dependency is our issue N when its number is N **and** its URL equals `https://github.com/<owner>/<repo>/issues/N`, ignoring letter case (GitHub ignores case in owner and repository names). The rule is GitHub's, but so is the URL it reads: `dependencySchema.url` is filled from GitHub's `blockedBy`.
+- **`repoSlug` is called only when a step already has a relation with the right number.** A project whose `repoUrl` is not a GitHub URL therefore still gets its first run. If `repoSlug` throws on a re-run, the error is caught and the run reports `could not open the step tickets: …`, as other forge failures are.
+- **All tickets are opened first, then all relations are written**, piece by piece in list order, each piece's needs in ascending order. This follows the plan's "then, for every piece". A step that already existed and has all its relations gets no call.
+- **The steps' current relations come from the one `listSteps` call made before any ticket is opened.** A step opened by this run is not in that answer, so it has no relations, as the orchestrator noted. No second `listSteps` call.
+- **The unclear check runs before `ensureLabel`.** The plan says "before it touches the forge", and case (7) says "no label". The failure message reaches the ticket through the existing failure path in `actions.ts`, unchanged.
+- **The `Order:` line has a blank line before it and one after it.** A line directly under a numbered item would be read by markdown as part of that item. Its numbers are the pieces' numbers, which are also the map's line numbers.
+- **The fake records `ensureLabel` too**, so case (7) can check "no label" with `calls` equal to `[]`.
+
+Refactors I would do but did not, because they are outside the slice: the comment on `ensureLabel` in `openStepTickets` still speaks of "29c" and "29d". `stepBody` could say what the step waits for in words, but the plan does not ask for it.
+
+**Validation evidence.**
+
+Each case was written alone and run with `npx vitest run src/daemon/chunk-zero.test.ts -t "<name>"`.
+
+1. *"makes each step wait only for the steps its piece directly needs (R10)"* — red: expected `#12←#11, #13←#11, #14←#12, #14←#13`, received the chain `#12 waits for #11`, `#13 waits for #12`, `#14 waits for #13`. Green after `orderOf` and the relations from `needs`, with the `previous` chain deleted.
+2. *"gives the committed list of ticket 197 the relations its Needs: lines say"* — **passed on arrival** (case 1's code covers it). To show it is not vacuous, I ran it against `HEAD`'s `chunk-zero.ts`. It failed: `expected [ '#12 waits for #11', …(4) ] to deeply equal [ '#13 waits for #11', …(3) ]`. I restored the new file and it was green again.
+3. *"chains the steps one after the other, as before, when no piece has a Needs: line"* — **passed on arrival, which is the point of the case** ("the chain exactly as today"). It also passes against `HEAD`'s `chunk-zero.ts`, which shows the behaviour did not change. Mutation: `needs` forced to `[]`. It failed: `expected [] to deeply equal [ '#12 waits for #11', …(1) ]`. Reverted, green.
+4. *"opens no ticket and writes no relation when run a second time on the same forge"* — red: `expected [ '#12 waits for #11', …(3) ] to deeply equal []`. Green after comparing each need with the step's `blockedBy` (by number at that point).
+5. *"adds only the relation a step is missing when the steps already exist"* — **passed on arrival** (case 4's code covers it). Mutation: put back the old rule, "relations only for a ticket this run opened" (`if (blockedByOf.has(step.number)) continue;`). It failed: `expected [] to deeply equal [ '#14 waits for #13' ]`. Reverted, green.
+6. *"still writes a relation when the step waits for an issue of another repository with the same number"* — red: `expected [] to deeply equal [ '#14 waits for #13' ]`. Green after `isStepOf` (number and URL).
+7. *"opens nothing and says why when a Needs: line cannot be read"* — red: `expected [ 'label timone:held made', …(6) ] to deeply equal []`. Green after the refusal before the forge is touched. The sentence is checked for its start (`the list of pieces at doc/plans/breakdowns/ticket-07.md does not say clearly what each piece needs: `), for 45a's reason (`piece 2's Needs: line "piece 3." names piece 3, which comes after it`) and for its end (`, so no step tickets were opened`).
+8. *"writes the order in words on the initiative's ticket, under the list of its steps"* — red: the received body lacked the line `Order: 1, then 2 and 3 together, then 4.` and the blank line after it. Green after `initiativeMap` took the order's words.
+
+Validation commands:
+
+```
+$ npx vitest run src/daemon/chunk-zero.test.ts
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+
+$ npx vitest run src/runner/actions.test.ts src/daemon/steps.test.ts
+ Test Files  2 passed (2)
+      Tests  65 passed (65)
+
+$ npm run type-check
+> tsc --noEmit
+(no output, exit 0)
+
+$ git diff --stat
+ src/daemon/chunk-zero.test.ts | 326 +++++++++++++++++++++++++++++++++++++++++-
+ src/daemon/chunk-zero.ts      |  76 ++++++++--
+ 2 files changed, 389 insertions(+), 13 deletions(-)
+```
+
+(The stat was taken before this section was appended. With it, the handoff file is the third file changed.)
+
+- [x] Cases (1)–(8) pass. Each was seen failing first. Where one passed on arrival (2, 3, 5), a change to the code made it fail, and that run is recorded above.
+- [x] `actions.test.ts` and `steps.test.ts` pass unchanged (65 tests).
+- [x] `src/runner/actions.ts` is not modified: it is not in `git diff --stat`.
+
+Tests run at slice end. The files this change can affect are `src/daemon/chunk-zero.test.ts`, `src/runner/actions.test.ts` and `src/daemon/steps.test.ts` (the only callers of `openStepTickets` are in `actions.ts`), all shown above. The whole suite:
+
+```
+$ npm run build && npx vitest run
+ Test Files  61 passed (61)
+      Tests  1633 passed (1633)
+   Duration  5.67s
+```
+
+**What 45c must know.**
+
+- The initiative's map now has an `Order: <words>` line between the list of steps and the line `The list was approved in …`. The words come from `orderOf(...).words`, the same function 45a wrote.
+- When the order is unclear, `openStepTickets` returns its sentence before `ensureLabel`, so a run whose list has a bad `Needs:` line has opened nothing at all.
+- A risk the plan does not cover: when GitHub reports more relations than it hands over (`dependenciesIncomplete: true`), a relation that exists but was not handed over looks missing and is written again. If GitHub refuses a relation that already exists, the run reports `could not open the step tickets: …` instead of finishing. Reading `dependenciesIncomplete` here, or making `blockStep` accept a relation that already exists, would close the gap. Neither is in this slice.
