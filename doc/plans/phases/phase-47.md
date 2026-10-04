@@ -184,6 +184,10 @@ grep -rn "The project is busy" src --include=*.ts | grep -vE '^\S+:[0-9]+:\s*(//
 6. `buildBrief` with each of the four place states writes the matching line; the `SYSTEM` text carries the new rule.
 7. After a simulated restart (`regivePlaces` on a ledger with a given place and no wake in flight), the next tick wakes the first waiting run.
 
+✏ 2026-10-04 (build, timone#201): three cases added and one file granted. The first try of this slice showed that a place could be given and then never used or given back, so the project's one place stays taken and no other step starts. (a) In `look()`, a run given the place that this tick will not wake for it — its ticket is held, or it is over its spending limit — gives the place back (`store.giveBack`), so it goes to the next waiting run. (b) In `wakeRunner`, a place given to the run *after* this wake's refused `start_step` (the holder's step ended during the wake) is not given back: the run keeps it and the next tick wakes it with `PLACE_GIVEN_EVENT`, as its refusal promised. **[MODIFY]** `src/daemon/poll.test.ts` — only the test "a runner refused a step because its project was busy is woken once it is free (40u)", which wrote a refusal by hand and expected the old words: it is rewritten to the given place, or deleted when case 1 covers it.
+8. A run given the place whose ticket is held (not a step ticket) is not woken, and the place goes to the next waiting run in the same tick; the same for a run over its spending limit.
+9. A run whose `start_step` was refused in this wake, and that was given the place later in the same wake, keeps the place when the wake ends, and the next tick wakes it with `PLACE_GIVEN_EVENT`.
+
 > Sub-phases 47a and 47b must be complete before starting this sub-phase (the store methods, and the refused `start_step` decision this reads).
 
 #### Agent Validation Steps

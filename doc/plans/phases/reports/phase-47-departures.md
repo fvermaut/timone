@@ -29,3 +29,24 @@
 **Agreed:** Every test of the code a sub-phase changes passes at its end.
 **Did instead:** 47b was committed with one test failing in `src/runner/driver.test.ts`: "wakes it again after a new refusal, once the project is free again", in the "project was busy (40u)" describe. 47c replaces that describe.
 **Why:** The test has a third run start a step at the moment the freed place is given to the refused run. ADR-0063 D3 says the ledger must refuse that, and it now does. The file is 47c's, not 47b's, so 47b may not change it.
+
+## 2026-10-04 — timone#201, execution (47c)
+
+**Kind:** plan step
+**Agreed:** 47c changes `driver.ts`, `session.ts`, `brief.ts`, `daemon.ts` and their tests, with cases 1–7.
+**Did instead:** The plan was amended in place (✏ 2026-10-04 under 47c). It grants one test in `src/daemon/poll.test.ts` and adds cases 8 and 9. First attempt: the slice's work passed cases 1–7, but a test in `poll.test.ts` that wrote a refusal by hand failed and kept the old words "The project is free now", so the validation grep failed; the file was not granted. It also found that a place given to a held ticket, or to a ticket over its spending limit, was never used and never given back, and that a place given later in the same wake as a refused try was handed on although the refusal promised a wake. Second attempt, with the grant and the two cases: all green.
+**Why:** The failing test could not be fixed without its file. The two gaps would leave the project's one place taken, so no other step of the project starts. ADR-0063 D3 says a place given and not used goes to the next run.
+
+## 2026-10-04 — timone#201, execution (47c)
+
+**Kind:** check not run
+**Agreed:** `npm run replay` passes (PRD-05.R18's replay set).
+**Did instead:** It ran and every case failed with "Not logged in · Please run /login": the runner's sessions need a Claude login, and the build's container has none. No recorded replay case uses the old words "The project is free now"; the offline `src/runner/replay/harness.test.ts` passes. The replay set must be run where a login exists, before merge.
+**Why:** The container has no Claude login for the sessions the replay starts.
+
+## 2026-10-04 — timone#201, execution (47c)
+
+**Kind:** plan step
+**Agreed:** `daemon.ts` calls `store.regivePlaces()` once after `RunStore.open`, before the first cycle. The brief's place is filled from `placeHolders` and `waitingForPlace`. A failed or stopped runner session gives back a place given to the run.
+**Did instead:** `regivePlaces()` is called inside the daemon's state lock in `runDaemon`, just before the first cycle. The brief reads `placeHolders` and the run's own place only. A session in which a try was refused for want of a place keeps the run's turn and any place given to it later, even when the session failed or was stopped. In case 8, the next waiting run is given the place in the same tick and woken on the next tick.
+**Why:** Before the lock, a second `timone daemon` that the lock then refuses would re-give the places of the daemon that runs. The four wordings need nothing from `waitingForPlace`. A run refused for want of a place was told it will be woken when a place is given; handing that place on would break the promise. `tick` walks the runs it read at its start.

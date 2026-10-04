@@ -223,3 +223,87 @@ Checkboxes of the excerpt:
 - Every `startStep` that reaches the ask writes `place` on the run, also when the step starts. So when that step ends (`active → parked`) the run waits again by itself (47a). The runner side must call `leaveTurn` when a wake ends with no step started and no try refused, and `giveBack` when a given place was not used. Nothing calls them yet.
 - `startStepSession` claims only a parked run. For a `picked-up` run, the place check happens in `activate`, after `runtime.start` has already started the session. A `NoPlaceError` there would leave a session running for a run the ledger did not mark active. In practice the runner's wake parks a `picked-up` run first, and the action asks before it starts, so this needs a race. It is not changed here (the excerpt says no change to the flow).
 - `recordApproval` does not ask for a place before its session.
+
+## 47c — Only the run given a place is woken, and a place it does not use goes to the next
+
+**Built.** The driver no longer tells every refused run "The project is free now." It wakes a run only when the ledger has given it a place and no step of it runs, with `PLACE_GIVEN_EVENT` ("A place on the project is free for this ticket now. A step you start will not be refused for want of one."), once per given place (notice `place given at <givenAt>, run <id>`). After a step ends, when the ledger gives the place back to that same run, the driver writes that notice at once, so the run is woken only with the step's end. A run given the place that the tick will not wake for it — its ticket is held (not a step ticket), or it is over its spending limit — gives the place back in that tick, so the place goes to the next waiting run, who is woken on the next tick. After a runner session, `wakeRunner` lets go of a place not used: a session that ended with no step started and no try refused for want of a place calls `leaveTurn`; a session that failed or was stopped, with no try refused, calls `giveBack` only when the place is given to the run. A run whose try was refused for want of a place in the wake keeps its turn: it waits, and a place given to it later in the same wake stays given, so the next tick wakes it with `PLACE_GIVEN_EVENT`. The brief has one new line under *Facts about the work*, `- The project's place: …`, in the four wordings of the plan, and one new rule under *How you act*. The daemon calls `store.regivePlaces()` once before its first cycle.
+
+**Files touched.**
+
+- `src/runner/driver.ts` — `PROJECT_FREE_EVENT`, `busyRefusal`, `projectFreeFor`, `namedRunIds` and `START_STEP` deleted (nothing else used them), with the `PLACES_PER_PROJECT` and `RunnerToolName` imports; `PLACE_GIVEN_EVENT` and the private `placeGivenNotice` added; the 40u block in `look()` replaced; `look()` gives back a place given to a run that is held or over its limit (`overLimit` is now read once, before the hold check); `afterStep` writes the notice after `parkForRunner`; its doc comment says why.
+- `src/runner/session.ts` — `wakeRunner` watches `startStep` for a refusal for want of a place, and calls the new private `freePlace` after the session (a refused try keeps the run's place and turn); private `noPlaceRefusal` and `placeOf`; `briefFor` fills `place`.
+- `src/runner/brief.ts` — exported type `PlaceFact`; `BriefInput.place`; the line in `factsSection` (private `placeText`); the rule in `SYSTEM`.
+- `src/commands/daemon.ts` — `options.store.regivePlaces()` in `runDaemon`, inside the lock, before `poll`.
+- `src/runner/driver.test.ts` — the 40u describe replaced by "a place on the project is given to one waiting run (ADR-0063 D3)": cases 1–5 and 7, case 8 (two tests: held, over the limit), plus the old "does not wake a run refused for another reason" test kept in the new world; a helper `endsAtOnce` (a quiet runner session) at the top of the file; `threeRuns` and `threeChores` take the ticket numbers to hold; `HELD_LABEL` imported.
+- `src/runner/session.test.ts` — new describe "a place on the project after a wake (ADR-0063 D2, D3)" with five tests, one of them case 9; the scripted runner's `calls` play gained an optional `afterCalls`.
+- `src/runner/brief.test.ts` — `briefInput` gives `place: { kind: "free" }`; new describe "the project's place, as the runner is told it (ADR-0063)" with three tests.
+- `src/daemon/poll.test.ts` — only the test "wakes the refused run once, when the other ticket's run has finished and its ticket closed": #7 now asks the ledger for a place with `store.askPlace` while #8's step runs (no refusal written by hand), and the expected wake carries `PLACE_GIVEN_EVENT`'s words. Its describe is renamed "… is woken once a place is given to it (40u)". The `root` it no longer needs is not destructured.
+- `doc/plans/phases/reports/phase-47-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **`regivePlaces` is called inside the state lock in `runDaemon`, not right after `RunStore.open` in the command's action.** Both are "after `RunStore.open`, before the first cycle". Before the lock, a second `timone daemon` that the lock then refuses would already have taken back and given again the places of the daemon that is running. The lock's own comment says a refused start touches nothing of the ledger. Production always passes `statePath`, so the lock path is always taken.
+- **A refusal for want of a place is found by watching the `startStep` action in the wake**, as the wake already watches `post`: its refusal starts with `No place is free on <project>:` (the ledger's `NoPlaceError` words). The record holds the same text after `Refused: `. Watching the action avoids re-reading the record. The variant "The step did not start: No place …" (second ask answered ok) does not match, which is right: that run does not wait.
+- **The brief's place reads `placeHolders` and the run's own `place` only.** `waitingForPlace` was not needed for the four wordings. When the place is taken by the run's own running step (a 15-minute check), the line says `taken: <own run id> has a step running.`, which is true.
+- **`freePlace` acts only on a run that is `picked-up` or `parked` and has no step running.** A `done` or `cancelled` run is left alone (the ledger cleared its place).
+- **The new rule sits right after "You never merge."** under *How you act*.
+- **A place given back by a held or over-limit run is told to the next run on the next tick, not the same one.** `tick` walks the runs it read from the ledger at its start, so the next run's copy does not show the place yet (or it was already looked at). Re-reading every run in the loop would be a change to `tick` the plan did not ask for. Case 8's tests say so: no wake in the first tick, the place is the next run's, and the next tick wakes it.
+- **At the limit, `PLACE_GIVEN_EVENT` is not pushed into the events.** The place is given back in the same look, so a "go on" reply that wakes the runner in that tick must not tell it of a place it no longer has.
+- **A try refused for want of a place keeps the run's place after a failed or stopped session too.** The amendment (b) does not limit itself to a session that ended. The refusal told the runner it would be woken when a place is given, and the next tick does that. Since `askPlace` never refuses a run a place is given to, a place given *before* the refusal cannot exist; so the refused branch of `freePlace` is a plain `return`, with no time comparison.
+- **The poll test was rewritten, not deleted.** Driver case 1 shows the same wake at `RunnerDriver.tick`, but this test goes through `pollOnce`, and the other run ends by `complete` with its ticket no longer listed — the path phase 40's verification saw. Rewriting it cost a few lines.
+- **In two places I wrote two tests before the first run** (brief: the line and the rule; session: the giveBack after a refusal, since replaced by case 9, and after a failure). Each was seen red on its own line of that run, recorded below.
+
+Refactor I would do but did not: `parkForRunner` (driver) and `putOnRunnersWait` (session) are the same function twice. Three doc comments still say a run "holds the project" (`atLimit` and `handBack` in `driver.ts`, `settle` in `session.ts`); they describe the rule ADR-0063 replaced. The test worlds in `driver.test.ts` (`threeRuns`, `builtChore`, the 40x world) each build their own `RunnerDriver`; one builder would do.
+
+**Validation evidence.**
+
+Every red/green run was `npx vitest run <file> -t "<name>"`.
+
+1. *"wakes only the first waiting run by order when the step that took the place ends, and tells it the place is given (R3 clause 3, #184)"* (`driver.test.ts`) — red: the one wake, of `scratch-app#13/1`, carried `"The project is free now."` where `"A place on the project is free for this ticket now. …"` was expected. Green after the new block in `look()`.
+2. *"asks for no wake on a second tick when nothing has changed, since the run was told of its place"* — **passed on arrival** (the notice came with case 1). Mutation: drop the `noticed` check in the new block → `AssertionError: expected [ { …(3) }, { …(3) } ] to have a length of 1 but got 2`. Reverted → green.
+3. *"gives the place to the next waiting run when the run given it ends its runner's wake with no step started, and the next tick wakes that run (R3 clause 4)"* (`driver.test.ts`, with the real `wakeRunner` and a quiet session) — red: `AssertionError: expected [ { runId: 'scratch-app#13/1', …(2) } ] to deeply equal [ { …(3) }, { …(3) } ]`. Green after `leaveTurn` in `wakeRunner`. At the `wakeRunner` seam (`session.test.ts`):
+   - *"gives the place to the next waiting run when the wake of the run given it ends with no step started, and the run waits no more (R3 clause 4)"* — **passed on arrival** (same code). Mutation: remove the `leaveTurn` call → `expected [ 'scratch-app#12/1' ] to deeply equal [ 'scratch-app#13/1' ]`. Reverted → green.
+   - *"leaves a run waiting for its turn when its try to start a step in the wake was refused for want of a place"* — red: `expected [ 'scratch-app#13/1' ] to deeply equal [ 'scratch-app#12/1', …(1) ]`. Green after the refusal was watched.
+   - *"gives the place to the next waiting run when the wake of the run given it fails"* — red: `expected [ 'scratch-app#12/1' ] to deeply equal [ 'scratch-app#13/1' ]`. Green after the `giveBack` branch. (The first attempt had a second test here that expected a place given after a refused try to go back; case 9 below replaced it.)
+4. *"wakes a run whose step just ended and kept the place once, with the step's end, and not again for the place"* — red: a second wake of `scratch-app#13/1` with `PLACE_GIVEN_EVENT` (`expected [ { …(3) }, { …(3) } ] to deeply equal [ { runId: 'scratch-app#13/1', …(2) } ]`). Green after the notice in `afterStep`.
+5. *"does not wake a run waiting for a person on its own branch with an open pull request when a place frees, and wakes it on the merge (R1 clause 3)"* — **passed on arrival** (the run left its turn, so the ledger gives it nothing). Mutation: in `look()`, treat any run with a `place` as given → `AssertionError: expected [ { runId: 'scratch-app#14/1', …(2) } ] to deeply equal []`. Reverted → green.
+6. `brief.test.ts`: *"writes one line under the facts for each state of the place"* — red: `expected undefined to be '- The project's place: given to this…'`; *"puts the line under Facts about the work"* — red: `expected '## Facts about the work\n\n- Default …' to contain '- The project's place: free.'`; *"has a rule under How you act: …"* — red: `expected '' to be '- A step needs the project's place. …'`. Green after the `brief.ts` change. The caller, at the `wakeRunner` seam: *"tells the runner in its brief who takes the project's place, or that it is given to this ticket"* — red: `expected [] to deeply equal [ …(2) ]` (with no `place`, building the brief threw, so no session started). Green after `placeOf`.
+7. *"wakes the first waiting run again after a restart, which takes back the place given before it and gives it again (D3)"* — **passed on arrival**. Mutation: the notice without the time (`place given, run <id>`) → `expected [ { runId: 'scratch-app#13/1', …(2) } ] to deeply equal [ { …(3) }, { …(3) } ]`. Reverted → green.
+8. *"does not wake a run given the place whose ticket is held, and gives the place to the next waiting run in the same tick"* — red: `AssertionError: expected [ 'scratch-app#13/1' ] to deeply equal [ 'scratch-app#14/1' ]`. Green after `look()` gave back a held run's place. *"does not wake a run given the place that is over its spending limit, and gives the place to the next waiting run in the same tick"* — red: `AssertionError: expected [ 'scratch-app#13/1' ] to deeply equal [ 'scratch-app#14/1' ]`. Green after the same give-back read `overLimit`. Both also check that the next tick wakes #14 with `PLACE_GIVEN_EVENT`.
+9. *"lets a run keep a place given to it after its try was refused in the same wake, so it is woken for it next (ADR-0063 D3)"* (`session.test.ts`, the first attempt's test rewritten) — red: `AssertionError: expected [ 'scratch-app#13/1' ] to deeply equal [ 'scratch-app#12/1' ]`. Green after `freePlace` returned on a refused try. The test checks the run still has `givenAt` and #13 still waits. That the next tick then wakes it is the code of case 1 (a given place with no notice wakes its run); it is not shown again at `RunnerDriver.tick`, because a runner session that calls `start_step` needs the scripted runner of `session.test.ts`.
+- The rewritten `poll.test.ts` test — the first attempt's version of it failed against this slice's code: `AssertionError: expected [] to deeply equal [ { runId: 'scratch-app#7/1', …(2) } ]`. The rewritten test **passed on arrival** (the driver code already existed). Mutation: in `look()`, never push `PLACE_GIVEN_EVENT` → `AssertionError: expected [] to deeply equal [ { runId: 'scratch-app#7/1', …(2) } ]`. Reverted → green.
+
+Mutations were temporary edits of `driver.ts` or `session.ts`, copied back from a saved copy straight after the run.
+
+*Validation commands* (from `projects/timone`, second attempt):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/runner/ src/daemon/runs.test.ts; echo "exit: $?"
+ Test Files  12 passed (12)
+      Tests  340 passed (340)
+exit: 0
+
+$ npm run replay; echo "exit: $?"
+FAIL ... (every case) the runner's session failed: Claude Code returned an error result: Not logged in · Please run /login.
+0 of 19 cases passed. The runner's sessions cost $0.00 in all.
+exit: 1
+
+$ grep -rn "PROJECT_FREE_EVENT\|The project is free now" src --include=*.ts | grep -vE '^\S+:[0-9]+:\s*(//|\*)'; echo "exit: $? (expected 1)"
+exit: 1 (expected 1)
+```
+
+Checkboxes of the excerpt:
+
+- [x] Cases 1–7 pass, with red runs recorded (cases 2, 5 and 7, and one `wakeRunner` test of case 3, passed on arrival; each has a mutation that fails it). Cases 8 and 9, added by the amendment, pass, each seen red first.
+- [ ] The replay set passes unchanged — **check not run**: no Claude login in this container, so every case fails before the runner answers (as before this slice). No recorded case expected the old words: `grep` for "The project is free now", `PROJECT_FREE_EVENT`, "free now" and "project is busy" under `src/runner/replay/` finds nothing. `src/runner/replay/harness.test.ts` (offline) passes.
+
+*Test files run at the end*: `src/runner/` (all 11 files, including `replay/harness.test.ts`) and `src/daemon/runs.test.ts`: 340 tests, all pass. `src/daemon/` and `src/commands/` (38 files, 1186 tests, including `poll.test.ts` and `commands/daemon.test.ts`), run after `npm run build` (several guard tests need `dist/cli.js`): all pass. `dist/` was not there before and is not ignored by git, so it was removed again.
+
+**What 47d must know.**
+
+- `regivePlaces` runs once inside the daemon's lock in `runDaemon`, before the first cycle, not in the command's action.
+- A place given back by a held or over-limit run reaches the next waiting run in the same tick, but that run is woken on the next tick.
+- A wake for a held run on a named person's words still happens, but the place is gone by then: a `start_step` in that wake is refused and the run waits again.

@@ -18,7 +18,7 @@ import { technicalFault } from "../daemon/faults.js";
 import { apiErrorFrom } from "../daemon/session.js";
 import { askedFor } from "../daemon/outcomes.js";
 import { SessionProgress } from "../daemon/progress.js";
-import type { Run, RunStatus } from "../daemon/runs.js";
+import { PLACES_PER_PROJECT, type Run, type RunStatus } from "../daemon/runs.js";
 import { HELD_LABEL } from "../daemon/steps.js";
 import {
   runnerActions,
@@ -26,7 +26,7 @@ import {
   type RunnerActions,
   type RunningSteps,
 } from "./actions.js";
-import { buildBrief, type StepActivity, type TimoneIssue } from "./brief.js";
+import { buildBrief, type PlaceFact, type StepActivity, type TimoneIssue } from "./brief.js";
 import { gatherFacts } from "./facts.js";
 import { isOverLimit } from "./limit.js";
 import { ticketKindOf } from "./order.js";
@@ -228,11 +228,21 @@ export async function wakeRunner(
   // it posted there. Watched at the action, so it is what the runner really
   // posted, not what it meant to.
   let asked: string | undefined;
+  // Whether a try to start a step in this wake was refused for want of a
+  // place, which leaves the run waiting for its turn (ADR-0063 D2).
+  let refusedForPlace = false;
   const watched: RunnerActions = {
     ...actions,
     post: async (input) => {
       const result = await actions.post(input);
       if (result.ok && input.where === "ticket") asked = input.body;
+      return result;
+    },
+    startStep: async (input) => {
+      const result = await actions.startStep(input);
+      if (!result.ok && result.refused.startsWith(noPlaceRefusal(actionDeps.project.name))) {
+        refusedForPlace = true;
+      }
       return result;
     },
   };
@@ -263,7 +273,47 @@ export async function wakeRunner(
         },
   );
   if (end.kind === "ended") await settle(actionDeps, run.id, asked);
+  freePlace(actionDeps, run.id, end, refusedForPlace);
   return end;
+}
+
+/**
+ * How the runner's actions begin the refusal of a step for want of a place
+ * on `project`: the words of the ledger's `NoPlaceError`.
+ */
+function noPlaceRefusal(project: string): string {
+  return `No place is free on ${project}:`;
+}
+
+/**
+ * After a session, let go of a place the run holds or waits for and did not
+ * use ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+ * D2, D3), so the place goes to the next waiting run.
+ *
+ * A session that ended with no step started and no try refused for want of
+ * a place leaves its turn: the run stops waiting, and a place given to it
+ * goes on. A session that failed or was stopped decided nothing, so only a
+ * place given to the run goes back. A run with a step running uses its
+ * place, and a run that is over holds none: the ledger cleared it.
+ *
+ * ✏ 2026-10-04: **a try refused for want of a place keeps the run's turn.**
+ * The run waits, and a place given to it later in the same wake (the step
+ * that took it ended meanwhile) stays given: the next look wakes the run for
+ * it, as the refusal promised. No place given before the refusal can be
+ * left, since the ledger never refuses a run a place is given to.
+ */
+function freePlace(
+  deps: RunnerActionDeps,
+  runId: string,
+  end: Exclude<WakeEnd, { kind: "not-woken" }>,
+  refusedForPlace: boolean,
+): void {
+  const run = deps.store.get(runId);
+  if (run === undefined || deps.running.has(runId)) return;
+  if (run.status !== "picked-up" && run.status !== "parked") return;
+  if (refusedForPlace) return;
+  if (end.kind === "ended") deps.store.leaveTurn(runId);
+  else if (run.place?.givenAt !== undefined) deps.store.giveBack(runId);
 }
 
 /** Everything one session is started from. */
@@ -547,9 +597,26 @@ async function briefFor(
     // pickup (ADR-0044 D7). Shown as a hold, it could lead the runner to do
     // nothing, and every piece of a split request would wait for ever.
     held: ticket.labels.includes(HELD_LABEL) && !deps.ticketContext.isStep,
+    place: placeOf(deps, run),
     limitUsd,
     now: deps.clock(),
   });
+}
+
+/**
+ * The project's place as `run` sees it, read from the ledger now
+ * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)):
+ * given to it, free, or taken. A taken place names the run given it, when
+ * one is, and else the run whose step runs.
+ */
+function placeOf(deps: RunnerActionDeps, run: Run): PlaceFact {
+  if (deps.store.get(run.id)?.place?.givenAt !== undefined) return { kind: "given" };
+  const holders = deps.store.placeHolders(run.project);
+  const holder = holders.find((one) => one.place?.givenAt !== undefined) ?? holders[0];
+  if (holder === undefined || holders.length < PLACES_PER_PROJECT) return { kind: "free" };
+  return holder.place?.givenAt !== undefined
+    ? { kind: "given-to", to: holder.id }
+    : { kind: "taken", by: holder.id };
 }
 
 /**

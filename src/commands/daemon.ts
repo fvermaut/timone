@@ -437,6 +437,10 @@ export async function runDaemon(options: RunDaemonOptions): Promise<number> {
             `(pid ${lock.reclaimed.pid}), silent since ${lock.reclaimed.observedAt}`,
         );
       }
+      // Once, under the lock and before the first cycle: no wake survives a
+      // stop, so a place given before it would never be used. Each is taken
+      // back and given again by order (ADR-0063 D3).
+      options.store.regivePlaces();
       return poll(options, log, lock);
     },
   );

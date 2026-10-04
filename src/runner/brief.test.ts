@@ -50,6 +50,7 @@ function briefInput(overrides: Partial<BriefInput> = {}): BriefInput {
     events: ["a new ticket"],
     timoneIssues: [],
     held: false,
+    place: { kind: "free" },
     limitUsd: 150,
     now: "2026-09-27T12:00:00Z",
     ...overrides,
@@ -672,5 +673,38 @@ describe("the steps the brief shows, once an approval is written into its file (
     const brief = buildBrief(briefInput({ kind: "feature", record }));
 
     expect(brief.prompt).toContain("3. writing down what it needs — ran once, cost $2.40.");
+  });
+});
+
+describe("the project's place, as the runner is told it (ADR-0063)", () => {
+  it("writes one line under the facts for each state of the place", () => {
+    const lineFor = (place: BriefInput["place"]): string | undefined =>
+      buildBrief(briefInput({ place }))
+        .prompt.split("\n")
+        .find((line) => line.startsWith("- The project's place:"));
+
+    expect(lineFor({ kind: "given" })).toBe(
+      "- The project's place: given to this ticket — a step you start now will not be refused.",
+    );
+    expect(lineFor({ kind: "free" })).toBe("- The project's place: free.");
+    expect(lineFor({ kind: "taken", by: "scratch-app#7/1" })).toBe(
+      "- The project's place: taken: scratch-app#7/1 has a step running.",
+    );
+    expect(lineFor({ kind: "given-to", to: "scratch-app#9/1" })).toBe(
+      "- The project's place: given to scratch-app#9/1. This ticket waits for its turn.",
+    );
+  });
+
+  it("puts the line under Facts about the work", () => {
+    const prompt = buildBrief(briefInput({ place: { kind: "free" } })).prompt;
+    const facts = prompt.slice(prompt.indexOf("## Facts about the work"));
+
+    expect(facts.slice(0, facts.indexOf("\n## "))).toContain("- The project's place: free.");
+  });
+
+  it("has a rule under How you act: a step needs the place, a refused step waits for its turn, and no comment says the work started before a step has", () => {
+    expect(actRule("A step needs the project's place.")).toBe(
+      "- A step needs the project's place. When the place is taken, starting a step is refused and the ticket waits for its turn; you are woken when a place is given to it. Do not say on the ticket that the work has started until a step has started.",
+    );
   });
 });

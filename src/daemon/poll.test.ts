@@ -3611,7 +3611,7 @@ describe("a cancel on a runner project holds the ticket (40u)", () => {
   });
 });
 
-describe("a runner refused a step because its project was busy is woken once it is free (40u)", () => {
+describe("a runner refused a step because its project was busy is woken once a place is given to it (40u)", () => {
   it("wakes the refused run once, when the other ticket's run has finished and its ticket closed", async () => {
     // Verification of phase 40, found outside the verdicts, item 1, as the
     // check saw it: two tickets picked up together, one runner refused a
@@ -3623,22 +3623,14 @@ describe("a runner refused a step because its project was busy is woken once it 
     const { adapter } = fakeAdapter(marked);
     const first = waitingForRunner(store, 7);
     const { run: second } = store.register("scratch-app", 8);
-    // ✏ 2026-10-04: #8's step runs. A run just picked up takes no place any
-    // more (ADR-0063 D1), so the refusal is for a step that runs.
+    // ✏ 2026-10-04: #8's step runs and takes the project's one place, so
+    // #7's ask for a place is refused and #7 waits for its turn (ADR-0063).
     store.activate(second.id, "step-session-2");
+    expect(store.askPlace(first.id, { priority: false, openedAt: "2026-09-27T09:00:00Z" }).ok).toBe(
+      false,
+    );
     const { sessions, wakes } = fakeWakes();
-    const { runner, root } = runnerFor({ store, adapter, manifest, sessions });
-    // The refusal as the runner's actions write it down.
-    appendEntry(root, "scratch-app", 7, {
-      kind: "decision",
-      at: "2026-09-27T11:59:00Z",
-      runId: first.id,
-      action: "start_step",
-      reason: "A new ticket starts with sorting.",
-      detail:
-        "Refused: The step did not start: No place is free on scratch-app: run " +
-        `${second.id} has a step running.`,
-    });
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     const deps = { manifest, store, adapter, runner };
 
     await pollOnce(deps);
@@ -3652,7 +3644,13 @@ describe("a runner refused a step because its project was busy is woken once it 
     await runner.drain();
 
     expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([
-      { runId: first.id, events: ["The project is free now."], options: {} },
+      {
+        runId: first.id,
+        events: [
+          "A place on the project is free for this ticket now. A step you start will not be refused for want of one.",
+        ],
+        options: {},
+      },
     ]);
   });
 });

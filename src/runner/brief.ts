@@ -55,6 +55,18 @@ export interface TimoneIssue {
   url: string;
 }
 
+/**
+ * The project's place, as this ticket sees it
+ * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)):
+ * given to this ticket, free, taken by a run with a step running, or given
+ * to another run. Runs are named by their run id.
+ */
+export type PlaceFact =
+  | { kind: "given" }
+  | { kind: "free" }
+  | { kind: "taken"; by: string }
+  | { kind: "given-to"; to: string };
+
 /** Everything a brief is built from. The caller gathers it; the brief only writes it out. */
 export interface BriefInput {
   project: string;
@@ -83,6 +95,8 @@ export interface BriefInput {
   timoneIssues: readonly TimoneIssue[];
   /** Whether the ticket carries the hold label. */
   held: boolean;
+  /** The project's place, read from the ledger as the wake starts. */
+  place: PlaceFact;
   /** The project's limit per ticket, before any "continue" (`ticketLimitOf`). */
   limitUsd: number;
   /** The time of this wake, so the runner can judge how long things took. */
@@ -117,6 +131,7 @@ const SYSTEM = [
   "- You act only through your tools: start a step with instructions, send a running step a message, stop a running step, post on the ticket or on the pull request, put the hold on the ticket or take it off, record an approval, file or add to a Timone issue, and end the run.",
   "- You never write code or change a file yourself. When something in the project must be fixed, start a step, and say in its instructions what to fix.",
   "- You never merge. Only a person merges a pull request.",
+  "- A step needs the project's place. When the place is taken, starting a step is refused and the ticket waits for its turn; you are woken when a place is given to it. Do not say on the ticket that the work has started until a step has started.",
   "- A wake may end with nothing done. When nothing is needed, and the newest comment on the ticket is still true, do nothing.",
   "- The newest comment on the ticket must say truthfully what the ticket needs now. A person reads that comment first. When it is the machine's and is no longer true, because it asks for something that is not needed, or offers a command that will not help, post a new comment that is true. Say what is needed now, or what the run does next. Do this even when there is nothing else to do.",
   "- When a named person asks for something, do it, or say on the ticket why you will not. When they ask for a change on the pull request, first reply there that the change is being made, then start the step that makes it.",
@@ -180,7 +195,7 @@ export function buildBrief(input: BriefInput): { system: string; prompt: string 
       wokenSection(input),
       ticketSection(input),
       orderSection(input),
-      factsSection(input.facts),
+      factsSection(input.facts, input.place),
       pullRequestSection(input),
       runningStepSection(input.activity),
       limitSection(input),
@@ -338,7 +353,7 @@ function stepState(step: OrderStep, ofRun: readonly RecordEntry[]): string {
  * Never as "none": the runner would read a missing phase file as a step that
  * made nothing, and start it again.
  */
-function factsSection(facts: Facts): string {
+function factsSection(facts: Facts, place: PlaceFact): string {
   const main = facts.defaultBranch.kind === "known" ? facts.defaultBranch.value : "the default branch";
   const lines = [
     "## Facts about the work",
@@ -374,8 +389,23 @@ function factsSection(facts: Facts): string {
     factLine("List of pieces for this ticket", facts.breakdown, (breakdown) =>
       breakdown === undefined ? "none" : `${breakdown.path} (${statusText(breakdown.status)})`,
     ),
+    `- The project's place: ${placeText(place)}`,
   );
   return lines.join("\n");
+}
+
+/** What the facts say of the project's place. */
+function placeText(place: PlaceFact): string {
+  switch (place.kind) {
+    case "given":
+      return "given to this ticket — a step you start now will not be refused.";
+    case "free":
+      return "free.";
+    case "taken":
+      return `taken: ${place.by} has a step running.`;
+    case "given-to":
+      return `given to ${place.to}. This ticket waits for its turn.`;
+  }
 }
 
 /** One line of the facts: the value written by `write`, or unknown and why. */
