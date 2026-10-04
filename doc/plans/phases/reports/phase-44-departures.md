@@ -29,3 +29,10 @@
 **Agreed:** each slice's validation block ends with `npm test`, and the build's rule runs every suite under a minute whole at the end of each slice.
 **Did instead:** from 44b on, no slice ran the whole suite. Each ran the test files of what it changed and of the code that uses it, by name. The whole suite ran once, at the close: 61 files, 1609 tests passed.
 **Why:** the person running this build asked for it on 2026-10-04, after 44a had run the whole suite three times.
+
+## 2026-10-04 — timone#199, verification
+
+**Kind:** check not run
+**Agreed:** the check runs every criterion in scope, including the standing ones this phase could affect.
+**Did instead:** PRD-05.R18 was BLOCKED on all three of its clauses, and two clauses of PRD-05.R2 (2b) and PRD-05.R7 (1, the runner) were BLOCKED inside otherwise passing checks. They need either the recorded replay against the real model on this build (`npm run --silent replay`, from a logged-in terminal) or a read of GitHub. Neither exists in this box. PRD-07.R8 clauses 2 and 3 were not checked: they are not built yet. No live gate was run; the report lists the ones owed.
+**Why:** no model login and no GitHub access here. The register is unchanged for every BLOCKED criterion. See [phase-44-verification.md](phase-44-verification.md).

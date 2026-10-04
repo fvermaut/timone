@@ -173,6 +173,8 @@
 
 ## R8 — Files almost every ticket changes never stop an update
 
+> ✏ 2026-10-04 — partial evidence: clause 1 passed in [phase-44-verification.md](../../plans/phases/reports/phase-44-verification.md), with its probe [`prd-07.r8.mjs`](../../plans/phases/probes/prd-07.r8.mjs). Clauses 2 and 3 are not built yet, so the status stays `draft`.
+
 - **Priority:** MUST
 - **Status:** draft
 - **Verify-via:** api
