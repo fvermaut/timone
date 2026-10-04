@@ -57,6 +57,8 @@ A single issue on the project's tracker labelled `wayfinder:map` **and `timone`*
 ---
 
 **What I need from you:** nothing — I'm working through the questions on this map, and I'll come back here when the last one is closed.
+
+Named so that GitHub tells them about this ticket and every comment on it: @<each login>
 ```
 
 **The map carries the `timone` mark, like every ticket on it** ([ADR-0024](../../../doc/adr/0024-every-open-ticket-answers-for-itself.md), amending ADR-0010's "never becomes a run" *for the map alone*). It is the ticket that represents the effort to the human, so it is the ticket they write on — and the one transition the process could not otherwise be given, stage 2 → stage 3, is the map's own. ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). Marked, the map has a run, and the runner reads what a named person writes on it. While questions are open, the map asks for nothing. Once the route is posted, **a comment agreeing is what starts the specification**: the runner reads it and starts the step that writes it, the next step of the map's default order. Leave the mark off and that comment lands nowhere, which is exactly what happened to `ivtrends` #1 on 2026-08-13.
@@ -131,6 +133,20 @@ timone takeover <project>#<n>
 
 **The mark is what makes both paths work.** ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). The daemon picks up a marked ticket and gives it a run. The runner reads the ticket's `wayfinder:<type>` label as its kind, so the run starts at this stage and not at sorting. `timone takeover` opens a session on the ticket in the person's terminal. When the run's step is this one, that session is told to hold the conversation with this skill. When it ends, the runner reads what it left on the ticket. Write the blocks as they stand; the way to make the written path a lie is to leave the mark off.
 
+### Every ticket names the project's people
+
+✏ 2026-10-04 ([PRD-08](../../../doc/specs/prd/prd-08-a-ticket-the-machine-opens-names-its-people.md) R3). The machine's account opens these tickets, so GitHub does not tell the project's people about them. A person named in a ticket hears about it and about every comment on it. Name them on every ticket you open: the map and each decision ticket.
+
+**Where the people are found.** Read `timone.yaml`. Use the project's `instructors` when it lists any. Otherwise use the top-level `operator`. These are the people allowed to instruct the project's runner.
+
+**The line.** End the body with a blank line, then one line: the words `Named so that GitHub tells them about this ticket and every comment on it:`, then, for each person, a space and `@<login>`. It comes after the closing block for the ticket's type, as the last line of the body. The code writes the same line on the tickets it opens, word for word. The map's body template above shows it in place. When you rewrite the map's closing line later, keep this line at the end.
+
+**Plain text only.** In the ticket body, write the line as plain text. Never put it inside backticks or a code block: GitHub tells nobody who is named inside code.
+
+**Naming is not claiming.** Never assign anyone for this. An assignee is the person who holds the ticket ([ADR-0044](../../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)). The **Claiming:** rule below does not change.
+
+**When the file names nobody** for the project, open the ticket without the line. Do not stop and do not ask. On the markdown fallback there is no GitHub ticket, so there is no line either.
+
 ### How a question on the map is answered
 
 ✏ 2026-09-30 ([ADR-0060](../../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)). This section used to describe how the old code picked up a written answer and allowed one more question in writing. That code was removed.
@@ -161,8 +177,8 @@ Invoked with a loose idea. Charting is one session's work; it hand-resolves noth
 
 1. **Name the destination** — a short grill (one question at a time, recommended answers) pinning down what this map is finding its way to. The destination fixes the scope, so it comes first.
 2. **Map the frontier, breadth-first** — fan out across the whole space, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** — the journey fits one session — you don't need a map: stop and suggest plain `timone-grill` (or `timone-prd` directly).
-3. **Create the map** (`wayfinder:map` **and `timone`**): Destination and Notes filled, Decisions-so-far empty, the fog sketched into Not yet specified, and the map's own closing line as the body template has it.
-4. **Create the tickets you can specify now** — each labelled `wayfinder:<type>` **and `timone`**, each closing on the CTA block for its type — then wire blocking in a **second pass** (tickets need ids before they can reference each other).
+3. **Create the map** (`wayfinder:map` **and `timone`**): Destination and Notes filled, Decisions-so-far empty, the fog sketched into Not yet specified, and the map's own closing line as the body template has it. End the body with the line that names the project's people — see [Every ticket names the project's people](#every-ticket-names-the-projects-people). ✏ 2026-10-04 ([PRD-08](../../../doc/specs/prd/prd-08-a-ticket-the-machine-opens-names-its-people.md) R3)
+4. **Create the tickets you can specify now** — each labelled `wayfinder:<type>` **and `timone`**, each closing on the CTA block for its type and then the line that names the project's people ([Every ticket names the project's people](#every-ticket-names-the-projects-people); ✏ 2026-10-04, [PRD-08](../../../doc/specs/prd/prd-08-a-ticket-the-machine-opens-names-its-people.md) R3) — then wire blocking in a **second pass** (tickets need ids before they can reference each other).
 5. **Fire the research sub-agents** — each `research` ticket you just created gets a fresh-context sub-agent resolving it in parallel, posting findings as its resolution comment.
 6. Stop. Report the map by name with its link, the frontier, and the suggested first working session. Update `STATUS.md` per the process convention (in a run this step owns no work branch, so that means no `STATUS.md` and no commit to the project).
 
@@ -174,7 +190,7 @@ Invoked with a map (URL, number, or fallback path); a ticket is optional — wit
 2. **Choose the ticket**: the user's if named, else the first frontier ticket. **Claim it before any work.**
 3. **Read the thread before asking anything.** A human may already have answered in writing — that is one of the two paths every HITL ticket offers, and re-asking a question they have answered is the failure the path exists to avoid. Then **resolve it** per its type (table above), zooming as needed — fetch the full body of any related closed ticket on demand; consult the skills the map's Notes name.
 4. **Record the resolution**: post the answer as a resolution comment, **close** the ticket, append the one-line gist to the map's Decisions so far. If the decision was ADR-significant, the ADR was already written at decision time (see above).
-5. **Tend the map**: create-then-wire newly surfaced tickets; graduate sharpened fog; rule mis-scoped tickets out of scope; update or delete tickets the answer invalidated.
+5. **Tend the map**: create-then-wire newly surfaced tickets, each ending on the line that names the project's people ([Every ticket names the project's people](#every-ticket-names-the-projects-people); ✏ 2026-10-04, [PRD-08](../../../doc/specs/prd/prd-08-a-ticket-the-machine-opens-names-its-people.md) R3); graduate sharpened fog; rule mis-scoped tickets out of scope; update or delete tickets the answer invalidated.
 6. **One ticket per session** — `research` tickets excepted. Update `STATUS.md` per the process convention (in a run this step owns no work branch, so that means no `STATUS.md` and no commit to the project), then stop.
 
 ## Closing the effort

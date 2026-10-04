@@ -814,6 +814,7 @@ describe("the writes that open an initiative's steps", () => {
 
     expect(calls[0].args).not.toContain("timone:held");
     expect(calls[0].args).not.toContain("--assignee");
+    expect(calls[0].args[calls[0].args.indexOf("--body") + 1]).toBe("does the thing");
   });
 
   it("refuses a create whose answer is not an issue url", async () => {
@@ -1457,6 +1458,10 @@ describe("the forge calls the runner needs", () => {
       "--label",
       "live-gate",
     ]);
+    expect(calls[0].args[calls[0].args.indexOf("--body") + 1]).toBe(
+      "The check stopped because the forge refused a call.",
+    );
+    expect(calls[0].args).not.toContain("--assignee");
   });
 
   it("reads a pull request's body as it stands on the forge", async () => {
