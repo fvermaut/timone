@@ -582,6 +582,23 @@ export interface TicketingAdapter {
     branch: string,
   ): Promise<PullRequest | undefined>;
 
+  /**
+   * The open pull request from a branch of `ticket`, with that branch, or
+   * undefined when none is open
+   * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+   * D4). A branch of the ticket is `timone/<ticket>`, or starts with
+   * `timone/<ticket>-`; `timone/670-…` is not a branch of ticket 67. When
+   * several are open, the newest wins.
+   *
+   * It throws when the forge fails, and never answers undefined for that:
+   * undefined means a ticket is picked up as new work, and a ticket picked up
+   * while its pull request is open knows nothing of it (#181).
+   */
+  findOpenPullRequestOfTicket(
+    project: TicketingProject,
+    ticket: number,
+  ): Promise<{ pullRequest: PullRequest; branch: string } | undefined>;
+
   /** One pull request with everything said on it, as one thread. */
   getPullRequestThread(
     project: TicketingProject,

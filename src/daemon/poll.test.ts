@@ -62,7 +62,7 @@ import { RunStore, type Run } from "./runs.js";
 import { pickedUpComment, pollOnce } from "./poll.js";
 import { RunnerDriver, pullRequestEvent, type RunnerDriverDeps } from "../runner/driver.js";
 import { RunningSteps, runnerActions } from "../runner/actions.js";
-import type { WakeOptions } from "../runner/session.js";
+import { RunnerSessions, type RunQuery, type WakeOptions } from "../runner/session.js";
 import { appendEntry, readRecord, type RecordEntry } from "../runner/record.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
@@ -166,6 +166,9 @@ interface PostedComment {
  */
 const noPullRequests = {
   async findPullRequest(): Promise<PullRequest | undefined> {
+    return undefined;
+  },
+  async findOpenPullRequestOfTicket(): Promise<undefined> {
     return undefined;
   },
   async getPullRequestThread(): Promise<PullRequestThread> {
@@ -848,6 +851,9 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
     async findPullRequest(_project, branch): Promise<PullRequest | undefined> {
       return pulls[branch];
     },
+    async findOpenPullRequestOfTicket(): Promise<undefined> {
+      return undefined;
+    },
     async getPullRequestThread(_project, number): Promise<PullRequestThread> {
       const found = Object.values(pulls).find((candidate) => candidate.number === number);
       if (found === undefined) throw new Error(`no pull request #${number} in this test`);
@@ -1514,6 +1520,9 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
         calls.push({ call: "applyLabel", number, body: label });
       },
       async findPullRequest(): Promise<PullRequest | undefined> {
+        return undefined;
+      },
+      async findOpenPullRequestOfTicket(): Promise<undefined> {
         return undefined;
       },
       async getPullRequestThread(): Promise<PullRequestThread> {
@@ -4247,3 +4256,203 @@ describe("the runs the old code left in the ledger, on the first cycle after it 
     expect(result.errors).toEqual([]);
   });
 });
+
+/** Pull request #70 of ticket 67, from `timone/67-some-title`, in `state`. */
+function pullRequest70(state: "open" | "merged" | "closed"): PullRequest {
+  return {
+    number: 70,
+    title: "A due date on each task",
+    url: "https://github.com/fvermaut/scratch-app/pull/70",
+    state,
+    headSha: "bbbbbbb",
+  };
+}
+
+/**
+ * `base`, with the open pull requests the forge has for each ticket, keyed by
+ * ticket number. Every ticket the pickup asks about is written down in
+ * `asked`.
+ */
+function withOpenPullRequests(
+  base: TicketingAdapter,
+  open: Record<number, { pullRequest: PullRequest; branch: string }>,
+): { adapter: TicketingAdapter; asked: number[] } {
+  const asked: number[] = [];
+  return {
+    asked,
+    adapter: {
+      ...base,
+      async findOpenPullRequestOfTicket(_project, number) {
+        asked.push(number);
+        return open[number];
+      },
+    },
+  };
+}
+
+// ✏ 2026-10-04: PRD-07.R9 (ADR-0063 D4). On 4 October scratch-app#67 was
+// picked up as new work while its pull request from an earlier run was open,
+// and its new run knew nothing of that pull request (#181).
+describe("a marked ticket whose pull request is open is taken over, not picked up as new work (#181)", () => {
+  it("scratch-app#67, with no run and pull request #70 open from timone/67-some-title: one cycle opens a parked run on that branch and pull request, posts nothing, and asks for no new-ticket wake (#181)", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    const base = fakeAdapter({ "scratch-app": [ticket(67)] });
+    const { adapter } = withOpenPullRequests(base.adapter, {
+      67: { pullRequest: pullRequest70("open"), branch: "timone/67-some-title" },
+    });
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+    await runner.drain();
+
+    expect(store.runsForTicket("scratch-app", 67)).toEqual([
+      expect.objectContaining({
+        status: "parked",
+        branch: "timone/67-some-title",
+        pr: 70,
+      }),
+    ]);
+    expect(base.comments).toEqual([]);
+    expect(wakes).toEqual([]);
+    expect(result.pickedUp).toEqual([]);
+  });
+
+  it("wakes the run that took over scratch-app#67 when pull request #70 merges, and its brief's facts name the branch and the pull request (#181)", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    let state: PullRequest["state"] = "open";
+    const base = fakeAdapter({ "scratch-app": [ticket(67)] });
+    const { adapter } = withOpenPullRequests(
+      {
+        ...base.adapter,
+        async findPullRequest(_project, branch) {
+          return branch === "timone/67-some-title" ? pullRequest70(state) : undefined;
+        },
+        async getPullRequestThread(_project, number) {
+          if (number !== 70) throw new Error(`no pull request #${number}`);
+          return { ...pullRequest70(state), comments: [] };
+        },
+      },
+      { 67: { pullRequest: pullRequest70("open"), branch: "timone/67-some-title" } },
+    );
+    const prompts: string[] = [];
+    const runner = briefedRunner({ store, adapter, manifest }, prompts);
+    const deps = { manifest, store, adapter, runner };
+
+    await pollOnce(deps);
+    await runner.drain();
+    expect(prompts).toEqual([]);
+
+    state = "merged";
+    await pollOnce(deps);
+    await runner.drain();
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("Pull request #70 was merged.");
+    const facts = prompts[0]?.split("## Facts about the work")[1]?.split("\n## ")[0] ?? "";
+    expect(facts).toContain("- Branch: timone/67-some-title");
+    expect(facts).toContain(
+      "- Pull request: #70 (merged): A due date on each task — https://github.com/fvermaut/scratch-app/pull/70",
+    );
+  });
+
+  it("picks scratch-app#67 up as before, with the pickup comment, when no pull request of it is open", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    const base = fakeAdapter({ "scratch-app": [ticket(67)] });
+    const { adapter, asked } = withOpenPullRequests(base.adapter, {});
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+
+    expect(asked).toEqual([67]);
+    expect(store.get("scratch-app#67/1")?.status).toBe("picked-up");
+    expect(base.comments).toEqual([
+      { project: "scratch-app", number: 67, body: pickedUpComment() },
+    ]);
+    expect(result.pickedUp).toEqual(["scratch-app#67/1"]);
+  });
+
+  it("does not ask the forge about scratch-app#67 while a run of it is live", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    const live = waitingForRunner(store, 67);
+    const base = fakeAdapter({ "scratch-app": [ticket(67)] });
+    const { adapter, asked } = withOpenPullRequests(base.adapter, {
+      67: { pullRequest: pullRequest70("open"), branch: "timone/67-some-title" },
+    });
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+
+    expect(asked).toEqual([]);
+    expect(store.runsForTicket("scratch-app", 67)).toEqual([live]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("skips scratch-app#67 for this cycle, with an error, when the forge cannot say whether a pull request of it is open, and still picks up the next ticket", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    const base = fakeAdapter({ "scratch-app": [ticket(67), ticket(68)] });
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async findOpenPullRequestOfTicket(_project, number) {
+        if (number === 67) throw new Error("gh: HTTP 502 Bad Gateway");
+        return undefined;
+      },
+    };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+
+    expect(store.runsForTicket("scratch-app", 67)).toEqual([]);
+    expect(base.comments.map((comment) => comment.number)).toEqual([68]);
+    expect(result.pickedUp).toEqual(["scratch-app#68/1"]);
+    expect(result.errors).toEqual([
+      expect.stringMatching(/^scratch-app#67: .*HTTP 502 Bad Gateway/),
+    ]);
+  });
+});
+
+/**
+ * The real driver over real runner sessions, whose session reads its brief,
+ * calls no tool and ends. Each brief's prompt is written down in `prompts`.
+ */
+function briefedRunner(
+  deps: Pick<RunnerDriverDeps, "store" | "adapter" | "manifest">,
+  prompts: string[],
+): RunnerDriver {
+  const root = mkdtempSync(join(tmpdir(), "timone-runner-"));
+  tempDirs.push(root);
+  const runQuery: RunQuery = async function* ({ prompt }) {
+    prompts.push(prompt);
+    yield {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      total_cost_usd: 0.05,
+      num_turns: 1,
+      result: "Nothing to do.",
+    };
+  };
+  return new RunnerDriver({
+    store: deps.store,
+    adapter: deps.adapter,
+    manifest: deps.manifest,
+    root,
+    sessionsFor: (actionsFor) => new RunnerSessions({ runQuery, actionsFor }),
+    running: new RunningSteps(),
+    consult: async () => undefined,
+    startStep: async () => {
+      throw new Error("no step starts in this test");
+    },
+    timonePin: async () => undefined,
+    clock: () => "2026-09-27T12:00:00Z",
+    log: () => {},
+  });
+}

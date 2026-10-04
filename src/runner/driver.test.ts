@@ -116,6 +116,9 @@ function forge(body: string): {
     async findPullRequest(_project, branch) {
       return branch === BRANCH ? PULL_REQUEST_21 : undefined;
     },
+    async findOpenPullRequestOfTicket(): Promise<undefined> {
+      return undefined;
+    },
     async getPullRequestThread() {
       return { ...PULL_REQUEST_21, comments: [] };
     },

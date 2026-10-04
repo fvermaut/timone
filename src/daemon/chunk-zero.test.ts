@@ -161,6 +161,9 @@ function fakeForge(steps: { number: number; title: string; blockedBy: Dependency
     async findPullRequest(): Promise<never> {
       throw new Error("no test here looks for a pull request");
     },
+    async findOpenPullRequestOfTicket(): Promise<undefined> {
+      return undefined;
+    },
     async getPullRequestThread(): Promise<never> {
       throw new Error("no test here reads a pull request");
     },

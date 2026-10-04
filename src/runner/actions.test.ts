@@ -167,6 +167,7 @@ function fakeForge(ticket: TicketThread, calls: string[]) {
       state.thread.labels = state.thread.labels.filter((each) => each !== label);
     },
     findPullRequest: async () => state.pullRequest,
+    findOpenPullRequestOfTicket: async () => undefined,
     getPullRequestThread: unused("getPullRequestThread"),
     getPullRequestBody: unused("getPullRequestBody"),
     setPullRequestBody: unused("setPullRequestBody"),

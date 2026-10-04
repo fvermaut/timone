@@ -529,6 +529,9 @@ function recordingForge(moment: Moment, project: TicketingProject, log: CallLog)
     async findPullRequest(_on, branch) {
       return pr !== undefined && pr.branch === branch ? pullRequestOf() : undefined;
     },
+    async findOpenPullRequestOfTicket(): Promise<undefined> {
+      return undefined;
+    },
     async getPullRequestThread(_on, number): Promise<PullRequestThread> {
       const found = pullRequestOf();
       if (found === undefined || found.number !== number) {

@@ -734,6 +734,51 @@ export class RunStore {
   }
 
   /**
+   * Open the ticket's next chunk on a pull request that is already open, from
+   * an earlier run of the ticket
+   * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+   * D4, #181). The run is parked at `delivery` with the branch and the pull
+   * request, and waits for the runner, which is woken when the pull request
+   * merges, closes or gets a named person's comment. It takes no place.
+   *
+   * Refused when the ticket has a live run: that run already owns the work.
+   */
+  adopt(project: string, ticket: number, open: { branch: string; pr: number }): Run {
+    this.refresh();
+    const live = this.loadedLiveRunForTicket(project, ticket);
+    if (live !== undefined) {
+      throw new Error(
+        `Cannot take over pull request #${open.pr} for ${project}#${ticket}: ` +
+          `run ${live.id} is still going.`,
+      );
+    }
+
+    const timestamp = this.now();
+    const seq = nextSequence(this.loadedRunsForTicket(project, ticket));
+    const run: Run = {
+      id: runId(project, ticket, seq),
+      project,
+      ticket,
+      seq,
+      status: "parked",
+      stage: "delivery",
+      branch: open.branch,
+      pr: open.pr,
+      wait: {
+        on: `pull request #${open.pr}, opened before this run`,
+        kind: "runner",
+        resolvableBy: ["delivery"],
+      },
+      flags: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    this.state.runs.push(run);
+    this.persist();
+    return { ...run };
+  }
+
+  /**
    * Mark a run as running under `sessionId`. A resuming run stops waiting:
    * whatever it was parked on has been dealt with, and leaving the wait
    * behind would let it be read as still open.

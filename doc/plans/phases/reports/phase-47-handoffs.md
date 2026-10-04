@@ -307,3 +307,63 @@ Checkboxes of the excerpt:
 - `regivePlaces` runs once inside the daemon's lock in `runDaemon`, before the first cycle, not in the command's action.
 - A place given back by a held or over-limit run reaches the next waiting run in the same tick, but that run is woken on the next tick.
 - A wake for a held run on a named person's words still happens, but the place is gone by then: a `start_step` in that wake is refused and the run waits again.
+
+## 47d — A ticket with an open pull request is taken over, not picked up as new work
+
+**Built.** Before the pickup opens a new run for a marked ticket that has no live run, it asks the forge for an open pull request from a branch of that ticket (`timone/<n>`, or a branch that starts with `timone/<n>-`). When one is open, the ledger opens the ticket's next chunk as `parked` at stage `delivery`, with the branch, the pull request and the wait `pull request #<pr>, opened before this run` (kind `runner`, ended by `delivery`). Nothing is posted, no new-ticket wake is asked, and the log says `adopt  <run id> — pull request #<n> is open`. The run then wakes on its pull request as any run with one does, and its brief's facts name the branch and the pull request. When the forge fails to answer, the ticket is skipped for this cycle with one line in the cycle's errors; the other tickets are still picked up. A ticket with a live run is not asked about.
+
+**Files touched.**
+
+- `src/adapters/ticketing.ts` — the port gains `findOpenPullRequestOfTicket(project, ticket)`, with the doc comment the plan asks for.
+- `src/adapters/github-tickets.ts` — implements it with one `gh pr list --repo <slug> --state open --json number,title,url,state,headRefOid,headRefName --limit <pageLimit>`; `ghPullSchema` gains an optional `headRefName`; a new `isBranchOfTicket(branch, ticket)` holds the branch rule. The newest open one (highest number) wins.
+- `src/daemon/runs.ts` — `RunStore.adopt(project, ticket, { branch, pr })`; refuses with an error naming the live run.
+- `src/daemon/poll.ts` — the check in `pollProject`, before `store.register`.
+- `src/adapters/github-pulls.test.ts`, `src/daemon/runs.test.ts`, `src/daemon/poll.test.ts` — the cases below. `poll.test.ts` also gains three helpers: `pullRequest70`, `withOpenPullRequests` and `briefedRunner` (the real driver over real `RunnerSessions`, whose session writes down its prompt and ends).
+- Fakes of the port that `tsc` named, each given only the new method, answering undefined: `src/commands/daemon.test.ts`, `src/commands/takeover.test.ts`, `src/daemon/chunk-zero.test.ts`, `src/daemon/hooks.test.ts`, `src/daemon/poll.test.ts` (`noPullRequests`, `previewTicketing`, and the adapter of the introduction tests), `src/runner/actions.test.ts`, `src/runner/driver.test.ts`, `src/runner/replay/recording.ts`.
+
+**Decisions taken inside the slice.**
+
+- The adapter cases are in `src/adapters/github-pulls.test.ts`, beside `findPullRequest`'s, as the excerpt allows.
+- Case 3 (the branch rule) is tested at the adapter seam, where the rule lives. The poll tests use a fake forge that already answers per ticket.
+- An adopted run is not added to the cycle's `pickedUp` list: it is not a pickup, and that list is what the daemon reports as picked up.
+- The adopted run has no `wait.opened`. The plan's wait has none, and the driver reads comments as new from the run's `createdAt`, so older comments on the pull request do not wake it.
+- The forge failure is caught around the adapter call only. A failure in `store.adopt` (which can only be a live run, and the code checked for one just before) is not caught here; it would end the project's turn as any ledger error does.
+- One case beyond the six: the forge-failure test (case 6b below). The excerpt asks for that behaviour in `poll.ts` and lists no case for it; the test is at the declared `pollProject` seam.
+- Not done: when the open pull requests fill the page (`--limit`, 200 by default), the ticket's one could be missing from the list, and the ticket would be picked up as new work. `listIssues` refuses a full page; this method does not, because the plan does not ask for it. It is one `if` if the orchestrator wants it.
+- Refactor I would do but did not: `register` and `adopt` build the new run with the same eight lines; a private helper that builds the next chunk of a ticket would hold them once.
+
+**Validation evidence.**
+
+Red-green, per case:
+
+1. `poll.test.ts` › "scratch-app#67, with no run and pull request #70 open from timone/67-some-title: one cycle opens a parked run on that branch and pull request, posts nothing, and asks for no new-ticket wake (#181)" — red: `AssertionError: expected [ { id: 'scratch-app#67/1', …(7) } ] to deeply equal [ ObjectContaining{…} ]` (the run was `picked-up`). Green after the check in `pollProject`.
+   `runs.test.ts` › "opens the ticket's next chunk parked at delivery, with the branch, the pull request and the wait for the runner" — red: `TypeError: store.adopt is not a function`. Green after `adopt`.
+2. `poll.test.ts` › "wakes the run that took over scratch-app#67 when pull request #70 merges, and its brief's facts name the branch and the pull request (#181)" — could not go red honestly: case 1's code already makes it true. Mutation 1, `adopt` without `pr`: `AssertionError: expected [] to have a length of 1 but got +0`. Mutation 2, `adopt` without `branch`: `AssertionError: expected '\n\n- Default branch: main\n- Branch:…' to contain '- Branch: timone/67-some-title'`. Both reverted from a saved copy; green.
+3. `github-pulls.test.ts` › "counts a pull request from timone/67 for ticket #67, and not one from timone/670-other" — red: `AssertionError: expected undefined to be 'timone/67' // Object.is equality` (the first filter took only `timone/67-…`). Green after `isBranchOfTicket`. The `670` half was already true; mutation `branch?.startsWith(own)`: `AssertionError: expected { …(2) } to be undefined`. Reverted; green.
+4. `poll.test.ts` › "picks scratch-app#67 up as before, with the pickup comment, when no pull request of it is open" — could not go red honestly (the behaviour from before). Mutation `if (open === undefined) continue;`: `AssertionError: expected undefined to be 'picked-up' // Object.is equality`. Reverted; green.
+5. `poll.test.ts` › "does not ask the forge about scratch-app#67 while a run of it is live" — could not go red honestly (case 1's code checks the live run). Mutation `… === undefined || true`: `AssertionError: expected [ 67 ] to deeply equal []`. Reverted; green.
+   `runs.test.ts` › "refuses a ticket that has a live run, and leaves the ledger as it was" — written after `adopt` already refused. Mutation `if (live !== undefined && false)`: `AssertionError: expected [Function] to throw an error`. Reverted; green.
+6. `github-pulls.test.ts` › "asks gh for the open pull requests and answers the one from a branch of the ticket, with its branch" — red: `TypeError: adapter.findOpenPullRequestOfTicket is not a function`. Green after the method.
+   `github-pulls.test.ts` › "throws when gh fails, rather than answering that no pull request is open" — could not go red honestly (a failing `gh` already threw). Mutation `.catch(() => "[]")` on the `gh` call: `AssertionError: promise resolved "undefined" instead of rejecting`. Reverted; green.
+   6b. `poll.test.ts` › "skips scratch-app#67 for this cycle, with an error, when the forge cannot say whether a pull request of it is open, and still picks up the next ticket" — red: `AssertionError: expected [] to deeply equal [ 68 ]` (the failure ended the project's turn). Green after the `try`/`catch`.
+
+The validation block, as written:
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/daemon/poll.test.ts src/daemon/runs.test.ts src/adapters/; echo "exit: $?"
+ Test Files  8 passed (8)
+      Tests  445 passed (445)
+exit: 0
+```
+
+- [x] Cases 1–6 pass, with red runs recorded — yes; where a case could not go red, a mutation's failure is recorded instead.
+- [x] The scratch-app#67 case is named in the test's title — yes: the describe is "a marked ticket whose pull request is open is taken over, not picked up as new work (#181)", and case 1's title starts "scratch-app#67, … (#181)".
+
+Test files run at the end, after `npm run build` (then `rm -rf dist`): every test file under `src/adapters`, `src/commands`, `src/daemon`, `src/runner` and `src/*.test.ts` — 61 files, 1703 tests, all passed, exit 0. That covers the test files of every changed file and of every file that imports one.
+
+**What 47e must know.**
+
+- An adopted step ticket is not given the hold label that a pickup puts on a step ticket (the plan says post nothing and continue). Its run is live, so it is not picked up again; whether the frontier should see it as claimed is not decided here.
+- `takeover.ts` and `cancel.ts` can now meet a ticket whose live run was opened by `adopt`: `parked`, stage `delivery`, with a branch and a pull request, and never `picked-up` or `active` before.

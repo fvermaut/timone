@@ -1125,6 +1125,34 @@ async function pollProject(
     // the project for every ticket behind it.
     if (await heldSinceListing(project, ticket.number, deps)) continue;
 
+    // ✏ 2026-10-04: a ticket whose pull request from an earlier run is open
+    // is taken over, not picked up as new work (ADR-0063 D4, #181). Asked
+    // only when no run of the ticket is live, so once per pickup and not
+    // once per cycle. Nothing is posted: the thread already has the pull
+    // request. A forge that does not answer skips the ticket for this cycle:
+    // picked up without the answer, it could be #181 again.
+    if (store.liveRunForTicket(project.name, ticket.number) === undefined) {
+      let open: { pullRequest: PullRequest; branch: string } | undefined;
+      try {
+        open = await adapter.findOpenPullRequestOfTicket(project, ticket.number);
+      } catch (error) {
+        const line =
+          `${project.name}#${ticket.number}: could not ask for an open pull request ` +
+          `of the ticket, so it is not picked up this cycle: ${oneLine(error)}`;
+        result.errors.push(line);
+        log(`error  ${line}`);
+        continue;
+      }
+      if (open !== undefined) {
+        const adopted = store.adopt(project.name, ticket.number, {
+          branch: open.branch,
+          pr: open.pullRequest.number,
+        });
+        log(`adopt  ${adopted.id} — pull request #${open.pullRequest.number} is open`);
+        continue;
+      }
+    }
+
     const { run, created } = store.register(project.name, ticket.number);
     if (!created) continue;
 

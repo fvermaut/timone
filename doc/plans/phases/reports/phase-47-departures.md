@@ -50,3 +50,10 @@
 **Agreed:** `daemon.ts` calls `store.regivePlaces()` once after `RunStore.open`, before the first cycle. The brief's place is filled from `placeHolders` and `waitingForPlace`. A failed or stopped runner session gives back a place given to the run.
 **Did instead:** `regivePlaces()` is called inside the daemon's state lock in `runDaemon`, just before the first cycle. The brief reads `placeHolders` and the run's own place only. A session in which a try was refused for want of a place keeps the run's turn and any place given to it later, even when the session failed or was stopped. In case 8, the next waiting run is given the place in the same tick and woken on the next tick.
 **Why:** Before the lock, a second `timone daemon` that the lock then refuses would re-give the places of the daemon that runs. The four wordings need nothing from `waitingForPlace`. A run refused for want of a place was told it will be woken when a place is given; handing that place on would break the promise. `tick` walks the runs it read at its start.
+
+## 2026-10-04 — timone#201, execution (47d)
+
+**Kind:** plan step
+**Agreed:** 47d's cases 1–6; case 3 (which branch counts for the ticket) under the poll seam's list.
+**Did instead:** One test was added at the declared `pollProject` seam for the forge failure the plan's prose asks for, which no case listed. Case 3 is tested at the adapter seam, where the branch rule lives. An adopted run is not counted in the cycle's `pickedUp` list. The new forge call does not refuse a full page of 200 open pull requests, as the ticket listings do; a ticket whose pull request falls off that page would be picked up as new work. An adopted step ticket does not get the hold label a pickup puts on a step ticket; its live run already stops a second pickup.
+**Why:** The forge failure is behaviour the plan asks for, so it needs a test at a declared seam. The branch filter belongs to the adapter. The full page and the hold label were left as the plan wrote them, and are raised as questions on the pull request.

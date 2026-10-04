@@ -2569,3 +2569,40 @@ describe("a failed run the old code left keeps a reason of one line (41m)", () =
     expect(store.get("timone#107/1")).toEqual(cancelledByAPerson);
   });
 });
+
+// ✏ 2026-10-04: PRD-07.R9 (#181). A ticket whose pull request from an earlier
+// run is open is taken over, not picked up as new work (ADR-0063 D4).
+describe("adopting a ticket's open pull request", () => {
+  it("opens the ticket's next chunk parked at delivery, with the branch, the pull request and the wait for the runner", () => {
+    const store = newStore();
+    const { run: first } = store.register("scratch-app", 67);
+    store.cancel(first.id, "the run left the ledger");
+
+    const adopted = store.adopt("scratch-app", 67, { branch: "timone/67-some-title", pr: 70 });
+
+    expect(adopted).toMatchObject({
+      id: "scratch-app#67/2",
+      status: "parked",
+      stage: "delivery",
+      branch: "timone/67-some-title",
+      pr: 70,
+      wait: {
+        on: "pull request #70, opened before this run",
+        kind: "runner",
+        resolvableBy: ["delivery"],
+      },
+    });
+    expect(store.get(adopted.id)).toEqual(adopted);
+    expect(store.liveRunForTicket("scratch-app", 67)?.id).toBe("scratch-app#67/2");
+  });
+
+  it("refuses a ticket that has a live run, and leaves the ledger as it was", () => {
+    const store = newStore();
+    const { run: live } = store.register("scratch-app", 67);
+
+    expect(() =>
+      store.adopt("scratch-app", 67, { branch: "timone/67-some-title", pr: 70 }),
+    ).toThrow(/scratch-app#67\/1/);
+    expect(store.runsForTicket("scratch-app", 67)).toEqual([live]);
+  });
+});

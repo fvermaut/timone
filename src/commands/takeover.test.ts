@@ -162,6 +162,9 @@ const noPullRequests = {
   async findPullRequest(): Promise<PullRequest | undefined> {
     return undefined;
   },
+  async findOpenPullRequestOfTicket(): Promise<undefined> {
+    return undefined;
+  },
   async getPullRequestThread(): Promise<PullRequestThread> {
     throw new Error("no pull request exists in this test");
   },
