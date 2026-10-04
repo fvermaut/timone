@@ -1,6 +1,6 @@
 # Breakdown
 
-**Status:** Awaiting approval
+**Status:** Approved by fvermaut 2026-10-04T06:34:53Z — 6 pieces
 
 1. **Numbered files never take the same number** — two tickets worked at the same time never give a phase file, an ADR or a triage record the same number.
    - Delivers PRD-07 R8, clause 1.
