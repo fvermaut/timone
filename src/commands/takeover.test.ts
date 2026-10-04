@@ -162,6 +162,9 @@ const noPullRequests = {
   async findPullRequest(): Promise<PullRequest | undefined> {
     return undefined;
   },
+  async findOpenPullRequestOfTicket(): Promise<undefined> {
+    return undefined;
+  },
   async getPullRequestThread(): Promise<PullRequestThread> {
     throw new Error("no pull request exists in this test");
   },
@@ -270,7 +273,10 @@ describe("resolveTakeover", () => {
     });
   });
 
-  it("explains a queued ticket rather than starting it out of turn", async () => {
+  // ✏ 2026-10-04: this asserted a queued ticket's answer. No ticket is queued
+  // any more (ADR-0063 D2): one picked up while another run is parked on its
+  // branch is picked up, and gets the answer every picked-up run gets.
+  it("says it is working on a ticket picked up while another run is parked on its branch", async () => {
     const store = newStore();
     const { run: first } = store.register("scratch-app", 4);
     store.activate(first.id, "session-1");
@@ -288,7 +294,7 @@ describe("resolveTakeover", () => {
 
     expect(resolution).toMatchObject({
       kind: "nothing-to-do",
-      message: expect.stringMatching(/queue/),
+      message: expect.stringMatching(/working on .* right now/),
     });
   });
 
@@ -396,7 +402,10 @@ describe("a ticket the ledger has never heard of", () => {
     expect(said.join("\n")).not.toMatch(/`timone` label/);
   });
 
-  it("queues a ticket behind the run holding its project, rather than opening a second session", async () => {
+  // ✏ 2026-10-04: this asserted that the new run was queued behind #6. A
+  // branch takes no place (ADR-0063 D1, D5; PRD-07 R13), so the takeover
+  // opens a session on the new run.
+  it("opens a session on a new ticket while another run is parked on its branch", async () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);
     store.activate(run.id, "session-1");
@@ -412,11 +421,8 @@ describe("a ticket the ledger has never heard of", () => {
       { manifest, store, adapter },
     );
 
-    expect(resolution).toMatchObject({
-      kind: "nothing-to-do",
-      message: expect.stringMatching(/queue/),
-    });
-    expect(store.get("scratch-app#12/1")).toMatchObject({ status: "queued" });
+    expect(resolution).toMatchObject({ kind: "open-session" });
+    expect(store.get("scratch-app#12/1")).toMatchObject({ status: "parked" });
   });
 });
 
@@ -1411,7 +1417,7 @@ describe("a takeover that opens a new run, at the step its `wayfinder:` label na
   });
 });
 
-describe("a takeover of a run that is queued or running", () => {
+describe("a takeover of a run that is picked up or running", () => {
   /** A ledger at a path of its own, so the command takes the lock as it does for real. */
   function ledger(): { store: RunStore; statePath: string } {
     const dir = mkdtempSync(join(tmpdir(), "timone-takeover-busy-"));
@@ -1440,7 +1446,10 @@ describe("a takeover of a run that is queued or running", () => {
     return { code, said, launched: calls.length };
   }
 
-  it("starts nothing for a queued run, says it is in the queue, and leaves it queued", async () => {
+  // ✏ 2026-10-04: this asserted a queued run's answer. No run is queued any
+  // more (ADR-0063 D2), so the run picked up behind a run parked on its
+  // branch gets the answer every picked-up run gets.
+  it("starts nothing for a run picked up while another run is parked on its branch, and says it is being worked on", async () => {
     const { store, statePath } = ledger();
     const { run: ahead } = store.register("scratch-app", 4);
     store.activate(ahead.id, "session-1");
@@ -1456,10 +1465,10 @@ describe("a takeover of a run that is queued or running", () => {
     expect(code).toBe(1);
     expect(launched).toBe(0);
     expect(said).toEqual([
-      "scratch-app #6 is in the queue — I take one thing at a time on a " +
-        "project. I'll start it when the one ahead is done.",
+      "I'm working on scratch-app #6 right now. Anything I need from you " +
+        "will land on the ticket.",
     ]);
-    expect(store.get(run.id)?.status).toBe("queued");
+    expect(store.get(run.id)?.status).toBe("picked-up");
     expect(pending(statePath).requests).toEqual([]);
     expect(existsSync(stateLockPath(statePath))).toBe(false);
   });
@@ -1635,5 +1644,145 @@ describe("a run the runner waits on", () => {
     expect(said.at(-1)).toBe(
       "scratch-app #6 goes back to the runner. It reads what the session left as soon as the daemon runs.",
     );
+  });
+});
+
+describe("a takeover takes no place on its project (ADR-0063 D5)", () => {
+  /** A ledger at a path of its own, so the command takes the lock as it does for real. */
+  function ledger(): { store: RunStore; statePath: string } {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-place-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    return { statePath, store: RunStore.open(statePath) };
+  }
+
+  /** Ticket #6's run, picked up and waiting for the runner. */
+  function waitingSix(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 6);
+    return store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
+  }
+
+  /**
+   * Run the command on #6 with the lock free. `during` runs while the
+   * terminal session is open, which is the only time the takeover holds the run.
+   */
+  async function takeOver(
+    store: RunStore,
+    statePath: string,
+    during: () => void = () => {},
+  ): Promise<{ code: number; said: string[]; launched: number }> {
+    const { launcher, calls } = fakeLauncher({ onRun: during });
+    const said: string[] = [];
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter: fakeAdapter().adapter,
+      launcher,
+      root: "/root",
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+    return { code, said, launched: calls.length };
+  }
+
+  it("takes over a ticket while another ticket of the project has a step running, and leaves that step alone (R13 clause 1)", async () => {
+    const { store, statePath } = ledger();
+    const six = waitingSix(store);
+    const { run: four } = store.register("scratch-app", 4);
+    store.activate(four.id, "step-session-4");
+    const fourBefore = store.get(four.id);
+    let sixDuring: Run | undefined;
+    let fourDuring: Run | undefined;
+
+    const { code, launched } = await takeOver(store, statePath, () => {
+      sixDuring = store.get(six.id);
+      fourDuring = store.get(four.id);
+    });
+
+    expect(code).toBe(0);
+    expect(launched).toBe(1);
+    expect(sixDuring).toMatchObject({ status: "active", takenOver: true });
+    expect(fourDuring).toEqual(fourBefore);
+    expect(store.get(four.id)).toEqual(fourBefore);
+  });
+
+  it("takes over a ticket while another ticket of the project owns a branch and an open pull request, with no step running (R13 clause 2)", async () => {
+    const { store, statePath } = ledger();
+    const { run: four } = store.register("scratch-app", 4);
+    store.activate(four.id, "step-session-4");
+    store.claimBranch(four.id, "timone/4-due-dates");
+    store.recordPullRequest(four.id, 19);
+    store.park(four.id, {
+      waitingOn: "pull request #19 to be merged",
+      kind: "runner",
+      resolvableBy: ["delivery"],
+    });
+    const six = waitingSix(store);
+    let sixDuring: Run | undefined;
+
+    const { code, said, launched } = await takeOver(store, statePath, () => {
+      sixDuring = store.get(six.id);
+    });
+
+    expect(code).toBe(0);
+    expect(launched).toBe(1);
+    expect(said[0]).toMatch(/^Picking up scratch-app #6 here\./);
+    expect(sixDuring).toMatchObject({ status: "active", takenOver: true });
+    expect(store.get(four.id)).toMatchObject({
+      status: "parked",
+      branch: "timone/4-due-dates",
+      pr: 19,
+    });
+  });
+
+  it("refuses the takeover of a ticket whose own step is running, in the words it always used (R13 clause 3)", async () => {
+    const { store, statePath } = ledger();
+    const { run: six } = store.register("scratch-app", 6);
+    store.activate(six.id, "step-session-6");
+    const sixBefore = store.get(six.id);
+
+    const { code, said, launched } = await takeOver(store, statePath);
+
+    expect(code).toBe(1);
+    expect(launched).toBe(0);
+    expect(said).toEqual([
+      "I'm working on scratch-app #6 right now. Anything I need from you " +
+        "will land on the ticket.",
+    ]);
+    expect(store.get(six.id)).toEqual(sixBefore);
+  });
+
+  it("lets a third ticket's step start while a ticket is taken over (R2 clause 6)", async () => {
+    const { store, statePath } = ledger();
+    const six = waitingSix(store);
+    const { run: eight } = store.register("scratch-app", 8);
+    store.park(eight.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
+    let asked: ReturnType<RunStore["askPlace"]> | undefined;
+    let eightDuring: Run | undefined;
+
+    const { code } = await takeOver(store, statePath, () => {
+      // What a step's start does: ask for the place, claim, then activate.
+      asked = store.askPlace(eight.id, {
+        priority: false,
+        openedAt: "2026-08-03T09:00:00Z",
+      });
+      store.claim(eight.id);
+      eightDuring = store.activate(eight.id, "step-session-8");
+    });
+
+    expect(code).toBe(0);
+    expect(asked).toEqual({ ok: true });
+    expect(eightDuring?.status).toBe("active");
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual([eight.id]);
+    expect(store.get(six.id)?.status).toBe("parked");
   });
 });

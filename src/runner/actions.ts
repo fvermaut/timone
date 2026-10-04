@@ -22,8 +22,8 @@ import {
   stagePrompt,
   workBranch,
 } from "../daemon/prompts.js";
-import type { Run, RunStore } from "../daemon/runs.js";
-import { HELD_LABEL, HELD_LABEL_DESCRIPTION } from "../daemon/steps.js";
+import { NoPlaceError, type Run, type RunStore } from "../daemon/runs.js";
+import { HELD_LABEL, HELD_LABEL_DESCRIPTION, PRIORITY_LABEL } from "../daemon/steps.js";
 import {
   openStepTickets,
   tryMergeChunkZero,
@@ -464,23 +464,30 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
   /**
    * The branch a step at `stage` works on: the run's own, or — at the first
    * stage that owns one — a new one claimed in the ledger now, before the
-   * step starts. The claim is refused while another run holds the project,
-   * and then no step starts.
+   * step starts. Several runs of a project may own a branch at once, so the
+   * claim is never refused (ADR-0063 D1): what keeps a step from starting
+   * is a place, asked for before this.
    */
-  const branchFor = (
-    stage: PipelineStage,
-    ticket: TicketThread,
-  ): { ok: true; name: string | undefined } | { ok: false; refused: string } => {
+  const branchFor = (stage: PipelineStage, ticket: TicketThread): string | undefined => {
     const held = current().branch;
-    if (held !== undefined || !ownsBranch(stage)) return { ok: true, name: held };
+    if (held !== undefined || !ownsBranch(stage)) return held;
     const name = workBranch(ticket, run.seq);
-    try {
-      deps.store.claimBranch(run.id, name);
-    } catch (error) {
-      return { ok: false, refused: `The project is busy, so no step can start: ${oneLine(error)}` };
-    }
-    return { ok: true, name };
+    deps.store.claimBranch(run.id, name);
+    return name;
   };
+
+  /**
+   * The refusal of a step for want of a place: who takes the place, by run
+   * id, and that this ticket now waits for its turn (ADR-0063 D2). The run
+   * id is there so the runner, and a person reading the record, can find
+   * the other run.
+   */
+  const noPlace = (holder: Run): { ok: false; refused: string } => ({
+    ok: false,
+    refused:
+      `${new NoPlaceError(deps.project.name, holder).message} This ticket now waits for its ` +
+      "turn, and you are woken when a place is given to it.",
+  });
 
   /**
    * Why no step may start now, or undefined when one may: a step of this run
@@ -807,8 +814,17 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         };
       }
 
+      // A step needs a place on the project (ADR-0063 D2). Asked after every
+      // other rule, so a try refused for another reason does not wait, and
+      // before the branch is claimed, so a refused try writes nothing else.
+      const turn = {
+        priority: ticket.labels.includes(PRIORITY_LABEL),
+        openedAt: ticket.createdAt,
+      };
+      const place = deps.store.askPlace(run.id, turn);
+      if (!place.ok) return noPlace(place.holder);
+
       const branch = branchFor(stage, ticket);
-      if (!branch.ok) return branch;
 
       const departure: RecordEntry | undefined =
         skipped.length === 0
@@ -840,7 +856,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
             project: deps.project,
             ticket,
             classification: classificationFromLabels(ticket.labels),
-            branch: branch.name,
+            branch,
           }),
           "",
           runnerInstructionsBlock(
@@ -854,12 +870,12 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         ].join("\n"),
         model,
         effort: effortFor(stage),
-        ...workspaceFor(await deps.timonePin(), deps.project, branch.name),
+        ...workspaceFor(await deps.timonePin(), deps.project, branch),
         interactive: true,
         // The one branch this step's pushes may reach (#85). Given whether or
         // not Timone's version is known, because the guard does not depend
         // on the workspace.
-        workBranch: branch.name,
+        workBranch: branch,
       });
 
       // **The ledger learns the step before the step starts** (40r), as the
@@ -886,6 +902,13 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         });
       } catch (error) {
         if (stageBefore !== undefined) deps.store.setStage(run.id, stageBefore);
+        // Another run took the place between the ask and the start. The
+        // ledger refused before it wrote anything, so the run asks for a
+        // place once more, and that writes that it waits.
+        if (error instanceof NoPlaceError) {
+          const again = deps.store.askPlace(run.id, turn);
+          if (!again.ok) return noPlace(again.holder);
+        }
         return { ok: false, refused: `The step did not start: ${oneLine(error)}` };
       }
       watchStep(stage, session, instructions);

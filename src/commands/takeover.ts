@@ -184,8 +184,6 @@ async function findTakeover(
   }
 
   switch (run.status) {
-    case "queued":
-      return { kind: "nothing-to-do", message: queuedMessage(target) };
     case "picked-up":
     case "active":
       return {
@@ -307,9 +305,6 @@ function enrolFromTracker(
 ): TakeoverResolution {
   const { store } = deps;
   const created = store.register(target.project, target.ticket).run;
-  if (created.status === "queued") {
-    return { kind: "nothing-to-do", message: queuedMessage(target) };
-  }
 
   // ✏ 2026-10-02 (41m): **at the step the ticket's `wayfinder:` label
   // names**, as the runner's own order reads it: a decision ticket at
@@ -326,14 +321,6 @@ function enrolFromTracker(
     resolvableBy: [stage ?? "triage"],
   });
   return { kind: "open-session", run };
-}
-
-/** What a ticket behind another on its project is told. */
-function queuedMessage(target: TakeoverTarget): string {
-  return (
-    `${target.project} #${target.ticket} is in the queue — I take one ` +
-    "thing at a time on a project. I'll start it when the one ahead is done."
-  );
 }
 
 /**
@@ -393,10 +380,11 @@ export async function runTakeover(
   const claimed = await claimForTakeover(raw, target, deps, log);
   if (claimed.kind !== "claimed") return claimed.code;
 
-  // From here the run's *status* is what holds the project — a RUNNING status
-  // occupies the one-session slot, which is how the daemon's own sessions have
-  // always had exclusivity (ADR-0032). No lock is held across the
-  // conversation, so the daemon carries on with every other project.
+  // From here the run's *status* is what holds the run: it is `active`, so
+  // the runner leaves it alone and no step starts on it (ADR-0032). It is
+  // marked taken over, so it takes no place on the project, and other
+  // tickets' steps go on starting (ADR-0063 D5). No lock is held across the
+  // conversation, so the daemon carries on with every other ticket and project.
   //
   // A claimed run is `active`, and an active run that stops stamping its
   // heartbeat is reclaimed as dead by the daemon's next pass (ADR-0020) —
@@ -456,8 +444,8 @@ type Claim = { kind: "claimed"; run: Run } | { kind: "no"; code: number };
  *
  * **Refusals keep their words wherever they can.** Where the ledger already
  * knows this ticket, resolution is a read, so it happens here and the human
- * gets the same sentence they have always got about a queued run, a running
- * one, a finished one. Only enrolling a ticket the ledger has never heard of
+ * gets the same sentence they have always got about a running run, or a
+ * finished one. Only enrolling a ticket the ledger has never heard of
  * is a write, and only that case is handed to the daemon whole.
  * ✏ 2026-10-02 (41m): so is a new run for an open ticket whose latest run is
  * done or cancelled. It is handed to the daemon whole too.
@@ -494,7 +482,10 @@ async function claimForTakeover(
         log(resolution.message);
         return { kind: "no", code: 1 };
       }
-      return { kind: "claimed", run: store.claim(resolution.run.id, hold) };
+      return {
+        kind: "claimed",
+        run: store.claim(resolution.run.id, hold, { takeover: true }),
+      };
     } finally {
       acquired.lock.release();
     }

@@ -30,7 +30,6 @@ import { departureSection, departuresOf, DEPARTURES_END, DEPARTURES_START } from
 import { defaultOrder, standingOf, ticketKindOf, type TicketContext } from "./order.js";
 import { appendEntry, readRecord, type RecordEntry } from "./record.js";
 import { RUNNER_DEFAULT_WAIT, type RunnerSessions, type WakeOptions } from "./session.js";
-import type { RunnerToolName } from "./tools.js";
 
 /**
  * The runner's driver: what the poll cycle calls, once a cycle, for every
@@ -267,20 +266,20 @@ export const RUNNER_CHECK_INTERVAL_MS = 15 * 60_000;
 export const CHECK_EVENT = "A 15-minute check on the running step.";
 
 /**
- * What the runner is told when the project it was refused a step on is free
- * again (40u): the run that held it ended, or waits with no branch.
+ * What the runner is told when the ledger has given its run a place on the
+ * project ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+ * D3). Only the run given the place is told, so a step it starts now is not
+ * refused for want of one.
  */
-export const PROJECT_FREE_EVENT = "The project is free now.";
-
-/** The action a try to start a step is written down under, in the record. */
-const START_STEP: RunnerToolName = "start_step";
+export const PLACE_GIVEN_EVENT =
+  "A place on the project is free for this ticket now. A step you start will not be refused for want of one.";
 
 /**
- * The run ids a sentence names. A run id is `project#ticket/seq`: one word,
- * with at most a full stop or a colon after it.
+ * The notice that says run `runId` was told of the place given to it at
+ * `givenAt`. One per given place: a place given again later is a new fact.
  */
-function namedRunIds(text: string): Set<string> {
-  return new Set(text.split(/[\s(),;]+/).map((word) => word.replace(/[.:]+$/, "")));
+function placeGivenNotice(givenAt: string, runId: string): string {
+  return `place given at ${givenAt}, run ${runId}`;
 }
 
 /** The statuses of a run the driver looks at: one just picked up, one waiting, one working. */
@@ -477,6 +476,13 @@ export class RunnerDriver {
     // claim, put on at pickup (ADR-0044 D7). Read as a hold there, it would
     // keep every new step's run from ever being woken.
     const held = ticket.labels.includes(HELD_LABEL) && !cycle.isStep(run.ticket);
+    const overLimit = isOverLimit(entries, ticketLimitOf(config));
+    // ✏ 2026-10-04: a place given to a run this look will not wake for it —
+    // held, or over its limit — goes to the next waiting run (ADR-0063 D3).
+    // Kept, it would stay taken until the hold came off or more spending was
+    // allowed, and no other step of the project could start meanwhile.
+    const givenAt = this.deps.running.has(run.id) ? undefined : run.place?.givenAt;
+    if (givenAt !== undefined && (held || overLimit)) this.deps.store.giveBack(run.id);
     if (!held) {
       if (run.status === "picked-up" && !wokeBefore(entries, run.id)) {
         events.unshift(NEW_TICKET_EVENT);
@@ -498,15 +504,13 @@ export class RunnerDriver {
           notices.push(about);
         }
       }
-      // ✏ A run refused a step because another run held the project waits
-      // for nothing a person would write (40u). It is told once the project
-      // is free — once for each refusal: the runner then decides again, and a
-      // new refusal is what makes it wait again.
-      const refusal = this.busyRefusal(run, entries);
-      if (refusal !== undefined && this.projectFreeFor(run)) {
-        const about = `project free after try ${refusal.tryNumber} to start a step, run ${run.id}`;
+      // ✏ 2026-10-04: a run given a place is told once for each place
+      // given (ADR-0063 D3). The ledger gives a freed place to one waiting
+      // run, so only that run is woken; the others wait for their turn.
+      if (givenAt !== undefined && !overLimit) {
+        const about = placeGivenNotice(givenAt, run.id);
         if (!noticed(entries, about)) {
-          events.push(PROJECT_FREE_EVENT);
+          events.push(PLACE_GIVEN_EVENT);
           notices.push(about);
         }
       }
@@ -519,7 +523,7 @@ export class RunnerDriver {
     // notice that means "go on": one question to a model decides that, and
     // only its yes writes the raise and wakes the runner. Anything else
     // leaves the ticket as it is; the comment is marked read all the same.
-    if (isOverLimit(entries, ticketLimitOf(config))) {
+    if (overLimit) {
       await this.atLimit(run, project, config, entries, async () => ticket.labels);
       const toldAt = limitNoticeAt(entries);
       const replies =
@@ -529,50 +533,6 @@ export class RunnerDriver {
     }
     if (events.length === 0) return;
     this.deliver(run, events, notices, check);
-  }
-
-  /**
-   * The refusal that left `run` waiting for its project, or undefined when it
-   * waits for none: its latest try to start a step was refused, no step of it
-   * runs, and the refusal names another run of the project. `tryNumber`
-   * counts the run's tries to start a step, the refused one included: the
-   * record is only ever added to, so it names this refusal for good, where
-   * two tries in the same instant would share a time.
-   *
-   * **Found by the holder's run id, not by the refusal's words.** The
-   * runner's actions keep the refusal in the record, as a sentence, and
-   * nowhere else. The ledger refuses a second session, a second work branch,
-   * and a branch claimed on a project another run holds; each of the three
-   * names the run that holds the project, and no other refusal names another
-   * run. A run id is the ledger's own and stays the same when a sentence is
-   * reworded. A refusal that stopped naming the holder would also leave the
-   * runner not knowing what it waits for.
-   */
-  private busyRefusal(
-    run: Run,
-    entries: readonly RecordEntry[],
-  ): { tryNumber: number } | undefined {
-    if (this.deps.running.has(run.id)) return undefined;
-    const tries = entries.flatMap((entry) =>
-      entry.kind === "decision" && entry.runId === run.id && entry.action === START_STEP
-        ? [entry]
-        : [],
-    );
-    const last = tries.at(-1);
-    if (last?.detail === undefined) return undefined;
-    const named = namedRunIds(last.detail);
-    const others = this.deps.store.runsFor(run.project).filter((other) => other.id !== run.id);
-    return others.some((other) => named.has(other.id)) ? { tryNumber: tries.length } : undefined;
-  }
-
-  /**
-   * Whether no run but `run` holds its project now: whatever held it is
-   * done, cancelled, failed or waiting with no branch. Read from the ledger's
-   * file, as every guard on the project is.
-   */
-  private projectFreeFor(run: Run): boolean {
-    const holder = this.deps.store.occupyingRun(run.project);
-    return holder === undefined || holder.id === run.id;
   }
 
   /**
@@ -930,12 +890,28 @@ export class RunnerDriver {
    * (40v). Reading it as an empty record put "The default order was
    * followed." in place of the list the pull request held. The failure is
    * logged, and the runner is still woken.
+   *
+   * **A run that kept the place is woken once.** When its step ends, the
+   * ledger may give the place back to it (ADR-0063 D2). The wake here tells
+   * it the step ended, and the place is noted as told, so the next look does
+   * not wake it a second time for the place.
    */
   private async afterStep(runId: string, stage: PipelineStage, result: StepResult): Promise<void> {
     this.lastCheck.delete(runId);
     const run = this.deps.store.get(runId);
     if (run === undefined || !UNSETTLED.includes(run.status)) return;
     this.parkForRunner(run, AFTER_STEP_WAIT, stage);
+    // A run whose step has just ended may keep the place (ADR-0063 D2). The
+    // wake below tells it its step ended, and is the only wake for that
+    // place: noted now, the place is not told again on the next look.
+    const givenAt = this.deps.store.get(runId)?.place?.givenAt;
+    if (givenAt !== undefined) {
+      appendEntry(this.deps.root, run.project, run.ticket, {
+        kind: "notice",
+        at: this.deps.clock(),
+        about: placeGivenNotice(givenAt, runId),
+      });
+    }
     const read = readRecord(this.deps.root, run.project, run.ticket);
     if (!read.ok) {
       this.deps.log(

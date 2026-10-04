@@ -147,6 +147,8 @@ const ghPullSchema = z.looseObject({
   state: ghPullStateSchema,
   /** GitHub's name for the commit at the head of the PR's branch. */
   headRefOid: z.string(),
+  /** The PR's head branch. Asked for only where it is read. */
+  headRefName: z.string().optional(),
 });
 
 /** A PR review summary as `gh pr view --json reviews` returns it. */
@@ -182,6 +184,15 @@ function toPullRequest(pull: z.infer<typeof ghPullSchema>): PullRequest {
     state: GH_PR_STATES[pull.state],
     headSha: pull.headRefOid,
   };
+}
+
+/**
+ * Whether `branch` is a branch of `ticket`: `timone/<ticket>`, or one that
+ * starts with `timone/<ticket>-`. `timone/670-…` is not a branch of ticket 67.
+ */
+function isBranchOfTicket(branch: string | undefined, ticket: number): boolean {
+  const own = `timone/${ticket}`;
+  return branch === own || branch?.startsWith(`${own}-`) === true;
 }
 
 /**
@@ -984,6 +995,36 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     return pulls
       .map(toPullRequest)
       .sort((a, b) => rank[a.state] - rank[b.state] || b.number - a.number)[0];
+  }
+
+  async findOpenPullRequestOfTicket(
+    project: TicketingProject,
+    ticket: number,
+  ): Promise<{ pullRequest: PullRequest; branch: string } | undefined> {
+    const slug = repoSlug(project.repoUrl);
+    const raw = await this.run("gh", [
+      "pr",
+      "list",
+      "--repo",
+      slug,
+      "--state",
+      "open",
+      "--json",
+      `${PR_FIELDS},headRefName`,
+      "--limit",
+      String(this.pageLimit),
+    ]);
+
+    const pulls = parseGhJson(
+      z.array(ghPullSchema),
+      raw,
+      `listing open pull requests for ${slug}`,
+    );
+    const found = pulls
+      .filter((pull) => isBranchOfTicket(pull.headRefName, ticket))
+      .sort((a, b) => b.number - a.number)[0];
+    if (found?.headRefName === undefined) return undefined;
+    return { pullRequest: toPullRequest(found), branch: found.headRefName };
   }
 
   async getPullRequestThread(

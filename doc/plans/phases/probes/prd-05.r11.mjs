@@ -38,6 +38,14 @@
 //   note 3a". New: another run of the project parked and holding a work branch (note 3b, with and
 //   without a daemon), and another run parked holding none (clause 2d). Labels quote the new words.
 //
+//   ✏ 2026-10-04 (phase 47 verification): the register's note on clause 2 dated 2026-10-04 replaces
+//   the refusal while another run of the same project is working or holds a work branch with
+//   PRD-07.R13, and says there is no queue any more. Notes 2, 3a and 3b checked that refusal and
+//   that queue; they are removed here, and the takeover now allowed in those states is checked by
+//   prd-07.r13.mjs. Clause 2d's break leg used a takeover refused over another run's work branch,
+//   which is no longer refused; it now uses the takeover of a run the machine is working on (note 1's
+//   fixture), where no session opens. Note 1 stays: the register keeps that refusal.
+//
 // Clause 1c added 2026-09-29 (re-check after 40u). Clause 1a closes the ticket right after the cancel,
 // so it never saw what the first check found outside its verdicts: the cancelled ticket, still open and
 // marked, was taken up again as a new run within seconds, and held the project again. 1c leaves the
@@ -280,28 +288,7 @@ async function busyTakeover() {
   await m.stop();
   return { status, out, said: (out.out + out.err).trim(), prompt: promptOf(fx), fx };
 }
-// A run waiting its turn: ticket 13's step holds the project when ticket 12 arrives.
-async function queuedTakeover() {
-  const fx = fixture({ issues: { fixture: { 13: { title: 'The ticket ahead' } } } });
-  standIn(fx);
-  const m = await model({
-    runner: (c) => (c.turn === 0 ? act('start_step', { stage: 'execution', instructions: 'build', reason: 'p', skipReason: 'p' }) : say()),
-    step: () => ({ hang: true }),
-  });
-  let out = null, status;
-  const d = daemon(fx, m, { until: () => out, timeoutMs: 45000, settleMs: 1500 });
-  while (!m.steps().length) await sleep(200);
-  fx.editForge((f) => { f.issues[N] = { number: N, title: 'Add a count of open to-dos', body: 'x', labels: ['timone'], state: 'OPEN', author: OPERATOR, createdAt: new Date().toISOString(), comments: [] }; });
-  { const t0 = Date.now(); while (!fx.run(N) && Date.now() - t0 < 20000) await sleep(200); }
-  await sleep(1500);
-  status = fx.run(N)?.status;
-  out = takeoverCmd(fx);
-  await d;
-  await m.stop();
-  return { status, out, said: (out.out + out.err).trim(), prompt: promptOf(fx), runs: runsOf(fx), fx };
-}
 const busy = await busyTakeover();
-const queued = await queuedTakeover();
 const noSession = (r) => assert(!r.prompt, `a terminal session was opened on the ticket: "${r.prompt.split('\n')[0].slice(0, 120)}"`);
 await clause('PRD-05.R11 clause 2, note 1', 'a takeover of a run the machine is working on opens no session, and says what is happening', {
   broken: async () => { noSession(took); assert(/working on/i.test(took.out.out + took.out.err), `it does not say what is happening: "${(took.out.out + took.out.err).trim().slice(0, 160)}"`); },
@@ -312,49 +299,6 @@ await clause('PRD-05.R11 clause 2, note 1', 'a takeover of a run the machine is 
   },
 });
 console.log(`    (takeover of the busy run said, exit ${busy.out.code}: "${busy.said.replace(/\n/g, ' ')}")`);
-await clause('PRD-05.R11 clause 2, note 2', 'nor does a takeover of a run waiting its turn behind another run open a session', {
-  broken: async () => noSession(took),
-  correct: async () => {
-    assert(queued.status === 'queued', `setup: the run is ${queued.status}, not waiting its turn`);
-    noSession(queued);
-  },
-});
-console.log(`    (takeover of the run waiting its turn said, exit ${queued.out.code}: "${queued.said.replace(/\n/g, ' ')}"; runs: ${queued.runs})`);
-
-// The refined note's first run: ticket 12's run waits on nothing (the runner chose to do nothing);
-// then ticket 13 arrives and its step holds the project. Judged since iteration 4 (note 3a below).
-async function idleWhileHeld() {
-  const fx = fixture({ issues: { fixture: { [N]: {} } } });
-  standIn(fx);
-  const m = await model({
-    runner: (c) => (c.turn === 0 && c.brief.includes('fixture #13') ? act('start_step', { stage: 'execution', instructions: 'build', reason: 'p', skipReason: 'p' }) : say()),
-    step: () => ({ hang: true }),
-  });
-  await daemon(fx, m, { until: () => fx.record(N).some((e) => e.kind === 'runner-ended'), timeoutMs: 20000, settleMs: 500 });
-  fx.editForge((f) => { f.issues[13] = { number: 13, title: 'Next ticket', body: 'x', labels: ['timone'], state: 'OPEN', author: OPERATOR, createdAt: new Date().toISOString(), comments: [] }; });
-  let out = null, runs = '', mine, others;
-  const d = daemon(fx, m, { until: () => out, timeoutMs: 40000, settleMs: 1500 });
-  while (!m.steps().length) await sleep(200);
-  await sleep(1500);
-  runs = runsOf(fx);
-  { const all = fx.state().runs; mine = all.filter((r) => r.ticket === N).at(-1)?.status; others = all.filter((r) => r.ticket !== N).map((r) => r.status); }
-  out = takeoverCmd(fx);
-  await d;
-  await m.stop();
-  const why = fs.readFileSync(path.join(fx.dir, 'daemon.log'), 'utf8').split('\n').filter((l) => /takeover/i.test(l)).at(-1) ?? '';
-  return { runs, mine, others, out, said: (out.out + out.err).trim(), prompt: promptOf(fx), why, fx };
-}
-const held = await idleWhileHeld();
-await clause('PRD-05.R11 clause 2, note 3a', 'a takeover is also refused while another run of the same project is working: no session opens', {
-  broken: async () => noSession(took),
-  correct: async () => {
-    assert(held.mine && !['active', 'queued'].includes(held.mine), `setup: ticket ${N}'s run is ${held.mine}, not one nothing is working on`);
-    assert(held.others.includes('active'), `setup: no other run of the project is working (${held.runs})`);
-    noSession(held);
-  },
-});
-console.log(`    (runs at the takeover: ${held.runs}. Takeover said, exit ${held.out.code}: "${held.said.replace(/\n/g, ' ')}"; the daemon's log: "${held.why.trim().slice(0, 200)}")`);
-
 // The refined note's second run, added in iteration 4. Ticket 12's run waits on nothing; then ticket
 // 13 arrives. withBranch: the runner starts a step on 13, the step ends at once, and 13's run is left
 // parked — nothing works on it, it is not queued — holding its work branch, which is then pushed with
@@ -392,17 +336,14 @@ async function otherParked({ withBranch, daemonUp }) {
   const why = fs.readFileSync(path.join(fx.dir, 'daemon.log'), 'utf8').split('\n').filter((l) => /takeover/i.test(l)).at(-1) ?? '';
   return { withBranch, daemonUp, given, other, otherAfter: fx.run(13), mineAfter: fx.run(N)?.status, runs, steps: m.steps().length, out, said: (out.out + out.err).trim(), prompt: promptOf(fx), woke: after.length > 0, sawLeft: after.some((q) => q.brief.includes('PROBE-R11-LEFT')), why, fx };
 }
-const holdsBranch = await otherParked({ withBranch: true, daemonUp: true });
 const holdsNone = await otherParked({ withBranch: false, daemonUp: true });
-const holdsBranchDown = await otherParked({ withBranch: true, daemonUp: false });
-const holdsNoneDown = await otherParked({ withBranch: false, daemonUp: false });
 function assertOpenedAndRead(r) {
   assert(r.prompt.includes(`fixture #${N}`) || r.prompt.includes(`fixture#${N}`), 'no terminal session was opened on the ticket');
   assert(r.woke, 'the terminal session ended and left its closing comment, but the runner did not wake');
   assert(r.sawLeft, 'the runner woke without what the session left');
 }
 await clause('PRD-05.R11 clause 2d', 'another run of the project is parked and holds no work branch: timone takeover opens a terminal session on that ticket, and when it ends the runner wakes and reads what it left', {
-  broken: async () => assertOpenedAndRead(holdsBranch),
+  broken: async () => assertOpenedAndRead(busy),
   correct: async () => {
     assert(holdsNone.other.status === 'parked' && !holdsNone.other.branch, `setup: ticket 13's run is ${holdsNone.other.status}${holdsNone.other.branch ? `, holding ${holdsNone.other.branch}` : ''}`);
     assertGiven(holdsNone);
@@ -410,29 +351,6 @@ await clause('PRD-05.R11 clause 2d', 'another run of the project is parked and h
   },
 });
 console.log(`    (runs at the takeover: ${holdsNone.runs}. Takeover said, exit ${holdsNone.out.code}: "${holdsNone.said.replace(/\n/g, ' ')}")`);
-function assertRefusedOverBranch(r) {
-  assert(r.given.status && !['active', 'queued'].includes(r.given.status), `setup: ticket ${N}'s run is ${r.given.status}, not one nothing is working on`);
-  assert(r.other.status === 'parked', `setup: ticket 13's run is ${r.other.status}, not parked`);
-  assert(r.other.branch && r.other.onRemote, `setup: ticket 13's run holds no work branch (${r.runs})`);
-  noSession(r);
-  assert(r.otherAfter?.branch === r.other.branch, `ticket 13's run no longer holds ${r.other.branch} after the takeover`);
-  assert(r.mineAfter === r.given.status, `ticket ${N}'s run went from ${r.given.status} to ${r.mineAfter}`);
-}
-await clause('PRD-05.R11 clause 2, note 3b', 'a takeover is also refused while another run of the same project holds a work branch (parked: nothing works on it, it is not queued): no session opens', {
-  broken: async () => noSession(holdsNone),
-  correct: async () => assertRefusedOverBranch(holdsBranch),
-});
-console.log(`    (runs at the takeover: ${holdsBranch.runs}; step sessions: ${holdsBranch.steps}. Takeover said, exit ${holdsBranch.out.code}: "${holdsBranch.said.replace(/\n/g, ' ')}"; the daemon's log: "${holdsBranch.why.trim().slice(0, 200)}")`);
-await clause('PRD-05.R11 clause 2, note 3b (daemon stopped)', 'the same with no daemon running: no session opens', {
-  broken: async () => noSession(holdsNoneDown),
-  correct: async () => assertRefusedOverBranch(holdsBranchDown),
-});
-{
-  const lines = (holdsBranchDown.out.out + holdsBranchDown.out.err).split('\n');
-  const err = lines.find((l) => /^\w*Error: /.test(l)) ?? lines.find((l) => l.trim()) ?? '';
-  console.log(`    (seen, not part of the clause: with no daemon, takeover exit ${holdsBranchDown.out.code}; it printed ${lines.filter((l) => l.trim()).length} lines, ${lines.filter((l) => /^\s+at /.test(l)).length} of them stack frames ("    at …"); its error line: "${err.trim().slice(0, 200)}")`);
-}
-
 // Clause 3, re-authored 2026-10-02 (phase 41 verification) from the register's clause as it now
 // stands: "it does not exist, and the message says to write on the ticket instead". The phase-40
 // version checked only that retry refused on a runner project, which was that phase's split.
@@ -500,5 +418,5 @@ const helpRetry = (() => { withFailedRun.cliPath = path.join(REPO_ROOT, 'dist', 
 console.log(`    (seen, not part of the clause: \`timone help retry\` prints, exit ${helpRetry.code}: "${(helpRetry.out + helpRetry.err).trim()}")`);
 withFailedRun.cleanup();
 
-for (const r of [cancelledDead, notCancelledDead, stepCancelled, stepNotCancelled, leftOpen, leftOpenUnheld, took, didNotTake, tookWhileDown, noTakeoverWhileDown, tookCancelled, noTakeoverCancelled, busy, queued, held, holdsBranch, holdsNone, holdsBranchDown, holdsNoneDown]) r.fx.cleanup();
+for (const r of [cancelledDead, notCancelledDead, stepCancelled, stepNotCancelled, leftOpen, leftOpenUnheld, took, didNotTake, tookWhileDown, noTakeoverWhileDown, tookCancelled, noTakeoverCancelled, busy, holdsNone]) r.fx.cleanup();
 finish('PRD-05.R11');

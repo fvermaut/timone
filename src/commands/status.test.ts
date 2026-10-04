@@ -209,17 +209,19 @@ describe("renderStatus", () => {
     expect(lastLine).toMatch(/other-app #2/);
   });
 
-  it("shows how many tickets are queued behind the active one", () => {
+  it("names the tickets picked up beside the active one, and no queue", () => {
+    // ✏ 2026-10-04: nothing is queued any more (ADR-0063 D2). A ticket picked
+    // up while another ticket's step runs is picked up too.
     const runs = [
       run({ project: "scratch-app", ticket: 7, status: "active" }),
-      run({ project: "scratch-app", ticket: 8, status: "queued" }),
-      run({ project: "scratch-app", ticket: 9, status: "queued" }),
+      run({ project: "scratch-app", ticket: 8, status: "picked-up" }),
+      run({ project: "scratch-app", ticket: 9, status: "picked-up" }),
     ];
     const line = lineFor(renderStatus(manifest, runs, { stateExists: true }), "scratch-app");
 
-    expect(line).toMatch(/2 queued/);
     expect(line).toMatch(/#8/);
     expect(line).toMatch(/#9/);
+    expect(line).not.toMatch(/queued/);
   });
 
   it("marks a run whose automatic checks failed", () => {
@@ -1069,5 +1071,81 @@ describe("renderStatus — the runs the old code left in the ledger", () => {
       ].join("\n"),
     );
     expect(output).not.toMatch(/timone \w+/);
+  });
+});
+
+describe("renderStatus — the tickets that wait for a place (ADR-0063)", () => {
+  /** A ledger in a temporary folder, read and written as the daemon does. */
+  function ledger(): RunStore {
+    const root = mkdtempSync(join(tmpdir(), "timone-status-"));
+    tempDirs.push(root);
+    return RunStore.open(join(root, ".timone", "state.json"));
+  }
+
+  /** A run of scratch-app whose step runs, so it takes the project's place. */
+  function stepRunning(store: RunStore, ticket: number): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.activate(run.id, `session-${ticket}`);
+    return run.id;
+  }
+
+  /** A run of scratch-app that asked for a place, with its ticket's order. */
+  function asksForAPlace(
+    store: RunStore,
+    ticket: number,
+    order: { priority: boolean; openedAt: string },
+  ): void {
+    const { run } = store.register("scratch-app", ticket);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "triage" });
+    store.askPlace(run.id, order);
+  }
+
+  /** scratch-app's line, rendered from the ledger as the command reads it. */
+  function scratchLine(store: RunStore): string {
+    return lineFor(
+      renderStatus(manifest, store.all(), {
+        stateExists: true,
+        waitingForPlace: (project) => store.waitingForPlace(project),
+      }),
+      "scratch-app",
+    );
+  }
+
+  it("names the tickets waiting for a place after the runs, in the order they get it, priority:high first", () => {
+    const store = ledger();
+    stepRunning(store, 7);
+    // #9 was opened first; #12 carries priority:high, so it comes first.
+    asksForAPlace(store, 9, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    asksForAPlace(store, 12, { priority: true, openedAt: "2026-08-03T09:00:00Z" });
+
+    expect(scratchLine(store)).toMatch(/ {2}· {2}waiting for a place: #12, then #9$/);
+  });
+
+  it("names the ticket the place is given to, and no longer counts it as waiting", () => {
+    const store = ledger();
+    const seven = stepRunning(store, 7);
+    asksForAPlace(store, 9, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    asksForAPlace(store, 12, { priority: true, openedAt: "2026-08-03T09:00:00Z" });
+
+    // #7's run ends, so the ledger gives its place to #12, first in order.
+    store.complete(seven);
+
+    expect(scratchLine(store)).toMatch(
+      / {2}· {2}the place is given to #12 {2}· {2}waiting for a place: #9$/,
+    );
+  });
+
+  it("says nothing about a place when no ticket waits for one", () => {
+    const store = ledger();
+    stepRunning(store, 7);
+    // Parked on the runner's wait, but it never asked for a place.
+    const { run } = store.register("scratch-app", 9);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "triage" });
+
+    const line = scratchLine(store);
+
+    expect(line).toMatch(/#7/);
+    expect(line).toMatch(/#9/);
+    expect(line).not.toMatch(/place/);
   });
 });

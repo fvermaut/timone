@@ -59,10 +59,10 @@ function breakdownIn(
 import { enqueue, pending, requestsDir } from "./requests.js";
 import type { Holder } from "./holder.js";
 import { RunStore, type Run } from "./runs.js";
-import { pollOnce } from "./poll.js";
+import { pickedUpComment, pollOnce } from "./poll.js";
 import { RunnerDriver, pullRequestEvent, type RunnerDriverDeps } from "../runner/driver.js";
 import { RunningSteps, runnerActions } from "../runner/actions.js";
-import type { WakeOptions } from "../runner/session.js";
+import { RunnerSessions, type RunQuery, type WakeOptions } from "../runner/session.js";
 import { appendEntry, readRecord, type RecordEntry } from "../runner/record.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
@@ -168,6 +168,9 @@ const noPullRequests = {
   async findPullRequest(): Promise<PullRequest | undefined> {
     return undefined;
   },
+  async findOpenPullRequestOfTicket(): Promise<undefined> {
+    return undefined;
+  },
   async getPullRequestThread(): Promise<PullRequestThread> {
     throw new Error("no pull request exists in this test");
   },
@@ -255,7 +258,7 @@ describe("pollOnce — pickup and acknowledgement", () => {
     const result = await pollOnce({ manifest, store, adapter, runner });
 
     expect(store.all()).toHaveLength(1);
-    expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
+    expect(store.get("scratch-app#7/1")?.status).toBe("picked-up");
     expect(comments).toHaveLength(1);
     expect(comments[0]).toMatchObject({ project: "scratch-app", number: 7 });
     expect(result.pickedUp).toEqual(["scratch-app#7/1"]);
@@ -327,8 +330,12 @@ describe("pollOnce — pickup and acknowledgement", () => {
   });
 });
 
-describe("pollOnce — serialization", () => {
-  it("queues a second marked ticket and says so in its acknowledgement", async () => {
+// ✏ 2026-10-04: these asserted PRD-02.R10's queue — a second ticket written
+// `queued` and started only once the first was done. ADR-0063 D2 replaces it
+// (PRD-07 R1, R2): every pickup is a pickup, and a ticket waits for a place
+// only once its runner tries a step.
+describe("pollOnce — two tickets of one project", () => {
+  it("picks a second marked ticket up beside the first, and says it is picked up", async () => {
     const store = newStore();
     const manifest = manifestWith("scratch-app");
     const { adapter, comments } = fakeAdapter({
@@ -340,18 +347,16 @@ describe("pollOnce — serialization", () => {
     const result = await pollOnce({ manifest, store, adapter, runner });
     await runner.drain();
 
-    expect(store.occupyingRun("scratch-app")?.ticket).toBe(7);
-    expect(store.queue("scratch-app").map((run) => run.ticket)).toEqual([8]);
-    expect(result.queued).toEqual(["scratch-app#8/1"]);
+    expect(result.pickedUp).toEqual(["scratch-app#7/1", "scratch-app#8/1"]);
+    expect(store.get("scratch-app#8/1")?.status).toBe("picked-up");
 
-    const queuedAck = comments.find((comment) => comment.number === 8);
-    expect(queuedAck?.body).toMatch(/queue/i);
-    expect(queuedAck?.body).toMatch(/#7/);
-    // Only the run that holds the project is handed on; the queued one waits.
-    expect(wakes.map((wake) => wake.runId)).toEqual(["scratch-app#7/1"]);
+    const secondAck = comments.find((comment) => comment.number === 8);
+    expect(secondAck?.body).toBe(pickedUpComment());
+    // Both runners are woken: a run just picked up takes no place.
+    expect(wakes.map((wake) => wake.runId)).toEqual(["scratch-app#7/1", "scratch-app#8/1"]);
   });
 
-  it("picks the queued ticket up on a later cycle, once the first is done", async () => {
+  it("wakes the second ticket's runner on the first cycle, without waiting for the first to be done", async () => {
     const store = newStore();
     const manifest = manifestWith("scratch-app");
     const { adapter } = fakeAdapter({ "scratch-app": [ticket(7), ticket(8)] });
@@ -360,14 +365,10 @@ describe("pollOnce — serialization", () => {
     const deps = { manifest, store, adapter, runner };
 
     await pollOnce(deps);
-    store.activate("scratch-app#7/1", "session-1");
-    store.activate("scratch-app#7/1", "session-7");
-    store.complete("scratch-app#7/1");
-    await pollOnce(deps);
     await runner.drain();
 
-    expect(store.occupyingRun("scratch-app")?.ticket).toBe(8);
-    expect(wakes.map((wake) => wake.runId)).toEqual(["scratch-app#7/1", "scratch-app#8/1"]);
+    expect(store.get("scratch-app#7/1")?.status).not.toBe("done");
+    expect(wakes.map((wake) => wake.runId)).toContain("scratch-app#8/1");
   });
 });
 
@@ -386,7 +387,7 @@ describe("pollOnce — resilience", () => {
 
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toMatch(/alpha/);
-    expect(store.occupyingRun("beta")?.ticket).toBe(2);
+    expect(store.runsFor("beta").map((run) => run.ticket)).toEqual([2]);
     expect(comments.map((comment) => comment.project)).toEqual(["beta"]);
   });
 });
@@ -431,7 +432,9 @@ describe("pollOnce — a run queued behind a park that holds nothing", () => {
     );
 
     const store = RunStore.open(path);
-    expect(store.get("scratch-app#6/1")?.status).toBe("queued");
+    // ✏ 2026-10-04: an older ledger's queued run is read as picked up
+    // (ADR-0063 D2).
+    expect(store.get("scratch-app#6/1")?.status).toBe("picked-up");
 
     // This test is about the queue moving, not about the park being picked
     // back up.
@@ -847,6 +850,9 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
     async applyLabel(): Promise<void> {},
     async findPullRequest(_project, branch): Promise<PullRequest | undefined> {
       return pulls[branch];
+    },
+    async findOpenPullRequestOfTicket(): Promise<undefined> {
+      return undefined;
     },
     async getPullRequestThread(_project, number): Promise<PullRequestThread> {
       const found = Object.values(pulls).find((candidate) => candidate.number === number);
@@ -1516,6 +1522,9 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       async findPullRequest(): Promise<PullRequest | undefined> {
         return undefined;
       },
+      async findOpenPullRequestOfTicket(): Promise<undefined> {
+        return undefined;
+      },
       async getPullRequestThread(): Promise<PullRequestThread> {
         throw new Error("no pull request exists in this test");
       },
@@ -2060,6 +2069,88 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     expect(result.errors.join(" ")).toContain("not out at the terminal");
     expect(pending(statePath).requests).toEqual([]);
   });
+
+  // ADR-0063 D5 and PRD-07 R13: a takeover takes no place on the project.
+  // The same three cases as the command's own, through the request a
+  // terminal leaves while the daemon holds the ledger.
+  it("hands a ticket to the terminal while another ticket of the project has a step running, and leaves that step alone (R13 clause 1)", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = manifestWith("scratch-app");
+    const six = waitingForRunner(store, 6);
+    const { run: four } = store.register("scratch-app", 4);
+    store.activate(four.id, "step-session-4");
+    const running = new RunningSteps();
+    running.set(four.id, {
+      stage: "execution",
+      session: { sessionId: "step-session-4", completed: new Promise(() => {}), stop() {} },
+      startedAt: "2026-08-16T12:00:00Z",
+    });
+    const fourBefore = store.get(four.id);
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = runnerAdapter([ticket(4), ticket(6)]);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions, running });
+
+    const result = await pollOnce({ manifest, store, adapter, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual(["claim-takeover scratch-app#6"]);
+    expect(store.get(six.id)).toMatchObject({ status: "active", takenOver: true });
+    expect(store.get(four.id)).toEqual(fourBefore);
+  });
+
+  it("hands a ticket to the terminal while another ticket of the project owns a branch and an open pull request, with no step running (R13 clause 2)", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = manifestWith("scratch-app");
+    const seven = waitingWithPullRequest(store);
+    const six = waitingForRunner(store, 6);
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = runnerAdapter([ticket(6), ticket(7)], {
+      pulls: { 19: pullRequest19("open") },
+    });
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual(["claim-takeover scratch-app#6"]);
+    expect(store.get(six.id)).toMatchObject({ status: "active", takenOver: true });
+    expect(store.get(seven.id)).toMatchObject({
+      status: "parked",
+      branch: "timone/7-due-dates",
+      pr: 19,
+    });
+  });
+
+  it("refuses to hand over a ticket whose own step is running, in the words the command uses (R13 clause 3)", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = manifestWith("scratch-app");
+    const { run: six } = store.register("scratch-app", 6);
+    store.activate(six.id, "step-session-6");
+    const running = new RunningSteps();
+    running.set(six.id, {
+      stage: "execution",
+      session: { sessionId: "step-session-6", completed: new Promise(() => {}), stop() {} },
+      startedAt: "2026-08-16T12:00:00Z",
+    });
+    const sixBefore = store.get(six.id);
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = runnerAdapter([ticket(6)]);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions, running });
+
+    const result = await pollOnce({ manifest, store, adapter, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual([]);
+    expect(result.errors).toEqual([
+      expect.stringMatching(
+        /^could not apply claim-takeover scratch-app#6 asked by .*: I'm working on scratch-app #6 right now\. Anything I need from you will land on the ticket\.$/,
+      ),
+    ]);
+    expect(store.get(six.id)).toEqual(sixBefore);
+  });
 });
 
 /**
@@ -2568,8 +2659,13 @@ describe("closing: the step, then the initiative", () => {
  *
  * The old cover for this drove two chunks of one ticket and went with the
  * chunk model in 29g. The guarantee did not go with it.
+ *
+ * ✏ 2026-10-04: PRD-02.R22 clause 6 is struck by ADR-0063 D6. Nothing is
+ * queued: the bug and the next step are both picked up and both runners
+ * woken, and which of them builds first is decided by the order of places
+ * (PRD-07 R2, R3), on the ledger.
  */
-describe("a bug filed during a step takes the project before the next step", () => {
+describe("a bug filed during a step and the next step are both picked up", () => {
   const MAP = 7;
 
   const aStep = (number: number, overrides: Partial<Step> = {}): Step => ({
@@ -2583,7 +2679,7 @@ describe("a bug filed during a step takes the project before the next step", () 
     ...overrides,
   });
 
-  it("promotes the waiting bug, and opens the next step behind it", async () => {
+  it("wakes the waiting bug, and opens the next step beside it", async () => {
     const store = newStore();
     const manifest = manifestWith("alpha");
     store.rememberInitiative({
@@ -2662,20 +2758,20 @@ describe("a bug filed during a step takes the project before the next step", () 
     await pollOnce(deps);
     await runner.drain();
 
-    // The window: the step is finished, the bug holds the project, and no run
+    // The window: the step is finished, the bug is picked up, and no run
     // exists for step 52 at all yet.
     expect(store.get("alpha#51/1")?.status).toBe("done");
     expect(store.get("alpha#8/1")?.status).toBe("picked-up");
     expect(store.runsForTicket("alpha", 52)).toEqual([]);
 
-    // The next cycle hands on the bug, and opens step 52 behind it. Asserted
-    // on the wakes, not on two log lines: the bug is the run handed on.
+    // The next cycle hands on the bug, and opens step 52 beside it: a run
+    // just picked up takes no place, so step 52 is not queued behind the bug.
     await pollOnce(deps);
     await runner.drain();
 
     expect(wakes).toContain("alpha#8/1");
-    expect(wakes).not.toContain("alpha#52/1");
-    expect(store.runsForTicket("alpha", 52).map((each) => each.status)).toEqual(["queued"]);
+    expect(wakes).toContain("alpha#52/1");
+    expect(store.runsForTicket("alpha", 52).map((each) => each.status)).toEqual(["picked-up"]);
   });
 });
 
@@ -2698,7 +2794,7 @@ describe("a project called `timone` is a project like any other", () => {
     });
 
     expect(result.pickedUp).toEqual(["timone#39/1"]);
-    expect(store.occupyingRun("timone")?.ticket).toBe(39);
+    expect(store.get("timone#39/1")?.status).toBe("picked-up");
     expect(comments[0]).toMatchObject({ project: "timone", number: 39 });
   });
 });
@@ -3170,7 +3266,7 @@ describe("the runner drives its projects in the poll cycle", () => {
         '**What I need from you:** reply "continue" to allow another $150.00, or say nothing and it stays stopped.',
     ]);
     expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
-    expect(store.occupyingRun("scratch-app")).toBeUndefined();
+    expect(store.placeHolders("scratch-app")).toEqual([]);
   });
 
   it("says where the work stands when the runner's own session takes the ticket over its limit while a step runs", async () => {
@@ -3606,7 +3702,7 @@ describe("a cancel on a runner project holds the ticket (40u)", () => {
   });
 });
 
-describe("a runner refused a step because its project was busy is woken once it is free (40u)", () => {
+describe("a runner refused a step because its project was busy is woken once a place is given to it (40u)", () => {
   it("wakes the refused run once, when the other ticket's run has finished and its ticket closed", async () => {
     // Verification of phase 40, found outside the verdicts, item 1, as the
     // check saw it: two tickets picked up together, one runner refused a
@@ -3618,26 +3714,20 @@ describe("a runner refused a step because its project was busy is woken once it 
     const { adapter } = fakeAdapter(marked);
     const first = waitingForRunner(store, 7);
     const { run: second } = store.register("scratch-app", 8);
+    // ✏ 2026-10-04: #8's step runs and takes the project's one place, so
+    // #7's ask for a place is refused and #7 waits for its turn (ADR-0063).
+    store.activate(second.id, "step-session-2");
+    expect(store.askPlace(first.id, { priority: false, openedAt: "2026-09-27T09:00:00Z" }).ok).toBe(
+      false,
+    );
     const { sessions, wakes } = fakeWakes();
-    const { runner, root } = runnerFor({ store, adapter, manifest, sessions });
-    // The refusal as the runner's actions write it down.
-    appendEntry(root, "scratch-app", 7, {
-      kind: "decision",
-      at: "2026-09-27T11:59:00Z",
-      runId: first.id,
-      action: "start_step",
-      reason: "A new ticket starts with sorting.",
-      detail:
-        "Refused: The step did not start: Project scratch-app already has a session for run " +
-        `${second.id} (picked-up) — one session per project at a time`,
-    });
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
     const deps = { manifest, store, adapter, runner };
 
     await pollOnce(deps);
     await runner.drain();
     expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([]);
 
-    store.activate(second.id, "step-session-2");
     store.complete(second.id);
     marked["scratch-app"] = [ticket(7)];
     await pollOnce(deps);
@@ -3645,7 +3735,13 @@ describe("a runner refused a step because its project was busy is woken once it 
     await runner.drain();
 
     expect(wakes.filter((wake) => wake.runId === first.id)).toEqual([
-      { runId: first.id, events: ["The project is free now."], options: {} },
+      {
+        runId: first.id,
+        events: [
+          "A place on the project is free for this ticket now. A step you start will not be refused for want of one.",
+        ],
+        options: {},
+      },
     ]);
   });
 });
@@ -4181,7 +4277,6 @@ describe("the runs the old code left in the ledger, on the first cycle after it 
     expect(wakes).toEqual([]);
     expect(writes).toEqual([]);
     expect(result.pickedUp).toEqual([]);
-    expect(result.queued).toEqual([]);
     expect(result.errors).toEqual([]);
   });
 
@@ -4210,9 +4305,10 @@ describe("the runs the old code left in the ledger, on the first cycle after it 
 
   it("picks a converted failed run's ticket up again as new work while it is still open and marked", async () => {
     // As any marked ticket with no run is (timone#166): the failed run is
-    // cancelled now, and a cancelled run no longer holds its ticket. ivtrends
-    // is free, so its ticket is picked up and the runner woken. scratch-app is
-    // held by #24, parked on its branch, so its ticket queues behind it.
+    // cancelled now, and a cancelled run no longer holds its ticket. Both
+    // tickets are picked up and both runners woken. ✏ 2026-10-04: scratch-app
+    // #24, parked on its branch, takes no place (ADR-0063 D1), so scratch-app's
+    // ticket is no longer queued behind it.
     const store = storeOnLedgerBefore166();
     const manifest = manifestWith("scratch-app", "ivtrends");
     const { adapter, writes } = forgeBefore166({ failedTickets: "open and marked" });
@@ -4222,9 +4318,13 @@ describe("the runs the old code left in the ledger, on the first cycle after it 
     const result = await pollOnce({ manifest, store, adapter, runner });
     await runner.drain();
 
-    expect(result.pickedUp).toEqual(["ivtrends#88/2"]);
-    expect(result.queued).toEqual(["scratch-app#21/2"]);
+    expect(result.pickedUp).toEqual(["scratch-app#21/2", "ivtrends#88/2"]);
     expect(wakes).toEqual([
+      {
+        runId: "scratch-app#21/2",
+        events: ["A new ticket was picked up. Nothing has been done on it yet."],
+        options: {},
+      },
       {
         runId: "ivtrends#88/2",
         events: ["A new ticket was picked up. Nothing has been done on it yet."],
@@ -4232,9 +4332,209 @@ describe("the runs the old code left in the ledger, on the first cycle after it 
       },
     ]);
     expect(writes).toEqual([
-      expect.stringMatching(/^comment on scratch-app#21: \*\*This one is in the queue\.\*\*/),
+      expect.stringMatching(/^comment on scratch-app#21: \*\*Picked this up\.\*\*/),
       expect.stringMatching(/^comment on ivtrends#88: \*\*Picked this up\.\*\*/),
     ]);
     expect(result.errors).toEqual([]);
   });
 });
+
+/** Pull request #70 of ticket 67, from `timone/67-some-title`, in `state`. */
+function pullRequest70(state: "open" | "merged" | "closed"): PullRequest {
+  return {
+    number: 70,
+    title: "A due date on each task",
+    url: "https://github.com/fvermaut/scratch-app/pull/70",
+    state,
+    headSha: "bbbbbbb",
+  };
+}
+
+/**
+ * `base`, with the open pull requests the forge has for each ticket, keyed by
+ * ticket number. Every ticket the pickup asks about is written down in
+ * `asked`.
+ */
+function withOpenPullRequests(
+  base: TicketingAdapter,
+  open: Record<number, { pullRequest: PullRequest; branch: string }>,
+): { adapter: TicketingAdapter; asked: number[] } {
+  const asked: number[] = [];
+  return {
+    asked,
+    adapter: {
+      ...base,
+      async findOpenPullRequestOfTicket(_project, number) {
+        asked.push(number);
+        return open[number];
+      },
+    },
+  };
+}
+
+// ✏ 2026-10-04: PRD-07.R9 (ADR-0063 D4). On 4 October scratch-app#67 was
+// picked up as new work while its pull request from an earlier run was open,
+// and its new run knew nothing of that pull request (#181).
+describe("a marked ticket whose pull request is open is taken over, not picked up as new work (#181)", () => {
+  it("scratch-app#67, with no run and pull request #70 open from timone/67-some-title: one cycle opens a parked run on that branch and pull request, posts nothing, and asks for no new-ticket wake (#181)", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    const base = fakeAdapter({ "scratch-app": [ticket(67)] });
+    const { adapter } = withOpenPullRequests(base.adapter, {
+      67: { pullRequest: pullRequest70("open"), branch: "timone/67-some-title" },
+    });
+    const { sessions, wakes } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+    await runner.drain();
+
+    expect(store.runsForTicket("scratch-app", 67)).toEqual([
+      expect.objectContaining({
+        status: "parked",
+        branch: "timone/67-some-title",
+        pr: 70,
+      }),
+    ]);
+    expect(base.comments).toEqual([]);
+    expect(wakes).toEqual([]);
+    expect(result.pickedUp).toEqual([]);
+  });
+
+  it("wakes the run that took over scratch-app#67 when pull request #70 merges, and its brief's facts name the branch and the pull request (#181)", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    let state: PullRequest["state"] = "open";
+    const base = fakeAdapter({ "scratch-app": [ticket(67)] });
+    const { adapter } = withOpenPullRequests(
+      {
+        ...base.adapter,
+        async findPullRequest(_project, branch) {
+          return branch === "timone/67-some-title" ? pullRequest70(state) : undefined;
+        },
+        async getPullRequestThread(_project, number) {
+          if (number !== 70) throw new Error(`no pull request #${number}`);
+          return { ...pullRequest70(state), comments: [] };
+        },
+      },
+      { 67: { pullRequest: pullRequest70("open"), branch: "timone/67-some-title" } },
+    );
+    const prompts: string[] = [];
+    const runner = briefedRunner({ store, adapter, manifest }, prompts);
+    const deps = { manifest, store, adapter, runner };
+
+    await pollOnce(deps);
+    await runner.drain();
+    expect(prompts).toEqual([]);
+
+    state = "merged";
+    await pollOnce(deps);
+    await runner.drain();
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("Pull request #70 was merged.");
+    const facts = prompts[0]?.split("## Facts about the work")[1]?.split("\n## ")[0] ?? "";
+    expect(facts).toContain("- Branch: timone/67-some-title");
+    expect(facts).toContain(
+      "- Pull request: #70 (merged): A due date on each task — https://github.com/fvermaut/scratch-app/pull/70",
+    );
+  });
+
+  it("picks scratch-app#67 up as before, with the pickup comment, when no pull request of it is open", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    const base = fakeAdapter({ "scratch-app": [ticket(67)] });
+    const { adapter, asked } = withOpenPullRequests(base.adapter, {});
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+
+    expect(asked).toEqual([67]);
+    expect(store.get("scratch-app#67/1")?.status).toBe("picked-up");
+    expect(base.comments).toEqual([
+      { project: "scratch-app", number: 67, body: pickedUpComment() },
+    ]);
+    expect(result.pickedUp).toEqual(["scratch-app#67/1"]);
+  });
+
+  it("does not ask the forge about scratch-app#67 while a run of it is live", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    const live = waitingForRunner(store, 67);
+    const base = fakeAdapter({ "scratch-app": [ticket(67)] });
+    const { adapter, asked } = withOpenPullRequests(base.adapter, {
+      67: { pullRequest: pullRequest70("open"), branch: "timone/67-some-title" },
+    });
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+
+    expect(asked).toEqual([]);
+    expect(store.runsForTicket("scratch-app", 67)).toEqual([live]);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("skips scratch-app#67 for this cycle, with an error, when the forge cannot say whether a pull request of it is open, and still picks up the next ticket", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    const base = fakeAdapter({ "scratch-app": [ticket(67), ticket(68)] });
+    const adapter: TicketingAdapter = {
+      ...base.adapter,
+      async findOpenPullRequestOfTicket(_project, number) {
+        if (number === 67) throw new Error("gh: HTTP 502 Bad Gateway");
+        return undefined;
+      },
+    };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, runner });
+
+    expect(store.runsForTicket("scratch-app", 67)).toEqual([]);
+    expect(base.comments.map((comment) => comment.number)).toEqual([68]);
+    expect(result.pickedUp).toEqual(["scratch-app#68/1"]);
+    expect(result.errors).toEqual([
+      expect.stringMatching(/^scratch-app#67: .*HTTP 502 Bad Gateway/),
+    ]);
+  });
+});
+
+/**
+ * The real driver over real runner sessions, whose session reads its brief,
+ * calls no tool and ends. Each brief's prompt is written down in `prompts`.
+ */
+function briefedRunner(
+  deps: Pick<RunnerDriverDeps, "store" | "adapter" | "manifest">,
+  prompts: string[],
+): RunnerDriver {
+  const root = mkdtempSync(join(tmpdir(), "timone-runner-"));
+  tempDirs.push(root);
+  const runQuery: RunQuery = async function* ({ prompt }) {
+    prompts.push(prompt);
+    yield {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      total_cost_usd: 0.05,
+      num_turns: 1,
+      result: "Nothing to do.",
+    };
+  };
+  return new RunnerDriver({
+    store: deps.store,
+    adapter: deps.adapter,
+    manifest: deps.manifest,
+    root,
+    sessionsFor: (actionsFor) => new RunnerSessions({ runQuery, actionsFor }),
+    running: new RunningSteps(),
+    consult: async () => undefined,
+    startStep: async () => {
+      throw new Error("no step starts in this test");
+    },
+    timonePin: async () => undefined,
+    clock: () => "2026-09-27T12:00:00Z",
+    log: () => {},
+  });
+}

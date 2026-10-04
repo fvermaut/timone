@@ -28,6 +28,14 @@ import { type Step } from "../adapters/ticketing.js";
 export const HELD_LABEL = "timone:held";
 
 /**
+ * The label that puts a ticket first in the order a freed place on its
+ * project is given ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
+ * D3). It is read from the ticket each time one of its steps asks for a
+ * place, so a label added later counts from the next try.
+ */
+export const PRIORITY_LABEL = "priority:high";
+
+/**
  * What the hold label says on the tracker, for whoever reads it there.
  *
  * **Under 100 characters, and that is a hard limit rather than a style.**

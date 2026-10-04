@@ -109,7 +109,14 @@ interface ToolCall {
  * when it is set, as the SDK does after a last message that was an error.
  */
 type Play =
-  | { kind: "calls"; calls: ToolCall[]; costUsd: number; until?: Promise<void> }
+  | {
+      kind: "calls";
+      calls: ToolCall[];
+      costUsd: number;
+      until?: Promise<void>;
+      /** Something that happens elsewhere once the calls are made, before the session ends. */
+      afterCalls?: () => void;
+    }
   | { kind: "throws"; error: string }
   | { kind: "says"; messages: unknown[]; thenThrows?: string };
 
@@ -159,6 +166,7 @@ function scriptedRunner(plays: Play[]) {
       answers.push(await client.callTool({ name: call.name, arguments: call.input }));
     }
     await client.close();
+    next.afterCalls?.();
     if (next.until !== undefined) await abortable(next.until, options.abortController?.signal);
     yield {
       type: "result",
@@ -885,5 +893,174 @@ describe("what a run waits on after a wake in which the runner posted nothing", 
       kind: "runner",
       on: 'read them and reply "approved", or say what to change.',
     });
+  });
+});
+
+describe("a place on the project after a wake (ADR-0063 D2, D3)", () => {
+  /** When each ticket was opened on the forge: #12 first, then #13. */
+  const OPENED = { 12: "2026-09-27T09:00:00Z", 13: "2026-09-27T10:00:00Z" } as const;
+
+  /** The runner's wait, as a wake leaves a run it just picked up. */
+  const RUNNER_WAIT = {
+    waitingOn: "the next thing that happens on this ticket",
+    kind: "runner" as const,
+    resolvableBy: ["triage" as const],
+  };
+
+  /**
+   * The world's run #12, parked, beside #11, whose step takes the project's
+   * one place, and #13, which waits for a place behind #12.
+   */
+  function threeRuns(w: World): { first: Run; next: Run } {
+    const first = w.store.activate(w.store.register(PROJECT.name, 11).run.id, "step-session-11");
+    w.store.park(w.run.id, RUNNER_WAIT);
+    const next = w.store.park(w.store.register(PROJECT.name, 13).run.id, RUNNER_WAIT);
+    w.store.askPlace(next.id, { priority: false, openedAt: OPENED[13] });
+    return { first, next };
+  }
+
+  /** The ids of the runs of the project that take a place now. */
+  function holders(w: World): string[] {
+    return w.store.placeHolders(PROJECT.name).map((run) => run.id);
+  }
+
+  /** The ids of the runs of the project that wait for a place, in order. */
+  function waiting(w: World): string[] {
+    return w.store.waitingForPlace(PROJECT.name).map((run) => run.id);
+  }
+
+  it("gives the place to the next waiting run when the wake of the run given it ends with no step started, and the run waits no more (R3 clause 4)", async () => {
+    const w = world();
+    const { first, next } = threeRuns(w);
+    w.store.askPlace(w.run.id, { priority: false, openedAt: OPENED[12] });
+    w.store.park(first.id, RUNNER_WAIT);
+    expect(holders(w)).toEqual([w.run.id]);
+
+    await wakeRunner(
+      { runQuery: scriptedRunner([quiet()]).runQuery, actionsFor: w.actionDeps },
+      w.store.get(w.run.id)!,
+      ["A place on the project is free for this ticket now. A step you start will not be refused for want of one."],
+    );
+
+    expect(holders(w)).toEqual([next.id]);
+    expect(waiting(w)).toEqual([]);
+  });
+
+  it("leaves a run waiting for its turn when its try to start a step in the wake was refused for want of a place", async () => {
+    const w = world();
+    const { next } = threeRuns(w);
+    const runner = scriptedRunner([
+      {
+        kind: "calls",
+        calls: [
+          {
+            name: "start_step",
+            input: {
+              stage: "triage",
+              instructions: "Sort the request.",
+              reason: "A new ticket starts with sorting.",
+            },
+          },
+        ],
+        costUsd: 0.1,
+      },
+    ]);
+
+    await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+      w.store.get(w.run.id)!,
+      ["A new ticket was picked up. Nothing has been done on it yet."],
+    );
+
+    expect(runner.answers).toEqual([
+      {
+        content: [
+          {
+            type: "text",
+            text: expect.stringMatching(/^Refused: No place is free on scratch-app: run scratch-app#11\/1 has a step running\./),
+          },
+        ],
+        isError: true,
+      },
+    ]);
+    expect(waiting(w)).toEqual([w.run.id, next.id]);
+  });
+
+  it("lets a run keep a place given to it after its try was refused in the same wake, so it is woken for it next (ADR-0063 D3)", async () => {
+    const w = world();
+    const { first, next } = threeRuns(w);
+    const runner = scriptedRunner([
+      {
+        kind: "calls",
+        calls: [
+          {
+            name: "start_step",
+            input: {
+              stage: "triage",
+              instructions: "Sort the request.",
+              reason: "A new ticket starts with sorting.",
+            },
+          },
+        ],
+        costUsd: 0.1,
+        // #11's step ends while the session is still running, so the ledger
+        // gives the place to #12, which comes first.
+        afterCalls: () => w.store.park(first.id, RUNNER_WAIT),
+      },
+    ]);
+
+    await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+      w.store.get(w.run.id)!,
+      ["A new ticket was picked up. Nothing has been done on it yet."],
+    );
+
+    expect(holders(w)).toEqual([w.run.id]);
+    expect(w.store.get(w.run.id)?.place?.givenAt).toBeDefined();
+    expect(waiting(w)).toEqual([next.id]);
+  });
+
+  it("gives the place to the next waiting run when the wake of the run given it fails", async () => {
+    const w = world();
+    const { first, next } = threeRuns(w);
+    w.store.askPlace(w.run.id, { priority: false, openedAt: OPENED[12] });
+    w.store.park(first.id, RUNNER_WAIT);
+    expect(holders(w)).toEqual([w.run.id]);
+
+    const end = await wakeRunner(
+      {
+        runQuery: scriptedRunner([{ kind: "throws", error: "API Error: Connection error." }]).runQuery,
+        actionsFor: w.actionDeps,
+      },
+      w.store.get(w.run.id)!,
+      ["A place on the project is free for this ticket now. A step you start will not be refused for want of one."],
+    );
+
+    expect(end.kind).toBe("failed");
+    expect(holders(w)).toEqual([next.id]);
+  });
+
+  it("tells the runner in its brief who takes the project's place, or that it is given to this ticket", async () => {
+    const w = world();
+    const { first } = threeRuns(w);
+    const runner = scriptedRunner([quiet(), quiet()]);
+    const wake = () =>
+      wakeRunner(
+        { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+        w.store.get(w.run.id)!,
+        ["fvermaut commented on the ticket at 2026-09-27T11:58:40Z."],
+      );
+
+    await wake();
+    w.store.askPlace(w.run.id, { priority: false, openedAt: OPENED[12] });
+    w.store.park(first.id, RUNNER_WAIT);
+    await wake();
+
+    const placeLine = (prompt: string) =>
+      prompt.split("\n").find((line) => line.startsWith("- The project's place:"));
+    expect(runner.started.map((session) => placeLine(session.prompt))).toEqual([
+      "- The project's place: taken: scratch-app#11/1 has a step running.",
+      "- The project's place: given to this ticket — a step you start now will not be refused.",
+    ]);
   });
 });

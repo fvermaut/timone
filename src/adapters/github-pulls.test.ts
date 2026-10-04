@@ -137,6 +137,70 @@ describe("findPullRequest", () => {
   });
 });
 
+// PRD-07.R9, #181: the pickup asks this before it opens a new run.
+describe("findOpenPullRequestOfTicket", () => {
+  it("asks gh for the open pull requests and answers the one from a branch of the ticket, with its branch", async () => {
+    const { run, calls } = fakeRunner(
+      JSON.stringify([
+        ghPull({ number: 68, headRefName: "timone/68-another-ticket" }),
+        ghPull({ number: 70, headRefName: "timone/67-some-title" }),
+      ]),
+    );
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    const found = await adapter.findOpenPullRequestOfTicket(alpha, 67);
+
+    expect(found).toEqual({
+      branch: "timone/67-some-title",
+      pullRequest: {
+        headSha: "9f1c0d3ab2e4f5061728394a5b6c7d8e9f0a1b2c",
+        number: 70,
+        title: "Typing in the box is fiddly on my phone",
+        url: "https://github.com/fvermaut/scratch-app/pull/9",
+        state: "open",
+      },
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].command).toBe("gh");
+    expect(calls[0].args.slice(0, 6)).toEqual([
+      "pr",
+      "list",
+      "--repo",
+      "fvermaut/scratch-app",
+      "--state",
+      "open",
+    ]);
+    expect(calls[0].args).toContain("number,title,url,state,headRefOid,headRefName");
+  });
+
+  it("counts a pull request from timone/67 for ticket #67, and not one from timone/670-other", async () => {
+    const other = fakeRunner(
+      JSON.stringify([ghPull({ number: 71, headRefName: "timone/670-other" })]),
+    );
+    const bare = fakeRunner(
+      JSON.stringify([ghPull({ number: 72, headRefName: "timone/67" })]),
+    );
+
+    await expect(
+      new GitHubTicketingAdapter({ run: other.run }).findOpenPullRequestOfTicket(alpha, 67),
+    ).resolves.toBeUndefined();
+    const found = await new GitHubTicketingAdapter({
+      run: bare.run,
+    }).findOpenPullRequestOfTicket(alpha, 67);
+    expect(found?.branch).toBe("timone/67");
+    expect(found?.pullRequest.number).toBe(72);
+  });
+
+  it("throws when gh fails, rather than answering that no pull request is open", async () => {
+    const run: CommandRunner = async () => {
+      throw new Error("gh: HTTP 502 Bad Gateway");
+    };
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    await expect(adapter.findOpenPullRequestOfTicket(alpha, 67)).rejects.toThrow(/502/);
+  });
+});
+
 /** Canned payloads for the two calls `getPullRequestThread` makes. */
 function prViewPayload(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({

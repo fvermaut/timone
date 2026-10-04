@@ -1,6 +1,6 @@
 # ADR-0026: A ticket is a conversation; a run is a chunk of work
 
-- **Status:** accepted
+- **Status:** accepted — **its rule "the chunk holds the project" is replaced 2026-10-04 by [ADR-0063](0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)**: a ticket takes a place on its project only while one of its steps runs ([PRD-07](../specs/prd/prd-07-several-tickets-of-one-project-at-once.md) R1, R2, R3). The rest stands; the body is untouched.
 - **Date:** 2026-08-14
 - **Source:** fvermaut's rulings of 2026-08-14, four questions put one at a time, after [phase 20](../plans/phases/phase-20.md)'s live gate showed an approved map walking straight on into building
 - **Discharges:** [ADR-0015](0015-branch-per-driving-unit.md)'s deferred question — *"a ticket that grows into multiple phases … this ADR is where the serial-phases-on-one-branch question gets taken up"*
