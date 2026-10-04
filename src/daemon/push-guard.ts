@@ -1,6 +1,8 @@
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { NUMBER_KINDS } from "../numbers.js";
+
 /**
  * A run's `git push` reaches its own work branch and nothing else
  * ([#85](https://github.com/fvermaut/timone/issues/85)).
@@ -25,6 +27,27 @@ export interface RefUpdate {
 const NO_COMMIT = /^0+$/;
 
 /**
+ * Where a reservation of a number lives (`reserveNumber` in `numbers.ts`):
+ * one ref per kind and number, and the number is digits only.
+ */
+const RESERVATION_REF = new RegExp(
+  `^refs/timone/numbers/(${NUMBER_KINDS.join("|")})/\\d+$`,
+);
+
+/**
+ * Whether `update` creates a reservation of a number: a ref the remote does
+ * not have yet, pushed with a commit. Moving or deleting one that exists is
+ * not creating one.
+ */
+function createsReservation(update: RefUpdate): boolean {
+  return (
+    RESERVATION_REF.test(update.remoteRef) &&
+    NO_COMMIT.test(update.remoteSha) &&
+    !NO_COMMIT.test(update.localSha)
+  );
+}
+
+/**
  * Why this push may not go ahead, or undefined when it may.
  *
  * **Every update has to be allowed, or none goes.** A non-zero exit from
@@ -40,16 +63,20 @@ export function pushRefusal(
   updates: readonly RefUpdate[],
   workBranch: string | undefined,
 ): string | undefined {
+  // Any step may reserve a number for a file it is about to write. Creating a
+  // reservation is allowed, and it does not make any other update in the same
+  // push allowed.
+  const others = updates.filter((update) => !createsReservation(update));
   // A step that owns no branch — sorting a ticket, answering a question —
-  // has nothing to push, and its work is what it says on the ticket.
+  // has nothing else to push, and its work is what it says on the ticket.
   if (workBranch === undefined) {
-    return updates.length === 0
+    return others.length === 0
       ? undefined
       : "Refused: this step has no work branch, so it pushes nothing to the project. " +
           "Say what you did on the ticket.";
   }
   const allowed = `refs/heads/${workBranch}`;
-  const refused = updates.filter(
+  const refused = others.filter(
     (update) => update.remoteRef !== allowed || NO_COMMIT.test(update.localSha),
   );
   if (refused.length === 0) return undefined;

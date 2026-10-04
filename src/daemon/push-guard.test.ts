@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { vi } from "vitest";
 
+import { reserveNumber } from "../numbers.js";
 import { installPushGuard, pushRefusal, type RefUpdate } from "./push-guard.js";
 
 /** A commit name, written out: what it is does not matter to the rule. */
@@ -72,6 +74,60 @@ describe("what a step with no work branch may push", () => {
       "Refused: this step has no work branch, so it pushes nothing to the project. " +
         "Say what you did on the ticket.",
     );
+  });
+});
+
+describe("a reservation of a number, which every step may create", () => {
+  /** One line of what git hands a `pre-push` hook for pushing a reservation to `remoteRef`. */
+  function reservation(
+    remoteRef: string,
+    shas: { localSha?: string; remoteSha?: string } = {},
+  ): RefUpdate {
+    return {
+      localRef: SHA,
+      localSha: shas.localSha ?? SHA,
+      remoteRef,
+      remoteSha: shas.remoteSha ?? ZERO,
+    };
+  }
+
+  it.each([
+    ["a run with a work branch", "timone/7-x"],
+    ["a step with no work branch", undefined],
+  ])("allows %s to create a reservation", (_who, workBranch) => {
+    expect(
+      pushRefusal([reservation("refs/timone/numbers/phase/44")], workBranch),
+    ).toBeUndefined();
+  });
+
+  describe.each([
+    ["a run with a work branch", "timone/7-x"],
+    ["a step with no work branch", undefined],
+  ])("for %s", (_who, workBranch) => {
+    const PHASE_44 = "refs/timone/numbers/phase/44";
+
+    it.each([
+      ["moving a reservation that exists", reservation(PHASE_44, { remoteSha: OLD })],
+      ["deleting a reservation", reservation(PHASE_44, { localSha: ZERO, remoteSha: OLD })],
+      [
+        "a delete whose far side reads as no commit",
+        reservation(PHASE_44, { localSha: ZERO, remoteSha: ZERO }),
+      ],
+      ["a ref under refs/timone/ outside numbers/", reservation("refs/timone/other/1")],
+      ["a kind of numbered file that does not exist", reservation("refs/timone/numbers/chapter/1")],
+      ["a number with more than digits", reservation("refs/timone/numbers/phase/44a")],
+    ])("refuses %s", (_what, refused) => {
+      expect(pushRefusal([refused], workBranch)).toBeDefined();
+    });
+
+    it("refuses a push that carries a reservation and an update to the default branch", () => {
+      const refusal = pushRefusal(
+        [reservation("refs/timone/numbers/phase/44"), update("refs/heads/main")],
+        workBranch,
+      );
+
+      expect(refusal).toBeDefined();
+    });
   });
 });
 
@@ -167,6 +223,33 @@ describe("a run's git push, with the guard switched on", () => {
 
     expect(toWork.status).toBe(0);
     expect(remoteHas("refs/heads/timone/7-x")).toBe(mustGit(["rev-parse", "HEAD"]));
+  });
+
+  it.each([
+    ["a run with a work branch", "timone/7-x"],
+    ["a step with no work branch", undefined],
+  ])("%s can reserve a number, and still cannot push to the default branch", async (_who, workBranch) => {
+    const { root, clone, env, git, remoteHas } = remoteAndClone();
+    const guard = installPushGuard(join(root, "guard"), { workBranch, cli: CLI });
+    const mainBefore = remoteHas("refs/heads/main");
+    // `reserveNumber` runs git with this process's own environment, so the
+    // guard is switched on there, with the same clean git setup as the rest.
+    for (const name of Object.keys(process.env)) {
+      if (name.startsWith("GIT_")) vi.stubEnv(name, undefined);
+    }
+    for (const [name, value] of Object.entries({ ...env, ...guard })) {
+      if (process.env[name] !== value) vi.stubEnv(name, value);
+    }
+
+    try {
+      expect(await reserveNumber(clone, "phase")).toBe("01");
+      expect(remoteHas("refs/timone/numbers/phase/01")).toBeDefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+
+    expect(git(["push", "origin", "HEAD:main"], guard).status).not.toBe(0);
+    expect(remoteHas("refs/heads/main")).toBe(mainBefore);
   });
 });
 

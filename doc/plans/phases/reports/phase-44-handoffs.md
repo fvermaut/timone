@@ -97,3 +97,97 @@ Test Files  61 passed (61)
 - The guard's pattern for a project folder, `/(?:join|resolve)\([^)]*\.path\b/`, does not match when a call such as `process.cwd()` comes before `.path` inside the same `resolve(...)`. Any new file that resolves a project folder that way is not caught.
 
 **Gate note (orchestrator).** The first attempt ended with the full suite red on `src/guards/checkouts.test.ts`. That was a plan defect, not a fault of the slice: the plan was amended to grant that file (see `phase-44-departures.md`), and the second attempt turned it green. Checked again before the commit: the three test files, 27 tests passed; type check and build exit 0; the three command probes gave exit 0, 1, 1; `git ls-remote origin 'refs/timone/*' | wc -l` printed 0.
+
+## 44b — a run's push guard lets it create a reservation, and nothing more
+
+**Built.** Any step can now push a new number reservation through the guard, whether or not it has a work branch. `pushRefusal` allows an update when all three of these hold:
+- its `remoteRef` matches `^refs/timone/numbers/(phase|adr|triage|prd)/\d+$`;
+- its `remoteSha` is all zeros, so the ref does not exist on the remote yet;
+- its `localSha` is not all zeros, so it is not a deletion.
+
+Such an update is taken out before the old rules run. Every other update is judged exactly as before, and the refusal sentences are unchanged. A push that carries a reservation and any refused update is still refused whole.
+
+**Files touched.**
+
+- `src/daemon/push-guard.ts`: imports `NUMBER_KINDS` from `../numbers.js`. Adds `RESERVATION_REF` and the private `createsReservation(update)`. `pushRefusal` filters out the reservation updates into `others`, then applies the old two rules to `others`. One comment changed from "nothing to push" to "nothing else to push".
+- `src/daemon/push-guard.test.ts`: added only, no line removed.
+  - Two new import lines: `import { vi } from "vitest";` and `import { reserveNumber } from "../numbers.js";`. They are separate lines so the existing vitest import line is not edited.
+  - A new describe block, "a reservation of a number, which every step may create", for cases 1–3.
+  - A new `it.each` inside the existing describe block "a run's git push, with the guard switched on", for case 4.
+
+**Decisions taken inside the slice.**
+- **Kinds.** The kinds in the pattern are built from `NUMBER_KINDS`, so the guard and `reserveNumber` cannot drift apart when a kind is added. The pattern is the same as the plan's literal.
+- **Both kinds of step.** Cases 1–4 each run twice: for a run with a work branch and for a step with none. A triage step has no work branch and needs triage numbers.
+- **Extra row in case 2.** Besides the realistic delete (local all zeros, remote is a commit), there is a row "a delete whose far side reads as no commit" (both all zeros). Without it, the `localSha` clause could be removed and no test would fail, because the realistic delete is already refused by the `remoteSha` clause.
+- **Environment in case 4.** `reserveNumber` runs git with this process's own environment. So the test uses `vi.stubEnv` to drop every inherited `GIT_*` variable, set the same clean `HOME` / `XDG_CONFIG_HOME` / `GIT_CONFIG_NOSYSTEM` as `remoteAndClone`, and add the guard's three variables. `vi.unstubAllEnvs()` runs in a `finally`.
+- **Build.** Case 4 runs the hook through `dist/cli.js`, so `npm run build` has to come before it, as the file's own comment says. I ran the build. `dist/` is gitignored.
+
+**Validation evidence.**
+
+Case 1: written first, red against the unchanged `pushRefusal`:
+```
+$ npx vitest run src/daemon/push-guard.test.ts -t "reservation"
+FAIL > allows a run with a work branch to create a reservation
++ Received: "Refused: this run may push only to `timone/7-x`, and this push goes to `refs/timone/numbers/phase/44`. ..."
+FAIL > allows a step with no work branch to create a reservation
++ Received: "Refused: this step has no work branch, so it pushes nothing to the project. Say what you did on the ticket."
+Tests  2 failed | 18 skipped (20)
+```
+Green after the smallest change: allow anything under `refs/timone/numbers/`.
+
+Case 2: red against that smallest change:
+```
+× refuses moving a reservation that exists        (both kinds of step)
+× refuses deleting a reservation                  (both)
+× refuses a kind of numbered file that does not exist (both)
+× refuses a number with more than digits          (both)
+AssertionError: expected undefined to be defined
+Tests  8 failed | 4 passed | 18 skipped (30)
+```
+The "outside numbers/" row was green from the start, because the smallest change already checked the prefix. Then green with the full rule (32 passed). Each clause was also checked by a mutation, reverted afterwards:
+- `localSha` clause removed: red only on "a delete whose far side reads as no commit" (2 failed).
+- `remoteSha` clause removed: red on "moving a reservation that exists" (2 failed).
+- Kind replaced with `[a-z]+`: red on "a kind of numbered file that does not exist" (2 failed).
+- End anchor `$` removed: red on "a number with more than digits" (2 failed).
+- Pattern widened to `^refs/timone/`: red on the outside-numbers/, unknown-kind and non-digits rows (6 failed).
+
+Case 3: green when written, because the "every update or none" rule already held. Mutation `if (updates.some(createsReservation)) return undefined;` gave red `AssertionError: expected undefined to be defined` (2 failed). Reverted, 34 passed.
+
+Case 4: red with `dist/` built from the unchanged `push-guard.ts`:
+```
+× a run with a work branch can reserve a number, and still cannot push to the default branch
+  → Could not reserve phase 01: Refused: this run may push only to `timone/7-x`, and this push goes to `refs/timone/numbers/phase/01`. ...
+× a step with no work branch can reserve a number, and still cannot push to the default branch
+  → Could not reserve phase 01: Refused: this step has no work branch, so it pushes nothing to the project. ...
+Tests  2 failed | 34 skipped (36)
+```
+After restoring the change and rebuilding: 36 passed. Each test also checks that `git push origin HEAD:main` from the same clone is refused and that `main` on the remote did not move.
+
+Case 5 (hard gate): all 20 tests that were in `push-guard.test.ts` before still pass, and so does `forge-guard.test.ts`. Neither file had a test edited (probes below).
+
+Validation block:
+```
+$ npx vitest run src/daemon/push-guard.test.ts src/daemon/forge-guard.test.ts src/numbers.test.ts
+Test Files  3 passed (3)      Tests  77 passed (77)
+$ git diff -U0 -- src/daemon/push-guard.test.ts | grep '^-[^-]'; echo "exit: $?"
+exit: 1
+$ git diff --name-only -- src/daemon/forge-guard.test.ts | wc -l
+0
+$ npm run type-check
+exit 0
+```
+
+Tests of code that uses the changed files:
+```
+$ npx vitest run src/commands/guardrails.test.ts src/daemon/hooks.test.ts src/daemon/session.test.ts src/daemon/container-runtime.test.ts src/guards/checkouts.test.ts src/commands/number.test.ts
+Test Files  6 passed (6)      Tests  256 passed (256)
+```
+`npm test` was not run. The person running this build asked that no slice run the whole suite. It is left to the close of the phase.
+
+**What delivery must know.**
+- A box only allows reservations once its `dist/cli.js` contains this change, because the hook runs the built command line. Run `npm run build` before the whole suite, as the existing tests already need.
+- `push-guard.ts` now imports `numbers.ts`. That file imports `node:child_process`, which the guard's `pre-push` command now loads. Nothing in `numbers.ts` runs when it is loaded.
+- `git status` also shows `src/adapters/ticketing.ts`, `src/daemon/prompts.ts` and `src/daemon/prompts.test.ts` as modified. Those are 44c's files; I did not touch them.
+
+
+**Gate note (orchestrator).** 44b and 44c ran at the same time: they share no file and no state outside the repository. Checked again before the commit: after `npm run build`, the three test files of the validation block, 77 tests passed; the removed-line probe gave `exit: 1`; the forge-guard probe printed `0`; type check exit 0.
