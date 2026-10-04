@@ -14,7 +14,7 @@ The first reason for this rule was two agents working in one copy of the reposit
 
 fvermaut asked for this on 3 October 2026 ([timone#197](https://github.com/fvermaut/timone/issues/197)): "I want to be able to work on multiple tickets at the same time for one project." He answered six questions in a terminal session the same day. Every decision below is his. The source is the handover file [2026-10-03-several-tickets-at-once.md](../../handover/2026-10-03-several-tickets-at-once.md), which also records what the code does today and the risks. It uses two words from [`CONTEXT.md`](../../../CONTEXT.md): the **planner** and the **update**.
 
-A decision record that replaces the rule of [ADR-0026](../../adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md) ("the chunk holds the project") is still to be written.
+A decision record that replaces the rule of [ADR-0026](../../adr/0026-a-ticket-is-a-conversation-a-run-is-a-chunk.md) ("the chunk holds the project") is still to be written. ✏ 2026-10-04: it is written. [ADR-0063](../../adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md) replaces that rule: a ticket takes one of its project's places only while one of its steps runs, and a freed place is given to one waiting ticket.
 
 ## Goals
 

@@ -9,7 +9,7 @@
 
 Machine-driven work stops on the human too often, and the stops carry no judgement worth having. Ticket [timone#99](https://github.com/fvermaut/timone/issues/99) is the record: three interventions on one small bug fix. The first was "go ahead" on a plan correction the machine had already decided was not a decision. The second was a request to waive a check the machine could not run. The third was the machine refusing the answer to its own question and demanding a terminal command instead. fvermaut's judgement of the episode, from the requirements interview of 2026-09-05: the interventions were "just to unblock and say yes go ahead, without even really understanding what was going on".
 
-Each stop also holds the project: nothing else runs on it while a run waits for an answer. So a stop that buys no judgement costs twice — the human's attention and the queue's time.
+Each stop also holds the project: nothing else runs on it while a run waits for an answer. (✏ 2026-10-04, [ADR-0063](../../adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md): reversed by [PRD-07.R1](prd-07-several-tickets-of-one-project-at-once.criteria.md#r1--a-ticket-frees-its-project-when-its-pull-request-opens). A run that waits for an answer no longer holds the project; it takes one of the project's places only while one of its steps runs.) So a stop that buys no judgement costs twice — the human's attention and the queue's time.
 
 The interview resolved the direction: stop stopping. The human's judgement is real in two places — agreeing to what will be built, and merging what was built. Everything between those two points should run in the dark, and everything the machine had to bend on the way should surface at the second point, the pull request, where the human already is.
 
@@ -40,7 +40,7 @@ The interview resolved the direction: stop stopping. The human's judgement is re
 - **Draft pull requests as a third state.** A red run opens an ordinary pull request that says it is red.
 - **Changing the agreements before the build.** Requirements approval and the approval of the list of pieces stay exactly as they are, takeover included.
 - **Patching a rejected pull request in place.** A rejection is never patched in place. When the human asks for the work to be built again it is a fresh cycle, never a patch — but a close no longer always means a rebuild (✏ 2026-09-07, [timone#111](https://github.com/fvermaut/timone/issues/111): a close may instead mean the work was unwanted, or was a mistake; the machine asks which — see R1).
-- **Changing how a project is held.** One pull request in flight per project, the run holding it until merge or close, stays as it is (PRD-02.R10): the human's merge paces the pipeline, by design.
+- **Changing how a project is held.** One pull request in flight per project, the run holding it until merge or close, stays as it is (PRD-02.R10): the human's merge paces the pipeline, by design. (✏ 2026-10-04, [ADR-0063](../../adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md): reversed by [PRD-07.R1](prd-07-several-tickets-of-one-project-at-once.criteria.md#r1--a-ticket-frees-its-project-when-its-pull-request-opens). A ticket frees its project when its pull request opens, and several pull requests of one project can be open at once.)
 
 ## Open Questions
 

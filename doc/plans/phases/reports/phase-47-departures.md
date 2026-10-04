@@ -64,3 +64,10 @@
 **Agreed:** Case 5 runs "the same three" through the `claim-takeover` request road; `findTakeover` loses every sentence that blamed another run of the project.
 **Did instead:** Case 5 runs cases 1–3 through the request road; case 4 is tested through the command only. `findTakeover` needed no change: 47a had already removed its only such sentence, the queue message. Two of case 5's tests were written together before either ran; both passed on arrival, and each has its own failing mutation on record.
 **Why:** "The same three" reads as cases 1–3. The second point is a fact of the code as 47a left it. The third is recorded so the trace is honest.
+
+## 2026-10-04 — timone#201, execution (47g)
+
+**Kind:** plan step
+**Agreed:** The `process.md` stage 6 sentence "becomes" the new words; the charting instructions' "Mode 2 item 5" is amended.
+**Did instead:** In `process.md` and in the charting instructions, the new words come first with a dated marker, and the old words are kept struck through after "The words before that date, kept as history:", as `process.md` already does once. The item amended is item 5 of "Closing the effort", the only item that says a map holds its project. It also gains one line: do not write in the route summary that other work on the project will stop.
+**Why:** Old text is kept, not deleted. The plan named the wrong section for the item. Without the added line, the old instruction to write that the queue stopped would still be partly in force.

@@ -477,3 +477,65 @@ Checkboxes of the excerpt:
 
 - `timone status` no longer shows a queue and now shows the waiting list, so ADR-0063's last consequence ("It shows the runs waiting for a place, in the order they will get it") is true in the code. Any document 47g edits that describes the status line's queue can point at this.
 - The command's wiring (`waitingForPlace: (project) => store.waitingForPlace(project)` in `registerStatusCommand`) is not covered by a test: the declared seam is the renderer. It is one line.
+
+## 47g — The old rule is struck where it is written
+
+**Built.** No behaviour. Every place PRD-07.R12 names for this piece now carries a dated note (✏ 2026-10-04) that names ADR-0063 and the PRD-07 requirement that replaces the old rule. Nothing was deleted: notes sit beside the text they change, and where text had to be rewritten (`process.md` stage 6, the wayfind skill's item 5) the old words are kept struck through, after "The words before that date, kept as history:", as `process.md` already does for `STATUS.md`. `CONTEXT.md` gains a **Place** entry. This slice carries no seam, so there are no tests and no red-green trace.
+
+**Files touched.**
+
+- `doc/specs/prd/prd-02-inversion-of-control.criteria.md` — R10: a dated note under its heading, "replaced by PRD-07 R1, R2 and R3 (ADR-0063)", above the older revision notes. R22 clause 6: a dated note after the clause naming PRD-07.R1.
+- `doc/specs/prd/prd-02-inversion-of-control.md` — inline dated notes after "Work per project is serialized …" (PRD-07 R1, R2 and R3) and after "**The chunk holds the project, not the ticket** …" (PRD-07 R1), each naming ADR-0063.
+- `doc/specs/prd/prd-03-a-run-ends-at-its-pull-request.md` — "(✏ 2026-10-04, ADR-0063: reversed by PRD-07.R1. …)" after "Each stop also holds the project …" and after the out-of-scope line "Changing how a project is held", in the file's own parenthesis style.
+- `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` — R11 clause 2: a dated note that the refusal while another run of the project works or holds a work branch is replaced by PRD-07.R13, and that the refusal on a run the machine is working on stays. R15's verification hint: a dated note that "The project is free now." is no longer said, quoting `PLACE_GIVEN_EVENT`'s words from `src/runner/driver.ts` and the start of the refusal words ("No place is free on <project>: …").
+- `doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.md` — after "… is still to be written.": "✏ 2026-10-04: it is written. ADR-0063 replaces that rule: …".
+- `process.md` — stage 6's parenthesis now reads: stacking arises only on this path; a ticket-driven run's branch is always cut from the default branch, and a ticket that needs another ticket's work waits for that ticket's pull request to merge. Then a ✏ 2026-10-04 marker naming ADR-0063, and the old words struck through.
+- `.claude/skills/timone-wayfind/SKILL.md` — item 5 now says the map's run takes the project's place only while one of its steps runs, that other tickets are not stopped by it, that there is no queue, and not to write in the route summary that other work will stop. Dated marker naming ADR-0063; the old item kept struck through.
+- `CONTEXT.md` — new **Place** entry after **Step ticket**, in the words of PRD-07's register ("one of a project's slots for a running step"), saying what takes a place and what does not, and that every project has one place until the number can be set in `timone.yaml`. The **Chunk** entry: a dated note after "its own place in the queue" that there is no queue any more.
+- `doc/plans/phases/reports/phase-47-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **Strike, not delete, where the plan says "becomes".** The plan rewrites `process.md`'s parenthesis and amends the wayfind item; the orchestrator's rule is never to delete old text. Both are met by writing the new words first and keeping the old ones struck through, as `process.md` already does once. The validation's second command accepts either form.
+- **The wayfind item gained one instruction:** do not write in the route summary that other work on the project will stop. The old item told the agent to write the opposite, so leaving that unsaid would leave the old instruction half alive.
+- **The plan says the wayfind item is "Mode 2 item 5"; it is item 5 of "Closing the effort".** It is the only item that says a map holds its project, so that is the one amended.
+- **R10's note sits above the older revision notes**, because the file puts its newest revision first. Its links to PRD-07 R1, R2 and R3 use the same heading anchors the file already uses.
+- **R15's note quotes the new words; clause 2 itself and its "Last live gate" line are not touched** (piece 5's, and a record of what was watched).
+- ADR-0026 was left alone, as the orchestrator said: its status line already carries its note.
+
+Refactor I would do but did not: PRD-02.R22's evidence notes and PRD-05.R11's evidence still talk of "queued" runs and "a run in the queue"; they are records of what was checked then, so they stay, but a reader may want one short note at the top of each register saying the queue is gone.
+
+**Validation evidence.**
+
+No behaviour-carrying code, so no declared seams and no red-green cases.
+
+```
+$ grep -n "ADR-0063" doc/specs/prd/prd-02-inversion-of-control.criteria.md doc/specs/prd/prd-02-inversion-of-control.md doc/specs/prd/prd-03-a-run-ends-at-its-pull-request.md doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.md process.md .claude/skills/timone-wayfind/SKILL.md CONTEXT.md; echo "exit: $? (expected 0, every file listed at least once)"
+(13 matching lines; file:line only, the lines are long)
+doc/specs/prd/prd-03-a-run-ends-at-its-pull-request.md:12, :43
+CONTEXT.md:22, :24
+doc/specs/prd/prd-02-inversion-of-control.md:26, :36
+doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.md:17
+doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md:215, :291
+doc/specs/prd/prd-02-inversion-of-control.criteria.md:193, :536
+.claude/skills/timone-wayfind/SKILL.md:213
+process.md:44
+exit: 0 (expected 0, every file listed at least once)
+
+$ grep -n "holds its project until its PR reaches a terminal state" process.md | grep -v "~~"; echo "exit: $? (expected 1 — struck or rewritten)"
+exit: 1 (expected 1 — struck or rewritten)
+```
+
+Checkboxes of the excerpt:
+
+- [x] Every place R12 names for this piece carries a dated note naming the PRD-07 requirement that changes it — PRD-02.R10 (R1, R2, R3), PRD-02.R22 clause 6 (R1), PRD-05.R11 clause 2 (R13), PRD-03's out-of-scope line (R1), `process.md` stage 6 (rewritten; names ADR-0063, and R12's own clause asks only that it no longer says a run holds its project until its pull request ends). ADR-0026's status line already carried its note.
+- [x] PRD-02.R22 clause 1 and PRD-05.R15 clause 2 are untouched — `git diff -U0` shows no line of either changed; the R15 note sits in the verification hint, after its existing note.
+- [x] No requirement's `Status:` line changed — `git diff -U0 | grep "^+.*Status:"` finds nothing (exit 1).
+- [x] Plain words in every note — short sentences, no metaphor; the only domain words are those of `CONTEXT.md` (place, run, step, takeover, ticket).
+
+*Test files run at the end* — the ones that read the edited documents or their words: `src/process-text.test.ts`, `src/runner/brief.test.ts`, `src/runner/facts.test.ts`, `src/runner/session.test.ts`, `src/runner/actions.test.ts`, `src/runner/driver.test.ts`, `src/daemon/pipeline.test.ts`, `src/daemon/lock.test.ts`, `src/daemon/hooks.test.ts`, `src/git.test.ts`, `src/numbers.test.ts`, `src/daemon/holder.test.ts` — 12 files, 352 tests, all passed, exit 0.
+
+**What the phase close must know.**
+
+- 47g is the last slice. PRD-07's requirement statuses stay `draft`; verification sets them.
+- PRD-05.R11's probe still tests the takeover refusal that 47e removed. R11's new note says the refusal is replaced but does not name the probe; verification must amend the probe. R11's `Status:` is `verified` and was not changed here.
