@@ -651,7 +651,12 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       });
       return;
     }
-    const failure = await openStepTickets(chunkZero, current(), deps.project);
+    const failure = await openStepTickets(
+      chunkZero,
+      current(),
+      deps.project,
+      namedPeople(deps.manifest, deps.project.name),
+    );
     if (failure !== undefined) {
       await piecesNotActedOn({ failed: "tickets", said: failure });
       return;

@@ -12,6 +12,7 @@ import {
   type BreakdownSource,
   type Chunk,
 } from "./breakdown.js";
+import { withPeopleNamed } from "./people.js";
 import type { Run, RunStore } from "./runs.js";
 import { mergeMessage } from "./session.js";
 import {
@@ -149,11 +150,19 @@ async function attemptMerge(
  * create leaves six real tickets behind, and the next cycle opens the other
  * eight; taking the run down with it would turn a partial success into a
  * failed initiative.
+ *
+ * `people` are the project's named people. Each step ticket opened here
+ * names them with an `@` at the end of its body, so that GitHub tells them
+ * it was opened and tells them of every comment on it
+ * ([PRD-08](../../doc/specs/prd/prd-08-a-ticket-the-machine-opens-names-its-people.md)
+ * R1). A step found by its title is neither opened again nor edited, so a
+ * re-run names nobody twice.
  */
 export async function openStepTickets(
   deps: ChunkZeroDeps,
   run: Run,
   project: TicketingProject,
+  people: readonly string[],
 ): Promise<string | undefined> {
   const { adapter } = deps;
   const read = await readBreakdown(
@@ -202,7 +211,7 @@ export async function openStepTickets(
       if (number === undefined) {
         number = await adapter.createStep(project, run.ticket, {
           title,
-          body: stepBody(chunk, run.ticket, read.path),
+          body: withPeopleNamed(stepBody(chunk, run.ticket, read.path), people),
         });
       }
       opened.push({ number, chunk });

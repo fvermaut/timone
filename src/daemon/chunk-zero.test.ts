@@ -23,6 +23,7 @@ import {
   type ChunkZeroDeps,
 } from "./chunk-zero.js";
 import { RunStore, type Run } from "./runs.js";
+import { nextStep } from "./steps.js";
 
 const PROJECT: TicketingProject = {
   name: "ivtrends",
@@ -72,6 +73,18 @@ const R10_LIST = [
   "",
 ].join("\n");
 
+/** Three pieces, one after the other. */
+const THREE_PIECES = [
+  "# Breakdown",
+  "",
+  "**Status:** Approved by fvermaut 2026-10-04 — 3 pieces",
+  "",
+  "1. **Tasks** — a task can be written down",
+  "2. **Due dates** — a task carries a due date",
+  "3. **Reminders** — the owner is reminded before the due date",
+  "",
+].join("\n");
+
 /** An issue URL of this project's repository. */
 function issueUrl(number: number): string {
   return `https://github.com/fvermaut/ivtrends/issues/${number}`;
@@ -86,11 +99,13 @@ afterEach(() => {
  * A forge holding the initiative's step tickets in memory. `listSteps`
  * answers from that list, `createStep` adds to it from #11 upwards, and
  * `blockStep` adds to a step's `blockedBy`, so a second run sees what the
- * first one wrote. Every write is recorded, in order, as one line.
+ * first one wrote. Every write is recorded, in order, as one line, and the
+ * body each step ticket was opened with is kept under its title.
  */
 function fakeForge(steps: { number: number; title: string; blockedBy: Dependency[] }[] = []) {
   const calls: string[] = [];
   const bodies: string[] = [];
+  const stepBodies = new Map<string, string>();
   const adapter: TicketingAdapter = {
     ...noBranches,
     ...noFiles,
@@ -111,6 +126,7 @@ function fakeForge(steps: { number: number; title: string; blockedBy: Dependency
     async createStep(_project, _initiative, step): Promise<number> {
       const number = 11 + steps.length;
       steps.push({ number, title: step.title, blockedBy: [] });
+      stepBodies.set(step.title, step.body);
       calls.push(`open #${number} "${step.title}"`);
       return number;
     },
@@ -158,7 +174,7 @@ function fakeForge(steps: { number: number; title: string; blockedBy: Dependency
       throw new Error("no test here closes a ticket");
     },
   };
-  return { adapter, calls, bodies, steps };
+  return { adapter, calls, bodies, stepBodies, steps };
 }
 
 /** What `openStepTickets` needs, reading `list` as the initiative's list of pieces. */
@@ -182,7 +198,7 @@ describe("openStepTickets, the step tickets of an approved list of pieces", () =
   it("makes each step wait only for the steps its piece directly needs (R10)", async () => {
     const forge = fakeForge();
 
-    const failure = await openStepTickets(depsFor(forge.adapter, R10_LIST), RUN, PROJECT);
+    const failure = await openStepTickets(depsFor(forge.adapter, R10_LIST), RUN, PROJECT, []);
 
     expect(failure).toBeUndefined();
     expect(forge.calls.filter((call) => call.startsWith("open "))).toEqual([
@@ -207,7 +223,7 @@ describe("openStepTickets, the step tickets of an approved list of pieces", () =
     );
     const forge = fakeForge();
 
-    const failure = await openStepTickets(depsFor(forge.adapter, list), RUN, PROJECT);
+    const failure = await openStepTickets(depsFor(forge.adapter, list), RUN, PROJECT, []);
 
     expect(failure).toBeUndefined();
     expect(forge.steps.map((step) => step.number)).toEqual([11, 12, 13, 14, 15, 16]);
@@ -232,7 +248,7 @@ describe("openStepTickets, the step tickets of an approved list of pieces", () =
     ].join("\n");
     const forge = fakeForge();
 
-    const failure = await openStepTickets(depsFor(forge.adapter, list), RUN, PROJECT);
+    const failure = await openStepTickets(depsFor(forge.adapter, list), RUN, PROJECT, []);
 
     expect(failure).toBeUndefined();
     expect(forge.steps.map((step) => step.number)).toEqual([11, 12, 13]);
@@ -242,10 +258,10 @@ describe("openStepTickets, the step tickets of an approved list of pieces", () =
   it("opens no ticket and writes no relation when run a second time on the same forge", async () => {
     const forge = fakeForge();
     const deps = depsFor(forge.adapter, R10_LIST);
-    await openStepTickets(deps, RUN, PROJECT);
+    await openStepTickets(deps, RUN, PROJECT, []);
     forge.calls.splice(0);
 
-    const failure = await openStepTickets(deps, RUN, PROJECT);
+    const failure = await openStepTickets(deps, RUN, PROJECT, []);
 
     expect(failure).toBeUndefined();
     expect(forge.calls.filter((call) => call.startsWith("open "))).toEqual([]);
@@ -263,7 +279,7 @@ describe("openStepTickets, the step tickets of an approved list of pieces", () =
       { number: 14, title: "4. Reminders", blockedBy: [local(12)] },
     ]);
 
-    const failure = await openStepTickets(depsFor(forge.adapter, R10_LIST), RUN, PROJECT);
+    const failure = await openStepTickets(depsFor(forge.adapter, R10_LIST), RUN, PROJECT, []);
 
     expect(failure).toBeUndefined();
     expect(forge.calls.filter((call) => call.startsWith("open "))).toEqual([]);
@@ -287,7 +303,7 @@ describe("openStepTickets, the step tickets of an approved list of pieces", () =
       },
     ]);
 
-    const failure = await openStepTickets(depsFor(forge.adapter, R10_LIST), RUN, PROJECT);
+    const failure = await openStepTickets(depsFor(forge.adapter, R10_LIST), RUN, PROJECT, []);
 
     expect(failure).toBeUndefined();
     expect(relations(forge.calls)).toEqual(["#14 waits for #13"]);
@@ -307,7 +323,7 @@ describe("openStepTickets, the step tickets of an approved list of pieces", () =
     ].join("\n");
     const forge = fakeForge();
 
-    const failure = await openStepTickets(depsFor(forge.adapter, list), RUN, PROJECT);
+    const failure = await openStepTickets(depsFor(forge.adapter, list), RUN, PROJECT, []);
 
     expect(forge.calls).toEqual([]);
     expect(failure).toMatch(
@@ -320,7 +336,7 @@ describe("openStepTickets, the step tickets of an approved list of pieces", () =
   it("writes the order in words on the initiative's ticket, under the list of its steps", async () => {
     const forge = fakeForge();
 
-    await openStepTickets(depsFor(forge.adapter, R10_LIST), RUN, PROJECT);
+    await openStepTickets(depsFor(forge.adapter, R10_LIST), RUN, PROJECT, []);
 
     expect(forge.bodies).toEqual([
       [
@@ -338,3 +354,104 @@ describe("openStepTickets, the step tickets of an approved list of pieces", () =
     ]);
   });
 });
+
+describe("openStepTickets names the project's people on every step ticket it opens (PRD-08)", () => {
+  it("names the one named person on each of the three step tickets (R1)", async () => {
+    const forge = fakeForge();
+
+    const failure = await openStepTickets(
+      depsFor(forge.adapter, THREE_PIECES),
+      RUN,
+      PROJECT,
+      ["fvermaut"],
+    );
+
+    expect(failure).toBeUndefined();
+    expect([...forge.stepBodies.keys()]).toEqual(["1. Tasks", "2. Due dates", "3. Reminders"]);
+    for (const [title, firstLine] of [
+      ["1. Tasks", "a task can be written down"],
+      ["2. Due dates", "a task carries a due date"],
+      ["3. Reminders", "the owner is reminded before the due date"],
+    ] as const) {
+      const body = forge.stepBodies.get(title);
+      expect(body?.startsWith(`${firstLine}\n`)).toBe(true);
+      expect(body).toContain("Part of #7.");
+      expect(body).toContain("@fvermaut");
+    }
+  });
+
+  it("names every named person on every step ticket when there are two (R1)", async () => {
+    const forge = fakeForge();
+
+    const failure = await openStepTickets(
+      depsFor(forge.adapter, THREE_PIECES),
+      RUN,
+      PROJECT,
+      ["alice", "bob"],
+    );
+
+    expect(failure).toBeUndefined();
+    expect(forge.stepBodies.size).toBe(3);
+    for (const body of forge.stepBodies.values()) {
+      expect(body).toContain("@alice");
+      expect(body).toContain("@bob");
+    }
+  });
+
+  it("opens nothing and edits no step ticket's body on a re-run, so nobody is named twice (R1)", async () => {
+    const forge = fakeForge([
+      { number: 11, title: "1. Tasks", blockedBy: [] },
+      { number: 12, title: "2. Due dates", blockedBy: [] },
+      { number: 13, title: "3. Reminders", blockedBy: [] },
+    ]);
+
+    const failure = await openStepTickets(
+      depsFor(forge.adapter, THREE_PIECES),
+      RUN,
+      PROJECT,
+      ["fvermaut"],
+    );
+
+    expect(failure).toBeUndefined();
+    expect(forge.calls.filter((call) => call.startsWith("open "))).toEqual([]);
+    expect(forge.calls.filter((call) => call.startsWith("body of "))).toEqual(["body of #7"]);
+  });
+
+  it("opens the step tickets with no name and no @ in them when nobody is named (R5)", async () => {
+    const forge = fakeForge();
+
+    const failure = await openStepTickets(depsFor(forge.adapter, THREE_PIECES), RUN, PROJECT, []);
+
+    expect(failure).toBeUndefined();
+    expect(Object.fromEntries(forge.stepBodies)).toEqual({
+      "1. Tasks":
+        "a task can be written down\n\nPart of #7. The full list is in `doc/plans/breakdowns/ticket-07.md`.",
+      "2. Due dates":
+        "a task carries a due date\n\nPart of #7. The full list is in `doc/plans/breakdowns/ticket-07.md`.",
+      "3. Reminders":
+        "the owner is reminded before the due date\n\nPart of #7. The full list is in `doc/plans/breakdowns/ticket-07.md`.",
+    });
+    for (const body of forge.stepBodies.values()) expect(body).not.toContain("@");
+  });
+
+  it("leaves piece 1's step ticket free to be taken, with nobody assigned and nothing held (R4)", async () => {
+    const forge = fakeForge();
+    await openStepTickets(depsFor(forge.adapter, THREE_PIECES), RUN, PROJECT, ["fvermaut"]);
+
+    const steps = await forge.adapter.listSteps(PROJECT, INITIATIVE);
+
+    expect(nextStep(steps)?.number).toBe(11);
+    // Every write the first run made is one of these, so none of them
+    // assigned a step ticket to anyone or held it.
+    const otherWrites = forge.calls.filter(
+      (call) =>
+        !/^open #\d+ "/.test(call) &&
+        !/^#\d+ waits for #\d+$/.test(call) &&
+        !/^label timone:(held|map) made$/.test(call) &&
+        call !== "body of #7" &&
+        call !== "label timone:map on #7",
+    );
+    expect(otherWrites).toEqual([]);
+  });
+});
+
