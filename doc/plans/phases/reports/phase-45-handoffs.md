@@ -265,3 +265,86 @@ The whole suite was not run, at the request of the person running the build. The
 - The sentences a prompt or a test can match on: a good list prints only the words. A missing line prints `The list of pieces has no **Order:** line. Add this line under the list: **Order:** <words>`. A wrong line prints `The **Order:** line says "…", but the Needs: lines say "…". Change the line to: **Order:** <words>`. So in both cases the text after the last `**Order:** ` is the line to write. An unclear `Needs:` line starts `The list of pieces does not say clearly what each piece needs: `. An unreadable file starts `The list of pieces cannot be read: `. No list: `Ticket <n> of <project> has no list of pieces: …`.
 - The command reads the **working tree** of the project's checkout (`fromWorkingTree`), so it checks what the session has just written, committed or not.
 - The line is found anywhere in the file, the first one only. A list with two `Order:` lines is judged by the first.
+
+## 45d — The session that writes a list writes the `Needs:` lines, the order, and runs the check
+
+**Built.** The breakdown prompt now shows a list with a `Needs:` line under each piece and an `**Order:**` line under the list. It tells the session to write a `Needs:` line for every piece. It states the preference for fewer pieces waiting for each other and fewer pieces changing the same files, and says that each piece working end to end on its own comes first. Before the commit, the session runs `node dist/cli.js breakdown <project> <ticket>` (both values filled in from the run), writes the `**Order:**` line with what it prints, and fixes the list until the command ends without a problem. The closing comment says the order in the same words as the `**Order:**` line. "Order them so each can be built…" and "Prefer few real pieces to many small ones…" are unchanged.
+
+**Files touched.**
+
+- `src/daemon/prompts.ts` — inside `breakdownPrompt` only: one new paragraph after "Order them…", three new lines in the shape block, one new paragraph after the `Status:` paragraph, and one sentence added to the closing-comment paragraph. The JSDoc above the function is unchanged.
+- `src/daemon/prompts.test.ts` — imports `checkOrderLine`; one new `describe` ("the breakdown prompt's list of pieces (45d)") with 4 cases. No existing test changed (the diff of this file removes no line).
+- `doc/plans/phases/reports/phase-45-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **How the session is not stuck by a missing `**Order:**` line.** The command refuses a list with no `**Order:**` line, and 45c's sentence for that case ends with the exact line to add. So the prompt says: if the line is missing or says another order, the command prints the line to write; write it and run the command again. The shown shape also already carries an `**Order:**` line, so a session that copies the shape starts with one.
+- **The check paragraph sits after the `Status:` paragraph and starts "Before you commit it".** The commit instruction comes earlier in the prompt (it introduces the shape), so the words "before you commit it" put the check in the right place in time.
+- **The command is written as `node dist/cli.js breakdown …`**, the same form the skills and `process.md` use for `node dist/cli.js number` (phase 44). No prompt in `prompts.ts` named a Timone command before this slice, so there was no form in that file to copy.
+- **Case (1) checks the `Needs:` lines as well as the order.** A list without `Needs:` lines also reads "1, then 2." (each piece needs the one above), so `checkOrderLine` alone would pass with the `Needs:` lines missing. The test also reads `needsLine` from `parseBreakdown` and expects `["nothing.", "piece 1."]`. Placeholders `<…>` are all filled with the word "something".
+- **An extra case for the closing comment.** The plan asks for it, but no numbered case covers it, and strict TDD does not allow untested text.
+- **The `Needs:` sentence is pinned in case (3)**, since case (3) is the test of that paragraph.
+- **One rewording after green.** The first wording of the `Needs:` sentence read "which pieces above it it needs". I changed the test literal first (red: `expected 'Break the work for ticket #6 on **scr…' to contain 'Under each piece, write a \`Needs:\` li…'`), then the prompt (green).
+
+**Validation evidence.**
+
+Each case was written alone and run with `npx vitest run src/daemon/prompts.test.ts -t "<name>"`.
+
+1. *"shows a list the order check accepts, once its placeholders are filled in"* — red: `expected { kind: 'problem', …(1) } to deeply equal { kind: 'ok', words: '1, then 2.' }`, with the problem `The list of pieces has no **Order:** line. Add this line under the list: **Order:** 1, then 2.` Green after the two `Needs:` lines and the `**Order:**` line went into the shape. Mutation: with the two `Needs:` lines removed from the prompt, it failed with `expected [ undefined, undefined ] to deeply equal [ 'nothing.', 'piece 1.' ]`. Reverted, green.
+2. *"names the check to run with this project's name and this ticket's number"* — red: `expected 'Break the work for ticket #6 on **scr…' to contain 'run \`node dist/cli.js breakdown scrat…'`. Green after the check paragraph. Expected literals: ``run `node dist/cli.js breakdown scratch-app 6` `` and ``Write the `**Order:**` line with exactly what it prints.``
+3. *"prefers fewer pieces waiting for each other, but puts each piece working end to end first"* — red: `expected 'Break the work for ticket #6 on **scr…' to contain 'When two ways of cutting the work are…'`, then (after pinning the `Needs:` sentence too, still red) `… to contain 'Under each piece, its \`Needs:\` line s…'`. Green after the new paragraph. Red and green again for the rewording noted above.
+   Extra: *"tells the closing comment to say the order in the words of the Order: line"* — red: `expected 'Break the work for ticket #6 on **scr…' to contain 'Say the order of the pieces in the sa…'`. Green after the sentence in the closing-comment paragraph.
+4. Existing breakdown-prompt tests — unchanged and passing: `npx vitest run src/daemon/prompts.test.ts -t "breakdown"` gives `17 passed | 196 skipped` (the per-stage "breakdown" rows, "tells the breakdown's stamp to carry the count of pieces", "writes a stamp the breakdown parser actually accepts", and the new ones). `git diff src/daemon/prompts.test.ts` removes no line.
+
+Validation commands:
+
+```
+$ npx vitest run src/daemon/prompts.test.ts src/daemon/breakdown.test.ts
+ ✓ src/daemon/breakdown.test.ts (37 tests)
+ ✓ src/daemon/prompts.test.ts (213 tests)
+ Test Files  2 passed (2)
+      Tests  250 passed (250)
+
+$ npm run type-check
+> tsc --noEmit
+(no output, exit 0)
+
+$ git diff -U0 src/daemon/prompts.ts | grep "^@@"
+@@ -1088,0 +1089,6 @@ function breakdownPrompt(context: PromptContext): string {
+@@ -1100,0 +1107 @@ function breakdownPrompt(context: PromptContext): string {
+@@ -1101,0 +1109,3 @@ function breakdownPrompt(context: PromptContext): string {
+@@ -1107,0 +1118,7 @@ function breakdownPrompt(context: PromptContext): string {
+@@ -1110 +1127,2 @@ function breakdownPrompt(context: PromptContext): string {
+```
+
+- [x] Cases (1)–(4) pass. Cases (1), (2), (3) and the extra case were each seen failing first. Case (4) is the existing tests, passing unchanged.
+- [x] No other prompt function in `prompts.ts` is changed: every hunk is inside `breakdownPrompt` (hunk headers above).
+
+Tests run at slice end, by file: `src/daemon/prompts.test.ts` (213 passed), `src/daemon/breakdown.test.ts` (37 passed), `src/commands/takeover.test.ts` (47 passed; the only other test file that imports `prompts.ts`, and it imports `takeoverPrompt` only). `src/runner/replay/harness.test.ts`, `src/runner/actions.test.ts` and `src/daemon/session.test.ts` do not import `prompts.ts`, so they were not run. The whole suite was not run, at the request of the person running the build. The orchestrator runs it once at the end of the phase.
+
+**What 45e must know.**
+
+The shape block, exactly as the prompt now shows it:
+
+```markdown
+# Breakdown
+
+**Status:** Awaiting approval
+
+1. **<what the piece is called>** — <one line of what it delivers>
+   - Needs: nothing.
+2. **<the next piece>** — <one line of what it delivers>
+   - Needs: piece 1.
+
+**Order:** 1, then 2.
+```
+
+The `Needs:` and R11 paragraph, exactly (it follows "Order them so each can be built and merged on its own, needing only what is above it. Prefer few real pieces to many small ones: every piece costs a review."):
+
+> Under each piece, write a `Needs:` line. It gives the numbers of the pieces above it that this piece needs, or says `nothing`. When two ways of cutting the work are equally good, choose the one where fewer pieces wait for each other and fewer pieces change the same files. But each piece must still work end to end on its own, and that comes first.
+
+The check paragraph (with `<project>` and `<ticket>` filled in by the prompt):
+
+> **Before you commit it, run `node dist/cli.js breakdown <project> <ticket>`.** It prints the order of the pieces, or says what is wrong with the list. Write the `**Order:**` line with exactly what it prints. If the line is missing or says another order, the command prints the line to write: write that line, and run the command again. Fix the list until the command prints the order and ends without a problem.
+
+The sentence added to the closing comment: "Say the order of the pieces in the same words as the `**Order:**` line."

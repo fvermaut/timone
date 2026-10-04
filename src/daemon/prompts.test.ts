@@ -7,6 +7,7 @@ import {
   type TicketThread,
 } from "../adapters/ticketing.js";
 import {
+  checkOrderLine,
   parseBreakdown,
   renderBreakdown,
   type ParsedBreakdown,
@@ -675,6 +676,67 @@ describe("the approval-recording prompt", () => {
     );
     expect(stamped).toContain("Approved by fvermaut 2026-08-15 — 3 pieces");
     expect(prompt).toContain("`Status:`");
+  });
+});
+
+/**
+ * The list of pieces is read by machine: its `Needs:` lines give the order
+ * the step tickets wait in, and `timone breakdown` checks the `**Order:**`
+ * line against them (45c). The prompt is what makes a session write that
+ * list, so its example is put through the same check, as the stamp is above.
+ */
+describe("the breakdown prompt's list of pieces (45d)", () => {
+  const breakdownContext: PromptContext = {
+    ...context,
+    branch: "timone/6-typing-in-the-box",
+  };
+
+  it("shows a list the order check accepts, once its placeholders are filled in", () => {
+    const prompt = stagePrompt("breakdown", breakdownContext);
+    const example = /```markdown\n([\s\S]*?)\n```/.exec(prompt)?.[1];
+    expect(example).toBeDefined();
+
+    const filled = (example ?? "").replace(/<[^>]+>/g, "something");
+
+    expect(checkOrderLine(filled)).toEqual({ kind: "ok", words: "1, then 2." });
+    // And the order comes from the `Needs:` lines the example shows, not from
+    // the default a list without them gets.
+    const parsed = parseBreakdown(filled) as ParsedBreakdown;
+    expect(parsed.chunks.map((chunk) => chunk.needsLine)).toEqual([
+      "nothing.",
+      "piece 1.",
+    ]);
+  });
+
+  it("names the check to run with this project's name and this ticket's number", () => {
+    const prompt = stagePrompt("breakdown", breakdownContext).replace(/\s+/g, " ");
+
+    expect(prompt).toContain("run `node dist/cli.js breakdown scratch-app 6`");
+    expect(prompt).toContain("Write the `**Order:**` line with exactly what it prints.");
+  });
+
+  it("prefers fewer pieces waiting for each other, but puts each piece working end to end first", () => {
+    const prompt = stagePrompt("breakdown", breakdownContext).replace(/\s+/g, " ");
+
+    expect(prompt).toContain(
+      "Under each piece, write a `Needs:` line. It gives the numbers of the " +
+        "pieces above it that this piece needs, or says `nothing`.",
+    );
+    expect(prompt).toContain(
+      "When two ways of cutting the work are equally good, choose the one where " +
+        "fewer pieces wait for each other and fewer pieces change the same files.",
+    );
+    expect(prompt).toContain(
+      "But each piece must still work end to end on its own, and that comes first.",
+    );
+  });
+
+  it("tells the closing comment to say the order in the words of the Order: line", () => {
+    const prompt = stagePrompt("breakdown", breakdownContext).replace(/\s+/g, " ");
+
+    expect(prompt).toContain(
+      "Say the order of the pieces in the same words as the `**Order:**` line.",
+    );
   });
 });
 
