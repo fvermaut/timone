@@ -36,3 +36,10 @@
 **Agreed:** PRD-08.R6: on a live run on scratch-app, fvermaut is notified of a ticket the machine opened and of a later comment on it.
 **Did instead:** Not run during the build. It goes to the pull request as an unticked item, and R6 stays `draft`.
 **Why:** Only fvermaut can read fvermaut's own GitHub notifications. The runner's instructions for this step say not to try it and to write it down as not run.
+
+## 2026-10-04 — timone#210, verification
+
+**Kind:** check not run
+**Agreed:** The check runs every criterion in scope. PRD-05.R18, the replay of the recorded failures against the real model, is always in scope, and PRD-05.R7's runner clause uses the same replay.
+**Did instead:** Both are BLOCKED. The newest recorded replay is older than this build, and no replay on this build was run. `npm run --silent replay -- --dry` ran (19 of 19 passed, $0.00), but it uses a scripted runner and is not evidence. See [phase-46-verification.md](phase-46-verification.md), *Regression*.
+**Why:** The replay calls the real model and needs a terminal logged in to Claude. This container has no model login.

@@ -11,7 +11,7 @@
 ## R1 — A ticket opened for a piece names the project's people
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that runs the opening of step tickets on a fake tracker for a project whose people are `alice` and `bob`, and fails if any ticket it opens has a body without `@alice` or without `@bob`
 - **Depends-on:** `src/daemon/chunk-zero.ts, src/adapters/, src/manifest.ts`
@@ -30,7 +30,7 @@
 ## R2 — An issue the runner files on Timone names the people of the `timone` project
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that calls the runner's action that files a Timone issue, with a body that names nobody, and fails if the body sent to the tracker lacks the people of the `timone` project
 - **Depends-on:** `src/runner/actions.ts, src/adapters/, src/manifest.ts`
@@ -53,10 +53,12 @@
 - **Criteria:** the instructions in `.claude/skills/timone-wayfind/SKILL.md` tell the session to name the people of the project in the body of every ticket it opens: the map ticket and each decision ticket. They say where the session finds those people (`timone.yaml`, `instructors` or else `operator`). A session that opens tickets by its own `gh` command cannot be checked by code each time, so this requirement is about the instructions, and it is a SHOULD.
 - **Verification hint:** read the skill. The places that create the map and the decision tickets each say to name the project's people.
 
+> ✏ 2026-10-04 — partial evidence: [phase-46-verification.md](../../plans/phases/reports/phase-46-verification.md) found the instructions say all of this, with the probe [`prd-08.r3.mjs`](../../plans/phases/probes/prd-08.r3.mjs), which was seen to fail first. It stays `draft`: its words say "every ticket it opens", a claim about all cases, and this block names no `Falsified-by` check. That probe could be named here.
+
 ## R4 — Nobody is assigned to a ticket because of this
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that records every call each path of R1 and R2 makes to the tracker, and fails if any of them sets an assignee
 - **Depends-on:** `src/daemon/chunk-zero.ts, src/runner/actions.ts, src/adapters/`
@@ -73,7 +75,7 @@
 ## R5 — When the file names nobody, the ticket still opens
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a project for which `namedPeople` returns an empty list
