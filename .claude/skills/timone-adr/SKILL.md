@@ -36,7 +36,7 @@ Before writing anything, test the decision against all three parts:
 ## Numbering
 
 - ADRs live at `projects/<name>/doc/adr/NNNN-<slug>.md`.
-- List the existing files, take the highest `NNNN`, and use the next number, zero-padded to four digits (`0001`, `0002`, …). Empty directory → `0001`.
+- ~~List the existing files, take the highest `NNNN`, and use the next number, zero-padded to four digits (`0001`, `0002`, …). Empty directory → `0001`.~~ ✏ 2026-10-04 ([ADR-0062](../../../doc/adr/0062-a-numbered-file-takes-its-number-by-reserving-it-on-the-projects-remote.md)) — Run `node dist/cli.js number <name> adr`. It reserves the next ADR number on the project's remote and prints it, zero-padded to four digits, so no other session can take the same number. On a project with no ADR yet it prints `0001`. **If the command fails, stop and say so**, with the command's own sentence. Never count the files in the folder instead.
 - Numbers are **never reused**, even if an ADR was deleted or superseded. Never renumber existing ADRs.
 
 ## Format
@@ -73,7 +73,7 @@ accepted, not only the benefits.>
 
 When a new decision replaces an old one:
 
-1. Create a **new** ADR (next number) recording the new decision. Its Context must reference the old ADR and say what changed.
+1. Create a **new** ADR ~~(next number)~~ (a number from the command, see Numbering; ✏ 2026-10-04 ([ADR-0062](../../../doc/adr/0062-a-numbered-file-takes-its-number-by-reserving-it-on-the-projects-remote.md))) recording the new decision. Its Context must reference the old ADR and say what changed.
 2. Flip the old ADR's status line to `superseded by [ADR-NNNN](NNNN-<slug>.md)` — a cross-link to the new one.
 3. Change **nothing else** in the old ADR. History is never edited: Context, Decision, and Consequences stay exactly as written, even where now wrong.
 

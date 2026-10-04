@@ -159,7 +159,7 @@ For each stack choice from the intake checklist, apply the **same three-part sig
 
 Not every stack tag warrants an ADR (e.g. "uses npm" rarely does); a database choice, an auth strategy, a hosting/runtime choice, or a framework pick usually does. Judge each one individually — don't write an ADR per `--stack` entry mechanically.
 
-For each choice that passes the gate, write `projects/<name>/doc/adr/NNNN-<slug>.md`, numbered from `0001` (this is a fresh project — the directory is empty), in the **exact same format `timone-adr` uses**:
+For each choice that passes the gate, write `projects/<name>/doc/adr/NNNN-<slug>.md`, ~~numbered from `0001` (this is a fresh project — the directory is empty),~~ ✏ 2026-10-04 ([ADR-0062](../../../doc/adr/0062-a-numbered-file-takes-its-number-by-reserving-it-on-the-projects-remote.md)) — each founding ADR takes its number from `node dist/cli.js number <name> adr`, which reserves it on the project's remote and prints it. On a fresh project the first is `0001`. **If the command fails, stop and say so**; never count the files instead. Write each one in the **exact same format `timone-adr` uses**:
 
 ```markdown
 # ADR-NNNN: <decision stated as a full sentence>
@@ -186,7 +186,7 @@ accepted, not only the benefits.>
 
 Rules, identical to `timone-adr`:
 
-- One decision per file. Number sequentially, zero-padded to four digits, never reused.
+- One decision per file. ~~Number sequentially, zero-padded to four digits, never reused.~~ ✏ 2026-10-04 ([ADR-0062](../../../doc/adr/0062-a-numbered-file-takes-its-number-by-reserving-it-on-the-projects-remote.md)) — Each number comes from `node dist/cli.js number <name> adr`, as above. If the command fails, stop and say so. Numbers are never reused.
 - Status is `accepted` (the choice was just made during intake).
 - Keep each ADR short — a record, not a design document.
 - If a stack choice fails the significance gate, say so in one line ("No ADR for `<choice>`: not hard to reverse, doesn't pass the gate") and move on — don't write a "minor decision" note as a substitute.

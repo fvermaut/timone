@@ -77,7 +77,7 @@ have to do anything to make it happen.>
 
 **Doc-record path** — everything else (free-form request, or an issue ref against a non-GitHub remote):
 
-1. Allocate the number: list `projects/<name>/doc/triage/`, take the highest `NNN`, use the next, zero-padded to three digits; missing directory → create it, start at `001`. Numbers are never reused.
+1. Allocate the number: ~~list `projects/<name>/doc/triage/`, take the highest `NNN`, use the next, zero-padded to three digits; missing directory → create it, start at `001`.~~ ✏ 2026-10-04 ([ADR-0062](../../../doc/adr/0062-a-numbered-file-takes-its-number-by-reserving-it-on-the-projects-remote.md)) — run `node dist/cli.js number <name> triage`. It reserves the next triage number on the project's remote and prints it, zero-padded to three digits, so no other session can take the same number. On a project with no triage record yet it prints `001`. If `projects/<name>/doc/triage/` is missing, create it. **If the command fails, stop and say so**, with the command's own sentence. Never count the files in the folder instead. Numbers are never reused.
 2. Write `projects/<name>/doc/triage/NNN-<slug>.md`:
 
 ```markdown

@@ -80,3 +80,57 @@ describe("where the text a session follows says STATUS.md goes", () => {
     },
   );
 });
+
+/**
+ * The paragraphs of a text: blocks separated by a blank line. A list with
+ * no blank line between its items is one paragraph.
+ */
+function paragraphs(text: string): string[] {
+  return text.split(/\n[ \t]*\n/);
+}
+
+describe("how the text a session follows says a numbered file gets its number (44d)", () => {
+  const NUMBERING_SKILLS = [
+    [".claude/skills/timone-plan/SKILL.md", "phase"],
+    [".claude/skills/timone-adr/SKILL.md", "adr"],
+    [".claude/skills/timone-onboard/SKILL.md", "adr"],
+    [".claude/skills/timone-triage/SKILL.md", "triage"],
+    [".claude/skills/timone-prd/SKILL.md", "prd"],
+  ] as const;
+
+  it.each(NUMBERING_SKILLS)(
+    "%s takes its number from the command, kind %s",
+    (file, kind) => {
+      const live = unstruck(read(file));
+      expect(live).toMatch(
+        new RegExp(`node dist/cli\\.js number \\S+ ${kind}\\b`),
+      );
+    },
+  );
+
+  it("process.md names the command", () => {
+    expect(unstruck(read("process.md"))).toContain("node dist/cli.js number");
+  });
+
+  it.each(SESSION_TEXT)(
+    "%s never tells a session to find a number from a folder",
+    (file) => {
+      expect(unstruck(read(file))).not.toMatch(
+        /highest existing|take the highest|next available `?NN|use the next, zero-padded|Number sequentially/i,
+      );
+    },
+  );
+
+  it.each(NUMBERING_SKILLS)(
+    "%s says, beside the command, that a failing command stops the session",
+    (file) => {
+      const beside = paragraphs(unstruck(read(file))).filter((p) =>
+        p.includes("dist/cli.js number"),
+      );
+      expect(beside.length).toBeGreaterThan(0);
+      expect(beside.some((p) => /fails?/i.test(p) && /\bstop/i.test(p))).toBe(
+        true,
+      );
+    },
+  );
+});

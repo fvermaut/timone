@@ -255,3 +255,68 @@ Tests run at the end:
 
 
 **Gate note (orchestrator).** Checked again before the commit: `src/daemon/prompts.test.ts`, 209 tests passed; the grep for "newest phase file" outside tests gave `exit: 1`; type check exit 0.
+
+## 44d — every skill that numbers a file takes its number from the command
+
+**Built.** Five skills now tell a session to get a number by running `node dist/cli.js number <name> <kind>`:
+- `timone-plan` uses `phase`.
+- `timone-adr` and `timone-onboard` use `adr`.
+- `timone-triage` uses `triage`.
+- `timone-prd` uses `prd`.
+
+Each skill says three things: the command reserves the number on the project's remote and prints it; if the command fails, the session stops and says so; it never counts the files in the folder instead. "Never reused", "never renumber", "create the folder when it is missing" and "PRD numbering is independent of phase numbering" are all kept. Each old sentence is struck (`~~…~~`), not deleted. After it comes `✏ 2026-10-04 ([ADR-0062](…))` and then the new text. `process.md` has a new marked paragraph after the artifact tree that says the same, for all four kinds.
+
+**Files touched.**
+
+- `.claude/skills/timone-plan/SKILL.md`: § Numbering is rewritten as above. In the "what to read" list, "the next phase number" for `doc/plans/phases/` is struck and marked.
+- `.claude/skills/timone-adr/SKILL.md`: § Numbering is rewritten. In § Superseding step 1, "(next number)" is struck and becomes "(a number from the command, see Numbering; ✏ …)".
+- `.claude/skills/timone-triage/SKILL.md`: doc-record path, step 1.
+- `.claude/skills/timone-prd/SKILL.md`: step 2, "Determine the PRD number".
+- `.claude/skills/timone-onboard/SKILL.md`: the founding-ADRs paragraph (the old "numbered from `0001`" is struck; the new text says that on a fresh project the first is `0001`) and the "One decision per file" rule.
+- `process.md`: one new paragraph after the artifact tree, which links ADR-0062.
+- `src/process-text.test.ts`: a new helper `paragraphs()` and a new describe block, "how the text a session follows says a numbered file gets its number (44d)". The test reuses `read`, `unstruck` and `SESSION_TEXT`. No existing line changed.
+
+**Decisions taken inside the slice.**
+- **Case 1** checks `node dist/cli.js number \S+ <kind>\b`, so the kind must follow the command. In `process.md` it checks only that the command is named.
+- **Case 3.** A "paragraph" is a block of text between blank lines, so a list with no blank lines between its items counts as one paragraph. The test needs at least one paragraph that names the command and matches both `/fails?/i` and `/\bstop/i`. I added `/\bstop/` to the plan's `/fails?/i` so that the word "fails" on its own, used about something else, cannot pass the test.
+- **One extra strike in `timone-plan`.** The plan did not name the line that says to read the next phase number from the folder (line 38). It does not match the case-2 regex, but it does tell a session to take a number from the folder, so I struck that part and marked it.
+- **Prettier.** I formatted only the new block. The file was not prettier-clean before this slice, and I left its existing lines alone.
+
+**Validation evidence.**
+
+I wrote cases 1, 2 and 3 together, not one at a time; that was a slip. All three were red against the unchanged text:
+```
+$ npx vitest run src/process-text.test.ts
+× ... timone-plan/SKILL.md takes its number from the command, kind phase   (also adr, onboard, triage, prd)
+× ... process.md names the command
+× ... timone-adr/SKILL.md never tells a session to find a number from a folder   (also onboard, plan, prd, triage)
+× ... says, beside the command, that a failing command stops the session   (all five)
+AssertionError: expected '---\nname: timone-plan\ndescription: …' to match /node dist\/…/cli\.js number \S+ phase\b
+AssertionError: expected '# The Timone Process\n\n> The single …' to contain 'node dist/cli.js number'
+AssertionError: expected '---\nname: timone-prd\ndescription: "…' not to match /highest existing|take the highest|ne…/i
+AssertionError: expected 0 to be greater than 0
+Tests  16 failed | 25 passed (41)
+```
+After the text changes: `Tests 41 passed (41)`.
+
+To show that case 3 can fail on the fail/stop sentence and not only on a missing command, I took the "If the command fails, stop and say so" sentence out of `timone-prd`. The case went red (`1 failed | 40 passed`). I put the sentence back and it was green again (41 passed).
+
+Validation block:
+```
+$ npx vitest run src/process-text.test.ts
+Test Files  1 passed (1)      Tests  41 passed (41)
+$ grep -c "dist/cli.js number" <five skills> process.md
+timone-plan:1  timone-adr:1  timone-triage:1  timone-prd:1  timone-onboard:2  process.md:1
+$ npm run type-check      -> exit 0
+$ npm test                -> not run; the person running this build asked that no slice run the whole suite. It is left to the close of the phase.
+```
+
+Tests run at the end: `src/process-text.test.ts`, 41 passed. I searched `src` for other tests that read these texts. `src/daemon/hooks.test.ts` and `src/git.test.ts` mention `process.md` and `SKILL.md` only as file names in test data and never read their content, so no other test file checks the changed text.
+
+**What delivery must know.**
+- The text now sends every session to `node dist/cli.js number`. So a session's checkout needs a built `dist/`, and, as 44a says, a commit identity in the project checkout.
+- The GitHub path in `timone-triage` ("Write the `doc/triage/NNN` record as well…") does not say how to number that record. It relies on doc-record step 1, which now names the command. I did not add a pointer there because it was outside the plan.
+- `feedback/NNN-<slug>.md` (stage 9, retired) is still numbered in the artifact tree. It is not a kind the command knows.
+
+
+**Gate note (orchestrator).** Checked again before the commit: `src/process-text.test.ts`, 41 tests passed; `grep -c "dist/cli.js number"` gave at least 1 in each of the six files (onboard 2). The slice wrote its three cases together rather than one at a time; all three were seen red against the unchanged text, so the red-first evidence stands, but the loop was not followed case by case.
