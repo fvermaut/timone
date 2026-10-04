@@ -126,6 +126,12 @@ if (a0 === 'issue' && a1 === 'list') {
   for (const l of opts('--remove-label')) for (const x of l.split(',')) i.labels = i.labels.filter((y) => y !== x);
   if (opt('--body') !== undefined || opt('--body-file') !== undefined) i.body = bodyArg();
   if (opt('--title')) i.title = opt('--title');
+  // ✏ 2026-10-04 (phase 45 verification): GitHub's own `blocked by` relation, as the built
+  // daemon was seen to write it (`gh issue edit <n> --add-blocked-by <m>`). Before this, the
+  // flag was accepted and dropped, so no probe could read a relation back.
+  i.blockedBy ??= [];
+  for (const v of opts('--add-blocked-by')) for (const x of v.split(',')) if (!i.blockedBy.includes(n(x))) i.blockedBy.push(n(x));
+  for (const v of opts('--remove-blocked-by')) for (const x of v.split(',')) i.blockedBy = i.blockedBy.filter((y) => y !== n(x));
   save(f); logLine({ result: 'edited' });
 } else if (a0 === 'issue' && (a1 === 'close' || a1 === 'reopen')) {
   const i = repo.issues[n(argv[2])];
