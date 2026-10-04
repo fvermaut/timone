@@ -38,6 +38,10 @@
 
 **What I need from you:** run the two checks, then review and merge #212, and answer its four questions there.
 
+**1h. Piece 2 of #197 ([#200](https://github.com/fvermaut/timone/issues/200)), in Timone's own repository: the pull request opens next, from the branch `timone/200-2-status-md-and-the-requirement-register`.** When a pull request is brought level with `main`, the update no longer stops on `STATUS.md` or on a requirement register. Timone's own rule merges these two files, and nothing either side wrote is lost. Where both sides changed the same lines, both versions are kept. `STATUS.md` keeps one `**Last updated:**` line, with the later date. In a register, when both sides set one field to different values, the value on `main` stays, and the branch's value is kept as a note. Two new requirements with the same number still need a person. A branch is brought level by merging `main` into it, never by rebasing. The rule works only inside a box. On your own machine and on GitHub, git still stops on these files. Before you merge, one check is owed on the real machine: the tests cannot show that git inside the box really uses the rule. This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** review and merge the pull request for #200 when it opens. Before you merge, run the check on the real machine.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.

@@ -310,3 +310,66 @@ Tests run at the end of the slice, by file: `src/daemon/container-runtime.test.t
 - A box now installs the merge rule into `$HOME/.timone/git-merge/attributes` and exports `GIT_CONFIG_COUNT=4`: `core.hooksPath` at 0, `core.attributesFile` at 1, `merge.timone-status.driver` at 2, `merge.timone-register.driver` at 3. Anything that adds a git setting to the box must add it to the list given to `gitConfigExport` in `boxScript`, never in a second export.
 - A box that cannot install the rule stops with exit 79 and the sentence "could not set up the rule that merges STATUS.md and the requirement registers without a person. …".
 - The drivers run `node /workspace/timone/dist/cli.js`, so they need Timone's build, which the box makes before both installs.
+
+## 48d — What the process says about these two files
+
+**Built.**
+
+- `process.md`, part **Status reporting**: one new paragraph, line 114, directly after the paragraph marked `✏ Revised 2026-10-03`. It starts `✏ 2026-10-04 ([ADR-0064](…))`. It says that in a box, when a run's branch is brought level with the default branch, `STATUS.md` and `doc/specs/prd/*.criteria.md` are merged by `node dist/cli.js merge-file`, switched on through git's environment, with nothing written into the project. It says the rule keeps what both sides wrote, keeps one `**Last updated:**` line with the later date, keeps the default branch's value of a one-value field and writes the branch's value as a dated note, and leaves two requirements with the same number to a person. It says a branch is brought level by merging the default branch into it, never by rebasing, and why. It says the rule works only in a box. It ends with a link to PRD-07.R8.
+- `STATUS.md`: item **1h**, after item 1g, with its `**What I need from you:**` paragraph. It names Timone's own repository, the branch `timone/200-2-status-md-and-the-requirement-register`, ticket #200 as piece 2 of #197, and says the pull request opens next. The `**Last updated:**` line already read 2026-10-04 and was not changed.
+
+**Files touched.**
+
+- `process.md` — one paragraph added (2 lines: the paragraph and a blank line). No line changed or removed.
+- `STATUS.md` — one item added (4 lines). No line changed or removed.
+- `doc/plans/phases/reports/phase-48-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **The paragraph also says what the rule does not cover.** It names the same-number case and that the rule works only in a box, as ADR-0064's Consequences say. Without these two sentences the paragraph would claim more than was built.
+- **The paragraph links back to the cost named in the 2026-10-03 paragraph.** That paragraph says two pull requests that both change `STATUS.md` will conflict. The new paragraph says the update no longer stops on `STATUS.md`. It does not say GitHub stops showing a conflict, because it does not: GitHub shows one until the box brings the branch level.
+- **The paragraph ends with `Requirement: [PRD-07.R8](…)`**, as the first paragraph of the part ends with its requirement. The anchor `#r8--files-almost-every-ticket-changes-never-stop-an-update` matches the heading `## R8 — Files almost every ticket changes never stop an update`.
+- **The STATUS.md item calls the default branch `main`**, as the other items of the file do.
+- **PLAN PROBLEM (small) — `git diff --stat main... -- process.md` shows nothing before the commit.** `main...` compares the last commit with the merge base, so it does not see the working tree. Before the commit, `git diff --stat main -- process.md` shows the change. After this slice is committed, the plan's command shows the same.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+```
+$ grep -n 'ADR-0064' process.md; echo "exit: $?"
+114:✏ 2026-10-04 ([ADR-0064](doc/adr/0064-status-md-and-the-registers-are-merged-by-timones-own-rule-in-the-box.md)). **In a box, …
+exit: 0
+
+(Status reporting starts at line 110; Handover starts at line 118. Line 114 is inside Status reporting.)
+
+$ git diff --stat main... -- process.md
+(no output: the change is not committed yet; see PLAN PROBLEM above)
+
+$ git diff --stat main -- process.md
+ process.md | 2 ++
+ 1 file changed, 2 insertions(+)
+
+$ git diff main -- process.md | grep '^-[^-]' ; echo "exit: $?"
+exit: 1
+
+$ git diff --stat main -- STATUS.md
+ STATUS.md | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+$ npx vitest run src/process-text.test.ts
+ ✓ src/process-text.test.ts (41 tests)
+ Test Files  1 passed (1)
+      Tests  41 passed (41)
+```
+
+Result per assertion:
+
+1. The paragraph names ADR-0064 and says the branch is merged, not rebased: **met** (line 114, "**A branch is brought level by merging the default branch into it, never by rebasing.**").
+2. No line of `process.md` was removed: **met** (2 lines added, `grep '^-[^-]'` finds nothing, exit 1).
+3. The `STATUS.md` item names which repository it belongs to (Timone), the branch, and the pull request: **met** (item 1h: "in Timone's own repository", the branch `timone/200-2-status-md-and-the-requirement-register`, "the pull request opens next", for #200).
+4. The full suite: **not run in this slice**, as the runner said. It runs once at the close of the phase. Only `src/process-text.test.ts` was run.
+
+**What delivery must know.**
+
+- STATUS.md item 1h says the pull request "opens next". When it is open, the item should name its number and link, the way items 1c to 1g do, and the reviews' findings.
+- Item 1h and the pull request owe fvermaut one check on the real machine: that git inside a real box calls the rule when a branch is brought level. The tests show the settings reach git in a shell and that real git uses the driver, but not that the box's own git does.
+- Item 1g already says #212 is best merged after the pull request for #200.
