@@ -26,9 +26,9 @@
 
 **What I need from you:** run the replay, then review and merge #205, and answer its question there.
 
-**1e. Piece 6 of #197 ([#204](https://github.com/fvermaut/timone/issues/204)) is built on the branch `timone/204-6-the-list-of-pieces-shows-what-is-built`.** Each piece of a list of pieces now says which pieces it needs. The list shows its order in plain words, for example "1, then 2 and 3 together, then 4." The step tickets wait for each other exactly as the list says. A check refuses a list whose written order is wrong. The work is not checked or reviewed yet, and it has no pull request yet.
+**1e. Piece 6 of #197 ([#204](https://github.com/fvermaut/timone/issues/204)) is built and checked on the branch `timone/204-6-the-list-of-pieces-shows-what-is-built`. It has no pull request yet.** Each piece of a list of pieces now says which pieces it needs. The list shows its order in plain words, for example "1, then 2 and 3 together, then 4." The step tickets wait for each other exactly as the list says. The check found no fault: [the report](doc/plans/phases/reports/phase-45-verification.md). Three things could not be checked from the box, and only you can run them: the replay against the real model (`npm run --silent replay`, from a logged-in terminal), a watched run of a list of pieces on scratch-app, and one manual check (does the next list of pieces avoid needless waits?). The script is in the report.
 
-**What I need from you:** nothing yet. The pull request comes when the check and the reviews are done.
+**What I need from you:** run the replay on this branch when you can. The pull request comes after the reviews.
 
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
