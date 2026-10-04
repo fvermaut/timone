@@ -1,4 +1,4 @@
-// Probe for PRD-07.R8 — Files almost every ticket changes never stop an update. CLAUSE 1 ONLY.
+// Probe for PRD-07.R8 — Files almost every ticket changes never stop an update.
 // Stage 7 artifact, authored 2026-10-04 (phase 44 verification) from the register alone.
 //
 // Register clause 1 (verbatim):
@@ -6,9 +6,8 @@
 //   WHEN each writes a phase file, an ADR or a triage record
 //   THEN no two of them take the same number
 //
-// Clauses 2 and 3 (STATUS.md and the requirement registers after a merge) are not built yet;
-// phase 44 claims clause 1 only. They print as BLOCKED so the gap stays a visible number, and a
-// later pass that is owed them writes them here.
+// Clauses 2 and 3 (STATUS.md and the requirement registers after a merge) were added by phase 48's
+// verification, 2026-10-04; see their own comment below.
 //
 // What is observed, from outside: the built CLI's `number <project> <kind>` command, which the
 // completion report names as the way a session takes a number, run from SEPARATE clones of one
@@ -22,9 +21,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
-import { clause, blocked, assert, finish, CLI, REPO_ROOT } from './_rig.mjs';
+import { clause, assert, finish, CLI, REPO_ROOT } from './_rig.mjs';
 import { oldBuild } from './_old-build.mjs';
-import { stepSession } from './_steps.mjs';
+import { stepSession, boxScript, boxReplay, BR } from './_steps.mjs';
 
 // main just before phase 44 (the merge-base of timone/199): sessions numbered files by listing
 // the folder, and the run's guard knew no reservation.
@@ -218,8 +217,185 @@ await clause('PRD-07.R8 clause 1 (d)', 'the instructions a session follows to wr
   correct: async () => { const w = instructions(atHead); assert(w.length === 0, w.join(' | ')); },
 });
 
-blocked('PRD-07.R8 clause 2', 'two open pull requests that both changed `STATUS.md`: the update completes without a person', 'not built yet — phase 44 claims clause 1 only (piece 2 of the breakdown for #197)');
-blocked('PRD-07.R8 clause 3', 'two open pull requests that both changed the same requirement register: the update completes without a person', 'not built yet — phase 44 claims clause 1 only (piece 2 of the breakdown for #197)');
+// ✏ 2026-10-04 (phase 48 verification): clauses 2 and 3, written from the register alone.
+//
+// Register clause 2 (verbatim):
+//   GIVEN two open pull requests of one project that both changed `STATUS.md`
+//   WHEN one merges and the update runs on the other
+//   THEN the update completes without a person resolving `STATUS.md`, and `STATUS.md` on the
+//   branch keeps what both said
+// Register clause 3 (verbatim):
+//   GIVEN two open pull requests of one project that both changed the same requirement register
+//   WHEN one merges and the update runs on the other
+//   THEN the update completes without a person resolving the register, and no line either one
+//   wrote is lost
+//
+// What is observed, from outside: the script the BUILT daemon hands docker for a step, run for
+// real outside a container (_steps.mjs boxReplay), with a stand-in agent that brings its work
+// branch level with the default branch by `git merge` — the way an update brings a branch level
+// is not built yet (PRD-07.R7), and a merge is the plain git way. Two pull requests start from
+// this repository's own STATUS.md and PRD-07 register as they stood before phase 48, and change
+// them the way runs do: both move the `**Last updated:**` date, both add an item at the same
+// place, both rewrite the same line; in the register both write a dated note under the same
+// requirement, both set its one `Status`, both rewrite the same hint line, and both add a new
+// requirement at the end. Pull request A lands on the default branch first, (a) squashed, or
+// (b) as a merge commit with the dates the other way round; pull request B is then merged level.
+// Break leg: the same, with the box script and Timone checkout of the build before phase 48.
+const BEFORE_PHASE_48 = 'bd05360f1aa5946988160b92668ac21e8c842c06';
+const REG = 'doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.criteria.md';
+const baseOf = (f) => execFileSync('git', ['-C', REPO_ROOT, 'show', `${BEFORE_PHASE_48}:${f}`], { encoding: 'utf8' });
+const after = (text, anchor, lines) => { assert(text.includes(anchor), `fixture: anchor not found: ${anchor.slice(0, 60)}`); return text.replace(anchor, `${anchor}\n${lines.join('\n')}`); };
+const swap = (text, from, to) => { assert(text.includes(from), `fixture: line not found: ${from.slice(0, 60)}`); return text.replace(from, to); };
+// Only inside the R2 block: `- **Status:** draft` is the first one after the R2 heading.
+const inBlock = (text, k, f) => { const re = new RegExp(`(^## R${k} [\\s\\S]*?)(?=^## R|(?![\\s\\S]))`, 'm'); return text.replace(re, (b) => f(b)); };
+const blockOf = (text, k) => (text.match(new RegExp(`^## R${k} [\\s\\S]*?(?=^## R|(?![\\s\\S]))`, 'm')) || [''])[0];
+const ITEM_ANCHOR = '**What I need from you:** run the two checks, then review and merge #212, and answer its four questions there.';
+const ITEM1 = '**1. Restart the daemon** so it runs the merged code of #189.';
+const R2_NOTE = 'so the status stays `draft`.';
+const R2_HINT = '- **Verification hint:** test it on the run store with fake steps.';
+function side(who, date) {
+  let s = baseOf('STATUS.md');
+  s = swap(s, '**Last updated:** 2026-10-04.', `**Last updated:** ${date}.`);
+  s = after(s, ITEM_ANCHOR, ['', `**1h. ${who}: probe item written by pull request ${who}.**`, '', `**What I need from you:** ${who}-probe answer.`]);
+  s = swap(s, ITEM1, `**1. Restart the daemon (${who} rewrote this line)** so it runs the merged code of #189.`);
+  let r = baseOf(REG);
+  r = inBlock(r, 2, (b) => swap(after(b, R2_NOTE, ['', `> ✏ ${date} — ${who}: probe note under R2.`]), '- **Status:** draft', `- **Status:** ${who === 'A' ? 'verified' : 'failed'}`));
+  r = swap(r, R2_HINT, `${R2_HINT} (${who} rewrote this hint.)`);
+  r = `${r.trimEnd()}\n\n## R${who === 'A' ? 15 : 16} — ${who}: probe requirement added by pull request ${who}\n\n- **Priority:** MUST\n- **Status:** draft\n- **Verify-via:** api\n- **Criteria:** ${who}: probe criterion text.\n`;
+  return { 'STATUS.md': s, [REG]: r };
+}
+const added = (base, mine) => { const b = new Set(base.split('\n')); return mine.split('\n').filter((l) => l.trim() && !b.has(l)); };
+const BR2 = 'timone/12-probe-merge-commit';
+const BR3 = 'timone/12-probe-same-number';
+// The project remote: base on main; B's branch from base; A landed on main squashed, and on a
+// second ref as a merge commit (variant b, dates the other way round).
+function plantPRs(remote) {
+  const w = fs.mkdtempSync(path.join(base, 'prs-'));
+  const c = path.join(w, 'c');
+  G(w, 'clone', '-q', remote, c);
+  const write = (files) => { for (const [f, t] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(c, f)), { recursive: true }); fs.writeFileSync(path.join(c, f), t); } G(c, 'add', '-A'); };
+  const commit = (m) => G(c, ...ID, 'commit', '-q', '-m', m);
+  G(c, 'checkout', '-q', 'main');
+  write({ 'STATUS.md': baseOf('STATUS.md'), [REG]: baseOf(REG) }); commit('base: STATUS.md and the register as before phase 48');
+  const baseSha = G(c, 'rev-parse', 'HEAD').trim();
+  // variant (a): A dated 10-05 squashed onto main; B dated 10-06 on the run's own branch
+  G(c, 'checkout', '-q', '-b', 'pr-a'); write(side('A', '2026-10-05')); commit('A');
+  G(c, 'checkout', '-q', '-b', BR, baseSha); write(side('B', '2026-10-06')); commit('B');
+  G(c, 'checkout', '-q', 'main'); G(c, 'merge', '-q', '--squash', 'pr-a'); commit('A (#1) squashed');
+  // variant (b): A dated 10-07 landed by a merge commit; B dated 10-06
+  G(c, 'checkout', '-q', '-b', 'pr-a2', baseSha); write(side('A', '2026-10-07')); commit('A2');
+  G(c, 'checkout', '-q', '-b', 'landed-merge', baseSha); G(c, ...ID, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #1', 'pr-a2');
+  G(c, 'checkout', '-q', '-b', BR2, baseSha); write(side('B', '2026-10-06')); commit('B2');
+  // the open case (c): both pull requests add a new requirement with the SAME number, R15
+  const dup = (who) => ({ [REG]: `${baseOf(REG).trimEnd()}\n\n## R15 — ${who}: probe requirement added by pull request ${who}\n\n- **Priority:** MUST\n- **Status:** draft\n- **Verify-via:** api\n- **Criteria:** ${who}: probe criterion text.\n` });
+  G(c, 'checkout', '-q', '-b', 'landed-dup', baseSha); write(dup('A')); commit('A3 (#1)');
+  G(c, 'checkout', '-q', '-b', BR3, baseSha); write(dup('B')); commit('B3');
+  G(c, 'push', '-q', '-f', 'origin', 'main', BR, BR2, BR3, 'landed-merge', 'landed-dup');
+  return { a: side('A', '2026-10-05'), b: side('B', '2026-10-06'), a2: side('A', '2026-10-07'), base: { 'STATUS.md': baseOf('STATUS.md'), [REG]: baseOf(REG) } };
+}
+const updateRun = async (cli, timoneCommit) => {
+  const b = await boxScript({ cli });
+  assert(b.script, `the daemon handed docker no script: ${b.decision}`);
+  const remote = path.join(b.fx.dir, 'remote', 'fixture.git');
+  const sides = plantPRs(remote);
+  const mainBefore = b.fx.remoteHead('main');
+  const M = '-c user.email=box@timone.invalid -c user.name=box';
+  const show = (tag) => `echo "=== ${tag} STATUS"; cat STATUS.md; echo "=== ${tag} REG"; cat ${REG}; echo "=== ${tag} END"`;
+  const r = boxReplay({
+    script: b.script, projectRemote: remote,
+    timoneCommit: timoneCommit ?? execFileSync('git', ['-C', REPO_ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    agent: [
+      `git fetch -q origin '+refs/heads/*:refs/remotes/origin/*'`,
+      `git checkout -q -B "${BR}" "origin/${BR}"`,
+      `echo "=== a merge"; git ${M} merge --no-edit origin/main 2>&1; echo EXIT=$?; echo "UNMERGED=[$(git diff --name-only --diff-filter=U | tr '\\n' ' ')]"`,
+      show('a'),
+      `echo "=== a push"; git push origin "HEAD:refs/heads/${BR}" 2>&1; echo EXIT=$?`,
+      `git merge --abort 2>/dev/null; git reset -q --hard; git checkout -q -B "${BR2}" "origin/${BR2}"`,
+      `echo "=== b merge"; git ${M} merge --no-edit origin/landed-merge 2>&1; echo EXIT=$?; echo "UNMERGED=[$(git diff --name-only --diff-filter=U | tr '\\n' ' ')]"`,
+      show('b'),
+      `git merge --abort 2>/dev/null; git reset -q --hard; git checkout -q -B "${BR3}" "origin/${BR3}"`,
+      `echo "=== c merge"; git ${M} merge --no-edit origin/landed-dup 2>&1; echo EXIT=$?; echo "UNMERGED=[$(git diff --name-only --diff-filter=U | tr '\\n' ' ')]"; git merge --abort 2>/dev/null; git reset -q --hard`,
+      `echo "=== clone"; git status --porcelain --ignored | grep -v '^!! node_modules' ; test -e .gitattributes && echo GITATTRIBUTES-PRESENT; git config --local --list | grep -i merge; echo CLONE-END`,
+    ],
+  });
+  const res = { ...r, sides, mainBefore, mainAfter: b.fx.remoteHead('main'), own: b.fx.remoteHead(BR), remote };
+  res.ownStatus = res.own ? G(remote, 'show', `${res.own}:STATUS.md`) : '';
+  b.fx.cleanup();
+  return res;
+};
+const UPD_NEW = memo(() => updateRun(CLI));
+// The open case, observed and printed, not judged: when both pull requests add a requirement with
+// the same new number, the build stops for a person on purpose (its completion report). Whether
+// that case is inside clause 3 is a question for the person; this prints what happens.
+function observeSameNumber(r) {
+  const c = cut(r.out, 'c merge', 'clone').replace(/\s+/g, ' ').trim();
+  console.log(`=== PRD-07.R8 clause 3, open case — both pull requests add a new requirement with the same number (R15)`);
+  console.log(`    observed, not judged: ${c.slice(0, 400)}`);
+}
+const UPD_OLD = memo(async () => updateRun(oldBuild(BEFORE_PHASE_48), BEFORE_PHASE_48));
+const cut = (out, from, to) => ((out.split(`=== ${from}\n`)[1] ?? '').split(`\n=== ${to}`)[0]);
+function assertCompleted(r, v) {
+  assert(r.agentRan, `the box script did not reach the agent (exit ${r.code}): ${r.out.slice(-400)}`);
+  const m = cut(r.out, `${v} merge`, `${v} STATUS`);
+  assert(/EXIT=0/.test(m) && /UNMERGED=\[\]/.test(m), `variant (${v}): the merge stopped for a person: ${m.replace(/\s+/g, ' ').slice(0, 300)}`);
+  return m;
+}
+const nolost = (label, text, lines) => { const miss = lines.filter((l) => !text.includes(l)); assert(miss.length === 0, `${label}: ${miss.length} line(s) lost, first: ${JSON.stringify(miss[0]?.slice(0, 120))}`); };
+function assertStatus(r, v) {
+  assertCompleted(r, v);
+  const s = cut(r.out, `${v} STATUS`, `${v} REG`);
+  assert(!/^(<{7}|>{7}|={7}$|\|{7})/m.test(s), `variant (${v}): STATUS.md carries conflict markers`);
+  const [A, B, later] = v === 'a' ? [r.sides.a, r.sides.b, '2026-10-06'] : [r.sides.a2, r.sides.b, '2026-10-07'];
+  const keep = (x) => added(r.sides.base['STATUS.md'], x['STATUS.md']).filter((l) => !/^\*\*Last updated:\*\*/.test(l));
+  nolost(`variant (${v}) STATUS.md, lines of the pull request that merged`, s, keep(A));
+  nolost(`variant (${v}) STATUS.md, lines of the branch`, s, keep(B));
+  assert(s.includes(`**Last updated:** ${later}.`), `variant (${v}): STATUS.md does not carry the later date ${later}`);
+  const dates = (s.match(/^\*\*Last updated:\*\*.*$/gm) || []);
+  console.log(`    (${v}) STATUS.md: ${s.split('\n').length} lines; Last updated lines: ${JSON.stringify(dates)}`);
+  const at = s.split('\n').findIndex((l) => l.startsWith('**1h.'));
+  console.log(`    (${v}) STATUS.md where both added an item:\n${s.split('\n').slice(at - 1, at + 8).map((l) => `      | ${l}`).join('\n')}`);
+  console.log(`    (${v}) STATUS.md item 1, which both rewrote:\n${s.split('\n').filter((l) => l.startsWith('**1. Restart')).map((l) => `      | ${l.slice(0, 110)}`).join('\n')}`);
+}
+function assertRegister(r, v) {
+  assertCompleted(r, v);
+  const t = cut(r.out, `${v} REG`, `${v} END`);
+  assert(!/^(<{7}|>{7}|={7}$|\|{7})/m.test(t), `variant (${v}): the register carries conflict markers`);
+  const A = v === 'a' ? r.sides.a : r.sides.a2;
+  const keep = (x) => added(r.sides.base[REG], x[REG]).filter((l) => !/^- \*\*Status:\*\*/.test(l));
+  nolost(`variant (${v}) register, lines of the pull request that merged`, t, keep(A));
+  nolost(`variant (${v}) register, lines of the branch`, t, keep(r.sides.b));
+  // The one-value Status line both set: neither side's value may vanish from R2's block.
+  const r2 = blockOf(t, 2);
+  assert(/\bverified\b/.test(r2) && /\bfailed\b/.test(r2), `variant (${v}): R2's block lost a side's Status value (verified from the merged pull request, failed from the branch)`);
+  const statusLines = r2.match(/^- \*\*Status:\*\*.*$/gm) || [];
+  const notes = r2.split('\n').filter((l) => /failed|verified/.test(l) && !/^- \*\*Status/.test(l)).map((l) => l.slice(0, 140));
+  console.log(`    (${v}) R2 Status lines: ${JSON.stringify(statusLines)}; other R2 lines naming a value: ${JSON.stringify(notes)}`);
+  console.log(`    (${v}) R2 block as merged, head:\n${r2.split('\n').slice(0, 14).map((l) => `      | ${l.slice(0, 200)}`).join('\n')}`);
+  console.log(`    (${v}) R2 hint lines: ${JSON.stringify(r2.split('\n').filter((l) => l.includes('rewrote this hint')).map((l) => l.slice(-40)))}`);
+  console.log(`    (${v}) headings: ${JSON.stringify((t.match(/^## R\d+/gm) || []).join(' '))}`);
+}
+function assertPushed(r) {
+  assert(r.mainAfter === r.mainBefore, `the default branch moved: ${r.mainBefore} → ${r.mainAfter}`);
+  assert(/EXIT=0/.test(cut(r.out, 'a push', 'b merge')), `the merged branch could not be pushed: ${cut(r.out, 'a push', 'b merge').slice(0, 300)}`);
+  assert(r.ownStatus.includes('A: probe item written by pull request A') && r.ownStatus.includes('B: probe item written by pull request B'), 'the work branch on the remote does not hold both sides\' STATUS.md');
+}
+await clause('PRD-07.R8 clause 2 (a)', 'two open pull requests that both changed `STATUS.md`; one merges squashed; the update on the other completes without a person, and `STATUS.md` on the branch keeps what both said', {
+  broken: async () => assertStatus(await UPD_OLD(), 'a'),
+  correct: async () => { const r = await UPD_NEW(); assertStatus(r, 'a'); assertPushed(r); console.log(`    clone after the merges: ${JSON.stringify(cut(r.out, 'clone', 'xx').replace(/CLONE-END[\s\S]*/, '').trim())}`); },
+});
+await clause('PRD-07.R8 clause 2 (b)', 'the same when the pull request merges as a merge commit, and the default branch carries the later date', {
+  broken: async () => assertStatus(await UPD_OLD(), 'b'),
+  correct: async () => assertStatus(await UPD_NEW(), 'b'),
+});
+await clause('PRD-07.R8 clause 3 (a)', 'two open pull requests that both changed the same requirement register; one merges squashed; the update on the other completes without a person, and no line either one wrote is lost', {
+  broken: async () => assertRegister(await UPD_OLD(), 'a'),
+  correct: async () => assertRegister(await UPD_NEW(), 'a'),
+});
+await clause('PRD-07.R8 clause 3 (b)', 'the same when the pull request merges as a merge commit', {
+  broken: async () => assertRegister(await UPD_OLD(), 'b'),
+  correct: async () => assertRegister(await UPD_NEW(), 'b'),
+});
+observeSameNumber(await UPD_NEW());
 
 if (!process.env.PROBE_KEEP) fs.rmSync(base, { recursive: true, force: true });
 finish('PRD-07.R8');

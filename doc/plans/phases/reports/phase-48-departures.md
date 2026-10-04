@@ -29,3 +29,9 @@
 **Agreed:** 48a creates `src/merge-rules.ts` and `src/merge-rules.test.ts`, and changes nothing else.
 **Did instead:** at the close, `src/guards/checkouts.test.ts` gained one entry: `merge-rules.ts` in `GIT_USERS`, with its reason. The phase file grants this file to 48a, with a marked amendment.
 **Why:** the whole suite failed once, in "performs git only where somebody said so, and said what on". That test requires every source file that runs git to be listed with its reason. The slices ran only the tests of what they changed, so the failure was found at the close.
+
+## Verification, 2026-10-04 — checks that could not run here
+
+- **What:** PRD-05.R18 (all three clauses) and the real-runner clause of PRD-05.R7 are BLOCKED: the replay (`npm run --silent replay`) needs a Claude login, which the container that ran the check does not have. PRD-05.R2 clause 2b is BLOCKED: its probe could not read GitHub from there.
+- **Why it was not resolved:** nothing was observed, so no fix loop applies. A person runs the replay from a logged-in terminal on this branch before merging.
+- **Where:** [phase-48-verification.md](phase-48-verification.md), *Carried forward*.
