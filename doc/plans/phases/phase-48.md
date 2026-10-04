@@ -73,6 +73,8 @@ export function mergeFile(
 
 **[NEW FILE]** `src/merge-rules.test.ts` — the cases below.
 
+**[MODIFY]** `src/guards/checkouts.test.ts` — list `merge-rules.ts` in `GIT_USERS`, with the reason it runs git. ✏ 2026-10-04 (build, timone#200): added at the close. The whole suite failed in "performs git only where somebody said so, and said what on", which requires every source file that runs git to be listed there with its reason. `mergeFile` runs `git merge-file` on temporary files it makes itself, and the plan granted this file to no slice.
+
 **Seams under test (TDD):** `mergeFile` is the seam: three texts in, one result out. It shells out to `git merge-file` on temporary files, which it removes, and touches no repository. That boundary survives any change to how the conflict blocks are resolved inside. Red-green:
 
 1. Both kinds: when git merges cleanly, the text is git's result, `clean` is true and `problems` is empty.
