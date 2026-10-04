@@ -75,7 +75,7 @@ Triage having routed a chore here **does not pre-clear the ADR gate**. Triage cl
 
 Stage 5 produces two artifacts, and only the first of them is put in front of a human ([ADR-0030](../../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md) D1). This is a different kind of gate from the two above: those are entry refusals that stop the skill, this one is the closing approval the stage exists to obtain.
 
-**The breakdown is the list of pieces an initiative will be built in — and nothing else.** No slices, no seams, no validation steps: one piece is one pull request's worth of work, a change somebody can review in a sitting that leaves the project working when it lands. Order the pieces so each can be built and merged needing only what is above it, and prefer few real pieces to many small ones — every piece costs a review. It lives at `doc/plans/breakdowns/ticket-NN.md` (zero-padded to two digits) on the ticket's own branch, is written **once per initiative**, before any phase file, and is read by machine as well as by a person:
+**The breakdown is the list of pieces an initiative will be built in — and nothing else.** No slices, no seams, no validation steps: one piece is one pull request's worth of work, a change somebody can review in a sitting that leaves the project working when it lands. Order the pieces so each can be built and merged needing only what is above it, and prefer few real pieces to many small ones — every piece costs a review. ✏ 2026-10-04 ([PRD-07.R10, R11](../../../doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.criteria.md)): under each piece, a `Needs:` line names the pieces above it that this piece needs, or says `nothing`. A piece with no `Needs:` line needs the piece just above it. Under the list, the `**Order:**` line says the order in plain words, for example "1, then 2 and 3 together, then 4." Write that line with exactly what `node dist/cli.js breakdown <name> <ticket>` prints, and do not commit the list until that command ends without a problem. When the list is approved, each step ticket is blocked by exactly the steps its piece's `Needs:` line names, and a list whose `Needs:` lines cannot be read opens no step tickets. When two ways of cutting the work are equally good, choose the one where fewer pieces wait for each other and fewer pieces change the same files. But each piece must still work end to end on its own ([PRD-01.R25](../../../doc/specs/prd/prd-01-process-layer.criteria.md#r25--a-piece-is-a-thin-path-through-every-layer-and-names-only-what-it-finishes)), and that comes first. The shape below shows the `Needs:` lines and the `**Order:**` line. It lives at `doc/plans/breakdowns/ticket-NN.md` (zero-padded to two digits) on the ticket's own branch, is written **once per initiative**, before any phase file, and is read by machine as well as by a person:
 
 ```markdown
 # Breakdown
@@ -83,7 +83,11 @@ Stage 5 produces two artifacts, and only the first of them is put in front of a 
 **Status:** Awaiting approval
 
 1. **<what the piece is called>** — <one line of what it delivers>
+   - Needs: nothing.
 2. **<the next piece>** — <one line of what it delivers>
+   - Needs: piece 1.
+
+**Order:** 1, then 2.
 ```
 
 **The stamp carries the count, and the count is not decoration.** On approval the line becomes `Approved by <who> <date> — N pieces`, N being how many the numbered list beneath it holds. That number is the whole of how a list which has *grown* since the approval is recognised — a re-proposal carrying a piece the human has never seen, which stage 6 refuses to build. A stamp written in any other shape reads back as malformed, and a malformed breakdown is indistinguishable from having no breakdown at all.
@@ -92,7 +96,7 @@ Stage 5 produces two artifacts, and only the first of them is put in front of a 
 
 **On approval, one ticket per step opens** — ✏ 2026-08-20 ([ADR-0040](../../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)). Each step ticket is a child of the initiative's ticket, carries that step's one-line description and a link to the breakdown, and **declares any step it depends on**. The initiative's ticket becomes a map: links to its children and nothing else.
 
-Write the dependencies down even when the list order makes them look obvious. Under the old count they were implicit in the order; they are not any more, and a step that should have declared one gets picked up early. This is the single thing most likely to go wrong with the new shape.
+Write the dependencies down even when the list order makes them look obvious. Under the old count they were implicit in the order; they are not any more, and a step that should have declared one gets picked up early. This is the single thing most likely to go wrong with the new shape. ✏ 2026-10-04 ([PRD-07.R10](../../../doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.criteria.md)): the `Needs:` line under each piece is where they are written.
 
 **Which step is next is the first step ticket that is open, unblocked and unassigned.** Nothing counts runs. Do not write progress back anywhere — a closed ticket is a done step, and that is the whole of it.
 

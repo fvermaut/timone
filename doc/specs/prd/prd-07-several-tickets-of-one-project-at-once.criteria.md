@@ -211,7 +211,7 @@
 ## R10 — The breakdown shows which pieces are built at the same time
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Depends-on:** `.claude/skills/timone-plan/, src/adapters/github-tickets.ts, src/runner/`
 - **Criteria:**
@@ -224,6 +224,8 @@
 - **Verification hint:** the step tickets' `blocked by` relations are read from the forge. Write a fixture breakdown with that shape and check the approval text and the relations it opens.
 
 ## R11 — The breakdown prefers pieces that can be built at the same time
+
+> ✏ 2026-10-04 — partial evidence: [phase-45-verification.md](../../plans/phases/reports/phase-45-verification.md) issued the manual check for this criterion, in its *HUMAN-CHECK scripts* section. Nobody has performed it yet, so the status stays `draft`.
 
 - **Priority:** SHOULD
 - **Status:** draft
