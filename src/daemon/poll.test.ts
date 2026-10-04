@@ -2069,6 +2069,88 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     expect(result.errors.join(" ")).toContain("not out at the terminal");
     expect(pending(statePath).requests).toEqual([]);
   });
+
+  // ADR-0063 D5 and PRD-07 R13: a takeover takes no place on the project.
+  // The same three cases as the command's own, through the request a
+  // terminal leaves while the daemon holds the ledger.
+  it("hands a ticket to the terminal while another ticket of the project has a step running, and leaves that step alone (R13 clause 1)", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = manifestWith("scratch-app");
+    const six = waitingForRunner(store, 6);
+    const { run: four } = store.register("scratch-app", 4);
+    store.activate(four.id, "step-session-4");
+    const running = new RunningSteps();
+    running.set(four.id, {
+      stage: "execution",
+      session: { sessionId: "step-session-4", completed: new Promise(() => {}), stop() {} },
+      startedAt: "2026-08-16T12:00:00Z",
+    });
+    const fourBefore = store.get(four.id);
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = runnerAdapter([ticket(4), ticket(6)]);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions, running });
+
+    const result = await pollOnce({ manifest, store, adapter, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual(["claim-takeover scratch-app#6"]);
+    expect(store.get(six.id)).toMatchObject({ status: "active", takenOver: true });
+    expect(store.get(four.id)).toEqual(fourBefore);
+  });
+
+  it("hands a ticket to the terminal while another ticket of the project owns a branch and an open pull request, with no step running (R13 clause 2)", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = manifestWith("scratch-app");
+    const seven = waitingWithPullRequest(store);
+    const six = waitingForRunner(store, 6);
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = runnerAdapter([ticket(6), ticket(7)], {
+      pulls: { 19: pullRequest19("open") },
+    });
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    const result = await pollOnce({ manifest, store, adapter, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual(["claim-takeover scratch-app#6"]);
+    expect(store.get(six.id)).toMatchObject({ status: "active", takenOver: true });
+    expect(store.get(seven.id)).toMatchObject({
+      status: "parked",
+      branch: "timone/7-due-dates",
+      pr: 19,
+    });
+  });
+
+  it("refuses to hand over a ticket whose own step is running, in the words the command uses (R13 clause 3)", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = manifestWith("scratch-app");
+    const { run: six } = store.register("scratch-app", 6);
+    store.activate(six.id, "step-session-6");
+    const running = new RunningSteps();
+    running.set(six.id, {
+      stage: "execution",
+      session: { sessionId: "step-session-6", completed: new Promise(() => {}), stop() {} },
+      startedAt: "2026-08-16T12:00:00Z",
+    });
+    const sixBefore = store.get(six.id);
+    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const { adapter } = runnerAdapter([ticket(6)]);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions, running });
+
+    const result = await pollOnce({ manifest, store, adapter, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual([]);
+    expect(result.errors).toEqual([
+      expect.stringMatching(
+        /^could not apply claim-takeover scratch-app#6 asked by .*: I'm working on scratch-app #6 right now\. Anything I need from you will land on the ticket\.$/,
+      ),
+    ]);
+    expect(store.get(six.id)).toEqual(sixBefore);
+  });
 });
 
 /**

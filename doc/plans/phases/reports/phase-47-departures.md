@@ -57,3 +57,10 @@
 **Agreed:** 47d's cases 1–6; case 3 (which branch counts for the ticket) under the poll seam's list.
 **Did instead:** One test was added at the declared `pollProject` seam for the forge failure the plan's prose asks for, which no case listed. Case 3 is tested at the adapter seam, where the branch rule lives. An adopted run is not counted in the cycle's `pickedUp` list. The new forge call does not refuse a full page of 200 open pull requests, as the ticket listings do; a ticket whose pull request falls off that page would be picked up as new work. An adopted step ticket does not get the hold label a pickup puts on a step ticket; its live run already stops a second pickup.
 **Why:** The forge failure is behaviour the plan asks for, so it needs a test at a declared seam. The branch filter belongs to the adapter. The full page and the hold label were left as the plan wrote them, and are raised as questions on the pull request.
+
+## 2026-10-04 — timone#201, execution (47e)
+
+**Kind:** plan step
+**Agreed:** Case 5 runs "the same three" through the `claim-takeover` request road; `findTakeover` loses every sentence that blamed another run of the project.
+**Did instead:** Case 5 runs cases 1–3 through the request road; case 4 is tested through the command only. `findTakeover` needed no change: 47a had already removed its only such sentence, the queue message. Two of case 5's tests were written together before either ran; both passed on arrival, and each has its own failing mutation on record.
+**Why:** "The same three" reads as cases 1–3. The second point is a fact of the code as 47a left it. The third is recorded so the trace is honest.

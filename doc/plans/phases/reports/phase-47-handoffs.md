@@ -367,3 +367,62 @@ Test files run at the end, after `npm run build` (then `rm -rf dist`): every tes
 
 - An adopted step ticket is not given the hold label that a pickup puts on a step ticket (the plan says post nothing and continue). Its run is live, so it is not picked up again; whether the frontier should see it as claimed is not decided here.
 - `takeover.ts` and `cancel.ts` can now meet a ticket whose live run was opened by `adopt`: `parked`, stage `delivery`, with a branch and a pull request, and never `picked-up` or `active` before.
+
+## 47e — A takeover takes no place and is not refused because of another ticket
+
+**Built.** A takeover now claims its run with `store.claim(id, hold, { takeover: true })` on both roads: the command with the lock free (`claimForTakeover` in `takeover.ts`), and the daemon's `claim-takeover` request handler (`poll.ts`). The run is `active` and marked `takenOver`, takes no place on the project, and is not refused because another ticket of the project has a step running, owns a work branch, or has an open pull request. Another ticket's step may start while a ticket is taken over. A takeover of a ticket whose own step is running is still refused, with the same words as before ("I'm working on scratch-app #6 right now. Anything I need from you will land on the ticket."). The comment above the heartbeat in `runTakeover` no longer says the run's status holds the project's one-session slot; it says a taken-over run takes no place (ADR-0063 D5).
+
+**Files touched.**
+
+- `src/commands/takeover.ts` — `claimForTakeover` passes `{ takeover: true }`; the comment above the heartbeat corrected.
+- `src/daemon/poll.ts` — the `claim-takeover` handler passes `{ takeover: true }`, with one comment line saying why.
+- `src/commands/takeover.test.ts` — new describe "a takeover takes no place on its project (ADR-0063 D5)", four tests (cases 1–4), with local helpers `ledger`, `waitingSix` and `takeOver`. No existing test changed.
+- `src/daemon/poll.test.ts` — three tests (case 5) added to the describe "pollOnce — handing a run to the terminal and taking it back". No existing test changed.
+- `doc/plans/phases/reports/phase-47-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **`findTakeover` needed no change.** Its refusal for a `picked-up` or `active` run of the same ticket stays. No sentence in it blamed another run of the project any more: 47a had already removed `queuedMessage` and the `queued` cases. The plan's "every sentence that blamed another run goes" was therefore already true.
+- **"The same three" of case 5 are cases 1, 2 and 3.** Case 4 (a third ticket's step starts while one is taken over) is shown at the command seam only. The request road writes the same `takenOver` mark through the same `claim`.
+- **Case 4 starts the third ticket's step as `startStepSession` does**, with `askPlace`, `claim` and `activate` on the store, inside the terminal session. Starting a real step session would need the runtime, which is not at this seam.
+- **In the poll tests, a run with a step running also has an entry in `RunningSteps`**, as the existing 15-minute-check test does. Without it the run would look like one a terminal holds, and the case would not be "a step running".
+- **Two poll tests (clauses 2 and 3) were written together before their first run.** Both passed on arrival; each has its own mutation below.
+
+Refactor I would do but did not: `takeover.test.ts` now has two describes with their own `ledger()` and `takeOver()` helpers; one pair at the top of the file would do. In `poll.test.ts` the `RunningSteps` entry for a step that never ends is written out four times; a small helper would hold it.
+
+**Validation evidence.**
+
+Every red/green run was `npx vitest run <file> -t "<name>"`. Mutations were temporary edits of `takeover.ts` or `poll.ts`, copied back from a saved copy straight after the run.
+
+1. `takeover.test.ts` › *"takes over a ticket while another ticket of the project has a step running, and leaves that step alone (R13 clause 1)"* — red: `NoPlaceError: No place is free on scratch-app: run scratch-app#4/1 has a step running.` Green after `claimForTakeover` passed `{ takeover: true }`.
+2. *"takes over a ticket while another ticket of the project owns a branch and an open pull request, with no step running (R13 clause 2)"* — **passed on arrival** (47a: a branch and a pull request take no place). Mutation: `claimForTakeover` throws when another run of the project owns a branch → `Error: MUTATED: run scratch-app#4/1 owns a branch`. Reverted → green.
+3. *"refuses the takeover of a ticket whose own step is running, in the words it always used (R13 clause 3)"* — **passed on arrival** (the refusal is today's). Mutation: in `findTakeover`, an `active` run resolves to `open-session` → `AssertionError: expected +0 to be 1` (the terminal session was launched). Reverted → green.
+4. *"lets a third ticket's step start while a ticket is taken over (R2 clause 6)"* — **could not go red honestly** (case 1's change already makes it true). Mutation: remove `{ takeover: true }` from `claimForTakeover` → `NoPlaceError: No place is free on scratch-app: run scratch-app#6/1 has a step running.` Reverted → green.
+5. `poll.test.ts`:
+   - *"hands a ticket to the terminal while another ticket of the project has a step running, and leaves that step alone (R13 clause 1)"* — red: `AssertionError: expected [] to deeply equal [ 'claim-takeover scratch-app#6' ]`; the cycle's error was `could not apply claim-takeover scratch-app#6 asked by pid …: No place is free on scratch-app: run scratch-app#4/1 has a step running.` Green after the handler passed `{ takeover: true }`.
+   - *"hands a ticket to the terminal while another ticket of the project owns a branch and an open pull request, with no step running (R13 clause 2)"* — **passed on arrival**. Mutation: the handler throws when another run of the project owns a branch → `expected [] to deeply equal [ 'claim-takeover scratch-app#6' ]`. Reverted → green.
+   - *"refuses to hand over a ticket whose own step is running, in the words the command uses (R13 clause 3)"* — **passed on arrival**. Mutation: on `nothing-to-do`, the handler claims the ticket's latest run anyway → `expected [ 'claim-takeover scratch-app#6' ] to deeply equal []`. Reverted → green.
+
+*Validation commands* (from `projects/timone`):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/commands/takeover.test.ts src/daemon/poll.test.ts src/daemon/runs.test.ts; echo "exit: $?"
+ Test Files  3 passed (3)
+      Tests  310 passed (310)
+exit: 0
+```
+
+Checkboxes of the excerpt:
+
+- [x] Cases 1–5 pass, with red runs recorded (cases 2, 3 and 4, and clauses 2 and 3 of case 5, passed on arrival; each has a mutation that fails it, recorded above).
+- [x] The handoff names PRD-05.R11's probe as one verification must amend; the builder does not open it — see below. It was not opened.
+
+*Test files run at the end*, after `npm run build` (then `rm -rf dist`): every test file under `src/commands`, `src/daemon`, `src/runner` and `src/*.test.ts` — 55 files, 1521 tests, all passed, exit 0. That covers the test files of `takeover.ts` and `poll.ts` and of every file that imports them (`cli.ts`, `commands/daemon.ts`, `commands/status.ts`, `runner/actions.ts`, `daemon/hooks.test.ts`).
+
+**What 47f must know.**
+
+- **Verification must amend PRD-05.R11's probe** (`prd-05.r11.mjs`, owned by verification). Its clause 2 refusal — a takeover refused because another ticket of the project holds it — is gone after this slice, so the probe tests a refusal that no longer happens. The builder did not open the probe.
+- A taken-over run is `active` with `takenOver: true` and takes no place. `placeHolders` does not list it; `staleRuns` and anything that reads `RUNNING` still see it as running. `timone status` should not show a taken-over run as taking the project's place.

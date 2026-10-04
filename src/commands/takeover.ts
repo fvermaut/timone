@@ -380,10 +380,11 @@ export async function runTakeover(
   const claimed = await claimForTakeover(raw, target, deps, log);
   if (claimed.kind !== "claimed") return claimed.code;
 
-  // From here the run's *status* is what holds the project — a RUNNING status
-  // occupies the one-session slot, which is how the daemon's own sessions have
-  // always had exclusivity (ADR-0032). No lock is held across the
-  // conversation, so the daemon carries on with every other project.
+  // From here the run's *status* is what holds the run: it is `active`, so
+  // the runner leaves it alone and no step starts on it (ADR-0032). It is
+  // marked taken over, so it takes no place on the project, and other
+  // tickets' steps go on starting (ADR-0063 D5). No lock is held across the
+  // conversation, so the daemon carries on with every other ticket and project.
   //
   // A claimed run is `active`, and an active run that stops stamping its
   // heartbeat is reclaimed as dead by the daemon's next pass (ADR-0020) —
@@ -481,7 +482,10 @@ async function claimForTakeover(
         log(resolution.message);
         return { kind: "no", code: 1 };
       }
-      return { kind: "claimed", run: store.claim(resolution.run.id, hold) };
+      return {
+        kind: "claimed",
+        run: store.claim(resolution.run.id, hold, { takeover: true }),
+      };
     } finally {
       acquired.lock.release();
     }
