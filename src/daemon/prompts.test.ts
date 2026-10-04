@@ -180,6 +180,29 @@ describe("a step with no work branch commits nothing to the project (43e)", () =
   );
 });
 
+/**
+ * A branch may carry phase files it did not add: the default branch's own,
+ * and any merged in from it. The newest of them is not always this run's
+ * plan, so the build and the check are pointed at the file the branch added
+ * (44c), which is how the runner reads it too.
+ */
+describe("the build and the check find their own phase file by what the branch added (44c)", () => {
+  it.each(["execution", "verification"] as const)(
+    "%s is pointed at the phase file this branch added",
+    (stage) => {
+      const prompt = stagePrompt(stage, { ...context, branch: "timone/6-typing-in-the-box" });
+
+      expect(prompt.replace(/\s+/g, " ")).toContain("the phase file this branch added");
+    },
+  );
+
+  it.each(PROMPTED_STAGES)("%s never says the newest phase file", (stage) => {
+    const prompt = stagePrompt(stage, { ...context, branch: "timone/6-typing-in-the-box" });
+
+    expect(prompt.replace(/\s+/g, " ")).not.toMatch(/newest phase file/i);
+  });
+});
+
 describe("the triage prompt", () => {
   it("does not tell the session what kind of request it is", () => {
     // Working that out from the raw text is the entire job of the stage.

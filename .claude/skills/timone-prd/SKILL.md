@@ -41,7 +41,7 @@ Keep `product-overview.md` short. It changes rarely; PRDs change often.
 
 ### 2. Determine the PRD number
 
-List `projects/<name>/doc/specs/prd/`. Use the next available `NN` (zero-padded). PRD numbering is independent of phase numbering — one PRD may feed several phases.
+~~List `projects/<name>/doc/specs/prd/`. Use the next available `NN` (zero-padded).~~ ✏ 2026-10-04 ([ADR-0062](../../../doc/adr/0062-a-numbered-file-takes-its-number-by-reserving-it-on-the-projects-remote.md)) — Run `node dist/cli.js number <name> prd`. It reserves the next PRD number on the project's remote and prints it, zero-padded to two digits, so no other session can take the same number. **If the command fails, stop and say so**, with the command's own sentence. Never count the files in the folder instead. PRD numbering is independent of phase numbering — one PRD may feed several phases.
 
 ### 3. Parse the input
 

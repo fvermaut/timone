@@ -91,6 +91,8 @@ doc/
   wayfinder/NN-<slug>/…          stage-2 at-scale map + tickets — fallback when the repo is not GitHub-hosted
 ```
 
+✏ 2026-10-04 ([ADR-0062](doc/adr/0062-a-numbered-file-takes-its-number-by-reserving-it-on-the-projects-remote.md)) — **A file whose name carries a number takes the number from a command.** Phase files, ADRs, triage records and PRDs carry a number. A session gets it from `node dist/cli.js number <project> <kind>`, where the kind is `phase`, `adr`, `triage` or `prd`. The command reserves the number on the project's remote and prints it, so two sessions never take the same one. A number is never taken by counting the files in a folder. If the command fails, the session stops and says so.
+
 ## The standards library
 
 Timone hosts the central standards library under `standards/` in its own repo, in three tiers:

@@ -35,7 +35,7 @@ Never plan from the prompt alone. Read, in the target project:
 - `doc/triage/` — the record that routed this request, if there is one. It carries the kind (which decides whether the un-anchored path is even open to you) and the entry point triage chose. **If triage routed the request to a stage other than planning and that stage never ran, say so and route there** — you were invoked out of sequence.
 - `CONTEXT.md` — the domain glossary. Use its canonical terms in the plan; a phase file that renames domain concepts corrupts the ubiquitous language.
 - `doc/standards.md` — what the code must conform to, which shapes validation steps.
-- `doc/plans/phases/` — prior phase files and their reports: the next phase number, what already exists, and the house patterns established *in this project*.
+- `doc/plans/phases/` — prior phase files and their reports: ~~the next phase number,~~ ✏ 2026-10-04 ([ADR-0062](../../../doc/adr/0062-a-numbered-file-takes-its-number-by-reserving-it-on-the-projects-remote.md)) — the number comes from the command under Numbering, not from this folder; what already exists, and the house patterns established *in this project*.
 - Timone's own `standards/` — the `Approved` entries for this project's stack, read **unconditionally**, not only as a fallback. They are normative and they routinely decide questions that would otherwise look like open architectural choices.
 
 **When an artifact is absent, that is a finding, not a blank to skip past.** Report which were missing and reason about why. A missing `CONTEXT.md` or an empty `doc/specs/prd/` usually means stages 2–3 never ran — expect the anchoring gate to fire. An empty `doc/adr/` on a project with a committed stack means the founding ADRs stage 0 owes were never recorded; treat stack-touching work as undocumented and expect the ADR gate to fire. A missing `doc/standards.md` means onboarding is incomplete: fall back to the central `standards/` baseline and flag the gap. None of these absences is on its own a reason to abort.
@@ -137,7 +137,7 @@ Sub-phases carrying no behaviour (documentation, spec amendments, scaffolds, dry
 
 ## Numbering
 
-List `projects/<name>/doc/plans/phases/`, take the highest existing `NN`, use the next, zero-padded to two digits. Missing **or empty** directory → create it if absent, start at `01` (onboarding creates the tree empty, so a first plan lands here, not in the highest-existing branch). Numbers are **never reused**, even for an abandoned phase. Never renumber existing phase files.
+~~List `projects/<name>/doc/plans/phases/`, take the highest existing `NN`, use the next, zero-padded to two digits. Missing **or empty** directory → create it if absent, start at `01` (onboarding creates the tree empty, so a first plan lands here, not in the highest-existing branch).~~ ✏ 2026-10-04 ([ADR-0062](../../../doc/adr/0062-a-numbered-file-takes-its-number-by-reserving-it-on-the-projects-remote.md)) — Run `node dist/cli.js number <name> phase`. It reserves the next phase number on the project's remote and prints it, zero-padded to two digits, so no other session can take the same number. On a project with no phase file yet it prints `01`. If `doc/plans/phases/` is missing, create it. **If the command fails, stop and say so**, with the command's own sentence. Never count the files in the folder instead. Numbers are **never reused**, even for an abandoned phase. Never renumber existing phase files.
 
 ## Phase file template
 
