@@ -34,6 +34,10 @@
 
 **What I need from you:** run the two checks, then review and merge #211.
 
+**1g. Piece 3 of #197 ([#201](https://github.com/fvermaut/timone/issues/201)): built and checked on the branch `timone/201-3-the-project-is-free-when-the-pull-requ`, no pull request yet.** A ticket now takes the project's one place only while one of its steps runs. An open pull request, a question waiting for you, a runner session and a takeover take none. When the place frees, it goes to one waiting ticket: `priority:high` first, then the oldest, and only that ticket is told. A ticket whose pull request is already open is no longer picked up as new work. The check passed all of this and found no fault. Not run: the replay against the real model (`npm run --silent replay`, from a logged-in terminal). The check asks one question: should the daemon manual and one line of `process.md`, which still describe the old rule, be corrected in this pull request? See [the report](doc/plans/phases/reports/phase-47-verification.md). This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** nothing yet; the pull request comes next.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
