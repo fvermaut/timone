@@ -22,3 +22,10 @@
 **Agreed:** the `number` command is tested through `buildProgram().parseAsync([...])`.
 **Did instead:** it is tested through `registerNumberCommand` on a fresh `Command`, as the other command tests do.
 **Why:** importing `src/cli.ts` runs the real command line when the module loads, so no test can import `buildProgram`.
+
+## 2026-10-04 — timone#199, build
+
+**Kind:** check not run
+**Agreed:** each slice's validation block ends with `npm test`, and the build's rule runs every suite under a minute whole at the end of each slice.
+**Did instead:** from 44b on, no slice ran the whole suite. Each ran the test files of what it changed and of the code that uses it, by name. The whole suite ran once, at the close: 61 files, 1609 tests passed.
+**Why:** the person running this build asked for it on 2026-10-04, after 44a had run the whole suite three times.
