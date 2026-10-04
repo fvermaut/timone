@@ -1,6 +1,6 @@
 # PRD-08: A ticket the machine opens names the people it is for
 
-> **Status:** Draft
+> **Status:** Active — approved by fvermaut on 2026-10-04T13:20:05Z
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-08-a-ticket-the-machine-opens-names-its-people.criteria.md](prd-08-a-ticket-the-machine-opens-names-its-people.criteria.md)
 > **Phases:** none yet
