@@ -8,6 +8,7 @@ import { registerBreakdownCommand } from "./commands/breakdown.js";
 import { registerCancelCommand } from "./commands/cancel.js";
 import { registerDaemonCommand } from "./commands/daemon.js";
 import { registerGuardrailsCommand } from "./commands/guardrails.js";
+import { registerMergeFileCommand } from "./commands/merge-file.js";
 import { registerNumberCommand } from "./commands/number.js";
 import { registerProjectsCommand } from "./commands/projects.js";
 import { registerRecordCommand } from "./commands/record.js";
@@ -93,6 +94,7 @@ export function buildProgram(): Command {
   registerStageCommand(program);
   registerNumberCommand(program);
   registerBreakdownCommand(program);
+  registerMergeFileCommand(program);
 
   return program;
 }

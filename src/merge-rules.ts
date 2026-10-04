@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /**
  * Timone's own merge rule for the two files every branch writes to:
@@ -523,4 +523,60 @@ export async function mergeFile(
   const text = merged.map((line) => line.text).join("\n") + (result.stdout.endsWith("\n") ? "\n" : "");
   const problems = kind === "register" ? takenNumbers(text) : [];
   return { text, clean: problems.length === 0, problems };
+}
+
+/** The paths each rule applies to, as git attribute patterns relative to the repository root. */
+export const MERGE_RULE_PATHS: Readonly<Record<MergeKind, string>> = {
+  status: "/STATUS.md",
+  register: "doc/specs/prd/*.criteria.md",
+};
+
+/** The name git knows the rule for `kind` by, in `merge=<name>` and `merge.<name>.driver`. */
+function driverName(kind: MergeKind): string {
+  return `timone-${kind}`;
+}
+
+/**
+ * The git settings that switch both rules on: `core.attributesFile` and one
+ * driver per kind. Git runs the driver with the base (%O), the current side
+ * (%A, which the driver overwrites), the other side (%B) and the path (%P).
+ */
+export function mergeRulesConfig(options: {
+  cli: string;
+  dir: string;
+}): ReadonlyArray<readonly [string, string]> {
+  return [
+    ["core.attributesFile", join(options.dir, "attributes")],
+    ...MERGE_KINDS.map(
+      (kind) =>
+        [
+          `merge.${driverName(kind)}.driver`,
+          `node ${options.cli} merge-file ${kind} %O %A %B %P`,
+        ] as const,
+    ),
+  ];
+}
+
+/**
+ * Write `<dir>/attributes` and return the environment (`GIT_CONFIG_COUNT`,
+ * `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`) that makes git use it.
+ *
+ * **The environment, not the checkout**, as for the push guard: nothing is
+ * written into the project, so a client repository never gains a
+ * `.gitattributes` or a driver in its `.git/config`.
+ */
+export function installMergeRules(dir: string, options: { cli: string }): Record<string, string> {
+  const at = resolve(dir);
+  mkdirSync(at, { recursive: true });
+  writeFileSync(
+    join(at, "attributes"),
+    MERGE_KINDS.map((kind) => `${MERGE_RULE_PATHS[kind]} merge=${driverName(kind)}\n`).join(""),
+  );
+  const config = mergeRulesConfig({ cli: options.cli, dir: at });
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(config.length) };
+  config.forEach(([key, value], index) => {
+    env[`GIT_CONFIG_KEY_${index}`] = key;
+    env[`GIT_CONFIG_VALUE_${index}`] = value;
+  });
+  return env;
 }

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
+import { Command } from "commander";
 
 import type { Manifest } from "../manifest.js";
 import type { Violation } from "../daemon/hooks.js";
@@ -14,6 +15,7 @@ import { startStepSession } from "../daemon/step-session.js";
 import {
   appendJournal,
   readHookPayload,
+  registerGuardrailsCommand,
   runBaseline,
   runCheck,
   runForSession,
@@ -1093,5 +1095,65 @@ describe("the STATUS.md rule, read back off real commits", () => {
     expect(first.returned.map((violation) => violation.rule)).toContain(
       "status-placement",
     );
+  });
+});
+
+/**
+ * The box switches the merge rules for `STATUS.md` and the registers on with
+ * this command (48b), as it does the push guard.
+ */
+describe("guardrails install-merge-rules", () => {
+  /** Run `timone guardrails install-merge-rules …` as the CLI would, capturing what it printed. */
+  async function installMergeRulesCommand(
+    ...args: string[]
+  ): Promise<{ out: string[]; errors: string[]; exitCode: number | undefined }> {
+    const program = new Command();
+    program.exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerGuardrailsCommand(program);
+    const out: string[] = [];
+    const errors: string[] = [];
+    const realLog = console.log;
+    const realError = console.error;
+    console.log = (message: unknown): void => {
+      out.push(String(message));
+    };
+    console.error = (message: unknown): void => {
+      errors.push(String(message));
+    };
+    try {
+      await program.parseAsync(["guardrails", "install-merge-rules", ...args], { from: "user" });
+    } finally {
+      console.log = realLog;
+      console.error = realError;
+    }
+    const code = process.exitCode;
+    process.exitCode = undefined;
+    return { out, errors, exitCode: typeof code === "number" ? code : undefined };
+  }
+
+  it("writes the attributes file with one line per kind, and prints nothing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-merge-rules-cmd-"));
+    tempDirs.push(dir);
+
+    const result = await installMergeRulesCommand("--dir", dir);
+
+    expect(result).toEqual({ out: [], errors: [], exitCode: undefined });
+    expect(readFileSync(join(dir, "attributes"), "utf8")).toBe(
+      "/STATUS.md merge=timone-status\ndoc/specs/prd/*.criteria.md merge=timone-register\n",
+    );
+  });
+
+  it("exits 1 with one line naming the command when the folder cannot be made", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-merge-rules-cmd-"));
+    tempDirs.push(dir);
+    writeFileSync(join(dir, "a-file"), "not a folder\n");
+
+    const result = await installMergeRulesCommand("--dir", join(dir, "a-file", "rules"));
+
+    expect(result.out).toEqual([]);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(/^guardrails install-merge-rules: /);
+    expect(result.exitCode).toBe(1);
   });
 });
