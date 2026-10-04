@@ -57,6 +57,7 @@ Every skill that writes a numbered file says: list the folder, take the highest 
 **[NEW FILE]** `src/commands/number.ts` — `registerNumberCommand(program)`.
 **[NEW FILE]** `src/commands/number.test.ts` — the command's cases below.
 **[MODIFY]** `src/cli.ts` — import and call `registerNumberCommand(program)` in `buildProgram`.
+**[MODIFY]** `src/guards/checkouts.test.ts` — ✏ 2026-10-04 (build, timone#199): add `numbers.ts` to `GIT_USERS` and `commands/number.ts` to `EXEMPT`, each with its reason. The guard refuses any source file that runs git, or resolves a manifest project's `path`, unless one of its two lists names it. `reserveNumber` runs git in `projects/<name>`, and the command resolves that folder, so the full suite cannot pass without these two entries. The reason given: the command is run by a session in its own checkout, never by the daemon; it changes no file, no branch and no local ref there, only the remote-tracking refs a fetch updates. The command resolves the folder as `resolve(cwd, project.path)`, the spelling of `workspace.ts`, so that the guard sees it.
 
 **Seams under test (TDD):** two seams. `reserveNumber(dir, kind, options?)` is the seam for the behaviour: it is the public function every caller goes through, and a test observes it only by what it returns and what the bare remote holds afterwards, never by how it reads. The `number` command, through `buildProgram().parseAsync([...])` with a temporary `timone.yaml`, is the seam for what a session sees: the printed number, the exit code and the sentences. Red-green:
 
@@ -70,6 +71,8 @@ Every skill that writes a numbered file says: list the folder, take the highest 
 8. After a reservation the checkout is as it was: same current branch, same `git status --porcelain`, and no local ref points at the reservation commit (`git for-each-ref --points-at <sha>` prints nothing).
 9. When the push fails for a reason other than the number being taken — the remote path does not exist, or a `pre-push` hook in the clone refuses — `reserveNumber` throws an error whose message carries git's own words, and the remote holds no new reservation. It never answers with a number it did not reserve.
 10. Command: `number <project> <kind>` with a temporary manifest prints only the padded number and a newline, exit 0. Unknown project → one sentence naming the known projects, exit 1. Unknown kind → one sentence naming `phase, adr, triage, prd`, exit 1, checked before any git command (shown by pointing the manifest at a project path that does not exist and still getting the kind sentence). A failing reservation → the error sentence on stderr, nothing on stdout, exit 1.
+
+✏ 2026-10-04 (build, timone#199): the command's seam is `registerNumberCommand` on a fresh `Command`, as `src/commands/projects.test.ts` does, not `buildProgram().parseAsync`. Importing `src/cli.ts` runs `buildProgram().parseAsync(process.argv)` when the module loads, and no test imports it.
 
 > No dependency on other sub-phases.
 
@@ -97,7 +100,7 @@ npm test
 ```
 
 - [ ] Case 6 passes, and the handoff shows it failing first (red) against a version of `reserveNumber` that returns the next number without pushing.
-- [ ] Case 7 passes, and the handoff shows it failing first against a message with no random line.
+- [ ] Case 7 passes, and the handoff shows it failing first against a message with no random line ~~.~~ ✏ 2026-10-04 (build, timone#199): **and no `*` check**. Step 3's own success rule (exit 0 *and* a `*` line) already stops a second push of the same commit from counting, so removing only the random line cannot turn case 7 red. The two safeguards each cover the case; the red is shown with both removed, and the handoff shows each one alone keeping it green.
 - [ ] The `ls-remote` line prints `0`.
 - [ ] The full suite passes.
 

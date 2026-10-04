@@ -73,6 +73,12 @@ const EXEMPT: Record<string, string> = {
     "It writes the sentence `touch only `projects/<name>/…`` into a session " +
     "prompt. That is the R15 instruction to the agent, not a path this " +
     "process resolves: nothing here reaches a filesystem or spawns anything.",
+  "commands/number.ts":
+    "`timone number` resolves the checkout it reserves a number for. A " +
+    "session runs it in its own checkout, never the daemon. It changes no " +
+    "file, no branch and no local ref there, only the remote-tracking refs " +
+    "a fetch updates, and it pushes a reservation ref to the remote " +
+    "(ADR-0062).",
 };
 
 /**
@@ -109,6 +115,12 @@ const GIT_USERS: Record<string, string> = {
     "Reads the **timone** checkout — which version of Timone is running " +
     "(ADR-0041 D2, phase 30's 30f). Never a project's: this file resolves no " +
     "path under `projects/` at all any more.",
+  "numbers.ts":
+    "`reserveNumber`, behind `timone number`. A session runs it in its own " +
+    "checkout, never the daemon. It fetches, reads the remote branches, and " +
+    "pushes a reservation ref to the remote (ADR-0062); it changes no file, " +
+    "no branch and no local ref, only the remote-tracking refs a fetch " +
+    "updates.",
 };
 
 /** Every `.ts` file under `src`, excluding tests, as paths relative to `src`. */
