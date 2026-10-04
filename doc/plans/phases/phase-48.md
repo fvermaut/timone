@@ -85,7 +85,7 @@ export function mergeFile(
 8. `register`: both sides change the same requirement's `- **Status:**` line to different values. The section holds one Status line, with the other side's value. Directly under the heading, below any notes already there, is the note `> ✏ <today> — when this branch was brought level with the default branch, it had \`- **Status:** <current value>\`. The default branch's \`- **Status:** <other value>\` stands.` `clean` is true. The same rule holds for any `- **<Field>:** <value>` line, shown with `- **Last live gate:**`.
 9. `register`: one side changes `- **Status:**` and the other adds a note on the line before it. The text has the changed Status line once and the note once.
 10. `register`: both sides add a section `## R15 — …`. `clean` is false, `problems` has one sentence naming R15, and the text still holds both sections.
-11. No line is lost: for each of cases 2 to 9, every line that the current side or the other side has and the base does not is in the text. In case 8 the current side's field line counts as kept when it is quoted in the note.
+11. No line is lost: for each of cases 2 to 9, every line that the current side or the other side has and the base does not is in the text. In case 8 the current side's field line counts as kept when it is quoted in the note. ✏ 2026-10-04 (build, timone#200): in case 3 the older `**Last updated:**` line is replaced by the later one by design, so it is the one added line case 11 does not look for there. Case 3 and case 11 could not both hold as written.
 
 > No dependency on other sub-phases.
 
