@@ -239,3 +239,81 @@ Other test files run at the end, for code that imports the changed files: every 
 
 - `src/runner/replay/harness.test.ts`'s doc comment still says "The nineteen cases"; it is not in this slice's files, and it was already out of date.
 - The two new replay cases are new specifications for the runner. They pass in the dry run. Whether the real model passes them (3 of 3 tries) is only known from a real replay, which costs money and was not run.
+
+## 53c — Each step is told the sentence word for word
+
+**Built.** Every step prompt now tells the step, right after the closing-line rule: when a comment asks them for something, put the sentence from `twoWaysToAnswer(project, ticket)` in it word for word, on its own line just above that closing line, with a blank line between. The sentence is printed in the prompt already finished, with this project and this ticket. The prompt then says to leave the sentence out, and to write `timone takeover` nowhere in the comment, in three cases: asking for a missing key or secret, asking whether a misspelled word meant approve, and a terminal session on this ticket that has just ended without settling what is asked. The delivery prompt also says: when the pull request's *Questions for you* section holds a question, end that section with the same sentence, on its own line, with this ticket's number. The takeover prompt does not get the sentence. It says instead: "Do not write the takeover command in what you post here: the person has just used it." Its opening line, naming the command the session was opened by, is unchanged.
+
+**Files touched.**
+
+- `src/daemon/prompts.ts` — imports `twoWaysToAnswer`; `writingBlock(context)` builds the rule with the finished sentence and the three cases; the rules every prompt shares moved, unchanged, into `writingRules(takeoverRule)`, which places the rule about the takeover command after the closing-line rule; all twelve step prompts call `writingBlock(context)`; `deliveryPrompt` gains the *Questions for you* line; `takeoverPrompt` calls `writingRules` with the "do not write the takeover command" rule.
+- `src/daemon/prompts.test.ts` — new describe "each step is told the sentence that names the takeover command (PRD-09)" at the end of the file (cases 1–4). Nothing existing changed.
+
+**Decisions taken inside the slice.**
+
+- `writingRules(takeoverRule)` holds the shared text, and `writingBlock(context)` and the takeover prompt each pass their own rule. A boolean parameter on `writingBlock` would have been a flag parameter; the takeover prompt has its own context, so a second form was the plain way.
+- The plan's wording "just above that last line" became "just above that closing line", because the rule is a blank line away from the line it points to, and "last line" could be read as the last line of the paragraph.
+- The *Questions for you* line in the delivery prompt prints the sentence itself too, so a delivery session has it next to the instruction and does not need to carry it over from the writing rules.
+- The tests for cases 1, 3 and 4 flatten white space before they compare (`.replace(/\s+/g, " ")`), as the file's other tests do, so a line break in the prompt text does not break them.
+- Refactoring I would do, not done here: nothing in this slice. The two prompts' rules are short and stated once each.
+
+**Validation evidence.**
+
+Case 1 — `src/daemon/prompts.test.ts` › each step is told the sentence that names the takeover command (PRD-09) › "%s holds the sentence with the command for this ticket, and names the three cases that leave it out" (each of the twelve prompted stages, project `scratch-app`, ticket 66).
+Red:
+```
+× ... > triage holds the sentence with the command for this ticket, and names the three cases that leave it out
+× ... (all twelve stages)
+AssertionError: expected 'A ticket was filed on the managed pro…' to contain '`timone takeover scratch-app#66`'
+Tests  12 failed | 228 passed (240)
+```
+After the first implementation the twelve still failed, on `expected '…' to match /terminal session on this ticket has …/i`: the prompt broke that phrase across two lines. The test was changed to flatten white space, as the file's other tests do. Green: `Tests 240 passed (240)`.
+
+Case 2 — same describe › "%s holds no placeholder in the takeover command" (twelve stages) and "holds no placeholder in the takeover command in the takeover prompt". Green on arrival: case 1's code prints the finished sentence. Proved able to fail: with the sentence in `writingBlock` changed for a moment to `` `timone takeover <project>#<n>` ``, and the takeover prompt's opening line to `` `timone takeover ${project}#<n>` ``,
+```
+× ... > triage holds no placeholder in the takeover command
+× ... (all twelve stages)
+× ... > holds no placeholder in the takeover command in the takeover prompt
+AssertionError: expected 'A ticket was filed on the managed pro…' not to match /timone takeover[^\n`]*<(project|n)>/
+Failed Tests 13
+```
+Reverted: `Tests 14 passed | 239 skipped (253)`.
+
+Case 3 — same describe › "tells delivery to end the pull request's Questions for you section with the sentence, when it holds a question".
+Red:
+```
+× ... > tells delivery to end the pull request's Questions for you section with the sentence, when it holds a question
+AssertionError: expected 'Present the finished work for ticket …' to contain 'When the pull request\'s *Questions f…'
+Tests  1 failed | 253 skipped (254)
+```
+Green: `Tests 254 passed (254)`.
+
+Case 4 — same describe › "tells a takeover session not to write the takeover command in what it posts, keeps the line naming the command it was opened by, and does not hold the sentence".
+Red (the takeover prompt still had `writingBlock(context)`, so it held the sentence and not the new rule):
+```
+× ... > tells a takeover session not to write the takeover command in what it posts, keeps the line naming the command it was opened by, and does not hold the sentence
+AssertionError: expected 'You are picking up **scratch-app #66*…' to contain 'Do not write the takeover command in …'
+Tests  1 failed | 254 skipped (255)
+```
+Green: `Tests 255 passed (255)`.
+
+Validation block:
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+$ npx vitest run src/daemon/prompts.test.ts; echo "exit: $?"
+ ✓ src/daemon/prompts.test.ts (255 tests)
+ Test Files  1 passed (1)
+      Tests  255 passed (255)
+exit: 0
+```
+
+- [x] Cases 1–4 pass, with red runs recorded above (case 2 green on arrival, proved able to fail).
+- [x] Every existing case of `prompts.test.ts` passes unchanged. The diff of `prompts.test.ts` holds only added lines (62 added, 0 removed).
+
+Other test files run at the end, for code that imports `prompts.ts` or `session.ts` (after `npm run build`): `src/commands/takeover.test.ts`, `src/commands/daemon.test.ts`, `src/daemon/session.test.ts`, `src/daemon/step-session.test.ts`, `src/daemon/container-runtime.test.ts`, `src/daemon/poll.test.ts`, and every test file under `src/runner/` and `src/planner/`: 24 files, 633 tests, all passed. `npm run replay -- --dry`: "22 of 22 cases passed."
+
+**What 53d must know.**
+
+- The exact words a step is now told, for the written rules to match: the sentence goes "on its own line just above that closing line, with a blank line between", and the three cases are "when you ask for a missing key or secret; when you ask whether a misspelled word meant approve; and when a terminal session on this ticket has just ended without settling what you ask."
+- The delivery prompt now tells the step to end the *Questions for you* section with the sentence. `.claude/skills/timone-deliver/SKILL.md` (its *Questions for you* section, around line 192) does not say so yet.

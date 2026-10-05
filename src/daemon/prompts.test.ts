@@ -1112,3 +1112,65 @@ describe("the takeover prompt for a run that stopped at a step", () => {
     expect(prompt).toContain("timone cancel scratch-app#31");
   });
 });
+
+/**
+ * PRD-09: a question names the command that answers it in a terminal. Code
+ * cannot fix a step's comment once it is posted, so each step is told the
+ * sentence word for word, with this project and this ticket already in it.
+ */
+describe("each step is told the sentence that names the takeover command (PRD-09)", () => {
+  const ticket66: TicketThread = { ...ticket, number: 66 };
+  const context66: PromptContext = { ...context, ticket: ticket66, branch: "timone/66-a-question" };
+  const sentence =
+    "You can answer here in writing, or in your terminal by running `timone takeover scratch-app#66`.";
+
+  it.each(PROMPTED_STAGES)("%s holds the sentence with the command for this ticket, and names the three cases that leave it out", (stage) => {
+    const prompt = stagePrompt(stage, context66).replace(/\s+/g, " ");
+
+    expect(prompt).toContain("`timone takeover scratch-app#66`");
+    expect(prompt).toContain(sentence);
+    expect(prompt).toMatch(/missing key or secret/i);
+    expect(prompt).toMatch(/whether a misspelled word meant approve/i);
+    expect(prompt).toMatch(/terminal session on this ticket has just ended without settling/i);
+  });
+
+  it.each(PROMPTED_STAGES)("%s holds no placeholder in the takeover command", (stage) => {
+    // R2: the command can be copied as it is, so nothing in it is left for
+    // the step to fill in.
+    const prompt = stagePrompt(stage, context66);
+
+    expect(prompt).not.toMatch(/timone takeover[^\n`]*<(project|n)>/);
+  });
+
+  it("tells delivery to end the pull request's Questions for you section with the sentence, when it holds a question", () => {
+    const prompt = stagePrompt("delivery", context66).replace(/\s+/g, " ");
+
+    expect(prompt).toContain(
+      `When the pull request's *Questions for you* section holds a question, end that section with this sentence, on its own line: ${sentence}`,
+    );
+  });
+
+  it("tells a takeover session not to write the takeover command in what it posts, keeps the line naming the command it was opened by, and does not hold the sentence", () => {
+    // A takeover session posts at the end of a terminal session, which is
+    // one of the three cases, and the person has just used the command.
+    const prompt = takeoverPrompt("scratch-app", { id: "scratch-app#66/1" }, ticket66, {
+      record: { ok: true, value: [] },
+      namedPeople: ["fvermaut"],
+    });
+    const flat = prompt.replace(/\s+/g, " ");
+
+    expect(flat).toContain("Do not write the takeover command in what you post here: the person has just used it.");
+    expect(flat).toContain("this session by running `timone takeover scratch-app#66`.");
+    expect(flat).not.toContain("You can answer here in writing");
+    expect(flat).not.toContain(sentence);
+  });
+
+  it("holds no placeholder in the takeover command in the takeover prompt", () => {
+    const prompt = takeoverPrompt("scratch-app", { id: "scratch-app#66/1" }, ticket66, {
+      record: { ok: true, value: [] },
+      namedPeople: ["fvermaut"],
+    });
+
+    expect(prompt).not.toMatch(/timone takeover[^\n`]*<(project|n)>/);
+  });
+});

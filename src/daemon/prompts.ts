@@ -4,7 +4,7 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
-import { takeoverCommand } from "../channels/terminal.js";
+import { takeoverCommand, twoWaysToAnswer } from "../channels/terminal.js";
 import { breakdownPath } from "./breakdown.js";
 import {
   stageLabel,
@@ -130,13 +130,43 @@ function reentryBlock(): string {
  * **The closing line is named in its exact words**, because it is read as
  * well as written: `askedFor` takes what a step asked for from the line that
  * starts with {@link NEEDED_FROM_YOU}, and the runner's wait says those words.
+ *
+ * ✏ 2026-10-05 (PRD-09): a step is told the sentence that names the takeover
+ * command, word for word, with this project and this ticket already in it.
+ * Code cannot fix a step's comment once it is posted, so the instruction has
+ * to carry the finished sentence, with nothing left for the step to fill in.
+ * The three cases that leave it out are the ones where the command does not
+ * help: a missing key, a word that may mean approve, and a terminal session
+ * that has just ended.
  */
-function writingBlock(): string {
+function writingBlock(context: PromptContext): string {
+  return writingRules([
+    "When a comment asks them for something, put this sentence in it word for",
+    "word, on its own line just above that closing line, with a blank line",
+    "between:",
+    "",
+    twoWaysToAnswer(context.project.name, context.ticket.number),
+    "",
+    "Leave the sentence out, and write `timone takeover` nowhere in the",
+    "comment, in three cases: when you ask for a missing key or secret; when",
+    "you ask whether a misspelled word meant approve; and when a terminal",
+    "session on this ticket has just ended without settling what you ask.",
+  ]);
+}
+
+/**
+ * The rules {@link writingBlock} and the takeover prompt share, with the rule
+ * about the takeover command that each of them needs placed after the
+ * closing-line rule.
+ */
+function writingRules(takeoverRule: readonly string[]): string {
   return [
     "Write anything you post for someone who knows nothing about this process:",
     "no stage numbers, no skill names, no process jargon.",
     `End every message to them with one line that starts with ${NEEDED_FROM_YOU}`,
     "and says what you need from them, or \"nothing\".",
+    "",
+    ...takeoverRule,
     "",
     "**Every comment you post on the ticket must start with this exact line,**",
     "followed by a blank line, `---` and a blank line, then your text. You are",
@@ -377,7 +407,7 @@ function remediationPrompt(context: PromptContext): string {
         "you found.",
     ),
     "",
-    writingBlock(),
+    writingBlock(context),
     "",
     "Then stop.",
   ].join("\n");
@@ -417,7 +447,7 @@ function updatePrompt(context: PromptContext): string {
         "with what you found.",
     ),
     "",
-    writingBlock(),
+    writingBlock(context),
     "",
     "Then stop.",
   ].join("\n");
@@ -466,7 +496,14 @@ function deliveryPrompt(context: PromptContext): string {
     "— it is read as the work being finished, and the reader loses the one",
     "place they were going to see it.",
     "",
-    writingBlock(),
+    // ✏ 2026-10-05 (PRD-09): a question carried onto the pull request names
+    // the takeover command too, with the ticket's number, not the pull
+    // request's.
+    "When the pull request's *Questions for you* section holds a question,",
+    "end that section with this sentence, on its own line:",
+    twoWaysToAnswer(context.project.name, ticket.number),
+    "",
+    writingBlock(context),
     "",
     "Then stop.",
   ].join("\n");
@@ -521,7 +558,7 @@ function verificationPrompt(context: PromptContext): string {
         "the report lives.",
     ),
     "",
-    writingBlock(),
+    writingBlock(context),
     "",
     "Then stop.",
   ].join("\n");
@@ -628,7 +665,7 @@ function executionPrompt(context: PromptContext): string {
         "both attempts, in words a person can act on.",
     ),
     "",
-    writingBlock(),
+    writingBlock(context),
     "",
     "Then stop.",
   ].join("\n");
@@ -844,7 +881,7 @@ function requirementsPrompt(context: PromptContext): string {
     "machinery posts the approval request itself, immediately after yours, and",
     "two different sets of instructions would tell them two different things.",
     "",
-    writingBlock(),
+    writingBlock(context),
     "",
     "Then stop.",
   ].join("\n");
@@ -904,7 +941,7 @@ function researchPrompt(context: PromptContext): string {
     "",
     noWorkBranchBlock(),
     "",
-    writingBlock(),
+    writingBlock(context),
     "",
     "Then stop.",
   ].join("\n");
@@ -959,7 +996,7 @@ function triagePrompt(context: PromptContext): string {
     "",
     noWorkBranchBlock(),
     "",
-    writingBlock(),
+    writingBlock(context),
     "",
     "Then stop. Whatever should happen next is started for you once the",
     "classification is on the ticket.",
@@ -1014,7 +1051,7 @@ function clarificationPrompt(context: PromptContext): string {
     "",
     noWorkBranchBlock(),
     "",
-    writingBlock(),
+    writingBlock(context),
   ].join("\n");
 }
 
@@ -1074,7 +1111,7 @@ function wayfindingPrompt(context: PromptContext): string {
     "",
     noWorkBranchBlock(),
     "",
-    writingBlock(),
+    writingBlock(context),
   ].join("\n");
 }
 
@@ -1173,7 +1210,7 @@ function breakdownPrompt(context: PromptContext): string {
     "itself, immediately after yours, and two sets of instructions would tell",
     "them two different things.",
     "",
-    writingBlock(),
+    writingBlock(context),
     "",
     "Then stop.",
   ].join("\n");
@@ -1232,7 +1269,7 @@ function planningPrompt(context: PromptContext): string {
         "can act on.",
     ),
     "",
-    writingBlock(),
+    writingBlock(context),
     "",
     "Then stop.",
   ].join("\n");
@@ -1388,7 +1425,13 @@ export function takeoverPrompt(
     `timone cancel ${project}#${ticket.number}`,
     "```",
     "",
-    writingBlock(),
+    // ✏ 2026-10-05 (PRD-09): not the sentence every step is told. What this
+    // session posts comes at the end of a terminal session, which is one of
+    // the cases that leave the command out.
+    writingRules([
+      "Do not write the takeover command in what you post here: the person has",
+      "just used it.",
+    ]),
     "",
     checkoutBlock(context),
     "",
