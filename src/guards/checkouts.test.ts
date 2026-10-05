@@ -126,6 +126,10 @@ const GIT_USERS: Record<string, string> = {
     "`STATUS.md` and the registers (ADR-0064). It runs `git merge-file` on " +
     "three temporary files it writes itself, in a temporary folder it " +
     "removes. It opens no repository and reads no checkout.",
+  "commands/guardrails.ts":
+    "`guardrails pre-push` asks git, read-only, about the clone the hook " +
+    "runs in, on the first push of a work branch, to find commits of " +
+    "another ticket's branch (49c, ADR-0065 D6).",
 };
 
 /** Every `.ts` file under `src`, excluding tests, as paths relative to `src`. */

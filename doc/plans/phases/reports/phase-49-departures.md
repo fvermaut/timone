@@ -29,3 +29,17 @@
 **Agreed:** 49b changes `src/daemon/steps.ts`, `src/daemon/poll.ts` and their two test files, and no code uses `nextStep` afterwards.
 **Did instead:** `src/daemon/chunk-zero.test.ts` also changed: its one case that called `nextStep` now checks that step 11 is among `eligibleSteps`. The phase file grants this file to 49b, with a marked amendment.
 **Why:** that test file imported `nextStep`, so the type check failed and the plan's own grep found it. The case still checks what it checked: piece 1's step ticket is free to be taken.
+
+## 2026-10-05 — timone#203, build
+
+**Kind:** plan step
+**Agreed:** 49c changes `src/daemon/push-guard.ts`, `src/commands/guardrails.ts` and their tests.
+**Did instead:** `src/guards/checkouts.test.ts` also changed: its list of files that run git (`GIT_USERS`) now names `commands/guardrails.ts`, with the reason. The phase file grants this file to 49c, with a marked amendment. The change is its own commit, after 49c's.
+**Why:** `guardrails pre-push` now asks git about the branch it pushes. That test fails when a file runs git and is not on its list. 49c's own checks did not run that test; 49d's checks found it.
+
+## 2026-10-05 — timone#203, build
+
+**Kind:** plan step
+**Agreed:** 49d adds two kinds of run record entry and changes the files its list names.
+**Did instead:** `src/daemon/prompts.ts` also changed: `recordLine` writes no line for the two new kinds, as for `runner-ended`. The phase file grants this file to 49d, with a marked amendment.
+**Why:** `recordLine` must cover every kind of entry, and the type check failed without it.
