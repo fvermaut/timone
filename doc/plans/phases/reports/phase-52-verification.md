@@ -272,3 +272,43 @@ None: the phase claims no criterion, PRD-08.R5 was already `verified`, and BLOCK
 ## Carried forward
 
 Eight regression criteria are BLOCKED: PRD-05.R2, R3, R4, R5, R7, R10 and R11 because this container refuses their fixtures' pushes to `main`, and PRD-05.R18 because the replay on this build has not been run. The evidence is under *Evidence*; the departures record [`phase-52-departures.md`](phase-52-departures.md) has the entry. They can be run outside the container with `npm run build && node doc/plans/phases/probes/run.mjs --regression` from a clone of this branch, and `npm run --silent replay` from a logged-in terminal. The wrong sentence in `README.md` line 96 is carried to the pull request.
+
+## Iteration 2 — 2026-10-05: the corrected sentence in `README.md`
+
+- **Branch:** `timone/219-the-places-setting-is-not-documented` @ `7662438`.
+- **Scope:** only the sentence the first iteration found wrong, as the runner asked. The regression set was not run again: its eight BLOCKED criteria still cannot run in this container ([timone#220](https://github.com/fvermaut/timone/issues/220)), and the fix changed no program file, so it can affect none of the nine. The whole test suite was not run.
+
+**Read:** the runner's instructions; `README.md` line 96; `doc/plans/phases/phase-52.md` lines 1–5; `phase-52-complete.md` lines 30–40; the register blocks of PRD-07.R6 and PRD-05.R10; this report's lines 1–9, 98–113 and 252–274, to append to it; `phase-52-departures.md` lines 19–40; `STATUS.md`. **Not read:** `src/manifest.ts` or any other source, the contents of commit `7662438`, handoffs, ADRs, the test suite. The runner asked for the sentence to be checked against `namedPeople` in `src/manifest.ts`. It was checked against what `namedPeople` returns when called, not against its code, for the reason the departures record already gives.
+
+### The sentence against the register and the program
+
+`README.md` line 96 now says: *"A named person can write on the ticket, in plain words, that it should build now: someone in the project's `instructors`, or the `operator` when the project lists no `instructors`."*
+
+- **The register.** PRD-07.R6 clause 2 lets "a named person" overrule, and its hint says the rule is the one of PRD-05.R10. PRD-05.R10 clause 2: *"GIVEN a project with no one named in `timone.yaml` … THEN the operator is the one named person."* The sentence says the same. It matches line 90 of the same file.
+- **The program.** `namedPeople(manifest, project)` imported from `src/manifest.ts` with `npx tsx` and called with five made-up manifests, operator `opr`:
+
+  ```
+  instructors [alice], operator opr        => ["alice"]
+  instructors [alice, opr], operator opr   => ["alice","opr"]
+  no instructors, operator opr             => ["opr"]
+  instructors [], operator opr             => []
+  no instructors, no operator              => []
+  ```
+
+  The first three are what the sentence says. An empty `instructors: []` gives nobody, but `parseManifest` refuses it ("field "instructors": must name at least one person"), so no loaded `timone.yaml` can reach that case. With neither field, nobody is named, and line 90 already says the daemon does not start then.
+
+**Outcome: the sentence is correct.**
+
+### What commit `7662438` changed
+
+Checked without reading its contents: `git show --numstat` names two files, `README.md` (1 line in, 1 out) and `doc/plans/phases/reports/phase-52-complete.md` (1 line in). `git blame` gives `7662438` exactly one line in each: `README.md` line 96, the paragraph above, and `phase-52-complete.md` line 38, the deviation entry that records the correction. No later commit is on the branch.
+
+**Outcome: the commit changed nothing else.**
+
+### Register changes
+
+None: the phase claims no criterion, and nothing was re-run.
+
+### Carried forward
+
+The wrong sentence is no longer carried to the pull request. The eight BLOCKED regression criteria of the first iteration are still carried, unchanged, with their entry in [`phase-52-departures.md`](phase-52-departures.md).
