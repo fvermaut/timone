@@ -76,6 +76,7 @@ The rest of the piece is small and code-only: `places` in `timone.yaml` (absent 
 **[MODIFY]** `src/runner/session.ts` — `placeOf` reads `deps.store.placesOf(run.project)`.
 **[MODIFY]** `src/commands/daemon.ts`, `src/commands/cancel.ts`, `src/commands/takeover.ts`, `src/commands/status.ts`, `src/commands/guardrails.ts` — each `RunStore.open` passes `placesOf: (name) => placesOf(<the project's config>)` from the manifest it already loads (or loads it, where it does not).
 **[MODIFY]** `src/manifest.test.ts`, `src/daemon/runs.test.ts`, `src/runner/session.test.ts` — cases below.
+**[MODIFY]** `src/commands/status.test.ts`, `src/runner/actions.test.ts`, `src/runner/driver.test.ts`, `src/daemon/poll.test.ts` — their store helpers open with `placesOf: () => 1`, as case 3 says of phase 47's cases; nothing else in them changes. ✏ 2026-10-05 (build, timone#203): added. Phase 47's one-place cases also live in these four files, and 14 of them failed with two places by default; case 3 names the change but the file list left them out.
 
 **Seams under test (TDD):** `parseManifest` / `placesOf` for the key; `RunStore`'s public methods over a temporary state file for the count, since the ledger is the one writer and the place rule lives there. Red-green:
 1. A project entry without `places`: `placesOf` answers 2 (R2 clause 1). With `places: 3`: 3 (clause 2). `places: 0`, `places: 1.5` and `places: "2"` are refused with a message naming the key.

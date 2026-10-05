@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
-import { loadManifest, ticketLimitOf, type Manifest } from "../manifest.js";
+import { loadManifest, placesIn, ticketLimitOf, type Manifest } from "../manifest.js";
 import {
   fromDefaultBranch,
   type SyncBreakdownSource,
@@ -577,7 +577,7 @@ export function registerStatusCommand(program: Command): void {
       let runs: Run[];
       let store: RunStore;
       try {
-        store = RunStore.open(statePath);
+        store = RunStore.open(statePath, { placesOf: placesIn(manifest) });
         runs = store.all();
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));

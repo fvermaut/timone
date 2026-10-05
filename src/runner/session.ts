@@ -18,7 +18,7 @@ import { technicalFault } from "../daemon/faults.js";
 import { apiErrorFrom } from "../daemon/session.js";
 import { askedFor } from "../daemon/outcomes.js";
 import { SessionProgress } from "../daemon/progress.js";
-import { PLACES_PER_PROJECT, type Run, type RunStatus } from "../daemon/runs.js";
+import type { Run, RunStatus } from "../daemon/runs.js";
 import { HELD_LABEL } from "../daemon/steps.js";
 import {
   runnerActions,
@@ -606,14 +606,17 @@ async function briefFor(
 /**
  * The project's place as `run` sees it, read from the ledger now
  * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)):
- * given to it, free, or taken. A taken place names the run given it, when
- * one is, and else the run whose step runs.
+ * given to it, free, or taken. It is free while fewer runs take a place than
+ * the project has places (PRD-07.R2). A taken place names the run given it,
+ * when one is, and else the run whose step runs.
  */
 function placeOf(deps: RunnerActionDeps, run: Run): PlaceFact {
   if (deps.store.get(run.id)?.place?.givenAt !== undefined) return { kind: "given" };
   const holders = deps.store.placeHolders(run.project);
   const holder = holders.find((one) => one.place?.givenAt !== undefined) ?? holders[0];
-  if (holder === undefined || holders.length < PLACES_PER_PROJECT) return { kind: "free" };
+  if (holder === undefined || holders.length < deps.store.placesOf(run.project)) {
+    return { kind: "free" };
+  }
   return holder.place?.givenAt !== undefined
     ? { kind: "given-to", to: holder.id }
     : { kind: "taken", by: holder.id };

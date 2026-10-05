@@ -1,0 +1,24 @@
+# Phase 49 — Departures
+
+> One entry per departure from the plan, appended in order, never rewritten. Format per the build stage's departures record.
+
+## 2026-10-05 — timone#203, build
+
+**Kind:** check not run
+**Agreed:** each sub-phase ends by running the tests its change can affect and every suite that takes under a minute, whole. The whole suite takes under a minute (3.8 s before the first slice), so each sub-phase would run it whole.
+**Did instead:** each sub-phase runs its own validation steps and the test files its change can affect. The whole suite runs once, at the close of the phase.
+**Why:** the runner's instructions for this step ask for exactly that: "While you work, run only the tests of what you change; run the whole test suite once at the end."
+
+## 2026-10-05 — timone#203, build
+
+**Kind:** check not run
+**Agreed:** 49d and 49f end with `npm run replay`, PRD-05.R18's replay set, expected to pass.
+**Did instead:** `npm run replay` is not counted. Before the first slice it was run: all 19 cases failed with "Not logged in · Please run /login", because this container has no model login. The replay's own test file, `src/runner/replay/harness.test.ts`, and the type check run instead, and the pull request lists the replay set as a check not run.
+**Why:** the replay set asks a model for each case. Nothing in this container can log in to one. The operator can run it on their machine.
+
+## 2026-10-05 — timone#203, build
+
+**Kind:** plan step
+**Agreed:** 49a changes `src/manifest.test.ts`, `src/daemon/runs.test.ts` and `src/runner/session.test.ts`; case 3 says phase 47's one-place cases open their store with `placesOf: () => 1`.
+**Did instead:** the store helpers of `src/commands/status.test.ts`, `src/runner/actions.test.ts`, `src/runner/driver.test.ts` and `src/daemon/poll.test.ts` also open with `placesOf: () => 1`. The phase file grants these files to 49a, with a marked amendment.
+**Why:** phase 47's one-place cases are in those four files too. With two places by default, 14 of them failed. Case 3 already decides the change; only the file list left them out.

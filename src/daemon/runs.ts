@@ -9,6 +9,7 @@ import {
   type Holder,
   type Liveness,
 } from "./holder.js";
+import { DEFAULT_PLACES } from "../manifest.js";
 import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
 
 /**
@@ -43,14 +44,6 @@ export type RunStatus =
  * see {@link RunStore}.
  */
 const RUNNING: readonly RunStatus[] = ["picked-up", "active"];
-
-/**
- * How many places each project has: how many of its runs may have a step
- * running at once
- * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
- * D1). One until the number of places is read from `timone.yaml`.
- */
-export const PLACES_PER_PROJECT = 1;
 
 /**
  * A run refused `active` because every place on its project is taken
@@ -545,6 +538,12 @@ export interface RunStoreOptions {
    * whatever the runner's pid table happens to hold asserts nothing.
    */
   livenessOf?: (holder: Holder) => Liveness;
+  /**
+   * How many places a project has: how many of its runs may have a step
+   * running at once (PRD-07.R2, ADR-0065 D6). The caller reads it from
+   * `timone.yaml`. Absent means `DEFAULT_PLACES` for every project.
+   */
+  placesOf?: (project: string) => number;
 }
 
 /** Default state-file location, relative to the timone root. */
@@ -583,8 +582,8 @@ export interface ParkOptions {
  *   place is given to it and not yet used.** Nothing else takes one: not a
  *   work branch, not an open pull request, not a wait for a person, not a run
  *   just picked up, not a terminal a person opened with `timone takeover`. A
- *   project has {@link PLACES_PER_PROJECT} places, and a run may enter
- *   `active` only while one is free or given to it.
+ *   project has the number of places {@link placesOf} answers, and a run
+ *   may enter `active` only while one is free or given to it.
  * - **A run refused a place waits for one, and a freed place is given to one
  *   waiting run in the same write that freed it**: a ticket labelled
  *   `priority:high` first, then the ticket opened first on the forge, then
@@ -605,13 +604,23 @@ export class RunStore {
     private state: State,
     private readonly now: () => string,
     private readonly livenessOf: (holder: Holder) => Liveness,
+    private readonly places: (project: string) => number,
   ) {}
 
   /** Open the store at `path`, starting empty when the file does not exist. */
   static open(path: string, options: RunStoreOptions = {}): RunStore {
     const now = options.now ?? (() => new Date().toISOString());
     const livenessOf = options.livenessOf ?? ((holder) => holderLiveness(holder));
-    return new RunStore(path, readState(path), now, livenessOf);
+    const places = options.placesOf ?? (() => DEFAULT_PLACES);
+    return new RunStore(path, readState(path), now, livenessOf, places);
+  }
+
+  /**
+   * How many places `project` has: how many of its runs may have a step
+   * running at once (PRD-07.R2, ADR-0065 D6).
+   */
+  placesOf(project: string): number {
+    return this.places(project);
   }
 
   /**
@@ -1391,8 +1400,10 @@ export class RunStore {
 
   /**
    * The run that keeps `run` from a place, or undefined when it may take one:
-   * {@link PLACES_PER_PROJECT} other runs of its project take a place, or a
-   * place is given to another run. Over the state already in hand.
+   * as many other runs of its project take a place as it has places
+   * ({@link placesOf}). A place given to another run counts as taken. The
+   * run named is the one a place is given to, when there is one, and else
+   * the first whose step runs. Over the state already in hand.
    */
   private placeTakenFrom(run: Run): Run | undefined {
     const others = this.state.runs.filter(
@@ -1400,7 +1411,7 @@ export class RunStore {
     );
     const taking = others.filter(takesPlace);
     const given = others.find((other) => other.place?.givenAt !== undefined);
-    if (taking.length < PLACES_PER_PROJECT && given === undefined) return undefined;
+    if (taking.length < this.places(run.project)) return undefined;
     return given ?? taking[0];
   }
 
@@ -1415,7 +1426,7 @@ export class RunStore {
       const taking = this.state.runs.filter(
         (run) => run.project === project && takesPlace(run),
       );
-      if (taking.length >= PLACES_PER_PROJECT) return;
+      if (taking.length >= this.places(project)) return;
       const first = this.loadedWaitingForPlace(project)[0];
       if (first?.place === undefined) return;
       first.place.givenAt = this.now();

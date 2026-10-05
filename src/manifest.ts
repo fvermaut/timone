@@ -62,6 +62,14 @@ const projectConfigSchema = z.strictObject({
    * {@link ticketLimitOf}.
    */
   ticket_limit_usd: z.number().positive("must be more than 0").optional(),
+  /**
+   * How many places this project has: how many of its tickets may have a
+   * step running at once
+   * ([PRD-07.R2](../doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.criteria.md),
+   * [ADR-0065](../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+   * D6). Absent means `DEFAULT_PLACES`, read through {@link placesOf}.
+   */
+  places: z.number().int().min(1, "must be 1 or more").optional(),
 });
 
 /**
@@ -172,6 +180,33 @@ export function namedPeople(manifest: Manifest, name: string): string[] {
  */
 export function ticketLimitOf(config: ProjectConfig): number {
   return config.ticket_limit_usd ?? DEFAULT_LIMIT_USD;
+}
+
+/**
+ * How many places a project has when its entry sets none (PRD-07.R2 clause 1,
+ * ADR-0065 D6).
+ */
+export const DEFAULT_PLACES = 2;
+
+/**
+ * How many places this project has: how many of its runs may have a step
+ * running at once (PRD-07.R2, ADR-0065 D6).
+ */
+export function placesOf(config: ProjectConfig): number {
+  return config.places ?? DEFAULT_PLACES;
+}
+
+/**
+ * {@link placesOf} for each project of `manifest`, by its name: what every
+ * command that opens the ledger tells it. A project the manifest no longer
+ * has gets `DEFAULT_PLACES`, so a run of a project removed from `timone.yaml`
+ * can still be read and ended.
+ */
+export function placesIn(manifest: Manifest): (project: string) => number {
+  return (project) => {
+    const config = manifest.projects[project];
+    return config === undefined ? DEFAULT_PLACES : placesOf(config);
+  };
 }
 
 /** Walk `data` along `path`, returning undefined if any step is missing. */

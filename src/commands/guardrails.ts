@@ -17,7 +17,7 @@ import {
   type ReportTarget,
   type Violation,
 } from "../daemon/hooks.js";
-import { loadManifest, type Manifest } from "../manifest.js";
+import { DEFAULT_PLACES, loadManifest, placesIn, type Manifest } from "../manifest.js";
 import {
   probeGuardDecision,
   type ProbeGuardDecision,
@@ -385,6 +385,20 @@ export function appendJournal(root: string, line: string): void {
   appendFileSync(path, `${line}\n`, "utf8");
 }
 
+/**
+ * How many places each project has, for the ledger the guard opens
+ * (PRD-07.R2). The guard only reads the ledger, so a manifest it cannot read
+ * gives every project `DEFAULT_PLACES` rather than an error: an error would
+ * switch the guard off for the whole session.
+ */
+function placesForGuard(manifestPath: string): (project: string) => number {
+  try {
+    return placesIn(loadManifest(manifestPath));
+  } catch {
+    return () => DEFAULT_PLACES;
+  }
+}
+
 /** Register the `guardrails` command on the program. */
 export function registerGuardrailsCommand(program: Command): void {
   const guardrails = program
@@ -442,7 +456,7 @@ export function registerGuardrailsCommand(program: Command): void {
       .description(
         "Refuse a build run the verifier's probes, and a run what switches off its push guard (PreToolUse hook)",
       ),
-  ).action(async (options: { root: string; state?: string }) => {
+  ).action(async (options: { root: string; manifest: string; state?: string }) => {
     // Same posture as the other two: nothing here may fail a session. A guard
     // that throws blocks every tool call in every session, which is a far
     // worse outcome than the leak it is watching for.
@@ -456,7 +470,7 @@ export function registerGuardrailsCommand(program: Command): void {
           : resolve(options.state);
       const reply = runGuard({
         root,
-        store: RunStore.open(statePath),
+        store: RunStore.open(statePath, { placesOf: placesForGuard(resolve(root, options.manifest)) }),
         sessionId: payload.session_id,
         env: process.env,
         toolName: payload.tool_name,
@@ -584,10 +598,11 @@ export function registerGuardrailsCommand(program: Command): void {
           ? defaultStatePath(root)
           : resolve(options.state);
 
+      const manifest = loadManifest(resolve(root, options.manifest));
       const outcome = await runCheck({
         root,
-        manifest: loadManifest(resolve(root, options.manifest)),
-        store: RunStore.open(statePath),
+        manifest,
+        store: RunStore.open(statePath, { placesOf: placesIn(manifest) }),
         sessionId: payload.session_id,
         env: process.env,
         print: (message) => console.log(message),

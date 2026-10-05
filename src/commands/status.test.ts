@@ -1075,11 +1075,16 @@ describe("renderStatus — the runs the old code left in the ledger", () => {
 });
 
 describe("renderStatus — the tickets that wait for a place (ADR-0063)", () => {
-  /** A ledger in a temporary folder, read and written as the daemon does. */
+  /**
+   * A ledger in a temporary folder, read and written as the daemon does, with
+   * one place on the project. ✏ 2026-10-05: these cases were written when
+   * every project had one place (ADR-0063 D1); a project now has two unless
+   * `timone.yaml` sets another number (PRD-07.R2).
+   */
   function ledger(): RunStore {
     const root = mkdtempSync(join(tmpdir(), "timone-status-"));
     tempDirs.push(root);
-    return RunStore.open(join(root, ".timone", "state.json"));
+    return RunStore.open(join(root, ".timone", "state.json"), { placesOf: () => 1 });
   }
 
   /** A run of scratch-app whose step runs, so it takes the project's place. */

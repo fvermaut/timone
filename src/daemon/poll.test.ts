@@ -74,7 +74,12 @@ afterEach(() => {
   }
 });
 
-/** A store over a fresh state file with a deterministic clock. */
+/**
+ * A store over a fresh state file with a deterministic clock, and one place
+ * on every project: the cases here were written when every project had one
+ * (ADR-0063 D1). ✏ 2026-10-05: a project now has two unless `timone.yaml`
+ * sets another number (PRD-07.R2).
+ */
 function newStore(): RunStore {
   const dir = mkdtempSync(join(tmpdir(), "timone-poll-"));
   tempDirs.push(dir);
@@ -90,6 +95,7 @@ function newStore(): RunStore {
   let tick = 0;
   return RunStore.open(join(dir, ".timone", "state.json"), {
     now: () => `2026-08-02T10:00:${String(tick++).padStart(2, "0")}Z`,
+    placesOf: () => 1,
   });
 }
 

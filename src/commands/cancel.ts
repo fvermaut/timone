@@ -5,7 +5,7 @@ import type { Command } from "commander";
 
 import { MARK_LABEL, type TicketingAdapter } from "../adapters/ticketing.js";
 import { GitHubTicketingAdapter } from "../adapters/github-tickets.js";
-import { loadManifest, type Manifest } from "../manifest.js";
+import { loadManifest, placesIn, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath } from "../daemon/runs.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock, type LockHolder } from "../daemon/lock.js";
@@ -336,7 +336,7 @@ export function registerCancelCommand(program: Command): void {
 
         let store: RunStore;
         try {
-          store = RunStore.open(statePath);
+          store = RunStore.open(statePath, { placesOf: placesIn(manifest) });
         } catch (error) {
           console.error(error instanceof Error ? error.message : String(error));
           process.exitCode = 1;

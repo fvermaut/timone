@@ -1744,6 +1744,10 @@ function choreTicket(labels: string[] = []): TicketThread {
  * So the ledger refuses a step for want of a place as it does in the daemon.
  * `beforeClaim` runs between the action's ask and the claim, for a place
  * taken in between.
+ *
+ * ✏ 2026-10-05: the project has one place, as every project did when these
+ * cases were written (ADR-0063 D1). A project now has two unless
+ * `timone.yaml` sets another number (PRD-07.R2).
  */
 function placeWorld(
   ticket: TicketThread,
@@ -1752,7 +1756,7 @@ function placeWorld(
 ) {
   const root = mkdtempSync(join(tmpdir(), "timone-actions-"));
   tempDirs.push(root);
-  const store = RunStore.open(join(root, ".timone", "state.json"));
+  const store = RunStore.open(join(root, ".timone", "state.json"), { placesOf: () => 1 });
   const { run: registered } = store.register(PROJECT.name, 12);
   const run = store.park(registered.id, {
     waitingOn: "the next thing that happens on this ticket",

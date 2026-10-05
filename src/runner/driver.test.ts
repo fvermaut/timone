@@ -563,13 +563,17 @@ describe("RunnerDriver — a place on the project is given to one waiting run (A
    * The driver over them, whose steps claim the run as `startStepSession`
    * does. `clock.now` is the time the ledger and the driver write. The
    * tickets numbered in `held` are held by a person.
+   *
+   * ✏ 2026-10-05: the project has one place, as every project did when these
+   * cases were written (ADR-0063 D1). A project now has two unless
+   * `timone.yaml` sets another number (PRD-07.R2).
    */
   function threeRuns({ held = [] }: { held?: readonly number[] } = {}) {
     const root = mkdtempSync(join(tmpdir(), "timone-driver-place-"));
     tempDirs.push(root);
     const clock = { now: "2026-09-29T10:00:00Z" };
     const path = join(root, ".timone", "state.json");
-    const store = RunStore.open(path, { now: () => clock.now });
+    const store = RunStore.open(path, { now: () => clock.now, placesOf: () => 1 });
     const first = store.activate(store.register("scratch-app", 11).run.id, "step-session-11");
     const newer = store.park(store.register("scratch-app", 14).run.id, RUNNER_WAIT);
     const older = store.park(store.register("scratch-app", 13).run.id, RUNNER_WAIT);
@@ -710,7 +714,7 @@ describe("RunnerDriver — a place on the project is given to one waiting run (A
     // The daemon stops before #13's runner has used the place, and starts
     // again an hour later. No wake survives the stop.
     w.clock.now = "2026-09-29T11:00:00Z";
-    const store = RunStore.open(w.path, { now: () => w.clock.now });
+    const store = RunStore.open(w.path, { now: () => w.clock.now, placesOf: () => 1 });
     store.regivePlaces();
     await w.cycle(w.driverOver(store));
 

@@ -5,7 +5,7 @@ import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
-import { loadManifest, namedPeople, type Manifest } from "../manifest.js";
+import { loadManifest, namedPeople, placesIn, type Manifest } from "../manifest.js";
 import {
   checkoutVersion,
   isCommitOnRemote,
@@ -628,7 +628,7 @@ export function registerDaemonCommand(program: Command): void {
 
       let store: RunStore;
       try {
-        store = RunStore.open(statePath);
+        store = RunStore.open(statePath, { placesOf: placesIn(manifest) });
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
