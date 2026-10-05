@@ -16,8 +16,15 @@ export const PROBE_DIRECTORIES = [
 /** Stages that write application code, and so must not see what checks it. */
 const BUILD_STAGES: readonly PipelineStage[] = ["execution", "remediation"];
 
-/** The stage that owns the probes and does the reading and writing. */
-const OWNING_STAGE: PipelineStage = "verification";
+/**
+ * The stages that run the checks, and so may read the probes. Verification
+ * owns them and writes them. The update runs them after it brings a branch
+ * level with the default branch
+ * ([ADR-0066](../../doc/adr/0066-the-update-is-a-step-the-runner-starts-when-an-open-pull-request-falls-behind.md)
+ * D4); the fix context it hands a failure to is kept out by its brief, not
+ * by this hook, as the check's own fix context is.
+ */
+const CHECKING_STAGES: readonly PipelineStage[] = ["verification", "update"];
 
 /**
  * Every string anywhere in a tool's input.
@@ -94,15 +101,16 @@ export function probeGuardDecision(
     };
   }
 
-  if (input.stage === OWNING_STAGE) {
+  if (input.stage !== undefined && CHECKING_STAGES.includes(input.stage)) {
+    const name = input.stage.charAt(0).toUpperCase() + input.stage.slice(1);
     return {
       permissionDecision: "allow",
-      permissionDecisionReason: `Verification owns ${where}.`,
+      permissionDecisionReason: `${name} runs the checks kept in ${where}, so it may read them.`,
     };
   }
 
-  // Neither a builder nor the owner: an interactive session, or a stage that
-  // does neither job. Asking is right where denying would be wrong — these
+  // Neither a builder nor a stage that runs the checks: an interactive
+  // session, or a stage that does neither job. Asking is right where denying would be wrong — these
   // are the human's own files, and a hook that refused them to the person who
   // owns the repository would be a bug wearing a guardrail's clothes.
   return {

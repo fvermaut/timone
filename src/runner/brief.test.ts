@@ -561,6 +561,30 @@ describe("the runner's rule that a run waits on its pull request", () => {
   });
 });
 
+describe("the runner's rule for a branch behind the default branch (ADR-0066 D2)", () => {
+  it("starts the update when told, with no step running, even while the pull request waits for review, and starts nothing more after it", () => {
+    const rule = actRule("behind the default branch");
+
+    expect(rule).toContain(
+      "When you are told that the ticket's branch is behind the default branch, and no step is running, start the update.",
+    );
+    expect(rule).toContain("Start it even while the pull request waits for review.");
+    expect(rule).toContain(
+      "When it ends, start nothing more for it: the top of the pull request says what a person needs to know.",
+    );
+    expect(rule).toContain("When the default branch moves again, you are told again.");
+  });
+
+  it("comes after the rule on a run that waits on its pull request", () => {
+    const rules = actRules();
+    const waits = rules.findIndex((line) => line.includes("waits on its pull request"));
+    const behind = rules.findIndex((line) => line.includes("behind the default branch"));
+
+    expect(waits).toBeGreaterThan(-1);
+    expect(behind).toBe(waits + 1);
+  });
+});
+
 describe("the runner's rule for a key missing where a step runs", () => {
   it("says a missing key is added to the project's environment file beside the daemon, that the next step reads it, and that a terminal session cannot add it", () => {
     const rule = stopRule("a key or secret is missing");

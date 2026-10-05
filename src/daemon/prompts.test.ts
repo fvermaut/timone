@@ -518,6 +518,33 @@ describe("the remediation prompt", () => {
   });
 });
 
+describe("the update prompt (ADR-0066 D2)", () => {
+  const prompt = stagePrompt("update", {
+    ...context,
+    branch: "timone/6-typing-in-the-box",
+  });
+
+  it("stays on the pull request's own branch", () => {
+    expect(prompt).toContain("**Stay on the branch `timone/6-typing-in-the-box`**");
+  });
+
+  it("follows the update instructions in the skill's file", () => {
+    expect(prompt).toContain(".claude/skills/timone-update/SKILL.md");
+  });
+
+  it("merges the default branch in, and never rebases, force-pushes or merges the pull request", () => {
+    expect(prompt).toContain(
+      "Merge the default branch into the branch; never rebase, never force-push, and never merge the pull request.",
+    );
+  });
+
+  it("carries the obligations every step owes: the trailer and the repository its git commands act on", () => {
+    expect(prompt).toContain("Timone-Stage: update");
+    expect(prompt).toContain("Timone-Run: scratch-app#6");
+    expect(prompt).toContain("git -C projects/scratch-app");
+  });
+});
+
 describe("every unattended work prompt", () => {
   // The stages that do real work with nobody at the keyboard. A session that
   // ends its turn "waiting to be notified" of background work simply ends —

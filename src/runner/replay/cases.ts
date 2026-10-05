@@ -13,6 +13,7 @@ import { runId } from "../../daemon/runs.js";
 import { HELD_LABEL } from "../../daemon/steps.js";
 import type { TimoneIssue } from "../brief.js";
 import {
+  behindEvent,
   CHECK_EVENT,
   commentEvent,
   DAEMON_STOPPED_EVENT,
@@ -30,7 +31,7 @@ import type { Call, Seen, Verdict } from "./recording.js";
 
 /**
  * The replay set of PRD-05 R18: the failures recorded between steps from 5
- * to 26 September, and four other cases, each set up as the moment it names.
+ * to 26 September, and five other cases, each set up as the moment it names.
  *
  * **These cases are the specification of the runner, not a test of it.** When
  * a case fails, what changes is the runner's brief or its rules, never the
@@ -523,7 +524,7 @@ function endRunCall(closeTicket: boolean, reason: string): ToolCall {
 }
 
 // ---------------------------------------------------------------------------
-// The nineteen cases
+// The twenty cases
 // ---------------------------------------------------------------------------
 
 /**
@@ -2651,6 +2652,136 @@ function aBuildThatRunsTheWholeSuiteAgain(): ReplayCase {
   };
 }
 
+/**
+ * #202 (PRD-07.R7, ADR-0066 D2). Another pull request of the project merged,
+ * and this run's open pull request, which nobody has reviewed yet, is now
+ * behind the default branch.
+ */
+function anOpenPullRequestBehindTheDefaultBranch(): ReplayCase {
+  const project = "scratch-app";
+  const title = "Sort the tasks by due date";
+  const branch = branchOf(61, title);
+  const run = runId(project, 61, 1);
+  const pr = 66;
+  const prUrl = `https://github.com/fvermaut/${project}/pull/${pr}`;
+  const reports = "doc/plans/phases/reports";
+  const mainHead = "9d3e5f7a1b2c4d6e8f0a2b4c6d8e0f1a3b5c7d9e";
+  return {
+    issues: ["#202"],
+    happened: "Another pull request of the project merged. This run's open pull request is now 3 commits behind the default branch.",
+    mustDo: "Start the update, and ask nobody for anything.",
+    moment: {
+      project,
+      ticket: ticketOf(project, 61, {
+        title,
+        body: "Add a button above the task list that sorts the tasks by due date, the earliest first.",
+        labels: ["timone", "triage:chore"],
+        createdAt: "2026-10-02T08:58:00Z",
+        comments: [
+          sorted("2026-10-02T09:03:50Z", "It is a chore: one button above the list. I will prepare the work next."),
+          planned("2026-10-02T09:20:40Z", blob(project, branch, "doc/plans/phases/phase-20.md"), "phase-20.md", "It has one slice."),
+          built("2026-10-02T10:40:30Z", blob(project, branch, `${reports}/phase-20-complete.md`), "phase-20-complete.md", "The slice is done, and all tests pass."),
+          checked("2026-10-02T11:30:30Z", blob(project, branch, `${reports}/phase-20-verification.md`), "phase-20-verification.md", "All 3 checks pass."),
+          delivered("2026-10-02T11:50:40Z", pr, prUrl, "All 3 checks pass, and the default order was followed."),
+        ],
+      }),
+      run: { status: "parked", stage: "delivery", waitingOn: "review the pull request.", branch, pr },
+      record: [
+        ...stepRun(run, {
+          stage: "triage",
+          session: "4b7e9a21-triage",
+          at: "2026-10-02T09:00:40Z",
+          woken: NEW_TICKET_EVENT,
+          instructions: "Sort this request.",
+          reason: "A new ticket. Sorting it comes first in every order.",
+          ended: { at: "2026-10-02T09:04:00Z", costUsd: 0.33 },
+        }),
+        ...stepRun(run, {
+          stage: "planning",
+          session: "8c2d5f10-planning",
+          at: "2026-10-02T09:04:10Z",
+          woken: stepEndedEvent("triage", { ok: true }),
+          instructions: "Prepare the work for the sort button.",
+          reason: "The request is sorted as a chore. Preparing the work is next in its order.",
+          ended: { at: "2026-10-02T09:21:00Z", costUsd: 1.3 },
+        }),
+        ...stepRun(run, {
+          stage: "execution",
+          session: "e5a9c3b7-execution",
+          at: "2026-10-02T09:21:10Z",
+          woken: stepEndedEvent("planning", { ok: true }),
+          instructions: "Build the plan in doc/plans/phases/phase-20.md.",
+          reason: "The plan is pushed. Building is next.",
+          ended: { at: "2026-10-02T10:41:00Z", costUsd: 4.8 },
+        }),
+        ...stepRun(run, {
+          stage: "verification",
+          session: "1f6b8d42-verification",
+          at: "2026-10-02T10:41:10Z",
+          woken: stepEndedEvent("execution", { ok: true }),
+          instructions: "Check the work against the plan and the ticket.",
+          reason: "The build is finished. Checking it is next.",
+          ended: { at: "2026-10-02T11:31:00Z", costUsd: 2.4 },
+        }),
+        ...stepRun(run, {
+          stage: "delivery",
+          session: "7a0e4c96-delivery",
+          at: "2026-10-02T11:41:10Z",
+          woken: stepEndedEvent("verification", { ok: true }),
+          instructions: "Open the pull request for this work.",
+          reason: "The check passed. Delivering is next.",
+          ended: { at: "2026-10-02T11:51:00Z", costUsd: 0.9 },
+        }),
+        ...wake(run, "2026-10-02T11:51:10Z", [stepEndedEvent("delivery", { ok: true })]),
+      ],
+      files: {
+        main: { "doc/plans/phases/phase-19.md": phaseFile("19", "Each task can carry a due date", "Complete") },
+        branch: {
+          "doc/plans/phases/phase-20.md": phaseFile("20", "A button that sorts the tasks by due date", "Complete"),
+          [`${reports}/phase-20-complete.md`]: reportFile("Phase 20 — Completion Report", "The slice is done."),
+          [`${reports}/phase-20-verification.md`]: reportFile("Phase 20 — Verification Report", "3 of 3 checks pass."),
+        },
+      },
+      ahead: 4,
+      pullRequest: {
+        number: pr,
+        title,
+        url: prUrl,
+        state: "open",
+        headSha: "3c5e7a9b1d2f4a6c8e0b2d4f6a8c0e1b3d5f7a9c",
+        branch,
+        body: [
+          "<!-- timone:departures -->",
+          "The default order was followed.",
+          "<!-- /timone:departures -->",
+          "",
+          "## What changed",
+          "",
+          "A button above the task list that sorts the tasks by due date.",
+        ].join("\n"),
+        comments: [],
+      },
+      timoneIssues: OPEN_TIMONE_ISSUES,
+      events: [behindEvent(3, "main", mainHead)],
+      now: "2026-10-03T09:12:40Z",
+    },
+    // The pull request waits for review, and nobody has reviewed it. That is
+    // no reason to wait: the update is started at once, and nobody is asked.
+    judge: (seen) =>
+      allOf(
+        when(startedAt(seen, "update"), `${named("update")} started`),
+        when(!askedAnything(seen), "nothing asked of a person"),
+      ),
+    rightCalls: [
+      startStepCall(
+        "update",
+        "Bring the branch level with main, which is 3 commits ahead. Fix what the merge breaks, and test it again.",
+        "The default branch moved on while the pull request is open, and no step is running.",
+      ),
+    ],
+  };
+}
+
 /** The replay set, in the order of R18's table. */
 export const CASES: readonly ReplayCase[] = [
   planningFinishedWithTheEmojiMisplaced(),
@@ -2672,4 +2803,5 @@ export const CASES: readonly ReplayCase[] = [
   approveThemYourselfInMyName(),
   aServerErrorFromTheModelService(),
   aBuildThatRunsTheWholeSuiteAgain(),
+  anOpenPullRequestBehindTheDefaultBranch(),
 ];

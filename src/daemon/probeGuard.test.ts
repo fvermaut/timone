@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -113,5 +114,32 @@ describe("probeGuardDecision", () => {
         stage: "delivery",
       })?.permissionDecision,
     ).toBe("ask");
+  });
+});
+
+describe("the probe guard and the update (ADR-0066 D4)", () => {
+  // Built from the constant, so no fixture here spells the folder out.
+  const probe = { file_path: join(PROBE_DIRECTORIES[0], "PRD-07.R7.mjs") };
+
+  it("allows the update, which runs the check scripts as the check does, and says so by name", () => {
+    const decision = probeGuardDecision({ toolInput: probe, stage: "update" });
+
+    expect(decision?.permissionDecision).toBe("allow");
+    expect(decision?.permissionDecisionReason).toMatch(/^Update /);
+  });
+
+  it("still allows verification, and names it", () => {
+    const decision = probeGuardDecision({ toolInput: probe, stage: "verification" });
+
+    expect(decision?.permissionDecision).toBe("allow");
+    expect(decision?.permissionDecisionReason).toMatch(/^Verification /);
+  });
+
+  it.each(["execution", "remediation"] as const)("still denies %s", (stage) => {
+    expect(probeGuardDecision({ toolInput: probe, stage })?.permissionDecision).toBe("deny");
+  });
+
+  it("still asks when no stage is running", () => {
+    expect(probeGuardDecision({ toolInput: probe, stage: undefined })?.permissionDecision).toBe("ask");
   });
 });

@@ -225,9 +225,20 @@ if (a0 === 'issue' && a1 === 'list') {
       if (!exists) fail(`gh: Not Found (HTTP 404) compare ${m[2]}...${m[3]}`);
       ahead = Number(git('rev-list', '--count', `${m[2]}..${m[3]}`).trim());
     }
-    logLine({ result: `ahead ${ahead}` });
+    // ✏ 2026-10-05 (phase 50 verification): the built app now also asks how far the branch is
+    // behind and what the base branch's head is (`--jq '{behind: .behind_by, defaultHead:
+    // .base_commit.sha}'`, seen in this pass's gh.log). The answer used to carry only ahead_by and
+    // status, so the app rejected its shape and every look at an open pull request failed. The
+    // body now has the fields GitHub's compare answer has, and any other --jq runs through jq.
+    let behind = (f.behind ?? {})[m[3]];
+    if (behind === undefined) behind = Number((tryGit('rev-list', '--count', `${m[3]}..${m[2]}`) ?? '0').trim());
+    const baseSha = (tryGit('rev-parse', `refs/heads/${m[2]}`) ?? '').trim();
+    logLine({ result: `ahead ${ahead} behind ${behind}` });
+    const body = { ahead_by: ahead, behind_by: behind, base_commit: { sha: baseSha }, status: ahead > 0 && behind > 0 ? 'diverged' : ahead > 0 ? 'ahead' : behind > 0 ? 'behind' : 'identical' };
     const jq = opt('--jq', '-q');
-    out(jq === '.ahead_by' ? `${ahead}\n` : { ahead_by: ahead, status: ahead > 0 ? 'ahead' : 'identical' });
+    if (jq === '.ahead_by') out(`${ahead}\n`);
+    else if (jq) out(execFileSync('jq', ['-c', jq], { input: JSON.stringify(body), encoding: 'utf8' }));
+    else out(body);
   } else if (/^repos\/[^/]+\/[^/]+\/merges$/.test(path) && method === 'POST') {
     // GitHub's merge API, done for real in the bare remote, and logged so a
     // probe can see exactly when anything reached the default branch.

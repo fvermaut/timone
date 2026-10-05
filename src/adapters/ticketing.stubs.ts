@@ -107,6 +107,12 @@ export const noFiles = {
  * keeps those tests about their own subject. Nothing the daemon does calls
  * these, so there is no earlier answer to keep, and a daemon test that
  * reaches one has found a call nobody meant to make.
+ *
+ * **Except `behindDefault`, which answers "level with the default branch".**
+ * The runner's driver asks it on every look at an open pull request (phase
+ * 50), so a throw would turn every driver test about something else into an
+ * error. Level is the answer that tells the runner nothing, which is what
+ * those tests had before.
  */
 export const noRunnerCalls = {
   async removeLabel(): Promise<void> {
@@ -123,5 +129,8 @@ export const noRunnerCalls = {
   },
   async aheadOfDefault(): Promise<number | undefined> {
     throw new Error("no test here compares a branch with the default branch");
+  },
+  async behindDefault(): Promise<{ behind: number; defaultHead: string } | undefined> {
+    return { behind: 0, defaultHead: "4f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39" };
   },
 };

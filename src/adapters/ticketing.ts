@@ -406,6 +406,26 @@ export interface TicketingAdapter {
   ): Promise<number | undefined>;
 
   /**
+   * How many commits the default branch has that `branch` does not, and the
+   * default branch's head, or undefined when the forge does not know the
+   * branch.
+   *
+   * Phase 50's widening, for
+   * [ADR-0066](../../doc/adr/0066-the-update-is-a-step-the-runner-starts-when-an-open-pull-request-falls-behind.md)
+   * D1: the runner is told when an open pull request's branch falls behind
+   * the default branch, once for each head of the default branch. One
+   * question answers both, so the head told is the head the count was made
+   * against.
+   *
+   * **An absent branch is `undefined`**, as in {@link aheadOfDefault}. A
+   * failure to ask throws.
+   */
+  behindDefault(
+    project: TicketingProject,
+    branch: string,
+  ): Promise<{ behind: number; defaultHead: string } | undefined>;
+
+  /**
    * One file's content on `branch`, or undefined when the branch does not
    * carry it.
    *
