@@ -1,6 +1,6 @@
 # Phase 52: The `places` setting is documented — `README.md` and `timone.example.yaml` say how many tickets of one project build at once, and that a change needs a restart
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-52-complete.md](reports/phase-52-complete.md).
 
 > **Companion phases:** [phase 49](phase-49.md) — piece 5 of the list for #197, merged; it added `places` to `src/manifest.ts` and the planner, and wrote neither into `README.md` nor `timone.example.yaml`. This phase writes what it left out. [phase 47](phase-47.md) — piece 3, merged; it built the place rule in `src/daemon/runs.ts` that the new text describes. Governing decisions: [ADR-0065](../../adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md) — D1, D3, D4, D5 and D6 are what the text says about the planner, holding and overruling; the words must not say more than they do. [ADR-0063](../../adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md) D1 — what takes a place and what does not. [ADR-0050](../../adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md) D5 — this project is Timone, so `README.md` and `timone.example.yaml` are its source and are committed here.
 
