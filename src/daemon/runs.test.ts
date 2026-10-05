@@ -2846,3 +2846,132 @@ describe("the planner's decision on a run (ADR-0065 D2)", () => {
     expect(readFileSync(path, "utf8")).toBe(written);
   });
 });
+
+describe("a terminal that waits for the running step (ADR-0067 D1)", () => {
+  /** A store over `path` whose idea of the process table the test writes. */
+  function storeAt(path: string, alive: readonly number[] = [4213, 5000]): RunStore {
+    let tick = 0;
+    return RunStore.open(path, {
+      now: () => `2026-10-05T10:${String(tick++).padStart(2, "0")}:00Z`,
+      livenessOf: (holder) => (alive.includes(holder.pid) ? "alive" : "gone"),
+    });
+  }
+
+  /** The terminal of `timone takeover scratch-app#7`, as it records itself. */
+  const terminal: Holder = {
+    token: "token-terminal-4213",
+    command: "timone takeover scratch-app#7",
+    pid: 4213,
+    since: "2026-10-05T09:00:00Z",
+    observedAt: "2026-10-05T09:00:00Z",
+    host: "fvermaut-mac",
+  };
+
+  /** The daemon's step session, as `activate` records it. */
+  const daemon: Holder = {
+    token: "token-daemon-5000",
+    command: "timone daemon",
+    pid: 5000,
+    since: "2026-10-05T08:00:00Z",
+    observedAt: "2026-10-05T08:00:00Z",
+    host: "fvermaut-mac",
+  };
+
+  /** scratch-app #7 with a step running on it. */
+  function stepRunning(store: RunStore): Run {
+    const { run } = store.register("scratch-app", 7);
+    return store.activate(run.id, "step-session-1", daemon);
+  }
+
+  it("writes the waiting terminal on a run whose step runs, and the ledger keeps it", () => {
+    const path = statePath();
+    const store = storeAt(path);
+    const run = stepRunning(store);
+
+    const waiting = store.waitForStep(run.id, terminal);
+
+    expect(waiting.waitingTerminal).toEqual(terminal);
+    expect(waiting).toMatchObject({ status: "active", holder: daemon });
+    expect(storeAt(path).get(run.id)?.waitingTerminal).toEqual(terminal);
+  });
+
+  it("refuses to write a waiting terminal on a parked run", () => {
+    const store = storeAt(statePath());
+    const run = stepRunning(store);
+    store.park(run.id, { waitingOn: "an answer on the ticket" });
+
+    expect(() => store.waitForStep(run.id, terminal)).toThrow(
+      "Run scratch-app#7/1 is parked, so no step is running on it to wait for.",
+    );
+    expect(store.get(run.id)?.waitingTerminal).toBeUndefined();
+  });
+
+  it("refuses to write a waiting terminal on a run a person's terminal holds", () => {
+    const store = storeAt(statePath());
+    const { run } = store.register("scratch-app", 7);
+    store.claim(run.id, daemon, { takeover: true });
+
+    expect(() => store.waitForStep(run.id, terminal)).toThrow(
+      "Run scratch-app#7/1 is open in a person's terminal, so no step is running on it to wait for.",
+    );
+    expect(store.get(run.id)?.waitingTerminal).toBeUndefined();
+  });
+
+  it("clears the waiting terminal when the run is claimed", () => {
+    const store = storeAt(statePath());
+    const run = stepRunning(store);
+    store.waitForStep(run.id, terminal);
+    store.park(run.id, { waitingOn: "the runner to look at what the step did", kind: "runner" });
+    store.activate(run.id, "step-session-2", daemon);
+    store.waitForStep(run.id, terminal);
+
+    const claimed = store.claim(run.id, daemon);
+
+    expect(claimed.waitingTerminal).toBeUndefined();
+  });
+
+  it("clears the waiting terminal when the run parks", () => {
+    const store = storeAt(statePath());
+    const run = stepRunning(store);
+    store.waitForStep(run.id, terminal);
+
+    const parked = store.park(run.id, {
+      waitingOn: "the runner to look at what the step did",
+      kind: "runner",
+    });
+
+    expect(parked.waitingTerminal).toBeUndefined();
+  });
+
+  /** A second `timone takeover scratch-app#7`, typed in another terminal. */
+  const second: Holder = {
+    token: "token-terminal-6100",
+    command: "timone takeover scratch-app#7",
+    pid: 6100,
+    since: "2026-10-05T09:30:00Z",
+    observedAt: "2026-10-05T09:30:00Z",
+    host: "fvermaut-mac",
+  };
+
+  it("refuses a second waiting terminal while the first one's process is alive, and keeps the first (ADR-0067 D1)", () => {
+    const store = storeAt(statePath(), [4213, 5000, 6100]);
+    const run = stepRunning(store);
+    store.waitForStep(run.id, terminal);
+
+    expect(() => store.waitForStep(run.id, second)).toThrow(
+      "Another terminal is already waiting for the step on scratch-app #7: " +
+        "timone takeover scratch-app#7 (pid 4213).",
+    );
+    expect(store.get(run.id)?.waitingTerminal).toEqual(terminal);
+  });
+
+  it("replaces a waiting terminal whose process is gone (ADR-0067 D1)", () => {
+    const store = storeAt(statePath(), [5000, 6100]);
+    const run = stepRunning(store);
+    store.waitForStep(run.id, terminal);
+
+    const waiting = store.waitForStep(run.id, second);
+
+    expect(waiting.waitingTerminal).toEqual(second);
+  });
+});

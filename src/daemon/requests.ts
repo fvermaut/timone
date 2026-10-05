@@ -244,7 +244,7 @@ export interface WaitOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
-const WATCH_INTERVAL_MS = 1_000;
+export const WATCH_INTERVAL_MS = 1_000;
 
 /**
  * How long a command waits for the daemon before taking its request back.

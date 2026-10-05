@@ -191,6 +191,14 @@ export interface RunnerActions {
 const NO_STEP_RUNNING = "No step of this run is running now.";
 
 /**
+ * The refusal of a step while a person's terminal holds the run (ADR-0067
+ * D4). It says when to try again, because the runner is woken then.
+ */
+const TERMINAL_HOLDS_RUN =
+  "A person has this ticket open in a terminal. Start nothing until the terminal session ends; " +
+  "you are woken then.";
+
+/**
  * What a `step-ended` entry says ended a step the runner asked to stop, so a
  * reader of the record can tell it from a step that failed by itself.
  */
@@ -566,14 +574,25 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
   };
 
   /**
-   * Why no step may start now, or undefined when one may: a step of this run
-   * is already running, or the ticket has spent its limit. Asked before every
-   * session this run starts, the approval's own included, because each one
-   * spends money and each one works on the same branch.
+   * Why no step may start now, or undefined when one may: a person's terminal
+   * holds the run, a step of this run is already running, or the ticket has
+   * spent its limit. Asked before every session this run starts, the
+   * approval's own included, because each one spends money and each one
+   * works on the same branch.
+   *
+   * **The terminal is read from the store, not from the run this wake was
+   * given** (ADR-0067 D4). A wake that began before a step ended — a check,
+   * or a comment — still sees the run as it was. The step's end may have
+   * handed the run to a terminal that waited for it since, and a step started
+   * then would work on the branch under the person's session.
    */
   const stepBlocked = async (
     entries: readonly RecordEntry[],
   ): Promise<{ ok: false; refused: string } | undefined> => {
+    const fresh = current();
+    if (fresh.status === "active" && fresh.takenOver === true) {
+      return { ok: false, refused: TERMINAL_HOLDS_RUN };
+    }
     const running = deps.running.get(run.id);
     if (running !== undefined) {
       return {

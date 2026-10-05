@@ -3,7 +3,7 @@
 > **Status:** Active (approved by fvermaut on 2026-10-05T13:40:31Z)
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.criteria.md](prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.criteria.md)
-> **Phases:** none yet
+> **Phases:** [phase 51](../../plans/phases/phase-51.md) (piece 1, #217)
 
 ## Problem
 

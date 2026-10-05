@@ -19,6 +19,10 @@
 // daemon running. A stand-in `claude` on PATH plays the terminal session: it records how it was
 // started and ends at once. "A session opens" is that record naming the ticket.
 //
+// ✏ 2026-10-05 (phase 51 verification): clause 3's check of the message is read with PRD-09.R4,
+// which replaces the refusal it named "as today"; see assertRefusedOwn. The fixture is unchanged: the
+// ticket's own step never ends, so no session can open, and the takeover waits until the daemon stops.
+//
 // Break legs. Clauses 1 and 2: the same fixture on the build from just before phase 47
 // (_places.mjs's BEFORE_PHASE_47), whose takeover was refused there (PRD-05.R11's old note,
 // checked by prd-05.r11.mjs up to phase 46). Clause 3: the takeover of ticket 12 while nothing
@@ -121,10 +125,23 @@ function assertRefusedOwn(r, { breakLeg = false } = {}) {
   assert(r.given, `setup: the fixture never reached its state (${runsLine(r.fx)})`);
   if (!breakLeg) assert(r.given.mine === 'active', `setup: ticket ${N}'s own step is not running (${r.given.runs})`);
   assert(!opened(r), `a terminal session opened on the ticket: "${r.prompt.split('\n')[0].slice(0, 120)}"`);
-  assert(/working on/i.test(r.said) && r.said.includes(`#${N}`), `the message does not say what is happening: "${r.said.replace(/\n/g, ' ').slice(0, 200)}"`);
+  // ✏ 2026-10-05 (phase 51 verification): "the message says what is happening" used to be read as
+  // the refusal "I'm working on … right now". PRD-09.R4 (approved 2026-10-05) replaces that refusal:
+  // the takeover now says which step it waits for, and waits. Read with it, this clause holds when no
+  // session opens while the ticket's own step runs, and the message names the ticket and says that
+  // the machine is working on it or that a step is running on it. The words "as today" are a
+  // question for the person, in the phase 51 verification report.
+  assert(/working on|step running|step .{0,40}running/i.test(r.said) && r.said.includes(`#${N}`), `the message does not say what is happening: "${r.said.replace(/\n/g, ' ').slice(0, 200)}"`);
 }
 await clause('PRD-07.R13 clause 3', 'a ticket whose own step the machine is working on: timone takeover on it opens no session, and the message says what is happening, as today', {
-  broken: async () => assertRefusedOwn(nothing, { breakLeg: true }),
+  // ✏ 2026-10-05 (phase 51 verification): two breaks, and the leg is red only when both go red. The
+  // takeover of a ticket nothing works on opens a session; and the same takeover's message, with its
+  // session left out, says nothing of a step running, so the rewritten message check must fail on it.
+  broken: async () => {
+    const reds = [];
+    for (const r of [nothing, { ...nothing, prompt: '' }]) { try { assertRefusedOwn(r, { breakLeg: true }); } catch (e) { reds.push(e.message); } }
+    if (reds.length === 2) throw new Error(reds.join(' | and | '));
+  },
   correct: async () => assertRefusedOwn(ownStep),
 });
 console.log(`    (runs at the takeover: ${ownStep.given?.runs}. Takeover said, exit ${ownStep.code}: "${ownStep.said.replace(/\n/g, ' ')}")`);

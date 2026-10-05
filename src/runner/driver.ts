@@ -8,6 +8,7 @@ import type {
   TicketThread,
 } from "../adapters/ticketing.js";
 import { stageLabel, type PipelineStage } from "../daemon/pipeline.js";
+import type { Holder } from "../daemon/holder.js";
 import type { Run, RunStatus, RunStore } from "../daemon/runs.js";
 import { HELD_LABEL } from "../daemon/steps.js";
 import type { TimonePin } from "../daemon/session.js";
@@ -877,7 +878,7 @@ export class RunnerDriver {
    */
   reclaimed(run: Run): void {
     this.endInterruptedSteps(run);
-    this.handBack(run, run.status === "active" ? DAEMON_STOPPED_EVENT : NEW_TICKET_EVENT);
+    this.handBack(run, [run.status === "active" ? DAEMON_STOPPED_EVENT : NEW_TICKET_EVENT]);
   }
 
   /**
@@ -926,27 +927,64 @@ export class RunnerDriver {
   /**
    * Give back a run a person's terminal session held, now that the session
    * has ended (R11). The runner is woken to read what it left.
+   *
+   * ✏ 2026-10-05 (ADR-0067 D2): a run still on its after-step wait was
+   * handed to a terminal that waited for its step, and the runner was never
+   * told that step ended. The wake tells it first, as the step's end would
+   * have.
    */
   terminalEnded(run: Run): void {
-    this.handBack(run, TAKEOVER_ENDED_EVENT);
+    const current = this.deps.store.get(run.id) ?? run;
+    this.handBack(run, [...this.unreadStepEnd(current), TAKEOVER_ENDED_EVENT]);
+  }
+
+  /**
+   * Give back a run the step's end handed to a terminal that then stopped
+   * waiting before it opened a session (ADR-0067 D3). As
+   * {@link terminalEnded}, without saying a session ended: none was opened,
+   * so the runner is told only what it would have been told had nobody
+   * waited.
+   */
+  takeoverAbandoned(run: Run): void {
+    const current = this.deps.store.get(run.id) ?? run;
+    this.handBack(run, this.unreadStepEnd(current));
+  }
+
+  /**
+   * What the runner was not told of the step that ended on `run`, when the
+   * run is still on the after-step wait: the step's end and what failed
+   * after it, built from the record as {@link afterStep} builds them. Nothing
+   * when the run is on another wait, or the record has no end for its step.
+   */
+  private unreadStepEnd(run: Run): string[] {
+    const stage = run.stage;
+    if (run.wait?.on !== AFTER_STEP_WAIT || stage === undefined) return [];
+    const read = readRecord(this.deps.root, run.project, run.ticket);
+    const entries = read.ok ? read.value : [];
+    const ended = lastStepEnded(entries, run.id, stage);
+    if (ended === undefined) return [];
+    return [
+      stepEndedEvent(stage, ended),
+      ...piecesFailuresAfter(entries, run.id, stage).map(piecesFailedEvent),
+    ];
   }
 
   /**
    * Give `run` back to the runner once something outside it has ended. The
    * run is put on the runner's wait — keeping what the runner last asked for,
-   * when that is what it waits on — and a wake is asked for with `event`,
+   * when that is what it waits on — and a wake is asked for with `events`,
    * unless the ticket is over its limit.
    *
    * The park is done now, before this returns, so the cycle that called it
    * finds the run waiting and never holding its project with nothing
    * working on it (R16). Only the wake runs on its own.
    */
-  private handBack(run: Run, event: string): void {
+  private handBack(run: Run, events: readonly string[]): void {
     const current = this.deps.store.get(run.id) ?? run;
     if (!UNSETTLED.includes(current.status)) return;
     const waitingOn = current.wait?.kind === "runner" ? current.wait.on : RUNNER_DEFAULT_WAIT;
     this.parkForRunner(current, waitingOn);
-    this.track(this.ask(this.deps.store.get(run.id) ?? current, [event]));
+    this.track(this.ask(this.deps.store.get(run.id) ?? current, events));
   }
 
   /**
@@ -1045,7 +1083,12 @@ export class RunnerDriver {
     this.lastCheck.delete(runId);
     const run = this.deps.store.get(runId);
     if (run === undefined || !UNSETTLED.includes(run.status)) return;
+    // ✏ 2026-10-05 (ADR-0067 D2): a terminal waits for this step. The run is
+    // handed to it in the same write as the park, with no await in between,
+    // so no runner woken meanwhile can start another step on it.
+    const waiter = this.deps.store.liveWaiter(runId);
     this.parkForRunner(run, AFTER_STEP_WAIT, stage);
+    const handed = waiter !== undefined && this.handToWaiter(runId, waiter);
     const read = readRecord(this.deps.root, run.project, run.ticket);
     if (!read.ok) {
       this.deps.log(
@@ -1058,6 +1101,9 @@ export class RunnerDriver {
     } catch (error) {
       this.deps.log(`runner ${runId} — the pull request's description was not brought up to date: ${oneLine(error)}`);
     }
+    // The runner is woken when the terminal session ends, and is told then
+    // of this step's end (`terminalEnded`).
+    if (handed) return;
     const ended = lastStepEnded(entries ?? [], runId, stage) ?? {
       ok: result.outcome.ok,
       ...(result.outcome.error === undefined ? {} : { error: result.outcome.error }),
@@ -1066,6 +1112,24 @@ export class RunnerDriver {
       stepEndedEvent(stage, ended),
       ...piecesFailuresAfter(entries ?? [], runId, stage).map(piecesFailedEvent),
     ]);
+  }
+
+  /**
+   * Claim the run for the terminal that waited for its step (ADR-0067 D2),
+   * and say whether it took. A claim that fails is logged, and the runner is
+   * then woken as if nobody had waited.
+   */
+  private handToWaiter(runId: string, waiter: Holder): boolean {
+    try {
+      this.deps.store.claim(runId, waiter, { takeover: true });
+    } catch (error) {
+      this.deps.log(
+        `runner ${runId} — the run could not go to the terminal that waited for its step: ${oneLine(error)}`,
+      );
+      return false;
+    }
+    this.deps.log(`runner ${runId} — the step ended and the run goes to the terminal that waited for it`);
+    return true;
   }
 
   /**

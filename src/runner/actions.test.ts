@@ -13,6 +13,7 @@ import type {
 import type { Manifest } from "../manifest.js";
 import { breakdownPath, renderBreakdown } from "../daemon/breakdown.js";
 import { tryMergeChunkZero, type ChunkZeroDeps } from "../daemon/chunk-zero.js";
+import type { Holder } from "../daemon/holder.js";
 import { RunStore, type Run } from "../daemon/runs.js";
 import type {
   StepResult,
@@ -1807,6 +1808,12 @@ function placeWorld(
     forge: state,
     steps: fake.steps,
     wrote: (entry: RecordEntry) => appendEntry(root, PROJECT.name, 12, entry),
+    /** The run's record, as the machine wrote it. */
+    record: (): RecordEntry[] => {
+      const read = readRecord(root, PROJECT.name, 12);
+      if (!read.ok) throw new Error(read.error.message);
+      return read.value;
+    },
   };
 }
 
@@ -2100,5 +2107,68 @@ describe("the update of an open pull request (ADR-0066 D2)", () => {
     expect(result).toEqual({ ok: false, refused: noPlace("run scratch-app#7/1 has a step running") });
     expect(steps).toEqual([]);
     expect(store.waitingForPlace(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+});
+
+/** The refusal of a step while a person's terminal holds the run (ADR-0067 D4). */
+const TERMINAL_HOLDS =
+  "A person has this ticket open in a terminal. Start nothing until the terminal session ends; " +
+  "you are woken then.";
+
+/** A person's terminal, as `timone takeover` writes it on the run it claims. */
+const TERMINAL: Holder = {
+  token: "token-terminal-4213",
+  command: "timone takeover scratch-app#12",
+  pid: process.pid,
+  since: "2026-09-27T11:59:00.000Z",
+  observedAt: "2026-09-27T11:59:00.000Z",
+};
+
+describe("the runner starts no step on a run a person's terminal holds (ADR-0067 D4)", () => {
+  it("refuses a step on a run claimed for a terminal after the wake began, and changes nothing but the record", async () => {
+    const { actions, store, run, steps, forge, record } = placeWorld(choreTicket(), () => {});
+    store.claim(run.id, TERMINAL, { takeover: true });
+    const before = store.get(run.id);
+
+    const result = await actions.startStep(PLANNING);
+
+    expect(result).toEqual({ ok: false, refused: TERMINAL_HOLDS });
+    expect(steps).toEqual([]);
+    const after = store.get(run.id);
+    expect(after?.status).toBe("active");
+    expect(after?.takenOver).toBe(true);
+    expect(after?.stage).toBe(before?.stage);
+    expect(after?.place).toEqual(before?.place);
+    expect(after?.branch).toBeUndefined();
+    expect(forge.comments).toEqual([]);
+    expect(record()).toEqual([
+      triageRan(run.id),
+      {
+        kind: "decision",
+        at: "2026-09-27T12:00:00.000Z",
+        runId: run.id,
+        action: "start_step",
+        reason: PLANNING.reason,
+        detail: `Refused: ${TERMINAL_HOLDS}`,
+      },
+    ]);
+  });
+
+  it("starts the step as before once the terminal session has ended and the run is parked again", async () => {
+    const { actions, store, run, steps } = placeWorld(choreTicket(), () => {});
+    store.claim(run.id, TERMINAL, { takeover: true });
+    expect(await actions.startStep(PLANNING)).toEqual({ ok: false, refused: TERMINAL_HOLDS });
+    store.park(run.id, {
+      waitingOn: "the next thing that happens on this ticket",
+      kind: "runner",
+      resolvableBy: ["triage"],
+    });
+
+    const result = await actions.startStep(PLANNING);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(steps.map((step) => step.input.label)).toEqual(["scratch-app#12/1 (planning)"]);
+    expect(store.get(run.id)?.status).toBe("active");
+    expect(store.get(run.id)?.takenOver).toBeUndefined();
   });
 });
