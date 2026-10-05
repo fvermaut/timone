@@ -61,7 +61,7 @@ In this register, a **question** is a message the machine posts on a ticket or o
 ## R4 — A takeover typed while a step is running waits for it, then opens
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a run of ticket `<n>` whose step is still running, for example because it has just posted a question and has not yet ended
@@ -80,6 +80,7 @@ In this register, a **question** is a message the machine posts on a ticket or o
       WHEN the command is typed, both while the daemon is running and holds the run ledger, and while no daemon is running
       THEN it behaves as the clauses above say, or, when no daemon is running and so no step can end, it says so and does not wait
 - **Falsified-by:** two tests, each seen to fail first in [phase 51](../../plans/phases/phase-51.md) ([handoffs](../../plans/phases/reports/phase-51-handoffs.md)). In `src/commands/takeover.test.ts`: "a takeover typed while the ticket's step runs (ADR-0067) > says which step it waits for, and opens the session when the step ends, before the runner is woken (PRD-09.R4 clauses 1 and 2)". In `src/runner/driver.test.ts`: "RunnerDriver — a step ends on a run a terminal waits for (ADR-0067 D2) > wakes the runner with the step's end, and clears the waiting terminal, when that terminal's process is gone (PRD-09.R4 clause 3, ADR-0067 D2)". The check in PRD-05.R11's probe that a takeover of a run the machine is working on opens no session is replaced by one that it waits and then opens, seen to fail first. Verification makes that change, not the build.
+- **Evidence:** ✏ 2026-10-05 — phase 51 verification ([report](../../plans/phases/reports/phase-51-verification.md)): all four clauses pass, each checked by the probe [`prd-09.r4.mjs`](../../plans/phases/probes/prd-09.r4.mjs), whose eight checks each went red on a break leg before they went green. A takeover typed while a step ran said which step it waited for and that Ctrl-C stops the wait; the session opened 0.3 s after the step ended, with no runner wake and no step started in between; the runner then read what the session left. Ctrl-C left the run and the runner's next step as in a run where nothing was typed. With no daemon, it said no step can end and did not wait. PRD-05.R11's probe check was replaced as the `Falsified-by` line asks, and was seen to fail first. Status `draft` → `verified`.
 - **Verification hint:** `findTakeover` and `claimForTakeover` in `src/commands/takeover.ts` answer *"I'm working on … right now"* for a run that is `picked-up` or `active`; that answer is what changes. A test with a fake step that ends after the command is typed shows the wait, the opening, and that the runner was not woken into a new step in between.
 
 ## R5 — The written rules say the same as the machine does
@@ -93,4 +94,5 @@ In this register, a **question** is a message the machine posts on a ticket or o
       THEN each place that tells the machine how to ask a person something says that a question names the command, with the three cases of R3 left out
       AND `process.md`'s paragraph on `timone takeover` says that a takeover typed while a step runs waits for it to end, then opens
       AND no line in them says that a takeover refuses while a step of its own ticket runs
+- **Evidence:** ✏ 2026-10-05 — partial, phase 51 verification ([report](../../plans/phases/reports/phase-51-verification.md)): clauses 2 and 3 pass, checked by [`prd-09.r5.mjs`](../../plans/phases/probes/prd-09.r5.mjs), which went red on each break leg first. `process.md`'s paragraph on `timone takeover` says a takeover typed while a step runs waits for it to end, then opens; no line in `process.md`, the skills, or the runner's instructions as the runner receives them says a takeover refuses while a step of its own ticket runs. Clause 1 belongs to the second piece of #213 and was not checked. It stays `draft`.
 - **Verification hint:** read the places named above. In `process.md` these are the paragraph on `timone takeover` and the paragraph that starts *"Every command a ticket names can be run while the daemon is running"*. That second paragraph's rule, that no message may name a command the machine would refuse, stays as it is: R4 makes it true for the command a question names. [PRD-05.R11](prd-05-a-runner-decides-each-step.criteria.md#r11--takeover-and-cancel-stay-and-retry-goes) carries a dated note that R4 replaces its refusal.

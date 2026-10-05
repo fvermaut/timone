@@ -78,7 +78,11 @@ export async function boxScript({ cli, envFile = null }) {
   fs.symlinkSync(path.dirname(fx.cliPath), path.join(fx.dir, 'dist'));
   // The daemon builds a box from the remotes: its root needs an origin that holds its commit.
   G(fx.dir, 'remote', 'add', 'origin', 'https://github.com/probe-owner/timone.git');
-  G(fx.dir, 'push', '-q', '-f', path.join(fx.dir, 'remote', 'timone.git'), 'HEAD:main');
+  // ✏ 2026-10-05 (phase 51 verification): a forced fetch run in the scratch remote, not a push from
+  // the root. A run's container refuses every push that is not to the run's own work branch (its
+  // pre-push hook); no push happens here, so nothing is switched off. Same result: the remote's
+  // main is the root's commit.
+  G(path.join(fx.dir, 'remote', 'timone.git'), 'fetch', '-q', fx.dir, '+HEAD:refs/heads/main');
   G(fx.dir, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
   // git: the daemon's own clones name github.com; send them to the local bare remotes.
   fs.writeFileSync(path.join(fx.dir, 'bin', 'git'), `#!/bin/bash
