@@ -1,6 +1,6 @@
 # PRD-09: A question names the command that answers it in a terminal
 
-> **Status:** Draft
+> **Status:** Active (approved by fvermaut on 2026-10-05T13:40:31Z)
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.criteria.md](prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.criteria.md)
 > **Phases:** none yet
