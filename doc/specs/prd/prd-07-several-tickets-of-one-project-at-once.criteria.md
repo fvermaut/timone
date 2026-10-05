@@ -288,6 +288,7 @@
     - GIVEN a ticket whose own step the machine is working on
       WHEN a person runs `timone takeover <ticket>` on it
       THEN no session opens, and the message says what is happening, as today
+- **Evidence:** ✏ 2026-10-05 — phase 51 verification ([report](../../plans/phases/reports/phase-51-verification.md)): clauses 1 and 2 pass. Clause 3 was read with [PRD-09.R4](prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.criteria.md#r4--a-takeover-typed-while-a-step-is-running-waits-for-it-then-opens), approved on 2026-10-05, which replaces the refusal "as today" names: no session opened while the ticket's own step ran, and the message said a step was running on it and that the takeover waits. It passes read that way. Whether clause 3's words should change to point at PRD-09.R4 is a question in the report. The status stays `verified`.
 - **Verification hint:** this replaces the part of [PRD-05.R11](prd-05-a-runner-decides-each-step.criteria.md#r11--takeover-and-cancel-stay-and-retry-goes) clause 2 that refuses a takeover while another run of the project is working or holds a work branch. Its probe, [`prd-05.r11.mjs`](../../plans/phases/probes/prd-05.r11.mjs), checks that refusal today and will have to change with it. The takeover takes no place (R2).
 
 ## R14 — A pull request that opens behind the default branch is brought level at once

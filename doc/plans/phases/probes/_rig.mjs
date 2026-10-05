@@ -101,7 +101,13 @@ export function fixture(opts = {}) {
     }
     G(clone, 'add', '-A');
     G(clone, ...GID, 'commit', '-q', '--allow-empty', '-m', 'init');
-    G(clone, 'push', '-q', 'origin', 'main');
+    // ✏ 2026-10-05 (phase 51 verification): the throwaway remote is filled by a fetch run in the
+    // remote, not by a push from the clone. A run's container refuses every push that is not to
+    // the run's own work branch (its pre-push hook), and that refused this rig's setup push to
+    // its own scratch repository. Nothing is switched off: no push happens here at all. The
+    // state left is the same as the push left: main on the remote, origin/main in the clone.
+    G(bare, 'fetch', '-q', clone, 'main:main');
+    G(clone, 'fetch', '-q', 'origin');
     // ✏ 2026-10-05 (phase 49 verification): a clone made from a remote that already has main
     // knows origin/HEAD; this one was cloned while the remote was empty, so set it as such a
     // clone would. Since phase 49 the push guard refuses a work branch's first push from a
@@ -243,7 +249,9 @@ export function fixture(opts = {}) {
       }
       G(clone, 'add', '-A');
       G(clone, ...GID, 'commit', '-q', '--allow-empty', '-m', message);
-      G(clone, 'push', '-q', 'origin', `HEAD:refs/heads/${branch}`);
+      // ✏ 2026-10-05 (phase 51 verification): a fetch run in the remote, not a push; see fixture().
+      G(path.join(dir, 'remote', `${project}.git`), 'fetch', '-q', clone, `HEAD:refs/heads/${branch}`);
+      G(clone, 'fetch', '-q', 'origin');
     },
     cli(args, { port } = {}) {
       try {

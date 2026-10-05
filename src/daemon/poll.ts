@@ -692,6 +692,23 @@ async function applyRequest(
         log(resolution.message);
         return 1;
       }
+      // ✏ 2026-10-05 (ADR-0067 D1): a step runs on it. The terminal is written
+      // on the run as the one that waits for the step, and the step's end
+      // hands the run to it (D2). A request written before requests carried
+      // a holder names no terminal to hand it to, so it gets the refusal it
+      // always got.
+      if (resolution.kind === "wait-for-step") {
+        if (body.holder === undefined) {
+          log(
+            `I'm working on ${body.project} #${body.ticket} right now. ` +
+              "Anything I need from you will land on the ticket.",
+          );
+          return 1;
+        }
+        store.waitForStep(resolution.run.id, body.holder);
+        log(`${target} waits for the step to end, for the terminal.`);
+        return 0;
+      }
       // On the asking terminal's behalf, never on the daemon's (ADR-0049 D1).
       // A run the daemon recorded itself as holding is one its own sweep will
       // reclaim from under a live conversation — timone#63. A person's
@@ -709,7 +726,11 @@ async function applyRequest(
       }
       // It goes back to the runner, which is woken to read what the terminal
       // session left (PRD-05 R11). Only the runner moves a run.
-      deps.runner.terminalEnded(run);
+      // ✏ 2026-10-05 (ADR-0067 D3): `abandoned` is a terminal that stopped
+      // waiting for a step after the step's end had handed it the run. No
+      // session was opened, so the runner is not told that one ended.
+      if (body.outcome === "abandoned") deps.runner.takeoverAbandoned(run);
+      else deps.runner.terminalEnded(run);
       log(`${target} is back with the runner (${body.outcome}).`);
       return 0;
     }

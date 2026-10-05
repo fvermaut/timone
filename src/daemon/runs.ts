@@ -227,6 +227,14 @@ const runSchema = z.strictObject({
    */
   takenOver: z.literal(true).optional(),
   /**
+   * The terminal that waits for this run's running step to end, so that the
+   * step's end hands the run to it instead of waking the runner
+   * ([ADR-0067](../../doc/adr/0067-a-takeover-typed-while-a-step-runs-is-written-on-the-run-and-takes-it-when-the-step-ends.md)
+   * D1). Written by {@link RunStore.waitForStep}, and cleared when the run
+   * leaves `active` and when it is claimed. Absent on every other run.
+   */
+  waitingTerminal: holderSchema.optional(),
+  /**
    * The planner's decision on this run
    * ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
    * D2): whether its build may start now. The build is refused until there
@@ -875,9 +883,57 @@ export class RunStore {
       "active",
       (run) => {
         if (holder !== undefined) run.holder = holder;
+        run.waitingTerminal = undefined;
       },
       { takeover: options.takeover === true },
     );
+  }
+
+  /**
+   * Write `holder` on the run as the terminal that waits for its running step
+   * to end (ADR-0067 D1). Refused when no step runs on it: the run is not
+   * `active`, or a person's terminal holds it.
+   *
+   * **One terminal waits at a time.** Another terminal already waiting is
+   * kept while its process is not `gone`, and this one is refused in the
+   * words the command prints. One whose process is gone is replaced: it
+   * cannot open the session the step's end would hand it.
+   */
+  waitForStep(id: string, holder: Holder): Run {
+    const run = this.mutable(id);
+    if (run.status !== "active") {
+      throw new Error(`Run ${id} is ${run.status}, so no step is running on it to wait for.`);
+    }
+    if (run.takenOver === true) {
+      throw new Error(
+        `Run ${id} is open in a person's terminal, so no step is running on it to wait for.`,
+      );
+    }
+    const other = run.waitingTerminal;
+    if (other !== undefined && other.token !== holder.token && this.livenessOf(other) !== "gone") {
+      throw new Error(anotherWaiterMessage(run, other));
+    }
+    run.waitingTerminal = holder;
+    run.updatedAt = this.now();
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * The terminal that waits for the run's running step to end, if one does
+   * and its process is not gone (ADR-0067 D2). A waiter whose process is gone
+   * is cleared, so the step's end wakes the runner as if nobody had waited.
+   * A terminal on another machine (`unknown`) counts as alive, as an existing
+   * holder does in {@link claim}.
+   */
+  liveWaiter(id: string): Holder | undefined {
+    const run = this.mutable(id);
+    const waiter = run.waitingTerminal;
+    if (waiter === undefined || this.livenessOf(waiter) !== "gone") return waiter;
+    run.waitingTerminal = undefined;
+    run.updatedAt = this.now();
+    this.persist();
+    return undefined;
   }
 
   /**
@@ -1488,6 +1544,8 @@ export class RunStore {
     run.updatedAt = this.now();
     // A person's terminal holds a run only while it is active (ADR-0063 D5).
     if (next !== "active") run.takenOver = undefined;
+    // A terminal waits for a step only while the step runs (ADR-0067 D1).
+    if (next !== "active") run.waitingTerminal = undefined;
     // The step takes the place itself now, so the place is no longer given
     // and the run no longer waits for one.
     if (next === "active" && run.place !== undefined) {
@@ -1601,6 +1659,18 @@ function initiativeKey(project: string, initiative: number): string {
 /** One introduction per ticket, keyed the same way runs are keyed. */
 export function introductionKey(project: string, ticket: number): string {
   return `${project}#${ticket}`;
+}
+
+/**
+ * What a takeover is told when another terminal already waits for the step
+ * running on `run` (ADR-0067 D1). The store refuses in these words, and the
+ * command prints them.
+ */
+export function anotherWaiterMessage(run: Pick<Run, "project" | "ticket">, waiter: Holder): string {
+  return (
+    `Another terminal is already waiting for the step on ${run.project} #${run.ticket}: ` +
+    `${waiter.command} (pid ${waiter.pid}).`
+  );
 }
 
 /**
