@@ -347,3 +347,52 @@ Other tests that read skill files: `npx vitest run src/process-text.test.ts src/
 - The skill writes `none` on the whole-suite line for a project with no test command, so such a project's update always shows as not passing. If that is not wanted, the plan's form and `latestUpdate` both have to change; the skill alone cannot fix it truthfully.
 - The skill relies on the box switching on Timone's merge rule for `STATUS.md` and the registers. Outside a box, git's own merge applies, and a conflict in those files goes to the fix context like any other.
 - GitHub's "Update branch" is forbidden by the skill's text only, as ADR-0066 accepts.
+
+## 50f — The words that describe the update are written where the process and the glossary say what a pull request goes through
+
+**Built.** `process.md` stage 8's note has a new dated paragraph, **The update — while a pull request is open**, placed after *How to try it* and before stage 9. It says what 50a–50e built: code tells the runner once for each new head of the default branch, whether the default branch moved past the branch or the pull request opened behind it; the runner starts `timone-update`, a step that takes a place, is not asked of the planner, and is in no default order; the update merges and never rebases, runs the three test sets (`update-checks` names the two sets of check scripts), never fixes code itself, makes at most two fixes for failing tests through a fresh fix context (conflict fixes not counted), and asks nobody anything; it appends one entry to `phase-NN-update.md`; code writes that entry at the top of the pull request between the update markers, above the departures block; delivery keeps the block first and unchanged; only pull requests a run owns are updated. The deliver skill, the glossary's **Update** entry and PRD-07's `Phases:` line each gain what the plan names.
+
+**Files touched.**
+
+- `process.md` — one dated paragraph in stage 8's note (`✏ 2026-10-05 ([ADR-0066](doc/adr/0066-…))`). The skills README line from 50e, which points at "`process.md` stage 8's note", is now true as written.
+- `.claude/skills/timone-deliver/SKILL.md` — one dated sentence in the rule on the departures block (line 187): code also writes a block between `<!-- timone:update -->` and `<!-- /timone:update -->`; when it is there it comes first, above the departures block, and is kept unchanged in the same way. The link uses the file's `../../../doc/adr/` form.
+- `CONTEXT.md` — the **Update** entry only: a dated note saying it is a step, so it takes a place; the runner starts it when told the branch is behind the default branch; it also runs when a pull request opens behind.
+- `doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.md` — the `Phases:` line gains `[phase 50](../../plans/phases/phase-50.md) (piece 4, #202)`, placed between piece 3 and piece 5.
+- `doc/plans/phases/reports/phase-50-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **Where the paragraph sits.** As its own paragraph at the end of stage 8's note, not inside the long first paragraph, which already carries four dated notes. It opens with a bold title, as *How to try it* does.
+- **The fix count is written as the skill counts it**: at most two fixes for failing tests, conflict fixes not counted (ADR-0066 D4). The plan's line says "fixes at most twice"; the added clause keeps the note true to the skill.
+- **Three facts the plan's line does not name were added**, each from ADR-0066 or the skill: the update is in no default order (D2), it asks nobody anything (D4), and a failed or missing test set makes the section say the work does not pass (D5, 50d). Each is one short sentence.
+- **The deliver skill's sentence keeps "Where this skill says a section comes first, it means first below that block"** unchanged. With an update block present, the delivery's own sections still go below both blocks; the new sentence says the update block is above the departures block, so the order is clear.
+- **The glossary note names no file, command or skill**, to keep process words out of it.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+```
+grep -n "ADR-0066" process.md .claude/skills/timone-deliver/SKILL.md CONTEXT.md; echo "exit: $? (expected 0, each file listed at least once)"
+CONTEXT.md:32:- **Update** — …
+.claude/skills/timone-deliver/SKILL.md:187:- **The block between `<!-- timone:departures -->` …
+process.md:56:**The update — while a pull request is open.** ✏ 2026-10-05 ([ADR-0066](…
+exit: 0 (expected 0, each file listed at least once)
+grep -n "phase-50" doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.md; echo "exit: $? (expected 0)"
+7:> **Phases:** … [phase 50](../../plans/phases/phase-50.md) (piece 4, #202) …
+exit: 0 (expected 0)
+git diff -U0 -- doc/specs/ | grep -n "Status:" ; echo "(expected no output)"
+(expected no output)
+npx vitest run src/process-text.test.ts src/planner/plan-files.test.ts src/daemon/prompts.test.ts
+ Test Files  3 passed (3)
+      Tests  275 passed (275)
+```
+
+- [x] No requirement's `Status:` line changed. Pass: the `git diff` of `doc/specs/` holds no `Status:` line; the only change there is the `Phases:` line.
+- [x] Plain words in every note: no metaphor, no process jargon. Pass, by reading: short sentences, no images or comparisons. The glossary note uses only glossary words (step, place, runner, default branch, pull request). The `process.md` paragraph and the skill sentence name the skill, the command and the markers, as the plan asks and as the text around them does.
+
+A `node` script imported `PROBE_DIRECTORIES` from `dist/daemon/probeGuard.js` and counted each value in the lines this slice added to the four documents: `hits: 0`.
+
+**What delivery must know.**
+
+- 50e's open point is closed: `.claude/skills/README.md` points at "`process.md` stage 8's note" for `timone-update`, and that note now exists.
+- The **Update** glossary entry still opens with "after another pull request of the same project merged"; the dated note adds the case of a pull request that opens behind. The opening sentence was left as written, as the other dated notes in the glossary leave theirs.
+- 50e's point about a project with no test command still stands: such a project's update always shows as not passing. The words written here do not change that.
