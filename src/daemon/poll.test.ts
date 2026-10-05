@@ -2438,6 +2438,53 @@ describe("the frontier decides which step is taken", () => {
   });
 
   /**
+   * PRD-07.R4 clause 4: when the tracker does not answer the listing of the
+   * steps, no ticket can be told from a step, so a step blocked by an open
+   * one would look free. Nothing is picked up on that cycle; the next cycle
+   * that reads the steps picks up the eligible ones and still not the blocked.
+   */
+  it("picks up nothing on a cycle where the steps cannot be read, so a blocked step is not started", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const step = (number: number, open: boolean) => ({
+      number,
+      url: `https://github.com/fvermaut/scratch-app/issues/${number}`,
+      open,
+    });
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { blockedBy: [step(51, false)] },
+      { blockedBy: [step(51, false)] },
+      { blockedBy: [step(52, true), step(53, true)] },
+    ]);
+    const open = tickets.filter((t) => t.number !== 51);
+    const { adapter } = trackerFor(open, steps);
+    let answered = false;
+    const failing: TicketingAdapter = {
+      ...adapter,
+      async listSteps(project, initiative): Promise<Step[]> {
+        if (!answered) throw new Error("gh issue list failed: HTTP 502");
+        return adapter.listSteps(project, initiative);
+      },
+    };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter: failing, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter: failing, runner });
+
+    for (const number of [51, 52, 53, 54]) {
+      expect(store.runsForTicket("alpha", number)).toEqual([]);
+    }
+
+    answered = true;
+    await pollOnce({ manifest, store, adapter: failing, runner });
+
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 53)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 54)).toEqual([]);
+  });
+
+  /**
    * The claim. Without it the next cycle sees the same step open, unheld and
    * unclaimed, and every ruling about dropping work is decoration.
    */

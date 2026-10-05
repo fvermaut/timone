@@ -982,6 +982,12 @@ async function releasePreview(
  * steps, and which steps of each may be taken up.
  */
 interface Frontier {
+  /**
+   * Whether the steps of every initiative were read. When one listing failed,
+   * a step of that initiative looks like an ordinary ticket, so no ticket can
+   * be told from a step.
+   */
+  complete: boolean;
   isStep(ticket: number): boolean;
   isEligible(ticket: number): boolean;
   /** The tickets a step ticket is blocked by, as its listing gave them; none for any other ticket. */
@@ -1001,8 +1007,9 @@ interface Frontier {
  * front of a waiting human, which is the thing that ruling refused.
  *
  * It never throws. A tracker that cannot list one initiative's children leaves
- * that initiative alone for a cycle, with a line in the errors; taking the
- * project's whole turn down over it would stop every other ticket on it too.
+ * that initiative alone for a cycle, with a line in the errors, and says the
+ * frontier is not complete. Taking the project's whole turn down over it would
+ * stop the runs already open on it too.
  */
 async function surveyInitiatives(
   project: TicketingProject,
@@ -1014,6 +1021,7 @@ async function surveyInitiatives(
   const steps = new Set<number>();
   const eligible = new Set<number>();
   const blockers = new Map<number, readonly Dependency[]>();
+  let complete = true;
 
   for (const map of tickets.filter((t) => t.labels.includes(MAP_LABEL))) {
     let children: Step[];
@@ -1024,6 +1032,7 @@ async function surveyInitiatives(
         `error  ${project.name}: could not read the steps of #${map.number} — ` +
           `${oneLine(error)}`,
       );
+      complete = false;
       continue;
     }
 
@@ -1048,6 +1057,7 @@ async function surveyInitiatives(
   }
 
   return {
+    complete,
     isStep: (ticket) => steps.has(ticket),
     isEligible: (ticket) => eligible.has(ticket),
     blockedBy: (ticket) => blockers.get(ticket) ?? [],
@@ -1107,6 +1117,13 @@ async function pollProject(
   const tickets = await adapter.listMarkedTickets(project);
   const frontier = await surveyInitiatives(project, tickets, deps, log);
   for (const ticket of tickets) {
+    // No ticket is picked up on a cycle where the steps of an initiative
+    // could not be read (PRD-07.R4). Its steps then look like ordinary
+    // tickets, and one blocked by a step still open would be started. The
+    // runs already open go on below; the next cycle that reads the steps
+    // picks up what it may.
+    if (!frontier.complete) break;
+
     // A map ticket is a conversation, not work: the runs belong to the steps
     // it points at. Without this the daemon works the initiative and its own
     // children at the same time, on the same project.
