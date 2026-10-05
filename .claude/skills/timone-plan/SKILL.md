@@ -98,7 +98,7 @@ Stage 5 produces two artifacts, and only the first of them is put in front of a 
 
 Write the dependencies down even when the list order makes them look obvious. Under the old count they were implicit in the order; they are not any more, and a step that should have declared one gets picked up early. This is the single thing most likely to go wrong with the new shape. ✏ 2026-10-04 ([PRD-07.R10](../../../doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.criteria.md)): the `Needs:` line under each piece is where they are written.
 
-**Which step is next is the first step ticket that is open, unblocked and unassigned.** Nothing counts runs. Do not write progress back anywhere — a closed ticket is a done step, and that is the whole of it.
+**Which step is next is the first step ticket that is open, unblocked and unassigned.** Nothing counts runs. ✏ 2026-10-05 ([ADR-0065](../../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md) D6): every step ticket that is open, unblocked, unheld and unclaimed may be picked up, not only the first. The project's places and the planner decide which of them build. A step blocked by a step that is still open is still not picked up. Do not write progress back anywhere — a closed ticket is a done step, and that is the whole of it.
 
 **Immutable after approval** (D4): the file the human approved is the file that stays. Nothing ticks it as pieces land — which piece is next is derived from how many have been built, and progress is reported on the ticket. A session that finds itself wanting to edit an approved breakdown is re-opening that decision, not filling in a detail.
 

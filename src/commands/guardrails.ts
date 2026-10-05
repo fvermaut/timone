@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +18,7 @@ import {
   type ReportTarget,
   type Violation,
 } from "../daemon/hooks.js";
-import { loadManifest, type Manifest } from "../manifest.js";
+import { DEFAULT_PLACES, loadManifest, placesIn, type Manifest } from "../manifest.js";
 import {
   probeGuardDecision,
   type ProbeGuardDecision,
@@ -25,9 +26,11 @@ import {
 import { declaredStage } from "../daemon/declared-stage.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import {
+  foreignCommits,
   installPushGuard,
   parsePrePushInput,
   pushRefusal,
+  type RefUpdate,
 } from "../daemon/push-guard.js";
 import { forgeCallRefusal } from "../daemon/forge-guard.js";
 import { installMergeRules } from "../merge-rules.js";
@@ -385,6 +388,68 @@ export function appendJournal(root: string, line: string): void {
   appendFileSync(path, `${line}\n`, "utf8");
 }
 
+/**
+ * How many places each project has, for the ledger the guard opens
+ * (PRD-07.R2). The guard only reads the ledger, so a manifest it cannot read
+ * gives every project `DEFAULT_PLACES` rather than an error: an error would
+ * switch the guard off for the whole session.
+ */
+function placesForGuard(manifestPath: string): (project: string) => number {
+  try {
+    return placesIn(loadManifest(manifestPath));
+  } catch {
+    return () => DEFAULT_PLACES;
+  }
+}
+
+/** What git prints for `args`, run where the hook runs: the top of the clone. */
+function gitOutput(args: readonly string[]): string {
+  return execFileSync("git", args, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+}
+
+/** The lines of `text`, trimmed, without the empty ones. */
+function lines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+}
+
+/**
+ * The commits of another ticket's branch that the first push of the work
+ * branch carries (PRD-07.R4, ADR-0065). Only the first push is checked: the
+ * one whose far side is all zeros, because the remote has no such branch yet.
+ * A later push of the same branch is not checked again.
+ *
+ * Git answers every question here, in the clone the hook runs in. A question
+ * it cannot answer throws, and the caller refuses the push.
+ */
+function foreignOnFirstPush(
+  updates: readonly RefUpdate[],
+  workBranch: string | undefined,
+): { sha: string; branch: string }[] {
+  if (workBranch === undefined) return [];
+  const first = updates.find(
+    (update) => update.remoteRef === `refs/heads/${workBranch}` && /^0+$/.test(update.remoteSha),
+  );
+  if (first === undefined) return [];
+  const defaultBranch = gitOutput(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).replace(
+    /^origin\//,
+    "",
+  );
+  const own = lines(
+    gitOutput(["rev-list", first.localSha, "--not", `refs/remotes/origin/${defaultBranch}`]),
+  );
+  return foreignCommits(
+    own,
+    (sha) => lines(gitOutput(["branch", "-r", "--contains", sha])),
+    workBranch,
+  );
+}
+
 /** Register the `guardrails` command on the program. */
 export function registerGuardrailsCommand(program: Command): void {
   const guardrails = program
@@ -442,7 +507,7 @@ export function registerGuardrailsCommand(program: Command): void {
       .description(
         "Refuse a build run the verifier's probes, and a run what switches off its push guard (PreToolUse hook)",
       ),
-  ).action(async (options: { root: string; state?: string }) => {
+  ).action(async (options: { root: string; manifest: string; state?: string }) => {
     // Same posture as the other two: nothing here may fail a session. A guard
     // that throws blocks every tool call in every session, which is a far
     // worse outcome than the leak it is watching for.
@@ -456,7 +521,7 @@ export function registerGuardrailsCommand(program: Command): void {
           : resolve(options.state);
       const reply = runGuard({
         root,
-        store: RunStore.open(statePath),
+        store: RunStore.open(statePath, { placesOf: placesForGuard(resolve(root, options.manifest)) }),
         sessionId: payload.session_id,
         env: process.env,
         toolName: payload.tool_name,
@@ -484,9 +549,11 @@ export function registerGuardrailsCommand(program: Command): void {
       try {
         const chunks: Buffer[] = [];
         for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+        const updates = parsePrePushInput(Buffer.concat(chunks).toString("utf8"));
         const refusal = pushRefusal(
-          parsePrePushInput(Buffer.concat(chunks).toString("utf8")),
+          updates,
           options.branch,
+          foreignOnFirstPush(updates, options.branch),
         );
         if (refusal === undefined) return;
         console.error(refusal);
@@ -584,10 +651,11 @@ export function registerGuardrailsCommand(program: Command): void {
           ? defaultStatePath(root)
           : resolve(options.state);
 
+      const manifest = loadManifest(resolve(root, options.manifest));
       const outcome = await runCheck({
         root,
-        manifest: loadManifest(resolve(root, options.manifest)),
-        store: RunStore.open(statePath),
+        manifest,
+        store: RunStore.open(statePath, { placesOf: placesIn(manifest) }),
         sessionId: payload.session_id,
         env: process.env,
         print: (message) => console.log(message),

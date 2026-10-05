@@ -1428,6 +1428,8 @@ function recordLine(entry: RecordEntry): string[] {
       return [`- ${entry.at}: ${entry.by} allowed more spending, in the comment at ${entry.commentAt}.`];
     case "woke":
     case "runner-ended":
+    case "planner-decision":
+    case "planner-ended":
     case "seen":
     case "notice":
       return [];

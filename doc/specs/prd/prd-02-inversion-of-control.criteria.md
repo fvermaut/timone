@@ -517,6 +517,7 @@
     - GIVEN an initiative whose step tickets are partly closed, and whose current run has ended
       WHEN the daemon next polls the project
       THEN the step it takes up is **the first step ticket that is open, unblocked and unassigned**, decided from the tickets themselves and never from a count of runs — and a step whose ticket declares a dependency on an open step is not eligible
+    > ✏ 2026-10-05 — changed by [PRD-07.R4](prd-07-several-tickets-of-one-project-at-once.criteria.md#r4--nothing-is-built-on-top-of-an-open-pull-request) ([ADR-0065](../../adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)): every step ticket that is open, unblocked, unheld and unclaimed may be picked up, not only the first; the places and the planner decide which build. A step blocked by a step that is still open is still not picked up.
     - GIVEN a ticket whose current chunk is `failed`
       WHEN the daemon polls the project on that cycle and on every later one
       THEN **no further chunk is opened** — the ledger still names the failed chunk as the ticket's current one — and `timone retry <project>#<ticket>` re-arms that same chunk in place, at the stage it died, keeping its branch and its sequence number

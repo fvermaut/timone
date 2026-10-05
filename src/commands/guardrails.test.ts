@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Command } from "commander";
 
 import type { Manifest } from "../manifest.js";
@@ -549,6 +549,69 @@ describe("switching off the guard on a run's pushes", () => {
     "git commit --no-verify -m x",
   ])("says nothing about `%s` in a person's own session", (command) => {
     expect(guardOnBash(command, {})).toBeUndefined();
+  });
+});
+
+describe("guardrails pre-push, on the first push of a work branch (PRD-07.R4)", () => {
+  const ZERO = "0000000000000000000000000000000000000000";
+  const SHA = "1111111111111111111111111111111111111111";
+  const OLD = "2222222222222222222222222222222222222222";
+
+  /**
+   * Run `timone guardrails pre-push --branch timone/7-x` as git's hook would,
+   * with one update to the work branch on stdin, in a folder that is not a
+   * git repository: any question to git fails there, so a case can see
+   * whether git was asked.
+   */
+  async function prePushOutsideGit(
+    remoteSha: string,
+  ): Promise<{ errors: string[]; exitCode: number | undefined }> {
+    const dir = mkdtempSync(join(tmpdir(), "timone-pre-push-"));
+    tempDirs.push(dir);
+    const startedIn = process.cwd();
+    vi.stubEnv("GIT_CEILING_DIRECTORIES", tmpdir());
+    vi.stubEnv("GIT_DIR", undefined);
+    vi.spyOn(process, "stdin", "get").mockReturnValue(
+      Readable.from([
+        `refs/heads/timone/7-x ${SHA} refs/heads/timone/7-x ${remoteSha}\n`,
+      ]) as unknown as typeof process.stdin,
+    );
+    const program = new Command();
+    program.exitOverride();
+    registerGuardrailsCommand(program);
+    const errors: string[] = [];
+    const realError = console.error;
+    console.error = (message: unknown): void => {
+      errors.push(String(message));
+    };
+    process.chdir(dir);
+    try {
+      await program.parseAsync(["guardrails", "pre-push", "--branch", "timone/7-x"], {
+        from: "user",
+      });
+    } finally {
+      process.chdir(startedIn);
+      console.error = realError;
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+    }
+    const code = process.exitCode;
+    process.exitCode = undefined;
+    return { errors, exitCode: typeof code === "number" ? code : undefined };
+  }
+
+  it("does not ask git about a push of a branch the remote already has", async () => {
+    expect(await prePushOutsideGit(OLD)).toEqual({ errors: [], exitCode: undefined });
+  });
+
+  it("asks git on the first push, and refuses the push when git cannot answer", async () => {
+    const result = await prePushOutsideGit(ZERO);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatch(
+      /^Refused: Timone's push guard could not judge this push, so it lets nothing through\. /,
+    );
   });
 });
 

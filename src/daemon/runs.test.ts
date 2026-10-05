@@ -40,11 +40,20 @@ function statePath(): string {
   return join(dir, ".timone", "state.json");
 }
 
-/** A store over a fresh state file with a deterministic, advancing clock. */
+/**
+ * A store over a fresh state file with a deterministic, advancing clock, and
+ * one place on every project.
+ *
+ * ✏ 2026-10-05: the cases below were written when every project had one
+ * place (ADR-0063 D1). A project now has two unless `timone.yaml` sets
+ * another number (PRD-07.R2), so they open their store with one place, and
+ * are unchanged otherwise.
+ */
 function newStore(path = statePath()): RunStore {
   let tick = 0;
   return RunStore.open(path, {
     now: () => `2026-08-02T10:${String(tick++).padStart(2, "0")}:00Z`,
+    placesOf: () => 1,
   });
 }
 
@@ -697,7 +706,7 @@ describe("places on a project (ADR-0063)", () => {
     );
   });
 
-  it("gives the place back to a run whose step just ended when nobody else waits (D2)", () => {
+  it("takes no place for a run whose step just ended while its runner decides, so another ticket's step is not refused (R2 clause 6)", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
     store.askPlace(run.id, PLAIN);
@@ -705,29 +714,26 @@ describe("places on a project (ADR-0063)", () => {
 
     store.park(run.id, { waitingOn: "the runner", kind: "runner" });
 
-    expect(store.placeHolders("scratch-app").map((each) => each.id)).toEqual(["scratch-app#7/1"]);
+    expect(store.placeHolders("scratch-app")).toEqual([]);
+    expect(store.get(run.id)?.place?.givenAt).toBeUndefined();
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
     const other = waitingForRunner(store, 8);
-    const answer = store.askPlace(other, PLAIN);
-    expect(answer.ok ? undefined : answer.holder.id).toBe("scratch-app#7/1");
-    expect(() => store.claim(other)).toThrow(
-      "No place is free on scratch-app: the place is given to run scratch-app#7/1.",
-    );
+    expect(store.askPlace(other, PLAIN)).toEqual({ ok: true });
+    expect(store.claim(other).status).toBe("active");
   });
 
-  it("gives the place to an older waiting ticket when a step ends, and the ended run waits behind it (D2)", () => {
+  it("gives the place to a waiting ticket when a step ends, and the ended run does not wait (R2 clause 6, R3)", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
-    store.askPlace(run.id, { priority: false, openedAt: "2026-08-02T09:00:00Z" });
+    store.askPlace(run.id, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
     store.activate(run.id, "session-7");
-    const older = waitingForRunner(store, 8);
-    store.askPlace(older, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    const newer = waitingForRunner(store, 8);
+    store.askPlace(newer, { priority: false, openedAt: "2026-08-02T09:00:00Z" });
 
     store.park(run.id, { waitingOn: "the runner", kind: "runner" });
 
     expect(store.placeHolders("scratch-app").map((each) => each.id)).toEqual(["scratch-app#8/1"]);
-    expect(store.waitingForPlace("scratch-app").map((each) => each.id)).toEqual([
-      "scratch-app#7/1",
-    ]);
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
   });
 
   it("lets a takeover hold a run while another ticket's step runs, and the takeover takes no place (R2 clause 6, R13)", () => {
@@ -816,6 +822,106 @@ describe("places on a project (ADR-0063)", () => {
 
     expect(store.waitingForPlace("scratch-app")).toEqual([]);
     expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#8/1"]);
+  });
+});
+
+describe("the number of places on a project (PRD-07.R2)", () => {
+  /** A ticket's order facts, as a runner reads them from the forge. */
+  const PLAIN = { priority: false, openedAt: "2026-08-01T09:00:00Z" };
+
+  /** A store opened with only a clock, so it is told no number of places. */
+  function storeWithDefaultPlaces(path = statePath()): RunStore {
+    let tick = 0;
+    return RunStore.open(path, {
+      now: () => `2026-08-02T10:${String(tick++).padStart(2, "0")}:00Z`,
+    });
+  }
+
+  /** A run just picked up, put on the runner's wait as the runner does. */
+  function waitingForRunner(store: RunStore, project: string, ticket: number): string {
+    const { run } = store.register(project, ticket);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "triage" });
+    return run.id;
+  }
+
+  it("lets two runs of one project take a place when the store is told no number, and refuses a third naming one of them (clause 3)", () => {
+    const store = storeWithDefaultPlaces();
+    const first = waitingForRunner(store, "scratch-app", 7);
+    const second = waitingForRunner(store, "scratch-app", 8);
+    const third = waitingForRunner(store, "scratch-app", 9);
+
+    expect(store.askPlace(first, PLAIN)).toEqual({ ok: true });
+    store.activate(first, "session-7");
+    expect(store.askPlace(second, PLAIN)).toEqual({ ok: true });
+    store.activate(second, "session-8");
+    const answer = store.askPlace(third, PLAIN);
+
+    expect(answer.ok).toBe(false);
+    expect(answer.ok ? undefined : answer.holder.id).toMatch(/^scratch-app#[78]\/1$/);
+  });
+
+  it("lets a run take the second place while the first is given to another run (clause 3)", () => {
+    const store = storeWithDefaultPlaces();
+    const first = waitingForRunner(store, "scratch-app", 7);
+    const second = waitingForRunner(store, "scratch-app", 8);
+    const third = waitingForRunner(store, "scratch-app", 9);
+    store.askPlace(first, PLAIN);
+    store.activate(first, "session-7");
+    store.askPlace(second, PLAIN);
+    store.activate(second, "session-8");
+    store.askPlace(third, PLAIN);
+    store.complete(first);
+    store.complete(second);
+    const fourth = waitingForRunner(store, "scratch-app", 10);
+
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual(["scratch-app#9/1"]);
+    expect(store.askPlace(fourth, PLAIN)).toEqual({ ok: true });
+  });
+
+  it("gives the place of a run that parks to the waiting run by its order, while the other run keeps its step (clause 4)", () => {
+    const store = storeWithDefaultPlaces();
+    const first = waitingForRunner(store, "scratch-app", 7);
+    const second = waitingForRunner(store, "scratch-app", 8);
+    const waiting = waitingForRunner(store, "scratch-app", 9);
+    store.askPlace(first, { priority: false, openedAt: "2026-08-03T09:00:00Z" });
+    store.activate(first, "session-7");
+    store.askPlace(second, { priority: false, openedAt: "2026-08-03T09:00:00Z" });
+    store.activate(second, "session-8");
+    store.askPlace(waiting, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+
+    store.park(first, { waitingOn: "the runner", kind: "runner" });
+
+    expect(store.get(waiting)?.place?.givenAt).toBeDefined();
+    expect(store.get(second)?.status).toBe("active");
+    expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual([
+      "scratch-app#8/1",
+      "scratch-app#9/1",
+    ]);
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
+  });
+
+  it("counts the places of each project on its own when two projects have different numbers", () => {
+    let tick = 0;
+    const store = RunStore.open(statePath(), {
+      now: () => `2026-08-02T10:${String(tick++).padStart(2, "0")}:00Z`,
+      placesOf: (project) => (project === "ivtrends" ? 1 : 3),
+    });
+    const ivtrends = [1, 2].map((ticket) => waitingForRunner(store, "ivtrends", ticket));
+    const scratch = [7, 8, 9, 10].map((ticket) => waitingForRunner(store, "scratch-app", ticket));
+
+    expect(store.askPlace(ivtrends[0]!, PLAIN)).toEqual({ ok: true });
+    store.activate(ivtrends[0]!, "session-1");
+    for (const [index, id] of scratch.slice(0, 3).entries()) {
+      expect(store.askPlace(id, PLAIN)).toEqual({ ok: true });
+      store.activate(id, `session-${7 + index}`);
+    }
+    const ivtrendsRefused = store.askPlace(ivtrends[1]!, PLAIN);
+    const scratchRefused = store.askPlace(scratch[3]!, PLAIN);
+
+    expect(ivtrendsRefused.ok ? undefined : ivtrendsRefused.holder.id).toBe("ivtrends#1/1");
+    expect(scratchRefused.ok).toBe(false);
+    expect(store.placesOf("ivtrends")).toBe(1);
+    expect(store.placesOf("scratch-app")).toBe(3);
   });
 });
 
@@ -2604,5 +2710,139 @@ describe("adopting a ticket's open pull request", () => {
       store.adopt("scratch-app", 67, { branch: "timone/67-some-title", pr: 70 }),
     ).toThrow(/scratch-app#67\/1/);
     expect(store.runsForTicket("scratch-app", 67)).toEqual([live]);
+  });
+});
+
+describe("the planner's decision on a run (ADR-0065 D2)", () => {
+  const PLAIN = { priority: false, openedAt: "2026-08-01T09:00:00Z" };
+
+  /** A run just picked up, put on the runner's wait as the runner does. */
+  function waitingForRunner(store: RunStore, ticket: number): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "planning" });
+    return run.id;
+  }
+
+  it("keeps the time the planner was first asked when it is asked a second time", () => {
+    const store = newStore();
+    const id = waitingForRunner(store, 12);
+
+    const first = store.askPlanner(id, PLAIN);
+    store.askPlanner(id, PLAIN);
+
+    expect(first.planner?.askedAt).toBe("2026-08-02T10:02:00Z");
+    expect(store.get(id)?.planner).toEqual({ askedAt: "2026-08-02T10:02:00Z" });
+    expect(store.waitingForPlanner("scratch-app").map((run) => run.id)).toEqual([id]);
+  });
+
+  it("keeps a held run's decision as it was told, and stops counting it as waiting for the planner", () => {
+    const store = newStore();
+    const id = waitingForRunner(store, 12);
+    store.askPlanner(id, PLAIN);
+
+    const held = store.decidePlanner(id, {
+      kind: "hold",
+      at: "2026-08-02T11:00:00Z",
+      reason: "Both change the task list.",
+      waitsFor: [7],
+    });
+
+    expect(held.planner).toEqual({
+      askedAt: "2026-08-02T10:02:00Z",
+      decision: {
+        kind: "hold",
+        at: "2026-08-02T11:00:00Z",
+        reason: "Both change the task list.",
+        waitsFor: [7],
+      },
+    });
+    expect(store.get(id)?.planner).toEqual(held.planner);
+    expect(store.waitingForPlanner("scratch-app")).toEqual([]);
+    expect(store.heldByPlanner("scratch-app").map((run) => run.id)).toEqual([id]);
+  });
+
+  it("asks the planner again for a held run: the decision goes and the run waits for the planner", () => {
+    const store = newStore();
+    const id = waitingForRunner(store, 12);
+    store.askPlanner(id, PLAIN);
+    store.decidePlanner(id, {
+      kind: "hold",
+      at: "2026-08-02T11:00:00Z",
+      reason: "Both change the task list.",
+      waitsFor: [7],
+    });
+
+    const asked = store.reaskPlanner(id);
+
+    expect(asked.planner).toEqual({ askedAt: "2026-08-02T10:03:00Z" });
+    expect(store.heldByPlanner("scratch-app")).toEqual([]);
+    expect(store.waitingForPlanner("scratch-app").map((run) => run.id)).toEqual([id]);
+  });
+
+  it("puts a ticket labelled priority:high first among the runs waiting for the planner, then the ticket opened first", () => {
+    const store = newStore();
+    const late = waitingForRunner(store, 8);
+    const early = waitingForRunner(store, 9);
+    const urgent = waitingForRunner(store, 10);
+    store.askPlanner(late, { priority: false, openedAt: "2026-08-01T12:00:00Z" });
+    store.askPlanner(early, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    store.askPlanner(urgent, { priority: true, openedAt: "2026-08-01T15:00:00Z" });
+
+    expect(store.waitingForPlanner("scratch-app").map((run) => run.id)).toEqual([
+      "scratch-app#10/1",
+      "scratch-app#9/1",
+      "scratch-app#8/1",
+    ]);
+  });
+
+  it("leaves the planner's decision on a run that is finished, and counts it no more", () => {
+    const store = newStore();
+    const id = waitingForRunner(store, 12);
+    store.askPlanner(id, PLAIN);
+    const decision = {
+      kind: "hold" as const,
+      at: "2026-08-02T11:00:00Z",
+      reason: "Both change the task list.",
+      waitsFor: [7],
+    };
+    store.decidePlanner(id, decision);
+
+    const cancelled = store.cancel(id, "fvermaut asked to stop");
+
+    expect(cancelled.planner?.decision).toEqual(decision);
+    expect(store.heldByPlanner("scratch-app")).toEqual([]);
+  });
+
+  it("loads a ledger written before the planner existed unchanged, with no run waiting for it", () => {
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    const written = JSON.stringify({
+      version: 1,
+      runs: [
+        {
+          id: "scratch-app#12/1",
+          project: "scratch-app",
+          ticket: 12,
+          seq: 1,
+          status: "parked",
+          stage: "planning",
+          wait: { on: "the runner", kind: "runner", resolvableBy: ["planning"] },
+          branch: "timone/12-a-due-date-on-each-task",
+          place: { priority: false, openedAt: "2026-10-01T08:00:00Z" },
+          flags: [],
+          createdAt: "2026-10-01T08:00:00Z",
+          updatedAt: "2026-10-01T09:00:00Z",
+        },
+      ],
+    });
+    writeFileSync(path, written);
+
+    const store = RunStore.open(path);
+
+    expect(store.get("scratch-app#12/1")?.planner).toBeUndefined();
+    expect(store.get("scratch-app#12/1")?.branch).toBe("timone/12-a-due-date-on-each-task");
+    expect(store.waitingForPlanner("scratch-app")).toEqual([]);
+    expect(store.heldByPlanner("scratch-app")).toEqual([]);
+    expect(readFileSync(path, "utf8")).toBe(written);
   });
 });

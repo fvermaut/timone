@@ -31,10 +31,12 @@
 
 ## R2 — Each project has a number of places, 2 unless `timone.yaml` says otherwise
 
-> ✏ 2026-10-04 — partial evidence: clauses 3 to 6 passed in [phase-47-verification.md](../../plans/phases/reports/phase-47-verification.md), with its probe [`prd-07.r2.mjs`](../../plans/phases/probes/prd-07.r2.mjs). Clause 4 was seen only as far as one place allows: its words "while the other steps keep running" need two places. Clauses 1 and 2, the number of places, are not built yet (piece 5), so the status stays `draft`.
+> ✏ 2026-10-05 — verified in [phase-49-verification.md](../../plans/phases/reports/phase-49-verification.md), with its probe [`prd-07.r2.mjs`](../../plans/phases/probes/prd-07.r2.mjs): all six clauses passed, clauses 1 and 2 with no `places` line (2 places) and with `places: 3` and `places: 1`, clauses 3 and 4 with two places. Clause 6 also for the runner session a step's end wakes, which took a place until the fix `074ec45` on this branch. The note below is history: what it said was still owed has now been seen.
+
+> ✏ 2026-10-04 — partial evidence: clauses 3 to 6 passed in [phase-47-verification.md](../../plans/phases/reports/phase-47-verification.md), with its probe [`prd-07.r2.mjs`](../../plans/phases/probes/prd-07.r2.mjs). ~~Clause 4 was seen only as far as one place allows: its words "while the other steps keep running" need two places. Clauses 1 and 2, the number of places, are not built yet (piece 5), so the status stays `draft`.~~
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that fills every place of a project and fails if any further step of that project starts; and a test that counts places while tickets wait for a person, for a merge, or for their turn, and fails if any of those is counted
 - **Depends-on:** `src/daemon/runs.ts, src/runner/, src/manifest.ts`
@@ -84,8 +86,10 @@
 
 ## R4 — Nothing is built on top of an open pull request
 
+> ✏ 2026-10-05 — verified in [phase-49-verification.md](../../plans/phases/reports/phase-49-verification.md), with its probe [`prd-07.r4.mjs`](../../plans/phases/probes/prd-07.r4.mjs): all four clauses passed, clauses 1 and 4 also while GitHub fails the call that lists an initiative's steps, which started a blocked step until the fix `e705481` on this branch.
+
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test that asks to start a build for a ticket that needs another ticket's unmerged work, and fails if it starts; and a test that reads the base of every work branch a run creates and fails if any is not the default branch
 - **Depends-on:** `src/runner/, src/daemon/, src/adapters/github-tickets.ts`
@@ -130,8 +134,10 @@
 
 ## R6 — A held ticket says what it waits for, and a named person can overrule
 
+> ✏ 2026-10-05 — verified in [phase-49-verification.md](../../plans/phases/reports/phase-49-verification.md), with its probe [`prd-07.r6.mjs`](../../plans/phases/probes/prd-07.r6.mjs): all three clauses passed, the planner's judgement played by the probe; clause 3 also when the planner names the comment of someone not named for the project.
+
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Falsified-by:** a test in which the planner holds a ticket and fails if no comment on that ticket names the ticket it waits for; and a test that gives the planner a comment by someone not named for the project and fails if it changes a decision
 - **Depends-on:** `src/runner/, src/daemon/`
@@ -240,10 +246,12 @@
 
 ## R12 — The old rule is gone from every place it is written
 
-> ✏ 2026-10-04 — partial evidence: clauses 1, 3 and 4 passed in [phase-47-verification.md](../../plans/phases/reports/phase-47-verification.md), and clause 2 for PRD-02.R22 clause 6, PRD-05.R11 clause 2 and PRD-03's out-of-scope line, with its probe [`prd-07.r12.mjs`](../../plans/phases/probes/prd-07.r12.mjs). PRD-02.R22 clause 1 and PRD-05.R15 clause 2 are not changed yet (piece 5), so the status stays `draft`.
+> ✏ 2026-10-05 — verified in [phase-49-verification.md](../../plans/phases/reports/phase-49-verification.md), with its probe [`prd-07.r12.mjs`](../../plans/phases/probes/prd-07.r12.mjs): all four clauses passed, clause 2 now also for PRD-02.R22 clause 1 and PRD-05.R15 clause 2. The note below is history.
+
+> ✏ 2026-10-04 — partial evidence: clauses 1, 3 and 4 passed in [phase-47-verification.md](../../plans/phases/reports/phase-47-verification.md), and clause 2 for PRD-02.R22 clause 6, PRD-05.R11 clause 2 and PRD-03's out-of-scope line, with its probe [`prd-07.r12.mjs`](../../plans/phases/probes/prd-07.r12.mjs). ~~PRD-02.R22 clause 1 and PRD-05.R15 clause 2 are not changed yet (piece 5), so the status stays `draft`.~~
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Depends-on:** `process.md, doc/adr/, doc/specs/prd/, src/daemon/runs.ts`
 - **Criteria:**

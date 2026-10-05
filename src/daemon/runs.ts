@@ -9,6 +9,7 @@ import {
   type Holder,
   type Liveness,
 } from "./holder.js";
+import { DEFAULT_PLACES } from "../manifest.js";
 import { PIPELINE_STAGES, type PipelineStage } from "./pipeline.js";
 
 /**
@@ -43,14 +44,6 @@ export type RunStatus =
  * see {@link RunStore}.
  */
 const RUNNING: readonly RunStatus[] = ["picked-up", "active"];
-
-/**
- * How many places each project has: how many of its runs may have a step
- * running at once
- * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)
- * D1). One until the number of places is read from `timone.yaml`.
- */
-export const PLACES_PER_PROJECT = 1;
 
 /**
  * A run refused `active` because every place on its project is taken
@@ -233,6 +226,35 @@ const runSchema = z.strictObject({
    * run.
    */
   takenOver: z.literal(true).optional(),
+  /**
+   * The planner's decision on this run
+   * ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+   * D2): whether its build may start now. The build is refused until there
+   * is one.
+   *
+   * `askedAt` set and no `decision` means the run waits for the planner.
+   * A `hold` decision means the planner holds it until the tickets in
+   * `waitsFor` are merged or closed; a `build` decision means it may build.
+   * `onComment` is the named person's comment a decision was taken on. The
+   * decision stays on a finished run, as a record of what was decided.
+   *
+   * Optional, so every ledger written before the planner existed loads
+   * unchanged.
+   */
+  planner: z
+    .strictObject({
+      askedAt: z.string().optional(),
+      decision: z
+        .strictObject({
+          kind: z.enum(["build", "hold"]),
+          at: z.string(),
+          reason: z.string(),
+          waitsFor: z.array(z.number().int().positive()).optional(),
+          onComment: z.strictObject({ by: z.string(), at: z.string() }).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   /** Agent SDK session identifier, once one has been spawned. */
   sessionId: z.string().optional(),
   /**
@@ -485,6 +507,13 @@ export type Run = z.infer<typeof runSchema>;
  * D5) — {@link Run.wait}, named so that readers can talk about it.
  */
 export type RunWait = NonNullable<Run["wait"]>;
+
+/** The planner's decision on a run (ADR-0065 D2) — see {@link Run.planner}. */
+export type PlannerDecision = NonNullable<NonNullable<Run["planner"]>["decision"]>;
+
+/** What decides a run's turn for a place, and for the planner (ADR-0063 D3). */
+export type PlaceOrder = { priority: boolean; openedAt: string };
+
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
 export type IntroductionRecord = z.infer<typeof introductionRecordSchema>;
 export type InitiativeRecord = z.infer<typeof initiativeRecordSchema>;
@@ -545,6 +574,12 @@ export interface RunStoreOptions {
    * whatever the runner's pid table happens to hold asserts nothing.
    */
   livenessOf?: (holder: Holder) => Liveness;
+  /**
+   * How many places a project has: how many of its runs may have a step
+   * running at once (PRD-07.R2, ADR-0065 D6). The caller reads it from
+   * `timone.yaml`. Absent means `DEFAULT_PLACES` for every project.
+   */
+  placesOf?: (project: string) => number;
 }
 
 /** Default state-file location, relative to the timone root. */
@@ -583,8 +618,8 @@ export interface ParkOptions {
  *   place is given to it and not yet used.** Nothing else takes one: not a
  *   work branch, not an open pull request, not a wait for a person, not a run
  *   just picked up, not a terminal a person opened with `timone takeover`. A
- *   project has {@link PLACES_PER_PROJECT} places, and a run may enter
- *   `active` only while one is free or given to it.
+ *   project has the number of places {@link placesOf} answers, and a run
+ *   may enter `active` only while one is free or given to it.
  * - **A run refused a place waits for one, and a freed place is given to one
  *   waiting run in the same write that freed it**: a ticket labelled
  *   `priority:high` first, then the ticket opened first on the forge, then
@@ -605,13 +640,23 @@ export class RunStore {
     private state: State,
     private readonly now: () => string,
     private readonly livenessOf: (holder: Holder) => Liveness,
+    private readonly places: (project: string) => number,
   ) {}
 
   /** Open the store at `path`, starting empty when the file does not exist. */
   static open(path: string, options: RunStoreOptions = {}): RunStore {
     const now = options.now ?? (() => new Date().toISOString());
     const livenessOf = options.livenessOf ?? ((holder) => holderLiveness(holder));
-    return new RunStore(path, readState(path), now, livenessOf);
+    const places = options.placesOf ?? (() => DEFAULT_PLACES);
+    return new RunStore(path, readState(path), now, livenessOf, places);
+  }
+
+  /**
+   * How many places `project` has: how many of its runs may have a step
+   * running at once (PRD-07.R2, ADR-0065 D6).
+   */
+  placesOf(project: string): number {
+    return this.places(project);
   }
 
   /**
@@ -839,10 +884,7 @@ export class RunStore {
    * Ask for a place on the run's project before a step starts (ADR-0063 D2).
    * `order` is what decides the run's turn, read from its ticket at this try.
    */
-  askPlace(
-    id: string,
-    order: { priority: boolean; openedAt: string },
-  ): { ok: true } | { ok: false; holder: Run } {
+  askPlace(id: string, order: PlaceOrder): { ok: true } | { ok: false; holder: Run } {
     const run = this.mutable(id);
     run.place = { ...run.place, priority: order.priority, openedAt: order.openedAt };
     const holder = run.place.givenAt === undefined ? this.placeTakenFrom(run) : undefined;
@@ -918,6 +960,81 @@ export class RunStore {
     this.refresh();
     return this.state.runs
       .filter((run) => run.project === project && takesPlace(run))
+      .map((run) => ({ ...run }));
+  }
+
+  /**
+   * Write that `id` waits for the planner's decision (ADR-0065 D2). Does
+   * nothing when the run has a decision. A run asked already keeps the time
+   * it was first asked.
+   *
+   * `order` is the run's place order, read from its ticket at this try, and
+   * written on its place as {@link askPlace} writes it, so
+   * {@link waitingForPlanner} can order the runs that wait.
+   */
+  askPlanner(id: string, order: PlaceOrder): Run {
+    const run = this.mutable(id);
+    if (run.planner?.decision !== undefined) return { ...run };
+    run.place = { ...run.place, priority: order.priority, openedAt: order.openedAt };
+    run.planner = { askedAt: run.planner?.askedAt ?? this.now() };
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Write the planner's decision on `id` (ADR-0065 D2). The time it was
+   * asked stays. A new decision replaces the one before, as when a held run
+   * is decided again.
+   */
+  decidePlanner(id: string, decision: PlannerDecision): Run {
+    const run = this.mutable(id);
+    run.planner = { ...run.planner, decision };
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Ask the planner again for a held run, now that what it waits for is gone
+   * (ADR-0065 D4): the hold goes, and the run waits for a new decision from
+   * now. A run that is not held is left as it is.
+   */
+  reaskPlanner(id: string): Run {
+    const run = this.mutable(id);
+    if (run.planner?.decision?.kind !== "hold") return { ...run };
+    run.planner = { askedAt: this.now() };
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * The live runs of `project` that wait for the planner's decision, in the
+   * order a freed place is given (ADR-0063 D3, ADR-0065 D1). A run with no
+   * place order comes after those that have one, by ticket number.
+   */
+  waitingForPlanner(project: string): Run[] {
+    this.refresh();
+    return this.state.runs
+      .filter(
+        (run) =>
+          run.project === project &&
+          !isSettled(run.status) &&
+          run.planner?.askedAt !== undefined &&
+          run.planner.decision === undefined,
+      )
+      .sort(byPlannerOrder)
+      .map((run) => ({ ...run }));
+  }
+
+  /** The live runs of `project` the planner holds (ADR-0065 D4). */
+  heldByPlanner(project: string): Run[] {
+    this.refresh();
+    return this.state.runs
+      .filter(
+        (run) =>
+          run.project === project &&
+          !isSettled(run.status) &&
+          run.planner?.decision?.kind === "hold",
+      )
       .map((run) => ({ ...run }));
   }
 
@@ -1341,8 +1458,9 @@ export class RunStore {
   /**
    * Move a run to `next`, refusing illegal transitions and refusing `active`
    * when no place is free for the run (ADR-0063 D1). A run whose step ends
-   * waits for a place with its own order (D2). Whatever place the move frees
-   * is given to the first waiting run before the file is written (D3).
+   * takes no place while its runner decides (PRD-07.R2 clause 6). Whatever
+   * place the move frees is given to the first waiting run before the file is
+   * written (D3).
    */
   private transition(
     id: string,
@@ -1365,7 +1483,6 @@ export class RunStore {
       if (holder !== undefined) throw new NoPlaceError(run.project, holder);
     }
 
-    const stepEnds = run.status === "active" && run.takenOver !== true;
     run.status = next;
     apply(run);
     run.updatedAt = this.now();
@@ -1377,12 +1494,9 @@ export class RunStore {
       run.place.givenAt = undefined;
       run.place.waitingSince = undefined;
     }
-    // A run whose step has just ended waits for a place with its own order,
-    // until its runner decides what comes next (ADR-0063 D2). It keeps the
-    // place when it comes first.
-    if (next === "parked" && stepEnds && run.place !== undefined) {
-      run.place.waitingSince = this.now();
-    }
+    // ✏ 2026-10-05: a run whose step has just ended does not wait for a
+    // place, and none is given to it: the runner session it wakes takes no
+    // place (PRD-07.R2 clause 6). Its next step asks like any other.
     this.givePlaces(run.project);
 
     this.persist();
@@ -1391,8 +1505,10 @@ export class RunStore {
 
   /**
    * The run that keeps `run` from a place, or undefined when it may take one:
-   * {@link PLACES_PER_PROJECT} other runs of its project take a place, or a
-   * place is given to another run. Over the state already in hand.
+   * as many other runs of its project take a place as it has places
+   * ({@link placesOf}). A place given to another run counts as taken. The
+   * run named is the one a place is given to, when there is one, and else
+   * the first whose step runs. Over the state already in hand.
    */
   private placeTakenFrom(run: Run): Run | undefined {
     const others = this.state.runs.filter(
@@ -1400,7 +1516,7 @@ export class RunStore {
     );
     const taking = others.filter(takesPlace);
     const given = others.find((other) => other.place?.givenAt !== undefined);
-    if (taking.length < PLACES_PER_PROJECT && given === undefined) return undefined;
+    if (taking.length < this.places(run.project)) return undefined;
     return given ?? taking[0];
   }
 
@@ -1415,7 +1531,7 @@ export class RunStore {
       const taking = this.state.runs.filter(
         (run) => run.project === project && takesPlace(run),
       );
-      if (taking.length >= PLACES_PER_PROJECT) return;
+      if (taking.length >= this.places(project)) return;
       const first = this.loadedWaitingForPlace(project)[0];
       if (first?.place === undefined) return;
       first.place.givenAt = this.now();
@@ -1582,6 +1698,16 @@ function byPlaceOrder(left: Run, right: Run): number {
   const opened = Date.parse(left.place?.openedAt ?? "") - Date.parse(right.place?.openedAt ?? "");
   if (opened !== 0 && !Number.isNaN(opened)) return opened;
   return left.ticket - right.ticket;
+}
+
+/**
+ * The order in which runs that wait for the planner are decided (ADR-0065
+ * D1): a run with a place order first, by {@link byPlaceOrder}; then a run
+ * with none, by ticket number.
+ */
+function byPlannerOrder(left: Run, right: Run): number {
+  const ordered = Number(left.place === undefined) - Number(right.place === undefined);
+  return ordered !== 0 ? ordered : byPlaceOrder(left, right);
 }
 
 /** Who takes the place a run was refused, as the refusal says it. */

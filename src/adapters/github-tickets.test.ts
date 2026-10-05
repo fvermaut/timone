@@ -1375,6 +1375,7 @@ describe("every call this adapter makes can be scoped to a repository", () => {
       () => adapter.removeLabel(project, 7, "timone:held"),
       () => adapter.createIssue(project, { title: "t", body: "b", labels: ["bug"] }),
       () => adapter.getPullRequestBody(project, 9),
+      () => adapter.listPullRequestFiles(project, 9),
       () => adapter.setPullRequestBody(project, 9, "b"),
       () => adapter.aheadOfDefault(project, "b"),
     ];
@@ -1485,6 +1486,42 @@ describe("the forge calls the runner needs", () => {
       "--json",
       "body",
     ]);
+  });
+
+  it("lists the paths of the files a pull request changes (ADR-0065 D3)", async () => {
+    // `gh pr view --json files` gives each file with its line counts; only
+    // the path is read.
+    const { run, calls } = fakeRunner(
+      JSON.stringify({
+        files: [
+          { path: "src/daemon/runs.ts", additions: 40, deletions: 3 },
+          { path: "src/runner/actions.ts", additions: 12, deletions: 0 },
+        ],
+      }),
+    );
+
+    const files = await new GitHubTicketingAdapter({ run }).listPullRequestFiles(alpha, 9);
+
+    expect(files).toEqual(["src/daemon/runs.ts", "src/runner/actions.ts"]);
+    expect(calls[0].args).toEqual([
+      "pr",
+      "view",
+      "9",
+      "--repo",
+      "fvermaut/scratch-app",
+      "--json",
+      "files",
+    ]);
+  });
+
+  it("lets a forge failure travel when it lists a pull request's files, and never answers an empty list for it", async () => {
+    const { run } = fakeRunnerFailing(
+      new Error("gh pr view 9 failed after 3 attempts: ECONNRESET"),
+    );
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).listPullRequestFiles(alpha, 9),
+    ).rejects.toThrow(/ECONNRESET/);
   });
 
   it("counts the commits on a branch that the default branch the forge names does not have", async () => {

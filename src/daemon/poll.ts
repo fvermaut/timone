@@ -1,6 +1,8 @@
 import type { Manifest, ProjectConfig } from "../manifest.js";
+import type { PlannerDriver } from "../planner/driver.js";
 import type { RunnerDriver } from "../runner/driver.js";
 import {
+  type Dependency,
   MARK_LABEL,
   PREVIEW_MARKER,
   type PullRequest,
@@ -35,7 +37,7 @@ import { resolveTakeover } from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
 import {
   type InitiativeRecord, type Run, type RunStore, type Witness } from "./runs.js";
-import { HELD_LABEL, MAP_LABEL, nextStep } from "./steps.js";
+import { HELD_LABEL, MAP_LABEL, eligibleSteps } from "./steps.js";
 
 export interface PollDeps {
   manifest: Manifest;
@@ -117,6 +119,14 @@ export interface PollDeps {
    * alone. There is one driver now, so there is nothing to leave a project to.
    */
   runner: RunnerDriver;
+  /**
+   * The planner, which decides for each project which ticket may be built
+   * now ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+   * D1). Each project is handed to it after the runner, with the same cycle.
+   * Absent means no planner session starts, and a run that waits for one
+   * goes on waiting.
+   */
+  planner?: Pick<PlannerDriver, "tick">;
   /** Progress sink; defaults to silence (the command wires stdout). */
   log?: (message: string) => void;
 }
@@ -969,11 +979,19 @@ async function releasePreview(
 
 /**
  * What this cycle knows about every initiative on a project: which tickets are
- * steps, and which step of each is the one to take next.
+ * steps, and which steps of each may be taken up.
  */
 interface Frontier {
+  /**
+   * Whether the steps of every initiative were read. When one listing failed,
+   * a step of that initiative looks like an ordinary ticket, so no ticket can
+   * be told from a step.
+   */
+  complete: boolean;
   isStep(ticket: number): boolean;
-  isNext(ticket: number): boolean;
+  isEligible(ticket: number): boolean;
+  /** The tickets a step ticket is blocked by, as its listing gave them; none for any other ticket. */
+  blockedBy(ticket: number): readonly Dependency[];
 }
 
 /**
@@ -981,7 +999,7 @@ interface Frontier {
  * and write down what was seen.
  *
  * **One query per initiative per cycle, and it does three jobs.** It is what
- * tells a step ticket from an ordinary one, what chooses the step to take, and
+ * tells a step ticket from an ordinary one, what chooses the steps to take, and
  * — as a side effect and not as a second call — what fills the cached picture
  * `timone status` renders from
  * ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
@@ -989,8 +1007,9 @@ interface Frontier {
  * front of a waiting human, which is the thing that ruling refused.
  *
  * It never throws. A tracker that cannot list one initiative's children leaves
- * that initiative alone for a cycle, with a line in the errors; taking the
- * project's whole turn down over it would stop every other ticket on it too.
+ * that initiative alone for a cycle, with a line in the errors, and says the
+ * frontier is not complete. Taking the project's whole turn down over it would
+ * stop the runs already open on it too.
  */
 async function surveyInitiatives(
   project: TicketingProject,
@@ -1000,7 +1019,9 @@ async function surveyInitiatives(
 ): Promise<Frontier> {
   const { store, adapter } = deps;
   const steps = new Set<number>();
-  const next = new Set<number>();
+  const eligible = new Set<number>();
+  const blockers = new Map<number, readonly Dependency[]>();
+  let complete = true;
 
   for (const map of tickets.filter((t) => t.labels.includes(MAP_LABEL))) {
     let children: Step[];
@@ -1011,28 +1032,35 @@ async function surveyInitiatives(
         `error  ${project.name}: could not read the steps of #${map.number} — ` +
           `${oneLine(error)}`,
       );
+      complete = false;
       continue;
     }
 
-    for (const child of children) steps.add(child.number);
-    const eligible = nextStep(children);
-    if (eligible !== undefined) next.add(eligible.number);
+    for (const child of children) {
+      steps.add(child.number);
+      blockers.set(child.number, child.blockedBy);
+    }
+    const toTake = eligibleSteps(children);
+    for (const step of toTake) eligible.add(step.number);
 
+    // `timone status` names one step as next, so the picture keeps the first
+    // eligible one, as it did when only the first was picked up.
+    const [first] = toTake;
     store.rememberInitiative({
       project: project.name,
       initiative: map.number,
       title: map.title,
       steps: children.map((child) => child.number),
       done: children.filter((child) => child.state === "closed").length,
-      ...(eligible === undefined
-        ? {}
-        : { next: eligible.number, nextTitle: eligible.title }),
+      ...(first === undefined ? {} : { next: first.number, nextTitle: first.title }),
     });
   }
 
   return {
+    complete,
     isStep: (ticket) => steps.has(ticket),
-    isNext: (ticket) => next.has(ticket),
+    isEligible: (ticket) => eligible.has(ticket),
+    blockedBy: (ticket) => blockers.get(ticket) ?? [],
   };
 }
 
@@ -1089,16 +1117,25 @@ async function pollProject(
   const tickets = await adapter.listMarkedTickets(project);
   const frontier = await surveyInitiatives(project, tickets, deps, log);
   for (const ticket of tickets) {
+    // No ticket is picked up on a cycle where the steps of an initiative
+    // could not be read (PRD-07.R4). Its steps then look like ordinary
+    // tickets, and one blocked by a step still open would be started. The
+    // runs already open go on below; the next cycle that reads the steps
+    // picks up what it may.
+    if (!frontier.complete) break;
+
     // A map ticket is a conversation, not work: the runs belong to the steps
     // it points at. Without this the daemon works the initiative and its own
     // children at the same time, on the same project.
     if (ticket.labels.includes(MAP_LABEL)) continue;
 
-    // A step that is not the frontier waits its turn. This is what stops a
-    // fourteen-step initiative becoming fourteen runs in one cycle: every
-    // step carries the mark — it has to, or nothing could ever pick it up —
-    // so the mark alone can no longer decide.
-    if (frontier.isStep(ticket.number) && !frontier.isNext(ticket.number)) {
+    // A step that is not eligible waits: it is closed, held, taken by a
+    // person, or blocked by a step still open or by a dependency list that
+    // came back incomplete. Every step carries the mark — it has to, or
+    // nothing could ever pick it up — so the mark alone cannot decide. Every
+    // eligible step is picked up, not only the first (PRD-07.R4, ADR-0065
+    // D6); how many build at once is for the places and the planner.
+    if (frontier.isStep(ticket.number) && !frontier.isEligible(ticket.number)) {
       continue;
     }
 
@@ -1113,11 +1150,11 @@ async function pollProject(
     }
 
     // **A held ticket is not picked up, whether or not it is a step.** For a
-    // step the frontier already refuses it, because `nextStep` skips the hold;
-    // this is the same refusal for everything else, and without it a ticket
-    // held by a declined pull request would simply be registered afresh on the
-    // next cycle and rebuilt. Nothing here removes a hold: taking it off is
-    // the human's half of the rule (ADR-0044 D7).
+    // step the frontier already refuses it, because `eligibleSteps` leaves a
+    // held step out; this is the same refusal for everything else, and
+    // without it a ticket held by a declined pull request would simply be
+    // registered afresh on the next cycle and rebuilt. Nothing here removes a
+    // hold: taking it off is the human's half of the rule (ADR-0044 D7).
     if (ticket.labels.includes(HELD_LABEL)) continue;
 
     // ✏ And a ticket held since the listing was read (40u). A cancel the
@@ -1181,8 +1218,15 @@ async function pollProject(
   // work does not hold up the next (R15). ✏ 2026-10-04: nothing is promoted
   // here any more. The ledger gives a freed place in the write that frees it
   // (ADR-0063 D3).
-  const cycle = { tickets, isStep: frontier.isStep, threads };
+  const cycle = { tickets, isStep: frontier.isStep, blockedBy: frontier.blockedBy, threads };
   for (const line of await runner.tick(project, config, cycle)) {
+    result.errors.push(line);
+    log(`error  ${line}`);
+  }
+  // Then the planner, with the same cycle, so it reads each thread from the
+  // same fetch (ADR-0065 D1). Like the runner's, its tick returns once it
+  // has started a session; it never waits for one.
+  for (const line of (await deps.planner?.tick(project, config, cycle)) ?? []) {
     result.errors.push(line);
     log(`error  ${line}`);
   }

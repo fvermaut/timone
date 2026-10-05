@@ -62,6 +62,21 @@ describe("the spending limit of a ticket", () => {
     expect(spentOn(entries)).toBe(44.5);
   });
 
+  it("counts the $0.40 a planner session cost on the ticket it decided for (ADR-0065 D1)", () => {
+    const entries: RecordEntry[] = [
+      stepCost(12.5, "2026-09-27T10:30:00.000Z"),
+      {
+        kind: "planner-ended",
+        at: "2026-09-27T11:00:00.000Z",
+        runId: "scratch-app#12/1",
+        ok: true,
+        costUsd: 0.4,
+      },
+    ];
+
+    expect(spentOn(entries)).toBe(12.9);
+  });
+
   it("puts a ticket over its limit at $150 spent, but not at $149.50", () => {
     const at150: RecordEntry[] = [
       stepCost(100, "2026-09-27T10:00:00.000Z"),

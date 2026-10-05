@@ -64,6 +64,7 @@ import { RunnerDriver, pullRequestEvent, type RunnerDriverDeps } from "../runner
 import { RunningSteps, runnerActions } from "../runner/actions.js";
 import { RunnerSessions, type RunQuery, type WakeOptions } from "../runner/session.js";
 import { appendEntry, readRecord, type RecordEntry } from "../runner/record.js";
+import type { PlannerDriverCycle } from "../planner/driver.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
 const tempDirs: string[] = [];
@@ -74,7 +75,12 @@ afterEach(() => {
   }
 });
 
-/** A store over a fresh state file with a deterministic clock. */
+/**
+ * A store over a fresh state file with a deterministic clock, and one place
+ * on every project: the cases here were written when every project had one
+ * (ADR-0063 D1). ✏ 2026-10-05: a project now has two unless `timone.yaml`
+ * sets another number (PRD-07.R2).
+ */
 function newStore(): RunStore {
   const dir = mkdtempSync(join(tmpdir(), "timone-poll-"));
   tempDirs.push(dir);
@@ -90,6 +96,7 @@ function newStore(): RunStore {
   let tick = 0;
   return RunStore.open(join(dir, ".timone", "state.json"), {
     now: () => `2026-08-02T10:00:${String(tick++).padStart(2, "0")}Z`,
+    placesOf: () => 1,
   });
 }
 
@@ -204,6 +211,9 @@ function fakeAdapter(
 ): { adapter: TicketingAdapter; comments: PostedComment[] } {
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,
@@ -834,6 +844,9 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
 } {
   const upserts: Upsert[] = [];
   const adapter: TicketingAdapter = {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,
@@ -1487,6 +1500,9 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       `${MACHINE_MARKER}\n\n---\n\n${body}`;
 
     const adapter: TicketingAdapter = {
+      async listPullRequestFiles(): Promise<string[]> {
+        return [];
+      },
       ...noBranches,
     ...noFiles,
     ...noMerges,
@@ -2231,6 +2247,80 @@ describe("the frontier decides which step is taken", () => {
   });
 
   /**
+   * PRD-07.R4 clauses 3 and 4, ADR-0065 D6: every eligible step is picked up
+   * in one cycle, not only the first. Whether each then builds is for the
+   * places and the planner; registering the run is the part decided here.
+   */
+  it("opens a run on each of steps 2 and 3 when both are eligible, and none on a step blocked by an open one", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const closedStep1 = {
+      number: 51,
+      url: "https://github.com/fvermaut/scratch-app/issues/51",
+      open: false,
+    };
+    const openStep2 = {
+      number: 52,
+      url: "https://github.com/fvermaut/scratch-app/issues/52",
+      open: true,
+    };
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { blockedBy: [closedStep1] },
+      { blockedBy: [closedStep1] },
+      { blockedBy: [openStep2] },
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, runner });
+
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 53)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 54)).toEqual([]);
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+  });
+
+  /**
+   * ADR-0065 D1, D3: the planner is handed each project after the runner, in
+   * the same cycle, with the blockers the survey found for each step.
+   */
+  it("hands the project to the planner after the runner, with the same cycle and each step's blockers", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const closedStep1 = {
+      number: 51,
+      url: "https://github.com/fvermaut/scratch-app/issues/51",
+      open: false,
+    };
+    const { tickets, steps } = initiative([{ state: "closed" }, { blockedBy: [closedStep1] }]);
+    const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const calls: { by: string; project: string; cycle: unknown }[] = [];
+    const runnerTick = runner.tick.bind(runner);
+    runner.tick = async (project, config, cycle) => {
+      calls.push({ by: "runner", project: project.name, cycle });
+      return runnerTick(project, config, cycle);
+    };
+    const blockers: unknown[] = [];
+    const planner = {
+      async tick(project: TicketingProject, _config: unknown, cycle: PlannerDriverCycle) {
+        calls.push({ by: "planner", project: project.name, cycle });
+        blockers.push(cycle.blockedBy(52), cycle.blockedBy(9));
+        return [];
+      },
+    };
+
+    await pollOnce({ manifest, store, adapter, runner, planner });
+
+    expect(calls.map(({ by, project }) => `${by} ${project}`)).toEqual(["runner alpha", "planner alpha"]);
+    expect(calls[1]?.cycle).toBe(calls[0]?.cycle);
+    expect(blockers).toEqual([[closedStep1], []]);
+  });
+
+  /**
    * The map ticket is marked — it is the ticket the human filed — and it must
    * never get a run of its own, or the daemon works the initiative and its
    * steps at the same time.
@@ -2248,11 +2338,30 @@ describe("the frontier decides which step is taken", () => {
     expect(store.runsForTicket("alpha", MAP)).toEqual([]);
   });
 
-  /** Fourteen marked steps must not become fourteen runs at once. */
-  it("opens one run, not one per step", async () => {
+  /**
+   * Fourteen marked steps that each wait for the one before must not become
+   * fourteen runs at once: the mark alone does not decide. ✏ Phase 49: the
+   * steps now wait for each other, because every eligible step is picked up
+   * (PRD-07.R4), and fourteen unblocked steps are fourteen eligible ones.
+   */
+  it("opens one run, not one per step, when each step waits for the one before", async () => {
     const store = newStore();
     const manifest = manifestWith("alpha");
-    const { tickets, steps } = initiative(Array.from({ length: 14 }, () => ({})));
+    const { tickets, steps } = initiative(
+      Array.from({ length: 14 }, (_, index) =>
+        index === 0
+          ? {}
+          : {
+              blockedBy: [
+                {
+                  number: 50 + index,
+                  url: `https://github.com/fvermaut/scratch-app/issues/${50 + index}`,
+                  open: true,
+                },
+              ],
+            },
+      ),
+    );
     const { adapter } = trackerFor(tickets, steps);
     const { sessions } = fakeWakes();
     const { runner } = runnerFor({ store, adapter, manifest, sessions });
@@ -2329,6 +2438,53 @@ describe("the frontier decides which step is taken", () => {
   });
 
   /**
+   * PRD-07.R4 clause 4: when the tracker does not answer the listing of the
+   * steps, no ticket can be told from a step, so a step blocked by an open
+   * one would look free. Nothing is picked up on that cycle; the next cycle
+   * that reads the steps picks up the eligible ones and still not the blocked.
+   */
+  it("picks up nothing on a cycle where the steps cannot be read, so a blocked step is not started", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const step = (number: number, open: boolean) => ({
+      number,
+      url: `https://github.com/fvermaut/scratch-app/issues/${number}`,
+      open,
+    });
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { blockedBy: [step(51, false)] },
+      { blockedBy: [step(51, false)] },
+      { blockedBy: [step(52, true), step(53, true)] },
+    ]);
+    const open = tickets.filter((t) => t.number !== 51);
+    const { adapter } = trackerFor(open, steps);
+    let answered = false;
+    const failing: TicketingAdapter = {
+      ...adapter,
+      async listSteps(project, initiative): Promise<Step[]> {
+        if (!answered) throw new Error("gh issue list failed: HTTP 502");
+        return adapter.listSteps(project, initiative);
+      },
+    };
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter: failing, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter: failing, runner });
+
+    for (const number of [51, 52, 53, 54]) {
+      expect(store.runsForTicket("alpha", number)).toEqual([]);
+    }
+
+    answered = true;
+    await pollOnce({ manifest, store, adapter: failing, runner });
+
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 53)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 54)).toEqual([]);
+  });
+
+  /**
    * The claim. Without it the next cycle sees the same step open, unheld and
    * unclaimed, and every ruling about dropping work is decoration.
    */
@@ -2399,6 +2555,34 @@ describe("the frontier decides which step is taken", () => {
       steps: [51, 52, 53],
       done: 1,
       next: 52,
+    });
+  });
+
+  /**
+   * Phase 49: several steps may be picked up at once, but `timone status`
+   * still names one as next, and it is the first eligible one.
+   */
+  it("still names the first eligible step as next when two steps are eligible", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { labels: ["timone", HELD_LABEL] },
+      {},
+      {},
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, runner });
+
+    expect(store.initiativeFor("alpha", 53)).toMatchObject({
+      initiative: MAP,
+      steps: [51, 52, 53, 54],
+      done: 1,
+      next: 53,
+      nextTitle: "3. Piece 3",
     });
   });
 
@@ -2703,7 +2887,17 @@ describe("a bug filed during a step and the next step are both picked up", () =>
     });
     store.register("alpha", 8);
 
-    const steps = [aStep(51), aStep(52)];
+    // ✏ Phase 49: step 52 waits for step 51, as piece 2 of a breakdown waits
+    // for piece 1. Every eligible step is picked up now (PRD-07.R4), so
+    // without the wait step 52 would be taken up beside step 51 at once.
+    const steps = [
+      aStep(51),
+      aStep(52, {
+        blockedBy: [
+          { number: 51, url: "https://github.com/fvermaut/scratch-app/issues/51", open: true },
+        ],
+      }),
+    ];
     const tickets = [
       ticket(MAP, { labels: ["timone", MAP_LABEL] }),
       ticket(51),
@@ -2730,6 +2924,7 @@ describe("a bug filed during a step and the next step are both picked up", () =>
         return steps.map((s) => ({
           ...s,
           state: closed.has(s.number) ? "closed" : s.state,
+          blockedBy: s.blockedBy.map((d) => ({ ...d, open: !closed.has(d.number) })),
         }));
       },
       async applyLabel(): Promise<void> {},

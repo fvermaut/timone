@@ -9,6 +9,8 @@ import {
   loadManifest,
   namedPeople,
   parseManifest,
+  placesIn,
+  placesOf,
   serializeManifest,
   ticketLimitOf,
   updateProject,
@@ -720,5 +722,66 @@ describe("who may instruct a project, and its limit", () => {
         },
       }),
     ).toThrowError(/project "client-alpha": field "instructors"/);
+  });
+});
+
+describe("how many places a project has (PRD-07.R2)", () => {
+  const entry = {
+    repo_url: "git@github.com:fvermaut/client-alpha.git",
+    path: "projects/client-alpha",
+    stack: ["typescript"],
+    bindings: { ticketing: "github" },
+  };
+
+  it("gives a project that sets no number 2 places (clause 1)", () => {
+    const manifest = parseManifest({ projects: { "client-alpha": entry } });
+
+    expect(placesOf(manifest.projects["client-alpha"]!)).toBe(2);
+  });
+
+  it("gives a project that sets 3 places 3 (clause 2)", () => {
+    const manifest = parseManifest({
+      projects: { "client-alpha": { ...entry, places: 3 } },
+    });
+
+    expect(placesOf(manifest.projects["client-alpha"]!)).toBe(3);
+  });
+
+  it("refuses 0 places, which would let no step run at all", () => {
+    expect(() =>
+      parseManifest({
+        projects: { "client-alpha": { ...entry, places: 0 } },
+      }),
+    ).toThrowError('project "client-alpha": field "places": must be 1 or more');
+  });
+
+  it("refuses 1.5 places, which is not a whole number", () => {
+    expect(() =>
+      parseManifest({
+        projects: { "client-alpha": { ...entry, places: 1.5 } },
+      }),
+    ).toThrowError(/project "client-alpha": field "places"/);
+  });
+
+  it('refuses "2" written as text, rather than reading it as a number', () => {
+    expect(() =>
+      parseManifest({
+        projects: { "client-alpha": { ...entry, places: "2" } },
+      }),
+    ).toThrowError(/project "client-alpha": field "places"/);
+  });
+
+  it("answers each project's number by its name, and 2 for a project the manifest does not have", () => {
+    const manifest = parseManifest({
+      projects: {
+        "client-alpha": { ...entry, places: 3 },
+        "client-beta": { ...entry, path: "projects/client-beta" },
+      },
+    });
+    const places = placesIn(manifest);
+
+    expect(places("client-alpha")).toBe(3);
+    expect(places("client-beta")).toBe(2);
+    expect(places("gone-project")).toBe(2);
   });
 });

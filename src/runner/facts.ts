@@ -85,7 +85,8 @@ export interface Facts {
   breakdown: Fact<Breakdown | undefined>;
 }
 
-const PHASES = "doc/plans/phases";
+/** Where the phase files are: a ticket's plan is one of them. */
+export const PHASES = "doc/plans/phases";
 const REPORTS = "doc/plans/phases/reports";
 const REQUIREMENTS = "doc/specs/prd";
 
@@ -153,13 +154,13 @@ async function branchFactsOf(
     attempt(() => adapter.aheadOfDefault(project, branch)),
     comparedWith(defaultBranch, async (name) => {
       const files: PhaseFile[] = [];
-      for (const path of await addedOn(adapter, project, name, branch, PHASES)) {
+      for (const path of await filesAddedOnBranch(adapter, project, name, branch, PHASES)) {
         files.push({ path, status: statusOf(await adapter.readFile(project, branch, path)) });
       }
       return files;
     }),
     comparedWith(defaultBranch, async (name) =>
-      (await addedOn(adapter, project, name, branch, REPORTS)).filter((path) =>
+      (await filesAddedOnBranch(adapter, project, name, branch, REPORTS)).filter((path) =>
         REPORT_FILE.test(path),
       ),
     ),
@@ -221,9 +222,13 @@ async function breakdownOf(
   return content === undefined ? undefined : { path, status: statusOf(content) };
 }
 
-/** The files directly under `directory` that `branch` has and `defaultBranch` does not. */
-async function addedOn(
-  adapter: FactsAdapter,
+/**
+ * The files directly under `directory` that `branch` has and `defaultBranch`
+ * does not. A ticket's plan is the phase file its branch added: the planner
+ * reads it the same way (ADR-0065 D3), never as the highest number there.
+ */
+export async function filesAddedOnBranch(
+  adapter: Pick<FactsAdapter, "listFiles">,
   project: TicketingProject,
   defaultBranch: string,
   branch: string,
@@ -239,8 +244,9 @@ async function addedOn(
 /**
  * What `read` answers, as a known fact, or unknown with the reason it failed.
  * Every forge call here goes through this, so no fact can miss a failure.
+ * The planner's facts read the forge through it too.
  */
-async function attempt<T>(read: () => Promise<T>): Promise<Fact<T>> {
+export async function attempt<T>(read: () => Promise<T>): Promise<Fact<T>> {
   try {
     return { kind: "known", value: await read() };
   } catch (error: unknown) {

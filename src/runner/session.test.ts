@@ -222,11 +222,20 @@ interface World {
   record(): RecordEntry[];
 }
 
-/** Run `scratch-app#12/1`, just picked up, with nothing running. */
-function world(): World {
+/**
+ * Run `scratch-app#12/1`, just picked up, with nothing running, on a project
+ * with `places` places.
+ *
+ * ✏ 2026-10-05: one place unless a case says otherwise. The cases here were
+ * written when every project had one place (ADR-0063 D1); a project now has
+ * two unless `timone.yaml` sets another number (PRD-07.R2).
+ */
+function world(places = 1): World {
   const root = mkdtempSync(join(tmpdir(), "timone-runner-session-"));
   tempDirs.push(root);
-  const store = RunStore.open(join(root, ".timone", "state.json"));
+  const store = RunStore.open(join(root, ".timone", "state.json"), {
+    placesOf: () => places,
+  });
   const { run } = store.register(PROJECT.name, 12);
   const { adapter, state } = fakeForge(featureTicket());
   const running = new RunningSteps();
@@ -1061,6 +1070,25 @@ describe("a place on the project after a wake (ADR-0063 D2, D3)", () => {
     expect(runner.started.map((session) => placeLine(session.prompt))).toEqual([
       "- The project's place: taken: scratch-app#11/1 has a step running.",
       "- The project's place: given to this ticket — a step you start now will not be refused.",
+    ]);
+  });
+
+  it("tells the runner the place is free while one of the project's two places is taken (PRD-07.R2)", async () => {
+    const w = world(2);
+    w.store.activate(w.store.register(PROJECT.name, 11).run.id, "step-session-11");
+    w.store.park(w.run.id, RUNNER_WAIT);
+    const runner = scriptedRunner([quiet()]);
+
+    await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+      w.store.get(w.run.id)!,
+      ["fvermaut commented on the ticket at 2026-09-27T11:58:40Z."],
+    );
+
+    const placeLine = (prompt: string) =>
+      prompt.split("\n").find((line) => line.startsWith("- The project's place:"));
+    expect(runner.started.map((session) => placeLine(session.prompt))).toEqual([
+      "- The project's place: free.",
     ]);
   });
 });

@@ -11,7 +11,7 @@ import {
   type TicketingAdapter,
   type TicketingProject,
 } from "../adapters/ticketing.js";
-import { loadManifest, namedPeople, type Manifest } from "../manifest.js";
+import { loadManifest, namedPeople, placesIn, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
 import { wayfinderStage } from "../daemon/pipeline.js";
@@ -829,7 +829,7 @@ export function registerTakeoverCommand(program: Command): void {
 
         let store: RunStore;
         try {
-          store = RunStore.open(statePath);
+          store = RunStore.open(statePath, { placesOf: placesIn(manifest) });
         } catch (error) {
           console.error(error instanceof Error ? error.message : String(error));
           process.exitCode = 1;

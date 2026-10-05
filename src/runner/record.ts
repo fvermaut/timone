@@ -61,6 +61,31 @@ export const recordEntrySchema = z.discriminatedUnion("kind", [
     costUsd,
     error: z.string().optional(),
   }),
+  /**
+   * The planner decided whether this run may build now (ADR-0065 D2): `build`
+   * or `hold`, with its reason. Kept for history; the ledger holds the
+   * decision the machine acts on. `waitsFor` holds the tickets a hold waits
+   * for, and `onComment` the named person's comment a decision was taken on.
+   * The decision's kind is `decision`, since `kind` names the entry.
+   */
+  z.strictObject({
+    kind: z.literal("planner-decision"),
+    at,
+    runId,
+    decision: z.enum(["build", "hold"]),
+    reason: z.string(),
+    waitsFor: z.array(z.number().int().positive()).optional(),
+    onComment: z.strictObject({ by: z.string(), at: z.string() }).optional(),
+  }),
+  /** A planner session for this run finished, and what it cost (ADR-0065 D1). */
+  z.strictObject({
+    kind: z.literal("planner-ended"),
+    at,
+    runId,
+    ok: z.boolean(),
+    costUsd,
+    error: z.string().optional(),
+  }),
   /** What the runner decided, and the reason it gave. */
   z.strictObject({
     kind: z.literal("decision"),

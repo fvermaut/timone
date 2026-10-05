@@ -22,7 +22,7 @@ import {
   stagePrompt,
   workBranch,
 } from "../daemon/prompts.js";
-import { NoPlaceError, type Run, type RunStore } from "../daemon/runs.js";
+import { NoPlaceError, type PlaceOrder, type Run, type RunStore } from "../daemon/runs.js";
 import { HELD_LABEL, HELD_LABEL_DESCRIPTION, PRIORITY_LABEL } from "../daemon/steps.js";
 import {
   openStepTickets,
@@ -60,7 +60,7 @@ import {
   type PiecesFailure,
 } from "./comments.js";
 import { sinceLastBuild } from "./departures.js";
-import { isNamedPerson } from "./brief.js";
+import { isNamedPerson, untilMergedOrClosed } from "./brief.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
 import { appendEntry, readRecord, startsAStep, type RecordEntry } from "./record.js";
 import type {
@@ -422,6 +422,56 @@ function oneLine(error: unknown): string {
   return message.split("\n")[0] ?? message;
 }
 
+/** What {@link namedPersonsComment} reads: the ticket on the forge, and who is named. */
+export interface NamedCommentDeps {
+  adapter: Pick<TicketingAdapter, "getTicket">;
+  manifest: Manifest;
+  project: TicketingProject;
+}
+
+/**
+ * The comment at `commentAt` on ticket `ticket`, with the ticket it is on,
+ * when a named person wrote it — or why it cannot count.
+ *
+ * **Code checks only that the comment is there and whose it is**, never
+ * what it says: the runner, or the planner, judges the words. A comment the
+ * machine posted never counts, even under a named person's login: it is a
+ * record of what the machine did. `onlyNamed` ends the refusal of a comment
+ * by someone who is not named, and says what only a named person can do.
+ *
+ * One lookup for an approval, for a request to stop the work (40t), and for
+ * a comment the planner lets a ticket build on (ADR-0065 D5), so they
+ * cannot come to disagree on whose comment counts.
+ */
+export async function namedPersonsComment(
+  deps: NamedCommentDeps,
+  ticket: number,
+  commentAt: string,
+  onlyNamed: string,
+): Promise<
+  { ok: true; comment: TicketComment; ticket: TicketThread } | { ok: false; refused: string }
+> {
+  const thread = await deps.adapter.getTicket(deps.project, ticket);
+  const comment = thread.comments.find(
+    (each) => each.createdAt === commentAt && !each.fromTimone,
+  );
+  if (comment === undefined) {
+    return {
+      ok: false,
+      refused: `There is no comment by a person at ${commentAt} on ticket #${ticket}.`,
+    };
+  }
+  if (!isNamedPerson(namedPeople(deps.manifest, deps.project.name), comment.author)) {
+    return {
+      ok: false,
+      refused:
+        `The comment at ${commentAt} is by ${comment.author}, who is not named for this ` +
+        `project. ${onlyNamed}`,
+    };
+  }
+  return { ok: true, comment, ticket: thread };
+}
+
 /** The runner's actions for `run`. */
 export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
   /** The run as the ledger has it now: a branch or a pull request may be newer than `run`. */
@@ -490,6 +540,32 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
   });
 
   /**
+   * The refusal of the build while the planner has not let it start
+   * (ADR-0065 D2), or undefined when it has. With no decision, the run is
+   * written as waiting for the planner, with its place order.
+   */
+  const plannerRefusal = (turn: PlaceOrder): { ok: false; refused: string } | undefined => {
+    const decision = current().planner?.decision;
+    if (decision?.kind === "build") return undefined;
+    if (decision === undefined) {
+      deps.store.askPlanner(run.id, turn);
+      return {
+        ok: false,
+        refused:
+          "The planner has not decided yet whether this ticket may be built now: it looks at " +
+          `what else on ${deps.project.name} is being built. This ticket now waits for its ` +
+          "decision, and you are woken when it has decided.",
+      };
+    }
+    return {
+      ok: false,
+      refused:
+        `The planner holds this ticket until ${untilMergedOrClosed(decision.waitsFor ?? [])}: ` +
+        `${decision.reason.trim().replace(/\.$/, "")}. You are woken if that changes.`,
+    };
+  };
+
+  /**
    * Why no step may start now, or undefined when one may: a step of this run
    * is already running, or the ticket has spent its limit. Asked before every
    * session this run starts, the approval's own included, because each one
@@ -548,46 +624,6 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         `This ticket has spent $${spentUsd.toFixed(2)} of the $${allowanceUsd.toFixed(2)} it may spend. ` +
         "No step can start until a named person allows more.",
     };
-  };
-
-  /**
-   * The comment at `commentAt` on the run's ticket, with the ticket it is on,
-   * when a named person wrote it — or why it cannot count.
-   *
-   * **Code checks only that the comment is there and whose it is**, never
-   * what it says: the runner judges the words. A comment the machine posted
-   * never counts, even under a named person's login: it is a record of what
-   * the machine did. `onlyNamed` ends the refusal of a comment by someone
-   * who is not named, and says what only a named person can do.
-   *
-   * One lookup for an approval and for a request to stop the work (40t), so
-   * the two cannot come to disagree on whose comment counts.
-   */
-  const namedPersonsComment = async (
-    commentAt: string,
-    onlyNamed: string,
-  ): Promise<
-    { ok: true; comment: TicketComment; ticket: TicketThread } | { ok: false; refused: string }
-  > => {
-    const ticket = await deps.adapter.getTicket(deps.project, run.ticket);
-    const comment = ticket.comments.find(
-      (each) => each.createdAt === commentAt && !each.fromTimone,
-    );
-    if (comment === undefined) {
-      return {
-        ok: false,
-        refused: `There is no comment by a person at ${commentAt} on ticket #${run.ticket}.`,
-      };
-    }
-    if (!isNamedPerson(namedPeople(deps.manifest, deps.project.name), comment.author)) {
-      return {
-        ok: false,
-        refused:
-          `The comment at ${commentAt} is by ${comment.author}, who is not named for this ` +
-          `project. ${onlyNamed}`,
-      };
-    }
-    return { ok: true, comment, ticket };
   };
 
   /**
@@ -814,13 +850,23 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         };
       }
 
-      // A step needs a place on the project (ADR-0063 D2). Asked after every
-      // other rule, so a try refused for another reason does not wait, and
-      // before the branch is claimed, so a refused try writes nothing else.
       const turn = {
         priority: ticket.labels.includes(PRIORITY_LABEL),
         openedAt: ticket.createdAt,
       };
+      // The build needs the planner's decision (ADR-0065 D2). Asked before
+      // the place, so a run waiting for the planner does not also wait for a
+      // place. Its place order is written with the ask, so the runs that
+      // wait for the planner are decided in the order places are given.
+      if (stage === "execution") {
+        const refusal = plannerRefusal(turn);
+        if (refusal !== undefined) return refusal;
+      }
+
+      // A step needs a place on the project (ADR-0063 D2). Asked after every
+      // other rule, the planner's included, so a try refused for another
+      // reason does not wait, and before the branch is claimed, so a refused
+      // try writes nothing else.
       const place = deps.store.askPlace(run.id, turn);
       if (!place.ok) return noPlace(place.holder);
 
@@ -973,7 +1019,12 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       return { ok: true, said: `Ticket #${run.ticket} is no longer on hold.` };
     }),
     recordApproval: decided("record_approval", async ({ what, commentAt }) => {
-      const found = await namedPersonsComment(commentAt, "Only a named person can approve.");
+      const found = await namedPersonsComment(
+        deps,
+        run.ticket,
+        commentAt,
+        "Only a named person can approve.",
+      );
       if (!found.ok) return found;
       const { comment, ticket } = found;
       const { branch } = current();
@@ -1153,6 +1204,8 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
             };
           }
           const stop = await namedPersonsComment(
+            deps,
+            run.ticket,
             stopCommentAt,
             "Only a named person can stop the work.",
           );

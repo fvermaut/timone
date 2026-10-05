@@ -5,7 +5,7 @@ import {
   HELD_LABEL,
   HELD_LABEL_DESCRIPTION,
   MAP_LABEL_DESCRIPTION,
-  nextStep,
+  eligibleSteps,
 } from "./steps.js";
 
 /**
@@ -31,23 +31,48 @@ const on = (number: number, open: boolean): Dependency => ({
   open,
 });
 
-describe("nextStep", () => {
-  it("takes the first when every step is open and none is blocked", () => {
+/** The numbers of the eligible steps, in the listing's order. */
+const eligible = (steps: Step[]): number[] => eligibleSteps(steps).map((s) => s.number);
+
+describe("eligibleSteps (PRD-07.R4, ADR-0065 D6)", () => {
+  it("makes steps 2 and 3 both eligible when each is blocked only by closed step 1 (clause 3)", () => {
+    const steps = [
+      step(1, { state: "closed" }),
+      step(2, { blockedBy: [on(1, false)] }),
+      step(3, { blockedBy: [on(1, false)] }),
+    ];
+
+    expect(eligible(steps)).toEqual([2, 3]);
+  });
+
+  it("leaves step 3 out while step 2, which blocks it, is open (clause 4)", () => {
+    const steps = [
+      step(1, { state: "closed" }),
+      step(2, { blockedBy: [on(1, false)] }),
+      step(3, { blockedBy: [on(2, true)] }),
+    ];
+
+    expect(eligible(steps)).toEqual([2]);
+  });
+});
+
+describe("eligibleSteps — the four conditions", () => {
+  it("makes every step eligible when every step is open and none is blocked", () => {
     const steps = [step(11), step(12), step(13)];
 
-    expect(nextStep(steps)?.number).toBe(11);
+    expect(eligible(steps)).toEqual([11, 12, 13]);
   });
 
-  it("takes the second when the first is closed", () => {
+  it("leaves a closed step out", () => {
     const steps = [step(11, { state: "closed" }), step(12), step(13)];
 
-    expect(nextStep(steps)?.number).toBe(12);
+    expect(eligible(steps)).toEqual([12, 13]);
   });
 
-  it("skips a step whose dependency is still open, even when it sorts first", () => {
+  it("leaves out a step whose dependency is still open, even when it sorts first", () => {
     const steps = [step(11, { blockedBy: [on(12, true)] }), step(12)];
 
-    expect(nextStep(steps)?.number).toBe(12);
+    expect(eligible(steps)).toEqual([12]);
   });
 
   it("takes a step whose dependency is closed", () => {
@@ -56,7 +81,7 @@ describe("nextStep", () => {
       step(12, { state: "closed" }),
     ];
 
-    expect(nextStep(steps)?.number).toBe(11);
+    expect(eligible(steps)).toEqual([11]);
   });
 
   /**
@@ -66,10 +91,10 @@ describe("nextStep", () => {
    * human deliberately stopped — with every call succeeding and nothing
    * reporting a fault. See ADR-0044 D3.
    */
-  it("skips an open step the machine is holding", () => {
+  it("leaves out an open step the machine is holding", () => {
     const steps = [step(11, { labels: ["timone", HELD_LABEL] }), step(12)];
 
-    expect(nextStep(steps)?.number).toBe(12);
+    expect(eligible(steps)).toEqual([12]);
   });
 
   /**
@@ -78,25 +103,25 @@ describe("nextStep", () => {
    * above — reading one field and not the other builds half a rule that
    * looks whole.
    */
-  it("skips an open step a person has taken", () => {
+  it("leaves out an open step a person has taken", () => {
     const steps = [step(11, { assignees: ["fvermaut"] }), step(12)];
 
-    expect(nextStep(steps)?.number).toBe(12);
+    expect(eligible(steps)).toEqual([12]);
   });
 
-  it("returns undefined when every step is closed", () => {
+  it("makes no step eligible when every step is closed", () => {
     const steps = [step(11, { state: "closed" }), step(12, { state: "closed" })];
 
-    expect(nextStep(steps)).toBeUndefined();
+    expect(eligible(steps)).toEqual([]);
   });
 
-  it("returns undefined on a dependency cycle rather than looping", () => {
+  it("makes neither step eligible when two steps block each other, rather than looping", () => {
     const steps = [
       step(11, { blockedBy: [on(12, true)] }),
       step(12, { blockedBy: [on(11, true)] }),
     ];
 
-    expect(nextStep(steps)).toBeUndefined();
+    expect(eligible(steps)).toEqual([]);
   });
 
   /**
@@ -105,10 +130,10 @@ describe("nextStep", () => {
    * leaves the step waiting on something nobody can name, and the safe answer
    * is the one that holds it back.
    */
-  it("skips a step whose dependency list came back incomplete", () => {
+  it("leaves out a step whose dependency list came back incomplete", () => {
     const steps = [step(11, { dependenciesIncomplete: true }), step(12)];
 
-    expect(nextStep(steps)?.number).toBe(12);
+    expect(eligible(steps)).toEqual([12]);
   });
 });
 

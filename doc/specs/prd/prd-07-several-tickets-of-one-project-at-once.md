@@ -4,7 +4,7 @@
 > **Approved by:** fvermaut on 2026-10-03T17:05:30Z
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-07-several-tickets-of-one-project-at-once.criteria.md](prd-07-several-tickets-of-one-project-at-once.criteria.md)
-> **Phases:** none yet
+> **Phases:** [phase 44](../../plans/phases/phase-44.md) (piece 1, #199), [phase 48](../../plans/phases/phase-48.md) (piece 2, #200), [phase 47](../../plans/phases/phase-47.md) (piece 3, #201), [phase 49](../../plans/phases/phase-49.md) (piece 5, #203), [phase 45](../../plans/phases/phase-45.md) (piece 6, #204)
 
 ## Problem
 

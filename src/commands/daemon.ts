@@ -5,7 +5,7 @@ import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
-import { loadManifest, namedPeople, type Manifest } from "../manifest.js";
+import { loadManifest, namedPeople, placesIn, type Manifest } from "../manifest.js";
 import {
   checkoutVersion,
   isCommitOnRemote,
@@ -45,6 +45,8 @@ import { startStepSession } from "../daemon/step-session.js";
 import { RunningSteps } from "../runner/actions.js";
 import { RunnerDriver } from "../runner/driver.js";
 import { RunnerSessions } from "../runner/session.js";
+import { PlannerDriver } from "../planner/driver.js";
+import { PlannerSessions } from "../planner/session.js";
 import { containerRuntime } from "../daemon/container-runtime.js";
 import { bringUpServices } from "../daemon/services.js";
 import { readRunEnv } from "../daemon/run-env.js";
@@ -399,6 +401,13 @@ export interface RunDaemonOptions {
    * cycle that asked for it.
    */
   runner: RunnerDriver;
+  /**
+   * The planner, which decides for each project which ticket may be built
+   * now ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+   * D1). One for the daemon's life, so it knows which project has a session
+   * running. Absent means no planner session starts.
+   */
+  planner?: PlannerDriver;
   log?: (message: string) => void;
 }
 
@@ -491,6 +500,7 @@ async function poll(
       pollIntervalMs: options.intervalMs,
       previews: options.previews,
       runner: options.runner,
+      planner: options.planner,
       log,
     });
     failures = result.errors.length;
@@ -510,6 +520,7 @@ async function poll(
   // person inspecting it afterwards finds. A step a wake started is not waited
   // for; its end is handled when it comes, for as long as the process lives.
   await options.runner.drain();
+  await options.planner?.drain();
 
   return failures > 0 ? 1 : 0;
 }
@@ -628,7 +639,7 @@ export function registerDaemonCommand(program: Command): void {
 
       let store: RunStore;
       try {
-        store = RunStore.open(statePath);
+        store = RunStore.open(statePath, { placesOf: placesIn(manifest) });
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
@@ -724,6 +735,28 @@ export function registerDaemonCommand(program: Command): void {
         log,
       });
 
+      // ✏ The planner, beside the runner (ADR-0065 D1): one session per
+      // project at a time, on the same store, forge and clock.
+      const clock = (): string => new Date().toISOString();
+      const plannerSessions = new PlannerSessions({
+        runQuery: query,
+        store,
+        adapter,
+        manifest,
+        root: process.cwd(),
+        clock,
+        log,
+      });
+      const planner = new PlannerDriver({
+        store,
+        adapter,
+        manifest,
+        root: process.cwd(),
+        decide: (run, facts) => plannerSessions.decide(run, facts),
+        clock,
+        log,
+      });
+
       // Ctrl-C is how every operator stops the daemon, and a lock left behind
       // by that is a project wedged until the reclaim path's window passes.
       // `withStateLock`'s `finally` never runs on a signal, so the exit path
@@ -757,6 +790,7 @@ export function registerDaemonCommand(program: Command): void {
         once: options.once === true,
         adapter,
         runner,
+        planner,
         // What this process is running, against what the default branch has
         // moved to (timone#5). `ls-remote`, so fvermaut's own checkout is
         // read and never written (ADR-0043's spirit, in his own folder).

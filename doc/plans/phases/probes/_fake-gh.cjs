@@ -59,6 +59,9 @@ function pick(obj, fl) {
   return r;
 }
 const f = load();
+// ✏ 2026-10-05 (phase 49 verification): f.failCalls, a list of patterns; a call whose argv,
+// joined by spaces, matches one fails as GitHub failing would (exit 1, a message on stderr).
+for (const pat of f.failCalls ?? []) if (new RegExp(pat).test(argv.join(' '))) fail(`probe: this call fails on purpose (${pat})`);
 const slug = opt('--repo', '-R') || f.slug;
 f.others ??= {};
 const repo = slug === f.slug ? f : (f.others[slug] ??= { issues: {}, prs: {} });
@@ -83,7 +86,10 @@ function issueView(i) {
     url: base, comments: i.comments.map((c) => commentView(c, base)),
     closedAt: i.closedAt ?? null, stateReason: i.stateReason ?? null,
     assignees: (i.assignees ?? []).map((login) => ({ login })),
-    blockedBy: { totalCount: (i.blockedBy ?? []).length, nodes: (i.blockedBy ?? []).map((x) => ({ number: x })) },
+    // ✏ 2026-10-05 (phase 49 verification): each blocker carries its state and url, as GitHub's
+    // does; the built daemon was seen to refuse the list without them ("gh returned an unexpected
+    // shape (…blockedBy.nodes.0.state…)").
+    blockedBy: { totalCount: (i.blockedBy ?? []).length, nodes: (i.blockedBy ?? []).map((x) => ({ number: x, state: repo.issues[x]?.state ?? 'OPEN', url: `https://github.com/${slug}/issues/${x}` })) },
     parent: i.parent ? { number: i.parent } : null,
   };
 }

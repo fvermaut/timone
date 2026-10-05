@@ -1075,11 +1075,16 @@ describe("renderStatus — the runs the old code left in the ledger", () => {
 });
 
 describe("renderStatus — the tickets that wait for a place (ADR-0063)", () => {
-  /** A ledger in a temporary folder, read and written as the daemon does. */
+  /**
+   * A ledger in a temporary folder, read and written as the daemon does, with
+   * one place on the project. ✏ 2026-10-05: these cases were written when
+   * every project had one place (ADR-0063 D1); a project now has two unless
+   * `timone.yaml` sets another number (PRD-07.R2).
+   */
   function ledger(): RunStore {
     const root = mkdtempSync(join(tmpdir(), "timone-status-"));
     tempDirs.push(root);
-    return RunStore.open(join(root, ".timone", "state.json"));
+    return RunStore.open(join(root, ".timone", "state.json"), { placesOf: () => 1 });
   }
 
   /** A run of scratch-app whose step runs, so it takes the project's place. */
@@ -1147,5 +1152,111 @@ describe("renderStatus — the tickets that wait for a place (ADR-0063)", () => 
     expect(line).toMatch(/#7/);
     expect(line).toMatch(/#9/);
     expect(line).not.toMatch(/place/);
+  });
+});
+
+describe("renderStatus — the tickets the planner is deciding or holding (ADR-0065)", () => {
+  /** A ledger in a temporary folder, read and written as the daemon does. */
+  function ledger(): RunStore {
+    const root = mkdtempSync(join(tmpdir(), "timone-status-"));
+    tempDirs.push(root);
+    return RunStore.open(join(root, ".timone", "state.json"));
+  }
+
+  /** A run of scratch-app whose step runs, as the build of `ticket` would. */
+  function building(store: RunStore, ticket: number): void {
+    const { run } = store.register("scratch-app", ticket);
+    store.activate(run.id, `session-${ticket}`);
+  }
+
+  /** A run of scratch-app that tried to start its build, so it waits for the planner. */
+  function asksThePlanner(store: RunStore, ticket: number, openedAt: string): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "execution" });
+    store.askPlanner(run.id, { priority: false, openedAt });
+    return run.id;
+  }
+
+  /** A run of scratch-app the planner holds until `waitsFor` are merged or closed. */
+  function held(store: RunStore, ticket: number, waitsFor: number[]): void {
+    const id = asksThePlanner(store, ticket, "2026-08-01T09:00:00Z");
+    store.decidePlanner(id, {
+      kind: "hold",
+      at: "2026-08-02T09:00:00Z",
+      reason: "Both change the same files.",
+      waitsFor,
+    });
+  }
+
+  /** scratch-app's line, rendered from the ledger as the command reads it. */
+  function scratchLine(store: RunStore): string {
+    return lineFor(
+      renderStatus(manifest, store.all(), {
+        stateExists: true,
+        waitingForPlace: (project) => store.waitingForPlace(project),
+        waitingForPlanner: (project) => store.waitingForPlanner(project),
+        heldByPlanner: (project) => store.heldByPlanner(project),
+      }),
+      "scratch-app",
+    );
+  }
+
+  it("names the ticket the planner is deciding and the one it holds, with what it waits for", () => {
+    const store = ledger();
+    building(store, 7);
+    asksThePlanner(store, 12, "2026-08-03T09:00:00Z");
+    held(store, 9, [7]);
+
+    expect(scratchLine(store)).toMatch(/ {2}· {2}planner: deciding #12; holds #9 until #7$/);
+  });
+
+  it("says nothing about the planner when it is deciding nothing and holds nothing", () => {
+    const store = ledger();
+    building(store, 7);
+    // Parked on the runner's wait, but it never tried to start its build.
+    const { run } = store.register("scratch-app", 9);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "planning" });
+    // Let build: the planner has decided, and holds nothing.
+    const twelve = asksThePlanner(store, 12, "2026-08-03T09:00:00Z");
+    store.decidePlanner(twelve, {
+      kind: "build",
+      at: "2026-08-04T09:00:00Z",
+      reason: "No other ticket changes the same files.",
+    });
+
+    const line = scratchLine(store);
+
+    expect(line).toMatch(/#7/);
+    expect(line).toMatch(/#9/);
+    expect(line).toMatch(/#12/);
+    expect(line).not.toMatch(/planner/);
+  });
+
+  it("names both tickets a held ticket waits for, as until #7 and #8", () => {
+    const store = ledger();
+    building(store, 7);
+    building(store, 8);
+    held(store, 9, [7, 8]);
+
+    expect(scratchLine(store)).toMatch(/ {2}· {2}planner: holds #9 until #7 and #8$/);
+  });
+
+  it("joins several tickets with commas, after the tickets that wait for a place", () => {
+    const store = ledger();
+    // #7 and #8 take the project's two places, so #14 waits for one.
+    building(store, 7);
+    building(store, 8);
+    const { run } = store.register("scratch-app", 14);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "triage" });
+    store.askPlace(run.id, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    // #13 was opened first, so the planner takes it first.
+    asksThePlanner(store, 12, "2026-08-03T09:00:00Z");
+    asksThePlanner(store, 13, "2026-08-02T09:00:00Z");
+    held(store, 9, [7]);
+    held(store, 10, [7, 8]);
+
+    expect(scratchLine(store)).toMatch(
+      / {2}· {2}waiting for a place: #14 {2}· {2}planner: deciding #13, #12; holds #9 until #7, #10 until #7 and #8$/,
+    );
   });
 });

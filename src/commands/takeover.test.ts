@@ -187,6 +187,9 @@ function fakeAdapter(open: readonly Ticket[] = []): {
   const asked: number[] = [];
   const listings: string[] = [];
   const adapter: TicketingAdapter = {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   MergeOutcome,
   PullRequest,
+  TicketComment,
   TicketingAdapter,
   TicketingProject,
   TicketThread,
@@ -91,6 +92,9 @@ function forge(body: string): {
   const posted: string[] = [];
   let description = body;
   const adapter: TicketingAdapter = {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,
@@ -563,13 +567,17 @@ describe("RunnerDriver — a place on the project is given to one waiting run (A
    * The driver over them, whose steps claim the run as `startStepSession`
    * does. `clock.now` is the time the ledger and the driver write. The
    * tickets numbered in `held` are held by a person.
+   *
+   * ✏ 2026-10-05: the project has one place, as every project did when these
+   * cases were written (ADR-0063 D1). A project now has two unless
+   * `timone.yaml` sets another number (PRD-07.R2).
    */
   function threeRuns({ held = [] }: { held?: readonly number[] } = {}) {
     const root = mkdtempSync(join(tmpdir(), "timone-driver-place-"));
     tempDirs.push(root);
     const clock = { now: "2026-09-29T10:00:00Z" };
     const path = join(root, ".timone", "state.json");
-    const store = RunStore.open(path, { now: () => clock.now });
+    const store = RunStore.open(path, { now: () => clock.now, placesOf: () => 1 });
     const first = store.activate(store.register("scratch-app", 11).run.id, "step-session-11");
     const newer = store.park(store.register("scratch-app", 14).run.id, RUNNER_WAIT);
     const older = store.park(store.register("scratch-app", 13).run.id, RUNNER_WAIT);
@@ -653,7 +661,7 @@ describe("RunnerDriver — a place on the project is given to one waiting run (A
     ]);
   });
 
-  it("wakes a run whose step just ended and kept the place once, with the step's end, and not again for the place", async () => {
+  it("wakes a run whose step just ended once, with the step's end, and gives it no place while its runner decides (PRD-07.R2 clause 6)", async () => {
     const w = threeRuns();
     w.store.park(w.first.id, RUNNER_WAIT);
     expect((await w.tryToSort(w.older)).ok).toBe(true);
@@ -663,7 +671,8 @@ describe("RunnerDriver — a place on the project is given to one waiting run (A
     });
     await vi.waitFor(() => expect(w.wakes).toHaveLength(1));
     await w.driver.drain();
-    expect(w.store.placeHolders("scratch-app").map((run) => run.id)).toEqual([w.older.id]);
+    expect(w.store.placeHolders("scratch-app")).toEqual([]);
+    expect(w.store.waitingForPlace("scratch-app")).toEqual([]);
 
     await w.cycle();
     await w.cycle();
@@ -710,7 +719,7 @@ describe("RunnerDriver — a place on the project is given to one waiting run (A
     // The daemon stops before #13's runner has used the place, and starts
     // again an hour later. No wake survives the stop.
     w.clock.now = "2026-09-29T11:00:00Z";
-    const store = RunStore.open(w.path, { now: () => w.clock.now });
+    const store = RunStore.open(w.path, { now: () => w.clock.now, placesOf: () => 1 });
     store.regivePlaces();
     await w.cycle(w.driverOver(store));
 
@@ -1032,6 +1041,162 @@ describe("RunnerDriver — when the approved list of pieces cannot be acted on (
         events: [
           "The step working out the pieces ended: it succeeded.",
           expect.stringMatching(/on the default branch.*gh: HTTP 502: Bad Gateway.*The run was not ended\.$/),
+        ],
+        options: {},
+      },
+    ]);
+  });
+});
+
+describe("RunnerDriver — a run that waits for the planner (ADR-0065 D2, D5)", () => {
+  /** fvermaut's comment on #12, written after the planner was asked. */
+  const NAMED: TicketComment = {
+    author: "fvermaut",
+    body: "Please also fix the same word in CONTRIBUTING.md.",
+    createdAt: "2026-10-05T10:30:00Z",
+    fromTimone: false,
+  };
+
+  /**
+   * The chore's run, refused the build and so waiting for the planner, with
+   * `comments` on its ticket, and the driver over it.
+   */
+  function waitingForThePlanner(comments: TicketComment[]) {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-planner-"));
+    tempDirs.push(root);
+    const clock = { now: "2026-10-05T10:00:00Z" };
+    const store = RunStore.open(join(root, ".timone", "state.json"), { now: () => clock.now });
+    const { run } = store.register("scratch-app", 12);
+    store.park(run.id, {
+      waitingOn: "the planner to decide whether this ticket may be built now",
+      kind: "runner",
+      resolvableBy: ["execution"],
+    });
+    store.askPlanner(run.id, { priority: false, openedAt: CHORE.createdAt });
+    // The runner was woken once already, when the ticket was picked up.
+    appendEntry(root, "scratch-app", 12, {
+      kind: "woke",
+      at: "2026-10-05T10:00:00Z",
+      runId: run.id,
+      events: ["A new ticket was picked up. Nothing has been done on it yet."],
+    });
+    const thread: TicketThread = { ...CHORE, comments };
+    const adapter: TicketingAdapter = { ...forge("").adapter, getTicket: async () => thread };
+    const { sessions, wakes } = fakeWakes();
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: async () => {
+        throw new Error("no step starts in this test");
+      },
+      timonePin: async () => undefined,
+      clock: () => clock.now,
+      log: () => {},
+    });
+    const cycle = async (): Promise<void> => {
+      await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, {
+        tickets: [CHORE],
+        isStep: () => false,
+        threads: () => ({
+          ticket: async () => thread,
+          pullRequest: async () => ({ ...PULL_REQUEST_21, comments: [] }),
+        }),
+      });
+      await driver.drain();
+    };
+    clock.now = "2026-10-05T11:00:00Z";
+    return { root, clock, store, run, wakes, cycle };
+  }
+
+  it("does not wake the runner on a named person's comment on a ticket the planner holds, and leaves the comment unread", async () => {
+    const w = waitingForThePlanner([NAMED]);
+    w.store.decidePlanner(w.run.id, {
+      kind: "hold",
+      at: "2026-10-05T10:15:00Z",
+      reason: "It changes the README, which #7 changes too.",
+      waitsFor: [7],
+    });
+
+    await w.cycle();
+
+    expect(w.wakes).toEqual([]);
+    expect(recordOf(w.root).filter((entry) => entry.kind === "seen")).toEqual([]);
+  });
+
+  it("tells the runner, once, a named person's comment the planner passed to it, as the comment event it would have been", async () => {
+    const w = waitingForThePlanner([NAMED]);
+    appendEntry(w.root, "scratch-app", 12, {
+      kind: "notice",
+      at: "2026-10-05T10:31:00Z",
+      about: "planner read comment at 2026-10-05T10:30:00Z",
+    });
+    appendEntry(w.root, "scratch-app", 12, {
+      kind: "notice",
+      at: "2026-10-05T10:32:00Z",
+      about: "passed to runner: comment at 2026-10-05T10:30:00Z",
+    });
+
+    await w.cycle();
+    await w.cycle();
+
+    expect(w.wakes).toEqual([
+      {
+        runId: w.run.id,
+        events: [
+          'fvermaut commented on the ticket at 2026-10-05T10:30:00Z: "Please also fix the same word in CONTRIBUTING.md."',
+        ],
+        options: {},
+      },
+    ]);
+  });
+
+  it("wakes the run once when the planner let it build, and not again on the tick after", async () => {
+    const w = waitingForThePlanner([]);
+    w.store.decidePlanner(w.run.id, {
+      kind: "build",
+      at: "2026-10-05T10:40:00Z",
+      reason: "No other ticket is being built.",
+    });
+
+    await w.cycle();
+    await w.cycle();
+
+    expect(w.wakes).toEqual([
+      {
+        runId: w.run.id,
+        events: ["The planner let this ticket be built now: No other ticket is being built."],
+        options: {},
+      },
+    ]);
+  });
+
+  it("tells the runner the planner let the ticket build on a named person's comment, and does not tell it the comment as well", async () => {
+    const w = waitingForThePlanner([NAMED]);
+    appendEntry(w.root, "scratch-app", 12, {
+      kind: "notice",
+      at: "2026-10-05T10:31:00Z",
+      about: "planner read comment at 2026-10-05T10:30:00Z",
+    });
+    w.store.decidePlanner(w.run.id, {
+      kind: "build",
+      at: "2026-10-05T10:40:00Z",
+      reason: "fvermaut asked for it to be built now.",
+      onComment: { by: "fvermaut", at: "2026-10-05T10:30:00Z" },
+    });
+
+    await w.cycle();
+
+    expect(w.wakes).toEqual([
+      {
+        runId: w.run.id,
+        events: [
+          "The planner let this ticket be built now, on fvermaut's comment at 2026-10-05T10:30:00Z: " +
+            "fvermaut asked for it to be built now.",
         ],
         options: {},
       },
