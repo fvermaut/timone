@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,5 +56,37 @@ describe("the removed retry command", () => {
     // The list of commands is there, so its missing line is not a missing list.
     expect(ran.stdout).toContain("cancel [options] <ticket>");
     expect(ran.stdout).not.toMatch(/\bretry\b/);
+  });
+});
+
+describe("update-checks", () => {
+  it("exits 2 on an unknown project, with a sentence naming the projects it knows", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "timone-cli-"));
+    tempDirs.push(cwd);
+    writeFileSync(
+      join(cwd, "timone.yaml"),
+      `projects:
+  app:
+    repo_url: https://example.invalid/app.git
+    path: projects/app
+    stack: [typescript]
+    bindings:
+      ticketing: github
+  site:
+    repo_url: https://example.invalid/site.git
+    path: projects/site
+    stack: [typescript]
+    bindings:
+      ticketing: github
+`,
+    );
+
+    const ran = spawnSync(process.execPath, [CLI, "update-checks", "no-such-project"], { cwd, encoding: "utf8" });
+
+    expect(ran.status).toBe(2);
+    expect(ran.stderr).toBe(
+      'I don\'t know a project called "no-such-project"; the projects I know are: app, site.\n',
+    );
+    expect(ran.stdout).toBe("");
   });
 });

@@ -130,3 +130,85 @@ Other test files that use code this slice changed, run at the end: `src/guards/c
 - The runner is told to start nothing after the update ends. Nothing in code stops a second update; the driver's notice per head (50a) is what keeps the runner from being told twice.
 - `src/runner/replay/harness.test.ts`'s top comment still says "The nineteen cases"; it was not in this slice's files.
 - Deferred refactoring: `probeGuardDecision` capitalises the stage name inline; `capitalised` is already written three times, privately (`actions.ts`, `departures.ts`, `commands/record.ts`). One shared helper would remove the copies.
+
+## 50c — `update-checks` says which three test sets an update runs
+
+**Built.** `timone update-checks <project> [--before <commit>] [--json]` prints the three test sets an update runs on the project's checked-out branch: the project's test command, the check scripts of the branch's own plan, and the check scripts of each plan that arrived on the default branch since `--before` (`HEAD` by default). `src/update-checks.ts` holds the pure parts `claimedRequirements` and `checkScriptOf`, and `updateChecks(git, { defaultBranch, before })`, which reads everything through a small git port. The command resolves `projects/<project>` from the manifest as `number` does, reads the default branch from `git symbolic-ref --short refs/remotes/origin/HEAD`, and exits 2 with one sentence on an unknown project, a missing checkout, or a git failure.
+
+**Files touched.**
+
+- `src/update-checks.ts` — new: `claimedRequirements`, `checkScriptOf`, `updateChecks`, and the types `RunGit`, `PlanChecks`, `UpdateChecks`.
+- `src/commands/update-checks.ts` — new: `registerUpdateChecksCommand`, the git port over `execFileSync`, and the plain output.
+- `src/cli.ts` — registers the command, after `merge-file`.
+- `src/update-checks.test.ts` — new: cases 1 and 2.
+- `src/update-checks.git.test.ts` — new: cases 3 to 6, against a real temporary repository with a bare `origin`, built as `merge-rules.git.test.ts` builds one. The clone sits at `projects/app` under the temp root, so case 6 can run the built command there with a `timone.yaml`.
+- `src/cli.test.ts` — case 7, a new `describe`. No existing line changed except the `writeFileSync` import.
+
+**Decisions taken inside the slice.**
+
+- **Which pull request a plan arrived with.** The plan reads it from `git log --first-parent --format=%s <before>..origin/<default>`. Subjects alone cannot say which commit brought which plan when two arrived. So the same log also gets `--diff-merges=first-parent --diff-filter=A --name-only -- doc/plans/phases/`: each first-parent commit's subject comes with the phase files it added against its first parent. Both forms are read: a subject ending `(#<n>)` (a squash) and one starting `Merge pull request #<n>` (a merge commit). The merge-commit form has no case among 1–7; it was checked by hand in a scratch repository (a plan landed by `Merge pull request #214 from …` was named with pull request 214).
+- **Where the test command is read.** `updateChecks` has only the git port, and the result carries `testCommand`. So it reads `package.json` with `git show <before>:package.json`, and only when `ls-tree` of `<before>` lists it; no `package.json` means no test command. It is the branch's own `package.json`, not the merged one. It is parsed with a zod schema; a `package.json` that is not JSON makes the command exit 2 with the parser's message.
+- **The port is synchronous** (`(args) => string`), so `updateChecks` returns `UpdateChecks` as the plan writes it, not a promise. It throws on a failed git command; the command catches at the process boundary and exits 2 with `` `git <args>` failed in <dir>: <what git said> ``.
+- **A phase file** is a path matching `doc/plans/phases/phase-<anything>.md` directly in that folder, so reports and check scripts are never taken for plans. When a branch adds more than one, the first in git's order is its own plan.
+- **`phase` is the phase file's path** in the repository (`doc/plans/phases/phase-50.md`), so the skill can open it.
+- **A check script's name** is the lowercased ID, a dot, and an extension with no further dot: `prd-07.r7.mjs` matches `PRD-07.R7`; `prd-07.r70.mjs`, a file in a subfolder, and a name with no extension do not.
+- **`--manifest <path>`** is accepted, as `number` accepts it, with the same default `timone.yaml`.
+- **A missing checkout** gets its own sentence (`The project "<p>" is not checked out at <dir>.`), because git's own message for a missing folder names git, not the folder.
+- **The unknown-project sentence** is `number`'s sentence word for word; only the exit code differs (2, as the plan says).
+
+**Validation evidence.** Order run: 1, 2, 3, 4, 5, 6, 7.
+
+- **Case 1** — `update-checks.test.ts` "returns the IDs in the first column of the Requirements table, and none named only in prose". Red: first `Failed to load url ./update-checks.js`, then against a stub returning `[]`: `AssertionError: expected [] to deeply equal [ 'PRD-07.R7', 'PRD-07.R14' ]`. Green: 1 passed.
+- **Case 2** — "returns the file directly in the probe folder named by the lowercased ID, and no file whose name only starts with it". Red against a stub returning `undefined`: `AssertionError: expected undefined to be '<the probe folder>/prd-07.r7.mjs'`. Green: 2 passed.
+- **Case 3** — `update-checks.git.test.ts` "names the branch's own plan and the plan that arrived, with each requirement's check script and the pull request". Red against a stub: `AssertionError: expected undefined to deeply equal { …(2) }`. Green: 1 passed.
+- **Case 4** — "gives the same answer as before the merge when told the branch's commit before it" and "finds no plan arrived when told nothing of the commit before the merge, and still answers". Both passed on their first run: the ranges built for case 3 already use `before`. Mutation A: the arrived range made `HEAD...origin/main` (ignoring `before`) → the first test failed with `AssertionError: expected [] to deeply equal [ { …(3) } ]`, case 3 still passed. Mutation B: the arrived range made `<before>~1...origin/main` → the second test failed with `AssertionError: expected [ { …(2) } ] to deeply equal []`. Both reverted → 3 passed.
+- **Case 5** — "finds no plan arrived" on a level branch. Passed on its first run, for the same reason. Mutation: the arrived range made `origin/main~1...origin/main` → case 5 failed with `AssertionError: expected [ { …(2) } ] to deeply equal []` (and case 4's second test), case 3 still passed. A second mutation, the range without a merge base (`git diff origin/main`), failed every case 3–5. Reverted → 4 passed.
+- **Case 6** — three tests under "the project's test command". "is the project's scripts.test" red: `AssertionError: expected undefined to be 'vitest run'`. "is said to be missing in the command's plain output" red: `expected 'error: unknown command \'update-check…' to be ''`. "is undefined when package.json has no scripts.test" passed at red, because the field did not exist yet; mutation: a fallback `"npm test"` → `AssertionError: expected 'npm test' to be undefined`, reverted. Green after `testCommand`, the command and its registration, and `npm run build`: 7 passed.
+- **Case 7** — `cli.test.ts` "exits 2 on an unknown project, with a sentence naming the projects it knows". It could not be driven red honestly: the unknown-project branch came with the command in case 6, written in `number`'s shape. Mutation A: exit code 1 → `AssertionError: expected 1 to be 2`. Mutation B: the sentence without the list of projects → `AssertionError: expected 'I don\'t know a project called "no-su…' to be …`. Both reverted, rebuilt → 7 passed.
+
+Validation block, run from `projects/timone` (Timone itself, which has a `timone.yaml`, so the third command reads a real manifest):
+
+```
+npx tsc --noEmit; echo "exit: $?"
+exit: 0
+npx vitest run src/update-checks.test.ts src/update-checks.git.test.ts src/cli.test.ts; echo "exit: $?"
+ Test Files  3 passed (3)
+      Tests  16 passed (16)
+exit: 0
+npm run build && node dist/cli.js update-checks no-such-project; echo "exit: $? (expected 2)"
+I don't know a project called "no-such-project"; the projects I know are: scratch-app, ivtrends, timone.
+exit: 2 (expected 2)
+```
+
+- [x] Cases 1–7 pass, with red runs recorded. Pass. Cases 4, 5, the "undefined" test of case 6, and case 7 could not be driven red honestly; each is shown not to be empty by a mutation above.
+- [x] No file this slice wrote contains a probe folder's path as text: it is built from `PROBE_DIRECTORIES`. Pass. A `node` script imported `PROBE_DIRECTORIES` from `dist/daemon/probeGuard.js` and counted each value in the seven files this slice wrote or changed: `hits: 0`.
+
+Other test files run: `src/merge-rules.git.test.ts` (it runs the built command line, which `cli.ts` now registers one more command in): 6 passed.
+
+**What 50d must know.** Nothing in this slice touches the runner or the daemon. `src/update-checks.ts` exports `updateChecks` and the types if code ever needs the answer; today only the command uses it.
+
+**What 50e must know** (the skill that quotes this command).
+
+- The command line, run at the Timone root in the box: `node dist/cli.js update-checks <project> [--before <commit>] [--json]`. Run it **before** the merge with no `--before`; after the merge, pass `--before <the branch's commit before the merge>` for the same answer. With no `--before` after the merge, it still runs, but finds no plan arrived.
+- Exit 0 with the answer on stdout. Exit 2 with one sentence on stderr for an unknown project (the sentence lists the projects), a missing checkout, or a failed git command (for example a `--before` git does not know).
+- Plain output: blocks separated by one blank line. First the test command, then the branch's own plan, then one block per arrived plan, in git's order:
+
+```
+The project's tests: vitest run --passWithNoTests
+
+This branch's plan, doc/plans/phases/phase-50.md:
+  PRD-07.R7: <the probe folder>/prd-07.r7.mjs
+  PRD-07.R14: no check script
+
+Arrived on main with pull request #214, doc/plans/phases/phase-48.md:
+  PRD-07.R3: no check script
+
+Arrived on main with pull request #215, doc/plans/phases/phase-49.md:
+  PRD-07.R5: <the probe folder>/prd-07.r5.mjs
+  PRD-07.R6: <the probe folder>/prd-07.r6.mjs
+```
+
+  The real output prints the folder's path where this shows `<the probe folder>`; the skill must not repeat it in text. The other lines: `The project has no test command: there is no scripts.test in its package.json.`; `This branch adds no plan.`; `No plan arrived on <default> since <before>.`; `Arrived on <default>, <phase>:` when no pull request number was found; `  It claims no requirement.` under a plan whose table claims none.
+- `testCommand` is the text of `scripts.test` (for example `vitest run`), not `npm test`; the skill decides how to run it.
+- `--json` prints `{ testCommand?, own?, arrived: [{ phase, pullRequest?, checks: [{ id, script? }] }] }`; a missing value is left out, not `null`.
+- Deferred refactoring: the git test's `forge()` copies most of `merge-rules.git.test.ts`'s `forge()`; a shared test helper would remove the copy. The command's `try` block does the manifest, the checkout check and git in one body; it could be split if it grows.

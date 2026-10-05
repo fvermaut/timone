@@ -16,6 +16,7 @@ import { registerStageCommand } from "./commands/stage.js";
 import { registerStatusCommand } from "./commands/status.js";
 import { registerTranscriptCommand } from "./commands/transcript.js";
 import { registerTakeoverCommand } from "./commands/takeover.js";
+import { registerUpdateChecksCommand } from "./commands/update-checks.js";
 import { registerWorkspaceCommand } from "./commands/workspace.js";
 
 /**
@@ -95,6 +96,7 @@ export function buildProgram(): Command {
   registerNumberCommand(program);
   registerBreakdownCommand(program);
   registerMergeFileCommand(program);
+  registerUpdateChecksCommand(program);
 
   return program;
 }
