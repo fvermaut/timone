@@ -285,6 +285,29 @@ function placeGivenNotice(givenAt: string, runId: string): string {
 }
 
 /**
+ * What the runner is told when its open pull request's branch is `behind`
+ * commits behind the default branch, whose head is `head`
+ * ([ADR-0066](../../doc/adr/0066-the-update-is-a-step-the-runner-starts-when-an-open-pull-request-falls-behind.md)
+ * D1). It names the step that answers it: the update.
+ */
+export function behindEvent(behind: number, defaultBranch: string, head: string): string {
+  const commits = behind === 1 ? "1 commit" : `${behind} commits`;
+  return (
+    `The default branch ${defaultBranch} has moved on: this ticket's branch is ${commits} behind it ` +
+    `(${defaultBranch} is at ${head.slice(0, 7)}). ` +
+    "Start the update: it brings the branch level, fixes what that breaks, and tests it again."
+  );
+}
+
+/**
+ * The notice that says run `runId` was told its branch is behind
+ * `defaultBranch` at `head`. One per head: a new head is a new fact.
+ */
+export function behindNotice(defaultBranch: string, head: string, runId: string): string {
+  return `branch behind ${defaultBranch} at ${head}, run ${runId}`;
+}
+
+/**
  * What the runner is told when the planner let its run build
  * ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
  * D2): its reason, and the named person's comment it decided on, if any. A
@@ -498,6 +521,9 @@ export class RunnerDriver {
     // claim, put on at pickup (ADR-0044 D7). Read as a hold there, it would
     // keep every new step's run from ever being woken.
     const held = ticket.labels.includes(HELD_LABEL) && !cycle.isStep(run.ticket);
+    // Asked before any comment is marked read: a compare that fails stops
+    // this look with nothing written, so nothing is lost for the next one.
+    const behind = held ? undefined : await this.behindDefault(run, project, pull);
     const overLimit = isOverLimit(entries, ticketLimitOf(config));
     // **While the run waits for the planner, a named person's comment on its
     // ticket is the planner's to read** (ADR-0065 D5), when the planner would
@@ -536,6 +562,15 @@ export class RunnerDriver {
         const about = `pull request #${pull.number} ${pull.state}`;
         if (!noticed(entries, about)) {
           events.push(pullRequestEvent(pull.number, pull.state));
+          notices.push(about);
+        }
+      }
+      // An open pull request whose branch is behind the default branch:
+      // the runner starts the update (ADR-0066 D1).
+      if (behind !== undefined) {
+        const about = behindNotice(behind.defaultBranch, behind.defaultHead, run.id);
+        if (!noticed(entries, about)) {
+          events.push(behindEvent(behind.behind, behind.defaultBranch, behind.defaultHead));
           notices.push(about);
         }
       }
@@ -588,6 +623,27 @@ export class RunnerDriver {
     }
     if (events.length === 0) return;
     this.deliver(run, events, notices, check);
+  }
+
+  /**
+   * How far `run`'s branch is behind the default branch, when its pull
+   * request is open, no step of the run is running, and the branch is
+   * behind; undefined otherwise. The default branch's name is read only when
+   * there is something to tell.
+   */
+  private async behindDefault(
+    run: Run,
+    project: TicketingProject,
+    pull: PullRequestThread | undefined,
+  ): Promise<{ behind: number; defaultBranch: string; defaultHead: string } | undefined> {
+    if (pull?.state !== "open" || run.branch === undefined) return undefined;
+    // A step running on the branch moves it itself; the runner is told once
+    // the step has ended.
+    if (this.deps.running.has(run.id)) return undefined;
+    const answer = await this.deps.adapter.behindDefault(project, run.branch);
+    if (answer === undefined || answer.behind === 0) return undefined;
+    const { defaultBranch } = await this.deps.adapter.readBranches(project);
+    return { ...answer, defaultBranch };
   }
 
   /**

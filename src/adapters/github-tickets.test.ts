@@ -1378,6 +1378,7 @@ describe("every call this adapter makes can be scoped to a repository", () => {
       () => adapter.listPullRequestFiles(project, 9),
       () => adapter.setPullRequestBody(project, 9, "b"),
       () => adapter.aheadOfDefault(project, "b"),
+      () => adapter.behindDefault(project, "b"),
     ];
 
     for (const call of calls) {
@@ -1580,6 +1581,49 @@ describe("the forge calls the runner needs", () => {
 
     await expect(
       new GitHubTicketingAdapter({ run }).aheadOfDefault(alpha, "timone/7-slow"),
+    ).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it("counts the commits the default branch has that a branch does not, and names the default branch's head, in one compare", async () => {
+    const { run, calls } = fakeRunnerWithOptions(
+      ghBranchesForMerge(),
+      '{"behind":2,"defaultHead":"abc1234def5678abc1234def5678abc1234def56"}\n',
+    );
+
+    const behind = await new GitHubTicketingAdapter({ run }).behindDefault(alpha, "timone/7-x");
+
+    expect(behind).toEqual({ behind: 2, defaultHead: "abc1234def5678abc1234def5678abc1234def56" });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].args).toEqual([
+      "api",
+      "repos/fvermaut/scratch-app/compare/main...timone/7-x",
+      "--jq",
+      "{behind: .behind_by, defaultHead: .base_commit.sha}",
+    ]);
+    expect(calls[1].options?.repository).toBe("fvermaut/scratch-app");
+  });
+
+  it("answers undefined when the compare does not know the branch", async () => {
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error(
+        "gh api repos/fvermaut/scratch-app/compare/main...timone/7-x --jq ... failed: gh: Not Found (HTTP 404)",
+      ),
+    );
+
+    const behind = await new GitHubTicketingAdapter({ run }).behindDefault(alpha, "timone/7-x");
+
+    expect(behind).toBeUndefined();
+  });
+
+  it("reports a failed compare other than a 404, and never renders it as a missing branch", async () => {
+    const { run } = fakeRunnerFailing(
+      ghBranchesForMerge(),
+      new Error("gh api repos/... failed after 3 attempts: ECONNRESET"),
+    );
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).behindDefault(alpha, "timone/7-x"),
     ).rejects.toThrow(/ECONNRESET/);
   });
 

@@ -1203,3 +1203,251 @@ describe("RunnerDriver — a run that waits for the planner (ADR-0065 D2, D5)", 
     ]);
   });
 });
+
+describe("RunnerDriver — an open pull request whose branch falls behind the default branch (ADR-0066 D1)", () => {
+  /** A second chore on scratch-app, with its own branch and pull request. */
+  const LICENCE: TicketThread = {
+    ...CHORE,
+    number: 13,
+    title: "Fix the licence year",
+    body: "The licence says 2025.",
+    url: "https://github.com/fvermaut/scratch-app/issues/13",
+    createdAt: "2026-09-27T10:00:00Z",
+  };
+
+  /** The work branch of #13's run. */
+  const LICENCE_BRANCH = "timone/13-fix-the-licence-year";
+
+  /** Pull request #22, open for #13's branch. */
+  const PULL_REQUEST_22: PullRequest = {
+    number: 22,
+    title: "Fix the licence year",
+    url: "https://github.com/fvermaut/scratch-app/pull/22",
+    state: "open",
+    headSha: "ddddddd",
+  };
+
+  const TICKETS = [CHORE, LICENCE];
+
+  /** The default branch's head after #21 merged, and after the next merge. */
+  const HEAD_ABC = "abc1234def5678abc1234def5678abc1234def56";
+  const HEAD_DEF = "def5678abc1234def5678abc1234def5678abc12";
+
+  /** What the runner is told, as the plan words it, for each case below. */
+  const TWO_BEHIND_ABC =
+    "The default branch main has moved on: this ticket's branch is 2 commits behind it (main is at abc1234). " +
+    "Start the update: it brings the branch level, fixes what that breaks, and tests it again.";
+  const THREE_BEHIND_DEF =
+    "The default branch main has moved on: this ticket's branch is 3 commits behind it (main is at def5678). " +
+    "Start the update: it brings the branch level, fixes what that breaks, and tests it again.";
+  const ONE_BEHIND_ABC =
+    "The default branch main has moved on: this ticket's branch is 1 commit behind it (main is at abc1234). " +
+    "Start the update: it brings the branch level, fixes what that breaks, and tests it again.";
+
+  /** What one branch's compare answers: a count and a head, no branch, or a failure. */
+  type Compare = { behind: number; defaultHead: string } | undefined | Error;
+
+  /**
+   * #12's run (pull request #21, on `BRANCH`) and #13's run (pull request
+   * #22, on `LICENCE_BRANCH`), both parked, and the driver over them.
+   * `pulls` holds each pull request's state, `compare` what the forge answers
+   * for each branch (level when unset), and `asked` every branch it was asked
+   * about. The tickets numbered in `held` carry the hold label. The runs
+   * numbered in `withPullRequest` have their pull request recorded.
+   */
+  function twoPullRequests({ withPullRequest = [12, 13] }: { withPullRequest?: readonly number[] } = {}) {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-behind-"));
+    tempDirs.push(root);
+    const clock = { now: "2026-10-05T10:00:00Z" };
+    const store = RunStore.open(join(root, ".timone", "state.json"), { now: () => clock.now });
+    const spelling = builtChore(store, root);
+    if (withPullRequest.includes(12)) store.recordPullRequest(spelling.id, 21);
+    const licence = store.register("scratch-app", 13).run;
+    store.claimBranch(licence.id, LICENCE_BRANCH);
+    if (withPullRequest.includes(13)) store.recordPullRequest(licence.id, 22);
+    store.park(licence.id, {
+      waitingOn: "fvermaut to review pull request #22",
+      resolvableBy: ["delivery"],
+    });
+    const pulls = new Map<number, PullRequest["state"]>([
+      [21, "open"],
+      [22, "open"],
+    ]);
+    const compare = new Map<string, Compare>();
+    const asked: string[] = [];
+    const held: number[] = [];
+    const adapter: TicketingAdapter = {
+      ...forge("").adapter,
+      async listMarkedTickets() {
+        return TICKETS;
+      },
+      async getTicket(_project, number) {
+        const ticket = TICKETS.find((one) => one.number === number);
+        if (ticket === undefined) throw new Error(`no ticket ${number}`);
+        return held.includes(number) ? { ...ticket, labels: [...ticket.labels, HELD_LABEL] } : ticket;
+      },
+      async getPullRequestThread(_project, number) {
+        const pull = number === 21 ? PULL_REQUEST_21 : PULL_REQUEST_22;
+        return { ...pull, state: pulls.get(number) ?? "open", comments: [] };
+      },
+      async behindDefault(_project, branch) {
+        asked.push(branch);
+        const answer = compare.has(branch)
+          ? compare.get(branch)
+          : { behind: 0, defaultHead: "4f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39" };
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+    };
+    const { sessions, wakes } = fakeWakes();
+    const step = fakeStep(store);
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: step.startStep,
+      timonePin: async () => undefined,
+      clock: () => clock.now,
+      log: () => {},
+    });
+    const cycle = async (): Promise<string[]> => {
+      const errors = await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, {
+        tickets: TICKETS,
+        isStep: () => false,
+        threads: (ticket) => ({
+          ticket: () => adapter.getTicket(PROJECT, ticket),
+          pullRequest: (pr) => adapter.getPullRequestThread(PROJECT, pr),
+        }),
+      });
+      await driver.drain();
+      return errors;
+    };
+    /** Every notice in a ticket's record, or the test fails. */
+    const noticesOf = (ticket: number): string[] => {
+      const read = readRecord(root, "scratch-app", ticket);
+      if (!read.ok) throw new Error(read.error.message);
+      return read.value.flatMap((entry) => (entry.kind === "notice" ? [entry.about] : []));
+    };
+    return { store, spelling, licence, pulls, compare, asked, held, wakes, step, driver, cycle, noticesOf };
+  }
+
+  it("wakes the other open pull request's runner with how far its branch is behind when one pull request merges (R7 clause 1)", async () => {
+    const w = twoPullRequests();
+    w.pulls.set(21, "merged");
+    w.compare.set(LICENCE_BRANCH, { behind: 2, defaultHead: HEAD_ABC });
+
+    await w.cycle();
+
+    expect(w.wakes).toEqual([
+      { runId: w.spelling.id, events: ["Pull request #21 was merged."], options: {} },
+      { runId: w.licence.id, events: [TWO_BEHIND_ABC], options: {} },
+    ]);
+  });
+
+  it("tells a run once for each head of the default branch: not again at the same head, again at a new one", async () => {
+    const w = twoPullRequests();
+    w.pulls.set(21, "merged");
+    w.compare.set(LICENCE_BRANCH, { behind: 2, defaultHead: HEAD_ABC });
+    await w.cycle();
+    expect(w.wakes.filter((wake) => wake.runId === w.licence.id)).toHaveLength(1);
+
+    await w.cycle();
+    expect(w.wakes.filter((wake) => wake.runId === w.licence.id)).toHaveLength(1);
+
+    w.compare.set(LICENCE_BRANCH, { behind: 3, defaultHead: HEAD_DEF });
+    await w.cycle();
+
+    expect(w.wakes.filter((wake) => wake.runId === w.licence.id)).toEqual([
+      { runId: w.licence.id, events: [TWO_BEHIND_ABC], options: {} },
+      { runId: w.licence.id, events: [THREE_BEHIND_DEF], options: {} },
+    ]);
+  });
+
+  it("tells a run whose pull request opened behind on the first tick, and tells nothing to one that opened level (R14 clauses 1 and 3)", async () => {
+    const w = twoPullRequests();
+    w.compare.set(BRANCH, { behind: 1, defaultHead: HEAD_ABC });
+    w.compare.set(LICENCE_BRANCH, { behind: 0, defaultHead: HEAD_ABC });
+
+    await w.cycle();
+
+    expect(w.wakes).toEqual([{ runId: w.spelling.id, events: [ONE_BEHIND_ABC], options: {} }]);
+    expect(w.noticesOf(13)).toEqual([]);
+  });
+
+  it("does not ask about a run with a step running, and tells it on the first tick after the step ends", async () => {
+    const w = twoPullRequests();
+    const spelling = w.store.get(w.spelling.id)!;
+    const started = await runnerActions(w.driver.actionsFor(spelling), spelling).startStep({
+      stage: "delivery",
+      instructions: "Open the pull request.",
+      skipReason: "The change only fixes a spelling mistake in the README.",
+      reason: "The fix is built.",
+    });
+    expect(started.ok).toBe(true);
+    w.compare.set(BRANCH, { behind: 2, defaultHead: HEAD_ABC });
+
+    await w.cycle();
+    expect(w.asked).not.toContain(BRANCH);
+    expect(w.wakes).toEqual([]);
+
+    w.step.end({
+      outcome: { sessionId: "step-session-4", ok: true },
+      summary: { durationMs: 60_000, turns: 12, costUsd: 0.5, models: [] },
+    });
+    await vi.waitFor(() => expect(w.wakes).toHaveLength(1));
+    await w.driver.drain();
+    await w.cycle();
+
+    expect(w.wakes).toEqual([
+      { runId: w.spelling.id, events: ["The step delivering ended: it succeeded."], options: {} },
+      { runId: w.spelling.id, events: [TWO_BEHIND_ABC], options: {} },
+    ]);
+  });
+
+  it("does not tell a held ticket that its branch is behind, and tells it once the hold comes off", async () => {
+    const w = twoPullRequests();
+    w.held.push(13);
+    w.compare.set(LICENCE_BRANCH, { behind: 2, defaultHead: HEAD_ABC });
+
+    await w.cycle();
+    expect(w.wakes).toEqual([]);
+    expect(w.noticesOf(13)).toEqual([]);
+
+    w.held.splice(0);
+    await w.cycle();
+
+    expect(w.wakes).toEqual([{ runId: w.licence.id, events: [TWO_BEHIND_ABC], options: {} }]);
+  });
+
+  it("asks nothing about a run with no pull request, or whose pull request is merged or closed", async () => {
+    const w = twoPullRequests({ withPullRequest: [13] });
+    w.pulls.set(22, "closed");
+
+    await w.cycle();
+    expect(w.asked).toEqual([]);
+
+    w.store.recordPullRequest(w.spelling.id, 21);
+    w.pulls.set(21, "merged");
+    await w.cycle();
+
+    expect(w.asked).toEqual([]);
+  });
+
+  it("returns one error line naming the ticket when the compare fails, still looks at the other run, and notices nothing for the failed one", async () => {
+    const w = twoPullRequests();
+    w.compare.set(BRANCH, new Error("gh api repos/... failed after 3 attempts: ECONNRESET"));
+    w.compare.set(LICENCE_BRANCH, { behind: 2, defaultHead: HEAD_ABC });
+
+    const errors = await w.cycle();
+
+    expect(errors).toEqual([
+      "scratch-app: the runner could not look at #12: gh api repos/... failed after 3 attempts: ECONNRESET",
+    ]);
+    expect(w.wakes).toEqual([{ runId: w.licence.id, events: [TWO_BEHIND_ABC], options: {} }]);
+    expect(w.noticesOf(12)).toEqual([]);
+  });
+});

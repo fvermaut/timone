@@ -573,6 +573,47 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
   }
 
   /**
+   * How far `branch` is behind the default branch, and the default branch's
+   * head, through the same compare as {@link aheadOfDefault}.
+   *
+   * `base_commit` is the head of the base side of the compare, the default
+   * branch here, so the count and the head come from one answer.
+   */
+  async behindDefault(
+    project: TicketingProject,
+    branch: string,
+  ): Promise<{ behind: number; defaultHead: string } | undefined> {
+    const slug = repoSlug(project.repoUrl);
+    // The forge names its own default branch, for mergeIntoDefault's reason.
+    const { defaultBranch } = await this.readBranches(project);
+
+    let raw: string;
+    try {
+      raw = await this.run(
+        "gh",
+        [
+          "api",
+          `repos/${slug}/compare/${defaultBranch}...${branch}`,
+          "--jq",
+          "{behind: .behind_by, defaultHead: .base_commit.sha}",
+        ],
+        { repository: slug },
+      );
+    } catch (error) {
+      // For aheadOfDefault's reason: only the 404 is an answer.
+      const said = error instanceof Error ? error.message : String(error);
+      if (/\(HTTP 404\)/.test(said)) return undefined;
+      throw error;
+    }
+
+    return parseGhJson(
+      z.object({ behind: z.number().int().nonnegative(), defaultHead: z.string().min(1) }),
+      raw,
+      `comparing ${branch} with ${defaultBranch} on ${slug}`,
+    );
+  }
+
+  /**
    * One file's content on a branch, through GraphQL's `object(expression:)`.
    *
    * GraphQL again, and for the reason `readBranches` gives: an absent path
