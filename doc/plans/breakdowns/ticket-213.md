@@ -1,6 +1,6 @@
 # Breakdown
 
-**Status:** Awaiting approval
+**Status:** Approved by fvermaut 2026-10-05 — 2 pieces
 
 1. **A takeover waits for the running step** — `timone takeover` typed while a step of its ticket runs waits for that step to end, then opens the session.
    - At the terminal it says which step it waits for, and that Ctrl-C stops the wait. Stopping changes nothing on the run.
