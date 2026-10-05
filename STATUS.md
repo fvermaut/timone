@@ -46,6 +46,10 @@
 
 **What I need from you:** run the two checks, answer the two questions on #215, then merge it if you agree.
 
+**1j. Piece 4 of #197 ([#202](https://github.com/fvermaut/timone/issues/202)), in Timone's own repository: checked on the branch `timone/202-4-the-update-after-a-merge`; its pull request is not open yet.** When an open pull request falls behind `main`, the machine now notices it and starts an update. The check found no fault in the program. 19 of the 20 older requirements it re-ran passed. One could not run here: the replay needs a model login. Two of the check's own tools were wrong, and were fixed. The update itself is seen only in a watched run on scratch-app, which nobody has done yet. Details: [phase-50-verification.md](doc/plans/phases/reports/phase-50-verification.md).
+
+**What I need from you:** run the replay and the watched run, then review the pull request when it opens.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
