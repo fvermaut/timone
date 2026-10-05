@@ -467,3 +467,49 @@ Test files run at the end, by name: `src/planner/session.test.ts` 4, `src/planne
 - The runner's driver now reads `waitsForPlanner` and `plannerReadComment` from `src/planner/driver.ts`, and `passedToRunner` from `src/planner/actions.ts`.
 - `timone status` can read a run that waits for the planner with `store.waitingForPlanner(project)` and a held one with `store.heldByPlanner(project)`; `run.planner.decision.waitsFor` names what it waits for.
 - A daemon stopped while a planner session runs loses it; the run still waits in the ledger, and the next daemon's first cycle starts a new one (case 10). A comment that session was reading stays noted as read, so it is not given to the new session.
+
+## 49g — `timone status` says which tickets the planner is deciding or holding
+
+**Built.** `timone status` adds one part to a project's line, after the part about places that phase 47 added: `planner: deciding #12; holds #9 until #7`. It names the runs that wait for the planner's decision, then the runs the planner holds, each with the tickets it waits for. A held run waiting for two tickets reads `until #7 and #8`. Nothing is said when the planner is deciding nothing and holds nothing.
+
+**Files touched.**
+
+- `src/commands/status.ts` — `RenderStatusOptions.waitingForPlanner` and `heldByPlanner` (both optional; absent means say nothing, as `waitingForPlace`), the same two on `RenderContext`, a new `describePlanner(deciding, held)`, its call in `describeProject` after the place part, and the command passes `store.waitingForPlanner` and `store.heldByPlanner`. `joined` is imported from `src/runner/comments.ts`. A ✏ note on `describeProject`'s doc comment.
+- `src/commands/status.test.ts` — a new describe, "renderStatus — the tickets the planner is deciding or holding (ADR-0065)", with its own `ledger()` (two places, the default), and four cases.
+
+**Decisions taken inside the slice.**
+
+- **"One line" is one part of the project's line.** `timone status` writes each project on one line, its parts joined with `  ·  `; the place "line" of phase 47 is such a part. The planner's words are one more part, placed right after it.
+- **How several tickets are joined.** Several tickets the planner is deciding are joined with `, ` (`deciding #13, #12`), in the order `waitingForPlanner` gives, which is the order the planner takes them. Several held tickets are joined with `, ` too, in the ledger's order: `holds #9 until #7, #10 until #7 and #8`. `, ` is how the closing line names several tickets; `, then ` was not used, because it says an order of turns and a hold has none. The tickets one held ticket waits for are joined by `joined` from `src/runner/comments.ts` (`#7 and #8`, `#7, #8 and #9`), the same words as the hold comment on the ticket and the runner's refusal. The two halves are joined with `; `, as the plan's example has.
+- **A fourth case beyond the plan's three**, at the same seam, fixes the join for several tickets and the place of the part after `waiting for a place`.
+- A held run with no `waitsFor` (the planner's `hold` refuses one) would read `#9 until `; not handled, since the ledger is never written that way.
+
+**Validation evidence.**
+
+Per declared case:
+
+1. "names the ticket the planner is deciding and the one it holds, with what it waits for" — red: `AssertionError: expected 'scratch-app  #7 — working on it now  …' to match / {2}· {2}planner: deciding #12; holds…/` (received `scratch-app  #7 — working on it now  ·  #12 (building) — waiting: the runner  ·  #9 (building) — waiting: the runner`); green after `describePlanner`.
+2. "says nothing about the planner when it is deciding nothing and holds nothing" (one run never asked, one run let build) — green as written. Mutation: `describePlanner` always returns `planner: …` → `AssertionError: expected 'scratch-app  #7 — working on it now  …' not to match /planner/`; reverted, green.
+3. "names both tickets a held ticket waits for, as until #7 and #8" — green as written (`joined` was used with case 1's code). Mutation: the tickets joined with `, ` → `AssertionError: expected 'scratch-app  #7 — working on it now  …' to match / {2}· {2}planner: holds #9 until #7 a…/`; reverted, green.
+4. Added: "joins several tickets with commas, after the tickets that wait for a place" — green as written. Mutations, each reverted: the planner part put before the place part → `AssertionError: expected 'scratch-app  #7 — working on it now  …' to match / {2}· {2}waiting for a place: #14 {2}…/`; the held tickets joined with ` and ` → the same line.
+
+The validation block, as run (after `npm run build`, which exited 0):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/commands/status.test.ts; echo "exit: $?"
+ Test Files  1 passed (1)
+      Tests  50 passed (50)
+exit: 0
+```
+
+- [x] Cases 1–3 pass, with red runs recorded (case 1 red; cases 2 and 3 proved by mutation), and the added case 4 too. **Pass.**
+
+Test files run at the end, by name: `src/commands/status.test.ts` 50; then the files that import or name `status.ts`: `src/cli.test.ts`, `src/guards/checkouts.test.ts`, `src/planner/plan-files.test.ts` — 17 passed.
+
+**What 49h must know.**
+
+- The words `timone status` now prints for the planner are `planner: deciding #13, #12; holds #9 until #7, #10 until #7 and #8`. Any documentation of the status line can quote them.
+- `RenderStatusOptions.waitingForPlanner` and `heldByPlanner` are optional; a caller that gives neither shows nothing about the planner.

@@ -20,6 +20,7 @@ import {
   type InitiativeProgress,
 } from "../daemon/poll.js";
 import { daemonRecordNotice } from "../daemon/version.js";
+import { joined } from "../runner/comments.js";
 import { allowanceOf, spentOn } from "../runner/limit.js";
 import { readRecord } from "../runner/record.js";
 import { RUNNER_DEFAULT_WAIT } from "../runner/session.js";
@@ -149,6 +150,20 @@ export interface RenderStatusOptions {
    * Absent means say nothing about waiting, which is what a fixture wants.
    */
   waitingForPlace?: (project: string) => readonly Run[];
+  /**
+   * The runs of a project that wait for the planner's decision, in the order
+   * the planner takes them, as `RunStore.waitingForPlanner` gives them
+   * ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+   * D2).
+   *
+   * Absent means say nothing about the planner, which is what a fixture wants.
+   */
+  waitingForPlanner?: (project: string) => readonly Run[];
+  /**
+   * The runs of a project the planner holds, as `RunStore.heldByPlanner`
+   * gives them (ADR-0065 D2). Absent means none.
+   */
+  heldByPlanner?: (project: string) => readonly Run[];
 }
 
 /**
@@ -170,6 +185,10 @@ interface RenderContext {
   initiativesOf: (project: string) => readonly InitiativeRecord[];
   /** The runs of a project that wait for a place, in the ledger's order. */
   waitingForPlace: (project: string) => readonly Run[];
+  /** The runs of a project that wait for the planner's decision, in its order. */
+  waitingForPlanner: (project: string) => readonly Run[];
+  /** The runs of a project the planner holds. */
+  heldByPlanner: (project: string) => readonly Run[];
   /**
    * What this run's ticket has spent against its limit, as the words that
    * end its phrase — or nothing, when no reader of records was given.
@@ -405,6 +424,33 @@ function describeInitiative(picture: InitiativeRecord): string | undefined {
 }
 
 /**
+ * Which tickets of a project the planner is deciding, and which it holds
+ * until which others are merged or closed (ADR-0065 D2):
+ * `planner: deciding #12; holds #9 until #7`. Nothing when it does neither.
+ *
+ * Several tickets are joined with ", ", as the closing line names tickets.
+ * The tickets one held ticket waits for read `#7 and #8`, as the hold
+ * comment on the ticket says them.
+ */
+function describePlanner(
+  deciding: readonly Run[],
+  held: readonly Run[],
+): string | undefined {
+  const said: string[] = [];
+  if (deciding.length > 0) {
+    said.push(`deciding ${deciding.map((run) => `#${run.ticket}`).join(", ")}`);
+  }
+  if (held.length > 0) {
+    const holds = held.map((run) => {
+      const waitsFor = run.planner?.decision?.waitsFor ?? [];
+      return `#${run.ticket} until ${joined(waitsFor.map((ticket) => `#${ticket}`))}`;
+    });
+    said.push(`holds ${holds.join(", ")}`);
+  }
+  return said.length === 0 ? undefined : `planner: ${said.join("; ")}`;
+}
+
+/**
  * What one project's line says after its name.
  *
  * **Every** waiting ticket is named, not just the first. Since phase 12 a run
@@ -416,6 +462,9 @@ function describeInitiative(picture: InitiativeRecord): string | undefined {
  * ✏ 2026-10-04: after the runs, the line names the ticket a place is given
  * to and the tickets that wait for one, in their order (ADR-0063). It says
  * nothing about a place when nobody waits.
+ *
+ * ✏ 2026-10-05: after that, the tickets the planner is deciding and those it
+ * holds (ADR-0065 D2), through {@link describePlanner}.
  */
 function describeProject(
   project: string,
@@ -440,6 +489,11 @@ function describeProject(
       `waiting for a place: ${waiting.map((run) => `#${run.ticket}`).join(", then ")}`,
     );
   }
+  const planner = describePlanner(
+    context.waitingForPlanner(project),
+    context.heldByPlanner(project),
+  );
+  if (planner !== undefined) parts.push(planner);
 
   // An initiative whose live step already has a run above is not named again:
   // that run's own phrase says where it is. This is for the initiatives with
@@ -482,6 +536,8 @@ export function renderStatus(
     hold: (run) => (run.holder === undefined ? "none" : livenessOf(run.holder)),
     initiativesOf: (project) => options.pictures?.(project) ?? [],
     waitingForPlace: (project) => options.waitingForPlace?.(project) ?? [],
+    waitingForPlanner: (project) => options.waitingForPlanner?.(project) ?? [],
+    heldByPlanner: (project) => options.heldByPlanner?.(project) ?? [],
     spendingOf: spendingReader(manifest, options.records),
     progressOf: progressReader(
       options.root,
@@ -596,6 +652,8 @@ export function registerStatusCommand(program: Command): void {
           root: process.cwd(),
           pictures: (project) => store.initiativesFor(project),
           waitingForPlace: (project) => store.waitingForPlace(project),
+          waitingForPlanner: (project) => store.waitingForPlanner(project),
+          heldByPlanner: (project) => store.heldByPlanner(project),
           records: (project, ticket) => readRecord(process.cwd(), project, ticket),
           // Undefined once the daemon's process is gone: nobody is running
           // old code when nothing is running.
