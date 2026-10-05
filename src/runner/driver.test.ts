@@ -661,7 +661,7 @@ describe("RunnerDriver — a place on the project is given to one waiting run (A
     ]);
   });
 
-  it("wakes a run whose step just ended and kept the place once, with the step's end, and not again for the place", async () => {
+  it("wakes a run whose step just ended once, with the step's end, and gives it no place while its runner decides (PRD-07.R2 clause 6)", async () => {
     const w = threeRuns();
     w.store.park(w.first.id, RUNNER_WAIT);
     expect((await w.tryToSort(w.older)).ok).toBe(true);
@@ -671,7 +671,8 @@ describe("RunnerDriver — a place on the project is given to one waiting run (A
     });
     await vi.waitFor(() => expect(w.wakes).toHaveLength(1));
     await w.driver.drain();
-    expect(w.store.placeHolders("scratch-app").map((run) => run.id)).toEqual([w.older.id]);
+    expect(w.store.placeHolders("scratch-app")).toEqual([]);
+    expect(w.store.waitingForPlace("scratch-app")).toEqual([]);
 
     await w.cycle();
     await w.cycle();

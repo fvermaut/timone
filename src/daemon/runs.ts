@@ -1458,8 +1458,9 @@ export class RunStore {
   /**
    * Move a run to `next`, refusing illegal transitions and refusing `active`
    * when no place is free for the run (ADR-0063 D1). A run whose step ends
-   * waits for a place with its own order (D2). Whatever place the move frees
-   * is given to the first waiting run before the file is written (D3).
+   * takes no place while its runner decides (PRD-07.R2 clause 6). Whatever
+   * place the move frees is given to the first waiting run before the file is
+   * written (D3).
    */
   private transition(
     id: string,
@@ -1482,7 +1483,6 @@ export class RunStore {
       if (holder !== undefined) throw new NoPlaceError(run.project, holder);
     }
 
-    const stepEnds = run.status === "active" && run.takenOver !== true;
     run.status = next;
     apply(run);
     run.updatedAt = this.now();
@@ -1494,12 +1494,9 @@ export class RunStore {
       run.place.givenAt = undefined;
       run.place.waitingSince = undefined;
     }
-    // A run whose step has just ended waits for a place with its own order,
-    // until its runner decides what comes next (ADR-0063 D2). It keeps the
-    // place when it comes first.
-    if (next === "parked" && stepEnds && run.place !== undefined) {
-      run.place.waitingSince = this.now();
-    }
+    // ✏ 2026-10-05: a run whose step has just ended does not wait for a
+    // place, and none is given to it: the runner session it wakes takes no
+    // place (PRD-07.R2 clause 6). Its next step asks like any other.
     this.givePlaces(run.project);
 
     this.persist();

@@ -979,27 +979,15 @@ export class RunnerDriver {
    * followed." in place of the list the pull request held. The failure is
    * logged, and the runner is still woken.
    *
-   * **A run that kept the place is woken once.** When its step ends, the
-   * ledger may give the place back to it (ADR-0063 D2). The wake here tells
-   * it the step ended, and the place is noted as told, so the next look does
-   * not wake it a second time for the place.
+   * ✏ 2026-10-05: **the run takes no place while its runner decides**
+   * (PRD-07.R2 clause 6). The ledger gives none to a run whose step has just
+   * ended, so there is no place to tell it about here.
    */
   private async afterStep(runId: string, stage: PipelineStage, result: StepResult): Promise<void> {
     this.lastCheck.delete(runId);
     const run = this.deps.store.get(runId);
     if (run === undefined || !UNSETTLED.includes(run.status)) return;
     this.parkForRunner(run, AFTER_STEP_WAIT, stage);
-    // A run whose step has just ended may keep the place (ADR-0063 D2). The
-    // wake below tells it its step ended, and is the only wake for that
-    // place: noted now, the place is not told again on the next look.
-    const givenAt = this.deps.store.get(runId)?.place?.givenAt;
-    if (givenAt !== undefined) {
-      appendEntry(this.deps.root, run.project, run.ticket, {
-        kind: "notice",
-        at: this.deps.clock(),
-        about: placeGivenNotice(givenAt, runId),
-      });
-    }
     const read = readRecord(this.deps.root, run.project, run.ticket);
     if (!read.ok) {
       this.deps.log(

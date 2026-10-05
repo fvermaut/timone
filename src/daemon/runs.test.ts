@@ -706,7 +706,7 @@ describe("places on a project (ADR-0063)", () => {
     );
   });
 
-  it("gives the place back to a run whose step just ended when nobody else waits (D2)", () => {
+  it("takes no place for a run whose step just ended while its runner decides, so another ticket's step is not refused (R2 clause 6)", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
     store.askPlace(run.id, PLAIN);
@@ -714,29 +714,26 @@ describe("places on a project (ADR-0063)", () => {
 
     store.park(run.id, { waitingOn: "the runner", kind: "runner" });
 
-    expect(store.placeHolders("scratch-app").map((each) => each.id)).toEqual(["scratch-app#7/1"]);
+    expect(store.placeHolders("scratch-app")).toEqual([]);
+    expect(store.get(run.id)?.place?.givenAt).toBeUndefined();
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
     const other = waitingForRunner(store, 8);
-    const answer = store.askPlace(other, PLAIN);
-    expect(answer.ok ? undefined : answer.holder.id).toBe("scratch-app#7/1");
-    expect(() => store.claim(other)).toThrow(
-      "No place is free on scratch-app: the place is given to run scratch-app#7/1.",
-    );
+    expect(store.askPlace(other, PLAIN)).toEqual({ ok: true });
+    expect(store.claim(other).status).toBe("active");
   });
 
-  it("gives the place to an older waiting ticket when a step ends, and the ended run waits behind it (D2)", () => {
+  it("gives the place to a waiting ticket when a step ends, and the ended run does not wait (R2 clause 6, R3)", () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 7);
-    store.askPlace(run.id, { priority: false, openedAt: "2026-08-02T09:00:00Z" });
+    store.askPlace(run.id, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
     store.activate(run.id, "session-7");
-    const older = waitingForRunner(store, 8);
-    store.askPlace(older, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    const newer = waitingForRunner(store, 8);
+    store.askPlace(newer, { priority: false, openedAt: "2026-08-02T09:00:00Z" });
 
     store.park(run.id, { waitingOn: "the runner", kind: "runner" });
 
     expect(store.placeHolders("scratch-app").map((each) => each.id)).toEqual(["scratch-app#8/1"]);
-    expect(store.waitingForPlace("scratch-app").map((each) => each.id)).toEqual([
-      "scratch-app#7/1",
-    ]);
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
   });
 
   it("lets a takeover hold a run while another ticket's step runs, and the takeover takes no place (R2 clause 6, R13)", () => {
@@ -900,7 +897,7 @@ describe("the number of places on a project (PRD-07.R2)", () => {
       "scratch-app#8/1",
       "scratch-app#9/1",
     ]);
-    expect(store.waitingForPlace("scratch-app").map((run) => run.id)).toEqual(["scratch-app#7/1"]);
+    expect(store.waitingForPlace("scratch-app")).toEqual([]);
   });
 
   it("counts the places of each project on its own when two projects have different numbers", () => {
