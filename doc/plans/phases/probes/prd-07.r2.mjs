@@ -18,7 +18,18 @@
 //      WHEN the project's places are counted
 //      THEN neither takes a place
 //
-// Phase 47 claims R2 "except the number of places (clauses 1 and 2, which stay with piece 5)";
+// ✏ 2026-10-05 (phase 49 verification): phase 49 (piece 5) adds the number of places, `places` in
+// timone.yaml (the key CONTEXT.md names), 2 when a project sets none. Clauses 1 and 2 are judged
+// now, with _places.mjs's manyAsk(): several tickets picked up together, each starting a building
+// step that does not end; "counted" is how many of those steps run at once, and whether the rest
+// are refused for want of a place. Clause 3 is seen again with N = 2, and clause 4's second half
+// ("while the other steps keep running") with two places. The one-place fixtures below now write
+// `places: 1` into timone.yaml, so they are clause 3 and 5 and 6 at N = 1, as set by the project.
+// Break legs of the new labels: 1 — the "has 2" check on a project that sets 1; 2 — the "has 3"
+// check on a project that sets none; 3 (N = 2) — the same check on a project that sets 3, where
+// the third ticket starts; 4 (two places) — the same check on a project that sets 1.
+//
+// (phase 47's words, kept:) Phase 47 claims R2 "except the number of places (clauses 1 and 2, which stay with piece 5)";
 // every project keeps one place until then. Clauses 1 and 2 are printed, with what was seen,
 // and not judged. With one place, N is 1, and clause 4's "while the other steps keep running"
 // has no other step to keep: that half is seen only once a project has two places.
@@ -35,7 +46,8 @@
 // Clause 3's break leg reuses the no-step fixture with its setup check told the step runs, so
 // the leg exercises the outcome checks (refused, not started, waiting in the ledger) on a
 // project where nothing takes the place.
-import { secondAsks, assertNotRefused, said, freedPlace, before47, A, B, runsLine } from './_places.mjs';
+import { secondAsks, assertNotRefused, said, freedPlace, manyAsk, afterStepAsks, before47, A, B, runsLine } from './_places.mjs';
+import { oldBuild } from './_old-build.mjs';
 import { clause, assert, finish } from './_rig.mjs';
 
 const REAL_ONLY = process.env.PROBE_REAL_ONLY === '1';
@@ -59,11 +71,59 @@ const [turn, turnOld] = await Promise.all([
   REAL_ONLY ? null : freedPlace({ waiters: WAITERS, givenDoes: 'start', cli: before47(), timeoutMs: 30000 }),
 ]);
 
-console.log('=== PRD-07.R2 clause 1 — a project whose entry in timone.yaml sets no limit: when its places are counted, it has 2');
-console.log('    NOT CLAIMED by phase 47 (piece 5 adds the number). Seen, not judged: the fixture sets no limit, and a second ticket\'s step');
-console.log(`    was refused while one step ran — the project has one place on this build. ("${running.bRefused[0] ?? 'no refusal'}")`);
-console.log('=== PRD-07.R2 clause 2 — a project whose entry in timone.yaml sets a limit of N: when its places are counted, it has N');
-console.log('    NOT CLAIMED by phase 47 (piece 5 adds the setting in timone.yaml). Not run.');
+const [byDefault, setOne, setThree] = await Promise.all([
+  manyAsk({ places: undefined, count: 3 }),
+  manyAsk({ places: 1, count: 3 }),
+  manyAsk({ places: 3, count: 4 }),
+]);
+const counted = (r) => `${r.places === undefined ? 'no places line' : `places: ${r.places}`}: ${r.nums.map((n) => `#${n} ${r.per[n].started.length ? 'started' : r.per[n].refused.length ? 'refused' : 'neither'}`).join(', ')}; steps running at the end: ${r.running.map((n) => `#${n}`).join(', ') || 'none'}`;
+// The project has N places: N of the tickets' steps run at once, and every other ticket's step is
+// refused for want of a place.
+function assertHas(r, n) {
+  const st = r.nums.filter((t) => r.per[t].started.length);
+  assert(st.length === n, `${st.length} steps started, not ${n} (${counted(r)})`);
+  assert(r.running.length === n, `${r.running.length} steps were running together at the end, not ${n} (${counted(r)})`);
+  for (const t of r.nums.filter((t) => !r.per[t].started.length)) assert(r.per[t].refused.some((d) => /place/i.test(d)), `#${t} was not refused for want of a place: ${JSON.stringify(r.per[t].refused)}`);
+}
+await clause('PRD-07.R2 clause 1', 'a project whose entry in timone.yaml sets no limit: when its places are counted, it has 2', {
+  broken: async () => assertHas(setOne, 2),
+  correct: async () => assertHas(byDefault, 2),
+});
+console.log(`    (${counted(byDefault)})`);
+console.log(`    (the third ticket was refused with: "${byDefault.per[33]?.refused[0] ?? 'nothing'}")`);
+await clause('PRD-07.R2 clause 2', 'a project whose entry in timone.yaml sets a limit of N: when its places are counted, it has N (N = 3 and N = 1)', {
+  broken: async () => assertHas(byDefault, 3),
+  correct: async () => { assertHas(setThree, 3); assertHas(setOne, 1); },
+});
+console.log(`    (${counted(setThree)})`);
+console.log(`    (${counted(setOne)})`);
+// Clause 3 at N = 2: the third ticket's step does not start, and that ticket waits for its turn.
+function assertThirdWaits(r) {
+  const third = r.nums[2];
+  assert(r.running.length === 2, `setup: not two steps running (${counted(r)})`);
+  assert(!r.per[third].started.length, `the third ticket's step started while both places were taken (${counted(r)})`);
+  assert(r.per[third].refused.length > 0, `the third ticket's step was not refused (${counted(r)})`);
+  const run = r.per[third].run;
+  assert(run && run.status !== 'active' && run.place?.waitingSince, `the third ticket does not wait for its turn in the ledger: ${run?.status} ${JSON.stringify(run?.place)}`);
+}
+await clause('PRD-07.R2 clause 3 (N = 2)', 'a project with 2 places and steps of 2 different tickets running: a step of another ticket asks to start, and it does not start, and the ticket waits for its turn', {
+  broken: async () => assertThirdWaits({ ...setThree, running: setThree.running.slice(0, 2) }),
+  correct: async () => assertThirdWaits(byDefault),
+});
+console.log(`    (the third ticket in the ledger: ${byDefault.per[33]?.run?.status} ${JSON.stringify(byDefault.per[33]?.run?.place)})`);
+// Clause 4 with two places: the second ticket's step starts while the first one's keeps running.
+function assertStartsBeside(r) {
+  const [a, b] = r.nums;
+  assert(r.per[a].started.length && r.per[b].started.length, `the first two tickets' steps did not both start (${counted(r)})`);
+  const later = r.per[a].started[0] < r.per[b].started[0] ? [a, b] : [b, a];
+  assert(!r.per[later[0]].stepEnded && r.running.includes(later[0]), `the first step did not keep running after the second started (${counted(r)})`);
+  assert(r.running.includes(later[1]), `the second step is not running (${counted(r)})`);
+}
+await clause('PRD-07.R2 clause 4 (two places)', 'a project with fewer running steps than places (one of two): a step of another ticket asks to start, and it starts, while the other step keeps running', {
+  broken: async () => assertStartsBeside(setOne),
+  correct: async () => assertStartsBeside(byDefault),
+});
+console.log(`    (steps started at: ${byDefault.nums.slice(0, 2).map((n) => `#${n} ${byDefault.per[n].started[0]?.slice(11, 19)}`).join(', ')}; both running at the end: ${byDefault.running.join(', ')})`);
 
 function assertRefusedAndWaits(r) {
   assert(r.reachedA && r.atAsk?.aRun?.status === 'active', `setup: the first ticket's step is not running (${r.atAsk?.runs ?? runsLine(r.fx)})`);
@@ -86,7 +146,7 @@ await clause('PRD-07.R2 clause 4', 'fewer running steps than places (none of one
   correct: async () => { assertNotRefused(idle, assert); assertNotRefused(prOpen, assert); },
 });
 console.log(`    (${said(idle)})`);
-console.log('    (its second half, "while the other steps keep running", needs two places: with one, no other step can run. Not seen.)');
+console.log('    (its second half, "while the other steps keep running", is seen with two places: clause 4 (two places) above.)');
 
 // Clause 5.
 function assertTakesNoPlace(r, why) {
@@ -134,5 +194,28 @@ await clause('PRD-07.R2 clause 6 (takeover session)', 'a takeover session open i
 });
 console.log(`    (${said(takeover)})`);
 
-for (const r of [idle, running, prOpen, asks, runningTriage, runningDelivery, runner, takeover, turn, turnOld]) r?.fx.cleanup();
+// ✏ 2026-10-05 (phase 49 verification): clause 6 for the runner session a step's end wakes. The
+// label above sees the runner session of a ticket just picked up, with no step before it. Here
+// the first ticket's step has ended and its runner, woken by that end, is still deciding; the
+// second ticket asks to start a step then. Break leg: the build at this branch's first fix
+// commit (e705481, before the fix for this case), which was seen to refuse the second ticket
+// with "the place is given to run fixture#12/1".
+const FIX_LOOP_1 = 'e705481fbb80481735f378a4ea8a3188d07feaec';
+const [afterStep, afterStepOld] = await Promise.all([
+  afterStepAsks({}),
+  REAL_ONLY ? null : afterStepAsks({ cli: oldBuild(FIX_LOOP_1) }),
+]);
+function assertRunnerAfterStepTakesNone(r) {
+  assert(r.aStepEnded && r.aRunnerOpen, `setup: the first ticket's runner session after its step was not open when the second ticket was answered (step ended ${r.aStepEnded}, answered ${r.answeredAt}; ${r.runs})`);
+  assert(!r.bRefused.some((d) => d.includes(`fixture#${A}/`)), `a refusal names the first ticket as taking the place: "${r.bRefused[0]}"`);
+  assert(r.bStarted, `the second ticket's step did not start (${r.runs})`);
+}
+await clause('PRD-07.R2 clause 6 (runner session after a step)', 'a runner session running for a ticket, woken by the end of that ticket\'s step: when the project\'s places are counted, it takes no place', {
+  broken: async () => assertRunnerAfterStepTakesNone(afterStepOld),
+  correct: async () => assertRunnerAfterStepTakesNone(afterStep),
+});
+console.log(`    (the first ticket's step ended ${afterStep.aStepEnded?.slice(11, 23)}; its runner session still open when the second ticket was answered at ${afterStep.answeredAt?.slice(11, 23)}: ${afterStep.aRunnerOpen}; the second ticket was refused: ${JSON.stringify(afterStep.bRefused)}; its step started: ${afterStep.bStarted}; the first ticket's place: ${JSON.stringify(afterStep.aPlace)})`);
+
+for (const r of [afterStep, afterStepOld]) r?.fx.cleanup();
+for (const r of [idle, running, prOpen, asks, runningTriage, runningDelivery, runner, takeover, turn, turnOld, byDefault, setOne, setThree]) r?.fx.cleanup();
 finish('PRD-07.R2');

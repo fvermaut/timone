@@ -105,14 +105,17 @@ exit 0
   child.stdout.on('data', (d) => (out += d));
   child.stderr.on('data', (d) => (out += d));
   const start = Date.now();
-  const decided = () => fx.record(N).some((e) => e.kind === 'decision' && e.action === 'start_step');
+  // ✏ 2026-10-05 (phase 49 verification): the planner's gate refuses the build's first try
+  // (PRD-07.R5) and the rig tries again once the planner lets it, so that refusal is not the
+  // decision waited for here.
+  const decided = () => fx.record(N).some((e) => e.kind === 'decision' && e.action === 'start_step' && !/The planner has not decided/.test(e.detail ?? ''));
   while (Date.now() - start < 60000 && !(fs.existsSync(log) && decided()) && !(decided() && Date.now() - start > 8000)) await sleep(250);
   await sleep(500);
   child.kill('SIGTERM');
   await sleep(1000);
   child.kill('SIGKILL');
   await m.stop();
-  const decision = fx.record(N).find((e) => e.kind === 'decision' && e.action === 'start_step')?.detail ?? '';
+  const decision = fx.record(N).find((e) => e.kind === 'decision' && e.action === 'start_step' && !/The planner has not decided/.test(e.detail ?? ''))?.detail ?? '';
   if (!fs.existsSync(log)) return { fx, script: null, envLine: '', argv: [], decision, out };
   const [envLine, ...rest] = fs.readFileSync(log, 'utf8').split('\n');
   const argv = rest.join('\n').split('\n\x1e\n').slice(0, -1);

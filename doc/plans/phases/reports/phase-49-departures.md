@@ -43,3 +43,21 @@
 **Agreed:** 49d adds two kinds of run record entry and changes the files its list names.
 **Did instead:** `src/daemon/prompts.ts` also changed: `recordLine` writes no line for the two new kinds, as for `runner-ended`. The phase file grants this file to 49d, with a marked amendment.
 **Why:** `recordLine` must cover every kind of entry, and the type check failed without it.
+
+## Verification, 2026-10-05 — checks that could not run here
+
+- **What:** PRD-05.R18 (all three clauses) and the real-runner clause of PRD-05.R7 are BLOCKED: the replay (`npm run --silent replay`) needs a Claude login, which the container that ran the check does not have. PRD-05.R2 clause 2b is BLOCKED: its probe could not read GitHub from there.
+- **Why it was not resolved:** nothing was observed, so no fix loop applies. The runner's instructions for this step said not to try them. A person runs the replay from a logged-in terminal on this branch before merging, and commits its record on the branch.
+- **Where:** [phase-49-verification.md](phase-49-verification.md), *Carried forward*.
+
+## Verification, 2026-10-05 — a live check owed
+
+- **What:** PRD-07.R5 is on the `live` channel and has never had its watched run. This phase's changes touch what it rests on, so one is owed: on scratch-app, never ivtrends, three test tickets — two whose plans change most of the same files, one that changes none of them — where the planner lets one of the first two and the third build at once and holds the other with a comment naming the ticket it waits for.
+- **Why it was not resolved:** only the operator's machine runs the real daemon against real tickets. The runner's instructions for this step said not to try it.
+- **Where:** [phase-49-verification.md](phase-49-verification.md), *Live gates*.
+
+## Verification, 2026-10-05 — a fix that goes against ADR-0063 D2
+
+- **What:** fix `074ec45` makes a ticket whose step just ended take no place while its runner decides the next step, as PRD-07.R2 clause 6 says. Its fix context reported that ADR-0063 D2 decides the opposite. The ADR was not changed.
+- **Why it was not resolved:** which of the two stands is the person's decision. The check follows the register.
+- **Where:** [phase-49-verification.md](phase-49-verification.md), *Questions for the human*, 1.

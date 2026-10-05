@@ -44,7 +44,7 @@ if (!fs.existsSync(CLI)) {
 
 // ---------------------------------------------------------------- fixture
 //
-// opts.projects: { name: { driver, driverLine, instructors, limit, labels } } — defaults to one
+// opts.projects: { name: { driver, driverLine, instructors, limit, places, labels } } — defaults to one
 //   project named "fixture".
 // opts.operator: the top-level operator login, or null for none.
 // opts.issues:   { project: { number: {title, body, labels, author, comments} } }
@@ -102,6 +102,11 @@ export function fixture(opts = {}) {
     G(clone, 'add', '-A');
     G(clone, ...GID, 'commit', '-q', '--allow-empty', '-m', 'init');
     G(clone, 'push', '-q', 'origin', 'main');
+    // ✏ 2026-10-05 (phase 49 verification): a clone made from a remote that already has main
+    // knows origin/HEAD; this one was cloned while the remote was empty, so set it as such a
+    // clone would. Since phase 49 the push guard refuses a work branch's first push from a
+    // clone without origin/HEAD (the completion report's known limits).
+    G(clone, 'remote', 'set-head', 'origin', 'main');
     const slug = `probe-owner/${name}`;
     remotes[slug] = bare;
     gitConfig.push([`url.${bare}.insteadOf`, `https://github.com/${slug}.git`]);
@@ -109,6 +114,9 @@ export function fixture(opts = {}) {
     if (p.driverLine) yaml += `    driver: ${p.driverLine}\n`;
     if (p.instructors) yaml += `    instructors: [${p.instructors.join(', ')}]\n`;
     if (p.limit !== undefined) yaml += `    ticket_limit_usd: ${p.limit}\n`;
+    // ✏ 2026-10-05 (phase 49 verification): `places`, the project's number of places (PRD-07.R2;
+    // the key is named in CONTEXT.md). Written only when a probe asks for it.
+    if (p.places !== undefined) yaml += `    places: ${p.places}\n`;
   }
   fs.writeFileSync(path.join(dir, 'timone.yaml'), yaml);
 
@@ -255,12 +263,18 @@ export function fixture(opts = {}) {
 
 // ---------------------------------------------------------------- the fake model
 //
-// plan.runner(ctx) / plan.step(ctx) / plan.other(ctx) return an answer:
+// plan.runner(ctx) / plan.planner(ctx) / plan.step(ctx) / plan.other(ctx) return an answer:
 //   { blocks: [{type:'text',text}|{type:'tool_use',name,input}], usage, httpError, hang }
 // ctx: { body, kind, sid, wake (runner: 0-based index of its session), turn,
 //        brief (first user message), last (newest user message, tool results included) }
 export const say = (t = 'Nothing more to do.') => ({ blocks: [{ type: 'text', text: t }] });
 export const act = (name, input, usage) => ({ blocks: [{ type: 'tool_use', name: `mcp__runner__${name}`, input }], usage });
+// The planner's answers. plan.planner(ctx) returns one of these, or say() to decide nothing.
+export const plannerTicket = (c) => Number((c.brief.match(/## The ticket you decide for\s+\S+ #(\d+)/) || [])[1]);
+export const letBuild = (ticket, reason = 'probe: nothing else on the project overlaps', commentAt) => ({ blocks: [{ type: 'tool_use', name: 'mcp__planner__let_build', input: { ticket, reason, ...(commentAt ? { commentAt } : {}) } }] });
+export const hold = (ticket, waitsFor, reason) => ({ blocks: [{ type: 'tool_use', name: 'mcp__planner__hold', input: { ticket, waitsFor, reason } }] });
+export const passToRunner = (ticket, commentAt) => ({ blocks: [{ type: 'tool_use', name: 'mcp__planner__pass_to_runner', input: { ticket, commentAt } }] });
+export const DEFAULT_PLANNER = (c) => (c.turn === 0 ? letBuild(plannerTicket(c)) : say());
 export const bash = (command) => ({ blocks: [{ type: 'tool_use', name: 'Bash', input: { command, description: 'probe step' } }] });
 
 const textOf = (m) =>
@@ -275,6 +289,8 @@ export async function model(plan = {}) {
   const other = [];
   const runnerSids = [];
   const open = new Set();
+  const pendingStart = new Map(); // runner session id -> its last start_step answer
+  const retryStart = new Map(); // ticket -> the start_step the planner's refusal turned away
   const server = http.createServer(async (req, res) => {
     let raw = '';
     for await (const c of req) raw += c;
@@ -287,7 +303,11 @@ export async function model(plan = {}) {
       return res.end('{"type":"error","error":{"type":"not_found_error","message":"probe"}}');
     }
     const tools = (body.tools ?? []).map((t) => t.name);
-    const kind = tools.includes('mcp__runner__end_run') ? 'runner' : tools.includes('Bash') ? 'step' : 'other';
+    // ✏ 2026-10-05 (phase 49 verification): the planner is a model session of its own, seen by
+    // its tools (mcp__planner__let_build, hold, pass_to_runner, read_plan). Since phase 49 no
+    // build starts until it has let the ticket build (PRD-07.R5), so a probe that plans no
+    // planner answer gets DEFAULT_PLANNER: let the ticket named in its brief build at once.
+    const kind = tools.includes('mcp__runner__end_run') ? 'runner' : tools.includes('mcp__planner__let_build') ? 'planner' : tools.includes('Bash') ? 'step' : 'other';
     let sid = '';
     try { sid = JSON.parse(body.metadata?.user_id ?? '{}').session_id ?? ''; } catch {}
     if (kind === 'runner' && !runnerSids.includes(sid)) runnerSids.push(sid);
@@ -303,7 +323,23 @@ export async function model(plan = {}) {
     const rec = { at: new Date().toISOString(), kind, sid, wake: ctx.wake, turn: ctx.turn, tools, brief: ctx.brief, last: ctx.last, system: ctx.system, model: body.model };
     requests.push(rec);
     let a;
-    try { a = (plan[kind] ?? (() => say()))(ctx) ?? say(); } catch (e) { a = say(`probe plan error: ${e.message}`); }
+    try { a = (plan[kind] ?? (kind === 'planner' ? DEFAULT_PLANNER : () => say()))(ctx) ?? say(); } catch (e) { a = say(`probe plan error: ${e.message}`); }
+    // ✏ 2026-10-05 (phase 49 verification): since phase 49 a build's first try is refused until
+    // the planner decides, and the runner is woken again when it has let the ticket build. A
+    // probe written before then plans its build on the wake it cares about only. So, unless the
+    // probe sets plan.noBuildRetry, the rig acts as a runner that takes the refusal's word: the
+    // start_step the planner's refusal turned away is tried again, once, on the wake that says
+    // the planner let the ticket build, when the probe's own plan does nothing on that wake.
+    if (kind === 'runner' && !plan.noBuildRetry) {
+      const tkt = (ctx.brief.match(/## The ticket\s+(\S+ #\d+):/) || [])[1];
+      if (ctx.turn > 0 && pendingStart.has(sid) && /Refused: The planner has not decided/.test(ctx.last) && tkt) retryStart.set(tkt, pendingStart.get(sid));
+      pendingStart.delete(sid);
+      const why = ctx.brief.split('## The ticket')[0];
+      const acts = (a.blocks ?? []).some((b) => b.type === 'tool_use');
+      if (ctx.turn === 0 && tkt && retryStart.has(tkt) && /The planner let this ticket be built/.test(why) && !acts) { a = retryStart.get(tkt); retryStart.delete(tkt); rec.retried = true; }
+      const st = (a.blocks ?? []).find((b) => b.type === 'tool_use' && b.name === 'mcp__runner__start_step');
+      if (st) pendingStart.set(sid, { blocks: [st], usage: a.usage });
+    }
     rec.answer = a;
     if (a.delayMs) await sleep(a.delayMs);
     if (a.hang) {

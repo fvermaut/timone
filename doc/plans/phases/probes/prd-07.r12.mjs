@@ -114,6 +114,30 @@ await clause('PRD-07.R12 clause 2 (for what this piece changes)', 'PRD-02.R22 cl
     console.log(`    (NOT CLAIMED by phase 47, piece 5's: ${what} — ${has ? 'carries' : 'does not carry yet'} a dated note naming a requirement of PRD-07)`);
   }
 }
+// ✏ 2026-10-05 (phase 49 verification): phase 49 (piece 5) claims R12 for PRD-02.R22 clause 1
+// and PRD-05.R15 clause 2, the two places phase 47 left. Same check as above, on those two
+// clauses. Break leg: the same files at the commit just before phase 49 (BEFORE_PHASE_49, the
+// merge-base of timone/203 with main), where neither carried a note; both must go red there.
+const BEFORE_PHASE_49 = '55cddb4820ea9965313972e1848fe29a21f5a2f0';
+const before49 = (f) => execFileSync('git', ['-C', REPO_ROOT, 'show', `${BEFORE_PHASE_49}:${f}`], { encoding: 'utf8' });
+function c2Piece5(read) {
+  return {
+    r22c1: noteOnClause(clauseText(block(read(P02), 'R22'), 1), 'PRD-02.R22 clause 1'),
+    r15c2: noteOnClause(clauseText(block(read(P05), 'R15'), 2), 'PRD-05.R15 clause 2'),
+  };
+}
+function c2Piece5EachRed(read) {
+  const errs = [];
+  for (const f of [() => noteOnClause(clauseText(block(read(P02), 'R22'), 1), 'PRD-02.R22 clause 1'), () => noteOnClause(clauseText(block(read(P05), 'R15'), 2), 'PRD-05.R15 clause 2')]) { try { f(); } catch (e) { errs.push(e.message); } }
+  if (errs.length < 2) throw new Error(`only ${errs.length} of the two places lacks the note on the old files`);
+  throw new Error(errs.join(' / '));
+}
+await clause('PRD-07.R12 clause 2 (for what piece 5 changes)', 'PRD-02.R22 clause 1 and PRD-05.R15 clause 2 are read: each carries a dated note naming the requirement of this PRD that changes it', { broken: () => { try { c2Piece5EachRed(before49); } catch (e) { if (/only \d of the two/.test(e.message)) return; throw e; } }, correct: () => c2Piece5(now) });
+{
+  const n = c2Piece5(now);
+  console.log(`    (PRD-02.R22 clause 1: "${n.r22c1.trim().slice(0, 300)}…")`);
+  console.log(`    (PRD-05.R15 clause 2: "${n.r15c2.trim().slice(0, 300)}…")`);
+}
 await clause('PRD-07.R12 clause 3', 'ADR-0026 is read: its rule "the chunk holds the project" is marked as replaced, naming the decision record that replaces it', { broken: () => c3(then), correct: () => c3(now) });
 console.log(`    (the mark: "${c3(now).slice(0, 260)}…")`);
 await clause('PRD-07.R12 clause 4', 'process.md stage 6 is read: it no longer says that a ticket-driven run holds its project until its pull request ends', { broken: () => c4(then), correct: () => c4(now) });

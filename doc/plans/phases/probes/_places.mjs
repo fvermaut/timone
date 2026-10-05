@@ -38,7 +38,13 @@ export function addTicket(fx, n, { title = `Ticket ${n}`, createdAt = new Date()
 }
 export const isPlaceWake = (e) => e.kind === 'woke' && (e.events ?? []).some((x) => /place/i.test(x) && /free/i.test(x) || /project is free/i.test(x));
 export const decisions = (fx, t) => fx.record(t).filter((e) => e.kind === 'decision' && e.action === 'start_step');
-export const refusals = (fx, t) => decisions(fx, t).filter((e) => /^Refused/.test(e.detail ?? ''));
+// ✏ 2026-10-05 (phase 49 verification): since phase 49 a build's first try is refused until the
+// planner has decided (PRD-07.R5), and the rig then tries it again once the planner lets it build.
+// That refusal is the planner's gate, not a place taken by another ticket, so `refusals` leaves
+// it out; `plannerGates` lists it.
+export const isPlannerGate = (d) => /The planner has not decided/.test(d ?? '');
+export const refusals = (fx, t) => decisions(fx, t).filter((e) => /^Refused/.test(e.detail ?? '') && !isPlannerGate(e.detail));
+export const plannerGates = (fx, t) => decisions(fx, t).filter((e) => isPlannerGate(e.detail));
 export const started = (fx, t) => fx.record(t).filter((e) => e.kind === 'step-started');
 export const runsLine = (fx) => fx.state().runs.map((r) => `${r.id} ${r.status}${r.stage ? ` (${r.stage})` : ''}${r.branch ? ` on ${r.branch}` : ''}${r.pr ? ` pr #${r.pr}` : ''}${r.place?.waitingSince ? ' waiting for a place' : ''}${r.place?.givenAt ? ' given the place' : ''}`).join('; ');
 
@@ -80,8 +86,11 @@ export function startTakeover(fx, m, ticket) {
 // Then ticket B is put on the forge, and its runner starts a step when it is picked up.
 //
 // Returns what B's runner was answered, whether B's step started, and the ledger at that time.
-export async function secondAsks({ state, aStage = 'execution', cli, timeoutMs = 60000 }) {
-  const fx = fixture({ issues: { fixture: { [A]: { title: 'First ticket', createdAt: '2026-09-01T10:00:00.000Z' } } }, cli });
+// ✏ 2026-10-05 (phase 49 verification): `places` sets the project's number of places in
+// timone.yaml. It defaults to 1, the number these fixtures were written for; it is not written
+// for an older build (`cli`), which had one place and no such key.
+export async function secondAsks({ state, aStage = 'execution', cli, places = 1, timeoutMs = 60000 }) {
+  const fx = fixture({ projects: { fixture: cli ? {} : { places } }, issues: { fixture: { [A]: { title: 'First ticket', createdAt: '2026-09-01T10:00:00.000Z' } } }, cli });
   if (state === 'takeover') standInTerminal(fx);
   let prOf = null;
   const m = await model({
@@ -122,7 +131,7 @@ export async function secondAsks({ state, aStage = 'execution', cli, timeoutMs =
   const addB = () => { added = true; addTicket(fx, B, { title: 'Second ticket', createdAt: '2026-09-02T10:00:00.000Z' }); };
   if (state === 'takeover') {
     await daemon(fx, m, { until: aReady, timeoutMs: 20000, settleMs: 500 });
-    const d = daemon(fx, m, { until: () => decisions(fx, B).length > 0 || (started(fx, B).length > 0), timeoutMs, settleMs: 1500 });
+    const d = daemon(fx, m, { until: () => refusals(fx, B).length > 0 || started(fx, B).length > 0 || decisions(fx, B).some((e) => !isPlannerGate(e.detail)), timeoutMs, settleMs: 1500 });
     await sleep(1500);
     take = startTakeover(fx, m, A);
     { const t0 = Date.now(); while (!takeoverPrompt(fx) && Date.now() - t0 < 20000) await sleep(200); }
@@ -133,7 +142,7 @@ export async function secondAsks({ state, aStage = 'execution', cli, timeoutMs =
     await daemon(fx, m, {
       until: () => {
         if (!added && aReady()) { atAsk = { runs: runsLine(fx), aRun: fx.run(A) }; addB(); }
-        return added && (decisions(fx, B).length > 0 || started(fx, B).length > 0);
+        return added && (refusals(fx, B).length > 0 || started(fx, B).length > 0 || decisions(fx, B).some((e) => !isPlannerGate(e.detail)));
       },
       timeoutMs, settleMs: 1500,
     });
@@ -166,8 +175,11 @@ export const said = (r) => `the first ticket at that time: ${r.atAsk?.runs ?? 'n
 // says what the runner of the ticket given the place does: 'start' (a step that does not end)
 // or 'nothing'. Returns, per ticket, the time of every place wake, every refusal, every
 // started step.
-export async function freedPlace({ waiters, givenDoes = 'start', cli, holdMs = 9000, timeoutMs = 60000 }) {
-  const fx = fixture({ issues: { fixture: { 20: { title: 'The ticket building', createdAt: '2026-09-20T10:00:00.000Z' } } }, cli });
+// ✏ 2026-10-05 (phase 49 verification): `places` as in secondAsks, 1 by default. holdMs grew from
+// 9 s to 20 s: each waiting ticket is now refused by the planner's gate first, and the planner
+// decides one ticket per cycle, so the waiters reach "refused for want of a place" later.
+export async function freedPlace({ waiters, givenDoes = 'start', cli, places = 1, holdMs = cli ? 9000 : 20000, timeoutMs = 90000 }) {
+  const fx = fixture({ projects: { fixture: cli ? {} : { places } }, issues: { fixture: { 20: { title: 'The ticket building', createdAt: '2026-09-20T10:00:00.000Z' } } }, cli });
   const m = await model({
     runner: (c) => {
       if (c.turn > 0) return say();
@@ -218,3 +230,62 @@ export function firstTold(r) {
   return told;
 }
 export { OPERATOR, STRANGER };
+
+// ---------------------------------------------------------------- how many places
+//
+// ✏ 2026-10-05 (phase 49 verification), for PRD-07.R2 clauses 1 to 4 with more than one place.
+// `count` tickets (31, 32, …, oldest first) are picked up together; each one's runner starts a
+// building step that does not end. `places` is written into timone.yaml, or left out when
+// undefined. Runs until every ticket's step has started or been refused for want of a place,
+// then a few seconds more. Returns, per ticket, whether its step started, its refusals, its run
+// in the ledger at the end, and the number of steps running at the end.
+export async function manyAsk({ places, count, timeoutMs = 120000 }) {
+  const nums = Array.from({ length: count }, (_, i) => 31 + i);
+  const issues = Object.fromEntries(nums.map((n, i) => [n, { title: `Ticket ${n}`, createdAt: `2026-09-${String(10 + i).padStart(2, '0')}T10:00:00.000Z` }]));
+  const fx = fixture({ projects: { fixture: places === undefined ? {} : { places } }, issues: { fixture: issues } });
+  const m = await model({
+    runner: (c) => (c.turn === 0 && whyOf(c).includes('picked up') ? START('execution') : say()),
+    step: () => ({ hang: true }),
+  });
+  await daemon(fx, m, {
+    until: () => nums.every((n) => started(fx, n).length > 0 || refusals(fx, n).length > 0),
+    timeoutMs, settleMs: 4000,
+  });
+  await m.stop();
+  const per = {};
+  for (const n of nums) per[n] = { started: started(fx, n).map((e) => e.at), refused: refusals(fx, n).map((e) => e.detail), run: fx.run(n), stepEnded: fx.record(n).some((e) => e.kind === 'step-ended') };
+  const running = nums.filter((n) => per[n].run?.status === 'active' && per[n].started.length && !per[n].stepEnded);
+  return { fx, nums, per, running, places, runs: runsLine(fx) };
+}
+
+// ---------------------------------------------------------------- a runner session after a step
+//
+// ✏ 2026-10-05 (phase 49 verification), for PRD-07.R2 clause 6: the runner session that a step's
+// end wakes. Ticket 12's building step ends at once; its runner, woken by that end, is put on the
+// forge's second ticket (13) and then does not answer, so its session stays open. Ticket 13's
+// runner starts a building step when it is picked up (the rig tries it again once the planner
+// lets it). `places` as in secondAsks. Returns ticket 13's refusals, whether its step started,
+// and whether ticket 12's runner session was still open when ticket 13 was answered.
+// The older build it is run against for a break leg (this branch's first fix commit) reads
+// `places`, so the line is written for it too.
+export async function afterStepAsks({ cli, places = 1, timeoutMs = 60000 }) {
+  const fx = fixture({ projects: { fixture: { places } }, issues: { fixture: { [A]: { title: 'First ticket', createdAt: '2026-09-01T10:00:00.000Z' } } }, cli });
+  let added = false;
+  const m = await model({
+    runner: (c) => {
+      if (c.turn > 0) return say();
+      const t = tk(c), w = whyOf(c);
+      if (t === B) return w.includes('picked up') ? START('execution') : say();
+      if (w.includes('picked up')) return START('execution');
+      if (/step building ended/i.test(w)) { if (!added) { added = true; addTicket(fx, B, { title: 'Second ticket', createdAt: '2026-09-02T10:00:00.000Z' }); } return { hang: true }; }
+      return say();
+    },
+    step: () => (fx.state().runs.find((r) => r.ticket === A && r.status === 'active') ? say('done') : { hang: true }),
+  });
+  await daemon(fx, m, { until: () => refusals(fx, B).length > 0 || started(fx, B).length > 0, timeoutMs, settleMs: 1000 });
+  const answeredAt = (refusals(fx, B)[0] ?? started(fx, B)[0])?.at;
+  const aEnded = fx.record(A).find((e) => e.kind === 'step-ended')?.at;
+  const aRunnerOpen = Boolean(answeredAt && aEnded && !fx.record(A).some((e) => e.kind === 'runner-ended' && e.at > aEnded && e.at < answeredAt));
+  await m.stop();
+  return { fx, bRefused: refusals(fx, B).map((e) => e.detail), bStarted: started(fx, B).length > 0, aRunnerOpen, aStepEnded: aEnded, answeredAt, runs: runsLine(fx), aPlace: fx.run(A)?.place };
+}
