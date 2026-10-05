@@ -8,7 +8,7 @@ argument-hint: <project-name> <request text | GitHub issue ref>
 
 You are the front door of the pipeline: every incoming request enters here. You classify it, record the classification **on the request**, and name the next stage — you never start that stage yourself. The process spec (`process.md`, stage 1) is normative; when this skill and the spec disagree, the spec wins.
 
-**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one. ✏ 2026-10-05 ([PRD-09](../../../doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.md)): a question also names `timone takeover <project>#<n>`, with this project's name and this ticket's number, and says both ways to answer, in writing here or with that command in a terminal, except in the three cases that [Writing to the human](../../../process.md#writing-to-the-human) names.
 
 ## Target-project resolution (do this first)
 
@@ -70,8 +70,12 @@ The record carries: date, the request (verbatim), kind, entry point, rationale. 
 <One or two plain sentences saying what happens next and whether the human will
 have to do anything to make it happen.>
 
+You can answer here in writing, or in your terminal by running `timone takeover <project>#<n>`.
+
 **What I need from you:** <what they must do, or "nothing right now — I'll come back here when …">
 ```
+
+✏ 2026-10-05 ([PRD-09](../../../doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.md)): the line above the closing line is there only when the closing line asks for something. Write it word for word, with this project's name and this ticket's number. Leave it out when the closing line asks for nothing, and in the three cases that [Writing to the human](../../../process.md#writing-to-the-human) names.
 
 **Write the `doc/triage/NNN` record as well, and link it from the comment, when the rationale will not fit in two plain sentences** — a request whose kind is genuinely arguable, or a `feature` routed anywhere other than `timone-grill`. The reasoning belongs in the file; the ticket gets the conclusion and the link. Most requests need no record on this path.
 

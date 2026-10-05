@@ -26,7 +26,7 @@ import {
 import type { TicketContext } from "../order.js";
 import type { RecordEntry } from "../record.js";
 import { RUNNER_DEFAULT_WAIT } from "../session.js";
-import type { RunnerToolName } from "../tools.js";
+import type { PostInput, RunnerToolName } from "../tools.js";
 import type { Call, Seen, Verdict } from "./recording.js";
 
 /**
@@ -503,8 +503,16 @@ function startStepCall(
   };
 }
 
-function postCall(where: "ticket" | "pull-request", body: string, reason: string): ToolCall {
-  return { name: "post", input: { where, body, reason } };
+function postCall(
+  where: "ticket" | "pull-request",
+  body: string,
+  reason: string,
+  leaveOutTakeover?: PostInput["leaveOutTakeover"],
+): ToolCall {
+  return {
+    name: "post",
+    input: { where, body, reason, ...(leaveOutTakeover === undefined ? {} : { leaveOutTakeover }) },
+  };
 }
 
 function holdCall(on: boolean, reason: string): ToolCall {
@@ -524,7 +532,7 @@ function endRunCall(closeTicket: boolean, reason: string): ToolCall {
 }
 
 // ---------------------------------------------------------------------------
-// The twenty cases
+// The twenty-two cases
 // ---------------------------------------------------------------------------
 
 /**
@@ -1892,6 +1900,7 @@ function aTerminalSessionThatClearedNothing(): ReplayCase {
           `${NEEDED_FROM_YOU} add the key, then write "done" here.`,
         ].join("\n"),
         "The terminal session ended without adding the key. The key is what is needed, not another session.",
+        "missing-key",
       ),
     ],
   };
@@ -2782,6 +2791,323 @@ function anOpenPullRequestBehindTheDefaultBranch(): ReplayCase {
   };
 }
 
+/**
+ * #218 (PRD-09). A pull request closed without merging, with no review and no
+ * comment that says why. The runner asks on the ticket whether to do the work
+ * again or to stop. That is a question a person can answer in their terminal,
+ * so it names the takeover command for the ticket.
+ */
+function aPullRequestClosedWithNoReason(): ReplayCase {
+  const project = "scratch-app";
+  const title = "Sort tasks by priority";
+  const branch = branchOf(74, title);
+  const run = runId(project, 74, 1);
+  const pr = 76;
+  const prUrl = `https://github.com/fvermaut/${project}/pull/${pr}`;
+  const reports = "doc/plans/phases/reports";
+  const command = `\`timone takeover ${project}#74\``;
+  return {
+    issues: ["#218"],
+    happened: "The pull request was closed without merging, and no comment says why.",
+    mustDo: "Ask on the ticket whether to do the work again or to stop, and name the takeover command for the ticket once.",
+    moment: {
+      project,
+      ticket: ticketOf(project, 74, {
+        title,
+        body: "Add a priority to each task: high, normal or low. Show the high ones first.",
+        labels: ["timone", "triage:chore"],
+        createdAt: "2026-10-01T07:58:00Z",
+        comments: [
+          sorted("2026-10-01T08:03:50Z", "It is a chore: a priority on each task. I will prepare the work next."),
+          planned("2026-10-01T08:24:40Z", blob(project, branch, "doc/plans/phases/phase-21.md"), "phase-21.md", "It has two slices: the priority, and the order of the list."),
+          built("2026-10-01T10:59:30Z", blob(project, branch, `${reports}/phase-21-complete.md`), "phase-21-complete.md", "Both slices are done, and all tests pass."),
+          checked("2026-10-01T11:39:30Z", blob(project, branch, `${reports}/phase-21-verification.md`), "phase-21-verification.md", "All 4 checks pass."),
+          delivered("2026-10-01T12:29:40Z", pr, prUrl, "All 4 checks pass, and the default order was followed."),
+        ],
+      }),
+      run: { status: "parked", stage: "delivery", waitingOn: "review the pull request.", branch, pr },
+      record: [
+        ...stepRun(run, {
+          stage: "triage",
+          session: "5b1e7c20-triage",
+          at: "2026-10-01T08:00:40Z",
+          woken: NEW_TICKET_EVENT,
+          instructions: "Sort this request.",
+          reason: "A new ticket. Sorting it comes first in every order.",
+          ended: { at: "2026-10-01T08:04:00Z", costUsd: 0.31 },
+        }),
+        ...stepRun(run, {
+          stage: "planning",
+          session: "a92d4f61-planning",
+          at: "2026-10-01T08:04:10Z",
+          woken: stepEndedEvent("triage", { ok: true }),
+          instructions: "Prepare the work for a priority on each task.",
+          reason: "The request is sorted as a chore. Preparing the work is next in its order.",
+          ended: { at: "2026-10-01T08:25:00Z", costUsd: 1.7 },
+        }),
+        ...stepRun(run, {
+          stage: "execution",
+          session: "e3c80b57-execution",
+          at: "2026-10-01T08:25:10Z",
+          woken: stepEndedEvent("planning", { ok: true }),
+          instructions: "Build the plan in doc/plans/phases/phase-21.md.",
+          reason: "The plan is pushed. Building is next.",
+          ended: { at: "2026-10-01T11:00:00Z", costUsd: 8.1 },
+        }),
+        ...stepRun(run, {
+          stage: "verification",
+          session: "27f6a1d9-verification",
+          at: "2026-10-01T11:00:10Z",
+          woken: stepEndedEvent("execution", { ok: true }),
+          instructions: "Check the work against the plan and the ticket.",
+          reason: "The build is finished. Checking it is next.",
+          ended: { at: "2026-10-01T11:40:00Z", costUsd: 2.6 },
+        }),
+        ...stepRun(run, {
+          stage: "delivery",
+          session: "c05b93e2-delivery",
+          at: "2026-10-01T12:20:10Z",
+          woken: stepEndedEvent("verification", { ok: true }),
+          instructions: "Open the pull request for this work.",
+          reason: "The check passed. Delivering is next.",
+          ended: { at: "2026-10-01T12:31:00Z", costUsd: 0.9 },
+        }),
+        ...wake(run, "2026-10-01T12:31:10Z", [stepEndedEvent("delivery", { ok: true })]),
+      ],
+      files: {
+        main: { "doc/plans/phases/phase-20.md": phaseFile("20", "The tasks can be sorted by due date", "Complete") },
+        branch: {
+          "doc/plans/phases/phase-21.md": phaseFile("21", "Each task has a priority", "Complete"),
+          [`${reports}/phase-21-complete.md`]: reportFile("Phase 21 — Completion Report", "Both slices are done."),
+          [`${reports}/phase-21-verification.md`]: reportFile("Phase 21 — Verification Report", "4 of 4 checks pass."),
+        },
+      },
+      ahead: 5,
+      pullRequest: {
+        number: pr,
+        title,
+        url: prUrl,
+        state: "closed",
+        headSha: "c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1",
+        branch,
+        body: [
+          "<!-- timone:departures -->",
+          "The default order was followed.",
+          "<!-- /timone:departures -->",
+          "",
+          "## What changed",
+          "",
+          "A priority on each task, and the high ones first in the list.",
+        ].join("\n"),
+        comments: [],
+      },
+      timoneIssues: OPEN_TIMONE_ISSUES,
+      events: [pullRequestEvent(pr, "closed")],
+      now: "2026-10-01T15:05:30Z",
+    },
+    // The question is read from the line that says what the reader must do:
+    // it asks whether to do the work again or to stop. The command is
+    // counted in the whole comment: the one for this ticket, #74 and not the
+    // pull request's #76, written once.
+    judge: (seen) =>
+      when(
+        postsOn(seen, "ticket").some((body) => {
+          const asked = askedFor(body) ?? "";
+          return asksSomething(body) && /again/i.test(asked) && /stop/i.test(asked) && body.split(command).length === 2;
+        }),
+        `a comment on the ticket that asks whether to do the work again or to stop, and names ${command} once`,
+      ),
+    rightCalls: [
+      postCall(
+        "ticket",
+        [
+          `**Pull request #${pr} was closed without merging.** No comment on it says why, so I do not know what was wrong.`,
+          "",
+          `${NEEDED_FROM_YOU} say whether I should do the work again, and what to change, or stop.`,
+        ].join("\n"),
+        "The pull request was closed without merging, and no comment says why. Only fvermaut can say whether to do the work again or to stop.",
+      ),
+    ],
+  };
+}
+
+/**
+ * #218 (PRD-09). The named person answers the list of pieces with one word,
+ * spelt so wrong that it may not mean approve. Recording the approval is a
+ * fair reading, and so is asking. A question about the word cannot be
+ * answered in a terminal, so it does not name the takeover command.
+ */
+function aMisspelledApprovalWord(): ReplayCase {
+  const project = "scratch-app";
+  const title = "Group tasks into projects";
+  const branch = branchOf(78, title);
+  const run = runId(project, 78, 1);
+  const requirements = "doc/specs/prd/prd-08-projects.md";
+  const pieces = "doc/plans/breakdowns/ticket-78.md";
+  const answers = "1. One project per task. 2. No, a project cannot hold another project.";
+  const approvedAt = "2026-10-02T14:10:00Z";
+  const word = "aprovd";
+  const wordAt = "2026-10-03T09:05:12Z";
+  return {
+    issues: ["#218"],
+    happened: 'The named person answered the list of pieces with one word, "aprovd".',
+    mustDo: "Record the approval and ask nothing, or ask what the word meant. Do not name the takeover command.",
+    moment: {
+      project,
+      ticket: ticketOf(project, 78, {
+        title,
+        body: "Let me put tasks into projects, like Home and Work, and show the list one project at a time.",
+        labels: ["timone", "triage:feature"],
+        createdAt: "2026-10-02T08:58:00Z",
+        comments: [
+          sorted("2026-10-02T09:03:50Z", "It is a feature: projects that hold tasks. I will ask what you need next."),
+          byMachine(
+            "2026-10-02T09:10:40Z",
+            [
+              "**I have two questions before I write down what it needs.**",
+              "",
+              "1. Can a task be in more than one project?",
+              "2. Can a project hold another project?",
+              "",
+              `${NEEDED_FROM_YOU} answer the two questions here.`,
+            ].join("\n"),
+          ),
+          byPerson("2026-10-02T09:40:00Z", answers),
+          byMachine(
+            "2026-10-02T11:30:40Z",
+            [
+              STAGE_DONE_MARKER,
+              "",
+              `**The requirements are written:** [prd-08-projects.md](${blob(project, branch, requirements)}).`,
+              "",
+              `${NEEDED_FROM_YOU} read them and reply "approved", or say what to change.`,
+            ].join("\n"),
+          ),
+          byPerson(approvedAt, "approved"),
+          byMachine(
+            "2026-10-02T15:20:40Z",
+            [
+              STAGE_DONE_MARKER,
+              "",
+              `**The list of pieces is written:** [ticket-78.md](${blob(project, branch, pieces)}). It has two pieces: projects, and the list shown one project at a time.`,
+              "",
+              `${NEEDED_FROM_YOU} read it and reply "approved", or say what to change.`,
+            ].join("\n"),
+          ),
+          byPerson(wordAt, word),
+        ],
+      }),
+      run: {
+        status: "parked",
+        stage: "breakdown",
+        waitingOn: 'read it and reply "approved", or say what to change.',
+        branch,
+      },
+      record: [
+        ...stepRun(run, {
+          stage: "triage",
+          session: "6d2f8a31-triage",
+          at: "2026-10-02T09:00:40Z",
+          woken: NEW_TICKET_EVENT,
+          instructions: "Sort this request.",
+          reason: "A new ticket. Sorting it comes first in every order.",
+          ended: { at: "2026-10-02T09:04:00Z", costUsd: 0.33 },
+        }),
+        ...stepRun(run, {
+          stage: "clarification",
+          session: "f40b7e95-clarification",
+          at: "2026-10-02T09:04:10Z",
+          woken: stepEndedEvent("triage", { ok: true }),
+          instructions: "Ask what is needed for projects that hold tasks.",
+          reason: "A feature. Asking what is needed is next in its order.",
+          ended: { at: "2026-10-02T09:11:00Z", costUsd: 0.8 },
+        }),
+        ...wake(run, "2026-10-02T09:11:10Z", [stepEndedEvent("clarification", { ok: true })]),
+        ...stepRun(run, {
+          stage: "requirements",
+          session: "9c3a5d02-requirements",
+          at: "2026-10-02T09:40:30Z",
+          woken: commentEvent({ author: OPERATOR, where: "ticket", createdAt: "2026-10-02T09:40:00Z", body: answers }),
+          instructions: "Write down what projects need: one project per task, and a project cannot hold another project.",
+          reason: "fvermaut answered both questions. Writing down what it needs is next.",
+          ended: { at: "2026-10-02T11:31:00Z", costUsd: 3.0 },
+        }),
+        ...wake(run, "2026-10-02T11:31:10Z", [stepEndedEvent("requirements", { ok: true })]),
+        { kind: "approval", at: later(approvedAt, 40), runId: run, what: "requirements", by: OPERATOR, commentAt: approvedAt },
+        ...stepRun(run, {
+          stage: "breakdown",
+          session: "1e8b6c47-breakdown",
+          at: later(approvedAt, 50),
+          woken: commentEvent({ author: OPERATOR, where: "ticket", createdAt: approvedAt, body: "approved" }),
+          instructions: "Write the list of pieces for projects that hold tasks.",
+          reason: "fvermaut approved the requirements. The list of pieces is next.",
+          ended: { at: "2026-10-02T15:21:00Z", costUsd: 1.4 },
+        }),
+        ...wake(run, "2026-10-02T15:21:10Z", [stepEndedEvent("breakdown", { ok: true })]),
+      ],
+      files: {
+        main: {
+          "doc/specs/prd/prd-07-repeating-tasks.md": requirementsFile("07", "Tasks that repeat every week", "Active", "## Requirements\n\n- R1: a task can be marked weekly."),
+        },
+        branch: {
+          [requirements]: requirementsFile(
+            "08",
+            "Projects that hold tasks",
+            "Approved",
+            "## Requirements\n\n- R1: a task can be in one project.\n- R2: the list can show one project at a time.",
+          ),
+          [pieces]: [
+            "# Breakdown",
+            "",
+            "**Status:** Awaiting approval",
+            "",
+            "1. **Projects** — A task can be put in one project.",
+            "2. **One project at a time** — The list can show the tasks of one project.",
+            "",
+          ].join("\n"),
+        },
+      },
+      ahead: 2,
+      timoneIssues: OPEN_TIMONE_ISSUES,
+      events: [commentEvent({ author: OPERATOR, where: "ticket", createdAt: wordAt, body: word })],
+      now: "2026-10-03T09:05:40Z",
+    },
+    // Two answers are right. Recording fvermaut's approval of the pieces from
+    // his comment, asking nothing. Or asking on the ticket what the word
+    // meant. Whatever the try does, no comment may name the takeover
+    // command: a terminal session cannot tell what he meant by the word.
+    judge: (seen) => {
+      const approved = seen.entries.some(
+        (entry) =>
+          entry.kind === "approval" && entry.what === "pieces" && entry.by === OPERATOR && entry.commentAt === wordAt,
+      );
+      const asked = postsOn(seen, "ticket").some(asksSomething);
+      return allOf(
+        when(
+          (approved && !askedAnything(seen)) || asked,
+          `fvermaut's approval of the pieces recorded from his comment at ${wordAt} with nothing asked, or a question on the ticket`,
+        ),
+        when(
+          ![...postsOn(seen, "ticket"), ...postsOn(seen, "pull-request")].some((body) => body.includes("timone takeover")),
+          "no comment that names the takeover command",
+        ),
+      );
+    },
+    rightCalls: [
+      postCall(
+        "ticket",
+        [
+          `**You wrote "${word}".** I think you mean that you approve the list of pieces, but I want to be sure before the building starts.`,
+          "",
+          `${NEEDED_FROM_YOU} reply "approved" if you approve the list of pieces, or say what to change.`,
+        ].join("\n"),
+        `fvermaut wrote "${word}". It may mean approved, but it is spelt too far from it to record his approval without asking.`,
+        "approval-word",
+      ),
+    ],
+  };
+}
+
 /** The replay set, in the order of R18's table. */
 export const CASES: readonly ReplayCase[] = [
   planningFinishedWithTheEmojiMisplaced(),
@@ -2804,4 +3130,6 @@ export const CASES: readonly ReplayCase[] = [
   aServerErrorFromTheModelService(),
   aBuildThatRunsTheWholeSuiteAgain(),
   anOpenPullRequestBehindTheDefaultBranch(),
+  aPullRequestClosedWithNoReason(),
+  aMisspelledApprovalWord(),
 ];

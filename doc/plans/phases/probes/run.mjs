@@ -12,6 +12,10 @@
 // their break leg. A probe owed a break run (new, rewritten, in doubt) is run on
 // its own, `node doc/plans/phases/probes/<id>.mjs`, which does both legs.
 //   --with-break   does both legs for every probe, as every pass did before.
+//
+// ✏ 2026-10-05 (phase 53 verification, ADR-0051 D4): --only=ID,ID runs just the
+// named criteria of the derived set — the set as narrowed by `Depends-on`
+// against the phase's diff, which the verifier computes and lists in its report.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -38,9 +42,11 @@ function derive() {
   return set;
 }
 
-const set = derive();
+const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+const only = onlyArg ? new Set(onlyArg.slice('--only='.length).split(',').map((s) => s.trim().toUpperCase())) : null;
+const set = derive().filter((c) => !only || only.has(c.id));
 const withBreak = process.argv.includes('--with-break');
-console.log(`Derived regression set: ${set.length} criteria (MUST + api + verified)`);
+console.log(`Derived regression set: ${set.length} criteria (MUST + api + verified)${only ? ', narrowed with --only' : ''}`);
 console.log(withBreak ? 'Mode: break run, then real run, for every probe (--with-break)\n' : 'Mode: real runs only (PROBE_REAL_ONLY=1)\n');
 const childEnv = { ...process.env };
 if (withBreak) delete childEnv.PROBE_REAL_ONLY;

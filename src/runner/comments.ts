@@ -1,4 +1,5 @@
 import { NEEDED_FROM_YOU } from "../adapters/ticketing.js";
+import { withTwoWaysToAnswer } from "../channels/terminal.js";
 import type { Standing } from "./order.js";
 
 /**
@@ -42,6 +43,17 @@ export function departureNotice(input: DepartureNoticeInput): string {
   ].join("\n");
 }
 
+/**
+ * The ticket a notice is posted on. A notice that asks a question names the
+ * takeover command for it (PRD-09 R1).
+ */
+export interface PostedOn {
+  /** The project's name, as `timone.yaml` gives it. */
+  project: string;
+  /** The ticket's number. */
+  ticket: number;
+}
+
 /** What a limit notice is made from, in dollars. */
 export interface LimitNoticeInput {
   /** What every session of the ticket has cost so far. */
@@ -62,9 +74,12 @@ export interface LimitNoticeInput {
  * It says where the work stands too (PRD-05 R8): what is done, what is
  * running, and what the written order puts next. A person deciding whether
  * to allow more needs to know what the money has bought so far.
+ *
+ * ✏ 2026-10-05 (PRD-09): it asks a question, so it says the person can also
+ * answer in their terminal, and names the takeover command for `on`.
  */
-export function limitNotice(input: LimitNoticeInput): string {
-  return [
+export function limitNotice(input: LimitNoticeInput, on: PostedOn): string {
+  const text = [
     `**This ticket has reached its spending limit.** It has cost ${usd(input.spentUsd)}, ` +
       `and the limit is ${usd(input.allowanceUsd)}. I will not start any more work on it for now.`,
     "",
@@ -73,6 +88,7 @@ export function limitNotice(input: LimitNoticeInput): string {
     `${NEEDED_FROM_YOU} reply "continue" to allow another ${usd(input.raiseUsd)}, ` +
       "or say nothing and it stays stopped.",
   ].join("\n");
+  return withTwoWaysToAnswer(text, on.project, on.ticket);
 }
 
 /** Where the work stands, in a few short sentences. */
@@ -121,10 +137,14 @@ export type PiecesFailure =
  *
  * **The run is not ended, so there is nothing to start again.** The runner
  * is woken, and reads the replies on the ticket. So the comment names no
- * command and no standing note: it says what failed, and that a reply here
- * is read.
+ * standing note: it says what failed, and that a reply here is read.
+ *
+ * ✏ 2026-10-05 (PRD-09 R1): it used to name no command at all. It asks what
+ * to do next, and every question names the command that answers it in a
+ * terminal, so it now names one: the takeover command for `on`. It names no
+ * other.
  */
-export function piecesFailedNotice(failure: PiecesFailure): string {
+export function piecesFailedNotice(failure: PiecesFailure, on: PostedOn): string {
   const what =
     failure.failed === "tickets"
       ? "**I could not open a ticket for each piece.** The approval is written down, and the " +
@@ -134,13 +154,14 @@ export function piecesFailedNotice(failure: PiecesFailure): string {
           ? "The approval is written down. But the default branch has changes that clash with " +
             "them, so nothing was added. Someone has to decide which version to keep."
           : "The approval is written down, but nothing was added.");
-  return [
+  const text = [
     what,
     "",
     `What went wrong: ${sentence(failure.said)}`,
     "",
     `${NEEDED_FROM_YOU} reply here to say what to do next. I read every reply on this ticket.`,
   ].join("\n");
+  return withTwoWaysToAnswer(text, on.project, on.ticket);
 }
 
 /** Dollars as a person reads them: `$150.40`. */
