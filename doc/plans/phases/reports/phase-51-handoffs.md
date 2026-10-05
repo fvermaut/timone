@@ -187,3 +187,59 @@ Other test files run at the end (the files that import `src/commands/takeover.ts
 - 51c made no change to the runner, the driver or the store. A run that is `active` and `takenOver` is still only refused by the takeover command; `start_step` in `src/runner/actions.ts` does not yet refuse it.
 - `src/daemon/poll.ts` still has its own "I'm working on … right now" sentence, for a `claim-takeover` request with no holder that finds a running step (51a's decision). It reaches only the daemon's log. The checkbox's grep covers `src/commands/takeover.ts` only.
 - One race is left in `claimForTakeover`, after the request settles: an `active` run that another terminal took between this terminal's `findTakeover` and the daemon's read of the request still falls through to "claimed", and this terminal would open a session on it. `findTakeover` refuses that run before any request is left, so only that short window reaches it. The plan did not ask for a check there, and none was added.
+
+## 51d — The runner starts no step on a run a person's terminal holds
+
+**Built.** `start_step` is refused when the run, read from the store at the moment of the try, is `active` and `takenOver`. The refusal says: "A person has this ticket open in a terminal. Start nothing until the terminal session ends; you are woken then." The check is the first one in `stepBlocked`, so the approval's own step (`recordApproval`) meets it too, before its `approval` entry is written. Nothing is written before the refusal except the decision entry `decided` writes. No place is asked, no branch is claimed, the stage is not set, and no step is started. Once the run is parked again, `start_step` starts the step as before.
+
+**Files touched.**
+
+- `src/runner/actions.ts` — new constant `TERMINAL_HOLDS_RUN`. `stepBlocked` reads `current()` first and returns the refusal for an `active`, `takenOver` run. Its comment says why the store is read and not the run the wake was given.
+- `src/runner/actions.test.ts` — `placeWorld` returns a `record()` reader (the same one `world` has). New `TERMINAL_HOLDS` and `TERMINAL` (a holder with this test process's pid). New describe "the runner starts no step on a run a person's terminal holds (ADR-0067 D4)" with the two cases below. No existing case changed.
+
+**Decisions taken inside the slice.**
+
+- The cases use `placeWorld`: the run is parked when the actions are built, as a wake finds it, and its step starter claims and activates the run as `startStepSession` does. The claim for the terminal is made after the actions are built, which is "after a wake began".
+- The check does not ask whether the terminal's process is alive. The plan asks only for `active` and `takenOver`. A run held by a gone terminal is still refused until the daemon gives it back.
+- Case 2 also tries once while the terminal holds the run, then parks it and tries again with the same actions. Without that first try, no wrong implementation I could write made case 2 fail (see the mutations below).
+
+**Validation evidence.**
+
+Case 1 — "the runner starts no step on a run a person's terminal holds (ADR-0067 D4) > refuses a step on a run claimed for a terminal after the wake began, and changes nothing but the record". It asserts the refusal, no step started, the run still `active` and `takenOver` with the same stage and place and no branch, no comment, and a record of exactly the triage step and the refused `start_step` decision. Red:
+
+```
+AssertionError: expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }
+-   "ok": false,
+-   "refused": "A person has this ticket open in a terminal. Start nothing until the terminal session ends; you are woken then.",
++   "ok": true,
++   "said": "Started preparing the work, in session session-1. You are woken when it ends.",
+Tests  1 failed | 70 skipped (71)
+```
+
+Green: `Tests 71 passed (71)`.
+
+Case 2 — "… > starts the step as before once the terminal session has ended and the run is parked again". This is today's behaviour, so it could not go red. With the new check turned off (`if (false && …)`), case 2 passed and case 1 failed (`Tests 1 failed | 1 passed | 70 skipped`). Mutations:
+
+- Refuse when the run's `updatedAt` differs from the wake's run: both cases passed. The claim and the park land in the same millisecond, so the parked run looks untouched. This is why case 2 now tries once while the terminal holds the run.
+- Read the run once and keep it (`heldOnce ??= current()`): case 2 failed with `expected { ok: false, …(1) } to match object { ok: true }`, `Tests 1 failed | 1 passed | 70 skipped (72)`. Reverted: `Tests 72 passed (72)`.
+
+Validation block:
+
+```
+npx tsc --noEmit; echo "exit: $?"
+  exit: 0
+npx vitest run src/runner/actions.test.ts; echo "exit: $?"
+  Test Files  1 passed (1)
+       Tests  72 passed (72)
+  exit: 0
+```
+
+- Checkbox 1 (cases 1–2 pass, with red runs recorded): pass. Case 1 went red before the change. Case 2 could not go red; the mutation above shows it is not empty.
+- Checkbox 2 (every existing case of `actions.test.ts` passes unchanged): pass. No existing case changed. The only change to existing code in the test file is the `record()` reader added to `placeWorld`'s return.
+
+Other test files run at the end (test files of the code that imports `src/runner/actions.ts`, and of the modules that use those): `npx vitest run src/commands/daemon.test.ts src/commands/record.test.ts src/commands/takeover.test.ts src/daemon/poll.test.ts src/planner/actions.test.ts src/planner/driver.test.ts src/planner/session.test.ts src/runner/driver.test.ts src/runner/session.test.ts src/runner/tools.test.ts src/runner/replay` gave `Test Files 11 passed (11)`, `Tests 317 passed (317)`. `src/commands/guardrails.test.ts` was not run (it fails in this container because of the push guard, as 51b recorded).
+
+**What 51e must know.**
+
+- The runner's refusal sentence is in `TERMINAL_HOLDS_RUN` in `src/runner/actions.ts`. It applies to `start_step` and to `record_approval`'s own step. The other actions (`post`, `end_run`, and the rest) are not refused while a terminal holds the run; the plan did not ask for that.
+- The refusal is written in the ticket's record as a `decision` entry with `detail: "Refused: <sentence>"`, as every refused action is. It posts nothing on the ticket.
