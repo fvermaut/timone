@@ -61,7 +61,12 @@ function pick(obj, fl) {
 const f = load();
 // ✏ 2026-10-05 (phase 49 verification): f.failCalls, a list of patterns; a call whose argv,
 // joined by spaces, matches one fails as GitHub failing would (exit 1, a message on stderr).
-for (const pat of f.failCalls ?? []) if (new RegExp(pat).test(argv.join(' '))) fail(`probe: this call fails on purpose (${pat})`);
+// ✏ 2026-10-05 (phase 53 verification): an entry may also be { pattern, message }, to fail with
+// the words GitHub would print (for example "HTTP 403"), not this file's own.
+for (const pat of f.failCalls ?? []) {
+  const p = typeof pat === 'string' ? { pattern: pat } : pat;
+  if (new RegExp(p.pattern).test(argv.join(' '))) fail(p.message ?? `probe: this call fails on purpose (${p.pattern})`);
+}
 const slug = opt('--repo', '-R') || f.slug;
 f.others ??= {};
 const repo = slug === f.slug ? f : (f.others[slug] ??= { issues: {}, prs: {} });

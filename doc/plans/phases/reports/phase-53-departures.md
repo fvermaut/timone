@@ -22,3 +22,10 @@
 **Agreed:** At the close, the whole test suite passes.
 **Did instead:** The whole suite ran once: 76 files, 1984 tests, 1914 passed, 70 failed. Every failure is in `src/commands/guardrails.test.ts` (45), `src/numbers.test.ts` (16), `src/workspace.test.ts` (6) or `src/commands/number.test.ts` (3). Each one is a test that pushes to a branch named `main` in a scratch repository, and this container refuses that push. The same four files, run on `origin/main` without this phase, fail the same 70 tests.
 **Why:** The container's push guard lets this run push only to its own branch. These 70 tests cannot pass here, whatever the phase does; they need a run outside this container.
+
+## 2026-10-05 — timone#218, verification
+
+**Kind:** check not run
+**Agreed:** Every MUST criterion in scope is checked, and passes, before delivery (PRD-09.R1, R3; the regression set, PRD-05.R18 among it).
+**Did instead:** Four parts of PRD-09 were left BLOCKED: in R1, whether the real runner leaves the command in when no exception applies; in R3, whether the real runner marks each of the three exceptions. PRD-05.R18 is BLOCKED too. Everything the code and the instructions do passed. Nothing failed.
+**Why:** Those parts are a model's choice. Their instrument is the replay against the real model (`npm run --silent replay`, cases #120 and the two #218 cases). It cannot run in this container, and the newest recorded replay (run 10, at `4686ef4`) is older than this build. This phase changed the runner's instructions, so the replay is owed on this build anyway. See the [verification report](phase-53-verification.md), *Carried forward*.
