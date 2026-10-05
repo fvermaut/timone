@@ -29,9 +29,11 @@ import { isNamedPerson } from "./brief.js";
 import { limitNotice } from "./comments.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
 import { departureSection, departuresOf, DEPARTURES_END, DEPARTURES_START } from "./departures.js";
+import { filesAddedOnBranch, PHASES } from "./facts.js";
 import { defaultOrder, standingOf, ticketKindOf, type TicketContext } from "./order.js";
 import { appendEntry, readRecord, type RecordEntry } from "./record.js";
 import { RUNNER_DEFAULT_WAIT, type RunnerSessions, type WakeOptions } from "./session.js";
+import { latestUpdate, updateSection, withUpdate } from "./update-section.js";
 
 /**
  * The runner's driver: what the poll cycle calls, once a cycle, for every
@@ -1052,7 +1054,7 @@ export class RunnerDriver {
     }
     const entries = read.ok ? read.value : undefined;
     try {
-      await this.rewriteDepartures(runId, entries);
+      await this.rewriteDescription(runId, entries);
     } catch (error) {
       this.deps.log(`runner ${runId} — the pull request's description was not brought up to date: ${oneLine(error)}`);
     }
@@ -1077,8 +1079,15 @@ export class RunnerDriver {
    * from what the runner says of itself. With no record (`entries` is
    * undefined, because it could not be read), the ledger still follows the
    * pull request, and the description is not touched.
+   *
+   * ✏ 2026-10-05: **the update's newest entry goes above the departures**
+   * (ADR-0066). When the branch added one phase file and carries its
+   * `phase-NN-update.md`, the section the entry gives is put first, so a
+   * person reads first whether the work still passes after it was brought
+   * level with the default branch. The description is written only when it
+   * changed.
    */
-  private async rewriteDepartures(
+  private async rewriteDescription(
     runId: string,
     entries: readonly RecordEntry[] | undefined,
   ): Promise<void> {
@@ -1099,8 +1108,26 @@ export class RunnerDriver {
     const kind = ticketKindOf(ticket.labels, this.contexts.get(run.id) ?? NO_CONTEXT);
     const section = departureSection(departuresOf(entries, run.id, defaultOrder(kind)));
     const body = await adapter.getPullRequestBody(project, found.number);
-    const next = withDepartures(body, section);
+    const withList = withDepartures(body, section);
+    const update = await this.updateOf(project, run.branch);
+    const next = update === undefined ? withList : withUpdate(withList, update);
     if (next !== body) await adapter.setPullRequestBody(project, found.number, next);
+  }
+
+  /**
+   * The update section for `branch`, or undefined when there is none: the
+   * branch added no phase file or more than one, as the planner reads a
+   * branch's plan, or its update record is missing or has no entry.
+   */
+  private async updateOf(project: TicketingProject, branch: string): Promise<string | undefined> {
+    const { adapter } = this.deps;
+    const { defaultBranch } = await adapter.readBranches(project);
+    const [phase, ...more] = await filesAddedOnBranch(adapter, project, defaultBranch, branch, PHASES);
+    if (phase === undefined || more.length > 0) return undefined;
+    const name = phase.slice(phase.lastIndexOf("/") + 1).replace(/\.md$/, "");
+    const record = await adapter.readFile(project, branch, `${PHASES}/reports/${name}-update.md`);
+    const entry = record === undefined ? undefined : latestUpdate(record);
+    return entry === undefined ? undefined : updateSection(entry, defaultBranch);
   }
 
   /**

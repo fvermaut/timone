@@ -1451,3 +1451,130 @@ describe("RunnerDriver — an open pull request whose branch falls behind the de
     expect(w.noticesOf(12)).toEqual([]);
   });
 });
+
+describe("RunnerDriver — when a step ends on a branch that carries the update's record (ADR-0066)", () => {
+  /** The phase file the chore's branch added, beside one the default branch already has. */
+  const PHASE_49 = "doc/plans/phases/phase-49.md";
+  const PHASE_50 = "doc/plans/phases/phase-50.md";
+
+  /** Where the update writes its record for phase 50. */
+  const UPDATE_RECORD = "doc/plans/phases/reports/phase-50-update.md";
+
+  /** What the delivering step wrote in the pull request, below the departures. */
+  const DELIVERY_TEXT = ["## What changed", "", 'The README said "recieve"; it now says "receive".'].join("\n");
+
+  /** The departures block of the chore's run, which followed the default order. */
+  const FOLLOWED = [
+    "<!-- timone:departures -->",
+    "The default order was followed.",
+    "<!-- /timone:departures -->",
+  ].join("\n");
+
+  /**
+   * The chore's run with pull request #21 holding `body`, its branch adding
+   * phase 50, and the update's record on the branch holding `record` (no
+   * record when undefined). The driver is told that a step at `update`
+   * ended.
+   */
+  async function stepEndsOnUpdatedBranch(body: string, record: string | undefined): Promise<string[]> {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-update-"));
+    tempDirs.push(root);
+    const store = RunStore.open(join(root, ".timone", "state.json"), {
+      now: () => "2026-10-05T14:00:00Z",
+    });
+    const run = builtChore(store, root);
+    const { adapter: base, descriptions } = forge(body);
+    const adapter: TicketingAdapter = {
+      ...base,
+      async listFiles(_project, branch, directory) {
+        if (directory !== "doc/plans/phases") return undefined;
+        return branch === BRANCH ? [PHASE_49, PHASE_50] : [PHASE_49];
+      },
+      async readFile(_project, branch, path) {
+        return branch === BRANCH && path === UPDATE_RECORD ? record : undefined;
+      },
+    };
+    const { sessions } = fakeWakes();
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: async () => {
+        throw new Error("no step starts in this test");
+      },
+      timonePin: async () => undefined,
+      clock: () => "2026-10-05T14:00:00Z",
+      log: () => {},
+    });
+
+    await driver.stepEnded(run.id, "update", {
+      outcome: { sessionId: "step-session-7", ok: true },
+    });
+    await driver.drain();
+    return descriptions;
+  }
+
+  it("puts the update block at the top of the pull request, with the departures block and the delivery text after it, unchanged", async () => {
+    const record = [
+      "# Phase 50 — updates",
+      "",
+      "## Update 1 — 2026-10-05T13:40:00Z",
+      "",
+      "- **Level with:** main at 1630843",
+      "- **Arrived:** phase 49 (pull request #215)",
+      "- **Whole test suite:** passed — 1262 tests passed",
+      "- **Check scripts of this ticket:** passed — PRD-07.R7",
+      "- **Check scripts of the work that arrived:** none — phase 49 claims no requirement",
+      "- **Fixes:** 0",
+      "- **Code changed:** none",
+      "- **Result:** passes",
+      "",
+    ].join("\n");
+
+    const descriptions = await stepEndsOnUpdatedBranch(`${FOLLOWED}\n\n${DELIVERY_TEXT}`, record);
+
+    expect(descriptions).toEqual([
+      [
+        "<!-- timone:update -->",
+        "### Brought level with main",
+        "",
+        "What arrived on main: phase 49 (pull request #215).",
+        "",
+        "No code had to change.",
+        "",
+        "- The whole test suite: passed — 1262 tests passed.",
+        "- The check scripts of this ticket: passed — PRD-07.R7.",
+        "- The check scripts of the work that arrived: none — phase 49 claims no requirement.",
+        "<!-- /timone:update -->",
+        "",
+        "<!-- timone:departures -->",
+        "The default order was followed.",
+        "<!-- /timone:departures -->",
+        "",
+        "## What changed",
+        "",
+        'The README said "recieve"; it now says "receive".',
+      ].join("\n"),
+    ]);
+  });
+
+  it("gives the body that the departures alone give when the branch carries no update record, as before the update existed", async () => {
+    const descriptions = await stepEndsOnUpdatedBranch(DELIVERY_TEXT, undefined);
+
+    expect(descriptions).toEqual([
+      [
+        "<!-- timone:departures -->",
+        "The default order was followed.",
+        "<!-- /timone:departures -->",
+        "",
+        "## What changed",
+        "",
+        'The README said "recieve"; it now says "receive".',
+      ].join("\n"),
+    ]);
+  });
+});

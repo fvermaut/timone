@@ -212,3 +212,86 @@ Arrived on main with pull request #215, doc/plans/phases/phase-49.md:
 - `testCommand` is the text of `scripts.test` (for example `vitest run`), not `npm test`; the skill decides how to run it.
 - `--json` prints `{ testCommand?, own?, arrived: [{ phase, pullRequest?, checks: [{ id, script? }] }] }`; a missing value is left out, not `null`.
 - Deferred refactoring: the git test's `forge()` copies most of `merge-rules.git.test.ts`'s `forge()`; a shared test helper would remove the copy. The command's `try` block does the manifest, the checkout check and git in one body; it could be split if it grows.
+
+## 50d — The update's record becomes a section at the top of the pull request, above the departures
+
+**Built.** `src/runner/update-section.ts` holds three pure functions. `latestUpdate(recordText)` reads the last `## Update` section of the record into its eight fields. A line that is missing, or not in a form it reads, is undefined. `updateSection(entry, defaultBranch)` writes the block between `<!-- timone:update -->` and `<!-- /timone:update -->`. Its heading is `### Brought level with <default>` only when all three test sets have a line and none says `failed`, and the `Result:` line does not say `does not pass`. Otherwise the heading is `### This work does not pass after being brought level with <default>`, and the first lines name the failure and each set that failed or did not run. `withUpdate(body, section)` takes out any earlier update block and puts this one first. In `src/runner/driver.ts`, `rewriteDepartures` is now `rewriteDescription`. After the departures are placed, it finds the one phase file the branch added (`filesAddedOnBranch(…, PHASES)`, as `planOf` does), reads `doc/plans/phases/reports/phase-NN-update.md` on the branch, and, when that file has an entry, puts the update block above the departures. It writes the body only when it changed.
+
+**Files touched.**
+
+- `src/runner/update-section.ts` — new: `UPDATE_START`, `UPDATE_END`, the types `UpdateEntry` and `TestSet`, `latestUpdate`, `updateSection`, `withUpdate`.
+- `src/runner/update-section.test.ts` — new: cases 1, 2, 3, 4, 5 and 8.
+- `src/runner/driver.ts` — imports `filesAddedOnBranch`, `PHASES` and the three functions; `rewriteDepartures` renamed `rewriteDescription`, with a ✏ paragraph on its doc comment; a new private `updateOf(project, branch)`.
+- `src/runner/driver.test.ts` — a new `describe` at the end (cases 6 and 7) with its own helper `stepEndsOnUpdatedBranch`. Additions only: no existing line changed.
+
+**Decisions taken inside the slice.**
+
+- **The newest entry is the last `## Update` heading in the file**, because each update appends. The number after `Update` is not read.
+- **A field line** is `- **<label>:** <value>`, one line. A value that runs onto a second line loses the second line.
+- **The whole test suite reads only `passed` or `failed`**, as the plan's form says. A whole-suite line saying `none` is read as missing, so the section says the suite did not run and the work does not pass. The check-script sets read `passed`, `failed` or `none`; `none` counts as not failed.
+- **A missing `Result:` line** does not stop the work passing when all three sets passed. The plan's rule is about the sets; the `Result:` line can only make it not pass. No case covers this.
+- **Words of the section.** `What arrived on <default>: <the Arrived value>.`, then `What had to change: <the Code changed value>` or `No code had to change.`, then one list line per set: `- <name>: <word> — <detail>.`, or `- <name>: did not run.`. The names are `The whole test suite`, `The check scripts of this ticket`, `The check scripts of the work that arrived`. The failure lines are `It does not pass: <failure>.`, `<name> failed: <detail>.`, `<name> did not run.`. A full stop is added only when the text does not already end with one.
+- **A set with no text after its word** is shown as the word alone (`- The whole test suite: passed.`), not `passed — .`. This was fixed while writing case 4 and has no case of its own.
+- **`Level with:` and `Fixes:` are read but not shown.** The plan's list of the section's lines does not name them. They are on `UpdateEntry` for anything that later needs them.
+- **The update section is looked up only when the record could be read**, as the departures are; with no readable record the description is not touched.
+- **The default branch's name comes from `adapter.readBranches`**, once per step end. If any forge call for the update section fails, the whole description write is skipped and logged, as any failure in this method already was; the next step's end writes it again.
+- **The record path** is `doc/plans/phases/reports/<phase file's name without .md>-update.md`, so `phase-50.md` gives `phase-50-update.md`.
+
+**Validation evidence.**
+
+Order run: 1, 2, 3, 4, 8, 5, 6, 7.
+
+- **Case 1** — `update-section.test.ts` "says the work was brought level, after which pull request, and what code changed and why, when every set passed (R7 clause 3)". Red against a stub returning undefined: `Error: the record has no update entry`. Green after the parser and the passing section: 1 passed. The parser read all eight lines from the start, because case 1's entry has them all.
+- **Case 2** — "says no code had to change when the record says none". Red: `AssertionError: expected [ '<!-- timone:update -->', …(10) ] to include 'No code had to change.'`. Green: 2 passed.
+- **Case 3** — "says the work does not pass, and names the failure in its first lines, when the whole test suite still fails after two fixes (R7 clause 4)". Red: `AssertionError: expected [ '### Brought level with main', …(3) ] to deeply equal [ …(4) ]`. Green after `failuresOf` (result failure and failed sets): 3 passed.
+- **Case 4** — "says the work does not pass, and names the set that did not run, when a set's line is missing and the result says passes (R7 clause 2)". Red: `AssertionError: expected [ '### Brought level with main', …(2) ] to deeply equal [ …(3) ]`. Green after a missing set counts as not run: 4 passed.
+- **Case 8** — "shows only the newest entry when the record holds two". Red (the parser took the first `## Update`): `AssertionError: expected [ …(3) ] to deeply equal [ '### Brought level with main', …(2) ]`. Green after taking the last heading: 5 passed.
+- **Case 5** — "puts the update block first, above the departures block and the text, and changes nothing when run again". Red against the stub that returned the body: `AssertionError: expected '<!-- timone:departures -->\nThe defau…' to be '<!-- timone:update -->\n### Brought l…'`. Green: 6 passed.
+- **Case 6** — `driver.test.ts` "puts the update block at the top of the pull request, with the departures block and the delivery text after it, unchanged". Red: `AssertionError: expected [] to deeply equal [ Array(1) ]` (the departures were unchanged, so nothing was written). Green after `rewriteDescription` and `updateOf`: driver.test.ts 28 passed.
+- **Case 7** — "gives the body that the departures alone give when the branch carries no update record, as before the update existed". It passed on its first run: the guard for a missing record came with case 6. Mutation: `latestUpdate(record ?? "## Update")` (a missing record read as an empty entry) → `AssertionError: expected [ Array(1) ] to deeply equal [ Array(1) ]`. Reverted → 29 passed.
+
+Validation block:
+
+```
+npx tsc --noEmit; echo "exit: $?"
+exit: 0
+npx vitest run src/runner/; echo "exit: $?"
+ Test Files  12 passed (12)
+      Tests  232 passed (232)
+exit: 0
+```
+
+- [x] Cases 1–8 pass, with red runs recorded. Pass. Case 7 could not be driven red honestly; the mutation above shows it is not empty.
+- [x] `src/runner/departures.test.ts` passes unchanged (hard gate). Pass: `git diff --stat src/runner/departures.ts src/runner/departures.test.ts` prints nothing, and the file passes inside the `src/runner/` run. The 27 earlier cases of `driver.test.ts`, the departures cases among them, pass with no line changed.
+
+Other test files that use the driver or the code it now calls, run at the end: `src/commands/daemon.test.ts`, `src/daemon/poll.test.ts`, `src/planner/` (6 files), `src/commands/takeover.test.ts`, `src/daemon/chunk-zero.test.ts`, `src/daemon/hooks.test.ts`. 11 files, 326 tests passed, exit 0.
+
+A `node` script imported `PROBE_DIRECTORIES` from `dist/daemon/probeGuard.js` and counted each value in the five files this slice wrote or changed: `hits: 0`.
+
+**What 50e must know.**
+
+The skill must write each entry in exactly this form, appended at the end of `doc/plans/phases/reports/phase-NN-update.md` (NN as in the phase file the branch added):
+
+```
+## Update 2 — 2026-10-06T09:30:00Z
+
+- **Level with:** main at 9b1e0d2
+- **Arrived:** phase 51 (pull request #218)
+- **Whole test suite:** passed — 1270 tests passed
+- **Check scripts of this ticket:** passed — PRD-07.R7, PRD-07.R14
+- **Check scripts of the work that arrived:** none — phase 51 claims no requirement
+- **Fixes:** 0
+- **Code changed:** none
+- **Result:** passes
+```
+
+- **The entry.** It starts at a line beginning `## Update`. It ends at the next line beginning `## ` or at the end of the file. The last such heading in the file is the newest; it is the only one shown.
+- **Field lines.** Each is one line, `- **<label>:** <value>`, with the colon inside the bold. The labels must be exactly `Level with`, `Arrived`, `Whole test suite`, `Check scripts of this ticket`, `Check scripts of the work that arrived`, `Fixes`, `Code changed`, `Result`. A field with any other label is ignored. Order does not matter to the code, but keep the plan's order.
+- **Test sets.** The value is a word, then optionally ` — ` (space, em dash, space) and one line of text. `Whole test suite` reads `passed` or `failed` only. The two check-script lines read `passed`, `failed` or `none`. Any other word, a hyphen in place of the em dash, or a missing line is read as "did not run", and the work does not pass.
+- **`Result:`** reads `passes`, or `does not pass`, optionally followed by ` — <the failure>`. The failure text is shown as the first line under the heading. `does not pass` makes the work not pass even when every set passed.
+- **`Code changed:`** `none`, exactly, gives "No code had to change."; any other text is shown after "What had to change:" on one line. Write what changed and why, in plain sentences.
+- **`Arrived:`** is shown as written, after "What arrived on <default>:".
+- **`Fixes:`** is read as a whole number; **`Level with:`** is read as text. Neither is shown today.
+- Every value is shown on a pull request a person reads: plain English, no probe folder path, and no process words.
+
+Deferred refactoring: `withUpdate` repeats `withDepartures`' body with other markers; one helper taking the two markers would serve both (it would touch `withDepartures` in `driver.ts`). `UpdateEntry.fixes` and `levelWith` have no reader yet.
