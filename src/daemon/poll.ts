@@ -1,6 +1,8 @@
 import type { Manifest, ProjectConfig } from "../manifest.js";
+import type { PlannerDriver } from "../planner/driver.js";
 import type { RunnerDriver } from "../runner/driver.js";
 import {
+  type Dependency,
   MARK_LABEL,
   PREVIEW_MARKER,
   type PullRequest,
@@ -117,6 +119,14 @@ export interface PollDeps {
    * alone. There is one driver now, so there is nothing to leave a project to.
    */
   runner: RunnerDriver;
+  /**
+   * The planner, which decides for each project which ticket may be built
+   * now ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+   * D1). Each project is handed to it after the runner, with the same cycle.
+   * Absent means no planner session starts, and a run that waits for one
+   * goes on waiting.
+   */
+  planner?: Pick<PlannerDriver, "tick">;
   /** Progress sink; defaults to silence (the command wires stdout). */
   log?: (message: string) => void;
 }
@@ -974,6 +984,8 @@ async function releasePreview(
 interface Frontier {
   isStep(ticket: number): boolean;
   isEligible(ticket: number): boolean;
+  /** The tickets a step ticket is blocked by, as its listing gave them; none for any other ticket. */
+  blockedBy(ticket: number): readonly Dependency[];
 }
 
 /**
@@ -1001,6 +1013,7 @@ async function surveyInitiatives(
   const { store, adapter } = deps;
   const steps = new Set<number>();
   const eligible = new Set<number>();
+  const blockers = new Map<number, readonly Dependency[]>();
 
   for (const map of tickets.filter((t) => t.labels.includes(MAP_LABEL))) {
     let children: Step[];
@@ -1014,7 +1027,10 @@ async function surveyInitiatives(
       continue;
     }
 
-    for (const child of children) steps.add(child.number);
+    for (const child of children) {
+      steps.add(child.number);
+      blockers.set(child.number, child.blockedBy);
+    }
     const toTake = eligibleSteps(children);
     for (const step of toTake) eligible.add(step.number);
 
@@ -1034,6 +1050,7 @@ async function surveyInitiatives(
   return {
     isStep: (ticket) => steps.has(ticket),
     isEligible: (ticket) => eligible.has(ticket),
+    blockedBy: (ticket) => blockers.get(ticket) ?? [],
   };
 }
 
@@ -1184,8 +1201,15 @@ async function pollProject(
   // work does not hold up the next (R15). ✏ 2026-10-04: nothing is promoted
   // here any more. The ledger gives a freed place in the write that frees it
   // (ADR-0063 D3).
-  const cycle = { tickets, isStep: frontier.isStep, threads };
+  const cycle = { tickets, isStep: frontier.isStep, blockedBy: frontier.blockedBy, threads };
   for (const line of await runner.tick(project, config, cycle)) {
+    result.errors.push(line);
+    log(`error  ${line}`);
+  }
+  // Then the planner, with the same cycle, so it reads each thread from the
+  // same fetch (ADR-0065 D1). Like the runner's, its tick returns once it
+  // has started a session; it never waits for one.
+  for (const line of (await deps.planner?.tick(project, config, cycle)) ?? []) {
     result.errors.push(line);
     log(`error  ${line}`);
   }

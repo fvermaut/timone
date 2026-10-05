@@ -64,6 +64,7 @@ import { RunnerDriver, pullRequestEvent, type RunnerDriverDeps } from "../runner
 import { RunningSteps, runnerActions } from "../runner/actions.js";
 import { RunnerSessions, type RunQuery, type WakeOptions } from "../runner/session.js";
 import { appendEntry, readRecord, type RecordEntry } from "../runner/record.js";
+import type { PlannerDriverCycle } from "../planner/driver.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
 const tempDirs: string[] = [];
@@ -2279,6 +2280,44 @@ describe("the frontier decides which step is taken", () => {
     expect(store.runsForTicket("alpha", 53)).toHaveLength(1);
     expect(store.runsForTicket("alpha", 54)).toEqual([]);
     expect(store.runsForTicket("alpha", 51)).toEqual([]);
+  });
+
+  /**
+   * ADR-0065 D1, D3: the planner is handed each project after the runner, in
+   * the same cycle, with the blockers the survey found for each step.
+   */
+  it("hands the project to the planner after the runner, with the same cycle and each step's blockers", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const closedStep1 = {
+      number: 51,
+      url: "https://github.com/fvermaut/scratch-app/issues/51",
+      open: false,
+    };
+    const { tickets, steps } = initiative([{ state: "closed" }, { blockedBy: [closedStep1] }]);
+    const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+    const calls: { by: string; project: string; cycle: unknown }[] = [];
+    const runnerTick = runner.tick.bind(runner);
+    runner.tick = async (project, config, cycle) => {
+      calls.push({ by: "runner", project: project.name, cycle });
+      return runnerTick(project, config, cycle);
+    };
+    const blockers: unknown[] = [];
+    const planner = {
+      async tick(project: TicketingProject, _config: unknown, cycle: PlannerDriverCycle) {
+        calls.push({ by: "planner", project: project.name, cycle });
+        blockers.push(cycle.blockedBy(52), cycle.blockedBy(9));
+        return [];
+      },
+    };
+
+    await pollOnce({ manifest, store, adapter, runner, planner });
+
+    expect(calls.map(({ by, project }) => `${by} ${project}`)).toEqual(["runner alpha", "planner alpha"]);
+    expect(calls[1]?.cycle).toBe(calls[0]?.cycle);
+    expect(blockers).toEqual([[closedStep1], []]);
   });
 
   /**

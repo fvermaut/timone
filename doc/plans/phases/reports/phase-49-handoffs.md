@@ -388,3 +388,82 @@ Test files run at the end, by name (after `npm run build`):
 - Build `plannerActions(deps, run, facts)` once per session: the one-decision rule lives in it. `deps` is `{ store, adapter, manifest, project, root, clock }`. Give the session `plannerToolServer(actions)` and allow `qualifiedPlannerToolNames()`.
 - The notice the runner's driver must look for is `passedToRunner(at)` from `src/planner/actions.ts`, written as a `notice` entry. The planner's driver writes its own `planner read comment at <at>` notice; nothing here writes it.
 - `letBuild` and `hold` write `planner-decision`; neither wakes the runner. `plannerLetBuildEvent` and the `planner-ended` entry are 49f's.
+
+## 49f — The planner runs — one session per project, asked again when what a ticket waits for is gone, and a named person's comment on a waiting ticket goes to it
+
+**Built.** The daemon now runs the planner. Each poll cycle, after the runner, the planner's driver looks at each project once. It asks the planner again for a held run when no ticket it waits for still has a build running or an open pull request. It then starts at most one session for the project, and none while one runs: first for a run (waiting or held) whose ticket has a named person's comment the planner has not read, with that comment in its facts; otherwise for the first run waiting for the planner. A ticket a person holds (`timone:held`, not a step's claim) or one over its spending limit gets no session. A session is one SDK `query` with the planner's brief, the `planner` tool server, 12 turns, $2 and the runner's model, effort and 10-minute timeout; its cost goes into the ticket's record as `planner-ended`, whatever the end. A model that cannot be reached is tried again after 60 seconds and 5 minutes. The runner's driver no longer tells the runner a named person's comment on a run that waits for the planner, and does not mark it read; it tells only a comment the planner passed on, once. It wakes the runner once when the planner lets a run build, with `plannerLetBuildEvent`.
+
+**Files touched.**
+
+- `src/planner/session.ts` — new: `decide(deps, run, facts)`, `DecideDeps`, `DecideEnd`, `PLANNER_MAX_TURNS = 12`, `PLANNER_MAX_BUDGET_USD = 2`, `PlannerSessions` (`decide(run, facts)`; one per project; the retries), `PlannerSessionDeps`. Its working folder is `.timone/planner`.
+- `src/planner/driver.ts` — new: `PlannerDriver` (`tick`, `drain`), `PlannerDriverDeps`, `PlannerDriverCycle` (`PlannerCycle & Pick<RunnerCycle, "isStep">`), `waitsForPlanner(run)`, `plannerReadComment(at)` (the notice `planner read comment at <at>`).
+- `src/runner/driver.ts` — `plannerLetBuildEvent(reason, onComment?)`; the notices `planner let build at <at>, run <id>` and `passed comment at <at> told, run <id>`; in `look()`, `held` and `overLimit` are now worked out before the comments are read, a run that waits for the planner (and is neither held nor over its limit) has its ticket's comments left out of `newComments`, and `passedComments` gives the ones the planner passed. `newComments` drops a ticket comment the planner read.
+- `src/daemon/poll.ts` — `PollDeps.planner?: Pick<PlannerDriver, "tick">`; `Frontier.blockedBy`, filled by `surveyInitiatives` from each step's `blockedBy`; the cycle carries `blockedBy`; `pollProject` calls `planner.tick(project, config, cycle)` after `runner.tick`, with the same cycle object, and reports its lines as errors the same way.
+- `src/commands/daemon.ts` — builds `PlannerSessions` (SDK `query`) and `PlannerDriver` beside the runner; `RunDaemonOptions.planner?`, passed to `pollOnce`; `--once` drains the planner after the runner.
+- `src/planner/session.test.ts`, `src/planner/driver.test.ts` — new: the cases below.
+- `src/runner/driver.test.ts` — a describe "a run that waits for the planner" with four cases; `TicketComment` imported.
+- `src/daemon/poll.test.ts` — one case in "the frontier decides which step is taken"; `PlannerDriverCycle` imported.
+
+**Decisions taken inside the slice.**
+
+- **The driver gathers the facts; the session only decides.** `decide` takes facts already gathered, so `PlannerDriverDeps.decide(run, facts)` is the seam the plan names, and the facts need the cycle, which only the tick has. The driver keeps one promise per project and starts nothing while it is pending; `PlannerSessions` refuses a second session of a project too (it logs and returns), which is what its own test checks.
+- **Retries.** As `RunnerSessions`: tries after `RUNNER_RETRY_WAITS_MS` (60 s, 5 min), each try writing its own `planner-ended`. Before a retry the run must still wait for the planner (`waitsForPlanner`). After the third failure the session ends and the run waits; the next cycle starts again with fresh facts. Unlike the runner, nothing is posted on the ticket and there is no 15-minute timer: a timer outside the driver would need the driver to know the project is resting, and the plan asks for neither.
+- **Which comment.** The oldest named person's comment (not the machine's) newer than `askedAt`, or the hold's `at` for a held run, with neither `planner read comment at <at>` nor `passed to runner: comment at <at>` in the record. Runs waiting are looked at before held runs, each in the ledger's order. The notice is written after the facts are gathered, just before the session starts.
+- **How the runner's driver keeps those comments.** For a run that waits for the planner, the ticket thread gets no `seen` mark, so nothing on it is marked read. A comment passed on is told once, through its own notice `passed comment at <at> told, run <id>`. Once the run no longer waits (let build), the runner reads the ticket from its old `seen` mark, and `newComments` drops each comment with a `planner read comment` notice: the planner answered it (or passed it, and it was told then). So the comment a let-build was taken on reaches the runner only through `plannerLetBuildEvent`. Comments the planner never read reach the runner as before.
+- **Held or over its limit.** A run that waits for the planner but is held by a person, or over its limit, has its comments told to the runner as before. The planner's driver skips those runs, so without this a named person's reply to the limit notice, or a word on a held ticket, would reach nobody.
+- **Words.** `plannerLetBuildEvent("No other ticket is being built.")` is `The planner let this ticket be built now: No other ticket is being built.`; with a comment, `The planner let this ticket be built now, on fvermaut's comment at <at>: <reason>`. A full stop is added when the reason has none. The event is told inside the "not held" branch, beside the place event; over its limit it waits for a yes like every other event.
+- **"Building" is written a second time.** `stillWaits` in `planner/driver.ts` repeats the rule of `stateOf` in `planner/facts.ts` (and `BUILDING_STAGES`), which is private there and not in my files. One exported function in `facts.ts` would remove the copy.
+- **What I would refactor.** `planner/session.ts` copies from `runner/session.ts` (not granted) the parts of `converse` that read the SDK's messages: `assistantMessage`, `resultMessage`, `failureOf`, `REACHED_A_CAP`, `tookTooLong`'s words and `oneLine`. One shared module for "run one SDK session and say how it ended" would serve both.
+- **A hold that waits for a ticket with no live run** is asked again on the next cycle, by the plan's rule. Only a closed blocker can be such a ticket (a step blocked by an open one is never picked up), so the planner should not hold on it; if it did, the run would be decided once a cycle.
+
+**Validation evidence.**
+
+Per declared case (red line seen, then green, or mutation proof):
+
+1. `planner/driver.test.ts` › "starts one session for the run first by order, none while it runs, and the other's once it has ended" — red: `AssertionError: expected [] to deeply equal [ 'scratch-app#13/1' ]`; green.
+2. "starts one session for each of two projects whose runs wait, both running at once" — green as written. Mutation: the busy check counts any project (`this.deciding.size > 0`) → `expected [ 'scratch-app#12/1' ] to deeply equal [ 'scratch-app#12/1', 'todo-app#4/1' ]`; reverted, green.
+3. "does not ask again while #7's pull request is open, and once it is merged and its run ended, decides #12 with its plan as it was" and "asks again once #7's pull request is closed without merging, while its run still waits" — red: both `expected [] to deeply equal [ 'scratch-app#12/1' ]` (after the "no re-ask while open" assertion had passed); green. Mutation: an open pull request not counted (`state === "merged"`) → both `expected [ { runId: 'scratch-app#12/1', …(2) } ] to deeply equal []`; reverted. The plan file is shown unchanged: the facts carry the plan as the branch holds it, and the branch's files are the same after.
+4. "decides a held ticket on the next tick with the named person's comment in its facts, and notes that the planner read it" — red: `expected [] to deeply equal [ 'scratch-app#12/1' ]`; green. Runner side, `runner/driver.test.ts` › "does not wake the runner on a named person's comment on a ticket the planner holds, and leaves the comment unread" — first written with the comment before the run existed, so it passed for the wrong reason; with the times corrected, red: `expected [ { runId: 'scratch-app#12/1', …(2) } ] to deeply equal []`; green.
+5. "starts no session and changes nothing when the comment is by someone who is not named for the project (clause 3)" — green as written. Mutation: the named check removed → `expected [ { runId: 'scratch-app#12/1', …(2) } ] to deeply equal []`; reverted.
+6. `runner/driver.test.ts` › "tells the runner, once, a named person's comment the planner passed to it, as the comment event it would have been" — green as written (written with case 4's code). Mutations: the told notice not written → `expected [ { …(3) }, { …(3) } ] to deeply equal [ { runId: 'scratch-app#12/1', …(2) } ]`; the passed notice not read → `expected [] to deeply equal [ … ]`; reverted.
+7. "wakes the run once when the planner let it build, and not again on the tick after" — red: `expected [] to deeply equal [ { runId: 'scratch-app#12/1', …(2) } ]`; green. Added: "tells the runner the planner let the ticket build on a named person's comment, and does not tell it the comment as well" — red the same way; green. Mutation: `newComments` not dropping comments the planner read → `expected [ { runId: 'scratch-app#12/1', …(2) } ] to deeply equal [ … ]` (the comment told too); reverted.
+8. "starts no session for a ticket a person holds with timone:held" and "starts no session for a ticket over its spending limit" — red: both `expected [ { runId: 'scratch-app#12/1', …(2) } ] to deeply equal []`; green.
+9. `planner/session.test.ts` › "writes the $0.30 of a session that decided nothing into the ticket's record, leaves the run waiting, and starts again when asked again" — green as written (the session was written for the one-at-a-time case). Mutations: `costUsd: 0` written → `expected [ { kind: 'planner-ended', …(4) } ] to deeply equal [ … ]`; the project never freed → `expected [ { …(2) } ] to have a length of 2 but got 1`; reverted. One-at-a-time: "starts no second session for the project while one runs, and the first still ends" — red (an empty `PlannerSessions`): `expected [] to have a length of 1 but got +0`; green. Added: "is tried again after 60 seconds and then 5 minutes, each try's cost written, and the run left waiting after the third" — green as written; mutation, a retryable failure not retried → `expected [ { …(2) } ] to have a length of 2 but got 1`; reverted. "gives the planner no built-in tool, only its four tools, 12 turns and $2, and the brief for the ticket" — green as written; mutation, 40 turns → `expected { model: 'claude-opus-5-5', …(10) } to match object { … }`; reverted.
+10. `planner/driver.test.ts` › "starts a session on the first tick of a new driver over the same ledger, for a run whose session the stop lost" — green as written. Mutation: the map of running sessions shared by every driver (static) → `expected [ 'scratch-app#12/1' ] to deeply equal [ 'scratch-app#12/1', …(1) ]`; reverted.
+
+Poll: `poll.test.ts` › "hands the project to the planner after the runner, with the same cycle and each step's blockers" — red: `expected [ 'runner alpha' ] to deeply equal [ 'runner alpha', 'planner alpha' ]`; green.
+
+The validation block, as run (after `npm run build`, which exited 0):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/planner/ src/runner/ src/daemon/; echo "exit: $?"
+ Test Files  45 passed (45)
+      Tests  1265 passed (1265)
+exit: 0
+
+$ npx vitest run src/runner/replay/; echo "exit: $?"   # in place of npm run replay
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+exit: 0
+
+$ npx vitest run; echo "exit: $?"
+ Test Files  73 passed (73)
+      Tests  1847 passed (1847)
+exit: 0
+```
+
+- [x] Cases 1–10 pass, with red runs recorded (cases 2, 5, 6, 9 and 10 proved by mutation). **Pass.**
+- [x] The whole suite passes: 73 files, 1847 tests, exit 0. **Pass.**
+- `npm run replay` was not run (no model login in this container); `src/runner/replay/` passed in its place.
+
+Test files run at the end, by name: `src/planner/session.test.ts` 4, `src/planner/driver.test.ts` 9, `src/runner/driver.test.ts` 20, `src/daemon/poll.test.ts` 118, `src/commands/daemon.test.ts` 26 (177); then the whole suite as above.
+
+**What 49g must know.**
+
+- `PollDeps.planner` is optional, and every existing test builds the poll without one. Only `timone daemon` passes it.
+- The runner's driver now reads `waitsForPlanner` and `plannerReadComment` from `src/planner/driver.ts`, and `passedToRunner` from `src/planner/actions.ts`.
+- `timone status` can read a run that waits for the planner with `store.waitingForPlanner(project)` and a held one with `store.heldByPlanner(project)`; `run.planner.decision.waitsFor` names what it waits for.
+- A daemon stopped while a planner session runs loses it; the run still waits in the ledger, and the next daemon's first cycle starts a new one (case 10). A comment that session was reading stays noted as read, so it is not given to the new session.

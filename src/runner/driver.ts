@@ -17,6 +17,8 @@ import type {
   StepSessionInput,
 } from "../daemon/step-session.js";
 import { namedPeople, ticketLimitOf, type Manifest, type ProjectConfig } from "../manifest.js";
+import { passedToRunner } from "../planner/actions.js";
+import { plannerReadComment, waitsForPlanner } from "../planner/driver.js";
 import {
   piecesFailureIn,
   STOPPED_BY_RUNNER,
@@ -282,6 +284,37 @@ function placeGivenNotice(givenAt: string, runId: string): string {
   return `place given at ${givenAt}, run ${runId}`;
 }
 
+/**
+ * What the runner is told when the planner let its run build
+ * ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+ * D2): its reason, and the named person's comment it decided on, if any. A
+ * hold does not wake the runner.
+ */
+export function plannerLetBuildEvent(
+  reason: string,
+  onComment?: { by: string; at: string },
+): string {
+  const on = onComment === undefined ? "" : `, on ${onComment.by}'s comment at ${onComment.at}`;
+  const why = reason.trim();
+  return `The planner let this ticket be built now${on}: ${why}${/[.!?]$/.test(why) ? "" : "."}`;
+}
+
+/**
+ * The notice that says run `runId` was told of the planner's let-build
+ * decision taken at `at`. One per decision.
+ */
+function plannerLetBuildNotice(at: string, runId: string): string {
+  return `planner let build at ${at}, run ${runId}`;
+}
+
+/**
+ * The notice that says the runner was told of a named person's comment the
+ * planner passed to it (ADR-0065 D5), so it is told once.
+ */
+function passedCommentNotice(commentAt: string, runId: string): string {
+  return `passed comment at ${commentAt} told, run ${runId}`;
+}
+
 /** The statuses of a run the driver looks at: one just picked up, one waiting, one working. */
 const UNSETTLED: readonly RunStatus[] = ["picked-up", "active", "parked"];
 
@@ -456,17 +489,6 @@ export class RunnerDriver {
     const ticket = await threads.ticket();
     const pull = run.pr === undefined ? undefined : await threads.pullRequest(run.pr);
 
-    const said = this.newComments(run, project, entries, [
-      ["ticket", "ticket", ticket.comments],
-      ...(pull === undefined
-        ? []
-        : [["pull request", `pull-request #${pull.number}`, pull.comments] as const]),
-    ]);
-    const events: string[] = said.map(commentEvent);
-    // Each fact is told once: its notice is written when the wake that
-    // carries it is asked for, and a fact already noticed is not told again.
-    const notices: string[] = [];
-    let check: Check | undefined;
     // **A held ticket wakes on a named person's words and nothing else.** The
     // hold is how the runner, or a person, says "wait for someone": a fact
     // arriving meanwhile is not someone. It is not lost either — it is not
@@ -477,6 +499,29 @@ export class RunnerDriver {
     // keep every new step's run from ever being woken.
     const held = ticket.labels.includes(HELD_LABEL) && !cycle.isStep(run.ticket);
     const overLimit = isOverLimit(entries, ticketLimitOf(config));
+    // **While the run waits for the planner, a named person's comment on its
+    // ticket is the planner's to read** (ADR-0065 D5), when the planner would
+    // look at it: not held, not over its limit. The ticket's comments are
+    // then neither told nor marked read, so none is lost; the runner is told
+    // only those the planner passed to it.
+    const toPlanner = waitsForPlanner(run) && !held && !overLimit;
+    const said = this.newComments(run, project, entries, [
+      ...(toPlanner ? [] : [["ticket", "ticket", ticket.comments] as const]),
+      ...(pull === undefined
+        ? []
+        : [["pull request", `pull-request #${pull.number}`, pull.comments] as const]),
+    ]);
+    const events: string[] = said.map(commentEvent);
+    // Each fact is told once: its notice is written when the wake that
+    // carries it is asked for, and a fact already noticed is not told again.
+    const notices: string[] = [];
+    if (toPlanner) {
+      for (const comment of this.passedComments(run, project, entries, ticket.comments)) {
+        events.push(commentEvent(comment));
+        notices.push(passedCommentNotice(comment.createdAt, run.id));
+      }
+    }
+    let check: Check | undefined;
     // ✏ 2026-10-04: a place given to a run this look will not wake for it —
     // held, or over its limit — goes to the next waiting run (ADR-0063 D3).
     // Kept, it would stay taken until the hold came off or more spending was
@@ -511,6 +556,16 @@ export class RunnerDriver {
         const about = placeGivenNotice(givenAt, run.id);
         if (!noticed(entries, about)) {
           events.push(PLACE_GIVEN_EVENT);
+          notices.push(about);
+        }
+      }
+      // The planner's let-build decision is told once (ADR-0065 D2): the
+      // runner was refused the build until it came.
+      const decision = run.planner?.decision;
+      if (decision?.kind === "build") {
+        const about = plannerLetBuildNotice(decision.at, run.id);
+        if (!noticed(entries, about)) {
+          events.push(plannerLetBuildEvent(decision.reason, decision.onComment));
           notices.push(about);
         }
       }
@@ -704,10 +759,43 @@ export class RunnerDriver {
       });
       for (const comment of fresh) {
         if (comment.fromTimone || !isNamedPerson(people, comment.author)) continue;
+        // A comment on the ticket that the planner read was the planner's
+        // to answer while the run waited for it (ADR-0065 D5); one it passed
+        // on was told then.
+        if (where === "ticket" && noticed(entries, plannerReadComment(comment.createdAt))) continue;
         said.push({ where, author: comment.author, body: comment.body, createdAt: comment.createdAt });
       }
     }
     return said.sort((one, other) => ms(one.createdAt) - ms(other.createdAt));
+  }
+
+  /**
+   * The named persons' comments on `run`'s ticket that the planner passed to
+   * the runner (ADR-0065 D5) and that the runner has not been told of yet,
+   * oldest first.
+   */
+  private passedComments(
+    run: Run,
+    project: TicketingProject,
+    entries: readonly RecordEntry[],
+    comments: TicketThread["comments"],
+  ): NamedComment[] {
+    const people = namedPeople(this.deps.manifest, project.name);
+    return comments
+      .filter(
+        (comment) =>
+          !comment.fromTimone &&
+          isNamedPerson(people, comment.author) &&
+          noticed(entries, passedToRunner(comment.createdAt)) &&
+          !noticed(entries, passedCommentNotice(comment.createdAt, run.id)),
+      )
+      .map((comment): NamedComment => ({
+        where: "ticket",
+        author: comment.author,
+        body: comment.body,
+        createdAt: comment.createdAt,
+      }))
+      .sort((one, other) => ms(one.createdAt) - ms(other.createdAt));
   }
 
   /**
