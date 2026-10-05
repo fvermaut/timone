@@ -33,6 +33,8 @@ import {
 import type { Holder } from "../daemon/holder.js";
 import { intervalTicker } from "../daemon/session.js";
 import { DEFAULT_POLL_INTERVAL_SECONDS } from "../daemon/poll.js";
+import { RunningSteps } from "../runner/actions.js";
+import { RunnerDriver } from "../runner/driver.js";
 import {
   parseTarget,
   resolveTakeover,
@@ -260,19 +262,37 @@ describe("parseTarget", () => {
 
 describe("resolveTakeover", () => {
 
-  it("says what it is doing instead when the ticket is being worked on", async () => {
+  // ✏ 2026-10-05 (ADR-0067 D1): a run whose step runs is no longer answered
+  // "I'm working on … right now". The takeover waits for the step to end, so
+  // the answer names the step it waits for.
+  it("waits for the step that runs on the ticket, and names it", async () => {
     const store = newStore();
     const { run } = store.register("scratch-app", 6);
-    store.activate(run.id, "session-1");
+    store.setStage(run.id, "execution");
+    const active = store.activate(run.id, "session-1");
 
     const resolution = await resolveTakeover(
       { project: "scratch-app", ticket: 6 },
       { manifest, store, adapter: fakeAdapter().adapter },
     );
 
-    expect(resolution.kind).toBe("nothing-to-do");
-    expect(resolution).toMatchObject({
-      message: expect.stringMatching(/working on .* right now/),
+    expect(resolution).toEqual({ kind: "wait-for-step", run: active, step: "building" });
+  });
+
+  it("says it is working on a ticket just picked up, where no step runs yet", async () => {
+    const store = newStore();
+    store.register("scratch-app", 6);
+
+    const resolution = await resolveTakeover(
+      { project: "scratch-app", ticket: 6 },
+      { manifest, store, adapter: fakeAdapter().adapter },
+    );
+
+    expect(resolution).toEqual({
+      kind: "nothing-to-do",
+      message:
+        "I'm working on scratch-app #6 right now. Anything I need from you " +
+        "will land on the ticket.",
     });
   });
 
@@ -337,7 +357,7 @@ describe("resolveTakeover", () => {
     });
     // Abandoned, not broken, and never parked: the words a person reads must
     // not hand them a fault to look for, nor a chunk to count.
-    const said = resolution.kind === "open-session" ? "" : resolution.message;
+    const said = resolution.kind === "nothing-to-do" ? resolution.message : "";
     // ✏ 2026-10-02: a cancel holds every ticket since 40u, step or not, and
     // the cycle passes a held ticket over. So reopening and marking it starts
     // nothing: the way back is to reopen it and take the hold off. Until then
@@ -1787,5 +1807,111 @@ describe("a takeover takes no place on its project (ADR-0063 D5)", () => {
     expect(eightDuring?.status).toBe("active");
     expect(store.placeHolders("scratch-app").map((run) => run.id)).toEqual([eight.id]);
     expect(store.get(six.id)?.status).toBe("parked");
+  });
+});
+
+describe("a takeover typed while the ticket's step runs (ADR-0067)", () => {
+  it("says which step it waits for, and opens the session when the step ends, before the runner is woken (PRD-09.R4 clauses 1 and 2)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-wait-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-10-05T10:00:00Z" });
+    const { run: registered } = store.register("scratch-app", 6);
+    store.setStage(registered.id, "execution");
+    const run = store.activate(registered.id, "step-session-4");
+    const daemon = acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    expect(daemon.ok).toBe(true);
+
+    const { adapter } = fakeAdapter();
+    const wakes: string[][] = [];
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest,
+      root: dir,
+      sessionsFor: () => ({
+        async wake(_run, events) {
+          wakes.push([...events]);
+        },
+        stop() {},
+      }),
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: async () => {
+        throw new Error("no step starts in this test");
+      },
+      timonePin: async () => undefined,
+      clock: () => "2026-10-05T10:00:00Z",
+      log: () => {},
+    });
+
+    // The daemon: its first look applies the request as `applyRequest`
+    // does, and three looks later the building step ends.
+    let looks = 0;
+    let stepEnded = false;
+    const daemonLook = async (): Promise<void> => {
+      looks += 1;
+      for (const request of pending(statePath).requests) {
+        if (request.body.kind === "claim-takeover" && request.body.holder !== undefined) {
+          store.waitForStep(run.id, request.body.holder);
+        }
+        settle(request.path);
+      }
+      if (looks === 4) {
+        await driver.stepEnded(run.id, "execution", {
+          outcome: { sessionId: "step-session-4", ok: true },
+        });
+        stepEnded = true;
+      }
+    };
+
+    let atLaunch: { stepEnded: boolean; wakes: number; run: Run | undefined } | undefined;
+    const { launcher, calls } = fakeLauncher({
+      onRun: () => {
+        atLaunch = { stepEnded, wakes: wakes.length, run: store.get(run.id) };
+      },
+    });
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: dir,
+      wait: { intervalMs: 1, boundMs: 100, sleep: daemonLook },
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+    await driver.drain();
+
+    expect(code).toBe(0);
+    expect(
+      said.filter((line) =>
+        line.startsWith("Waiting for the step running on scratch-app #6"),
+      ),
+    ).toEqual([
+      "Waiting for the step running on scratch-app #6 (building) to end, then " +
+        "I'll open the session here — press Ctrl-C to stop waiting, and " +
+        "nothing changes.",
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(atLaunch?.stepEnded).toBe(true);
+    expect(atLaunch?.wakes).toBe(0);
+    expect(atLaunch?.run).toMatchObject({
+      status: "active",
+      takenOver: true,
+      holder: { command: "timone takeover scratch-app#6" },
+    });
+    expect(wakes).toEqual([]);
+    expect(
+      pending(statePath).requests.map((request) => request.body.kind),
+    ).toEqual(["release-takeover"]);
   });
 });

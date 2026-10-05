@@ -14,7 +14,7 @@ import {
 import { loadManifest, namedPeople, placesIn, type Manifest } from "../manifest.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
-import { wayfinderStage } from "../daemon/pipeline.js";
+import { stageLabel, wayfinderStage } from "../daemon/pipeline.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
 import { acquireStateLock } from "../daemon/lock.js";
 import { takeHold, type Holder } from "../daemon/holder.js";
@@ -23,6 +23,7 @@ import {
   settle as settleRequest,
   waitUntilSettled,
   WATCH_BOUND_MS,
+  WATCH_INTERVAL_MS,
   type WaitOptions,
 } from "../daemon/requests.js";
 import { intervalTicker, waitOf, type Ticker } from "../daemon/session.js";
@@ -49,6 +50,13 @@ export type TakeoverResolution =
    * between steps: the ledger loads every old kind of wait as the runner's.
    */
   | { kind: "open-session"; run: Run }
+  /**
+   * A run whose step is running: the takeover waits for the step to end, and
+   * the step's end hands the run to the terminal
+   * ([ADR-0067](../../doc/adr/0067-a-takeover-typed-while-a-step-runs-is-written-on-the-run-and-takes-it-when-the-step-ends.md)).
+   * `step` names the step in the human's words.
+   */
+  | { kind: "wait-for-step"; run: Run; step: string }
   /** Nothing to take over; the message says what *is* happening instead. */
   | { kind: "nothing-to-do"; message: string };
 
@@ -184,14 +192,16 @@ async function findTakeover(
   }
 
   switch (run.status) {
-    case "picked-up":
     case "active":
-      return {
-        kind: "nothing-to-do",
-        message:
-          `I'm working on ${target.project} #${target.ticket} right now. ` +
-          "Anything I need from you will land on the ticket.",
-      };
+      // ✏ 2026-10-05 (ADR-0067 D1): a step runs on it, so the takeover waits
+      // for that step to end rather than refusing.
+      if (run.takenOver !== true) {
+        return { kind: "wait-for-step", run, step: runningStepOf(run) };
+      }
+      return { kind: "nothing-to-do", message: workingOnMessage(target) };
+    case "picked-up":
+      // No step runs on it yet, and the runner has not looked at it.
+      return { kind: "nothing-to-do", message: workingOnMessage(target) };
     case "parked":
       // ✏ 2026-09-30: **every parked run waits for the runner.** The ledger
       // loads a run parked on an older kind of wait — a gate, a review, a
@@ -214,6 +224,31 @@ async function findTakeover(
       return { kind: "nothing-to-do", message: settledMessage(target, run, store) };
     }
   }
+}
+
+/** The step that runs on `run`, in the human's words. */
+function runningStepOf(run: Run): string {
+  return run.stage === undefined ? "the step that is running" : stageLabel(run.stage);
+}
+
+/** What a takeover of a run the machine is working on says. */
+function workingOnMessage(target: TakeoverTarget): string {
+  return (
+    `I'm working on ${target.project} #${target.ticket} right now. ` +
+    "Anything I need from you will land on the ticket."
+  );
+}
+
+/**
+ * Why a takeover with the ledger in hand opens nothing. A run whose step
+ * runs is still refused with the words it always got there, since no daemon
+ * runs to end the step.
+ */
+function refusalOf(
+  target: TakeoverTarget,
+  resolution: Exclude<TakeoverResolution, { kind: "open-session" }>,
+): string {
+  return resolution.kind === "wait-for-step" ? workingOnMessage(target) : resolution.message;
 }
 
 /** What a takeover of a closed ticket whose latest run is done or cancelled says. */
@@ -478,8 +513,8 @@ async function claimForTakeover(
   if (acquired.ok) {
     try {
       const resolution = await resolveTakeover(target, deps);
-      if (resolution.kind === "nothing-to-do") {
-        log(resolution.message);
+      if (resolution.kind !== "open-session") {
+        log(refusalOf(target, resolution));
         return { kind: "no", code: 1 };
       }
       return {
@@ -501,6 +536,9 @@ async function claimForTakeover(
   // against R14. ✏ 2026-10-02 (41m): working out the answer writes nothing
   // here. A new run for an open ticket whose latest run is settled is a
   // write, so the daemon makes it, from the request.
+  // ✏ 2026-10-05 (ADR-0067 D1): a run whose step runs is not refused here.
+  // The request is left as for any other, and the daemon writes this
+  // terminal on the run as the one that waits for the step.
   if (store.runsForTicket(target.project, target.ticket).length > 0) {
     const found = await findTakeover(target, deps);
     if (found.kind === "nothing-to-do") {
@@ -546,6 +584,16 @@ async function claimForTakeover(
   }
 
   const run = store.runsForTicket(target.project, target.ticket).at(-1);
+  // ✏ 2026-10-05 (ADR-0067 D1, D3): the daemon wrote this terminal on the run
+  // as the one that waits for its step. The step's end hands the run over.
+  if (run?.waitingTerminal?.token === hold.token) {
+    log(
+      `Waiting for the step running on ${name} (${runningStepOf(run)}) to end, ` +
+        "then I'll open the session here — press Ctrl-C to stop waiting, and " +
+        "nothing changes.",
+    );
+    return waitForHandOver(target, hold, deps);
+  }
   if (run === undefined || run.status !== "active") {
     log(
       `The daemon read the request and did not hand ${name} over — it is ` +
@@ -554,6 +602,28 @@ async function claimForTakeover(
     return { kind: "no", code: 1 };
   }
   return { kind: "claimed", run };
+}
+
+/**
+ * Watch the ledger until the run is claimed with this terminal's own token,
+ * which the step's end does (ADR-0067 D2). No time limit: a step can run for
+ * an hour (D3).
+ */
+async function waitForHandOver(
+  target: TakeoverTarget,
+  hold: Holder,
+  deps: TakeoverDeps,
+): Promise<Claim> {
+  const intervalMs = deps.wait?.intervalMs ?? WATCH_INTERVAL_MS;
+  const sleep =
+    deps.wait?.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
+  for (;;) {
+    const run = deps.store.runsForTicket(target.project, target.ticket).at(-1);
+    if (run?.status === "active" && run.holder?.token === hold.token) {
+      return { kind: "claimed", run };
+    }
+    await sleep(intervalMs);
+  }
 }
 
 /**
@@ -774,8 +844,8 @@ async function takeover(
   }
 
   const resolution = await resolveTakeover(target, deps);
-  if (resolution.kind === "nothing-to-do") {
-    log(resolution.message);
+  if (resolution.kind !== "open-session") {
+    log(refusalOf(target, resolution));
     return 1;
   }
   return openSession(target, resolution.run, deps, log);

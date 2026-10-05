@@ -20,11 +20,12 @@ import {
 } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import { breakdownPath, renderBreakdown } from "../daemon/breakdown.js";
+import type { Holder } from "../daemon/holder.js";
 import { RunStore, type Run } from "../daemon/runs.js";
 import { HELD_LABEL } from "../daemon/steps.js";
 import type { StepResult, StepSessionInput } from "../daemon/step-session.js";
 import { RunningSteps, runnerActions } from "./actions.js";
-import { RunnerDriver, type RunnerDriverDeps } from "./driver.js";
+import { RunnerDriver, TAKEOVER_ENDED_EVENT, type RunnerDriverDeps } from "./driver.js";
 import { appendEntry, readRecord, type RecordEntry } from "./record.js";
 import { wakeRunner, type RunQuery, type WakeOptions } from "./session.js";
 
@@ -1576,5 +1577,144 @@ describe("RunnerDriver — when a step ends on a branch that carries the update'
         'The README said "recieve"; it now says "receive".',
       ].join("\n"),
     ]);
+  });
+});
+
+describe("RunnerDriver — a step ends on a run a terminal waits for (ADR-0067 D2)", () => {
+  /** The terminal of `timone takeover scratch-app#12`, as it records itself. */
+  const terminal: Holder = {
+    token: "token-terminal-4213",
+    command: "timone takeover scratch-app#12",
+    pid: 4213,
+    since: "2026-10-05T09:00:00Z",
+    observedAt: "2026-10-05T09:00:00Z",
+    host: "fvermaut-mac",
+  };
+
+  /**
+   * The chore's run on its branch with its building step running, as the
+   * runner's actions leave it, and a driver over it whose wakes and log the
+   * test reads. The step's end is written in the record, as `watchStep`
+   * writes it before it tells the driver.
+   */
+  function buildingChore(): {
+    store: RunStore;
+    run: Run;
+    driver: RunnerDriver;
+    wakes: AskedWake[];
+    descriptions: string[];
+    logged: string[];
+  } {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-"));
+    tempDirs.push(root);
+    const store = RunStore.open(join(root, ".timone", "state.json"), {
+      now: () => "2026-10-05T10:00:00Z",
+    });
+    const { run: registered } = store.register("scratch-app", 12);
+    store.claimBranch(registered.id, BRANCH);
+    store.setStage(registered.id, "execution");
+    const run = store.activate(registered.id, "step-session-4");
+    appendEntry(root, "scratch-app", 12, {
+      kind: "step-started",
+      at: "2026-10-05T09:30:00Z",
+      runId: run.id,
+      stage: "execution",
+      sessionId: "step-session-4",
+    });
+    appendEntry(root, "scratch-app", 12, {
+      kind: "step-ended",
+      at: "2026-10-05T10:00:00Z",
+      runId: run.id,
+      stage: "execution",
+      sessionId: "step-session-4",
+      ok: true,
+      costUsd: 2,
+    });
+    const { adapter, descriptions } = forge("## What changed");
+    const { sessions, wakes } = fakeWakes();
+    const logged: string[] = [];
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: async () => {
+        throw new Error("no step starts in this test");
+      },
+      timonePin: async () => undefined,
+      clock: () => "2026-10-05T10:00:00Z",
+      log: (line) => logged.push(line),
+    });
+    return { store, run, driver, wakes, descriptions, logged };
+  }
+
+  it("hands the run to the waiting terminal, brings the description up to date, and wakes nobody", async () => {
+    const { store, run, driver, wakes, descriptions, logged } = buildingChore();
+    store.waitForStep(run.id, terminal);
+
+    await driver.stepEnded(run.id, "execution", {
+      outcome: { sessionId: "step-session-4", ok: true },
+    });
+    await driver.drain();
+
+    expect(store.get(run.id)).toMatchObject({
+      status: "active",
+      takenOver: true,
+      holder: terminal,
+      wait: { on: "the runner to look at what the step did", kind: "runner" },
+    });
+    expect(store.get(run.id)?.waitingTerminal).toBeUndefined();
+    expect(wakes).toEqual([]);
+    expect(descriptions).toHaveLength(1);
+    expect(logged).toContain(
+      "runner scratch-app#12/1 — the step ended and the run goes to the terminal that waited for it",
+    );
+  });
+
+  it("tells the runner of the step's end, then of the session's end, when the terminal session ends", async () => {
+    const { store, run, driver, wakes } = buildingChore();
+    store.waitForStep(run.id, terminal);
+    await driver.stepEnded(run.id, "execution", {
+      outcome: { sessionId: "step-session-4", ok: true },
+    });
+    await driver.drain();
+
+    driver.terminalEnded(store.get(run.id)!);
+    await driver.drain();
+
+    expect(wakes).toEqual([
+      {
+        runId: run.id,
+        events: ["The step building ended: it succeeded.", TAKEOVER_ENDED_EVENT],
+        options: {},
+      },
+    ]);
+    expect(store.get(run.id)).toMatchObject({
+      status: "parked",
+      wait: { on: "the runner to look at what the step did", kind: "runner" },
+    });
+  });
+
+  it("tells the runner only of the session's end when the run was put on another wait meanwhile", async () => {
+    const { store, run, driver, wakes } = buildingChore();
+    store.waitForStep(run.id, terminal);
+    await driver.stepEnded(run.id, "execution", {
+      outcome: { sessionId: "step-session-4", ok: true },
+    });
+    await driver.drain();
+    // The runner looked at the step's end, and now waits for a person.
+    store.park(run.id, {
+      waitingOn: "fvermaut to answer the question on the ticket",
+      kind: "runner",
+      resolvableBy: ["execution"],
+    });
+
+    driver.terminalEnded(store.get(run.id)!);
+    await driver.drain();
+
+    expect(wakes).toEqual([{ runId: run.id, events: [TAKEOVER_ENDED_EVENT], options: {} }]);
   });
 });

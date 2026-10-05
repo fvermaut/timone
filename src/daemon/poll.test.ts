@@ -2139,7 +2139,11 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     });
   });
 
-  it("refuses to hand over a ticket whose own step is running, in the words the command uses (R13 clause 3)", async () => {
+  // ✏ 2026-10-05 (ADR-0067 D1): this was refused with "I'm working on
+  // scratch-app #6 right now." A takeover typed while the ticket's own step
+  // runs now waits for the step to end: the daemon writes the terminal on the
+  // run and settles the request, and the step goes on.
+  it("writes the asking terminal on a ticket whose own step is running, and leaves the step alone (R13 clause 3, ADR-0067 D1)", async () => {
     const { store, statePath } = newStoreAt();
     const manifest = manifestWith("scratch-app");
     const { run: six } = store.register("scratch-app", 6);
@@ -2150,8 +2154,20 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
       session: { sessionId: "step-session-6", completed: new Promise(() => {}), stop() {} },
       startedAt: "2026-08-16T12:00:00Z",
     });
-    const sixBefore = store.get(six.id);
-    enqueue(statePath, { kind: "claim-takeover", project: "scratch-app", ticket: 6 });
+    const terminal: Holder = {
+      token: "token-terminal-9100",
+      command: "timone takeover scratch-app#6",
+      pid: 9100,
+      since: "2026-08-16T12:05:00Z",
+      observedAt: "2026-08-16T12:05:00Z",
+      host: "fvermaut-mac",
+    };
+    enqueue(statePath, {
+      kind: "claim-takeover",
+      project: "scratch-app",
+      ticket: 6,
+      holder: terminal,
+    });
     const { adapter } = runnerAdapter([ticket(6)]);
     const { sessions } = fakeWakes();
     const { runner } = runnerFor({ store, adapter, manifest, sessions, running });
@@ -2159,13 +2175,15 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     const result = await pollOnce({ manifest, store, adapter, statePath, runner });
     await runner.drain();
 
-    expect(result.applied).toEqual([]);
-    expect(result.errors).toEqual([
-      expect.stringMatching(
-        /^could not apply claim-takeover scratch-app#6 asked by .*: I'm working on scratch-app #6 right now\. Anything I need from you will land on the ticket\.$/,
-      ),
-    ]);
-    expect(store.get(six.id)).toEqual(sixBefore);
+    expect(result.applied).toEqual(["claim-takeover scratch-app#6"]);
+    expect(result.errors).toEqual([]);
+    expect(pending(statePath).requests).toEqual([]);
+    expect(store.get(six.id)).toMatchObject({
+      status: "active",
+      sessionId: "step-session-6",
+      waitingTerminal: terminal,
+    });
+    expect(store.get(six.id)?.takenOver).toBeUndefined();
   });
 });
 
