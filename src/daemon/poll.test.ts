@@ -2237,6 +2237,42 @@ describe("the frontier decides which step is taken", () => {
   });
 
   /**
+   * PRD-07.R4 clauses 3 and 4, ADR-0065 D6: every eligible step is picked up
+   * in one cycle, not only the first. Whether each then builds is for the
+   * places and the planner; registering the run is the part decided here.
+   */
+  it("opens a run on each of steps 2 and 3 when both are eligible, and none on a step blocked by an open one", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const closedStep1 = {
+      number: 51,
+      url: "https://github.com/fvermaut/scratch-app/issues/51",
+      open: false,
+    };
+    const openStep2 = {
+      number: 52,
+      url: "https://github.com/fvermaut/scratch-app/issues/52",
+      open: true,
+    };
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { blockedBy: [closedStep1] },
+      { blockedBy: [closedStep1] },
+      { blockedBy: [openStep2] },
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, runner });
+
+    expect(store.runsForTicket("alpha", 52)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 53)).toHaveLength(1);
+    expect(store.runsForTicket("alpha", 54)).toEqual([]);
+    expect(store.runsForTicket("alpha", 51)).toEqual([]);
+  });
+
+  /**
    * The map ticket is marked — it is the ticket the human filed — and it must
    * never get a run of its own, or the daemon works the initiative and its
    * steps at the same time.
@@ -2254,11 +2290,30 @@ describe("the frontier decides which step is taken", () => {
     expect(store.runsForTicket("alpha", MAP)).toEqual([]);
   });
 
-  /** Fourteen marked steps must not become fourteen runs at once. */
-  it("opens one run, not one per step", async () => {
+  /**
+   * Fourteen marked steps that each wait for the one before must not become
+   * fourteen runs at once: the mark alone does not decide. ✏ Phase 49: the
+   * steps now wait for each other, because every eligible step is picked up
+   * (PRD-07.R4), and fourteen unblocked steps are fourteen eligible ones.
+   */
+  it("opens one run, not one per step, when each step waits for the one before", async () => {
     const store = newStore();
     const manifest = manifestWith("alpha");
-    const { tickets, steps } = initiative(Array.from({ length: 14 }, () => ({})));
+    const { tickets, steps } = initiative(
+      Array.from({ length: 14 }, (_, index) =>
+        index === 0
+          ? {}
+          : {
+              blockedBy: [
+                {
+                  number: 50 + index,
+                  url: `https://github.com/fvermaut/scratch-app/issues/${50 + index}`,
+                  open: true,
+                },
+              ],
+            },
+      ),
+    );
     const { adapter } = trackerFor(tickets, steps);
     const { sessions } = fakeWakes();
     const { runner } = runnerFor({ store, adapter, manifest, sessions });
@@ -2405,6 +2460,34 @@ describe("the frontier decides which step is taken", () => {
       steps: [51, 52, 53],
       done: 1,
       next: 52,
+    });
+  });
+
+  /**
+   * Phase 49: several steps may be picked up at once, but `timone status`
+   * still names one as next, and it is the first eligible one.
+   */
+  it("still names the first eligible step as next when two steps are eligible", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const { tickets, steps } = initiative([
+      { state: "closed" },
+      { labels: ["timone", HELD_LABEL] },
+      {},
+      {},
+    ]);
+    const { adapter } = trackerFor(tickets, steps);
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, runner });
+
+    expect(store.initiativeFor("alpha", 53)).toMatchObject({
+      initiative: MAP,
+      steps: [51, 52, 53, 54],
+      done: 1,
+      next: 53,
+      nextTitle: "3. Piece 3",
     });
   });
 
@@ -2709,7 +2792,17 @@ describe("a bug filed during a step and the next step are both picked up", () =>
     });
     store.register("alpha", 8);
 
-    const steps = [aStep(51), aStep(52)];
+    // ✏ Phase 49: step 52 waits for step 51, as piece 2 of a breakdown waits
+    // for piece 1. Every eligible step is picked up now (PRD-07.R4), so
+    // without the wait step 52 would be taken up beside step 51 at once.
+    const steps = [
+      aStep(51),
+      aStep(52, {
+        blockedBy: [
+          { number: 51, url: "https://github.com/fvermaut/scratch-app/issues/51", open: true },
+        ],
+      }),
+    ];
     const tickets = [
       ticket(MAP, { labels: ["timone", MAP_LABEL] }),
       ticket(51),
@@ -2736,6 +2829,7 @@ describe("a bug filed during a step and the next step are both picked up", () =>
         return steps.map((s) => ({
           ...s,
           state: closed.has(s.number) ? "closed" : s.state,
+          blockedBy: s.blockedBy.map((d) => ({ ...d, open: !closed.has(d.number) })),
         }));
       },
       async applyLabel(): Promise<void> {},

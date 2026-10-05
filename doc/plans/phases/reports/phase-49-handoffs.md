@@ -89,3 +89,80 @@ Test files run at the end, by name (after `npm run build`):
 - `src/runner/replay/recording.ts` opens its store with no `placesOf`, so the replay now runs with 2 places. Its cases passed in the harness test.
 - Wording not in this slice's files still speaks of one place: the runner's rule in `src/runner/brief.ts` line 134 ("A step needs the project's place…") and the fact label `- The project's place:`; `CONTEXT.md` **Place** ("Every project has one place until the number can be set in `timone.yaml`").
 - `RunStore.placesOf(project)` is public and is what any later code should ask for the number.
+
+## 49b — Every open, unblocked step of an initiative may be picked up
+
+**Built.** The daemon now picks up every step ticket of an initiative that is open, not held, not taken by a person, and not blocked (by an open step or by a dependency list that came back incomplete). Before, it picked up only the first such step. A step blocked by a step that is still open is still not picked up. `timone status` still names one step as next: the first eligible one, as before.
+
+**Files touched.**
+
+- `src/daemon/steps.ts` — `nextStep(steps): Step | undefined` is replaced by `eligibleSteps(steps): Step[]`, every step meeting the four conditions, in the listing's order. The doc comment says why "the first" went (PRD-07.R4, ADR-0065 D6) and keeps what it said about cycles and incomplete dependency lists. The module comment now says "which steps".
+- `src/daemon/poll.ts` — `Frontier.isNext` is renamed `isEligible`. `surveyInitiatives` adds every eligible step to the set; `rememberInitiative` still records the first eligible step as `next` and `nextTitle`. The comment above the frontier skip in `pollProject` is corrected (it said the skip stops fourteen steps becoming fourteen runs), and the comment on the hold skip no longer names `nextStep`.
+- `src/daemon/steps.test.ts` — cases 1 and 2 added; the old `nextStep` cases renamed and rewritten against `eligibleSteps` (case 3).
+- `src/daemon/poll.test.ts` — cases 4 and 5 added; two existing cases changed (see below).
+- `src/daemon/chunk-zero.test.ts` — imports `eligibleSteps` in place of `nextStep`; the case "leaves piece 1's step ticket free to be taken, with nobody assigned and nothing held (R4)" now asserts `expect(eligibleSteps(steps).map((step) => step.number)).toContain(11)`. Nothing else. Granted by a plan amendment.
+
+**Decisions taken inside the slice.**
+
+- **Two existing poll cases encoded the old rule, and were changed so they keep their purpose.** "opens one run, not one per step" used fourteen unblocked steps; under the new rule all fourteen are eligible. Its fourteen steps now each wait for the one before, so the case still proves the mark alone does not decide. "a bug filed during a step and the next step are both picked up" had steps 51 and 52 with no blocker; step 52 would now be taken up in the first cycle, beside step 51. Step 52 now waits for step 51, and the fake tracker reports that blocker closed once step 51 is closed. Both carry a ✏ note saying why.
+- **Case 5's test uses steps 3 and 4 as the two eligible ones** (step 1 closed, step 2 held), so `next` being the first eligible step is not the same as the first step in the list.
+- Every old `nextStep` case was kept and renamed, not only the four the plan names, because each still checks one condition of the rule. "takes the first when every step is open" now expects all three.
+- **PLAN PROBLEM, resolved by a plan amendment granting the file.** `src/daemon/chunk-zero.test.ts` also used `nextStep` (the import on line 26 and one assertion on line 446), and the plan did not list it. With `nextStep` gone, `tsc --noEmit` exited 2, the grep found those two lines, and the case "leaves piece 1's step ticket free to be taken, with nobody assigned and nothing held (R4)" failed with `TypeError: (0 , nextStep) is not a function`. The amended plan grants the file for this change only: the import now names `eligibleSteps`, and the case asserts that the numbers of `eligibleSteps(steps)` include 11.
+
+**Validation evidence.**
+
+Per declared case:
+
+1. `steps.test.ts` › "eligibleSteps (PRD-07.R4, ADR-0065 D6)" › "makes steps 2 and 3 both eligible when each is blocked only by closed step 1 (clause 3)" — red: `TypeError: (0 , eligibleSteps) is not a function`; green once `eligibleSteps` filtered on the four conditions.
+2. "leaves step 3 out while step 2, which blocks it, is open (clause 4)" — true as soon as written (the filter already had the open-blocker condition). Mutation: replace `!s.blockedBy.some((d) => d.open)` with `true` → `AssertionError: expected [ 2, 3 ] to deeply equal [ 2 ]`; reverted, green.
+3. "eligibleSteps — the four conditions" (the old `nextStep` cases, renamed) — true before the rename, since `eligibleSteps` already existed. Mutations, each reverted:
+   - hold condition removed → "leaves out an open step the machine is holding": `expected [ 11, 12 ] to deeply equal [ 12 ]`;
+   - assignee condition removed → "leaves out an open step a person has taken": `expected [ 11, 12 ] to deeply equal [ 12 ]`;
+   - incomplete-list condition removed → "leaves out a step whose dependency list came back incomplete": `expected [ 11, 12 ] to deeply equal [ 12 ]`;
+   - open-blocker condition limited to numbers over 99 → "makes neither step eligible when two steps block each other, rather than looping": `expected [ 11, 12 ] to deeply equal []` (and the clause 4 case failed too).
+4. `poll.test.ts` › "the frontier decides which step is taken" › "opens a run on each of steps 2 and 3 when both are eligible, and none on a step blocked by an open one" — red, with `poll.ts` still taking only the first eligible step: `AssertionError: expected [] to have a length of 1 but got +0`; green after `surveyInitiatives` added every eligible step.
+5. "still names the first eligible step as next when two steps are eligible" — true as soon as written. Mutation: `const first = toTake[toTake.length - 1]` → `expected { project: 'alpha', …(7) } to match object { initiative: 7, …(4) }` with `next: 54, nextTitle: "4. Piece 4"` received; reverted, green.
+
+After case 4's change, the two old-rule poll cases went red as expected: `AssertionError: expected [ Array(14) ] to deeply equal [ 51 ]` and `AssertionError: expected [ { id: 'alpha#52/1', …(7) } ] to deeply equal []`. Green after the changes described above.
+
+The validation block, as run (after `npm run build`, and after the plan amendment):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/daemon/steps.test.ts src/daemon/poll.test.ts src/commands/status.test.ts; echo "exit: $?"
+ Test Files  3 passed (3)
+      Tests  178 passed (178)
+exit: 0
+
+$ grep -rn "nextStep" src --include=*.ts | grep -vE '^\S+:[0-9]+:\s*(//|\*)'; echo "exit: $? (expected 1)"
+exit: 1 (expected 1)
+
+$ npx vitest run src/daemon/chunk-zero.test.ts; echo "exit: $?"
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+exit: 0
+```
+
+Before the amendment, `tsc` exited 2 and the grep found the two lines in `src/daemon/chunk-zero.test.ts`.
+
+- [x] Cases 1–5 pass, with red runs recorded (cases 2, 3 and 5 proved by mutation). **Pass.**
+- `tsc --noEmit` exits 0. **Pass.**
+- grep finds no `nextStep` outside comments. **Pass.**
+
+Test files run at the end, by name (after `npm run build`):
+
+- `src/daemon/steps.test.ts` — 15 passed.
+- `src/daemon/poll.test.ts` — 117 passed.
+- `src/commands/` — 223 passed (`status.test.ts`, `daemon.test.ts`, `takeover.test.ts`, `cancel.test.ts`, `guardrails.test.ts` among them).
+- `src/daemon/chunk-zero.test.ts` — 14 passed (after the plan amendment; before it, 13 passed and 1 failed with `TypeError: (0 , nextStep) is not a function`).
+- `src/runner/actions.test.ts` (its `endRun` cases included) — 63 passed. `src/runner/driver.test.ts` — 16 passed. `src/runner/session.test.ts` — 26 passed. `src/runner/brief.test.ts` — 41 passed. `src/runner/tools.test.ts` — 4 passed.
+- `src/daemon/hooks.test.ts` — 76 passed. `src/daemon/runs.test.ts` (place-order cases included) — 148 passed.
+- `src/adapters/github-tickets.test.ts` — 80 passed. `src/guards/checkouts.test.ts` — 7 passed. `src/cli.test.ts` — 6 passed.
+- `src/runner/replay/harness.test.ts` — 3 passed. `npm run replay` was not run (no model login in this container).
+
+**What 49c must know.**
+
+- In one cycle, every eligible step of an initiative is now registered as a run. Each registered step gets the claim label as before. Nothing yet stops two of them building at once beyond the project's places; the planner (49d onward) is what decides that.
+- A breakdown's steps without `blocked by` relations now all start together. Step tickets opened by `openStepTickets` carry the waits the breakdown declares, so the order still holds when the breakdown writes it.

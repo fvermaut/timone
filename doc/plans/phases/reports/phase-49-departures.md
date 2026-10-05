@@ -22,3 +22,10 @@
 **Agreed:** 49a changes `src/manifest.test.ts`, `src/daemon/runs.test.ts` and `src/runner/session.test.ts`; case 3 says phase 47's one-place cases open their store with `placesOf: () => 1`.
 **Did instead:** the store helpers of `src/commands/status.test.ts`, `src/runner/actions.test.ts`, `src/runner/driver.test.ts` and `src/daemon/poll.test.ts` also open with `placesOf: () => 1`. The phase file grants these files to 49a, with a marked amendment.
 **Why:** phase 47's one-place cases are in those four files too. With two places by default, 14 of them failed. Case 3 already decides the change; only the file list left them out.
+
+## 2026-10-05 — timone#203, build
+
+**Kind:** plan step
+**Agreed:** 49b changes `src/daemon/steps.ts`, `src/daemon/poll.ts` and their two test files, and no code uses `nextStep` afterwards.
+**Did instead:** `src/daemon/chunk-zero.test.ts` also changed: its one case that called `nextStep` now checks that step 11 is among `eligibleSteps`. The phase file grants this file to 49b, with a marked amendment.
+**Why:** that test file imported `nextStep`, so the type check failed and the plan's own grep found it. The case still checks what it checked: piece 1's step ticket is free to be taken.

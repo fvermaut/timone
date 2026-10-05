@@ -23,7 +23,7 @@ import {
   type ChunkZeroDeps,
 } from "./chunk-zero.js";
 import { RunStore, type Run } from "./runs.js";
-import { nextStep } from "./steps.js";
+import { eligibleSteps } from "./steps.js";
 
 const PROJECT: TicketingProject = {
   name: "ivtrends",
@@ -443,7 +443,7 @@ describe("openStepTickets names the project's people on every step ticket it ope
 
     const steps = await forge.adapter.listSteps(PROJECT, INITIATIVE);
 
-    expect(nextStep(steps)?.number).toBe(11);
+    expect(eligibleSteps(steps).map((step) => step.number)).toContain(11);
     // Every write the first run made is one of these, so none of them
     // assigned a step ticket to anyone or held it.
     const otherWrites = forge.calls.filter(

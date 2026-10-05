@@ -35,7 +35,7 @@ import { resolveTakeover } from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
 import {
   type InitiativeRecord, type Run, type RunStore, type Witness } from "./runs.js";
-import { HELD_LABEL, MAP_LABEL, nextStep } from "./steps.js";
+import { HELD_LABEL, MAP_LABEL, eligibleSteps } from "./steps.js";
 
 export interface PollDeps {
   manifest: Manifest;
@@ -969,11 +969,11 @@ async function releasePreview(
 
 /**
  * What this cycle knows about every initiative on a project: which tickets are
- * steps, and which step of each is the one to take next.
+ * steps, and which steps of each may be taken up.
  */
 interface Frontier {
   isStep(ticket: number): boolean;
-  isNext(ticket: number): boolean;
+  isEligible(ticket: number): boolean;
 }
 
 /**
@@ -981,7 +981,7 @@ interface Frontier {
  * and write down what was seen.
  *
  * **One query per initiative per cycle, and it does three jobs.** It is what
- * tells a step ticket from an ordinary one, what chooses the step to take, and
+ * tells a step ticket from an ordinary one, what chooses the steps to take, and
  * — as a side effect and not as a second call — what fills the cached picture
  * `timone status` renders from
  * ([ADR-0044](../../doc/adr/0044-a-run-belongs-to-a-step-ticket-and-the-assignee-is-what-holds-it.md)
@@ -1000,7 +1000,7 @@ async function surveyInitiatives(
 ): Promise<Frontier> {
   const { store, adapter } = deps;
   const steps = new Set<number>();
-  const next = new Set<number>();
+  const eligible = new Set<number>();
 
   for (const map of tickets.filter((t) => t.labels.includes(MAP_LABEL))) {
     let children: Step[];
@@ -1015,24 +1015,25 @@ async function surveyInitiatives(
     }
 
     for (const child of children) steps.add(child.number);
-    const eligible = nextStep(children);
-    if (eligible !== undefined) next.add(eligible.number);
+    const toTake = eligibleSteps(children);
+    for (const step of toTake) eligible.add(step.number);
 
+    // `timone status` names one step as next, so the picture keeps the first
+    // eligible one, as it did when only the first was picked up.
+    const [first] = toTake;
     store.rememberInitiative({
       project: project.name,
       initiative: map.number,
       title: map.title,
       steps: children.map((child) => child.number),
       done: children.filter((child) => child.state === "closed").length,
-      ...(eligible === undefined
-        ? {}
-        : { next: eligible.number, nextTitle: eligible.title }),
+      ...(first === undefined ? {} : { next: first.number, nextTitle: first.title }),
     });
   }
 
   return {
     isStep: (ticket) => steps.has(ticket),
-    isNext: (ticket) => next.has(ticket),
+    isEligible: (ticket) => eligible.has(ticket),
   };
 }
 
@@ -1094,11 +1095,13 @@ async function pollProject(
     // children at the same time, on the same project.
     if (ticket.labels.includes(MAP_LABEL)) continue;
 
-    // A step that is not the frontier waits its turn. This is what stops a
-    // fourteen-step initiative becoming fourteen runs in one cycle: every
-    // step carries the mark — it has to, or nothing could ever pick it up —
-    // so the mark alone can no longer decide.
-    if (frontier.isStep(ticket.number) && !frontier.isNext(ticket.number)) {
+    // A step that is not eligible waits: it is closed, held, taken by a
+    // person, or blocked by a step still open or by a dependency list that
+    // came back incomplete. Every step carries the mark — it has to, or
+    // nothing could ever pick it up — so the mark alone cannot decide. Every
+    // eligible step is picked up, not only the first (PRD-07.R4, ADR-0065
+    // D6); how many build at once is for the places and the planner.
+    if (frontier.isStep(ticket.number) && !frontier.isEligible(ticket.number)) {
       continue;
     }
 
@@ -1113,11 +1116,11 @@ async function pollProject(
     }
 
     // **A held ticket is not picked up, whether or not it is a step.** For a
-    // step the frontier already refuses it, because `nextStep` skips the hold;
-    // this is the same refusal for everything else, and without it a ticket
-    // held by a declined pull request would simply be registered afresh on the
-    // next cycle and rebuilt. Nothing here removes a hold: taking it off is
-    // the human's half of the rule (ADR-0044 D7).
+    // step the frontier already refuses it, because `eligibleSteps` leaves a
+    // held step out; this is the same refusal for everything else, and
+    // without it a ticket held by a declined pull request would simply be
+    // registered afresh on the next cycle and rebuilt. Nothing here removes a
+    // hold: taking it off is the human's half of the rule (ADR-0044 D7).
     if (ticket.labels.includes(HELD_LABEL)) continue;
 
     // ✏ And a ticket held since the listing was read (40u). A cancel the

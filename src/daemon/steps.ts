@@ -1,11 +1,11 @@
 import { type Step } from "../adapters/ticketing.js";
 
 /**
- * The frontier: which step of an initiative the daemon takes next.
+ * The frontier: which steps of an initiative the daemon may take up.
  *
  * Under [ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)
- * a step is a ticket, so the next step is *read off the tracker* rather than
- * counted from the ledger. This module is the rule and nothing else: pure,
+ * a step is a ticket, so the steps to take are *read off the tracker* rather
+ * than counted from the ledger. This module is the rule and nothing else: pure,
  * offline, and given whatever the ticketing adapter managed to read.
  */
 
@@ -66,9 +66,15 @@ export const MAP_LABEL_DESCRIPTION =
   "The map of a job. The work happens on the tickets listed in it, not here.";
 
 /**
- * The first step that is **open, unblocked, unheld and unclaimed**, or
- * `undefined` when there is none — which is the signal to close the
- * initiative.
+ * Every step that is **open, unblocked, unheld and unclaimed**, in the
+ * listing's order. An empty list is the signal to close the initiative.
+ *
+ * It used to return only the first such step, so one initiative built one
+ * step at a time. Now every step that meets the four conditions may be picked
+ * up ([PRD-07.R4](../../doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.criteria.md#r4--nothing-is-built-on-top-of-an-open-pull-request),
+ * [ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+ * D6). How many of them build at once is decided later, by the project's
+ * places and the planner, not here.
  *
  * The four conditions are one rule, and **any of them read alone lets a
  * stopped step be retaken**: the hold if the labels are skipped, a human's
@@ -76,12 +82,12 @@ export const MAP_LABEL_DESCRIPTION =
  * never who made it — it knows no login and compares against no identity.
  *
  * A dependency carries its own openness rather than a number to resolve, so a
- * cycle simply blocks every step in it and the call returns `undefined`
- * instead of looping. A step whose dependency list came back incomplete is
- * **blocked**, never free.
+ * cycle simply blocks every step in it and none of them is returned, with no
+ * loop. A step whose dependency list came back incomplete is **blocked**,
+ * never free.
  */
-export const nextStep = (steps: Step[]): Step | undefined =>
-  steps.find(
+export const eligibleSteps = (steps: Step[]): Step[] =>
+  steps.filter(
     (s) =>
       s.state === "open" &&
       !s.labels.includes(HELD_LABEL) &&

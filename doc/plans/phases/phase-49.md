@@ -110,6 +110,7 @@ grep -rn "RunStore.open(" src/commands --include=*.ts | grep -v test.ts
 **[MODIFY]** `src/daemon/steps.ts` — `nextStep` becomes `eligibleSteps(steps): Step[]`, every step meeting the four conditions, in the listing's order; the doc comment says why "the first" went (PRD-07.R4, ADR-0065 D6) and keeps what it says about cycles and incomplete dependency lists.
 **[MODIFY]** `src/daemon/poll.ts` — `surveyInitiatives` adds every eligible step to the `next` set (the field is renamed `isEligible`); `rememberInitiative` still records the first eligible step as `next`, so `timone status` reads as before. The comment above the skip in `pollProject` is corrected.
 **[MODIFY]** `src/daemon/steps.test.ts`, `src/daemon/poll.test.ts` — cases below.
+**[MODIFY]** `src/daemon/chunk-zero.test.ts` — its one use of `nextStep` (the case "leaves piece 1's step ticket free to be taken") asserts that `eligibleSteps` includes step 11 instead; nothing else changes. ✏ 2026-10-05 (build, timone#203): added. The file imports `nextStep`, so without it the type check fails and the grep below finds it.
 
 **Seams under test (TDD):** `eligibleSteps` is pure; `pollProject` through the poll test file's existing entry with the fake forge is the seam for what is picked up. Red-green:
 1. Steps 2 and 3 open, each blocked only by closed step 1: both are eligible (R4 clause 3).
