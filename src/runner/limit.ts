@@ -8,11 +8,12 @@ import type { RecordEntry } from "./record.js";
  * several runs, and a limit that started again with each run would never
  * stop a ticket that keeps failing and being retried. The runner's own
  * sessions count too: deciding what to do next costs money like any step.
+ * So do the planner's, for the ticket it decided for (ADR-0065 D1).
  */
 
 /**
  * Everything the sessions of a ticket have cost so far, in dollars: every
- * finished step and every finished runner session in its record.
+ * finished step, runner session and planner session in its record.
  *
  * Not rounded. The sum is compared with the limit, and rounding it first
  * could let a ticket start one more session than it may.
@@ -20,7 +21,11 @@ import type { RecordEntry } from "./record.js";
 export function spentOn(entries: readonly RecordEntry[]): number {
   let spent = 0;
   for (const entry of entries) {
-    if (entry.kind === "step-ended" || entry.kind === "runner-ended") {
+    if (
+      entry.kind === "step-ended" ||
+      entry.kind === "runner-ended" ||
+      entry.kind === "planner-ended"
+    ) {
       spent += entry.costUsd;
     }
   }

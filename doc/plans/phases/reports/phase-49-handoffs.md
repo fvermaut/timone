@@ -227,3 +227,85 @@ Test files run at the end, by name (after `npm run build`):
 
 - The check needs `refs/remotes/origin/HEAD` in the clone the push runs from. A clone without it refuses every first push of a work branch with "could not judge this push". Any new fixture that pushes through the guard must make its clone with `git clone`, or run `git remote set-head origin <default>`.
 - The check only sees `origin/timone/*` branches the clone has fetched. A ticket branch that is on the forge but not fetched into the box is not seen.
+
+## 49d — The build does not start without the planner's decision, and the ledger keeps that decision
+
+**Built.** A runner's try to start the build (`start_step` at `execution`) is now refused while the ledger holds no planner's decision for the run, and the ledger writes that the run waits for the planner. A run the planner holds is refused, naming the tickets it waits for. A run the planner let build asks for a place as before. No other stage asks. The ledger keeps the decision on the run, and the run record can hold a planner's decision and the cost of a planner session, which counts on the ticket's limit. The runner's brief has a fact line for the planner and a rule under *How you act*.
+
+**Files touched.**
+
+- `src/daemon/runs.ts` — `planner` on `runSchema` (optional, doc comment naming ADR-0065 D2). Types `PlannerDecision` and `PlaceOrder` (the latter now also types `askPlace`'s `order`). New public methods `askPlanner(id, order)`, `decidePlanner(id, decision)`, `reaskPlanner(id)`, `waitingForPlanner(project)`, `heldByPlanner(project)`; private `byPlannerOrder`. `complete` and `cancel` are unchanged, so they keep `planner`.
+- `src/runner/record.ts` — entries `planner-decision` and `planner-ended`.
+- `src/runner/limit.ts` — `spentOn` adds `planner-ended` costs; doc comments say so.
+- `src/runner/actions.ts` — `plannerRefusal(turn)`, asked in `startStep` for `execution` only, after `skippedBy` and before `askPlace`.
+- `src/runner/brief.ts` — `PlannerFact`, `BriefInput.planner`, the fact line `- The planner: …`, the rule in `SYSTEM`, and exported `untilMergedOrClosed(tickets)`, which the refusal in `actions.ts` also uses.
+- `src/runner/session.ts` — `plannerOf(run)` fills `planner` from the ledger's run.
+- `src/runner/replay/recording.ts` — `placeRun` gives the case's run a let-build decision.
+- `src/daemon/prompts.ts` — `recordLine` returns no line for `planner-decision` and `planner-ended`, beside `runner-ended`. Nothing else. Granted by a plan amendment (below).
+- `src/daemon/runs.test.ts`, `src/runner/actions.test.ts`, `src/runner/brief.test.ts`, `src/runner/limit.test.ts`, `src/runner/record.test.ts` — the cases below. In `actions.test.ts`, `placeWorld` now also returns `wrote`, and two helpers `planningStarted` and `planningEnded` were added.
+
+**Decisions taken inside the slice.**
+
+- **The place order is recorded by `askPlanner`.** Its signature is `askPlanner(id, order: PlaceOrder)`, not `askPlanner(id)`: it writes `place.priority` and `place.openedAt` as `askPlace` does (the order is read from the ticket at each try, ADR-0063 D2), and sets `askedAt` only the first time. It does nothing at all when the run has a decision. A place with only those two fields takes no place and does not wait for one, so nothing else reads it differently. The one line that writes the order is now in `askPlace` and `askPlanner`; a third copy should become a helper.
+- **The record's decision field is `decision`, not `kind`.** The Goal Description lists `kind` for `planner-decision`, but `kind` is the record's discriminator (`kind: "planner-decision"`). So the entry has `decision: "build" | "hold"`. The ledger's `planner.decision.kind` keeps the plan's name.
+- **`PlannerFact` is a union tagged by `kind`** (`not-asked`, `deciding`, `holds` with `waitsFor` and `reason`, `let-build` with `at`), like `PlaceFact`, so `plannerText` ends with `satisfies never`. The plan wrote it as `not-asked | deciding | { holds; reason } | { letBuildAt }`.
+- **Words.** Several tickets read `#7 and #9 are merged or closed` (one: `#7 is merged or closed`), in the refusal and in the fact line, through `untilMergedOrClosed`. The fact lines end with a full stop, like the place line, except the hold line, which ends with the planner's reason as given. The refusal takes a final full stop off the reason before adding its own. The rule reads: `- The build needs the planner's decision. The planner is another agent: it looks at what else on the project is being built. While it decides, or while it holds this ticket, do not start the build, and do not say on the ticket that the work has started.`
+- **`reaskPlanner` on a run that is not held does nothing**, rather than throwing: the planner's loop may find the run decided by the time it acts.
+- **`waitingForPlanner` and `heldByPlanner` list live runs only** (not `done`, not `cancelled`); a finished run keeps its decision as a record.
+- **Existing case adapted in `actions.test.ts`:** "does not ask again for the reason of a step it already skipped with one" starts `execution` on a chore; it now gives the run a let-build decision first (✏ note in the test). It failed without it (`TypeError: Cannot read properties of undefined (reading 'end')`: no step started). No other case in a granted or ungranted file started `execution`.
+- **PLAN PROBLEM, resolved by a plan amendment granting `src/daemon/prompts.ts`.** `recordLine` switches over every `RecordEntry` kind and ends with `entry satisfies never`, so with the two new entries `npx tsc --noEmit` exited 2: `src/daemon/prompts.ts(1435,7): error TS2322: Type '{ kind: "planner-decision"; …} | { kind: "planner-ended"; … }' is not assignable to type 'string[]'` and `(1435,20): error TS1360: … does not satisfy the expected type 'never'`. Vitest does not typecheck, so no test failed. The amended plan grants the file for this change only: `case "planner-decision":` and `case "planner-ended":` now sit with the cases that `return []`, beside `"runner-ended"`. `tsc` exits 0.
+
+**Validation evidence.**
+
+Per declared case (red line seen, then green, or mutation proof):
+
+1. `actions.test.ts` › "the build waits for the planner's decision (PRD-07.R5, ADR-0065 D2)" › "refuses the build of a run with a committed plan and no decision, takes no place, and writes that it waits for the planner (clause 1)" — red: `AssertionError: expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }` (received `Started building, in session session-1.`); green after `plannerRefusal`. Another ticket's step runs in this case, so "no place taken" is shown by the run not waiting for a place. Mutation: ask the planner after `askPlace` → `expected { ok: false, …(1) } to deeply equal { ok: false, …(1) }` (the place refusal came first); reverted, green.
+2. "refuses the build of a run the planner holds, naming the ticket it waits for, and starts nothing" — green as written (the hold branch was written with case 1). Mutation: let any decision through → `expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }`; reverted, green.
+3. "starts the build of a run the planner let build, taking a place as any step does", and "refuses the build of a run the planner let build for want of a place, as before" — green as written. Mutation: drop the `build` early return → `expected false to be true` and `expected { ok: false, …(1) } to deeply equal { ok: false, …(1) }`; reverted, green.
+4. "does not ask the planner before planning, checking, delivering or a remediation" — green as written. Mutation: ask for every stage → `planning: expected { ok: false, …(1) } to match object { ok: true }`; reverted, green.
+5. `runs.test.ts` › "the planner's decision on a run (ADR-0065 D2)":
+   - "keeps the time the planner was first asked when it is asked a second time" — red: `TypeError: store.askPlanner is not a function`; green.
+   - "keeps a held run's decision as it was told, and stops counting it as waiting for the planner" — red: `TypeError: store.decidePlanner is not a function`; green.
+   - "asks the planner again for a held run: the decision goes and the run waits for the planner" — red: `TypeError: store.reaskPlanner is not a function`; green.
+   - "puts a ticket labelled priority:high first among the runs waiting for the planner, then the ticket opened first" — green as written. Mutation: sort by ticket number → `expected [ 'scratch-app#8/1', …(2) ] to deeply equal [ 'scratch-app#10/1', …(2) ]`; reverted, green.
+   - "leaves the planner's decision on a run that is finished, and counts it no more" — green as written. Mutation: `heldByPlanner` counts settled runs → `expected [ { id: 'scratch-app#12/1', …(10) } ] to deeply equal []`; reverted, green.
+6. "loads a ledger written before the planner existed unchanged, with no run waiting for it" — green as written. Mutation: `planner` not optional → `Invalid daemon state file "…": runs.0.planner: Invalid input: expected object, received undefined`; reverted, green.
+7. `limit.test.ts` › "counts the $0.40 a planner session cost on the ticket it decided for (ADR-0065 D1)" — red: `AssertionError: expected 12.5 to be 12.9`; green. `record.test.ts` › "reads back the planner's hold and the cost of its session (ADR-0065 D2)" and "names the line number when a planner's decision has no reason" — written after the schema change, so green at once. Mutations: `reason` optional → `expected true to be false` on the malformed line; the entry renamed `planner-decided` → `ZodError` on the read-back case; reverted, green.
+8. `brief.test.ts` › "the planner's decision, as the runner is told it (ADR-0065 D2)" › "writes one line under the facts for each state of the planner's decision" — red: `expected undefined to be '- The planner: not asked yet.'`; and "has a rule under How you act: …" — red: `expected '' to be '- The build needs the planner\'s deci…'`; both green.
+9. Existing cases (`endRun`, the place refusal, the skip-reason refusal): unchanged and green, 68 of 68 in `actions.test.ts` with the one adaptation named above.
+
+The validation block, as run (after the plan amendment, and after `npm run build`, which exited 0):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/daemon/runs.test.ts src/runner/; echo "exit: $?"
+ Test Files  12 passed (12)
+      Tests  363 passed (363)
+exit: 0
+
+$ npx vitest run src/runner/replay/; echo "exit: $?"   # in place of npm run replay
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+exit: 0
+```
+
+Before the amendment, `tsc` exited 2 on the two `src/daemon/prompts.ts` lines quoted above, and `npm run build` printed the same errors.
+
+- [x] `tsc --noEmit` exits 0. **Pass** (after the amendment).
+- [x] Cases 1–9 pass, with red runs recorded (cases 2, 3, 4, 6 and parts of 5 and 7 proved by mutation). **Pass.**
+- [x] The replay set: `npm run replay` was not run (no model login in this container); `src/runner/replay/` passed. No recorded case was changed; `placeRun` gives every case's run a let-build decision. **Pass, as far as it can be run here.**
+
+Test files run at the end, by name (after `npm run build`):
+
+- `src/daemon/runs.test.ts` — 154. `src/runner/actions.test.ts` — 68. `src/runner/brief.test.ts` — 43. `src/runner/limit.test.ts` — 5. `src/runner/record.test.ts` — 5. `src/runner/session.test.ts` — 26. `src/runner/driver.test.ts` — 16. `src/runner/tools.test.ts` — 4. `src/runner/replay/harness.test.ts` — 3. The rest of `src/runner/` (facts, order, departures) — 39. All passed (363).
+- `src/daemon/prompts.test.ts` — 213 passed. `src/commands/` — 12 files, all passed (`status.test.ts` 46, `takeover.test.ts` 51, `guardrails.test.ts` 52, `daemon.test.ts` 26, `cancel.test.ts` 12, `record.test.ts` 14 among them).
+- Before the amendment, the rest of `src/daemon/` (`poll.test.ts` among them), `src/cli.test.ts` and `src/workspace.test.ts` were also run, and passed.
+
+**What 49e must know.**
+
+- `askPlanner` takes the place order; `reaskPlanner(id)` keeps the order already on the run. `waitingForPlanner` gives the runs in the order the planner's loop should take them.
+- A run is let build with `decidePlanner(id, { kind: "build", at, reason, onComment? })`; nothing wakes the runner yet. The record entry for a decision is `planner-decision` with `decision`, not `kind`.
+- `untilMergedOrClosed(tickets)` in `src/runner/brief.ts` writes `#7 and #9 are merged or closed`; the hold comment the planner's code posts can use it.
+- `recordLine` in `src/daemon/prompts.ts` writes no line for the two planner entries. A takeover prompt that should show the planner's decision needs a line there.

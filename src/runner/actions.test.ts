@@ -737,8 +737,14 @@ describe("the runner's actions", () => {
 
   it("does not ask again for the reason of a step it already skipped with one", async () => {
     const chore = { ...featureTicket(), labels: ["timone", "triage:chore"] };
-    const { actions, run, wrote, steps, endAndWait, forge } = world(chore);
+    const { actions, run, wrote, steps, endAndWait, forge, store } = world(chore);
     wrote(triageRan(run.id));
+    // ✏ 2026-10-05: the build needs the planner's decision (ADR-0065 D2).
+    store.decidePlanner(run.id, {
+      kind: "build",
+      at: "2026-09-27T11:00:00Z",
+      reason: "Nothing else on the project is being built.",
+    });
     await actions.startStep({
       stage: "execution",
       instructions: "Rename the column in the task list.",
@@ -1792,7 +1798,14 @@ function placeWorld(
     },
     run,
   );
-  return { store, run, actions, forge: state, steps: fake.steps };
+  return {
+    store,
+    run,
+    actions,
+    forge: state,
+    steps: fake.steps,
+    wrote: (entry: RecordEntry) => appendEntry(root, PROJECT.name, 12, entry),
+  };
 }
 
 /** Run `ticket` of scratch-app, picked up, with a step of it running. */
@@ -1908,5 +1921,142 @@ describe("a step asks for a place on the project (ADR-0063 D2)", () => {
     expect(store.get(run.id)?.stage).toBe("triage");
     expect(store.get(run.id)?.status).toBe("parked");
     expect(store.waitingForPlace(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+});
+
+/** The record's entry for the planning step of run `runId`, starting at 09:10. */
+function planningStarted(runId: string): RecordEntry {
+  return {
+    kind: "step-started",
+    at: "2026-09-27T09:10:00Z",
+    runId,
+    stage: "planning",
+    sessionId: "b2d4f6a8-planning",
+  };
+}
+
+/** The record's entry for the planning step of run `runId`, ending well at 09:30. */
+function planningEnded(runId: string): RecordEntry {
+  return {
+    kind: "step-ended",
+    at: "2026-09-27T09:30:00Z",
+    runId,
+    stage: "planning",
+    sessionId: "b2d4f6a8-planning",
+    ok: true,
+    costUsd: 0.9,
+  };
+}
+
+/** The try to start building ticket 12, its plan written. */
+const BUILDING = {
+  stage: "execution" as const,
+  instructions: "Build the rename the plan describes.",
+  reason: "The plan is written.",
+};
+
+/** The refusal of a build the planner has not decided on yet (ADR-0065 D2). */
+const PLANNER_NOT_DECIDED =
+  "The planner has not decided yet whether this ticket may be built now: it looks at what else " +
+  "on scratch-app is being built. This ticket now waits for its decision, and you are woken when " +
+  "it has decided.";
+
+describe("the build waits for the planner's decision (PRD-07.R5, ADR-0065 D2)", () => {
+  it("refuses the build of a run with a committed plan and no decision, takes no place, and writes that it waits for the planner (clause 1)", async () => {
+    const { actions, store, run, steps, wrote } = placeWorld(choreTicket(), (store) => {
+      stepRunning(store, 7);
+    });
+    wrote(planningStarted(run.id));
+    wrote(planningEnded(run.id));
+
+    const result = await actions.startStep(BUILDING);
+
+    expect(result).toEqual({ ok: false, refused: PLANNER_NOT_DECIDED });
+    expect(steps).toEqual([]);
+    expect(store.placeHolders(PROJECT.name).map((each) => each.id)).toEqual(["scratch-app#7/1"]);
+    expect(store.waitingForPlace(PROJECT.name)).toEqual([]);
+    expect(store.get(run.id)?.branch).toBeUndefined();
+    expect(store.waitingForPlanner(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+
+  it("refuses the build of a run the planner holds, naming the ticket it waits for, and starts nothing", async () => {
+    const { actions, store, run, steps, wrote } = placeWorld(choreTicket(), () => {});
+    wrote(planningStarted(run.id));
+    wrote(planningEnded(run.id));
+    store.askPlanner(run.id, { priority: false, openedAt: "2026-09-27T09:00:00Z" });
+    store.decidePlanner(run.id, {
+      kind: "hold",
+      at: "2026-09-27T11:00:00Z",
+      reason: "Both tickets change the task list.",
+      waitsFor: [7],
+    });
+
+    const result = await actions.startStep(BUILDING);
+
+    expect(result).toEqual({
+      ok: false,
+      refused:
+        "The planner holds this ticket until #7 is merged or closed: Both tickets change the task list. " +
+        "You are woken if that changes.",
+    });
+    expect(steps).toEqual([]);
+    expect(store.placeHolders(PROJECT.name)).toEqual([]);
+    expect(store.waitingForPlace(PROJECT.name)).toEqual([]);
+    expect(store.heldByPlanner(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+
+  it("starts the build of a run the planner let build, taking a place as any step does", async () => {
+    const { actions, store, run, steps, wrote } = placeWorld(choreTicket(), () => {});
+    wrote(planningStarted(run.id));
+    wrote(planningEnded(run.id));
+    store.askPlanner(run.id, { priority: false, openedAt: "2026-09-27T09:00:00Z" });
+    store.decidePlanner(run.id, {
+      kind: "build",
+      at: "2026-09-27T11:00:00Z",
+      reason: "Nothing else on the project is being built.",
+    });
+
+    const result = await actions.startStep(BUILDING);
+
+    expect(result.ok).toBe(true);
+    expect(steps.map((step) => step.input.label)).toEqual(["scratch-app#12/1 (execution)"]);
+    expect(store.placeHolders(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+    expect(store.waitingForPlanner(PROJECT.name)).toEqual([]);
+  });
+
+  it("refuses the build of a run the planner let build for want of a place, as before", async () => {
+    const { actions, store, run, steps, wrote } = placeWorld(choreTicket(), (store) => {
+      stepRunning(store, 7);
+    });
+    wrote(planningStarted(run.id));
+    wrote(planningEnded(run.id));
+    store.decidePlanner(run.id, {
+      kind: "build",
+      at: "2026-09-27T11:00:00Z",
+      reason: "The two tickets change different files.",
+    });
+
+    const result = await actions.startStep(BUILDING);
+
+    expect(result).toEqual({ ok: false, refused: noPlace("run scratch-app#7/1 has a step running") });
+    expect(steps).toEqual([]);
+    expect(store.waitingForPlace(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+
+  it("does not ask the planner before planning, checking, delivering or a remediation", async () => {
+    for (const stage of ["planning", "verification", "delivery", "remediation"] as const) {
+      const { actions, store, steps } = placeWorld(choreTicket(), () => {});
+
+      const result = await actions.startStep({
+        stage,
+        instructions: "Do this step.",
+        reason: "It is next.",
+        skipReason: "The ticket already says what to do.",
+      });
+
+      expect(result, stage).toMatchObject({ ok: true });
+      expect(steps, stage).toHaveLength(1);
+      expect(store.waitingForPlanner(PROJECT.name), stage).toEqual([]);
+    }
   });
 });

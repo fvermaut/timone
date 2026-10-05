@@ -51,6 +51,7 @@ function briefInput(overrides: Partial<BriefInput> = {}): BriefInput {
     timoneIssues: [],
     held: false,
     place: { kind: "free" },
+    planner: { kind: "not-asked" },
     limitUsd: 150,
     now: "2026-09-27T12:00:00Z",
     ...overrides,
@@ -705,6 +706,36 @@ describe("the project's place, as the runner is told it (ADR-0063)", () => {
   it("has a rule under How you act: a step needs the place, a refused step waits for its turn, and no comment says the work started before a step has", () => {
     expect(actRule("A step needs the project's place.")).toBe(
       "- A step needs the project's place. When the place is taken, starting a step is refused and the ticket waits for its turn; you are woken when a place is given to it. Do not say on the ticket that the work has started until a step has started.",
+    );
+  });
+});
+
+describe("the planner's decision, as the runner is told it (ADR-0065 D2)", () => {
+  it("writes one line under the facts for each state of the planner's decision", () => {
+    const lineFor = (planner: BriefInput["planner"]): string | undefined => {
+      const prompt = buildBrief(briefInput({ planner })).prompt;
+      const facts = prompt.slice(prompt.indexOf("## Facts about the work"));
+      return facts
+        .slice(0, facts.indexOf("\n## "))
+        .split("\n")
+        .find((line) => line.startsWith("- The planner:"));
+    };
+
+    expect(lineFor({ kind: "not-asked" })).toBe("- The planner: not asked yet.");
+    expect(lineFor({ kind: "deciding" })).toBe("- The planner: deciding.");
+    expect(
+      lineFor({ kind: "holds", waitsFor: [7, 9], reason: "Both tickets change the task list." }),
+    ).toBe(
+      "- The planner: holds this ticket until #7 and #9 are merged or closed: Both tickets change the task list.",
+    );
+    expect(lineFor({ kind: "let-build", at: "2026-10-05T10:00:00Z" })).toBe(
+      "- The planner: let this ticket be built at 2026-10-05T10:00:00Z.",
+    );
+  });
+
+  it("has a rule under How you act: the build needs the planner's decision, and while it decides or holds, the build is not started nor said to have started", () => {
+    expect(actRule("The build needs the planner's decision.")).toBe(
+      "- The build needs the planner's decision. The planner is another agent: it looks at what else on the project is being built. While it decides, or while it holds this ticket, do not start the build, and do not say on the ticket that the work has started.",
     );
   });
 });

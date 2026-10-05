@@ -226,6 +226,35 @@ const runSchema = z.strictObject({
    * run.
    */
   takenOver: z.literal(true).optional(),
+  /**
+   * The planner's decision on this run
+   * ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+   * D2): whether its build may start now. The build is refused until there
+   * is one.
+   *
+   * `askedAt` set and no `decision` means the run waits for the planner.
+   * A `hold` decision means the planner holds it until the tickets in
+   * `waitsFor` are merged or closed; a `build` decision means it may build.
+   * `onComment` is the named person's comment a decision was taken on. The
+   * decision stays on a finished run, as a record of what was decided.
+   *
+   * Optional, so every ledger written before the planner existed loads
+   * unchanged.
+   */
+  planner: z
+    .strictObject({
+      askedAt: z.string().optional(),
+      decision: z
+        .strictObject({
+          kind: z.enum(["build", "hold"]),
+          at: z.string(),
+          reason: z.string(),
+          waitsFor: z.array(z.number().int().positive()).optional(),
+          onComment: z.strictObject({ by: z.string(), at: z.string() }).optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   /** Agent SDK session identifier, once one has been spawned. */
   sessionId: z.string().optional(),
   /**
@@ -478,6 +507,13 @@ export type Run = z.infer<typeof runSchema>;
  * D5) — {@link Run.wait}, named so that readers can talk about it.
  */
 export type RunWait = NonNullable<Run["wait"]>;
+
+/** The planner's decision on a run (ADR-0065 D2) — see {@link Run.planner}. */
+export type PlannerDecision = NonNullable<NonNullable<Run["planner"]>["decision"]>;
+
+/** What decides a run's turn for a place, and for the planner (ADR-0063 D3). */
+export type PlaceOrder = { priority: boolean; openedAt: string };
+
 export type PreviewRecord = z.infer<typeof previewRecordSchema>;
 export type IntroductionRecord = z.infer<typeof introductionRecordSchema>;
 export type InitiativeRecord = z.infer<typeof initiativeRecordSchema>;
@@ -848,10 +884,7 @@ export class RunStore {
    * Ask for a place on the run's project before a step starts (ADR-0063 D2).
    * `order` is what decides the run's turn, read from its ticket at this try.
    */
-  askPlace(
-    id: string,
-    order: { priority: boolean; openedAt: string },
-  ): { ok: true } | { ok: false; holder: Run } {
+  askPlace(id: string, order: PlaceOrder): { ok: true } | { ok: false; holder: Run } {
     const run = this.mutable(id);
     run.place = { ...run.place, priority: order.priority, openedAt: order.openedAt };
     const holder = run.place.givenAt === undefined ? this.placeTakenFrom(run) : undefined;
@@ -927,6 +960,81 @@ export class RunStore {
     this.refresh();
     return this.state.runs
       .filter((run) => run.project === project && takesPlace(run))
+      .map((run) => ({ ...run }));
+  }
+
+  /**
+   * Write that `id` waits for the planner's decision (ADR-0065 D2). Does
+   * nothing when the run has a decision. A run asked already keeps the time
+   * it was first asked.
+   *
+   * `order` is the run's place order, read from its ticket at this try, and
+   * written on its place as {@link askPlace} writes it, so
+   * {@link waitingForPlanner} can order the runs that wait.
+   */
+  askPlanner(id: string, order: PlaceOrder): Run {
+    const run = this.mutable(id);
+    if (run.planner?.decision !== undefined) return { ...run };
+    run.place = { ...run.place, priority: order.priority, openedAt: order.openedAt };
+    run.planner = { askedAt: run.planner?.askedAt ?? this.now() };
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Write the planner's decision on `id` (ADR-0065 D2). The time it was
+   * asked stays. A new decision replaces the one before, as when a held run
+   * is decided again.
+   */
+  decidePlanner(id: string, decision: PlannerDecision): Run {
+    const run = this.mutable(id);
+    run.planner = { ...run.planner, decision };
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * Ask the planner again for a held run, now that what it waits for is gone
+   * (ADR-0065 D4): the hold goes, and the run waits for a new decision from
+   * now. A run that is not held is left as it is.
+   */
+  reaskPlanner(id: string): Run {
+    const run = this.mutable(id);
+    if (run.planner?.decision?.kind !== "hold") return { ...run };
+    run.planner = { askedAt: this.now() };
+    this.persist();
+    return { ...run };
+  }
+
+  /**
+   * The live runs of `project` that wait for the planner's decision, in the
+   * order a freed place is given (ADR-0063 D3, ADR-0065 D1). A run with no
+   * place order comes after those that have one, by ticket number.
+   */
+  waitingForPlanner(project: string): Run[] {
+    this.refresh();
+    return this.state.runs
+      .filter(
+        (run) =>
+          run.project === project &&
+          !isSettled(run.status) &&
+          run.planner?.askedAt !== undefined &&
+          run.planner.decision === undefined,
+      )
+      .sort(byPlannerOrder)
+      .map((run) => ({ ...run }));
+  }
+
+  /** The live runs of `project` the planner holds (ADR-0065 D4). */
+  heldByPlanner(project: string): Run[] {
+    this.refresh();
+    return this.state.runs
+      .filter(
+        (run) =>
+          run.project === project &&
+          !isSettled(run.status) &&
+          run.planner?.decision?.kind === "hold",
+      )
       .map((run) => ({ ...run }));
   }
 
@@ -1593,6 +1701,16 @@ function byPlaceOrder(left: Run, right: Run): number {
   const opened = Date.parse(left.place?.openedAt ?? "") - Date.parse(right.place?.openedAt ?? "");
   if (opened !== 0 && !Number.isNaN(opened)) return opened;
   return left.ticket - right.ticket;
+}
+
+/**
+ * The order in which runs that wait for the planner are decided (ADR-0065
+ * D1): a run with a place order first, by {@link byPlaceOrder}; then a run
+ * with none, by ticket number.
+ */
+function byPlannerOrder(left: Run, right: Run): number {
+  const ordered = Number(left.place === undefined) - Number(right.place === undefined);
+  return ordered !== 0 ? ordered : byPlaceOrder(left, right);
 }
 
 /** Who takes the place a run was refused, as the refusal says it. */

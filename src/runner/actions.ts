@@ -22,7 +22,7 @@ import {
   stagePrompt,
   workBranch,
 } from "../daemon/prompts.js";
-import { NoPlaceError, type Run, type RunStore } from "../daemon/runs.js";
+import { NoPlaceError, type PlaceOrder, type Run, type RunStore } from "../daemon/runs.js";
 import { HELD_LABEL, HELD_LABEL_DESCRIPTION, PRIORITY_LABEL } from "../daemon/steps.js";
 import {
   openStepTickets,
@@ -60,7 +60,7 @@ import {
   type PiecesFailure,
 } from "./comments.js";
 import { sinceLastBuild } from "./departures.js";
-import { isNamedPerson } from "./brief.js";
+import { isNamedPerson, untilMergedOrClosed } from "./brief.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
 import { appendEntry, readRecord, startsAStep, type RecordEntry } from "./record.js";
 import type {
@@ -490,6 +490,32 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
   });
 
   /**
+   * The refusal of the build while the planner has not let it start
+   * (ADR-0065 D2), or undefined when it has. With no decision, the run is
+   * written as waiting for the planner, with its place order.
+   */
+  const plannerRefusal = (turn: PlaceOrder): { ok: false; refused: string } | undefined => {
+    const decision = current().planner?.decision;
+    if (decision?.kind === "build") return undefined;
+    if (decision === undefined) {
+      deps.store.askPlanner(run.id, turn);
+      return {
+        ok: false,
+        refused:
+          "The planner has not decided yet whether this ticket may be built now: it looks at " +
+          `what else on ${deps.project.name} is being built. This ticket now waits for its ` +
+          "decision, and you are woken when it has decided.",
+      };
+    }
+    return {
+      ok: false,
+      refused:
+        `The planner holds this ticket until ${untilMergedOrClosed(decision.waitsFor ?? [])}: ` +
+        `${decision.reason.trim().replace(/\.$/, "")}. You are woken if that changes.`,
+    };
+  };
+
+  /**
    * Why no step may start now, or undefined when one may: a step of this run
    * is already running, or the ticket has spent its limit. Asked before every
    * session this run starts, the approval's own included, because each one
@@ -814,13 +840,23 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         };
       }
 
-      // A step needs a place on the project (ADR-0063 D2). Asked after every
-      // other rule, so a try refused for another reason does not wait, and
-      // before the branch is claimed, so a refused try writes nothing else.
       const turn = {
         priority: ticket.labels.includes(PRIORITY_LABEL),
         openedAt: ticket.createdAt,
       };
+      // The build needs the planner's decision (ADR-0065 D2). Asked before
+      // the place, so a run waiting for the planner does not also wait for a
+      // place. Its place order is written with the ask, so the runs that
+      // wait for the planner are decided in the order places are given.
+      if (stage === "execution") {
+        const refusal = plannerRefusal(turn);
+        if (refusal !== undefined) return refusal;
+      }
+
+      // A step needs a place on the project (ADR-0063 D2). Asked after every
+      // other rule, the planner's included, so a try refused for another
+      // reason does not wait, and before the branch is claimed, so a refused
+      // try writes nothing else.
       const place = deps.store.askPlace(run.id, turn);
       if (!place.ok) return noPlace(place.holder);
 

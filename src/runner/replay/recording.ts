@@ -210,9 +210,18 @@ function projectOf(moment: Moment): TicketingProject {
  * its pull request, its stage, and whether it waits or has a step running.
  * The store is new, so the run is the ticket's first, and its id is the one
  * the case's record entries name.
+ *
+ * The planner has let the run build (ADR-0065 D2), so a case whose runner
+ * starts the build is judged on that choice, not on a refusal for want of
+ * the planner's decision, which no recorded case was made with.
  */
 function placeRun(store: RunStore, moment: Moment): Run {
   const { run } = store.register(moment.project, moment.ticket.number);
+  store.decidePlanner(run.id, {
+    kind: "build",
+    at: moment.now,
+    reason: "The replay's runs are let build, so each case is judged on its choice.",
+  });
   const at = moment.run;
   switch (at.status) {
     case "picked-up":

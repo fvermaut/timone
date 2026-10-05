@@ -26,7 +26,13 @@ import {
   type RunnerActions,
   type RunningSteps,
 } from "./actions.js";
-import { buildBrief, type PlaceFact, type StepActivity, type TimoneIssue } from "./brief.js";
+import {
+  buildBrief,
+  type PlaceFact,
+  type PlannerFact,
+  type StepActivity,
+  type TimoneIssue,
+} from "./brief.js";
 import { gatherFacts } from "./facts.js";
 import { isOverLimit } from "./limit.js";
 import { ticketKindOf } from "./order.js";
@@ -598,6 +604,7 @@ async function briefFor(
     // nothing, and every piece of a split request would wait for ever.
     held: ticket.labels.includes(HELD_LABEL) && !deps.ticketContext.isStep,
     place: placeOf(deps, run),
+    planner: plannerOf(deps.store.get(run.id) ?? run),
     limitUsd,
     now: deps.clock(),
   });
@@ -620,6 +627,22 @@ function placeOf(deps: RunnerActionDeps, run: Run): PlaceFact {
   return holder.place?.givenAt !== undefined
     ? { kind: "given-to", to: holder.id }
     : { kind: "taken", by: holder.id };
+}
+
+/**
+ * The planner's decision on `run`, as the ledger holds it (ADR-0065 D2):
+ * not asked, deciding while it was asked and has not decided, holding, or
+ * letting it build.
+ */
+function plannerOf(run: Run): PlannerFact {
+  const { planner } = run;
+  if (planner?.decision === undefined) {
+    return planner?.askedAt === undefined ? { kind: "not-asked" } : { kind: "deciding" };
+  }
+  const { decision } = planner;
+  return decision.kind === "hold"
+    ? { kind: "holds", waitsFor: decision.waitsFor ?? [], reason: decision.reason }
+    : { kind: "let-build", at: decision.at };
 }
 
 /**

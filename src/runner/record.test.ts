@@ -65,6 +65,51 @@ describe("the run record", () => {
     expect(result.error.message).toContain("line 2");
   });
 
+  it("reads back the planner's hold and the cost of its session (ADR-0065 D2)", () => {
+    const dir = root();
+    const decision: RecordEntry = {
+      kind: "planner-decision",
+      at: "2026-10-05T10:00:00.000Z",
+      runId: "scratch-app#12/1",
+      decision: "hold",
+      reason: "Both tickets change the task list.",
+      waitsFor: [7],
+    };
+    const ended: RecordEntry = {
+      kind: "planner-ended",
+      at: "2026-10-05T10:00:05.000Z",
+      runId: "scratch-app#12/1",
+      ok: true,
+      costUsd: 0.4,
+    };
+
+    appendEntry(dir, "scratch-app", 12, decision);
+    appendEntry(dir, "scratch-app", 12, ended);
+
+    expect(readRecord(dir, "scratch-app", 12)).toEqual({ ok: true, value: [decision, ended] });
+  });
+
+  it("names the line number when a planner's decision has no reason", () => {
+    const dir = root();
+    const folder = join(dir, ".timone", "records", "scratch-app");
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(
+      join(folder, "12.jsonl"),
+      [
+        '{"kind":"woke","at":"2026-10-05T09:59:00.000Z","runId":"scratch-app#12/1","events":["the build was refused"]}',
+        '{"kind":"planner-decision","at":"2026-10-05T10:00:00.000Z","runId":"scratch-app#12/1","decision":"build"}',
+        "",
+      ].join("\n"),
+    );
+
+    const result = readRecord(dir, "scratch-app", 12);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.line).toBe(2);
+    expect(result.error.message).toContain("line 2");
+  });
+
   it("reads a ticket with no record yet as an empty list", () => {
     expect(readRecord(root(), "scratch-app", 12)).toEqual({
       ok: true,

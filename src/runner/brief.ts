@@ -12,6 +12,7 @@ import { RUN_ENV_DIR } from "../daemon/run-env.js";
 import { HELD_LABEL } from "../daemon/steps.js";
 import { departuresOf, type Departure } from "./departures.js";
 import type { Fact, Facts } from "./facts.js";
+import { joined } from "./comments.js";
 import { allowanceOf, spentOn } from "./limit.js";
 import { defaultOrder, type OrderStep, type TicketKind } from "./order.js";
 import { startsAStep, type RecordEntry } from "./record.js";
@@ -67,6 +68,28 @@ export type PlaceFact =
   | { kind: "taken"; by: string }
   | { kind: "given-to"; to: string };
 
+/**
+ * The planner's decision on this run, as the runner sees it
+ * ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+ * D2): not asked yet, deciding, holding the ticket until the tickets it
+ * waits for are merged or closed, or letting it build.
+ */
+export type PlannerFact =
+  | { kind: "not-asked" }
+  | { kind: "deciding" }
+  | { kind: "holds"; waitsFor: readonly number[]; reason: string }
+  | { kind: "let-build"; at: string };
+
+/**
+ * `#7 is merged or closed`, or `#7 and #9 are merged or closed`: what a
+ * ticket the planner holds waits for, as the runner's brief and its refusal
+ * say it.
+ */
+export function untilMergedOrClosed(tickets: readonly number[]): string {
+  const verb = tickets.length > 1 ? "are" : "is";
+  return `${joined(tickets.map((ticket) => `#${ticket}`))} ${verb} merged or closed`;
+}
+
 /** Everything a brief is built from. The caller gathers it; the brief only writes it out. */
 export interface BriefInput {
   project: string;
@@ -97,6 +120,8 @@ export interface BriefInput {
   held: boolean;
   /** The project's place, read from the ledger as the wake starts. */
   place: PlaceFact;
+  /** The planner's decision on the run, read from the ledger as the wake starts. */
+  planner: PlannerFact;
   /** The project's limit per ticket, before any "continue" (`ticketLimitOf`). */
   limitUsd: number;
   /** The time of this wake, so the runner can judge how long things took. */
@@ -132,6 +157,7 @@ const SYSTEM = [
   "- You never write code or change a file yourself. When something in the project must be fixed, start a step, and say in its instructions what to fix.",
   "- You never merge. Only a person merges a pull request.",
   "- A step needs the project's place. When the place is taken, starting a step is refused and the ticket waits for its turn; you are woken when a place is given to it. Do not say on the ticket that the work has started until a step has started.",
+  "- The build needs the planner's decision. The planner is another agent: it looks at what else on the project is being built. While it decides, or while it holds this ticket, do not start the build, and do not say on the ticket that the work has started.",
   "- A wake may end with nothing done. When nothing is needed, and the newest comment on the ticket is still true, do nothing.",
   "- The newest comment on the ticket must say truthfully what the ticket needs now. A person reads that comment first. When it is the machine's and is no longer true, because it asks for something that is not needed, or offers a command that will not help, post a new comment that is true. Say what is needed now, or what the run does next. Do this even when there is nothing else to do.",
   "- When a named person asks for something, do it, or say on the ticket why you will not. When they ask for a change on the pull request, first reply there that the change is being made, then start the step that makes it.",
@@ -195,7 +221,7 @@ export function buildBrief(input: BriefInput): { system: string; prompt: string 
       wokenSection(input),
       ticketSection(input),
       orderSection(input),
-      factsSection(input.facts, input.place),
+      factsSection(input.facts, input.place, input.planner),
       pullRequestSection(input),
       runningStepSection(input.activity),
       limitSection(input),
@@ -353,7 +379,7 @@ function stepState(step: OrderStep, ofRun: readonly RecordEntry[]): string {
  * Never as "none": the runner would read a missing phase file as a step that
  * made nothing, and start it again.
  */
-function factsSection(facts: Facts, place: PlaceFact): string {
+function factsSection(facts: Facts, place: PlaceFact, planner: PlannerFact): string {
   const main = facts.defaultBranch.kind === "known" ? facts.defaultBranch.value : "the default branch";
   const lines = [
     "## Facts about the work",
@@ -390,6 +416,7 @@ function factsSection(facts: Facts, place: PlaceFact): string {
       breakdown === undefined ? "none" : `${breakdown.path} (${statusText(breakdown.status)})`,
     ),
     `- The project's place: ${placeText(place)}`,
+    `- The planner: ${plannerText(planner)}`,
   );
   return lines.join("\n");
 }
@@ -405,6 +432,22 @@ function placeText(place: PlaceFact): string {
       return `taken: ${place.by} has a step running.`;
     case "given-to":
       return `given to ${place.to}. This ticket waits for its turn.`;
+  }
+}
+
+/** What the facts say of the planner's decision. */
+function plannerText(planner: PlannerFact): string {
+  switch (planner.kind) {
+    case "not-asked":
+      return "not asked yet.";
+    case "deciding":
+      return "deciding.";
+    case "holds":
+      return `holds this ticket until ${untilMergedOrClosed(planner.waitsFor)}: ${planner.reason}`;
+    case "let-build":
+      return `let this ticket be built at ${planner.at}.`;
+    default:
+      return planner satisfies never;
   }
 }
 

@@ -2715,3 +2715,137 @@ describe("adopting a ticket's open pull request", () => {
     expect(store.runsForTicket("scratch-app", 67)).toEqual([live]);
   });
 });
+
+describe("the planner's decision on a run (ADR-0065 D2)", () => {
+  const PLAIN = { priority: false, openedAt: "2026-08-01T09:00:00Z" };
+
+  /** A run just picked up, put on the runner's wait as the runner does. */
+  function waitingForRunner(store: RunStore, ticket: number): string {
+    const { run } = store.register("scratch-app", ticket);
+    store.park(run.id, { waitingOn: "the runner", kind: "runner", stage: "planning" });
+    return run.id;
+  }
+
+  it("keeps the time the planner was first asked when it is asked a second time", () => {
+    const store = newStore();
+    const id = waitingForRunner(store, 12);
+
+    const first = store.askPlanner(id, PLAIN);
+    store.askPlanner(id, PLAIN);
+
+    expect(first.planner?.askedAt).toBe("2026-08-02T10:02:00Z");
+    expect(store.get(id)?.planner).toEqual({ askedAt: "2026-08-02T10:02:00Z" });
+    expect(store.waitingForPlanner("scratch-app").map((run) => run.id)).toEqual([id]);
+  });
+
+  it("keeps a held run's decision as it was told, and stops counting it as waiting for the planner", () => {
+    const store = newStore();
+    const id = waitingForRunner(store, 12);
+    store.askPlanner(id, PLAIN);
+
+    const held = store.decidePlanner(id, {
+      kind: "hold",
+      at: "2026-08-02T11:00:00Z",
+      reason: "Both change the task list.",
+      waitsFor: [7],
+    });
+
+    expect(held.planner).toEqual({
+      askedAt: "2026-08-02T10:02:00Z",
+      decision: {
+        kind: "hold",
+        at: "2026-08-02T11:00:00Z",
+        reason: "Both change the task list.",
+        waitsFor: [7],
+      },
+    });
+    expect(store.get(id)?.planner).toEqual(held.planner);
+    expect(store.waitingForPlanner("scratch-app")).toEqual([]);
+    expect(store.heldByPlanner("scratch-app").map((run) => run.id)).toEqual([id]);
+  });
+
+  it("asks the planner again for a held run: the decision goes and the run waits for the planner", () => {
+    const store = newStore();
+    const id = waitingForRunner(store, 12);
+    store.askPlanner(id, PLAIN);
+    store.decidePlanner(id, {
+      kind: "hold",
+      at: "2026-08-02T11:00:00Z",
+      reason: "Both change the task list.",
+      waitsFor: [7],
+    });
+
+    const asked = store.reaskPlanner(id);
+
+    expect(asked.planner).toEqual({ askedAt: "2026-08-02T10:03:00Z" });
+    expect(store.heldByPlanner("scratch-app")).toEqual([]);
+    expect(store.waitingForPlanner("scratch-app").map((run) => run.id)).toEqual([id]);
+  });
+
+  it("puts a ticket labelled priority:high first among the runs waiting for the planner, then the ticket opened first", () => {
+    const store = newStore();
+    const late = waitingForRunner(store, 8);
+    const early = waitingForRunner(store, 9);
+    const urgent = waitingForRunner(store, 10);
+    store.askPlanner(late, { priority: false, openedAt: "2026-08-01T12:00:00Z" });
+    store.askPlanner(early, { priority: false, openedAt: "2026-08-01T09:00:00Z" });
+    store.askPlanner(urgent, { priority: true, openedAt: "2026-08-01T15:00:00Z" });
+
+    expect(store.waitingForPlanner("scratch-app").map((run) => run.id)).toEqual([
+      "scratch-app#10/1",
+      "scratch-app#9/1",
+      "scratch-app#8/1",
+    ]);
+  });
+
+  it("leaves the planner's decision on a run that is finished, and counts it no more", () => {
+    const store = newStore();
+    const id = waitingForRunner(store, 12);
+    store.askPlanner(id, PLAIN);
+    const decision = {
+      kind: "hold" as const,
+      at: "2026-08-02T11:00:00Z",
+      reason: "Both change the task list.",
+      waitsFor: [7],
+    };
+    store.decidePlanner(id, decision);
+
+    const cancelled = store.cancel(id, "fvermaut asked to stop");
+
+    expect(cancelled.planner?.decision).toEqual(decision);
+    expect(store.heldByPlanner("scratch-app")).toEqual([]);
+  });
+
+  it("loads a ledger written before the planner existed unchanged, with no run waiting for it", () => {
+    const path = statePath();
+    mkdirSync(dirname(path), { recursive: true });
+    const written = JSON.stringify({
+      version: 1,
+      runs: [
+        {
+          id: "scratch-app#12/1",
+          project: "scratch-app",
+          ticket: 12,
+          seq: 1,
+          status: "parked",
+          stage: "planning",
+          wait: { on: "the runner", kind: "runner", resolvableBy: ["planning"] },
+          branch: "timone/12-a-due-date-on-each-task",
+          place: { priority: false, openedAt: "2026-10-01T08:00:00Z" },
+          flags: [],
+          createdAt: "2026-10-01T08:00:00Z",
+          updatedAt: "2026-10-01T09:00:00Z",
+        },
+      ],
+    });
+    writeFileSync(path, written);
+
+    const store = RunStore.open(path);
+
+    expect(store.get("scratch-app#12/1")?.planner).toBeUndefined();
+    expect(store.get("scratch-app#12/1")?.branch).toBe("timone/12-a-due-date-on-each-task");
+    expect(store.waitingForPlanner("scratch-app")).toEqual([]);
+    expect(store.heldByPlanner("scratch-app")).toEqual([]);
+    expect(readFileSync(path, "utf8")).toBe(written);
+  });
+});
