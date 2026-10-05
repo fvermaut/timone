@@ -54,6 +54,10 @@
 
 **What I need from you:** run the replay on the branch, answer the pull request's question about PRD-07.R13, then merge #222 if you agree.
 
+**1k. The `places` line is now explained ([#219](https://github.com/fvermaut/timone/issues/219)): pull request [#221](https://github.com/fvermaut/timone/pull/221) is open for your review, in Timone's own repository, from the branch `timone/219-the-places-setting-is-not-documented`.** `README.md` and `timone.example.yaml` now say what `places` is, that it is 2 when the line is missing, and that a change to `timone.yaml` needs a restart of the daemon. The check of the words passed, after one sentence about who can let a held-back ticket build was corrected. The review of the style found 3 things: "build" names both every step and one step, the new paragraph is long and covers two subjects, and the restart sentence is written three times. The review against the requirements found 1: the example comment says "build" where any running step takes a place. Before you merge: 8 older checks and 70 tests could not run in the container ([#220](https://github.com/fvermaut/timone/issues/220)); the pull request says how to run them. No program code changed. This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** run the checks the pull request lists, then review and merge #221 if you agree.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
