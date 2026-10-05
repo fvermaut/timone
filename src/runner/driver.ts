@@ -939,6 +939,18 @@ export class RunnerDriver {
   }
 
   /**
+   * Give back a run the step's end handed to a terminal that then stopped
+   * waiting before it opened a session (ADR-0067 D3). As
+   * {@link terminalEnded}, without saying a session ended: none was opened,
+   * so the runner is told only what it would have been told had nobody
+   * waited.
+   */
+  takeoverAbandoned(run: Run): void {
+    const current = this.deps.store.get(run.id) ?? run;
+    this.handBack(run, this.unreadStepEnd(current));
+  }
+
+  /**
    * What the runner was not told of the step that ended on `run`, when the
    * run is still on the after-step wait: the step's end and what failed
    * after it, built from the record as {@link afterStep} builds them. Nothing

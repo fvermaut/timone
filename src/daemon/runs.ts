@@ -893,6 +893,11 @@ export class RunStore {
    * Write `holder` on the run as the terminal that waits for its running step
    * to end (ADR-0067 D1). Refused when no step runs on it: the run is not
    * `active`, or a person's terminal holds it.
+   *
+   * **One terminal waits at a time.** Another terminal already waiting is
+   * kept while its process is not `gone`, and this one is refused in the
+   * words the command prints. One whose process is gone is replaced: it
+   * cannot open the session the step's end would hand it.
    */
   waitForStep(id: string, holder: Holder): Run {
     const run = this.mutable(id);
@@ -904,15 +909,31 @@ export class RunStore {
         `Run ${id} is open in a person's terminal, so no step is running on it to wait for.`,
       );
     }
+    const other = run.waitingTerminal;
+    if (other !== undefined && other.token !== holder.token && this.livenessOf(other) !== "gone") {
+      throw new Error(anotherWaiterMessage(run, other));
+    }
     run.waitingTerminal = holder;
     run.updatedAt = this.now();
     this.persist();
     return { ...run };
   }
 
-  /** The terminal that waits for the run's running step to end, if one does (ADR-0067 D2). */
+  /**
+   * The terminal that waits for the run's running step to end, if one does
+   * and its process is not gone (ADR-0067 D2). A waiter whose process is gone
+   * is cleared, so the step's end wakes the runner as if nobody had waited.
+   * A terminal on another machine (`unknown`) counts as alive, as an existing
+   * holder does in {@link claim}.
+   */
   liveWaiter(id: string): Holder | undefined {
-    return this.mutable(id).waitingTerminal;
+    const run = this.mutable(id);
+    const waiter = run.waitingTerminal;
+    if (waiter === undefined || this.livenessOf(waiter) !== "gone") return waiter;
+    run.waitingTerminal = undefined;
+    run.updatedAt = this.now();
+    this.persist();
+    return undefined;
   }
 
   /**
@@ -1638,6 +1659,18 @@ function initiativeKey(project: string, initiative: number): string {
 /** One introduction per ticket, keyed the same way runs are keyed. */
 export function introductionKey(project: string, ticket: number): string {
   return `${project}#${ticket}`;
+}
+
+/**
+ * What a takeover is told when another terminal already waits for the step
+ * running on `run` (ADR-0067 D1). The store refuses in these words, and the
+ * command prints them.
+ */
+export function anotherWaiterMessage(run: Pick<Run, "project" | "ticket">, waiter: Holder): string {
+  return (
+    `Another terminal is already waiting for the step on ${run.project} #${run.ticket}: ` +
+    `${waiter.command} (pid ${waiter.pid}).`
+  );
 }
 
 /**

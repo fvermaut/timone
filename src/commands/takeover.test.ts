@@ -1914,4 +1914,209 @@ describe("a takeover typed while the ticket's step runs (ADR-0067)", () => {
       pending(statePath).requests.map((request) => request.body.kind),
     ).toEqual(["release-takeover"]);
   });
+
+  it("stops waiting on Ctrl-C, says nothing changed, and leaves nothing behind (PRD-09.R4 clause 4, ADR-0067 D3)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-wait-stop-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-10-05T10:00:00Z" });
+    const { run: registered } = store.register("scratch-app", 6);
+    store.setStage(registered.id, "execution");
+    const run = store.activate(registered.id, "step-session-4");
+    const daemon = acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    expect(daemon.ok).toBe(true);
+
+    // The daemon applies the request on its first look. On the third, the
+    // person presses Ctrl-C; the step is still running.
+    let looks = 0;
+    const daemonLook = async (): Promise<void> => {
+      looks += 1;
+      for (const request of pending(statePath).requests) {
+        if (request.body.kind === "claim-takeover" && request.body.holder !== undefined) {
+          store.waitForStep(run.id, request.body.holder);
+        }
+        settle(request.path);
+      }
+      if (looks === 3) process.emit("SIGINT");
+      if (looks > 10) throw new Error("the wait did not stop on Ctrl-C");
+    };
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: dir,
+      wait: { intervalMs: 1, boundMs: 100, sleep: daemonLook },
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(130);
+    expect(said.at(-1)).toBe("Stopped waiting. Nothing changed on scratch-app #6.");
+    expect(calls).toEqual([]);
+    expect(pending(statePath).requests).toEqual([]);
+    expect(store.get(run.id)).toMatchObject({ status: "active", sessionId: "step-session-4" });
+  });
+
+  it("gives the run back as abandoned when Ctrl-C comes just after the step's end handed it over (ADR-0067 D3)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-wait-late-stop-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, { now: () => "2026-10-05T10:00:00Z" });
+    const { run: registered } = store.register("scratch-app", 6);
+    store.setStage(registered.id, "execution");
+    const run = store.activate(registered.id, "step-session-4");
+    const daemon = acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    expect(daemon.ok).toBe(true);
+
+    const { adapter } = fakeAdapter();
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest,
+      root: dir,
+      sessionsFor: () => ({ async wake() {}, stop() {} }),
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: async () => {
+        throw new Error("no step starts in this test");
+      },
+      timonePin: async () => undefined,
+      clock: () => "2026-10-05T10:00:00Z",
+      log: () => {},
+    });
+
+    // The daemon applies the request on its first look. On the third, the
+    // building step ends and hands the run to this terminal, and the person
+    // presses Ctrl-C in the same moment.
+    let looks = 0;
+    const daemonLook = async (): Promise<void> => {
+      looks += 1;
+      for (const request of pending(statePath).requests) {
+        if (request.body.kind === "claim-takeover" && request.body.holder !== undefined) {
+          store.waitForStep(run.id, request.body.holder);
+        }
+        settle(request.path);
+      }
+      if (looks === 3) {
+        await driver.stepEnded(run.id, "execution", {
+          outcome: { sessionId: "step-session-4", ok: true },
+        });
+        process.emit("SIGINT");
+      }
+      if (looks > 10) throw new Error("the wait did not stop on Ctrl-C");
+    };
+    const { launcher, calls } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: dir,
+      wait: { intervalMs: 1, boundMs: 100, sleep: daemonLook },
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+    await driver.drain();
+
+    expect(code).toBe(130);
+    expect(said.at(-1)).toBe("Stopped waiting. Nothing changed on scratch-app #6.");
+    expect(calls).toEqual([]);
+    expect(pending(statePath).requests.map((request) => request.body)).toEqual([
+      { kind: "release-takeover", project: "scratch-app", ticket: 6, outcome: "abandoned" },
+    ]);
+  });
+
+  it("refuses a second takeover while another terminal waits for the step, and leaves that wait alone (ADR-0067 D1)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "timone-takeover-wait-second-"));
+    tempDirs.push(dir);
+    const statePath = join(dir, ".timone", "state.json");
+    const store = RunStore.open(statePath, {
+      now: () => "2026-10-05T10:00:00Z",
+      livenessOf: () => "alive",
+    });
+    const { run: registered } = store.register("scratch-app", 6);
+    store.setStage(registered.id, "execution");
+    const run = store.activate(registered.id, "step-session-4");
+    const first: Holder = {
+      token: "token-terminal-7100",
+      command: "timone takeover scratch-app#6",
+      pid: 7100,
+      since: "2026-10-05T09:50:00Z",
+      observedAt: "2026-10-05T09:50:00Z",
+      host: "fvermaut-mac",
+    };
+    store.waitForStep(run.id, first);
+    const daemon = acquireStateLock({
+      statePath,
+      command: "timone daemon",
+      pid: 4213,
+      staleAfterMs: 2 * 60 * 1000,
+    });
+    expect(daemon.ok).toBe(true);
+
+    // The daemon applies the request as `applyRequest` does: a refusal is
+    // reported on its log, and the request is settled either way.
+    let looks = 0;
+    const daemonLook = async (): Promise<void> => {
+      looks += 1;
+      for (const request of pending(statePath).requests) {
+        if (request.body.kind === "claim-takeover" && request.body.holder !== undefined) {
+          try {
+            store.waitForStep(run.id, request.body.holder);
+          } catch {
+            // Said on the daemon's log, as `could not apply …`.
+          }
+        }
+        settle(request.path);
+      }
+      if (looks > 10) throw new Error("the second takeover went on waiting");
+    };
+    const { adapter } = fakeAdapter();
+    const { launcher, calls } = fakeLauncher();
+    const said: string[] = [];
+
+    const code = await runTakeover("scratch-app#6", {
+      manifest,
+      store,
+      statePath,
+      adapter,
+      launcher,
+      root: dir,
+      wait: { intervalMs: 1, boundMs: 100, sleep: daemonLook },
+      ticker: () => ({ stop: () => {} }),
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(1);
+    expect(said.at(-1)).toBe(
+      "Another terminal is already waiting for the step on scratch-app #6: " +
+        "timone takeover scratch-app#6 (pid 7100).",
+    );
+    expect(calls).toEqual([]);
+    expect(store.get(run.id)).toMatchObject({
+      status: "active",
+      sessionId: "step-session-4",
+      waitingTerminal: first,
+    });
+    expect(pending(statePath).requests).toEqual([]);
+  });
 });

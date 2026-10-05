@@ -12,7 +12,7 @@ import {
   type TicketingProject,
 } from "../adapters/ticketing.js";
 import { loadManifest, namedPeople, placesIn, type Manifest } from "../manifest.js";
-import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
+import { RunStore, anotherWaiterMessage, defaultStatePath, type Run } from "../daemon/runs.js";
 import { takeoverPrompt } from "../daemon/prompts.js";
 import { stageLabel, wayfinderStage } from "../daemon/pipeline.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "../daemon/progress.js";
@@ -24,6 +24,7 @@ import {
   waitUntilSettled,
   WATCH_BOUND_MS,
   WATCH_INTERVAL_MS,
+  type RequestBody,
   type WaitOptions,
 } from "../daemon/requests.js";
 import { intervalTicker, waitOf, type Ticker } from "../daemon/session.js";
@@ -592,7 +593,13 @@ async function claimForTakeover(
         "then I'll open the session here — press Ctrl-C to stop waiting, and " +
         "nothing changes.",
     );
-    return waitForHandOver(target, hold, deps);
+    return waitForHandOver(target, hold, deps, log);
+  }
+  // Another terminal waits for the step, and the daemon refused this one
+  // (D1). The run is still the step's, so it is not this terminal's to open.
+  if (run?.status === "active" && run.waitingTerminal !== undefined) {
+    log(anotherWaiterMessage(run, run.waitingTerminal));
+    return { kind: "no", code: 1 };
   }
   if (run === undefined || run.status !== "active") {
     log(
@@ -605,25 +612,69 @@ async function claimForTakeover(
 }
 
 /**
- * Watch the ledger until the run is claimed with this terminal's own token,
- * which the step's end does (ADR-0067 D2). No time limit: a step can run for
- * an hour (D3).
+ * Wait for the step's end to hand the run to this terminal (ADR-0067 D2),
+ * or for the person to stop waiting.
+ *
+ * **Ctrl-C stops the wait, and changes nothing** (D3). While waiting, a
+ * `SIGINT` or `SIGTERM` ends the watch instead of the process, and the
+ * handlers are taken off before this returns, so the ones {@link runTakeover}
+ * puts on for the session are the only ones then. The step's end may have
+ * handed the run over just before the stop, so the ledger is looked at once
+ * more for a claim with this terminal's token, as {@link withdraw} does. A
+ * claim found is given back as abandoned: no session was opened, so the
+ * runner is told only of the step's end.
  */
 async function waitForHandOver(
   target: TakeoverTarget,
   hold: Holder,
   deps: TakeoverDeps,
+  log: (message: string) => void,
 ): Promise<Claim> {
+  const stop = new AbortController();
+  const stopWaiting = (): void => stop.abort();
+  process.on("SIGINT", stopWaiting);
+  process.on("SIGTERM", stopWaiting);
+  let handed: Run | undefined;
+  try {
+    handed = await watchForHandOver(target, hold, deps, stop.signal);
+  } finally {
+    process.off("SIGINT", stopWaiting);
+    process.off("SIGTERM", stopWaiting);
+  }
+  if (handed !== undefined) return { kind: "claimed", run: handed };
+
+  const landed = claimedFor(target, hold, deps.store);
+  if (landed !== undefined) releaseClaim(target, landed, deps, log, "abandoned");
+  log(`Stopped waiting. Nothing changed on ${target.project} #${target.ticket}.`);
+  return { kind: "no", code: 130 };
+}
+
+/**
+ * Watch the ledger until the run is claimed with this terminal's own token,
+ * which the step's end does (ADR-0067 D2), or until `stop` is aborted. No
+ * time limit: a step can run for an hour (D3). Undefined means stopped.
+ */
+async function watchForHandOver(
+  target: TakeoverTarget,
+  hold: Holder,
+  deps: TakeoverDeps,
+  stop: AbortSignal,
+): Promise<Run | undefined> {
   const intervalMs = deps.wait?.intervalMs ?? WATCH_INTERVAL_MS;
   const sleep =
     deps.wait?.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
   for (;;) {
-    const run = deps.store.runsForTicket(target.project, target.ticket).at(-1);
-    if (run?.status === "active" && run.holder?.token === hold.token) {
-      return { kind: "claimed", run };
-    }
+    const run = claimedFor(target, hold, deps.store);
+    if (run !== undefined) return run;
     await sleep(intervalMs);
+    if (stop.aborted) return undefined;
   }
+}
+
+/** The ticket's run, when it is `active` and claimed with this terminal's own token. */
+function claimedFor(target: TakeoverTarget, hold: Holder, store: RunStore): Run | undefined {
+  const run = store.runsForTicket(target.project, target.ticket).at(-1);
+  return run?.status === "active" && run.holder?.token === hold.token ? run : undefined;
 }
 
 /**
@@ -701,12 +752,8 @@ async function withdraw(
     deps.wait?.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
 
   for (let looked = 0; looked <= WITHDRAW_LOOKS; looked += 1) {
-    const run = store.runsForTicket(target.project, target.ticket).at(-1);
-    if (
-      run !== undefined &&
-      run.status === "active" &&
-      run.holder?.token === hold.token
-    ) {
+    const run = claimedFor(target, hold, store);
+    if (run !== undefined) {
       return { kind: "applied", claim: { kind: "claimed", run } };
     }
     if (looked < WITHDRAW_LOOKS) await sleep(intervalMs);
@@ -750,12 +797,18 @@ function boundOf(wait: WaitOptions | undefined): number {
  * deliberately), so what it goes back to is read off the run itself rather
  * than remembered by this process — a process that may not be alive to
  * remember anything.
+ *
+ * ✏ 2026-10-05 (ADR-0067 D3): `outcome` reaches a daemon that holds the
+ * ledger. With no daemon, the run is parked here and the next daemon is told
+ * a session ended whatever the outcome; a wait stopped as a daemon stops is
+ * rare, and not worth a request kind of its own.
  */
 function releaseClaim(
   target: TakeoverTarget,
   run: Run,
   deps: TakeoverDeps,
   log: (message: string) => void,
+  outcome: ReleaseOutcome = "ended",
 ): void {
   const { store, statePath } = deps;
   if (statePath === undefined) return;
@@ -794,9 +847,15 @@ function releaseClaim(
     kind: "release-takeover",
     project: target.project,
     ticket: target.ticket,
-    outcome: "ended",
+    outcome,
   });
 }
+
+/**
+ * How a claim given back ended: `ended` after a session, `abandoned` when the
+ * wait was stopped before a session was opened (ADR-0067 D3).
+ */
+type ReleaseOutcome = Extract<RequestBody, { kind: "release-takeover" }>["outcome"];
 
 /**
  * The session bound to no step: the terminal, and a prompt that names no

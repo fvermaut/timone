@@ -20,7 +20,7 @@ import {
 } from "../adapters/ticketing.stubs.js";
 import type { Manifest } from "../manifest.js";
 import { breakdownPath, renderBreakdown } from "../daemon/breakdown.js";
-import type { Holder } from "../daemon/holder.js";
+import type { Holder, Liveness } from "../daemon/holder.js";
 import { RunStore, type Run } from "../daemon/runs.js";
 import { HELD_LABEL } from "../daemon/steps.js";
 import type { StepResult, StepSessionInput } from "../daemon/step-session.js";
@@ -1595,9 +1595,10 @@ describe("RunnerDriver — a step ends on a run a terminal waits for (ADR-0067 D
    * The chore's run on its branch with its building step running, as the
    * runner's actions leave it, and a driver over it whose wakes and log the
    * test reads. The step's end is written in the record, as `watchStep`
-   * writes it before it tells the driver.
+   * writes it before it tells the driver. `livenessOf` is what the store
+   * answers about the waiting terminal's process.
    */
-  function buildingChore(): {
+  function buildingChore(livenessOf: (holder: Holder) => Liveness = () => "alive"): {
     store: RunStore;
     run: Run;
     driver: RunnerDriver;
@@ -1609,6 +1610,7 @@ describe("RunnerDriver — a step ends on a run a terminal waits for (ADR-0067 D
     tempDirs.push(root);
     const store = RunStore.open(join(root, ".timone", "state.json"), {
       now: () => "2026-10-05T10:00:00Z",
+      livenessOf,
     });
     const { run: registered } = store.register("scratch-app", 12);
     store.claimBranch(registered.id, BRANCH);
@@ -1716,5 +1718,25 @@ describe("RunnerDriver — a step ends on a run a terminal waits for (ADR-0067 D
     await driver.drain();
 
     expect(wakes).toEqual([{ runId: run.id, events: [TAKEOVER_ENDED_EVENT], options: {} }]);
+  });
+
+  it("wakes the runner with the step's end, and clears the waiting terminal, when that terminal's process is gone (PRD-09.R4 clause 3, ADR-0067 D2)", async () => {
+    const { store, run, driver, wakes } = buildingChore(() => "gone");
+    store.waitForStep(run.id, terminal);
+
+    await driver.stepEnded(run.id, "execution", {
+      outcome: { sessionId: "step-session-4", ok: true },
+    });
+    await driver.drain();
+
+    expect(store.get(run.id)).toMatchObject({
+      status: "parked",
+      wait: { on: "the runner to look at what the step did", kind: "runner" },
+    });
+    expect(store.get(run.id)?.waitingTerminal).toBeUndefined();
+    expect(store.get(run.id)?.holder).toBeUndefined();
+    expect(wakes).toEqual([
+      { runId: run.id, events: ["The step building ended: it succeeded."], options: {} },
+    ]);
   });
 });

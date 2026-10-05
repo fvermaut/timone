@@ -726,7 +726,11 @@ async function applyRequest(
       }
       // It goes back to the runner, which is woken to read what the terminal
       // session left (PRD-05 R11). Only the runner moves a run.
-      deps.runner.terminalEnded(run);
+      // ✏ 2026-10-05 (ADR-0067 D3): `abandoned` is a terminal that stopped
+      // waiting for a step after the step's end had handed it the run. No
+      // session was opened, so the runner is not told that one ended.
+      if (body.outcome === "abandoned") deps.runner.takeoverAbandoned(run);
+      else deps.runner.terminalEnded(run);
       log(`${target} is back with the runner (${body.outcome}).`);
       return 0;
     }

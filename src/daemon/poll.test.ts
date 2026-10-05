@@ -2185,6 +2185,59 @@ describe("pollOnce — handing a run to the terminal and taking it back", () => 
     });
     expect(store.get(six.id)?.takenOver).toBeUndefined();
   });
+
+  it("wakes the runner with the step's end only, as if nobody had waited, when the waiting terminal gives the run back unopened (ADR-0067 D3)", async () => {
+    const { store, statePath } = newStoreAt();
+    const manifest = manifestWith("scratch-app");
+    const { run: registered } = store.register("scratch-app", 6);
+    store.setStage(registered.id, "execution");
+    const six = store.activate(registered.id, "step-session-6");
+    store.waitForStep(six.id, {
+      token: "token-terminal-9100",
+      command: "timone takeover scratch-app#6",
+      pid: 9100,
+      since: "2026-08-16T12:05:00Z",
+      observedAt: "2026-08-16T12:05:00Z",
+      host: "fvermaut-mac",
+    });
+    const { adapter } = runnerAdapter([ticket(6)]);
+    const { sessions, wakes } = fakeWakes();
+    const { runner, root } = runnerFor({ store, adapter, manifest, sessions });
+    // The building step ends, as the actions write it, and the run goes to
+    // the terminal that waited for it.
+    appendEntry(root, "scratch-app", 6, {
+      kind: "step-ended",
+      at: "2026-08-16T12:30:00Z",
+      runId: six.id,
+      stage: "execution",
+      sessionId: "step-session-6",
+      ok: true,
+      costUsd: 1,
+    });
+    await runner.stepEnded(six.id, "execution", {
+      outcome: { sessionId: "step-session-6", ok: true },
+    });
+    expect(store.get(six.id)).toMatchObject({ status: "active", takenOver: true });
+    // The person pressed Ctrl-C before the session opened.
+    enqueue(statePath, {
+      kind: "release-takeover",
+      project: "scratch-app",
+      ticket: 6,
+      outcome: "abandoned",
+    });
+
+    const result = await pollOnce({ manifest, store, adapter, statePath, runner });
+    await runner.drain();
+
+    expect(result.applied).toEqual(["release-takeover scratch-app#6"]);
+    expect(store.get(six.id)).toMatchObject({
+      status: "parked",
+      wait: { on: "the runner to look at what the step did", kind: "runner" },
+    });
+    expect(wakes).toEqual([
+      { runId: six.id, events: ["The step building ended: it succeeded."], options: {} },
+    ]);
+  });
 });
 
 /**

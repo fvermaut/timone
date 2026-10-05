@@ -2942,4 +2942,36 @@ describe("a terminal that waits for the running step (ADR-0067 D1)", () => {
 
     expect(parked.waitingTerminal).toBeUndefined();
   });
+
+  /** A second `timone takeover scratch-app#7`, typed in another terminal. */
+  const second: Holder = {
+    token: "token-terminal-6100",
+    command: "timone takeover scratch-app#7",
+    pid: 6100,
+    since: "2026-10-05T09:30:00Z",
+    observedAt: "2026-10-05T09:30:00Z",
+    host: "fvermaut-mac",
+  };
+
+  it("refuses a second waiting terminal while the first one's process is alive, and keeps the first (ADR-0067 D1)", () => {
+    const store = storeAt(statePath(), [4213, 5000, 6100]);
+    const run = stepRunning(store);
+    store.waitForStep(run.id, terminal);
+
+    expect(() => store.waitForStep(run.id, second)).toThrow(
+      "Another terminal is already waiting for the step on scratch-app #7: " +
+        "timone takeover scratch-app#7 (pid 4213).",
+    );
+    expect(store.get(run.id)?.waitingTerminal).toEqual(terminal);
+  });
+
+  it("replaces a waiting terminal whose process is gone (ADR-0067 D1)", () => {
+    const store = storeAt(statePath(), [5000, 6100]);
+    const run = stepRunning(store);
+    store.waitForStep(run.id, terminal);
+
+    const waiting = store.waitForStep(run.id, second);
+
+    expect(waiting.waitingTerminal).toEqual(second);
+  });
 });
