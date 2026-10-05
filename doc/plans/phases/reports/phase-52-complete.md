@@ -35,6 +35,7 @@ None — the phase changes no screen.
 
 - `✏ 2026-10-05 (build, timone#219)` in the phase file: the plan said the comment on `internal-tools` already says it has 2 places. It did not, so the comment gains the words (departure 1).
 - The whole suite could not pass inside this container: 70 tests push to `main` in temporary repositories and the container's guard refuses it (departure 2). The tests were not run outside the container.
+- `✏ 2026-10-05 (build, timone#219)`: the check ([phase-52-verification.md](phase-52-verification.md)) found that `README.md` let the `operator` build a held-back ticket on every project. The sentence is corrected: someone in the project's `instructors`, or the `operator` only when the project lists no `instructors`, as `namedPeople` in `src/manifest.ts` decides.
 
 ## Context for the next agent
 
