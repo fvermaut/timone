@@ -50,6 +50,10 @@
 
 **What I need from you:** run the replay and the watched run, answer the four questions on #216, then merge it if you agree.
 
+**1k. The `places` line is now explained ([#219](https://github.com/fvermaut/timone/issues/219)), in Timone's own repository, on the branch `timone/219-the-places-setting-is-not-documented`; no pull request yet.** `README.md` and `timone.example.yaml` now say what `places` is, that it is 2 when the line is missing, and that a change to `timone.yaml` needs a restart of the daemon. The check found one wrong sentence in `README.md`: it says the operator can let a held ticket build, but the operator can do that only when the project lists no `instructors`. The example file loads and gives 3 and 2, as it says. 8 of the 9 older checks could not run in the container: it refuses their test pushes to `main`. One passed. No program code changed. Details: [phase-52-verification.md](doc/plans/phases/reports/phase-52-verification.md).
+
+**What I need from you:** run the 8 blocked checks outside the container, or say they can be skipped for a change to two documents.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
