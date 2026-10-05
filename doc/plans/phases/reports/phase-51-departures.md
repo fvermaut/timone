@@ -22,3 +22,10 @@
 **Agreed:** 51c ends the wait with the "moved on" sentence when the run is no longer `active` with this terminal as waiter, and not claimed for it. Four cases.
 **Did instead:** The run counts as moved on only when two looks in a row see it so. A fifth test, at the same seam (`runTakeover`), shows a run seen parked once and claimed on the next look opening the session. Two existing tests in `src/commands/takeover.test.ts` that expected "I'm working on … right now" for an `active` run with no daemon now expect the "no daemon" sentence, as case 1 requires.
 **Why:** The step's end parks the run and then claims it for the terminal in two writes to the ledger file. The terminal is another process and can read between them. On one look it would say "moved on" and leave a claim that nobody opens, and the runner is not woken after a hand-over.
+
+## 2026-10-05 — timone#217, build
+
+**Kind:** check not run
+**Agreed:** At the close, the whole suite runs once and passes (51e's validation: `npx vitest run`, exit 0).
+**Did instead:** The whole suite ran once: 76 files, 1932 tests, 1862 passed, 70 failed, in four files — `src/commands/guardrails.test.ts` (45), `src/numbers.test.ts` (16), `src/workspace.test.ts` (6), `src/commands/number.test.ts` (3). Each of these tests pushes to `main` in a temporary repository, and this container's push guard refuses it ("Refused: this run may push only to `timone/217-…`"). The same four files fail the same 70 tests on `origin/main`, checked out apart, with none of this phase's changes. These 70 tests were not run in a place where they can pass.
+**Why:** The container lets a run push only to its own branch, and the push guard also applies inside the tests' temporary repositories. Nothing this phase changed touches those four files or the code they test.
