@@ -984,9 +984,18 @@ describe("RunnerDriver — when the approved list of pieces cannot be acted on (
     return { store, root, run, wakes };
   }
 
-  /** Whether a comment asks the reader to run a command, or points at a standing note. */
+  /**
+   * Whether a comment asks the reader to run a command, or points at a
+   * standing note. The one command allowed is the takeover command for #12,
+   * the ticket of the run these comments are posted for.
+   *
+   * ✏ 2026-10-05 (PRD-09 R1): the notice asks a question, and a question
+   * names the command that answers it in a terminal. Any other command, or
+   * a standing note, is still not allowed.
+   */
   function namesACommand(comment: string): boolean {
-    return /`|\btimone [a-z]|standing note/i.test(comment);
+    const others = comment.replaceAll("`timone takeover scratch-app#12`", "");
+    return /`|\btimone [a-z]|standing note/i.test(others);
   }
 
   it("leaves the run waiting for the runner when the merge conflicts, notes why, tells the ticket once, and wakes the runner with the failure", async () => {
@@ -1046,6 +1055,21 @@ describe("RunnerDriver — when the approved list of pieces cannot be acted on (
         options: {},
       },
     ]);
+  });
+
+  // PRD-09 R1: the notice asks what to do next, so it says the person can
+  // also answer in their terminal, and names the command for #12.
+  it("names the takeover command for the run's ticket when the approved pieces could not be acted on, and no other command", async () => {
+    const { adapter, posted } = piecesForge({ merged: true, into: "main" }, "throws");
+
+    await approvePieces(adapter);
+
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toContain(
+      "\n\nYou can answer here in writing, or in your terminal by running `timone takeover scratch-app#12`.\n\n" +
+        "**What I need from you:** reply here",
+    );
+    expect(namesACommand(posted[0]!)).toBe(false);
   });
 });
 

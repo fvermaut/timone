@@ -627,12 +627,15 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       await deps.adapter.postComment(
         deps.project,
         run.ticket,
-        limitNotice({
-          spentUsd,
-          allowanceUsd,
-          raiseUsd: base,
-          standing: standingOf(entries, run.id, order),
-        }),
+        limitNotice(
+          {
+            spentUsd,
+            allowanceUsd,
+            raiseUsd: base,
+            standing: standingOf(entries, run.id, order),
+          },
+          { project: deps.project.name, ticket: run.ticket },
+        ),
       );
       write({ kind: "limit-reached", at: deps.clock(), spentUsd });
       write({ kind: "notice", at: deps.clock(), about: LIMIT_NOTICE });
@@ -675,7 +678,11 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
    */
   const piecesNotActedOn = async (failure: PiecesFailure): Promise<void> => {
     write({ kind: "notice", at: deps.clock(), about: piecesFailedAbout(run.id, failure) });
-    await deps.adapter.postComment(deps.project, run.ticket, piecesFailedNotice(failure));
+    await deps.adapter.postComment(
+      deps.project,
+      run.ticket,
+      piecesFailedNotice(failure, { project: deps.project.name, ticket: run.ticket }),
+    );
   };
 
   /**

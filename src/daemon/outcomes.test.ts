@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MACHINE_MARKER } from "../adapters/ticketing.js";
-import { askedFor, LONGEST_ASK } from "./outcomes.js";
+import { askedFor, isQuestion, LONGEST_ASK } from "./outcomes.js";
 
 /**
  * The line a stage's closing comment opened on when it stopped and asked a
@@ -61,5 +61,36 @@ describe("askedFor", () => {
     const quoted = `> **What I need from you:** the old one.\n\n${closing("the new one.")}`;
 
     expect(askedFor(quoted)).toBe("the new one.");
+  });
+});
+
+// PRD-09. A question names the takeover command, so code must tell a
+// question from a message that asks for nothing.
+describe("isQuestion", () => {
+  /** A message that ends on a closing line. */
+  function ending(needed: string): string {
+    return ["The fix is built.", "", `**What I need from you:** ${needed}`, ""].join("\n");
+  }
+
+  it("is a question when the closing line asks for something", () => {
+    expect(isQuestion(ending("say whether the nightly run keeps calls too."))).toBe(true);
+  });
+
+  it("is not a question when the closing line asks for nothing", () => {
+    expect(isQuestion(ending("Nothing. If you want the skipped step done after all, say so here."))).toBe(false);
+  });
+
+  it("is not a question when there is no closing line", () => {
+    expect(isQuestion("The fix is built.\n\nI stopped.")).toBe(false);
+  });
+
+  it("is not a question when the closing line is empty", () => {
+    expect(isQuestion(ending(""))).toBe(false);
+  });
+
+  // `askedFor` stops at 300 characters, because its words go on one line of
+  // `timone status`. A long ask is still a question.
+  it("is a question when the ask is longer than 300 characters", () => {
+    expect(isQuestion(ending(`say which of these you want: ${"x".repeat(300)}.`))).toBe(true);
   });
 });

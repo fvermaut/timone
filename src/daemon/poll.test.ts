@@ -3529,10 +3529,47 @@ describe("the runner drives its projects in the poll cycle", () => {
       "**This ticket has reached its spending limit.** It has cost $150.40, and the limit is $150.00. " +
         "I will not start any more work on it for now.\n\n" +
         "Nothing is done yet. Next, in the usual order: sorting the request.\n\n" +
+        "You can answer here in writing, or in your terminal by running `timone takeover scratch-app#7`.\n\n" +
         '**What I need from you:** reply "continue" to allow another $150.00, or say nothing and it stays stopped.',
     ]);
     expect(store.get(run.id)).toMatchObject({ status: "parked", wait: { kind: "runner" } });
     expect(store.placeHolders("scratch-app")).toEqual([]);
+  });
+
+  // PRD-09 R1: the limit notice the machine posts for the runner asks a
+  // question, so it names the command that answers it in a terminal, with
+  // the run's ticket number. Its last line is the one it always had.
+  it("names the takeover command for the run's ticket in the limit notice it posts for a new run over its limit, and keeps its last line", async () => {
+    const store = newStore();
+    const manifest = manifestWith("scratch-app");
+    const { run: earlier } = store.register("scratch-app", 7);
+    store.activate(earlier.id, "step-session-1");
+    store.complete(earlier.id);
+    store.register("scratch-app", 7);
+    const { adapter, comments } = runnerAdapter([ticket(7)]);
+    const { sessions } = fakeWakes();
+    const { runner, root } = runnerFor({ store, adapter, manifest, sessions });
+    appendEntry(root, "scratch-app", 7, {
+      kind: "step-ended",
+      at: "2026-08-02T11:00:00Z",
+      runId: earlier.id,
+      stage: "execution",
+      sessionId: "step-session-1",
+      ok: true,
+      costUsd: 150.4,
+    });
+
+    await pollOnce({ manifest, store, adapter, runner });
+    await runner.drain();
+
+    const [notice] = comments.map((comment) => comment.body);
+    expect(notice).toContain(
+      "\n\nYou can answer here in writing, or in your terminal by running `timone takeover scratch-app#7`.\n\n",
+    );
+    expect(notice?.match(/`timone takeover scratch-app#7`/g)).toHaveLength(1);
+    expect(notice?.split("\n").at(-1)).toBe(
+      '**What I need from you:** reply "continue" to allow another $150.00, or say nothing and it stays stopped.',
+    );
   });
 
   it("says where the work stands when the runner's own session takes the ticket over its limit while a step runs", async () => {

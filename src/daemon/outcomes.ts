@@ -41,3 +41,19 @@ export function askedFor(body: string): string | undefined {
 
   return asked;
 }
+
+/**
+ * Whether a message asks the person something: the text after its last
+ * `**What I need from you:**`, to the end of that line, is not empty and
+ * does not start with "nothing" (PRD-09).
+ *
+ * ✏ 2026-10-05 (PRD-09): a question names the takeover command, and this is
+ * how code tells a question from a message that asks for nothing. Unlike
+ * `askedFor` it has no length limit: a long ask is still a question.
+ */
+export function isQuestion(body: string): boolean {
+  const at = body.lastIndexOf(NEEDED_FROM_YOU);
+  if (at === -1) return false;
+  const asked = (body.slice(at + NEEDED_FROM_YOU.length).split("\n")[0] ?? "").trim();
+  return asked !== "" && !/^nothing/i.test(asked);
+}

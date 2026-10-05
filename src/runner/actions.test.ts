@@ -902,8 +902,36 @@ describe("the runner's actions", () => {
       "**This ticket has reached its spending limit.** It has cost $160.00, and the limit is $150.00. " +
         "I will not start any more work on it for now.\n\n" +
         "Done so far: sorting the request. Next, in the usual order: preparing the work.\n\n" +
+        "You can answer here in writing, or in your terminal by running `timone takeover scratch-app#12`.\n\n" +
         '**What I need from you:** reply "continue" to allow another $150.00, or say nothing and it stays stopped.',
     ]);
+  });
+
+  // PRD-09 R1: the limit notice asks a question, so it names the command
+  // that answers it in a terminal, with this run's ticket number. Its last
+  // line is the one it always had.
+  it("names the takeover command for the run's ticket in the limit notice, and keeps its last line", async () => {
+    const { actions, run, wrote, forge } = world();
+    wrote({
+      kind: "step-ended",
+      at: "2026-09-27T11:00:00Z",
+      runId: run.id,
+      stage: "requirements",
+      sessionId: "b41e-requirements",
+      ok: true,
+      costUsd: 150.4,
+    });
+
+    await actions.startStep({ stage: "triage", instructions: "Sort this request.", reason: "A new ticket." });
+
+    const [notice] = forge.comments.map((comment) => comment.body);
+    expect(notice).toContain(
+      "\n\nYou can answer here in writing, or in your terminal by running `timone takeover scratch-app#12`.\n\n",
+    );
+    expect(notice?.match(/`timone takeover scratch-app#12`/g)).toHaveLength(1);
+    expect(notice?.split("\n").at(-1)).toBe(
+      '**What I need from you:** reply "continue" to allow another $150.00, or say nothing and it stays stopped.',
+    );
   });
 
   it("refuses an approval given in a comment by someone who is not named, and records none", async () => {

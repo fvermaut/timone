@@ -696,12 +696,15 @@ export class RunnerDriver {
     await this.deps.adapter.postComment(
       project,
       run.ticket,
-      limitNotice({
-        spentUsd,
-        allowanceUsd: allowanceOf(entries, base),
-        raiseUsd: base,
-        standing: standingOf(entries, run.id, defaultOrder(kind)),
-      }),
+      limitNotice(
+        {
+          spentUsd,
+          allowanceUsd: allowanceOf(entries, base),
+          raiseUsd: base,
+          standing: standingOf(entries, run.id, defaultOrder(kind)),
+        },
+        { project: project.name, ticket: run.ticket },
+      ),
     );
     const write = (entry: RecordEntry): void => {
       appendEntry(this.deps.root, project.name, run.ticket, entry);

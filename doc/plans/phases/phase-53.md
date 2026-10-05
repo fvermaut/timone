@@ -77,7 +77,7 @@ npx vitest run src/channels/terminal.test.ts src/daemon/outcomes.test.ts src/run
 ```
 
 - [ ] Cases 1–5 pass, each one's red run recorded in the handoff before its green run.
-- [ ] Every other existing case of those files passes unchanged (hard gate), apart from `namesACommand`, whose change is listed in the handoff.
+- [ ] Every other existing case of those files passes unchanged (hard gate), apart from `namesACommand`, whose change is listed in the handoff. ✏ 2026-10-05 (build, timone#218): also apart from the two cases that compare the whole limit notice word for word (`actions.test.ts`, "says on the ticket where the work stands when the limit is reached: what is done, and what comes next"; `poll.test.ts`, "tells the ticket once that it spent its limit, frees the project, and wakes nothing, for a new run of a ticket over its limit"). Case 4 requires that notice to change, so they gain the sentence line and nothing else; the handoff lists them.
 
 ---
 
