@@ -243,3 +243,57 @@ Other test files run at the end (test files of the code that imports `src/runner
 
 - The runner's refusal sentence is in `TERMINAL_HOLDS_RUN` in `src/runner/actions.ts`. It applies to `start_step` and to `record_approval`'s own step. The other actions (`post`, `end_run`, and the rest) are not refused while a terminal holds the run; the plan did not ask for that.
 - The refusal is written in the ticket's record as a `decision` entry with `detail: "Refused: <sentence>"`, as every refused action is. It posts nothing on the ticket.
+
+## 51e — The written rules say that a takeover waits for a running step
+
+**Built.** The written rules now say what the code of 51a to 51d does. A takeover typed while a step of its ticket runs says which step it waits for, waits for that step to end, and then opens the session before the runner starts anything else on the ticket. Ctrl-C stops the wait and changes nothing. With no daemon running, it says so and does not wait. `process.md`, `CONTEXT.md` and `README.md` say this. PRD-05.R11 has a dated line that the refusal on a run whose step is running is gone. PRD-09.R4's `Falsified-by:` line names two tests, and PRD-09 names phase 51 as its phase.
+
+**Files touched.**
+
+- `process.md` — the paragraph that starts **`timone takeover <project>#<n>`** ends with a ✏ 2026-10-05 (ADR-0067) note. The paragraph that starts *"Every command a ticket names can be run while the daemon is running"* is not changed.
+- `README.md` — under **How you talk to it**, "opens a terminal session on a ticket nothing is working on right now" now reads "opens a terminal session on the ticket. Typed while a step of the ticket runs, it waits for that step to end first."
+- `CONTEXT.md` — the **Takeover** entry ends with a ✏ 2026-10-05 (ADR-0067) sentence.
+- `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` — one dated line under R11's note of 2026-10-05. No clause and no status line changed.
+- `doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.criteria.md` — R4's `Falsified-by:` line. No status line changed.
+- `doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.md` — the `Phases:` line.
+- `doc/plans/phases/reports/phase-51-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- The plan asks for "one dated sentence" in `process.md`. The note there is one dated marker with a bold first sentence and four short ones after it, as the other ✏ notes in `process.md` are written (for example the ADR-0065 note in stage 6). One sentence holding all five facts would have been too long to read. `CONTEXT.md`'s note is one sentence, as asked; it follows the form of the ✏ 2026-09-30 note in the same entry.
+- The PRD-05.R11 line also says that a run just picked up, where no step runs yet, is still refused with "I'm working on … right now". This is what 51c left in the code (`findTakeover`'s `picked-up` branch), and without it a reader of the line could think every refusal is gone.
+- PRD-09.R4's `Falsified-by:` line keeps its sentence about the PRD-05.R11 probe's check word for word, and adds "Verification makes that change, not the build." The build does not read or change that check.
+- I found no other sentence in `process.md`, `README.md`, `CONTEXT.md` or the step skills that says a takeover refuses while a step of its own ticket runs. The note of 2026-10-02 under PRD-05.R11 quotes the old README words ("on a ticket nothing is working on right now"). It is a dated record of what was true then, so it is left as it is.
+
+**Validation evidence.** This sub-phase changes no code that carries behaviour, so it declares no seams and has no red-green trace. Validation is checklist-based.
+
+```
+grep -n "ADR-0067" process.md CONTEXT.md; echo "exit: $?"
+  CONTEXT.md:9:- **Takeover** — a terminal session on a ticket, opened with `timone takeover`. … ✏ 2026-10-05 ([ADR-0067](…)): typed while a step of the ticket runs, …
+  process.md:147:**`timone takeover <project>#<n>`** opens a session on a ticket in the person's terminal. … ✏ 2026-10-05 ([ADR-0067](…)) — **typed while a step of the ticket runs, …**
+  exit: 0
+grep -n "nothing is working on right now" README.md; echo "exit: $?"
+  exit: 1
+grep -n "phase-51" doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.md; echo "exit: $?"
+  doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.md:6:> **Phases:** [phase 51](../../plans/phases/phase-51.md) (piece 1, #217)
+  doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md:217:    > ✏ 2026-10-05 — built in [phase 51](../../plans/phases/phase-51.md) …
+  exit: 0
+git diff -U0 origin/main -- doc/specs/prd/ | grep -E '^[-+]- \*\*Status:\*\*'; echo "exit: $?"
+  exit: 1
+npx vitest run; echo "exit: $?"
+  Test Files  4 failed | 72 passed (76)
+       Tests  70 failed | 1862 passed (1932)
+     Duration  8.28s
+  exit: 1
+```
+
+The whole suite took about 8 seconds. All 70 failures are in four files: `src/commands/guardrails.test.ts` (45), `src/numbers.test.ts` (16), `src/workspace.test.ts` (6) and `src/commands/number.test.ts` (3). Every one of the 70 fails on a `git push` to `main` in a temporary test repository, refused by this container's push guard: "Refused: this run may push only to `timone/217-1-a-takeover-waits-for-the-running-step`, and this push goes to `refs/heads/main`." The output holds exactly 70 such refusals. With this slice's changes stashed, the suite gave the same result: the same 70 failures in the same four files. `dist/` was already built.
+
+- Checkbox 1 (no line in `process.md`, `README.md`, `CONTEXT.md` or the step skills says that a takeover refuses while a step of its own ticket runs): pass. `grep -rn -i "takeover\|take over\|taken over" process.md README.md CONTEXT.md .claude/skills/ | grep -i -E "refus|working on .* right now|nothing is working on|busy"` finds one line, `CONTEXT.md:17` (**Request**), where "busy" is about the daemon's cycle, not a takeover. The step skills mention `timone takeover` only in `timone-wayfind/SKILL.md`, and none of those lines speaks of a refusal.
+- Checkbox 2 (plain words in every note, no metaphor, no process jargon): pass.
+
+**What delivery must know.**
+
+- R4's **Verification hint** in the PRD-09 register still says that `findTakeover` and `claimForTakeover` answer "I'm working on … right now" for a run that is `picked-up` or `active`. That describes the code before phase 51. Now only a `picked-up` run gets it. The plan did not list that line, so it is not changed.
+- The suite fails in this container only because of the push guard, in four files and not only `guardrails.test.ts`: `src/numbers.test.ts`, `src/workspace.test.ts` and `src/commands/number.test.ts` push to `main` in temporary repositories too.
+- PRD-05.R11 and PRD-09.R4 statuses are unchanged; moving them is verification's job.
