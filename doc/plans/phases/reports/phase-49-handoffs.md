@@ -513,3 +513,57 @@ Test files run at the end, by name: `src/commands/status.test.ts` 50; then the f
 
 - The words `timone status` now prints for the planner are `planner: deciding #13, #12; holds #9 until #7, #10 until #7 and #8`. Any documentation of the status line can quote them.
 - `RenderStatusOptions.waitingForPlanner` and `heldByPlanner` are optional; a caller that gives neither shows nothing about the planner.
+
+## 49h — The words that said one step at a time and one ticket at a time are changed where they are written
+
+**Built.** No code. Dated notes, `✏ 2026-10-05`, each linking ADR-0065, are added where the old rules are written. PRD-02.R22 clause 1 says it is changed by PRD-07.R4: every step ticket that is open, unblocked, unheld and unclaimed may be picked up, not only the first, and the places and the planner decide which build. PRD-05.R15 clause 2 says it is replaced by PRD-07.R2: two tickets of one project build at once, up to the project's places, as the planner allows. `process.md` stage 5 and the planning skill carry the same note as PRD-02.R22. `process.md` stage 6 gains one sentence on the planner. `CONTEXT.md` says where the number of places comes from, and when the planner decides. PRD-07's `Phases:` line lists the phases that deliver it. Nothing was deleted, and no `Status:` line changed.
+
+**Files touched.**
+
+- `doc/specs/prd/prd-02-inversion-of-control.criteria.md` — one new note line under R22 clause 1, in the `    > ✏ <date> — …` shape of the 2026-10-04 note under clause 6.
+- `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` — one new note line under R15 clause 2, same shape. Clause 1 untouched.
+- `doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.md` — `> **Phases:** none yet` replaced in place by the list: phase 44 (piece 1, #199), phase 48 (piece 2, #200), phase 47 (piece 3, #201), phase 49 (piece 5, #203), phase 45 (piece 6, #204), in the shape of PRD-05's `Phases:` line. Phase 46 is left out: it delivers PRD-08, not PRD-07.
+- `process.md` — two notes added inside existing lines (edited in place, old words kept as they were): stage 5, right after the sentence "It is the first step ticket that is open, unblocked and unassigned … arithmetic over runs."; stage 6, at the end of the entry gate, before **Work branch and commits**.
+- `.claude/skills/timone-plan/SKILL.md` — a note added inside the line "**Which step is next is the first step ticket that is open, unblocked and unassigned.** Nothing counts runs." (edited in place, old words kept).
+- `CONTEXT.md` — a note added at the end of the **Place** entry (`places` in `timone.yaml`, a whole number of 1 or more, 2 when a project sets none) and of the **Planner** entry (it decides when a ticket's build would start, the build does not start until it has decided, one session per project at a time, it takes no place). Both edited in place, old words kept.
+
+**Decisions taken inside the slice.**
+
+- PRD-02.R22's note and the `process.md` / skill notes add "A step blocked by a step that is still open is still not picked up.", from 49b's handoff, so nobody reads the change as dropping the blocking rule.
+- PRD-05.R15's note adds the number of places in 49a's words (`places` in `timone.yaml`, 2 when it sets none) and says clause 1 is not changed, as the 2026-10-04 note under it does.
+- The stage 6 sentence goes at the end of the entry gate, because it is about what must happen before a build starts.
+- CONTEXT.md's Place entry still says "Every project has one place until the number can be set"; the note says the number can be set now, rather than deleting the old sentence.
+
+**Validation evidence.** This slice carries no behaviour, so there is no TDD loop: validation is checklist-based.
+
+```
+$ grep -n "ADR-0065" doc/specs/prd/prd-02-inversion-of-control.criteria.md doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md process.md .claude/skills/timone-plan/SKILL.md CONTEXT.md
+CONTEXT.md:24, CONTEXT.md:31, .claude/skills/timone-plan/SKILL.md:101,
+doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md:290, process.md:42, process.md:44,
+doc/specs/prd/prd-02-inversion-of-control.criteria.md:520
+exit: 0 (expected 0, every file listed at least once)
+
+$ grep -n "phase-49" doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.md
+7:> **Phases:** [phase 44](../../plans/phases/phase-44.md) (piece 1, #199), … [phase 49](../../plans/phases/phase-49.md) (piece 5, #203), …
+exit: 0 (expected 0)
+
+$ git diff --stat
+ .claude/skills/timone-plan/SKILL.md                            | 2 +-
+ CONTEXT.md                                                     | 4 ++--
+ doc/specs/prd/prd-02-inversion-of-control.criteria.md          | 1 +
+ doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md    | 1 +
+ doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.md | 2 +-
+ process.md                                                     | 4 ++--
+```
+
+The six `-` lines of `git diff` are the six lines edited in place: the PRD-07 `Phases:` line, `process.md` lines 42 and 44, the skill's line 101, and CONTEXT.md lines 24 and 31. A script removed the added notes from each edited file and compared it with `HEAD`: equal for `process.md`, the skill and `CONTEXT.md`. So no old words were lost. `git diff -U0 | grep '^[-+].*Status:'` finds nothing. Every link was checked to point at a file that exists.
+
+- [x] PRD-02.R22 clause 1 and PRD-05.R15 clause 2 each carry a dated note naming the PRD-07 requirement that changes them (R4 and R2). **Pass.**
+- [x] No requirement's `Status:` line changed. **Pass.**
+- [x] Plain words in every note: short sentences, no metaphor, no stage numbers or skill names. **Pass**, by reading.
+
+Test files run at the end, by name: `src/process-text.test.ts` and `src/planner/plan-files.test.ts` (they read `process.md`, the skills and these registers) — 45 passed.
+
+**What the phase close must know.**
+
+- PRD-07.R12's 2026-10-04 note says PRD-02.R22 clause 1 and PRD-05.R15 clause 2 were "not changed yet (piece 5)". They are now. That register is not in this slice's grant, so its note was not touched; the verifier records the outcome.
