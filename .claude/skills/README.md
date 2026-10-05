@@ -2,6 +2,8 @@
 
 Every skill in this directory implements exactly one stage of [the Timone process](../../process.md). The process spec is normative: when a skill and the spec disagree, the spec wins and the skill gets fixed. Skills contain no client-specific content, ever.
 
+✏ 2026-10-05 ([ADR-0066](../../doc/adr/0066-the-update-is-a-step-the-runner-starts-when-an-open-pull-request-falls-behind.md)): `timone-update` is not a stage of its own: it is a step of an open pull request, defined in `process.md` stage 8's note, and started by the runner. It commits a merge, fixes and its record on the run's branch.
+
 Sessions run at the **timone repo root** ([ADR-0007](../../doc/adr/0007-sessions-at-timone-root.md)); skills operate on a **target project** under `projects/<name>/`.
 
 ## Frontmatter rules

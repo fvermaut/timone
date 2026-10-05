@@ -295,3 +295,55 @@ The skill must write each entry in exactly this form, appended at the end of `do
 - Every value is shown on a pull request a person reads: plain English, no probe folder path, and no process words.
 
 Deferred refactoring: `withUpdate` repeats `withDepartures`' body with other markers; one helper taking the two markers would serve both (it would touch `withDepartures` in `driver.ts`). `UpdateEntry.fixes` and `levelWith` have no reader yet.
+
+## 50e — The update's instructions — merge, three test sets, two fixes by a fresh context, one record entry
+
+**Built.** `.claude/skills/timone-update/SKILL.md` gives the update session its instructions. It has the frontmatter the skills README asks for, the target-project preamble, and the plan's seven steps in order: read the allowed list; fetch, note `<before>`, and run `node dist/cli.js update-checks <name> --before <before>` before the merge; `git merge --no-edit origin/<default>`, never rebase, force-push or GitHub's "Update branch"; run the whole test suite and each listed check script, real run only; hand failures to a fresh fix context, two fixes at most; append one entry in the plan's form, commit `docs: update NN — level with <default>` and push; ask nobody anything. It carries the fix context's brief, in the shape of `timone-verify`'s defect brief, and the two endings the update prompt gives. `.claude/skills/README.md` gains the one line the plan asks for.
+
+**Files touched.**
+
+- `.claude/skills/timone-update/SKILL.md` — new.
+- `.claude/skills/README.md` — one dated line under the first paragraph: `timone-update` is not a stage of its own, it is a step of an open pull request, defined in `process.md` stage 8's note and started by the runner, and it commits a merge, fixes and its record on the run's branch.
+- `doc/plans/phases/reports/phase-50-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- **A project with no test command.** The plan's form allows only `passed | failed` on the whole-suite line, and `latestUpdate` reads `none` as "did not run". `passed` and `failed` are both false when nothing ran. So the skill tells the session to write `- **Whole test suite:** none — the project has no test command` and `- **Result:** does not pass — the project has no test command, so the whole test suite could not run`. This is true, and code shows it as "The whole test suite did not run" under the heading that says the work does not pass. **No form is both true and read as a suite that ran.** The `none` word is outside the plan's two words for this line; the plan's own rule (a missing set reads as not passing) is what the section then shows.
+- **How a check script is run.** `timone-verify` has no rule for one script, only the runner for the whole set. The skill says: from the project's root, with the program its extension calls for (`node` for `.mjs` and `.js`), the app started first when the script needs it, real run only, and a script fails on a non-zero exit or a clause it prints as failed. To start the app, the session may read the project's `README.md`, its package scripts and the completion report's run instructions, as `timone-verify` reads them. Plan step 1's read list does not name these; without them the session cannot run a script that needs the app.
+- **One fix context per round**, given every failure of that round at once, so one round is one fix. Two failures handed separately would use both fixes at once.
+- **What a fix can affect.** A fix that changes any file outside `doc/` sends the whole test suite again. Scripts are judged from the changed file names; when the session cannot tell, it runs the script again.
+- **The merge commit carries the trailers.** `git merge --no-edit` writes no trailer, and the session-end check reports a commit without one. The skill keeps the plan's command and then adds the trailers with `git commit --amend --no-edit --trailer …` on the unpushed merge commit (checked in a scratch repository: the commit keeps both parents).
+- **A merge the fix context could not finish** is aborted (`git merge --abort`). No set runs. The entry writes each set as `none — the merge could not be finished` and `Result: does not pass — <default> could not be merged in: <files>`. The entry is still committed and pushed.
+- **A branch that already holds the default branch** (`git merge-base --is-ancestor` exits 0) gets no entry and no commit. The session ends with the prompt's ending for a branch that is not what the run says. The same ending is used for a dirty or wrong checkout, an `update-checks` exit 2, and a refused push.
+- **A new record file** starts with the line `# Phase NN — Updates`. `latestUpdate` ignores it: it reads from `## Update`.
+- **Lines the plan's form leaves open.** `Arrived:` with no pull request number drops the brackets; with no plan, it says what arrived in plain words. A requirement with no script is added after `; ` in the `passed` form (`passed — PRD-07.R7; no check script for PRD-07.R14`). Several failed scripts are separated by `; `.
+- **A session run by hand** declares `node dist/cli.js stage update --session <id>` before the first script, as `timone-verify` does for its own step (50b made `stage` accept `update`).
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+```
+test -f .claude/skills/timone-update/SKILL.md; echo "exit: $? (expected 0)"
+exit: 0 (expected 0)
+grep -c "update-checks" .claude/skills/timone-update/SKILL.md
+7
+grep -n "rebase" .claude/skills/timone-update/SKILL.md
+9:  … [ADR-0064](…) D3 is why it merges and never rebases.
+77: - **Merge only.** Never rebase. Never force-push. …
+182: - **Never** rebase, force-push, push, or use GitHub's "Update branch". …
+npx vitest run src/daemon/prompts.test.ts; echo "exit: $?"
+ Tests  228 passed (228)
+exit: 0
+```
+
+Other tests that read skill files: `npx vitest run src/process-text.test.ts src/planner/plan-files.test.ts src/daemon/hooks.test.ts src/daemon/prompts.test.ts` — 4 files, 351 tests passed. No test checks skill frontmatter.
+
+- [x] Every line of the record's form in the skill is the same as in the plan's Goal Description and in what `latestUpdate` reads. Pass. The heading from the plan's line 36 and the eight lines of lines 37–44 (backticks taken off) were written to one file, the first fenced block of the skill's *The record entry* to another, blank lines dropped; `diff` printed nothing: `IDENTICAL (9 lines)`. The skill's filled-in example is 50d's example. It was read by `latestUpdate` from `dist/runner/update-section.js`: every field came back (`wholeSuite: passed`, `ticketChecks: passed`, `arrivedChecks: none`, `fixes: 0`, `codeChanged: none`, `result: passes`), and `updateSection` gave `### Brought level with main`. The no-test-command entry gave `### This work does not pass after being brought level with main` with "The whole test suite did not run." A `passed — PRD-07.R7; no check script for PRD-07.R14` line and an `Arrived:` line with one plan lacking a number were shown as written.
+- [x] The skill does not contain a probe folder's path as text. Pass. After `npm run build`, a `node` script imported `PROBE_DIRECTORIES` from `dist/daemon/probeGuard.js` (2 values) and counted each, with and without its trailing slash, in the three files this slice wrote: `hits: 0`. The skill names the folder only as "the probe folder the check uses (see `timone-verify`)" and, in the brief, "the folder the check keeps its scripts in". The session takes each script's path from `update-checks`' output.
+- [x] Plain words; no metaphor. Pass, by reading: short sentences, no images or comparisons. The entry's guidance asks for plain sentences and no process words, and forbids copying a script's path into anything a person reads.
+
+**What 50f must know.**
+
+- The skill quotes `process.md` "stage 8's note" through the README line, but `process.md` has no such note yet. If 50f writes it, the README line becomes true as written.
+- The skill writes `none` on the whole-suite line for a project with no test command, so such a project's update always shows as not passing. If that is not wanted, the plan's form and `latestUpdate` both have to change; the skill alone cannot fix it truthfully.
+- The skill relies on the box switching on Timone's merge rule for `STATUS.md` and the registers. Outside a box, git's own merge applies, and a conflict in those files goes to the fix context like any other.
+- GitHub's "Update branch" is forbidden by the skill's text only, as ADR-0066 accepts.
