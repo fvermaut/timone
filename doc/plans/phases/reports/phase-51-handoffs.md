@@ -126,3 +126,64 @@ Other test files run at the end (test files of every module that imports the fou
 - After the request settles, `claimForTakeover` checks in this order: this terminal's own `waitingTerminal` (wait), another terminal's `waitingTerminal` on an `active` run ("another terminal", exit 1), then `status !== "active"` (the "did not hand over" sentence), then a claim. An `active` run held by another terminal's session (`takenOver`, no `waitingTerminal`) still falls through to "claimed" here. `findTakeover` answers that case with "I'm working on …" before any request is left, so only a race reaches it today. The "open in another terminal" sentence goes in `findTakeover` (`active` and `takenOver`) and probably in this check too.
 - Ctrl-C while the command waits for the daemon to read the request (`waitUntilSettled`) still ends the process with Node's default handler. Only the wait for the step has handlers.
 - `takeoverAbandoned` wakes the runner with an empty list of events when the record has no end for the run's step. That cannot happen through the wait, since the step's end is written before the hand-over, but a later change could make it happen. A refactor I would make at the review: `terminalEnded` and `takeoverAbandoned` differ only by one event, so they could share a private helper.
+
+## 51c — When no step can end, the takeover says so and does not wait
+
+**Built.** With no daemon holding the ledger, a takeover of a run whose step runs is refused with the reason: "A step shows as running on <project> #<n> (<step>), but no daemon is running, so it cannot end and I won't wait for it. Start the daemon with `timone daemon`; it gives the run back to the runner, and then you can run this again." Exit code 1, and nothing is written. A terminal that waits for a step now stops in two more ways. On each look it asks the ledger lock; if it gets the lock, no daemon holds the ledger, so it gives the lock back at once and says "The daemon stopped, so the step on <project> #<n> cannot end. I've stopped waiting, and nothing changed." (exit 1). When the run is no longer `active` with this terminal as its waiter, and is not claimed for it, it says "<project> #<n> moved on while I waited: it is now <status>. I've stopped waiting, and nothing changed." (exit 1). A run that is `active` and `takenOver` is answered on both roads with "<project> #<n> is open in another terminal: <command> (pid <pid>). Only one session can hold a ticket at a time." (exit 1), before any request is left. "I'm working on … right now" is now said only for a `picked-up` run.
+
+**Files touched.**
+
+- `src/commands/takeover.ts` — `refusalOf` gives the "no daemon" sentence for `wait-for-step` (used by the lock-free road and by `takeover()` with no state path). `findTakeover` answers an `active`, `takenOver` run with the new `heldElsewhereMessage`. `watchForHandOver` returns a `WatchEnd` union (`handed`, `stopped`, `moved-on`, `daemon-stopped`), and `waitForHandOver` prints the sentence for each. New `noDaemonHolds(statePath)`: takes the lock and releases it, or says no. New `isClaimedFor(run, hold)`, which `claimedFor` now uses.
+- `src/commands/takeover.test.ts` — five new cases (below) and two existing cases changed (below).
+
+**Decisions taken inside the slice.**
+
+- **A run counts as moved on only when two looks in a row see it so.** The step's end parks the run and then claims it for the terminal in two separate writes to the ledger file (`parkForRunner`, then `handToWaiter` in `src/runner/driver.ts`). The terminal is another process and can read the file between the two writes. It would then see a parked run with no waiter, say "moved on", and exit, and the claim would land for a terminal that had gone (the driver does not wake the runner after a hand-over). The plan did not see this. A test at the command's seam shows it ("does not count a run as moved on when it is seen between …").
+- **Each look asks the lock first, then reads the ledger.** A daemon writes its claim while it holds the lock, so once this terminal gets the lock, any claim made for it is already on disk and is opened rather than left behind. No test at the seam can see this order: the fake daemon acts only inside the injected `sleep`, between looks.
+- The lock check uses the same stale bound as the other takeover lock calls (four progress intervals). A daemon that stops cleanly is seen on the next look. A daemon that crashed is seen once its lock has gone quiet for two minutes and its process is gone, as `acquireStateLock` judges. An unreadable lock keeps the wait going, as the plan says ("any other answer").
+- "Moved on" names the status of the ticket's latest run (`runsForTicket(...).at(-1)`), as `claimedFor` reads it, and "gone from the ledger" when there is none, as `endTakeover` does.
+- The "daemon stopped" and "moved on" exits write nothing. The `waitingTerminal` the daemon wrote stays on the run; the step's end clears it (51b's `liveWaiter`) or the run leaving `active` does.
+- An `active`, `takenOver` run with no holder (claimed by a build before holders) gets the sentence without the holder part: "<project> #<n> is open in another terminal. Only one session can hold a ticket at a time." The plan has no words for this case. The sentence does not check whether the holder's process is alive; the plan did not ask for it.
+- `takeover()` (no state path, the resolution tests' shape) also gives the "no daemon" sentence, since it shares `refusalOf` and asks no daemon.
+
+Existing cases changed (both in `src/commands/takeover.test.ts`, both marked ✏ in the file):
+
+- "starts nothing for a run picked up or at work, says it is being worked on, and leaves it as it was" looped over `picked-up` and `active` and expected "I'm working on …" for both, on the lock-free road. Case 1 requires the "no daemon" sentence for `active`, so it is now "starts nothing for a run just picked up, says it is being worked on, and leaves it as it was", for `picked-up` only. Its assertions are otherwise the same. It is the test that shows the "working on" sentence is still given for a `picked-up` run.
+- "refuses the takeover of a ticket whose own step is running, in the words it always used (R13 clause 3)" expected "I'm working on …" for an `active` run on the lock-free road. It is now "refuses the takeover of a ticket whose own step is running when no daemon runs, and says why (R13 clause 3)", and expects the "no daemon" sentence; the run has no stage, so the step reads "the step that is running" (51a's `runningStepOf`). The refusal, the exit code and the unchanged run are still asserted.
+
+**Validation evidence.**
+
+Case 1 — "a takeover typed while the ticket's step runs (ADR-0067) > says no daemon runs to end the step, waits for nothing, and writes nothing (PRD-09.R4 clause 4)". The run is `active` at `planning`, the lock is free, and the injected `sleep` throws. Red: `Tests 1 failed | 56 skipped (57)`, `- "A step shows as running on scratch-app #6 (preparing the work), but no daemon is running, …"`, `+ "I'm working on scratch-app #6 right now. Anything I need from you will land on the ticket."`. After the change, the two existing cases above failed (`Tests 2 failed | 55 passed (57)`); after they were changed: `Tests 57 passed (57)`.
+
+Case 2 — "… > stops waiting, and says why, when the daemon stops during the wait (ADR-0067 D3)". The fake daemon releases its lock on its third look. Red: `Error: the wait went on after the daemon stopped`, `Tests 1 failed | 57 skipped (58)`. Green: `Tests 58 passed (58)`. It asserts exit 1, the sentence, no launcher call, no lock file left, no request left, and the run still `active` on the step's session.
+
+Case 3 — "… > stops waiting, and names where the run went, when it is cancelled during the wait (ADR-0067 D3)". The fake daemon cancels the run on its third look. Red: `Error: the wait went on after the run was cancelled`, `Tests 1 failed | 58 skipped (59)`. Green: `Tests 59 passed (59)`.
+
+Case 3, the write between park and claim — "… > does not count a run as moved on when it is seen between the step's end and its claim for the terminal (ADR-0067 D2)". The fake daemon parks the run on its third look and claims it for the terminal on its fourth. Red (with case 3's first implementation): `AssertionError: expected 1 to be +0`, `Tests 1 failed | 59 skipped (60)`. Green with the two-look rule: `Tests 60 passed (60)`; case 3 stays green.
+
+Case 4 — "… > names the other terminal that holds the ticket, with or without a daemon, and asks the daemon nothing (ADR-0067 D4)". One test, two roads in a loop: lock free, and a fake daemon holding the lock; the injected `sleep` throws. Red (the no-daemon road comes first): `- "scratch-app #6 is open in another terminal: timone takeover scratch-app#6 (pid 7100). Only one session can hold a ticket at a time."`, `+ "I'm working on scratch-app #6 right now. …"`, `Tests 1 failed | 60 skipped (61)`. Green: `Tests 61 passed (61)`. Because the red run stopped at the first road, the daemon road was shown red by a probe: the old answer put back and the loop cut to `["daemon"]` gave `expected { road: 'daemon', code: 1, …(1) } to deeply equal …`, `Tests 1 failed | 60 skipped (61)`; both restored: `Tests 61 passed (61)`.
+
+Validation block:
+
+```
+npx tsc --noEmit; echo "exit: $?"
+  exit: 0
+npx vitest run src/commands/takeover.test.ts src/daemon/poll.test.ts; echo "exit: $?"
+  Test Files  2 passed (2)
+       Tests  181 passed (181)
+  exit: 0
+grep -n "working on .* right now" src/commands/takeover.ts | grep -v '^\s*[0-9]*:\s*//'; echo "exit: $? …"
+  252:    `I'm working on ${target.project} #${target.ticket} right now. ` +
+  exit: 0
+```
+
+- Checkbox 1 (cases 1–4 pass, with red runs recorded): pass. Each case went red before its change.
+- Checkbox 2 (the "I'm working on …" sentence is reachable only for a `picked-up` run; a test shows it, and none shows it for `active`): pass. `workingOnMessage` has one caller, the `picked-up` branch of `findTakeover`. Tests that show it: "resolveTakeover > says it is working on a ticket just picked up, where no step runs yet", "… picked up while another run is parked on its branch" (both in `resolveTakeover` and `runTakeover`), and the changed "starts nothing for a run just picked up, …". No test in `src/commands/takeover.test.ts` expects it for an `active` run; the reds of cases 1 and 4 are what the old answer for `active` gives.
+
+Other test files run at the end (the files that import `src/commands/takeover.ts` are `src/cli.ts`, `src/daemon/poll.ts`, `src/planner/plan-files.test.ts`): `npx vitest run src/cli.test.ts src/planner/plan-files.test.ts src/daemon/poll.test.ts` gave `Test Files 3 passed (3)`, `Tests 131 passed (131)`. `src/commands/guardrails.test.ts` was not run.
+
+**What 51d must know.**
+
+- 51c made no change to the runner, the driver or the store. A run that is `active` and `takenOver` is still only refused by the takeover command; `start_step` in `src/runner/actions.ts` does not yet refuse it.
+- `src/daemon/poll.ts` still has its own "I'm working on … right now" sentence, for a `claim-takeover` request with no holder that finds a running step (51a's decision). It reaches only the daemon's log. The checkbox's grep covers `src/commands/takeover.ts` only.
+- One race is left in `claimForTakeover`, after the request settles: an `active` run that another terminal took between this terminal's `findTakeover` and the daemon's read of the request still falls through to "claimed", and this terminal would open a session on it. `findTakeover` refuses that run before any request is left, so only that short window reaches it. The plan did not ask for a check there, and none was added.

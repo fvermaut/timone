@@ -199,7 +199,9 @@ async function findTakeover(
       if (run.takenOver !== true) {
         return { kind: "wait-for-step", run, step: runningStepOf(run) };
       }
-      return { kind: "nothing-to-do", message: workingOnMessage(target) };
+      // ✏ 2026-10-05 (ADR-0067 D4): a person's terminal holds it, and no step
+      // runs on it, so the answer names that terminal.
+      return { kind: "nothing-to-do", message: heldElsewhereMessage(target, run) };
     case "picked-up":
       // No step runs on it yet, and the runner has not looked at it.
       return { kind: "nothing-to-do", message: workingOnMessage(target) };
@@ -232,6 +234,18 @@ function runningStepOf(run: Run): string {
   return run.stage === undefined ? "the step that is running" : stageLabel(run.stage);
 }
 
+/**
+ * What a takeover of a run another terminal holds says. A run claimed by a
+ * build before holders names no terminal, so the sentence then names none.
+ */
+function heldElsewhereMessage(target: TakeoverTarget, run: Run): string {
+  const by = run.holder === undefined ? "" : `: ${run.holder.command} (pid ${run.holder.pid})`;
+  return (
+    `${target.project} #${target.ticket} is open in another terminal${by}. ` +
+    "Only one session can hold a ticket at a time."
+  );
+}
+
 /** What a takeover of a run the machine is working on says. */
 function workingOnMessage(target: TakeoverTarget): string {
   return (
@@ -241,15 +255,23 @@ function workingOnMessage(target: TakeoverTarget): string {
 }
 
 /**
- * Why a takeover with the ledger in hand opens nothing. A run whose step
- * runs is still refused with the words it always got there, since no daemon
- * runs to end the step.
+ * Why a takeover with the ledger in hand opens nothing.
+ *
+ * ✏ 2026-10-05 (PRD-09.R4 clause 4): a run whose step runs is refused with
+ * the reason. No daemon holds the ledger, so the step cannot end, and a wait
+ * would never finish.
  */
 function refusalOf(
   target: TakeoverTarget,
   resolution: Exclude<TakeoverResolution, { kind: "open-session" }>,
 ): string {
-  return resolution.kind === "wait-for-step" ? workingOnMessage(target) : resolution.message;
+  if (resolution.kind !== "wait-for-step") return resolution.message;
+  return (
+    `A step shows as running on ${target.project} #${target.ticket} ` +
+    `(${resolution.step}), but no daemon is running, so it cannot end and I ` +
+    "won't wait for it. Start the daemon with `timone daemon`; it gives the " +
+    "run back to the runner, and then you can run this again."
+  );
 }
 
 /** What a takeover of a closed ticket whose latest run is done or cancelled says. */
@@ -623,6 +645,11 @@ async function claimForTakeover(
  * more for a claim with this terminal's token, as {@link withdraw} does. A
  * claim found is given back as abandoned: no session was opened, so the
  * runner is told only of the step's end.
+ *
+ * ✏ 2026-10-05: **a wait that can no longer end stops too** (D3). When no
+ * daemon holds the ledger any more, the step cannot end; when the run moved
+ * some other way, no step's end will hand it over. The terminal says which,
+ * and stops. It wrote nothing, so nothing changed.
  */
 async function waitForHandOver(
   target: TakeoverTarget,
@@ -634,47 +661,114 @@ async function waitForHandOver(
   const stopWaiting = (): void => stop.abort();
   process.on("SIGINT", stopWaiting);
   process.on("SIGTERM", stopWaiting);
-  let handed: Run | undefined;
+  let ended: WatchEnd;
   try {
-    handed = await watchForHandOver(target, hold, deps, stop.signal);
+    ended = await watchForHandOver(target, hold, deps, stop.signal);
   } finally {
     process.off("SIGINT", stopWaiting);
     process.off("SIGTERM", stopWaiting);
   }
-  if (handed !== undefined) return { kind: "claimed", run: handed };
-
-  const landed = claimedFor(target, hold, deps.store);
-  if (landed !== undefined) releaseClaim(target, landed, deps, log, "abandoned");
-  log(`Stopped waiting. Nothing changed on ${target.project} #${target.ticket}.`);
-  return { kind: "no", code: 130 };
+  const name = `${target.project} #${target.ticket}`;
+  switch (ended.kind) {
+    case "handed":
+      return { kind: "claimed", run: ended.run };
+    case "moved-on":
+      log(
+        `${name} moved on while I waited: it is now ${ended.status}. I've ` +
+          "stopped waiting, and nothing changed.",
+      );
+      return { kind: "no", code: 1 };
+    case "daemon-stopped":
+      log(
+        `The daemon stopped, so the step on ${name} cannot end. I've stopped ` +
+          "waiting, and nothing changed.",
+      );
+      return { kind: "no", code: 1 };
+    case "stopped": {
+      const landed = claimedFor(target, hold, deps.store);
+      if (landed !== undefined) releaseClaim(target, landed, deps, log, "abandoned");
+      log(`Stopped waiting. Nothing changed on ${name}.`);
+      return { kind: "no", code: 130 };
+    }
+  }
 }
+
+/** How the watch for the step's end ended. */
+type WatchEnd =
+  /** The step's end claimed the run with this terminal's token. */
+  | { kind: "handed"; run: Run }
+  /** The person pressed Ctrl-C. */
+  | { kind: "stopped" }
+  /**
+   * The run moved some other way: cancelled, ended, or parked with no claim
+   * for this terminal. `status` is where it is now, in the ledger's words.
+   */
+  | { kind: "moved-on"; status: string }
+  /** No daemon holds the ledger any more, so the step cannot end. */
+  | { kind: "daemon-stopped" };
 
 /**
  * Watch the ledger until the run is claimed with this terminal's own token,
- * which the step's end does (ADR-0067 D2), or until `stop` is aborted. No
- * time limit: a step can run for an hour (D3). Undefined means stopped.
+ * which the step's end does (ADR-0067 D2), until `stop` is aborted, until the
+ * run moves some other way, or until no daemon holds the ledger. No time
+ * limit: a step can run for an hour (D3).
  */
 async function watchForHandOver(
   target: TakeoverTarget,
   hold: Holder,
   deps: TakeoverDeps,
   stop: AbortSignal,
-): Promise<Run | undefined> {
+): Promise<WatchEnd> {
   const intervalMs = deps.wait?.intervalMs ?? WATCH_INTERVAL_MS;
   const sleep =
     deps.wait?.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
+  // The step's end parks the run, then claims it for this terminal: two
+  // writes, and this process can read the ledger between them. So the run
+  // counts as moved on only when two looks in a row see it so.
+  let movedBefore = false;
   for (;;) {
-    const run = claimedFor(target, hold, deps.store);
-    if (run !== undefined) return run;
+    // The lock is asked before the ledger is read. A daemon writes its claim
+    // while it holds the lock, so once the lock is free, any claim it made
+    // for this terminal is already there to be read.
+    const daemonGone = deps.statePath !== undefined && noDaemonHolds(deps.statePath);
+    const run = deps.store.runsForTicket(target.project, target.ticket).at(-1);
+    if (run !== undefined && isClaimedFor(run, hold)) return { kind: "handed", run };
+    const moved = run?.status !== "active" || run.waitingTerminal?.token !== hold.token;
+    if (moved && movedBefore) {
+      return { kind: "moved-on", status: run?.status ?? "gone from the ledger" };
+    }
+    movedBefore = moved;
+    if (daemonGone) return { kind: "daemon-stopped" };
     await sleep(intervalMs);
-    if (stop.aborted) return undefined;
+    if (stop.aborted) return { kind: "stopped" };
   }
+}
+
+/**
+ * Whether no daemon holds the ledger: this terminal gets the lock, and gives
+ * it straight back without writing. Any other answer, including a lock that
+ * cannot be read, says nothing for sure, so the wait goes on.
+ */
+function noDaemonHolds(statePath: string): boolean {
+  const acquired = acquireStateLock({
+    statePath,
+    command: "timone takeover (looking for the daemon)",
+    staleAfterMs: 4 * DEFAULT_PROGRESS_INTERVAL_SECONDS * 1000,
+  });
+  if (!acquired.ok) return false;
+  acquired.lock.release();
+  return true;
 }
 
 /** The ticket's run, when it is `active` and claimed with this terminal's own token. */
 function claimedFor(target: TakeoverTarget, hold: Holder, store: RunStore): Run | undefined {
   const run = store.runsForTicket(target.project, target.ticket).at(-1);
-  return run?.status === "active" && run.holder?.token === hold.token ? run : undefined;
+  return run !== undefined && isClaimedFor(run, hold) ? run : undefined;
+}
+
+/** Whether `run` is `active` and claimed with this terminal's own token. */
+function isClaimedFor(run: Run, hold: Holder): boolean {
+  return run.status === "active" && run.holder?.token === hold.token;
 }
 
 /**

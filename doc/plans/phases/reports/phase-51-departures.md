@@ -15,3 +15,10 @@
 **Agreed:** 51a changes one existing test, the `poll.test.ts` case that expected a takeover of a running run to be refused. Every other existing case of the four test files passes unchanged.
 **Did instead:** Two more existing cases in `src/commands/takeover.test.ts` changed. "resolveTakeover > says what it is doing instead when the ticket is being worked on" expected the "I'm working on … right now" answer for a running run; it now checks case 7's answer, that the takeover waits for the step. The cancelled-ticket case only had its type check widened, because the answer gained a third kind; its assertions are the same.
 **Why:** Case 7 of the plan asks for the opposite of the first test, so both cannot hold. The plan named only the `poll.test.ts` case and missed this one.
+
+## 2026-10-05 — timone#217, build
+
+**Kind:** plan step
+**Agreed:** 51c ends the wait with the "moved on" sentence when the run is no longer `active` with this terminal as waiter, and not claimed for it. Four cases.
+**Did instead:** The run counts as moved on only when two looks in a row see it so. A fifth test, at the same seam (`runTakeover`), shows a run seen parked once and claimed on the next look opening the session. Two existing tests in `src/commands/takeover.test.ts` that expected "I'm working on … right now" for an `active` run with no daemon now expect the "no daemon" sentence, as case 1 requires.
+**Why:** The step's end parks the run and then claims it for the terminal in two writes to the ledger file. The terminal is another process and can read between them. On one look it would say "moved on" and leave a claim that nobody opens, and the runner is not woken after a hand-over.
