@@ -166,3 +166,64 @@ Test files run at the end, by name (after `npm run build`):
 
 - In one cycle, every eligible step of an initiative is now registered as a run. Each registered step gets the claim label as before. Nothing yet stops two of them building at once beyond the project's places; the planner (49d onward) is what decides that.
 - A breakdown's steps without `blocked by` relations now all start together. Step tickets opened by `openStepTickets` carry the waits the breakdown declares, so the order still holds when the breakdown writes it.
+
+## 49c — A work branch that carries another ticket's unmerged commits is refused at its first push
+
+**Built.** The first push of a run's work branch is refused when one of the branch's own commits (a commit the default branch does not have) is also on another `origin/timone/*` branch. The refusal names that branch: `Refused: this branch carries work of <branch> that is not on the default branch yet. Cut the work branch from the default branch, and keep only this ticket's commits on it.` A branch cut from the default branch pushes as before. A push of a branch the remote already has is not checked again. The rules that were there (the default branch refused, a reservation allowed, a step with no work branch pushes nothing) are unchanged, and they are checked first.
+
+**Files touched.**
+
+- `src/daemon/push-guard.ts` — `foreignCommits(own, containedBy, workBranch)`, pure, with its doc comment. `pushRefusal` takes an optional third argument, the list `foreignCommits` found (default `[]`); a non-empty list refuses a push the other rules allow.
+- `src/commands/guardrails.ts` — `guardrails pre-push` calls `foreignOnFirstPush(updates, branch)`, a local function: only for the update whose `remoteRef` is the work branch and whose `remoteSha` is all zeros, it reads `git symbolic-ref --short refs/remotes/origin/HEAD`, lists `git rev-list <localSha> --not refs/remotes/origin/<default>`, asks `git branch -r --contains <sha>` for each, and returns what `foreignCommits` finds. Two small local helpers, `gitOutput` and `lines`.
+- `src/daemon/push-guard.test.ts` — cases 1–3 (pure). The `remoteAndClone` fixture now runs `git remote set-head origin main` after its first push (see below).
+- `src/daemon/push-guard.git.test.ts` (new) — cases 4 and 5, against a bare remote and a clone made by `git clone`, driven through `installPushGuard` and the built CLI.
+- `src/commands/guardrails.test.ts` — two in-process cases of the command, run in a folder that is not a git repository (see below).
+
+**Decisions taken inside the slice.**
+
+- **A clone with no `origin/HEAD` refuses a work branch's first push.** The plan names `git symbolic-ref --short refs/remotes/origin/HEAD`. When it fails, the command throws, and `pre-push` refuses on any error, as it always has. A box's checkout and the daemon's own checkouts are made by `git clone`, which sets `origin/HEAD`, so this does not happen there. The old `remoteAndClone` fixture in `push-guard.test.ts` built its clone with `git init` and `git remote add`, so it had no `origin/HEAD`; three of its cases went red (`AssertionError: expected 1 to be +0` on the push to `timone/7-x`). I added one line to that fixture, `git remote set-head origin main`, with a comment saying a box's checkout is a clone. No assertion changed. I did not add a fallback (such as `git remote show origin`): the plan does not ask for one, and it would ask the network from inside a hook.
+- **The branch is named without `origin/`** (`timone/12-other`), as case 2 words it. Several foreign branches are joined with " and ", each once. Each foreign commit is returned once, with the first other branch git lists for it.
+- **The branch name in the refusal has no backticks**, so the sentence is the plan's words exactly. The older refusals in the same file do put branch names in backticks.
+- **What `guardrails.test.ts` checks.** The command reads `process.stdin` and runs git in the current folder. The two cases stub `process.stdin`, `chdir` to a temporary folder that is not a repository (with `GIT_CEILING_DIRECTORIES` set to the temp root), and so can see whether git was asked: a push whose `remoteSha` is not zeros is allowed with nothing printed (case 5 at the command seam); a first push refuses with "could not judge this push", because git cannot answer there.
+- **Not refactored:** `foreignOnFirstPush` writes `/^0+$/` again; `push-guard.ts` has the same regular expression as `NO_COMMIT`, which is not exported. Exporting it, or naming `{ sha: string; branch: string }` as a type, would remove the repeats. I left both, as the plan gives the signature inline.
+
+**Validation evidence.**
+
+Per declared case:
+
+1. `push-guard.test.ts` › "a work branch that carries another ticket's unmerged commits (PRD-07.R4)" › "finds nothing, and lets the push go ahead, when no other branch has the branch's own commits (clause 2)" — red: `TypeError: (0 , foreignCommits) is not a function`; green.
+2. "finds an own commit that origin/timone/12-other has, and refuses the push naming that branch" — red: `AssertionError: expected undefined to be 'Refused: this branch carries work of …' // Object.is equality`; green once `pushRefusal` read its third argument. The test asserts the whole sentence with `toBe`.
+3. "does not count a commit that only the remote's copy of the work branch has" — red (the first `foreignCommits` counted every `origin/timone/` branch): `AssertionError: expected [ Array(1) ] to deeply equal []`; green once `origin/<workBranch>` was left out.
+4. `push-guard.git.test.ts` › "a run's first push of its work branch, against real git (PRD-07.R4)":
+   - "refuses a branch cut from another pushed timone/ branch, and names that branch" — red before the command change: `AssertionError: expected +0 not to be +0`; green after. It asserts the exact sentence in git's stderr, and that the remote has no `timone/7-x`.
+   - "pushes a branch cut from origin/main" — green before the command change. Mutation: read the default branch with `symbolic-ref` without `--short` → `AssertionError: expected { status: 1, …(1) } to match object { status: +0 }` (and the refusal case failed with "could not judge"); reverted, green.
+5. "does not check again a branch the remote already has" — green as written. Mutation: drop the all-zeros condition in `foreignOnFirstPush` → `AssertionError: expected { status: 1, …(1) } to match object { status: +0 }`; reverted, green.
+   At the command seam, `guardrails.test.ts` › "guardrails pre-push, on the first push of a work branch (PRD-07.R4)":
+   - "does not ask git about a push of a branch the remote already has" — green as written. Mutation: the same all-zeros condition dropped → `AssertionError: expected { …(2) } to deeply equal { errors: [], exitCode: undefined }`; reverted, green.
+   - "asks git on the first push, and refuses the push when git cannot answer" — first run red on my own expectation (I wrote a full stop where the message has a comma); corrected to the command's words, green. Mutation: `foreignOnFirstPush` never asks git → `AssertionError: expected undefined to be 1`; reverted, green.
+6. The existing push-guard cases: red after the command change on the fixture's missing `origin/HEAD` (three cases, `expected 1 to be +0`), green after the fixture line above. The default branch refused, a reservation allowed, the project's own hooks, the unreadable input: all green.
+
+The validation block, as run (after `npm run build`):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/daemon/push-guard.test.ts src/daemon/push-guard.git.test.ts src/commands/guardrails.test.ts; echo "exit: $?"
+ Test Files  3 passed (3)
+      Tests  94 passed (94)
+exit: 0
+```
+
+- [x] Cases 1–6 pass, with red runs recorded (cases 4's first half and 5 proved by mutation). **Pass.**
+- [x] The refusal sentence in a test matches the words above exactly: `push-guard.test.ts` case 2 (`toBe`) and `push-guard.git.test.ts` case 4 (`toContain` on git's stderr). **Pass.**
+
+Test files run at the end, by name (after `npm run build`):
+
+- `src/daemon/push-guard.test.ts` — 41 passed. `src/daemon/push-guard.git.test.ts` — 3 passed. `src/commands/guardrails.test.ts` — 52 passed (94 for the three).
+- `src/cli.test.ts` — 6, `src/daemon/session.test.ts` — 20, `src/daemon/container-runtime.test.ts` — 107, `src/daemon/hooks.test.ts` — 76, `src/daemon/forge-guard.test.ts` — 25, `src/merge-rules.git.test.ts` — 6: all passed (240).
+
+**What 49d must know.**
+
+- The check needs `refs/remotes/origin/HEAD` in the clone the push runs from. A clone without it refuses every first push of a work branch with "could not judge this push". Any new fixture that pushes through the guard must make its clone with `git clone`, or run `git remote set-head origin <default>`.
+- The check only sees `origin/timone/*` branches the clone has fetched. A ticket branch that is on the forge but not fetched into the box is not seen.

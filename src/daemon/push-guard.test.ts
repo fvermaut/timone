@@ -7,7 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { vi } from "vitest";
 
 import { reserveNumber } from "../numbers.js";
-import { installPushGuard, pushRefusal, type RefUpdate } from "./push-guard.js";
+import {
+  foreignCommits,
+  installPushGuard,
+  pushRefusal,
+  type RefUpdate,
+} from "./push-guard.js";
 
 /** A commit name, written out: what it is does not matter to the rule. */
 const SHA = "1111111111111111111111111111111111111111";
@@ -131,6 +136,42 @@ describe("a reservation of a number, which every step may create", () => {
   });
 });
 
+describe("a work branch that carries another ticket's unmerged commits (PRD-07.R4)", () => {
+  const WORK = "timone/7-x";
+  /** The first push of the work branch: the remote does not have it yet. */
+  const firstPush: RefUpdate = {
+    localRef: "refs/heads/timone/7-x",
+    localSha: SHA,
+    remoteRef: "refs/heads/timone/7-x",
+    remoteSha: ZERO,
+  };
+
+  it("finds nothing, and lets the push go ahead, when no other branch has the branch's own commits (clause 2)", () => {
+    const found = foreignCommits(["aaa", "bbb"], () => ["origin/main"], WORK);
+
+    expect(found).toEqual([]);
+    expect(pushRefusal([firstPush], WORK, found)).toBeUndefined();
+  });
+
+  it("finds an own commit that origin/timone/12-other has, and refuses the push naming that branch", () => {
+    const found = foreignCommits(
+      ["aaa", "bbb"],
+      (sha) => (sha === "bbb" ? ["origin/timone/12-other"] : []),
+      WORK,
+    );
+
+    expect(found).toEqual([{ sha: "bbb", branch: "timone/12-other" }]);
+    expect(pushRefusal([firstPush], WORK, found)).toBe(
+      "Refused: this branch carries work of timone/12-other that is not on the default branch yet. " +
+        "Cut the work branch from the default branch, and keep only this ticket's commits on it.",
+    );
+  });
+
+  it("does not count a commit that only the remote's copy of the work branch has", () => {
+    expect(foreignCommits(["aaa"], () => ["origin/timone/7-x"], WORK)).toEqual([]);
+  });
+});
+
 /**
  * The command line as it ships. The hook runs it the way a box does, so the
  * build comes before these tests (`npm run build && npm test`), as it does
@@ -202,6 +243,9 @@ function remoteAndClone() {
   mustGit(["remote", "add", "origin", remote]);
   mustGit(["commit", "--quiet", "--allow-empty", "-m", "first"]);
   mustGit(["push", "--quiet", "origin", "HEAD:main"]);
+  // What `git clone` sets, and a box's checkout is a clone: the guard reads
+  // the default branch from it on a work branch's first push.
+  mustGit(["remote", "set-head", "origin", "main"]);
   mustGit(["commit", "--quiet", "--allow-empty", "-m", "the run's work"]);
 
   return { root, clone, env: baseEnv, git, mustGit, remoteHas };

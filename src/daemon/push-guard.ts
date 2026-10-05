@@ -58,10 +58,15 @@ function createsReservation(update: RefUpdate): boolean {
  * The words are read by the session that tried the push, and that session
  * acts on them. So they say where work may go, and never name the default
  * branch as a place to put anything.
+ *
+ * `foreign` is what {@link foreignCommits} found on the work branch. A push
+ * the rules above allow is still refused when it is not empty: the branch
+ * carries another ticket's work that nobody has said yes to.
  */
 export function pushRefusal(
   updates: readonly RefUpdate[],
   workBranch: string | undefined,
+  foreign: readonly { sha: string; branch: string }[] = [],
 ): string | undefined {
   // Any step may reserve a number for a file it is about to write. Creating a
   // reservation is allowed, and it does not make any other update in the same
@@ -79,7 +84,14 @@ export function pushRefusal(
   const refused = others.filter(
     (update) => update.remoteRef !== allowed || NO_COMMIT.test(update.localSha),
   );
-  if (refused.length === 0) return undefined;
+  if (refused.length === 0) {
+    if (foreign.length === 0) return undefined;
+    const branches = [...new Set(foreign.map((commit) => commit.branch))].join(" and ");
+    return (
+      `Refused: this branch carries work of ${branches} that is not on the default branch yet. ` +
+      "Cut the work branch from the default branch, and keep only this ticket's commits on it."
+    );
+  }
 
   const what = refused
     .map((update) =>
@@ -93,6 +105,35 @@ export function pushRefusal(
     "Nothing reaches the project's default branch without a person's yes. " +
     `Commit on \`${workBranch}\` and push that.`
   );
+}
+
+/**
+ * The commits of a work branch that belong to another ticket's branch
+ * (PRD-07.R4, ADR-0065).
+ *
+ * A work branch is cut from the default branch. When a session cuts it from
+ * another ticket's branch instead, the pull request carries that ticket's
+ * work too, before anybody has said yes to it.
+ *
+ * `own` is the branch's own commits: those the default branch does not have.
+ * `containedBy` names the remote branches that hold a commit, as
+ * `git branch -r --contains` writes them (`origin/timone/12-other`). A commit
+ * is foreign when another `origin/timone/*` branch holds it. The remote's copy
+ * of the work branch itself does not count. Each foreign commit is returned
+ * once, with the first other branch that holds it, named without `origin/`.
+ */
+export function foreignCommits(
+  own: readonly string[],
+  containedBy: (sha: string) => readonly string[],
+  workBranch: string,
+): { sha: string; branch: string }[] {
+  const itself = `origin/${workBranch}`;
+  return own.flatMap((sha) => {
+    const other = containedBy(sha).find(
+      (name) => name.startsWith("origin/timone/") && name !== itself,
+    );
+    return other === undefined ? [] : [{ sha, branch: other.slice("origin/".length) }];
+  });
 }
 
 /** A commit name as git writes one: SHA-1, or SHA-256 in a repository that uses it. */
