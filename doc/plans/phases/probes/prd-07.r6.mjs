@@ -77,7 +77,11 @@ async function held({ places, citeStranger = false, slow70 = false }) {
     timeoutMs: 150000,
     until: () => {
       if (phase === 0 && started(fx, 70).length) { phase = 1; fx.editForge((f) => { f.issues[71] = { number: 71, title: 'Second', body: 'Show the open count.', labels: ['timone'], state: 'OPEN', author: OPERATOR, createdAt: '2026-09-02T10:00:00.000Z', comments: [] }; }); }
-      if (phase === 1 && fx.record(71).some((e) => e.kind === 'planner-decision')) { phase = 2; t = Date.now(); out.snaps.held = shot(); at.stranger = fx.comment(71, STRANGER, BUILD_NOW); }
+      // ✏ 2026-10-05 (phase 50 verification): "a held ticket" is one whose hold is recorded AND told on
+      // the ticket. The snapshot used to be taken on the record alone; under load the hold comment
+      // landed after it and clause 3 read it as "something new was written" (seen once in the
+      // parallel regression run, never alone).
+      if (phase === 1 && fx.record(71).some((e) => e.kind === 'planner-decision') && machine(fx, 71).some((c) => c.body.includes(REASON))) { phase = 2; t = Date.now(); out.snaps.held = shot(); at.stranger = fx.comment(71, STRANGER, BUILD_NOW); }
       if (phase === 2 && Date.now() - t > 12000) { phase = 3; t = Date.now(); out.snaps.afterStranger = shot(); at.operator = fx.comment(71, OPERATOR, BUILD_NOW); }
       if (phase === 3 && Date.now() - t > (slow70 ? 40000 : 15000)) { out.snaps.afterOperator = shot(); return true; }
       if (phase === 3 && slow70 && started(fx, 71).length && Date.now() - t > 5000) { out.snaps.afterOperator = shot(); return true; }
