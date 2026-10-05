@@ -175,6 +175,8 @@
 
 ## R8 — Files almost every ticket changes never stop an update
 
+> ✏ 2026-10-04 — partial evidence: clauses 1, 2 and 3 passed in [phase-48-verification.md](../../plans/phases/reports/phase-48-verification.md), with its probe [`prd-07.r8.mjs`](../../plans/phases/probes/prd-07.r8.mjs), for `STATUS.md` and a register merged level in a box, squashed or by a merge commit. One case of clause 3 still needs a person: both pull requests add a new requirement with the same number. Clause 3 says no person; this register's header says never renumber. Which rule wins is open in that report's *Questions for the human*, so the status stays `draft`.
+
 > ✏ 2026-10-04 — partial evidence: clause 1 passed in [phase-44-verification.md](../../plans/phases/reports/phase-44-verification.md), with its probe [`prd-07.r8.mjs`](../../plans/phases/probes/prd-07.r8.mjs). Clauses 2 and 3 are not built yet, so the status stays `draft`.
 
 - **Priority:** MUST

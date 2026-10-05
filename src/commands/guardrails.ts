@@ -30,6 +30,7 @@ import {
   pushRefusal,
 } from "../daemon/push-guard.js";
 import { forgeCallRefusal } from "../daemon/forge-guard.js";
+import { installMergeRules } from "../merge-rules.js";
 
 /** How long a parked baseline outlives the session that wrote it. */
 const BASELINE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -542,6 +543,25 @@ export function registerGuardrailsCommand(program: Command): void {
       } catch (error) {
         console.error(
           `guardrails install-push-guard: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        process.exitCode = 1;
+      }
+    });
+
+  guardrails
+    .command("install-merge-rules")
+    .description("Write the merge rules that keep STATUS.md and the registers from conflicting")
+    .requiredOption("--dir <path>", "where to write the attributes file")
+    .action((options: { dir: string }) => {
+      // Shaped as install-push-guard: the box stops when this fails, and
+      // puts the first line it said on the ticket.
+      try {
+        installMergeRules(options.dir, {
+          cli: fileURLToPath(new URL("../cli.js", import.meta.url)),
+        });
+      } catch (error) {
+        console.error(
+          `guardrails install-merge-rules: ${error instanceof Error ? error.message : String(error)}`,
         );
         process.exitCode = 1;
       }

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { githubAppCredentials, type MintCall } from "../adapters/credentials.js";
 import {
   containerRuntime,
+  gitConfigExport,
   keepForgeTokenFresh,
   parseSessionMessage,
   type ContainerExit,
@@ -2076,9 +2077,41 @@ describe("a box that can take a message while a step runs", () => {
 });
 
 /**
+ * The lines 48c puts into the box script after the push guard's install,
+ * written out by hand: the merge rule is installed through Timone's own
+ * command, and the box stops if that fails.
+ */
+const MERGE_RULE_LINES: readonly string[] = [
+  'node /workspace/timone/dist/cli.js guardrails install-merge-rules --dir "$HOME/.timone/git-merge"' +
+    " > /tmp/timone-merge-rules.log 2>&1 || {",
+  '  echo "could not set up the rule that merges STATUS.md and the requirement registers without a person.' +
+    " Refusing to work without it." +
+    ' It said: $(timone_reason /tmp/timone-merge-rules.log)" >&2',
+  "  exit 79",
+  "}",
+];
+
+/**
+ * The one export that switches on both the push guard and the merge rule
+ * (48c), written out by hand: four settings, the guard's hooks at index 0.
+ */
+const GIT_CONFIG_EXPORT =
+  "export GIT_CONFIG_COUNT=4" +
+  ' GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"' +
+  ' GIT_CONFIG_KEY_1=core.attributesFile GIT_CONFIG_VALUE_1="$HOME/.timone/git-merge/attributes"' +
+  " GIT_CONFIG_KEY_2=merge.timone-status.driver" +
+  ' GIT_CONFIG_VALUE_2="node /workspace/timone/dist/cli.js merge-file status %O %A %B %P"' +
+  " GIT_CONFIG_KEY_3=merge.timone-register.driver" +
+  ' GIT_CONFIG_VALUE_3="node /workspace/timone/dist/cli.js merge-file register %O %A %B %P"';
+
+/**
  * The lines 43a puts into the box script, written out by hand: the guard is
  * installed through Timone's own command, the box stops if that fails, and
  * the three variables that switch it on are exported for the CLI.
+ *
+ * ✏ 48c: the merge rule's install now sits between the guard's install and
+ * the export, and the export carries four settings instead of one, the
+ * guard's hooks still at index 0.
  */
 const PUSH_GUARD_LINES: readonly string[] = [
   'node /workspace/timone/dist/cli.js guardrails install-push-guard --dir "$HOME/.timone/git-hooks"' +
@@ -2088,7 +2121,8 @@ const PUSH_GUARD_LINES: readonly string[] = [
     ' It said: $(timone_reason /tmp/timone-push-guard.log)" >&2',
   "  exit 79",
   "}",
-  'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"',
+  ...MERGE_RULE_LINES,
+  GIT_CONFIG_EXPORT,
 ];
 
 /**
@@ -2136,9 +2170,8 @@ describe("the guard on a boxed run's pushes", () => {
   it("is switched on for every git the session runs", async () => {
     const { script } = await boxed("timone/7-the-page-feels-slow");
 
-    const exported = script.indexOf(
-      'export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0="$HOME/.timone/git-hooks"',
-    );
+    // ✏ 48c: the one export now carries the merge rule's three settings too.
+    const exported = script.indexOf(GIT_CONFIG_EXPORT);
     expect(exported).toBeGreaterThan(script.indexOf("guardrails install-push-guard"));
     expect(exported).toBeLessThan(script.indexOf("exec claude"));
   });
@@ -2282,5 +2315,105 @@ describe("the guard on a boxed run's gh calls", () => {
     expect(ran.status).toBe(1);
     expect(ran.stderr).toContain("not built yet");
     expect(ran.realGhGot).toBeUndefined();
+  });
+});
+
+/**
+ * `STATUS.md` and the requirement registers are merged by Timone's own rule
+ * (ADR-0064, 48c). git uses that rule only where it is switched on, and in a
+ * box that place is the script, beside the guard on the run's pushes.
+ */
+describe("the merge rule in a boxed run", () => {
+
+  async function boxedScript(workBranch?: string): Promise<string> {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({ image: "timone-box:test", spawn }).start(
+      workBranch === undefined ? request() : { ...request(), workBranch },
+    );
+    const run = calls.find((call) => call.args[0] === "run")!;
+    return run.args[run.args.length - 1];
+  }
+
+  it("is installed after Timone's build and the push guard, and before the CLI starts", async () => {
+    const script = await boxedScript("timone/7-the-page-feels-slow");
+
+    const installed = script.indexOf(
+      'node /workspace/timone/dist/cli.js guardrails install-merge-rules --dir "$HOME/.timone/git-merge"',
+    );
+    expect(installed).toBeGreaterThan(script.indexOf("npm run build"));
+    expect(installed).toBeGreaterThan(script.indexOf("guardrails install-push-guard"));
+    expect(installed).toBeLessThan(script.indexOf("exec claude"));
+  });
+
+  it("stops the box when it cannot be installed, as a missing push guard does", async () => {
+    const script = await boxedScript("timone/7-the-page-feels-slow");
+
+    expect(script).toContain(MERGE_RULE_LINES.join("\n"));
+  });
+
+  it("is switched on by one export after the install, the push guard's hooks first", async () => {
+    const script = await boxedScript("timone/7-the-page-feels-slow");
+
+    const exported = script.indexOf(GIT_CONFIG_EXPORT);
+    expect(exported).toBeGreaterThan(script.indexOf("guardrails install-merge-rules"));
+    expect(exported).toBeLessThan(script.indexOf("exec claude"));
+    // One export only: a second one would replace the first one's settings.
+    expect(script.match(/GIT_CONFIG_COUNT=/g)).toHaveLength(1);
+  });
+
+  it("is the same in a box with no work branch: the rule does not depend on the branch", async () => {
+    const script = await boxedScript();
+
+    expect(script).toContain(MERGE_RULE_LINES.join("\n"));
+    expect(script).toContain(GIT_CONFIG_EXPORT);
+  });
+
+  it("is never built from a value holding a double quote", () => {
+    expect(() =>
+      gitConfigExport([
+        ["core.hooksPath", "$HOME/.timone/git-hooks"],
+        ["merge.timone-status.driver", 'node "/opt/timone/cli.js" merge-file status %O %A %B %P'],
+      ]),
+    ).toThrow(/merge\.timone-status\.driver/);
+  });
+
+  describe("read back by git in a real shell", () => {
+    const homes: string[] = [];
+    afterEach(() => {
+      for (const dir of homes.splice(0)) rmSync(dir, { recursive: true, force: true });
+    });
+
+    it("gives git all four settings, the push guard's among them", async () => {
+      const script = await boxedScript("timone/7-the-page-feels-slow");
+      const exported = script.split("\n").find((text) => text.startsWith("export GIT_CONFIG_COUNT="));
+      expect(exported).toBeDefined();
+      const home = mkdtempSync(join(tmpdir(), "timone-box-merge-"));
+      homes.push(home);
+
+      const ran = spawnSync(
+        "sh",
+        [
+          "-c",
+          `${exported}; git config --get core.hooksPath; git config --get core.attributesFile;` +
+            " git config --get merge.timone-status.driver; git config --get merge.timone-register.driver",
+        ],
+        {
+          cwd: home,
+          // Built from nothing, so no GIT_CONFIG_* of this process reaches the shell.
+          env: { PATH: process.env.PATH ?? "", HOME: home, GIT_CONFIG_NOSYSTEM: "1" },
+          encoding: "utf8",
+        },
+      );
+
+      expect(ran.stdout).toBe(
+        [
+          `${home}/.timone/git-hooks`,
+          `${home}/.timone/git-merge/attributes`,
+          "node /workspace/timone/dist/cli.js merge-file status %O %A %B %P",
+          "node /workspace/timone/dist/cli.js merge-file register %O %A %B %P",
+          "",
+        ].join("\n"),
+      );
+    });
   });
 });

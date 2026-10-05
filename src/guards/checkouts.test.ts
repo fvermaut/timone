@@ -121,6 +121,11 @@ const GIT_USERS: Record<string, string> = {
     "pushes a reservation ref to the remote (ADR-0062); it changes no file, " +
     "no branch and no local ref, only the remote-tracking refs a fetch " +
     "updates.",
+  "merge-rules.ts":
+    "`mergeFile`, behind `timone merge-file`, the merge driver for " +
+    "`STATUS.md` and the registers (ADR-0064). It runs `git merge-file` on " +
+    "three temporary files it writes itself, in a temporary folder it " +
+    "removes. It opens no repository and reads no checkout.",
 };
 
 /** Every `.ts` file under `src`, excluding tests, as paths relative to `src`. */
