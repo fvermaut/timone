@@ -7,6 +7,8 @@ identity:
 # The operator's own forge login. Only named people may instruct the runner;
 # a project that names no instructors is instructed by the operator.
 operator: fvermaut
+# places: how many tickets of a project may build at the same time.
+# A ticket waiting for a person, or with an open pull request, takes none.
 projects:
   scratch-app:
     repo_url: https://github.com/fvermaut/scratch-app.git
@@ -17,6 +19,7 @@ projects:
       - prisma
       - postgresql
     introduce_unmarked: true
+    places: 2
     bindings:
       ticketing: github
       preview: docker
@@ -32,6 +35,7 @@ projects:
       - vercel
       - supabase
     introduce_unmarked: true
+    places: 2
     bindings:
       ticketing: github
       preview: docker
@@ -40,5 +44,6 @@ projects:
     path: projects/timone
     stack:
       - typescript
+    places: 2
     bindings:
       ticketing: github
