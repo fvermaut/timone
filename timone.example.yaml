@@ -20,6 +20,10 @@
 #              (optional)  The forge logins who may instruct the runner on this
 #                          project. They replace `operator` below; they do not
 #                          join it.
+#   places     (optional)  A whole number, 1 or more: how many of this
+#                          project's tickets may have a step running at the
+#                          same time. Omitted means 2. The daemon reads it
+#                          when it starts, so a change needs a restart.
 #
 # Unknown keys are rejected, so typos fail fast at load time — which matters
 # most for `introduce_unmarked`, whose every misspelling would otherwise read
@@ -88,10 +92,13 @@ projects:
     instructors:
       - fvermaut
       - a-colleague
+    # Three of this project's tickets may have a step running at the same time.
+    places: 3
 
   # Minimal project: empty stack, no preview binding, and no introductions —
   # the default, and what an existing repository with open issues keeps. It
-  # names no instructors, so the operator instructs it.
+  # names no instructors, so the operator instructs it, and sets no places,
+  # so it has the default 2.
   internal-tools:
     repo_url: git@github.com:fvermaut/internal-tools.git
     path: projects/internal-tools

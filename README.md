@@ -67,7 +67,7 @@ timone cancel <project>#<n>      # stop a ticket's work for good
 timone projects add|update <name> --repo <url> …   # register or correct a project
 ```
 
-Only one daemon works at a time; a second one exits saying who holds the lock. Restart the daemon after pulling — a running process keeps executing the code it started with.
+Only one daemon works at a time; a second one exits saying who holds the lock. Restart the daemon after pulling — a running process keeps executing the code it started with. The daemon reads `timone.yaml` only when it starts, so a change to that file needs a restart too.
 
 Two credentials keep a boxed run alive, and neither is yours to manage after setup. The model login comes from the token above. The GitHub token is minted per run, scoped to the one repository, and refreshed into the running container every twenty minutes — a minted token dies after an hour and runs last longer than that. [manual/how-the-daemon-works.md](manual/how-the-daemon-works.md) has both in full.
 
@@ -84,6 +84,7 @@ projects:
     # … repo_url, path, stack, bindings, as before
     instructors: [your-login]  # optional: these people instead of the operator
     ticket_limit_usd: 150      # optional: what one ticket may spend, in dollars
+    places: 3                  # optional: how many tickets build at once; 2 when missing
 ```
 
 **Who may instruct it.** The people in `instructors` on the project, or the `operator` when the project names nobody. `instructors` replaces the operator, so list the operator there too if they should still instruct it. The runner sees only these people's comments; anyone else's are left out. The daemon does not start while a project names nobody — no `instructors` and no `operator` — and it says which project, and what to add. `timone projects list` and `timone workspace sync` still read such a manifest.
@@ -91,6 +92,8 @@ projects:
 **How you talk to it.** Write in plain words on the ticket or the pull request. Each comment by a person who may instruct it wakes the runner. `timone takeover` opens a terminal session on a ticket nothing is working on right now; when the session ends, the runner reads what it left. `timone cancel` stops the run and any step still running, and puts the `timone:held` label on the ticket so it is not started again. It also works when no daemon is running. The retry command was removed: typed, it says to write on the ticket instead.
 
 **The limit.** One ticket may spend $150 across all its runs, the runner's own sessions included. `ticket_limit_usd` on the project changes it. At the limit, no new session starts, and the ticket says what was spent and where the work stands. Reply "continue", or any words that mean it, to allow the same amount again. Only a reply from a person who may instruct the runner counts.
+
+**How many tickets build at once.** `places` on the project is a whole number, 1 or more. It is how many of the project's tickets may have a step running at the same time. When the line is missing, the project has 2. A running step takes a place, whatever the step is: a plan, a build, a check, or an update of a pull request. A place given to a waiting ticket and not yet used counts as taken. Nothing else takes one: not a ticket waiting for a person, for a merge or for its turn, not a ticket with only an open pull request, not a runner session, and not a `timone takeover` terminal. A freed place goes to a ticket labelled `priority:high` first, then to the ticket opened first. Before a ticket's build starts, another agent, the planner, decides whether it may build now. It is asked only before the build. The planner takes no place. It holds the ticket back when another ticket that is building, or that has an open pull request, changes most of the same files. It also holds it back when it needs another ticket's work that is not merged. The ticket then gets a comment that names the ticket it waits for and gives the reason. It is decided again when that ticket's pull request merges or closes, and its plan is not rewritten. A named person — someone in `instructors`, or the `operator` — can write on the ticket, in plain words, that it should build now. The ticket is then built when a place is free, and the machine says so on the ticket. Anyone else's comment changes nothing. The daemon reads `timone.yaml` only when it starts, so a change to it needs a restart. The requirements are [PRD-07](doc/specs/prd/prd-07-several-tickets-of-one-project-at-once.md); the decision is [ADR-0065](doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md).
 
 **What it did.** The machine writes down each step, each decision of the runner with its reason, and what each session cost. `timone record` shows it. The replay checks the runner itself.
 

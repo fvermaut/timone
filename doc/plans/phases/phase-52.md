@@ -55,7 +55,8 @@ No decision is taken in this plan. Where the paragraph sits in `README.md` and w
 
 **[MODIFY]** `timone.example.yaml`:
 - in the header comment, after `instructors`, add `places` as `(optional)` in the same columns: a whole number, 1 or more; how many of this project's tickets may have a step running at the same time; omitted means 2; read when the daemon starts, so a change needs a restart.
-- in `pilot-app`, set `places: 3` with a one-line comment, as `instructors` has one; `internal-tools` keeps no line, and its existing comment says it has the default 2 places.
+- in `pilot-app`, set `places: 3` with a one-line comment, as `instructors` has one; `internal-tools` keeps no line, and its comment above the entry gains a few words saying it has the default 2 places.
+  ✏ 2026-10-05 (build, timone#219): the plan said the existing comment on `internal-tools` already says it has 2 places. It does not: it names the stack, the preview, the introductions and the instructors only. The comment gains the words instead, which is what the plan's sentence was there to ensure.
 
 **Seams under test (TDD):** no behaviour-carrying code in this sub-phase, so no seams are declared; validation is checklist-based, plus the load of the example manifest through the real parser.
 
