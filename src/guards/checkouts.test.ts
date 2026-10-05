@@ -130,6 +130,12 @@ const GIT_USERS: Record<string, string> = {
     "`guardrails pre-push` asks git, read-only, about the clone the hook " +
     "runs in, on the first push of a work branch, to find commits of " +
     "another ticket's branch (49c, ADR-0065 D6).",
+  "commands/update-checks.ts":
+    "`timone update-checks`, which says which tests an update runs. A " +
+    "session in the box runs it, never the daemon, against the project's " +
+    "checkout it is pointed at. It runs only read-only git there: " +
+    "`symbolic-ref`, `ls-tree`, `diff --name-only`, `log` and `show`. It " +
+    "does not fetch and changes no file, branch or ref (50c, ADR-0066 D4).",
 };
 
 /** Every `.ts` file under `src`, excluding tests, as paths relative to `src`. */
