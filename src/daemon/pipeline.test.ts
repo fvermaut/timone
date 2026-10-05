@@ -87,6 +87,16 @@ describe("the stage graph", () => {
   });
 });
 
+describe("the update of an open pull request (ADR-0066 D2)", () => {
+  // The same pair as `remediation`: both change a live pull request's branch.
+  it("owns the branch, runs on remediation's model and effort, and has a name a person reads", () => {
+    expect(ownsBranch("update")).toBe(true);
+    expect(modelFor("update")).toBe("claude-opus-5-5");
+    expect(effortFor("update")).toBe("high");
+    expect(stageLabel("update")).toBe("bringing the work up to date");
+  });
+});
+
 describe("the model and effort each stage runs on", () => {
   it("declares the table settled at the grill, stage by stage", () => {
     // Written out rather than looped, because the point of the table is the
@@ -271,6 +281,8 @@ describe("what the runner reads from the step table (41h)", () => {
     verification: { label: "checking the result", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
     delivery: { label: "delivering", model: "claude-opus-5-5", effort: "medium", ownsBranch: true },
     remediation: { label: "acting on your review", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
+    // ✏ 2026-10-05 (50b): the update, added after the table was copied (ADR-0066 D2).
+    update: { label: "bringing the work up to date", model: "claude-opus-5-5", effort: "high", ownsBranch: true },
   };
 
   it("lists every step, in order", () => {

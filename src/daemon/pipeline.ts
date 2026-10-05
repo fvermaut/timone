@@ -52,6 +52,7 @@ export const PIPELINE_STAGES = [
   "verification",
   "delivery",
   "remediation",
+  "update",
 ] as const;
 
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
@@ -287,6 +288,18 @@ const STAGES: Record<PipelineStage, StageSpec> = {
     // Coding, on a live pull request.
     // ✏ Sonnet since 2026-08-30, with `execution`, which it is a small
     // version of. A full verification runs after it either way.
+    model: "claude-opus-5-5",
+    effort: "high",
+  },
+  update: {
+    // [ADR-0066](../../doc/adr/0066-the-update-is-a-step-the-runner-starts-when-an-open-pull-request-falls-behind.md)
+    // D2: the runner starts it when an open pull request's branch is behind
+    // the default branch. It is in no default order: it is started on that
+    // fact, not in sequence.
+    label: "bringing the work up to date",
+    ownsBranch: true,
+    // The same pair as `remediation`, the nearest kind of work: changes on a
+    // live pull request.
     model: "claude-opus-5-5",
     effort: "high",
   },

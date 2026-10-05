@@ -64,3 +64,69 @@ Other test files that use code this slice changed (fakes edited, `noRunnerCalls`
 - A behind branch costs two forge calls per look (`behindDefault`, then `readBranches` for the name). A level branch costs one.
 - Deferred refactoring: `GitHubTicketingAdapter.aheadOfDefault` and `behindDefault` repeat the compare call and the 404 handling; one private compare helper would remove the copy.
 - `noRunnerCalls.behindDefault` answers level. A test that wants a behind branch overrides `behindDefault` on its own fake, as the new `twoPullRequests` fixture does.
+
+## 50b — `update` is a step the runner starts, with its own instructions and the check's access to the probe folders
+
+**Built.** `update` is a stage of the pipeline, after `remediation`, with the row the plan fixes: `bringing the work up to date`, owns the branch, `claude-opus-5-5` at `high`. It has its own prompt: the ticket and re-entry blocks, the pull request's branch, the path of the update instructions, merge and never rebase, force-push or merge the pull request, the two endings, and the writing block; `stagePrompt` adds the shared blocks. The runner can start it through `start_step`: it is not asked of the planner, it takes a place as any step does, and it starts on the run's own branch. The probe guard allows `update` as it allows `verification`, and its reason names the stage. The runner's rules carry the plan's rule under *How you act*, just after the rule on a run that waits on its pull request. The replay set has a twentieth case, `#202`.
+
+**Files touched.**
+
+- `src/daemon/pipeline.ts` — `"update"` in `PIPELINE_STAGES`, and its `STAGES` row with a comment naming ADR-0066 D2.
+- `src/daemon/prompts.ts` — `"update"` in `PROMPTED_STAGES`; `case "update"` in `stageBody`; `updatePrompt`, beside `remediationPrompt`.
+- `src/daemon/probeGuard.ts` — `CHECKING_STAGES = ["verification", "update"]` replaces `OWNING_STAGE`; the allow reason is `<Stage> runs the checks kept in <folders>, so it may read them.`; the comment above the ask branch says "a stage that runs the checks". `BUILD_STAGES` is unchanged.
+- `src/runner/brief.ts` — the rule, word for word from the plan, as one line under *How you act*.
+- `src/runner/replay/cases.ts` — `anOpenPullRequestBehindTheDefaultBranch` (issue `#202`), imported `behindEvent`; "four other cases" became "five", and "The nineteen cases" became "The twenty cases".
+- `src/daemon/pipeline.test.ts` — case 1; and the `update` row in the hand-written 41h table, which `Record<PipelineStage, …>` requires.
+- `src/daemon/prompts.test.ts` — case 2 (4 tests). The existing `it.each(PROMPTED_STAGES)` / `THREADED_STAGES` cases now also run for `update` (11 more).
+- `src/daemon/probeGuard.test.ts` — case 3, a new `describe` with its fixture built by `join(PROBE_DIRECTORIES[0], "PRD-07.R7.mjs")`. No existing line changed.
+- `src/runner/actions.test.ts` — case 4, a new `describe` using the existing `placeWorld`.
+- `src/runner/brief.test.ts` — case 5, a new `describe` using the existing `actRule`/`actRules`.
+
+**Decisions taken inside the slice.**
+
+- **`tsc --noEmit` named no other place.** After `update` joined `PIPELINE_STAGES` it was clean at once: the only `Record<PipelineStage, …>` is `STAGES` (and the test table); the other stage lists are lists, partial maps, or enums built from `PIPELINE_STAGES`. So `order.ts`, the `BUILDING_STAGES` lists and `START_AGAIN` are unchanged, as the plan decides. `timone stage`, the record and ledger schemas, and `start_step`'s enum accept `update` because they are built from `PIPELINE_STAGES`.
+- **The plan's sentence on the update instructions is wrapped over two lines** in the prompt, as the other prompts wrap; the merge sentence is kept on one line, word for word.
+- **The allow reason starts with the stage's name, capitalised** (`Verification …`, `Update …`). The old verification reason, `Verification owns <folders>.`, became the shared sentence. No existing test read that text.
+- **The replay case's issue is `#202`**, the Timone ticket this phase builds, because the case replays no recorded failure. Its run is parked at `delivery` waiting on review, with an open pull request and no review comment; the matcher passes when a step at `update` started and no comment asks a person for anything.
+- **Case 4 asserts `waitingForPlanner` is empty** to show that no planner decision was asked for, besides the step starting with none.
+
+**Validation evidence.**
+
+Order run: 1, 4 (red), 2 (which turned 4 green), 3, 5, 6.
+
+- **Case 1** — `pipeline.test.ts` "owns the branch, runs on remediation's model and effort, and has a name a person reads". Red: `TypeError: Cannot read properties of undefined (reading 'ownsBranch')`. After the row, the 41h table cases failed as they should (`expected [ 'triage', 'clarification', …(11) ] to deeply equal [ 'triage', 'clarification', …(10) ]`; `gives update its label, model, effort and branch`: `expected { …(4) } to deeply equal undefined`) until the table got its `update` row. Green: 43 passed.
+- **Case 4** — `actions.test.ts` "starts on the run's own branch, taking a place, with no planner decision asked" and "is refused for want of a place when every place is taken, as any step is". Red (after case 1, before case 2): both refused with `No session can be started for bringing the work up to date: it has no instructions of its own.` Green after case 2's code: 70 passed. Mutation: the planner check widened to `stage === "execution" || stage === "update"` → both failed (`expected { ok: false, …(1) } to match object { ok: true }`); reverted.
+- **Case 2** — `prompts.test.ts` "the update prompt (ADR-0066 D2)". Red: 3 failed, e.g. `expected '\n\n**If you cannot go on, say so on …' to contain '**Stay on the branch `timone/6-typing…'`, the same for the instructions' path and the merge sentence. The fourth test (trailer and `git -C`) passed at red: `stagePrompt` adds the shared blocks to every stage's body, so it states a property that already held. Green: 228 passed.
+- **Case 3** — `probeGuard.test.ts` "the probe guard and the update (ADR-0066 D4)". Red: `expected 'ask' to be 'allow'` (1 failed, 18 passed; the verification, deny and ask cases already held). Green: 19 passed. `git diff --numstat` of the file: 28 added, 0 removed.
+- **Case 5** — `brief.test.ts` "the runner's rule for a branch behind the default branch (ADR-0066 D2)". Red: `expected '' to contain 'When you are told that the ticket\'s …'` and `expected -1 to be 11`. Green: 45 passed.
+- **Case 6** — the new replay case. The code it needs was already in place when the case was written, so it was not driven red; two mutations show it is not empty. A: `update` taken out of `PROMPTED_STAGES` → `FAIL #202 — … 0 of 3 tries chose it. … Refused: No session can be started for bringing the work up to date …`, `19 of 20 cases passed`. B: a right call that posts on the ticket with `**What I need from you:** say whether I should bring it up to date.` → `FAIL #202`, `19 of 20 cases passed`. Both reverted → `20 of 20 cases passed`.
+
+Validation block:
+
+```
+npx tsc --noEmit; echo "exit: $?"
+exit: 0
+npx vitest run src/daemon/ src/runner/; echo "exit: $?"
+ Test Files  39 passed (39)
+      Tests  1259 passed (1259)
+exit: 0
+npm run replay -- --dry; echo "exit: $?"
+PASS #202 — Start the update, and ask nobody for anything. 3 of 3 tries.
+20 of 20 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+
+- [x] Cases 1–6 pass, with red runs recorded. Pass. Case 2's shared-block test and case 6 could not be driven red honestly; case 6 is shown not to be empty by two mutations, and case 4's planner part by one.
+- [x] `probeGuard.test.ts`'s existing deny cases pass unchanged (hard gate). Pass: no existing line of the file changed, and all 19 cases pass.
+- [ ] The real replay passes. **Not run.** This container has no model login, and the real replay fails with "Not logged in" on every case (recorded in `phase-50-departures.md`). No recorded case could be seen to change its choice.
+
+Other test files that use code this slice changed, run at the end: `src/guards/checkouts.test.ts`, `src/commands/` (12 files, `stage.test.ts`, `status.test.ts` and `takeover.test.ts` among them), `src/planner/` (6 files), `src/cli.test.ts`, `src/process-text.test.ts`. 21 files, 323 tests passed, exit 0.
+
+**What 50c must know.**
+
+- `stagePrompt("update", …)` points the session at `.claude/skills/timone-update/SKILL.md`, which does not exist yet (50e writes it). Until then, a started update has no instructions to follow beyond its prompt.
+- The prompt's "done" ending says "the record entry is committed and pushed, whatever the result". What that entry is, and the section at the top of the pull request, are for the skill to define.
+- The probe guard now allows any session at `update` to read the probe folders, as at `verification`. The fix context the update hands a failure to is kept out only by its brief (ADR-0066 D4).
+- The runner is told to start nothing after the update ends. Nothing in code stops a second update; the driver's notice per head (50a) is what keeps the runner from being told twice.
+- `src/runner/replay/harness.test.ts`'s top comment still says "The nineteen cases"; it was not in this slice's files.
+- Deferred refactoring: `probeGuardDecision` capitalises the stage name inline; `capitalised` is already written three times, privately (`actions.ts`, `departures.ts`, `commands/record.ts`). One shared helper would remove the copies.

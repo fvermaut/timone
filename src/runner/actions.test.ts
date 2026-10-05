@@ -2062,3 +2062,43 @@ describe("the build waits for the planner's decision (PRD-07.R5, ADR-0065 D2)", 
     }
   });
 });
+
+/** The try to bring ticket 12's open pull request level with the default branch. */
+const UPDATING = {
+  stage: "update" as const,
+  instructions: "Bring the branch level with main, which moved 3 commits ahead.",
+  reason: "The default branch moved on while the pull request is open.",
+};
+
+/** The run's own branch in the update cases: not the name `workBranch` would give. */
+const OWN_BRANCH = "timone/12-due-dates-kept-from-before";
+
+describe("the update of an open pull request (ADR-0066 D2)", () => {
+  it("starts on the run's own branch, taking a place, with no planner decision asked", async () => {
+    const { actions, store, run, steps } = placeWorld(choreTicket(), () => {});
+    store.claimBranch(run.id, OWN_BRANCH);
+    store.recordPullRequest(run.id, 31);
+
+    const result = await actions.startStep(UPDATING);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(steps.map((step) => step.input.label)).toEqual(["scratch-app#12/1 (update)"]);
+    expect(steps[0]?.input.request.workBranch).toBe(OWN_BRANCH);
+    expect(store.placeHolders(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+    expect(store.waitingForPlanner(PROJECT.name)).toEqual([]);
+  });
+
+  it("is refused for want of a place when every place is taken, as any step is", async () => {
+    const { actions, store, run, steps } = placeWorld(choreTicket(), (store) => {
+      stepRunning(store, 7);
+    });
+    store.claimBranch(run.id, OWN_BRANCH);
+    store.recordPullRequest(run.id, 31);
+
+    const result = await actions.startStep(UPDATING);
+
+    expect(result).toEqual({ ok: false, refused: noPlace("run scratch-app#7/1 has a step running") });
+    expect(steps).toEqual([]);
+    expect(store.waitingForPlace(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+});

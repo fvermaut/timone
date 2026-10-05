@@ -27,6 +27,7 @@ export const PROMPTED_STAGES = [
   "verification",
   "delivery",
   "remediation",
+  "update",
 ] as const;
 
 export interface PromptContext {
@@ -307,6 +308,8 @@ function stageBody(
       return deliveryPrompt(context);
     case "remediation":
       return remediationPrompt(context);
+    case "update":
+      return updatePrompt(context);
   }
 }
 
@@ -372,6 +375,46 @@ function remediationPrompt(context: PromptContext): string {
       "you could not take any path — the branch is gone, the pull request is " +
         "not what the ticket says, something structural. Follow it with what " +
         "you found.",
+    ),
+    "",
+    writingBlock(),
+    "",
+    "Then stop.",
+  ].join("\n");
+}
+
+/**
+ * [ADR-0066](../../doc/adr/0066-the-update-is-a-step-the-runner-starts-when-an-open-pull-request-falls-behind.md)
+ * D2: bring an open pull request's branch level with the default branch,
+ * after the default branch moved on.
+ *
+ * The prompt says only what the step is for and on which branch. How the
+ * work is done — the merge, the conflicts, the tests, and the record on the
+ * pull request — is the update instructions' to say, so it is written once,
+ * there.
+ */
+function updatePrompt(context: PromptContext): string {
+  const { ticket, branch } = context;
+
+  return [
+    `The default branch of **${context.project.name}** moved on while the pull request for ticket #${ticket.number} is open.`,
+    "",
+    ticketBlock(context),
+    "",
+    reentryBlock(),
+    "",
+    `**Stay on the branch \`${branch ?? "the run's work branch"}\`** — the pull`,
+    "request's head.",
+    "",
+    "Bring this branch level with the default branch, by following the update",
+    "instructions in .claude/skills/timone-update/SKILL.md to the letter.",
+    "Merge the default branch into the branch; never rebase, never force-push, and never merge the pull request.",
+    "",
+    outcomeBlock(
+      "the record entry is committed and pushed, whatever the result. Follow " +
+        "it with the result in one sentence.",
+      "the branch or the pull request is not what the run says. Follow it " +
+        "with what you found.",
     ),
     "",
     writingBlock(),
