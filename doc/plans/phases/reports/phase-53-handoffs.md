@@ -317,3 +317,53 @@ Other test files run at the end, for code that imports `prompts.ts` or `session.
 
 - The exact words a step is now told, for the written rules to match: the sentence goes "on its own line just above that closing line, with a blank line between", and the three cases are "when you ask for a missing key or secret; when you ask whether a misspelled word meant approve; and when a terminal session on this ticket has just ended without settling what you ask."
 - The delivery prompt now tells the step to end the *Questions for you* section with the sentence. `.claude/skills/timone-deliver/SKILL.md` (its *Questions for you* section, around line 192) does not say so yet.
+
+## 53d — The written rules say the same
+
+**Built.** The written rules now say what the code does since 53a–53c. `process.md`, under *Writing to the human*, has one dated paragraph: a question names the command that answers it in a terminal. It gives the sentence word for word, says it goes on its own line just above the last line that starts with *What I need from you:*, with a blank line between, that on a pull request the number is the ticket's, and names the three cases that leave it out, each with the reason PRD-09's R3 gives. The paragraph that starts **Every message ends with the line *What I need from you:*** gains one dated sentence that points to it. The paragraph that starts *"Every command a ticket names can be run while the daemon is running"* is not changed. The twelve skills' shared writing line gains one dated sentence: a question also names `timone takeover <project>#<n>` and says both ways to answer, except in the three cases *Writing to the human* names. `timone-triage`'s comment template shows the sentence above the closing line. `timone-deliver`'s *Questions for you* template, and its paragraph on a question carried from an earlier step, say the section ends with the sentence. `timone-wayfind`'s *A comment that asks what is still open* has the sentence before the CTA. PRD-09's R1 `Falsified-by:` names the tests and replay cases; its `Phases:` line names phase 53.
+
+**Files touched.**
+
+- `process.md` — one new dated paragraph at the end of *Writing to the human*; one dated sentence added to the paragraph that starts **Every message ends with the line *What I need from you:***.
+- `.claude/skills/{timone-adr,timone-deliver,timone-execute,timone-grill,timone-handover,timone-onboard,timone-plan,timone-prd,timone-prototype,timone-triage,timone-verify,timone-wayfind}/SKILL.md` — one dated sentence added to line 11, the line that ends *Every message ends with a call to action, and "no action needed" is one.* `timone-update` has no such line and is unchanged.
+- `.claude/skills/timone-triage/SKILL.md` — the comment template has the sentence above the closing line; one dated paragraph after the template says when to leave it out.
+- `.claude/skills/timone-deliver/SKILL.md` — the *Questions for you* template's note says to end the section with the sentence, and the template shows it; the paragraph on a question carried from an earlier step says the section that holds it ends with the sentence.
+- `.claude/skills/timone-wayfind/SKILL.md` — *A comment that asks what is still open* has the sentence before the CTA.
+- `doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.criteria.md` — R1's `Falsified-by:` line only. No status line changed.
+- `doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.md` — the `Phases:` line adds phase 53 (piece 2, #218).
+
+**Decisions taken inside the slice.**
+
+- The new `process.md` paragraph opens with the dated marker and then the bold words in lower case, as the paragraph on `timone takeover` does. That also lets the plan's case-sensitive grep find it.
+- The three reasons are R3's and the PRD's own: a terminal session cannot add a key, and a person who reads a command runs it; one word answers the misspelled-approval question; the person has just used the command and it did not help. For the third case I added one sentence: a terminal session does not write the command in what it posts. That is what 53c's takeover prompt now says, for the same reason.
+- The paragraph also says who writes the sentence: code adds it to what the runner posts and to the messages code writes; a step is given it word for word and writes it. That is what 53a–53c built.
+- The skills name the three cases by pointing to *Writing to the human*, as the plan words it, rather than repeating them in twelve places.
+- In `timone-deliver`, a question carried from an earlier step goes in the departures section (the skill's existing rule, from ADR-0056). The plan says that paragraph should "say the section ends with the sentence", so it now says the section that holds such a question ends with the sentence. 53c's delivery prompt names only the *Questions for you* section. A pull request with questions in both sections could therefore carry the sentence twice. No requirement limits how often it appears in a pull request's description. I note it for the delivery review; I did not decide it.
+- R1's `Falsified-by:` names the 53a tests for cases 4 and 5 and the 53b tests for cases 1–3, each with its file and full test name, and the two replay cases by function name and the action each asks for. The replay cases were new, so the handoff records them as seen to fail with their right call changed for a moment. The line says that.
+
+**Validation evidence.** This slice carries no behaviour, so the TDD loop does not apply: no test was written, and no red run exists. Validation is the plan's checklist.
+
+```
+$ grep -n "a question names the command" process.md; echo "exit: $? (expected 0)"
+194:✏ 2026-10-05 ([PRD-09](doc/specs/prd/prd-09-...md)) — **a question names the command that answers it in a terminal.** ...
+exit: 0 (expected 0)
+$ grep -L "timone takeover <project>#<n>" .claude/skills/*/SKILL.md
+.claude/skills/timone-update/SKILL.md
+$ grep -n "phase-53" doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.md; echo "exit: $? (expected 0)"
+6:> **Phases:** [phase 51](../../plans/phases/phase-51.md) (piece 1, #217), [phase 53](../../plans/phases/phase-53.md) (piece 2, #218)
+exit: 0 (expected 0)
+$ git diff -U0 origin/main -- doc/specs/prd/ | grep -E '^[-+]- \*\*Status:\*\*'; echo "exit: $? (expected 1: no status line changed)"
+exit: 1 (expected 1: no status line changed)
+```
+
+`npx vitest run` (the whole suite) was not run here. The runner asked that it run once, at the phase close, right after this slice; that run stands as this slice's last validation command.
+
+- [x] `process.md`, `src/runner/brief.ts` and every skill say a question names the command, and name the three cases (R5 clause 1). `process.md`: the new paragraph names the sentence and the three cases with their reasons. `src/runner/brief.ts` (53b, not edited here): the rule at the end of *Writing to a person* names `timone takeover` with this ticket and the three `leaveOutTakeover` values. Every skill except `timone-update`: line 11 names `timone takeover <project>#<n>` and the three cases, by pointing to *Writing to the human*.
+- [x] Plain words in every added line: no metaphor, no process jargon. Section names, PRD and ADR links are used as the surrounding text uses them. No closing keyword stands before a `#N` in any added line (checked with `grep -iE '(clos|fix|resolv)[a-z]* #[0-9]'` over the added lines: no match).
+
+Other test files run at the end, for the tests that read `process.md`, the skills or the PRD files: `src/process-text.test.ts`, `src/planner/plan-files.test.ts`, `src/daemon/pipeline.test.ts`, `src/daemon/prompts.test.ts`, `src/daemon/hooks.test.ts`, `src/daemon/lock.test.ts`, `src/daemon/holder.test.ts`, `src/git.test.ts`: 8 files, 441 tests, all passed.
+
+**What the phase close must know.**
+
+- The whole suite has not been run for this slice; the close's run is its last validation command.
+- `timone-deliver`'s paragraph on a carried question still says the departures section is the "first section of the pull request body". That was already out of date before this slice (the *Questions for you* section comes first since ADR-0057), and I did not change it.

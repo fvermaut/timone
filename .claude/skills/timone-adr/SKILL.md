@@ -8,7 +8,7 @@ argument-hint: <project-name> <decision to record>
 
 You record one architectural decision as an ADR under a managed project — or you decide, explicitly, that no ADR is warranted. The process spec (`process.md`, stage 4) is normative; when this skill and the spec disagree, the spec wins.
 
-**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one.
+**Everything you put in front of the human follows [Writing to the human](../../../process.md#writing-to-the-human).** Short sentences, plain words, no process vocabulary — no stage numbers, no skill names, nothing a reader would need `process.md` to understand. A ticket comment is a few sentences and under 150 words. Specifications, requirements and technical detail are **links** to committed artifacts, never text on a ticket. Every message ends with a call to action, and "no action needed" is one. ✏ 2026-10-05 ([PRD-09](../../../doc/specs/prd/prd-09-a-question-names-the-command-that-answers-it-in-a-terminal.md)): a question also names `timone takeover <project>#<n>`, with this project's name and this ticket's number, and says both ways to answer, in writing here or with that command in a terminal, except in the three cases that [Writing to the human](../../../process.md#writing-to-the-human) names.
 
 ## Target-project resolution (do this first)
 
