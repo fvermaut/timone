@@ -92,6 +92,16 @@ const postInput = z.object({
     .describe(
       "The comment. It must end with a line that starts with **What I need from you:** and says what you need, or nothing.",
     ),
+  leaveOutTakeover: z
+    .enum(["missing-key", "approval-word", "terminal-did-not-settle-it"])
+    .optional()
+    .describe(
+      "Leave this out for most questions: the machine then adds a sentence that names the takeover command. " +
+        "Set it only when the question must not name that command. " +
+        "missing-key: you ask for a key or secret that a terminal session cannot add. " +
+        "approval-word: you ask whether a misspelled word meant approve. " +
+        "terminal-did-not-settle-it: you ask after a terminal session that did not settle things.",
+    ),
   reason,
 });
 

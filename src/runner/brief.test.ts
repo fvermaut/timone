@@ -610,6 +610,33 @@ describe("the runner's rule for a key missing where a step runs", () => {
   });
 });
 
+describe("the runner's rule that a question names the takeover command (PRD-09)", () => {
+  /** The rules under "## Writing to a person", the last section of the system text. */
+  function writingRules(): string[] {
+    const lines = buildBrief(briefInput()).system.split("\n");
+    const start = lines.indexOf("## Writing to a person");
+    if (start === -1) return [];
+    return lines.slice(start + 1).filter((line) => line.startsWith("- "));
+  }
+
+  it("says a question names `timone takeover` with this ticket, that the machine adds the sentence, and names the three cases that leave it out", () => {
+    const rule = writingRules().find((line) => line.includes("timone takeover")) ?? "";
+
+    expect(rule).toContain("A question tells the reader they can also answer in a terminal, with `timone takeover` and this ticket.");
+    expect(rule).toContain("When you post a question, the machine adds the sentence that says so. Do not write it yourself.");
+    expect(rule).toContain('"missing-key" when you ask for a missing key');
+    expect(rule).toContain('"approval-word" when you ask whether a misspelled word meant approve');
+    expect(rule).toContain('"terminal-did-not-settle-it" when you ask after a terminal session that did not settle things');
+  });
+
+  it("has the comment that asks for a missing key posted with leaveOutTakeover set to missing-key, and still does not name the command", () => {
+    const rule = stopRule("a key or secret is missing");
+
+    expect(rule).toContain('When you post it, set leaveOutTakeover to "missing-key".');
+    expect(rule).not.toContain("timone takeover");
+  });
+});
+
 describe("the runner's rule for a named person who asks to stop the work for good", () => {
   it("has the run ended with their comment named by its time, without a pull request, and never asks them to run a command", () => {
     const rule = actRule("stop the work for good");

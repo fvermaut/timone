@@ -6,6 +6,7 @@ import {
   type TicketingProject,
   type TicketThread,
 } from "../adapters/ticketing.js";
+import { takeoverCommand, withTwoWaysToAnswer } from "../channels/terminal.js";
 import { namedPeople, ticketLimitOf, type Manifest } from "../manifest.js";
 import {
   APPROVAL_RECORD_MODEL,
@@ -213,6 +214,23 @@ const TIMONE_BUG_LABEL = "bug";
 
 const NO_TIMONE_PROJECT =
   "The manifest has no project called timone, so there is nowhere to file a fault in Timone.";
+
+/**
+ * The words every takeover command starts with. A comment the runner posts
+ * that holds them names a takeover command, right or wrong
+ * (✏ 2026-10-05 (PRD-09)).
+ */
+const TAKEOVER = "timone takeover";
+
+/**
+ * Whether `body` holds `command` with no digit after it: on ticket #12,
+ * `timone takeover scratch-app#123` holds the words of the command for #12,
+ * but names another ticket.
+ */
+function holdsExactly(body: string, command: string): boolean {
+  const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`${escaped}(?!\\d)`).test(body);
+}
 
 /** Timone's own repository, as the manifest declares it, or undefined when it does not. */
 function timoneProject(manifest: Manifest): TicketingProject | undefined {
@@ -1013,7 +1031,7 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         said: `Asked ${stageLabel(step.stage)} to stop. You are woken when it has stopped.`,
       };
     }),
-    post: decided("post", async ({ where, body }) => {
+    post: decided("post", async ({ where, body, leaveOutTakeover }) => {
       if (!asksSomething(body)) {
         return {
           ok: false,
@@ -1022,15 +1040,36 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
             'what you need from the reader, or "nothing". Add it, and post again.',
         };
       }
+      // ✏ 2026-10-05 (PRD-09): a question names the takeover command for this
+      // ticket, and code adds the sentence that names it. The runner names the
+      // few questions where the command cannot help, and then it must not be
+      // there: a person who reads a command runs it.
+      if (leaveOutTakeover !== undefined && body.includes(TAKEOVER)) {
+        return {
+          ok: false,
+          refused: "This question leaves the takeover command out. Remove it, and post again.",
+        };
+      }
+      const command = takeoverCommand(deps.project.name, run.ticket);
+      if (body.includes(TAKEOVER) && !holdsExactly(body, command)) {
+        return {
+          ok: false,
+          refused: `The takeover command for this ticket is \`${command}\`. Use that one, or leave it out.`,
+        };
+      }
+      const posted =
+        leaveOutTakeover === undefined
+          ? withTwoWaysToAnswer(body, deps.project.name, run.ticket)
+          : body;
       if (where === "ticket") {
-        await deps.adapter.postComment(deps.project, run.ticket, body);
+        await deps.adapter.postComment(deps.project, run.ticket, posted);
         return { ok: true, said: `Posted on ticket #${run.ticket}.` };
       }
       const pr = await openPullRequest();
       if (pr === undefined) {
         return { ok: false, refused: "This run has no open pull request to post on." };
       }
-      await deps.adapter.postPullRequestComment(deps.project, pr, body);
+      await deps.adapter.postPullRequestComment(deps.project, pr, posted);
       return { ok: true, said: `Posted on pull request #${pr}.` };
     }),
     setHold: decided("set_hold", async ({ on }) => {

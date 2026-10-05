@@ -2200,3 +2200,153 @@ describe("the runner starts no step on a run a person's terminal holds (ADR-0067
     expect(store.get(run.id)?.takenOver).toBeUndefined();
   });
 });
+
+describe("a question the runner posts names the takeover command (PRD-09)", () => {
+  const SENTENCE =
+    "You can answer here in writing, or in your terminal by running `timone takeover scratch-app#12`.";
+  const QUESTION =
+    "**The requirements are written:** [prd-02-due-dates.md](doc/specs/prd/prd-02-due-dates.md).\n\n" +
+    '**What I need from you:** read them and reply "approved", or say what to change.';
+
+  it("adds the sentence with the command for the run's ticket to a question on the ticket, and keeps its last line", async () => {
+    const { actions, forge } = world();
+
+    const result = await actions.post({
+      where: "ticket",
+      body: QUESTION,
+      reason: "Ask fvermaut to approve the requirements.",
+    });
+
+    expect(result).toEqual({ ok: true, said: "Posted on ticket #12." });
+    expect(forge.comments).toEqual([
+      {
+        number: 12,
+        body:
+          "**The requirements are written:** [prd-02-due-dates.md](doc/specs/prd/prd-02-due-dates.md).\n\n" +
+          `${SENTENCE}\n\n` +
+          '**What I need from you:** read them and reply "approved", or say what to change.',
+      },
+    ]);
+  });
+
+  it("names the run's ticket, not the pull request, in the command it adds to a question on the pull request", async () => {
+    const { actions, forge, store, run } = world();
+    store.claimBranch(run.id, BRANCH);
+    forge.pullRequest = {
+      number: 31,
+      title: "A due date on each task",
+      url: "https://github.com/fvermaut/scratch-app/pull/31",
+      state: "open",
+      headSha: "9e1d0b7",
+    };
+
+    const result = await actions.post({
+      where: "pull-request",
+      body: "**Should late tasks also show in bold?** The plan does not say.\n\n**What I need from you:** answer yes or no.",
+      reason: "The check asked a question only fvermaut can answer.",
+    });
+
+    expect(result).toEqual({ ok: true, said: "Posted on pull request #31." });
+    expect(forge.pullRequestComments).toEqual([
+      {
+        number: 31,
+        body:
+          "**Should late tasks also show in bold?** The plan does not say.\n\n" +
+          `${SENTENCE}\n\n` +
+          "**What I need from you:** answer yes or no.",
+      },
+    ]);
+  });
+
+  it.each(["missing-key", "approval-word", "terminal-did-not-settle-it"] as const)(
+    "posts a question unchanged when the runner leaves the command out (%s)",
+    async (leaveOutTakeover) => {
+      const { actions, forge } = world();
+
+      const result = await actions.post({
+        where: "ticket",
+        body: QUESTION,
+        leaveOutTakeover,
+        reason: "Ask fvermaut to approve the requirements.",
+      });
+
+      expect(result).toEqual({ ok: true, said: "Posted on ticket #12." });
+      expect(forge.comments).toEqual([{ number: 12, body: QUESTION }]);
+    },
+  );
+
+  it.each(["missing-key", "approval-word", "terminal-did-not-settle-it"] as const)(
+    "refuses a question that names the command when the runner said to leave it out (%s), and posts nothing",
+    async (leaveOutTakeover) => {
+      const { actions, forge } = world();
+
+      const result = await actions.post({
+        where: "ticket",
+        body:
+          "**The build needs the Polygon key.** Or run `timone takeover scratch-app#12` in your terminal.\n\n" +
+          "**What I need from you:** add the key.",
+        leaveOutTakeover,
+        reason: "The build needs a key only fvermaut can give.",
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        refused: "This question leaves the takeover command out. Remove it, and post again.",
+      });
+      expect(forge.comments).toEqual([]);
+    },
+  );
+
+  it("refuses a question that names the takeover command of another ticket, names the right one, and posts nothing", async () => {
+    const { actions, forge } = world();
+
+    const result = await actions.post({
+      where: "ticket",
+      body:
+        "**The build needs the Polygon key.** You can also run `timone takeover other#9` in your terminal.\n\n" +
+        "**What I need from you:** add the key.",
+      reason: "The build needs a key only fvermaut can give.",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      refused:
+        "The takeover command for this ticket is `timone takeover scratch-app#12`. Use that one, or leave it out.",
+    });
+    expect(forge.comments).toEqual([]);
+  });
+
+  it("refuses a question whose takeover command has a longer number that starts with the ticket's, and posts nothing", async () => {
+    const { actions, forge } = world();
+
+    const result = await actions.post({
+      where: "ticket",
+      body:
+        "**The build needs the Polygon key.** You can also run `timone takeover scratch-app#123` in your terminal.\n\n" +
+        "**What I need from you:** add the key.",
+      reason: "The build needs a key only fvermaut can give.",
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      refused:
+        "The takeover command for this ticket is `timone takeover scratch-app#12`. Use that one, or leave it out.",
+    });
+    expect(forge.comments).toEqual([]);
+  });
+
+  it("posts a comment that asks for nothing unchanged", async () => {
+    const { actions, forge } = world();
+    const body = "**I am preparing the work now.** I will write here when the plan is ready.\n\n**What I need from you:** nothing.";
+
+    const result = await actions.post({ where: "ticket", body, reason: "Tell fvermaut what happens next." });
+
+    expect(result).toEqual({ ok: true, said: "Posted on ticket #12." });
+    expect(forge.comments).toEqual([
+      {
+        number: 12,
+        body: "**I am preparing the work now.** I will write here when the plan is ready.\n\n**What I need from you:** nothing.",
+      },
+    ]);
+  });
+});
