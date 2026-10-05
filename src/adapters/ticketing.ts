@@ -616,6 +616,17 @@ export interface TicketingAdapter {
   getPullRequestBody(project: TicketingProject, number: number): Promise<string>;
 
   /**
+   * The paths of the files a pull request changes, as the forge lists them.
+   *
+   * Phase 49's widening. The planner compares the files a ticket's plan
+   * names with the files each open pull request of the project changes
+   * ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+   * D3). It throws when the forge fails, and never answers an empty list for
+   * that: no files would read as no overlap.
+   */
+  listPullRequestFiles(project: TicketingProject, pr: number): Promise<string[]>;
+
+  /**
    * Replace a pull request's description with `body`, verbatim:
    * {@link getPullRequestBody}'s other half, for the same block.
    *

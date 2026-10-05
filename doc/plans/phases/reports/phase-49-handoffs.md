@@ -309,3 +309,82 @@ Test files run at the end, by name (after `npm run build`):
 - A run is let build with `decidePlanner(id, { kind: "build", at, reason, onComment? })`; nothing wakes the runner yet. The record entry for a decision is `planner-decision` with `decision`, not `kind`.
 - `untilMergedOrClosed(tickets)` in `src/runner/brief.ts` writes `#7 and #9 are merged or closed`; the hold comment the planner's code posts can use it.
 - `recordLine` in `src/daemon/prompts.ts` writes no line for the two planner entries. A takeover prompt that should show the planner's decision needs a line there.
+
+## 49e — The planner's facts, instructions and answers — everything but the session
+
+**Built.** Everything a planner session needs except the session itself. `planFiles(text)` reads the files a plan names from its file markers. `gatherPlannerFacts` gathers, for the ticket being decided, its title, labels and plan (path, title, files, text), the tickets it is blocked by, every other ticket of the project that is building or has an open pull request (with its plan's files, and for an open pull request the files it changes), and the named person's comment that woke the planner. `buildPlannerBrief` writes the planner's rules and those facts. `plannerActions` gives the four actions the planner calls (`letBuild`, `hold`, `passToRunner`, `readPlan`), each checked, and `plannerToolServer` wraps them as the MCP server `planner`. The forge port has `listPullRequestFiles`.
+
+**Files touched.**
+
+- `src/planner/plan-files.ts` — new: `planFiles(text)`.
+- `src/planner/facts.ts` — new: `gatherPlannerFacts(deps, run, cycle, comment?)`, types `PlannerFacts`, `OtherTicket`, `Plan`, `PlanFact`, `PlannerCycle`, `PlannerFactsDeps`, `PlannerFactsAdapter`.
+- `src/planner/brief.ts` — new: `buildPlannerBrief(facts)`, and `planNotRead(ticket, why)`, the one sentence the brief and `readPlan` both use.
+- `src/planner/actions.ts` — new: `plannerActions(deps, run, facts)`, `PlannerActions`, `PlannerActionDeps`, and `passedToRunner(at)`, the notice text (`passed to runner: comment at <at>`).
+- `src/planner/tools.ts` — new: `plannerToolServer(actions)`, `plannerTools`, `PLANNER_SERVER_NAME = "planner"`, `PLANNER_TOOL_NAMES`, `qualifiedPlannerToolNames()`, and the four input schemas and types.
+- `src/planner/plan-files.test.ts`, `facts.test.ts`, `brief.test.ts`, `actions.test.ts` — new: the cases below.
+- `src/runner/facts.ts` — `addedOn` renamed `filesAddedOnBranch` and exported; its adapter parameter narrowed to `Pick<FactsAdapter, "listFiles">`. `PHASES` and `attempt` exported too, so the planner's facts do not copy them. No behaviour changed.
+- `src/runner/actions.ts` — `namedPersonsComment` moved out of `runnerActions`'s closure to a top-level export, `namedPersonsComment(deps: NamedCommentDeps, ticket, commentAt, onlyNamed)`. Its two callers (`recordApproval`, `endRun`) pass `deps, run.ticket`. Words unchanged.
+- `src/adapters/ticketing.ts` — `listPullRequestFiles(project, pr): Promise<string[]>` on the port, with its doc comment.
+- `src/adapters/github-tickets.ts` — its implementation: `gh pr view <n> --repo <slug> --json files`, the `path` of each; a `gh` failure is thrown.
+- `src/adapters/github-tickets.test.ts` — case 10's two cases; `listPullRequestFiles` added to the list in "every call this adapter makes can be scoped to a repository".
+- The fakes `tsc` named, each given `listPullRequestFiles` answering `[]` and nothing else: `src/commands/daemon.test.ts`, `src/commands/takeover.test.ts`, `src/daemon/chunk-zero.test.ts`, `src/daemon/hooks.test.ts`, `src/daemon/poll.test.ts` (three fakes), `src/runner/actions.test.ts`, `src/runner/driver.test.ts`; and `src/runner/replay/recording.ts`.
+
+**Decisions taken inside the slice.**
+
+- **What counts as a path in `planFiles`.** Every code span after a marker on the same line, when it is written only in path characters and has a `/` or a known file ending (`.md`, `.ts`, `.tsx`, `.json`, `.yaml` and a few more). A marker quoted inside a code span is not a marker (phase 49's own Goal Description quotes them). A bare file name that is the last part of a path already listed is that file, not a new entry. Why, from phase 47's own text: its marker lines name `driver.ts`, `status.ts` and `session.ts` in their descriptions after the full paths; `process.md` and `CONTEXT.md` are real files at the root; `store.register` and `tsc` are code words. Phase 47 gives 32 paths. `github-pulls.test.ts`, named as an alternative "(or …)" with no full path, is kept.
+- **The cycle.** `RunnerCycle` (what the runner's driver receives) has no blockers: the survey of initiatives keeps only `isStep` and `isEligible`. So `PlannerCycle = Pick<RunnerCycle, "threads"> & { blockedBy(ticket): readonly Dependency[] }`: the runner's thread reader, reused as it is, plus the survey's blockers. `blockedBy` is required, not optional, so `tsc` makes 49f supply it.
+- **The comment that woke the planner** is a fourth, optional parameter of `gatherPlannerFacts`: `comment?: TicketComment`. Choosing it is the planner driver's job (49f). The facts carry it as given.
+- **The run is read from the ledger** inside `gatherPlannerFacts` (`store.get(run.id) ?? run`), because a run handed in may be older than its branch. The first green run of case 2 failed on exactly this.
+- **A ticket's plan** is the phase file its branch added directly under `doc/plans/phases`, through `filesAddedOnBranch`, as the runner's facts find phase files. No branch, or no file added: "Plan: none yet." More than one added: unknown, with the reason naming them. A forge failure: unknown, "the forge did not answer: …". A thread the cycle's reader cannot read is not caught: `gatherPlannerFacts` throws, and nothing is decided that cycle.
+- **"Building"**: a live run of another ticket whose pull request is open (by the thread reader) counts as "open pull request", with the files from `listPullRequestFiles` (unknown when the forge fails). Otherwise it counts as building when it has a let-build decision and no `pr`, or is `active` at `execution`, `verification`, `delivery` or `remediation`.
+- **One decision per session** is a flag in the actions' closure, set only by a decision that succeeded. `passToRunner` counts as that one decision, because the rules say to call exactly one of the three, once; it changes nothing in the ledger. `readPlan` is not a decision, and accepts the ticket being decided or any ticket in `others`.
+- **The planner's tries are not written as `decision` entries**, unlike the runner's. Only a successful `letBuild` or `hold` writes `planner-decision`, and `passToRunner` writes its notice. The plan asked for nothing more.
+- **Words.** The two comments are the excerpt's words, with `NEEDED_FROM_YOU` (bold, as every comment posted) as the last line, and go through `postComment`, which puts the 🤖 header on. The hold comment adds a full stop to the planner's reason when it has none. Refusals: `You decide for ticket #12 only, not for #7.`; `You have already decided for ticket #12 in this session. Decide only once.`; `Name at least one ticket this ticket waits for.`; `#9 is not a ticket you were shown as building, with an open pull request, or blocking this ticket. This ticket can wait only for one of those.`; a comment refused by `namedPersonsComment` ends `Only a named person can have a ticket built before the planner would let it.`; `No comment woke you, so there is no comment to pass to the runner.`; `The comment that woke you is the one at <a>, not one at <b>.`; `#9 is not a ticket you were shown, so you cannot read its plan.`; `#7 has no plan yet.`; `The plan of #7 could not be read: <why>.`
+- **What I would refactor.** Small private helpers are copied because their files were not granted: `sentence` (from `src/runner/comments.ts`) in `planner/actions.ts`; `answer` (from `src/runner/tools.ts`) in `planner/tools.ts`; `quoted`, `listOrNone` and `factLine` (from `src/runner/brief.ts`) in `planner/brief.ts`. Each should become one export.
+
+**Validation evidence.**
+
+Per declared case (red line seen, then green, or mutation proof):
+
+1. `plan-files.test.ts` › "finds every file phase 47 marks, once each, in the order the plan names them" — red: `Error: Failed to load url ./plan-files.js … Does the file exist?`; green. "does not take a path named in prose, on a line with no marker", "takes the files a [DELETE] marker names", "does not read a marker quoted in code as a marker" — green as written. Mutations, each reverted: every line read as marked → `expected [ 'src/daemon/runs.ts', …(1) ] to deeply equal [ 'src/runner/actions.ts' ]` (and the phase 47 case failed); `DELETE` taken out of the marker pattern → `expected [] to deeply equal [ 'src/commands/retry.ts', …(1) ]`; a marker anywhere in the line counted → `expected [ 'src/planner/plan-files.ts' ] to deeply equal []`; bare names not dropped → `expected [ 'src/daemon/runs.ts', …(34) ] to deeply equal [ 'src/daemon/runs.ts', …(31) ]`.
+2. `facts.test.ts` › "lists a ticket building and a ticket with an open pull request, each with its files, and not one done or held" — red: `Error: Cannot find module './facts.js'`; then `expected { kind: 'known', value: undefined } to match object { kind: 'known', value: { …(3) } }` (the stale run, above); green. Mutations, each reverted: done runs not skipped → `expected [ { number: 7, …(3) }, …(2) ] to deeply equal [ { number: 7, …(3) }, …(1) ]`; a hold counted as building → the same; pull request files not read from the adapter → `expected [ { number: 7, …(3) }, …(1) ] to deeply equal [ { number: 7, …(3) }, …(1) ]` (C's files differ). Added: "tells an unreadable plan as a fact with its reason, and takes the blockers from the cycle's survey" — green as written; mutations: the plan's read not caught → `Error: gh api failed after 3 attempts: ECONNRESET`; blockers not read → `expected [] to deeply equal [ { number: 8, …(2) } ]`.
+3. `actions.test.ts` › "posts one comment naming #7 and the reason, ending with what is needed, and writes the hold in the ledger and the record (clause 1)" — red: `Error: Cannot find module './actions.js'`; green.
+4. "refuses a hold on a ticket the facts did not show, posts nothing and decides nothing" — red: `expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }`; green. Added: "refuses a hold that names no ticket to wait for" — red, the same line; green. "holds a ticket for a ticket it is blocked by, though that one is not building" — green as written; mutation, blockers left out of what a hold may name → `expected false to be true`.
+5. "lets the ticket build on a named person's comment, and the comment it posts names that person (clause 2)" — red: `TypeError: actions.letBuild is not a function`; green. Added: "posts nothing when it lets a ticket build on its own judgement" — green as written; mutation, always post → `expected [ { number: 12, …(1) } ] to deeply equal []`.
+6. "refuses a comment by someone not named for the project, and leaves the hold as it was (clause 3)" and "refuses a comment the machine posted, even under a named person's login (clause 3)" — green as written (the check came with case 5). Mutation, `namedPersonsComment`'s refusal ignored → both `expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }`; reverted.
+7. "refuses a second decision in the same session, and keeps the first" and "refuses a decision for a ticket other than the one being decided" — red: both `expected { ok: true, …(1) } to deeply equal { ok: false, …(1) }`; green.
+8. "writes that the comment was passed to the runner, and leaves the run waiting for a decision", with "refuses to pass a comment other than the one that woke the planner" and "refuses to pass a comment when none woke the planner" — red: `TypeError: actions.passToRunner is not a function`; green. `readPlan`'s four cases — red: `TypeError: actions.readPlan is not a function`; green.
+9. `brief.test.ts` — four cases ("lists the ticket and each ticket building or with an open pull request, with their files", "says the comment that woke the planner, and who wrote it", "says when no comment woke the planner", "names the three tools that decide in its rules, and asks for exactly one, once") — red: `TypeError: (0 , buildPlannerBrief) is not a function`; green.
+10. `github-tickets.test.ts` › "lists the paths of the files a pull request changes (ADR-0065 D3)" and "lets a forge failure travel when it lists a pull request's files, and never answers an empty list for it" — red: `TypeError: (intermediate value).listPullRequestFiles is not a function` (and `adapter.listPullRequestFiles is not a function` in the scope case); green. `tsc` then named the ten fakes listed above; with each given the method, it exits 0.
+
+The validation block, as run (after `npm run build`, which exited 0):
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/planner/ src/adapters/ src/runner/actions.test.ts src/runner/facts.test.ts; echo "exit: $?"
+ Test Files  12 passed (12)
+      Tests  299 passed (299)
+exit: 0
+
+$ grep -rn "function namedPersonsComment\|function addedOn\|function filesAddedOnBranch" src --include=*.ts | grep -v test.ts
+src/runner/facts.ts:230:export async function filesAddedOnBranch(
+src/runner/actions.ts:446:export async function namedPersonsComment(
+```
+
+- [x] Cases 1–10 pass, with red runs recorded (case 6, and the added cases noted, proved by mutation). **Pass.**
+- [x] `namedPersonsComment` and `addedOn` each have one definition under `src/` (the latter as `filesAddedOnBranch`). **Pass.**
+
+Test files run at the end, by name (after `npm run build`):
+
+- `src/planner/` — `plan-files.test.ts` 4, `facts.test.ts` 2, `brief.test.ts` 4, `actions.test.ts` 17. `src/adapters/` — every file, `github-tickets.test.ts` 82 among them. With `src/runner/actions.test.ts` 68 and `src/runner/facts.test.ts` 13: 299 passed.
+- `src/runner/` (every file, `replay/harness.test.ts` included, in place of `npm run replay`), `src/commands/daemon.test.ts` 26, `src/commands/takeover.test.ts` 51, `src/commands/record.test.ts` 14, `src/daemon/chunk-zero.test.ts` 14, `src/daemon/hooks.test.ts` 76, `src/daemon/poll.test.ts` 117: all passed (493 in the first 16 files, 14 in the last).
+
+**What 49f must know.**
+
+- `pollProject` builds `cycle = { tickets, isStep, threads }`. The planner needs `blockedBy(ticket)` on it too: the survey (`surveyInitiatives`) has each step's `blockedBy` in hand but keeps none of it. A ticket that is not a step answers `[]`.
+- Call `gatherPlannerFacts({ store, adapter, project }, run, cycle, comment)` with the comment the driver chose (a named person's, already checked), or none. It throws only when the cycle's thread reader throws.
+- Build `plannerActions(deps, run, facts)` once per session: the one-decision rule lives in it. `deps` is `{ store, adapter, manifest, project, root, clock }`. Give the session `plannerToolServer(actions)` and allow `qualifiedPlannerToolNames()`.
+- The notice the runner's driver must look for is `passedToRunner(at)` from `src/planner/actions.ts`, written as a `notice` entry. The planner's driver writes its own `planner read comment at <at>` notice; nothing here writes it.
+- `letBuild` and `hold` write `planner-decision`; neither wakes the runner. `plannerLetBuildEvent` and the `planner-ended` entry are 49f's.

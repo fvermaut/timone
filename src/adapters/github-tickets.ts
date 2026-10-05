@@ -1130,6 +1130,25 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
     ).body;
   }
 
+  async listPullRequestFiles(project: TicketingProject, pr: number): Promise<string[]> {
+    const slug = repoSlug(project.repoUrl);
+    const raw = await this.run("gh", [
+      "pr",
+      "view",
+      String(pr),
+      "--repo",
+      slug,
+      "--json",
+      "files",
+    ]);
+
+    return parseGhJson(
+      z.looseObject({ files: z.array(z.looseObject({ path: z.string() })) }),
+      raw,
+      `reading the files of ${slug}!${pr}`,
+    ).files.map((file) => file.path);
+  }
+
   /**
    * Replace a description through `gh pr edit --body-file`, with the body in
    * a file of its own.

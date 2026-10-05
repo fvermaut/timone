@@ -91,6 +91,9 @@ function forge(body: string): {
   const posted: string[] = [];
   let description = body;
   const adapter: TicketingAdapter = {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,

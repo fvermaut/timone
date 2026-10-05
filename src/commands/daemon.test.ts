@@ -81,6 +81,9 @@ const manifest: Manifest = {
 /** An adapter that answers an empty ticket list and swallows comments. */
 function quietAdapter(): TicketingAdapter {
   return {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,

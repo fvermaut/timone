@@ -985,6 +985,9 @@ function fakeAdapter(): {
 } {
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,

@@ -422,6 +422,56 @@ function oneLine(error: unknown): string {
   return message.split("\n")[0] ?? message;
 }
 
+/** What {@link namedPersonsComment} reads: the ticket on the forge, and who is named. */
+export interface NamedCommentDeps {
+  adapter: Pick<TicketingAdapter, "getTicket">;
+  manifest: Manifest;
+  project: TicketingProject;
+}
+
+/**
+ * The comment at `commentAt` on ticket `ticket`, with the ticket it is on,
+ * when a named person wrote it — or why it cannot count.
+ *
+ * **Code checks only that the comment is there and whose it is**, never
+ * what it says: the runner, or the planner, judges the words. A comment the
+ * machine posted never counts, even under a named person's login: it is a
+ * record of what the machine did. `onlyNamed` ends the refusal of a comment
+ * by someone who is not named, and says what only a named person can do.
+ *
+ * One lookup for an approval, for a request to stop the work (40t), and for
+ * a comment the planner lets a ticket build on (ADR-0065 D5), so they
+ * cannot come to disagree on whose comment counts.
+ */
+export async function namedPersonsComment(
+  deps: NamedCommentDeps,
+  ticket: number,
+  commentAt: string,
+  onlyNamed: string,
+): Promise<
+  { ok: true; comment: TicketComment; ticket: TicketThread } | { ok: false; refused: string }
+> {
+  const thread = await deps.adapter.getTicket(deps.project, ticket);
+  const comment = thread.comments.find(
+    (each) => each.createdAt === commentAt && !each.fromTimone,
+  );
+  if (comment === undefined) {
+    return {
+      ok: false,
+      refused: `There is no comment by a person at ${commentAt} on ticket #${ticket}.`,
+    };
+  }
+  if (!isNamedPerson(namedPeople(deps.manifest, deps.project.name), comment.author)) {
+    return {
+      ok: false,
+      refused:
+        `The comment at ${commentAt} is by ${comment.author}, who is not named for this ` +
+        `project. ${onlyNamed}`,
+    };
+  }
+  return { ok: true, comment, ticket: thread };
+}
+
 /** The runner's actions for `run`. */
 export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
   /** The run as the ledger has it now: a branch or a pull request may be newer than `run`. */
@@ -574,46 +624,6 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         `This ticket has spent $${spentUsd.toFixed(2)} of the $${allowanceUsd.toFixed(2)} it may spend. ` +
         "No step can start until a named person allows more.",
     };
-  };
-
-  /**
-   * The comment at `commentAt` on the run's ticket, with the ticket it is on,
-   * when a named person wrote it — or why it cannot count.
-   *
-   * **Code checks only that the comment is there and whose it is**, never
-   * what it says: the runner judges the words. A comment the machine posted
-   * never counts, even under a named person's login: it is a record of what
-   * the machine did. `onlyNamed` ends the refusal of a comment by someone
-   * who is not named, and says what only a named person can do.
-   *
-   * One lookup for an approval and for a request to stop the work (40t), so
-   * the two cannot come to disagree on whose comment counts.
-   */
-  const namedPersonsComment = async (
-    commentAt: string,
-    onlyNamed: string,
-  ): Promise<
-    { ok: true; comment: TicketComment; ticket: TicketThread } | { ok: false; refused: string }
-  > => {
-    const ticket = await deps.adapter.getTicket(deps.project, run.ticket);
-    const comment = ticket.comments.find(
-      (each) => each.createdAt === commentAt && !each.fromTimone,
-    );
-    if (comment === undefined) {
-      return {
-        ok: false,
-        refused: `There is no comment by a person at ${commentAt} on ticket #${run.ticket}.`,
-      };
-    }
-    if (!isNamedPerson(namedPeople(deps.manifest, deps.project.name), comment.author)) {
-      return {
-        ok: false,
-        refused:
-          `The comment at ${commentAt} is by ${comment.author}, who is not named for this ` +
-          `project. ${onlyNamed}`,
-      };
-    }
-    return { ok: true, comment, ticket };
   };
 
   /**
@@ -1009,7 +1019,12 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       return { ok: true, said: `Ticket #${run.ticket} is no longer on hold.` };
     }),
     recordApproval: decided("record_approval", async ({ what, commentAt }) => {
-      const found = await namedPersonsComment(commentAt, "Only a named person can approve.");
+      const found = await namedPersonsComment(
+        deps,
+        run.ticket,
+        commentAt,
+        "Only a named person can approve.",
+      );
       if (!found.ok) return found;
       const { comment, ticket } = found;
       const { branch } = current();
@@ -1189,6 +1204,8 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
             };
           }
           const stop = await namedPersonsComment(
+            deps,
+            run.ticket,
             stopCommentAt,
             "Only a named person can stop the work.",
           );

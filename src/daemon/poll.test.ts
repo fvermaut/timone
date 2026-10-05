@@ -210,6 +210,9 @@ function fakeAdapter(
 ): { adapter: TicketingAdapter; comments: PostedComment[] } {
   const comments: PostedComment[] = [];
   const adapter: TicketingAdapter = {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,
@@ -840,6 +843,9 @@ function previewTicketing(pulls: Record<string, PullRequest>): {
 } {
   const upserts: Upsert[] = [];
   const adapter: TicketingAdapter = {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,
@@ -1493,6 +1499,9 @@ describe("pollOnce — an unmarked ticket is introduced to, once", () => {
       `${MACHINE_MARKER}\n\n---\n\n${body}`;
 
     const adapter: TicketingAdapter = {
+      async listPullRequestFiles(): Promise<string[]> {
+        return [];
+      },
       ...noBranches,
     ...noFiles,
     ...noMerges,

@@ -438,6 +438,9 @@ function recordingForge(moment: Moment, project: TicketingProject, log: CallLog)
       : { number: pr.number, title: pr.title, url: pr.url, state: pr.state, headSha: pr.headSha };
 
   return {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     async readBranches(_on, branch?: string): Promise<RepositoryBranches> {
       const known = branch !== undefined && filesOn(branch) !== undefined;
       return {

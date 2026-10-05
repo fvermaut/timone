@@ -105,6 +105,7 @@ function fakeForge(ticket: TicketThread, calls: string[]) {
     throw new Error(`no test here calls the forge's ${name}`);
   };
   const adapter: TicketingAdapter = {
+    listPullRequestFiles: async () => [],
     readBranches: async () => ({ defaultBranch: "main", defaultHead: state.defaultHead }),
     mergeIntoDefault: async (_project, branch) => {
       calls.push(`merge ${branch}`);

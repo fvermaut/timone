@@ -107,6 +107,9 @@ function fakeForge(steps: { number: number; title: string; blockedBy: Dependency
   const bodies: string[] = [];
   const stepBodies = new Map<string, string>();
   const adapter: TicketingAdapter = {
+    async listPullRequestFiles(): Promise<string[]> {
+      return [];
+    },
     ...noBranches,
     ...noFiles,
     ...noMerges,
