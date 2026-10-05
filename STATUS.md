@@ -54,6 +54,10 @@
 
 **What I need from you:** run the replay on the branch, answer the pull request's question about PRD-07.R13, then merge #222 if you agree.
 
+**1l. Piece 2 of #213 ([#218](https://github.com/fvermaut/timone/issues/218)), in Timone's own repository: checked on the branch `timone/218-2-every-question-names-the-command`; no pull request yet.** Every question the machine asks now ends, just above its last line, with "You can answer here in writing, or in your terminal by running `timone takeover <project>#<n>`", with the ticket's real number, also on a pull request. The runner's questions, the spending limit message, the message about pieces that could not be opened, and every step's instructions were checked: all carry it, and `timone status` still shows what the question asks. It is left out when the runner marks a missing key, a misspelled "approve", or a question after a terminal session that did not settle things. Nothing failed. Not checked, because only a real model can show it: whether the real runner marks those three cases, and leaves the sentence in otherwise. That needs the replay (`npm run --silent replay`, from a logged-in terminal, on the branch). A watched run on scratch-app is also owed. The [check report](doc/plans/phases/reports/phase-53-verification.md) has the detail.
+
+**What I need from you:** run the replay on the branch and say what it printed; the pull request will follow.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
