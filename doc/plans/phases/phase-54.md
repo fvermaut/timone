@@ -52,7 +52,7 @@ On 2026-10-02 `timone status` ended with *"What I need from you: answer on ivtre
 1. **The ticket's case.** Done runs on `scratch-app` #51 and #52, and a picture `{ project: "scratch-app", initiative: 7, steps: [51, 52, 53], done: 2 }` with no `next`, passed through `pictures` → the last line is `**What I need from you:** nothing — nothing is waiting on you right now.` Red today: it names #51 and #52.
 2. **The map ticket's own done run.** A done run on `scratch-app` #7 (the initiative's number) with the same picture → the same "nothing" line. Red today.
 3. **A real ledger with old pictures.** Copy `ledger-before-166.json` into a temp folder as the test at 1015 does, open it with `RunStore.open`, call `rememberInitiative` for `{ project: "ivtrends", initiative: 59, title: "old work", steps: [60, 62, 63], done: 1 }` and `{ project: "scratch-app", initiative: 11, title: "old work", steps: [12, 13], done: 1 }` (no `next`), and render with `pictures: (p) => store.initiativesFor(p)` → the last line is exactly `**What I need from you:** answer on scratch-app #24, ivtrends #90, ivtrends #91, ivtrends #92, ivtrends #93 — each ticket says what it needs.` — no #12, no #60. Red today.
-4. **Control: a parked run that asked still is named.** A parked run on step `scratch-app` #53 with `wait: { kind: "runner", on: "your answer on the ticket" }`, beside done runs on #51 and #52 and the picture from case 1 → the last line names `scratch-app #53` and only it. Green before and after; it must stay green.
+4. **Control: a parked run that asked still is named.** A parked run on step `scratch-app` #53 with `wait: { kind: "runner", on: "your answer on the ticket" }`, beside done runs on #51 and #52 and the picture from case 1 → the last line names `scratch-app #53` and only it. Green before and after; it must stay green. ✏ 2026-10-06 (build, timone#186): it cannot be green before. Today's code names #51 and #52 too, because the picture beside them has steps left and no `next`, so a line that names #53 "and only it" fails on today's code. It was red before the change and is green after. What it protects, that #53 is named, held both before and after.
 5. **Replaces 491-514.** Two done runs and one parked run (with an ask) on `scratch-app` #6 → `scratch-app #6` is named once. Green before and after.
 
 > No dependency on other sub-phases.
@@ -73,8 +73,8 @@ npx vitest run; echo "exit: $?"             # expect 0
 ```
 
 - [ ] Cases 1, 2 and 3 were red before the change to `status.ts` and are green after; the handoff shows both runs.
-- [ ] Case 4 is green, and stays green — this is the only test that protects a real ask being named.
-- [ ] The four tests under `"which step of an initiative is live"` pass unchanged.
+- [ ] Case 4 is green after the change, and stays green — this is the only test that protects a real ask being named. ✏ 2026-10-06 (build, timone#186): it was red before the change, since today's code also names #51 and #52 beside #53.
+- [ ] The four tests under `"which step of an initiative is live"` pass unchanged. ✏ 2026-10-06 (build, timone#186): the block holds five tests, not four; all five are the guard.
 - [ ] `src/guards/checkouts.test.ts` passes with `commands/status.ts` gone from `EXEMPT`.
 - [ ] The whole suite passes; `tsc --noEmit` exits 0.
 

@@ -1,12 +1,8 @@
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { Command } from "commander";
 
 import { loadManifest, placesIn, ticketLimitOf, type Manifest } from "../manifest.js";
-import {
-  fromDefaultBranch,
-  type SyncBreakdownSource,
-} from "../daemon/breakdown.js";
 import {
   holderLiveness,
   type Hold,
@@ -14,29 +10,12 @@ import {
   type Liveness,
 } from "../daemon/holder.js";
 import { modelFor, stageLabel } from "../daemon/pipeline.js";
-import {
-  initiativeProgressSync,
-  progressOf,
-  type InitiativeProgress,
-} from "../daemon/poll.js";
 import { daemonRecordNotice } from "../daemon/version.js";
 import { joined } from "../runner/comments.js";
 import { allowanceOf, spentOn } from "../runner/limit.js";
 import { readRecord } from "../runner/record.js";
 import { RUNNER_DEFAULT_WAIT } from "../runner/session.js";
 
-/**
- * Where a project's checkout is, under the timone root.
- *
- * ✏ Moved here from `poll.ts` by phase 30's 30d, because this command is now
- * its only caller. `timone status` is **fvermaut's own command**, run in his
- * terminal against his own folder, and reading it is exactly what it is for —
- * one of the guard's named exemptions in `src/guards/checkouts.test.ts`. The
- * daemon resolves no such path any more.
- */
-export function checkoutOf(root: string, project: string): string {
-  return join(root, "projects", project);
-}
 import {
   RunStore,
   defaultStatePath,
@@ -105,28 +84,6 @@ export interface RenderStatusOptions {
    */
   livenessOf?: (holder: Holder) => Liveness;
   /**
-   * The timone root, so a ticket's list of pieces can be read from its
-   * project's checkout ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
-   * D1 names this cost: answering *is there a next piece?* means reading a
-   * file rather than a field).
-   *
-   * **Absent means no breakdown is read and every line reads as it did before
-   * tickets had pieces.** The command itself always supplies one — sessions
-   * run at the root (ADR-0007) — so this is a fixture's answer, not a user's.
-   */
-  root?: string;
-  /**
-   * Where that list is read from. Defaults to the project's default branch,
-   * which is the only place an approved breakdown is guaranteed to be
-   * (ADR-0030 D2) — and, since phase 27, the only place either surface looks.
-   *
-   * **Injected for the same reason `root` is**: a fixture hands over a plain
-   * directory. The command supplies nothing, so it takes the default, which
-   * keeps R21 clause 8 true — the terminal and the ticket read the same file
-   * from the same ref.
-   */
-  breakdownSource?: SyncBreakdownSource;
-  /**
    * A ticket's record, as `readRecord` gives it, so a ticket the runner works
    * on can show what it has spent against its limit
    * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
@@ -179,8 +136,6 @@ interface RenderContext {
   now?: Date;
   /** What can be said about the process holding a run (ADR-0049 D2). */
   hold: (run: Run) => Hold;
-  /** Where this run's ticket's initiative stands, resolved once per ticket. */
-  progressOf: (run: Run) => InitiativeProgress | undefined;
   /** Every initiative of a project the daemon has a picture of. */
   initiativesOf: (project: string) => readonly InitiativeRecord[];
   /** The runs of a project that wait for a place, in the ledger's order. */
@@ -194,47 +149,6 @@ interface RenderContext {
    * end its phrase — or nothing, when no reader of records was given.
    */
   spendingOf: (run: Run) => string;
-}
-
-/**
- * The reader `timone status` resolves every ticket's progress through.
- *
- * **It is `poll.ts`'s {@link initiativeProgressSync}, and that was the whole
- * of R21 clause 8's guarantee**: the terminal and the ticket could not
- * disagree about where an initiative stands, because there was no second
- * computation for them to disagree between. Memoized per ticket so a project
- * with several waiting tickets reads each breakdown once.
- *
- * ✏ 2026-09-30: the cycle's standing call to action, the ticket's side of
- * that guarantee, went with the old daemon's path.
- */
-function progressReader(
-  root: string | undefined,
-  source: SyncBreakdownSource | undefined,
-  picture: (project: string, ticket: number) => InitiativeRecord | undefined,
-): (run: Run) => InitiativeProgress | undefined {
-  const cache = new Map<string, InitiativeProgress | undefined>();
-  return (run) => {
-    const key = `${run.project}#${run.ticket}`;
-    if (!cache.has(key)) {
-      const seen = picture(run.project, run.ticket);
-      // Without a root there is no checkout to read the approved list from, so
-      // a re-proposal cannot be seen — but how far the work has got still can,
-      // because that comes off the ledger. Before 29g this answered nothing at
-      // all, since everything it knew came from the file.
-      cache.set(
-        key,
-        root === undefined
-          ? progressOf(seen)
-          : initiativeProgressSync(
-              source ?? fromDefaultBranch(checkoutOf(root, run.project)),
-              run.ticket,
-              seen,
-            ),
-      );
-    }
-    return cache.get(key);
-  };
 }
 
 /**
@@ -307,27 +221,28 @@ function humanDuration(ms: number): string {
  *   ticket, or `RUNNER_DEFAULT_WAIT` when it asked nothing. The runner is told
  *   to end every message with what it needs from the reader, "or nothing",
  *   so an ask that opens on that word asks nothing either.
- * - **A done run waits on the reader when its initiative does**
- *   ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
- *   D4): the list of pieces grew since it was approved, or pieces are left
- *   and none of them can start.
- * - A run picked up, at work or cancelled waits on nobody.
+ * - Every other run waits on nobody: picked up, at work, cancelled, or done.
  *
  * ✏ 2026-09-30: decided here. It was `ctaFor` in `src/daemon/cta.ts`, one
  * calculation for the ticket's standing note and for this command. The
  * standing note went with the old code between steps, and every wait a run
  * is read with now is the runner's, so this is all of it that was left.
+ *
+ * ✏ 2026-10-06 (#186): **a done run waits on nobody.** It used to be named
+ * when its initiative had steps left and none of them could start, or when
+ * its list of pieces had grown since it was approved. Both readings came from
+ * the old daemon. Now a person is asked something only by the runner, and the
+ * runner asks by parking the run with the ask as its wait
+ * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)).
+ * An initiative with steps left and none eligible is ordinary
+ * ([ADR-0065](../../doc/adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md)
+ * D6), and an old initiative picture stays in the ledger after its map ticket
+ * closes, so the old reading named finished work for ever.
  */
-function waitsOnYou(run: Run, context: RenderContext): boolean {
-  if (run.status === "parked") {
-    const on = run.wait?.on ?? RUNNER_DEFAULT_WAIT;
-    return on !== RUNNER_DEFAULT_WAIT && !/^nothing\b/i.test(on.trim());
-  }
-  if (run.status !== "done") return false;
-  const progress = context.progressOf(run);
-  if (progress === undefined) return false;
-  if (progress.reproposed === true) return true;
-  return progress.next === undefined && progress.done < progress.total;
+function waitsOnYou(run: Run): boolean {
+  if (run.status !== "parked") return false;
+  const on = run.wait?.on ?? RUNNER_DEFAULT_WAIT;
+  return on !== RUNNER_DEFAULT_WAIT && !/^nothing\b/i.test(on.trim());
 }
 
 /**
@@ -528,8 +443,6 @@ export function renderStatus(
       .filter((project) => !(project in manifest.projects)),
   ].filter((name, index, all) => all.indexOf(name) === index);
 
-  // One reader for the whole render, so a ticket's list of pieces is read
-  // once however many of its runs and closing lines mention it.
   const livenessOf = options.livenessOf ?? ((holder) => holderLiveness(holder));
   const context: RenderContext = {
     now: options.now,
@@ -539,15 +452,6 @@ export function renderStatus(
     waitingForPlanner: (project) => options.waitingForPlanner?.(project) ?? [],
     heldByPlanner: (project) => options.heldByPlanner?.(project) ?? [],
     spendingOf: spendingReader(manifest, options.records),
-    progressOf: progressReader(
-      options.root,
-      options.breakdownSource,
-      (project, ticket) =>
-        (options.pictures?.(project) ?? []).find(
-          (record) =>
-            record.initiative === ticket || record.steps.includes(ticket),
-        ),
-    ),
   };
 
   const width = Math.max(...names.map((name) => name.length), 0);
@@ -572,12 +476,15 @@ export function renderStatus(
     );
 
   // **By ticket, not by run.** A ticket is a conversation and a run is one
-  // chunk of it (ADR-0026), so a ticket built in three pieces holds three
-  // runs — and since a *done* run can now be waiting on the human (a
-  // re-proposed list of pieces is), naming the run would put the same ticket
-  // in this line once per piece it has had.
+  // chunk of it (ADR-0026), so one ticket can hold several runs. Only a
+  // parked run that asked for something is named, but the ledger can still
+  // hold more than one parked run of one ticket, written by older code, and
+  // naming each run would put the same ticket in this line more than once.
+  //
+  // ✏ 2026-10-06 (#186): a done run is never named here (see
+  // {@link waitsOnYou}).
   const waiting = runs
-    .filter((run) => waitsOnYou(run, context))
+    .filter((run) => waitsOnYou(run))
     .map((run) => `${run.project} #${run.ticket}`)
     .filter((name, index, all) => all.indexOf(name) === index);
 
@@ -641,15 +548,10 @@ export function registerStatusCommand(program: Command): void {
         return;
       }
 
-      // The root is where the command was run, which is where sessions and
-      // the daemon run too (ADR-0007) — the same directory `defaultStatePath`
-      // resolves the ledger under, so the ledger and the checkouts it talks
-      // about are read from one place.
       console.log(
         renderStatus(manifest, runs, {
           stateExists,
           now: new Date(),
-          root: process.cwd(),
           pictures: (project) => store.initiativesFor(project),
           waitingForPlace: (project) => store.waitingForPlace(project),
           waitingForPlanner: (project) => store.waitingForPlanner(project),
