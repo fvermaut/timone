@@ -93,8 +93,9 @@ const GIT_USERS: Record<string, string> = {
   // path under `projects/`, which is what {@link EXEMPT} catches.
   //
   // ✏ 2026-10-06 (#186): `commands/status.ts` reached git that way, through
-  // `daemon/breakdown.ts`'s `fromDefaultBranch`. It no longer reads a list of
-  // pieces, so it reaches no git and no checkout.
+  // `daemon/breakdown.ts`'s reader of the default branch on disk. It no longer
+  // reads a list of pieces, so it reaches no git and no checkout, and that
+  // reader is gone; `daemon/breakdown.ts` performs no git and left this list.
   "git.ts":
     "The module itself. Since 30c it has no machine caller: everything left " +
     "in it belongs to `workspace sync`, and 30l deletes `mergeIntoDefault`.",
@@ -103,10 +104,6 @@ const GIT_USERS: Record<string, string> = {
     "The R15 bracket's local, read-only reads. See its entry above.",
   "adapters/docker-preview.ts":
     "Worktrees for previews, on the host. See its entry above.",
-  "daemon/breakdown.ts":
-    "`fromDefaultBranch`, the on-disk source `timone status` builds. The " +
-    "machine's source is `fromForgeDefaultBranch`, in this same file, and it " +
-    "reaches no disk.",
   "commands/daemon.ts":
     "Asks whether the commit the daemon is standing on is on the remote, " +
     "before starting a boxed run that could not follow it (30k). The " +

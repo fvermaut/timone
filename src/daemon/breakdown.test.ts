@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -15,9 +14,7 @@ import {
   isReproposal,
   orderOf,
   parseBreakdown,
-  fromDefaultBranch,
   fromWorkingTree,
-  readBreakdownSync,
   readBreakdown,
   renderBreakdown,
   type ParsedBreakdown,
@@ -188,129 +185,53 @@ describe("a re-proposal is visible from the artifact alone", () => {
 });
 
 describe("reading a breakdown out of a checkout", () => {
-  it("answers rather than throwing when the project has no doc/ at all", () => {
+  // ✏ 2026-10-06 (#186): these cases ran through the synchronous reader, which
+  // went when `timone status` stopped reading a list of pieces. They now run
+  // through `readBreakdown`, which ends in the same code.
+  it("answers rather than throwing when the project has no doc/ at all", async () => {
     const dir = checkout();
 
-    expect(() => readBreakdownSync(TICKET, fromWorkingTree(dir))).not.toThrow();
-    expect(readBreakdownSync(TICKET, fromWorkingTree(dir))).toEqual({
+    // `resolves` fails the case if the read rejects rather than answering.
+    await expect(readBreakdown(TICKET, fromWorkingTree(dir))).resolves.toEqual({
       kind: "absent",
       path: RELATIVE_PATH,
     });
   });
 
-  it("reads the approved list back off the file", () => {
+  it("reads the approved list back off the file", async () => {
     const dir = checkout();
     const path = withBreakdown(dir, renderBreakdown(approved));
 
-    expect(readBreakdownSync(TICKET, fromWorkingTree(dir))).toEqual({
+    expect(await readBreakdown(TICKET, fromWorkingTree(dir))).toEqual({
       kind: "ok",
       path,
       breakdown: approved,
     });
   });
 
-  it("says why a file with a stamp and no chunks cannot be read", () => {
+  it("says why a file with a stamp and no chunks cannot be read", async () => {
     const dir = checkout();
     const path = withBreakdown(
       dir,
       "# Breakdown\n\n**Status:** Awaiting approval\n",
     );
 
-    const answer = readBreakdownSync(TICKET, fromWorkingTree(dir));
+    const answer = await readBreakdown(TICKET, fromWorkingTree(dir));
     expect(answer.kind).toBe("malformed");
     expect(answer).toMatchObject({ path });
     expect("reason" in answer && answer.reason).toContain("no chunks");
   });
 
-  it("says why a file with chunks and no stamp cannot be read", () => {
+  it("says why a file with chunks and no stamp cannot be read", async () => {
     const dir = checkout();
     const path = withBreakdown(
       dir,
       "# Breakdown\n\n1. **One** — the only piece.\n",
     );
 
-    const answer = readBreakdownSync(TICKET, fromWorkingTree(dir));
+    const answer = await readBreakdown(TICKET, fromWorkingTree(dir));
     expect(answer.kind).toBe("malformed");
     expect(answer).toMatchObject({ path });
-    expect("reason" in answer && answer.reason).toContain("`Status:`");
-  });
-});
-
-
-describe("where a breakdown is read from", () => {
-  /**
-   * A fixture shaped like a clone: one commit on `main`, and the `origin/HEAD`
-   * symref a real `git clone` leaves behind. That pair is what names the
-   * default branch.
-   */
-  function clone(dir: string): void {
-    const git = (...args: string[]): void => {
-      execFileSync("git", args, {
-        cwd: dir,
-        stdio: "ignore",
-        env: {
-          ...process.env,
-          GIT_AUTHOR_NAME: "t",
-          GIT_AUTHOR_EMAIL: "t@example.com",
-          GIT_COMMITTER_NAME: "t",
-          GIT_COMMITTER_EMAIL: "t@example.com",
-        },
-      });
-    };
-    git("init", "-b", "main");
-    git("add", ".");
-    git("commit", "-m", "fixture");
-    git("update-ref", "refs/remotes/origin/main", "HEAD");
-    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
-  }
-
-  it("reads the approved list off the default branch", () => {
-    const dir = checkout();
-    withBreakdown(dir, renderBreakdown(approved));
-    clone(dir);
-
-    expect(readBreakdownSync(TICKET, fromDefaultBranch(dir))).toEqual({
-      kind: "ok",
-      path: RELATIVE_PATH,
-      breakdown: approved,
-    });
-  });
-
-  it("does not read a proposal that only exists in the working tree", () => {
-    // The whole of the fix. A breakdown on a work branch is a proposal nobody
-    // has approved, and counting pieces off one describes a list the human has
-    // never seen. Committing an empty repository first, then writing the file,
-    // is exactly the state a session leaves behind mid-stage.
-    const dir = checkout();
-    mkdirSync(join(dir, "doc"), { recursive: true });
-    writeFileSync(join(dir, "doc", ".keep"), "", "utf8");
-    clone(dir);
-    withBreakdown(dir, renderBreakdown(approved));
-
-    expect(readBreakdownSync(TICKET, fromDefaultBranch(dir)).kind).toBe("absent");
-    expect(readBreakdownSync(TICKET, fromWorkingTree(dir)).kind).toBe("ok");
-  });
-
-  it("answers absent rather than throwing when the directory is no repository", () => {
-    // On the path of every marked ticket on every cycle: an exception here
-    // takes a whole project's turn with it.
-    const dir = checkout();
-    withBreakdown(dir, renderBreakdown(approved));
-
-    expect(() => readBreakdownSync(TICKET, fromDefaultBranch(dir))).not.toThrow();
-    expect(readBreakdownSync(TICKET, fromDefaultBranch(dir)).kind).toBe("absent");
-  });
-
-  it("still says why a file on the default branch cannot be read", () => {
-    // The `malformed` arm has to survive the change of source: a file that is
-    // on the branch and does not parse is somebody's mistake, and the cycle
-    // reports it.
-    const dir = checkout();
-    withBreakdown(dir, "# Breakdown\n\nsomebody deleted the status line\n");
-    clone(dir);
-
-    const answer = readBreakdownSync(TICKET, fromDefaultBranch(dir));
-    expect(answer.kind).toBe("malformed");
     expect("reason" in answer && answer.reason).toContain("`Status:`");
   });
 });

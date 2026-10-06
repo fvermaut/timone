@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TicketingProject } from "../adapters/ticketing.js";
@@ -198,50 +197,15 @@ export function fromWorkingTree(repoDir: string): SyncBreakdownSource {
 }
 
 /**
- * The file as it stands on the project's **default branch** — the one place an
- * approved breakdown is guaranteed to be, because approving one merges chunk
- * zero there ([ADR-0030](../../doc/adr/0030-the-breakdown-is-a-stage-and-chunk-zero-merges-without-a-pull-request.md)
- * D2).
- *
- * **Before that merge it answers "absent", and that is the honest answer.** A
- * breakdown on a work branch is a proposal: nobody has approved it, no piece
- * may be counted from it, and a ticket whose call to action counted pieces off
- * one was describing a list the human had never seen.
- *
- * **Any git failure reads as absent**, deliberately. A path that is not a
- * repository, a clone with no `origin/HEAD`, a repository mid-rebase — none of
- * them is evidence that a breakdown exists, and the poll loop asks this of
- * every marked ticket on every cycle. The one thing that would be lost by
- * guessing the other way is the `unreadable` arm, and that arm still fires for
- * what it was built for: a file that *is* on the default branch and does not
- * parse.
- *
- * Synchronous, matching what it replaced. These are two short `git` calls on a
- * local repository, on a loop that runs once a minute.
- */
-export function fromDefaultBranch(repoDir: string): SyncBreakdownSource {
-  return (path) => {
-    const ref = defaultBranchOf(repoDir);
-    if (ref === undefined) return undefined;
-    try {
-      return execFileSync("git", ["show", `${ref}:${path}`], {
-        cwd: repoDir,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-    } catch {
-      return undefined;
-    }
-  };
-}
-
-/**
  * The file as it stands on the project's default branch **on the forge**.
  *
- * The machine's source since 30d, and the reason the one above is now
- * fvermaut's alone. Nothing fetched the checkout the git version read, so it
- * answered from whatever that folder last happened to hold; and once a
- * session runs in a box, the branch is not in that folder at all.
+ * The machine's source since 30d. Before it, the machine ran `git` in the
+ * project's checkout. Nothing fetched that checkout, so it answered from
+ * whatever the folder last happened to hold; and once a session runs in a
+ * box, the branch is not in that folder at all.
+ *
+ * ✏ 2026-10-06 (#186): the `git` version is gone. Its last caller was
+ * `timone status`, which no longer reads a list of pieces.
  *
  * A file that is not there answers undefined. A forge that cannot be reached
  * **throws**, and `readBreakdown` turns that into `malformed` with the reason
@@ -268,19 +232,6 @@ export function fromForgeDefaultBranch(
   };
 }
 
-/** The default branch's ref, or undefined when the repository cannot say. */
-function defaultBranchOf(repoDir: string): string | undefined {
-  try {
-    return execFileSync(
-      "git",
-      ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-      { cwd: repoDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    ).trim();
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Read a ticket's breakdown out of a project, from wherever `source` looks.
  *
@@ -304,29 +255,6 @@ export async function readBreakdown(
   let text: string | undefined;
   try {
     text = await source(path);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return { kind: "malformed", path, reason };
-  }
-  return breakdownFrom(path, text);
-}
-
-/**
- * {@link readBreakdown} for a source that answers without waiting.
- *
- * It exists for `timone status`, which renders synchronously and reads
- * fvermaut's own checkout — his command, his folder, and one of 30d's named
- * exemptions. The machine's readers are all async because they ask the forge.
- */
-export function readBreakdownSync(
-  ticket: number,
-  source: SyncBreakdownSource,
-): BreakdownRead {
-  const path = breakdownPath(ticket);
-
-  let text: string | undefined;
-  try {
-    text = source(path);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { kind: "malformed", path, reason };

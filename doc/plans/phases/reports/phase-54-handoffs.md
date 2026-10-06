@@ -98,3 +98,96 @@ Tests run at the slice's end:
 - Nothing in `src` outside `daemon/poll.ts`, `daemon/breakdown.ts` and their tests now uses `fromDefaultBranch`, `initiativeProgressSync`, `progressOf` or `InitiativeProgress`. `status.ts` imports nothing from `daemon/breakdown.ts` or `daemon/poll.ts`.
 - `GIT_USERS["daemon/breakdown.ts"]` in `src/guards/checkouts.test.ts` still says "`fromDefaultBranch`, the on-disk source `timone status` builds", which is no longer true. The new comment above `GIT_USERS["git.ts"]` names `fromDefaultBranch` in a dated note about the past; if 54b deletes that function, that note can stay as it is.
 - `src/daemon/poll.test.ts` still has its own `breakdownSource` helpers and a comment naming `checkoutOf`; this slice did not touch them.
+
+## 54b — Code that only fed the old rule is gone
+
+**Built.** The code that read a list of pieces for `timone status` is deleted. `src/daemon/poll.ts` no longer has the per-ticket progress readers. `src/daemon/breakdown.ts` no longer has the reader that ran `git` on the default branch, nor the synchronous `readBreakdown`. `daemon/breakdown.ts` now runs no `git`, so the checkout guard no longer lists it. No behaviour changes.
+
+**Files touched.**
+
+- `src/daemon/poll.ts` — deleted `InitiativeProgress`, `initiativeProgressSync`, `progressFrom`, `progressOf`, `progressOfPicture`. Deleted the imports only they used: `readBreakdownSync`, `SyncBreakdownSource`, `BreakdownRead` and `InitiativeRecord`. `isReproposal` stays (`successionOf` uses it). The old `checkoutOf` comment is replaced by a dated two-line note: `timone status` no longer reads a project's checkout for the list of pieces.
+- `src/daemon/breakdown.ts` — deleted `fromDefaultBranch`, `defaultBranchOf`, `readBreakdownSync` and the `execFileSync` import. The doc comment of `fromForgeDefaultBranch` said "the one above is now fvermaut's alone"; after the deletion "the one above" would be `fromWorkingTree`, so it is reworded, with a dated note that the `git` version is gone. The "for `timone status`" comment went with `readBreakdownSync`.
+- `src/daemon/breakdown.test.ts` — deleted the `describe("where a breakdown is read from")` block (four tests of `fromDefaultBranch`) and its `clone` helper. The four tests in `describe("reading a breakdown out of a checkout")` moved from `readBreakdownSync` to `await readBreakdown(…, fromWorkingTree(dir))`, with a dated note. Removed the imports `execFileSync`, `fromDefaultBranch`, `readBreakdownSync`. 37 tests before, 33 after.
+- `src/guards/checkouts.test.ts` — deleted `GIT_USERS["daemon/breakdown.ts"]`. The 54a note above `GIT_USERS["git.ts"]` is reworded so it no longer names `fromDefaultBranch`, and says `daemon/breakdown.ts` left the list.
+- `src/daemon/poll.test.ts` — the comment in `breakdownIn` no longer says `checkoutOf` "used to supply" the path. Comment only.
+
+**Decisions taken inside the slice.**
+
+- The absent, ok and malformed cases were tested only through `readBreakdownSync`. No test called `readBreakdown` directly. So all four working-tree cases moved onto `readBreakdown`, as the plan allows. The "answers rather than throwing" case now uses `await expect(…).resolves.toEqual(…)`, which fails if the read rejects. The malformed case of the deleted block ("still says why a file on the default branch cannot be read") was not moved: the same `breakdownFrom` arm is covered by "says why a file with chunks and no stamp cannot be read".
+- 54a said its note naming `fromDefaultBranch` could stay. It could not: the validation grep matches comments too, and expects no line. The note now describes the reader without its name. For the same reason, my own notes in `breakdown.ts` do not name the deleted functions.
+- `BreakdownRead` and `InitiativeRecord` were also imported into `poll.ts` only for the deleted functions. `tsc --noUnusedLocals` flagged them, so they went too.
+- `src/commands/status.test.ts` needed no change. 54a already removed its `checkoutOf` comment; `grep checkoutOf src/commands/status.test.ts` finds nothing.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+Caller checks, run before any deletion (`grep -rnw <name> src --include=*.ts`, trimmed):
+
+```
+InitiativeProgress       only src/daemon/poll.ts (its own chain)
+initiativeProgressSync   only src/daemon/poll.ts
+progressFrom             only src/daemon/poll.ts
+progressOf               src/daemon/poll.ts; src/runner/replay/recording.ts has its own, unrelated
+progressOfPicture        only src/daemon/poll.ts
+readBreakdownSync        src/daemon/breakdown.ts, src/daemon/poll.ts, src/daemon/breakdown.test.ts
+fromDefaultBranch        src/daemon/breakdown.ts, src/daemon/breakdown.test.ts, comments in src/guards/checkouts.test.ts
+defaultBranchOf          src/daemon/breakdown.ts; src/daemon/hooks.ts has its own, unrelated
+execFileSync (breakdown.ts) used only by fromDefaultBranch and defaultBranchOf
+SyncBreakdownSource      kept: src/daemon/poll.test.ts and fromWorkingTree still use it
+isReproposal             kept: poll.ts successionOf still uses it
+```
+
+No caller outside the allowed set, so every deletion went ahead.
+
+The checkout guard, run after the deletions and before editing `GIT_USERS`:
+
+```
+$ npx vitest run src/guards/checkouts.test.ts
+ × … has no exemption for a file that has stopped needing one
+   → daemon/breakdown.ts is listed as a git user but performs no git — delete its entry
+      Tests  1 failed | 6 passed (7)
+```
+
+The validation block, as run after all edits:
+
+```
+$ grep -rnE '\b(initiativeProgressSync|progressOfPicture|InitiativeProgress|readBreakdownSync|fromDefaultBranch|defaultBranchOf)\b' src --include=*.ts | grep -v 'src/daemon/hooks.ts'; echo "exit: $?"
+exit: 1
+
+$ grep -rn '\bprogressOf\b' src --include=*.ts | grep -v 'src/runner/replay/recording.ts'; echo "exit: $?"
+exit: 1
+
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+
+$ npx vitest run src/guards/checkouts.test.ts src/daemon/breakdown.test.ts src/daemon/poll.test.ts src/commands/status.test.ts src/commands/breakdown.test.ts; echo "exit: $?"
+ ✓ src/guards/checkouts.test.ts (7 tests)
+ ✓ src/daemon/breakdown.test.ts (33 tests)
+ ✓ src/commands/breakdown.test.ts (4 tests)
+ ✓ src/commands/status.test.ts (54 tests)
+ ✓ src/daemon/poll.test.ts (121 tests)
+ Test Files  5 passed (5)
+      Tests  219 passed (219)
+exit: 0
+```
+
+`npx vitest run` (the whole suite) was not run here. The runner's instruction for this step is to run only the tests of what changed; the whole suite runs once, at the phase's close.
+
+- [x] None of the removed names is left in `src/`, other than the unrelated `defaultBranchOf` in `hooks.ts` and `progressOf` in `recording.ts`. Both greps print nothing and exit 1.
+- [x] `timone breakdown` (`src/commands/breakdown.ts`) still builds and its tests pass: `tsc --noEmit` exits 0 and `src/commands/breakdown.test.ts` passes 4 of 4.
+- [x] The checkout guard passes, with `daemon/breakdown.ts` removed from `GIT_USERS`. It failed before the removal, as shown above.
+- [ ] The whole suite passes: left to the phase's close, as the runner said. `tsc --noEmit` exits 0.
+
+Tests run at the slice's end:
+
+- `src/guards/checkouts.test.ts` — 7 passed.
+- `src/daemon/breakdown.test.ts` — 33 passed.
+- `src/daemon/poll.test.ts` — 121 passed.
+- `src/commands/status.test.ts` — 54 passed.
+- `src/commands/breakdown.test.ts` — 4 passed.
+- Tests of other files that import `daemon/poll.ts` or `daemon/breakdown.ts`: `src/commands/daemon.test.ts` (26), `src/commands/takeover.test.ts` (61), `src/daemon/prompts.test.ts` (255), `src/runner/actions.test.ts` (84), `src/runner/driver.test.ts` (34) — 460 passed.
+- `npx tsc --noEmit` — exit 0.
+
+**What delivery must know.**
+
+- `daemon/breakdown.ts` now has two readers only: `fromWorkingTree` (tests and `timone breakdown`) and `fromForgeDefaultBranch` (the poll loop). Nothing in it runs `git`.
+- `SyncBreakdownSource` stays, because `fromWorkingTree` returns it and `src/daemon/poll.test.ts` types its fixtures with it.
