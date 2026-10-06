@@ -22,3 +22,10 @@
 **Agreed:** At the close, the whole test suite passes (the last command of 54a's and 54b's validation blocks).
 **Did instead:** The whole suite ran once, after `npm run build`: 76 files, 1984 tests, 1914 passed, 70 failed, 11.2 s. Every failure is in `src/commands/guardrails.test.ts`, `src/numbers.test.ts`, `src/workspace.test.ts` or `src/commands/number.test.ts`. Each is a test that pushes to a branch named `main` in a scratch repository, and this container refuses that push. The same four files, run on `origin/main` without this phase, fail the same 70 tests.
 **Why:** The container's push guard lets this run push only to its own branch. These 70 tests cannot pass here, whatever the phase does; they need a run outside this container.
+
+## 2026-10-06 — timone#186, verification
+
+**Kind:** verification
+**Agreed:** The runner asked the check to confirm that the committed test with finished tickets fails on `main` and passes on the branch, that the same suite tests fail on `main`, and that the deleted code was used only by the old rule.
+**Did instead:** The check never reads the committed tests or the source, and never runs `main` to compare. It ran its own probe on the build from before this phase (it names the finished ticket #51) and on the branch (it names nothing), compared the 70 suite failures with the named list in `phase-53-verification.md` (all 70 old, none new), and ran the type check and the regression probes. Three regression checks stayed BLOCKED, as before this phase: PRD-05.R18 and PRD-05.R7's real-runner clause need a replay on the real model (`npm run --silent replay`), and PRD-05.R2 clause 2b needs GitHub. Fresh live gates are owed by the `Depends-on` lines, listed in the report.
+**Why:** The check's independence rules forbid reading the suite, the source and the diff. The answers above are what can be seen from outside. See [phase-54-verification.md](phase-54-verification.md).
