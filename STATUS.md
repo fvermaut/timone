@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-05.
+**Last updated:** 2026-10-06.
 
 ---
 
@@ -140,6 +140,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**6 October — `timone status` no longer names finished tickets as waiting on you ([#186](https://github.com/fvermaut/timone/issues/186)): pull request [#225](https://github.com/fvermaut/timone/pull/225) is open for your review, from the branch `timone/186-timone-status-asks-you-to-answer-on-abou`.** The last line of `timone status` now names a ticket only when the machine asked you something on it. A separate check ran the built command: on the old build it named a finished ticket, on this branch it names nothing, and a ticket with an open question is still named. The 70 test failures in the container are the same 70 as on `main` (Timone issue #220). The review of the code style found 1 thing: a test named "names a ticket once" no longer has two runs that would be named. The review against the requirement found 1: a ticket whose list of pieces grew after approval is no longer named, though the daemon still holds it for a person. Both are in the [delivery report](doc/plans/phases/reports/phase-54-delivery.md). Still owed, and only you can run them: the replay against the real model (`npm run --silent replay`), and the checks with a real daemon listed in the [check report](doc/plans/phases/reports/phase-54-verification.md). This status file is on that branch and reaches `main` with the pull request. **What I need from you:** review and merge #225 when you are ready.
 
 **2 October — the old code between steps is removed ([#166](https://github.com/fvermaut/timone/issues/166), [pull request #189](https://github.com/fvermaut/timone/pull/189)).** It was built in 13 slices from 30 September to 2 October. Every project now runs on the runner, Timone's own included. The code that picked the next step, read a step's end from a fixed line and chose where a run waits is deleted, and so is `timone retry`. About 28,000 lines went. `process.md`, the step skills, the glossary, the README and the manual now describe the runner, and nine decision records are marked as replaced. Old runs in the ledger are converted when it is read.
 

@@ -22,9 +22,6 @@ import {
   fromForgeDefaultBranch,
   isReproposal,
   readBreakdown,
-  readBreakdownSync,
-  type BreakdownRead,
-  type SyncBreakdownSource,
   type BreakdownSource,
 } from "./breakdown.js";
 import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
@@ -35,8 +32,7 @@ import { DEFAULT_PROGRESS_INTERVAL_SECONDS } from "./progress.js";
 import { holdCancelledTicket, runCancel } from "../commands/cancel.js";
 import { resolveTakeover } from "../commands/takeover.js";
 import { pending, settle, type QueuedRequest } from "./requests.js";
-import {
-  type InitiativeRecord, type Run, type RunStore, type Witness } from "./runs.js";
+import { type Run, type RunStore, type Witness } from "./runs.js";
 import { HELD_LABEL, MAP_LABEL, eligibleSteps } from "./steps.js";
 
 export interface PollDeps {
@@ -1477,106 +1473,8 @@ export async function closeInitiativeIfDone(
   );
 }
 
-// `checkoutOf` lived here until phase 30's 30d. It has one caller now —
-// `timone status`, fvermaut's own command reading his own folder — so it
-// moved there. The poll loop resolves no path under `projects/` at all any
-// more (ADR-0043), and a helper for doing so left sitting in this file would
-// be the obvious thing for the next reader to reach for.
-
-/**
- * Where a ticket's whole initiative stands, as a plain value.
- *
- * **This is what lets `timone status` speak about an initiative rather than
- * about a run** ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
- * D4). A ticket is a conversation and a run is one chunk of it (ADR-0026), so
- * between two chunks the ticket's last run is `done` while the initiative is
- * very much alive.
- *
- * It carries how far the initiative has got, plus the one fact about the
- * *artifact* a reader has to be told: that the list has grown since they
- * approved it. The two are separate facts about one initiative.
- *
- * ✏ 2026-09-30: moved here from `src/daemon/cta.ts`, which went with the
- * ticket's standing note. The functions below produce it.
- */
-export interface InitiativeProgress {
-  /** How many steps the initiative has. */
-  total: number;
-  /** How many of them are done. */
-  done: number;
-  /** The step to take next, or absent when none is. `index` counts from 1. */
-  next?: { index: number; title: string };
-  /** Whether the list of pieces has grown since the human approved it. */
-  reproposed?: boolean;
-}
-
-/**
- * Where a ticket's initiative stands, for `timone status`, which renders
- * without waiting and reads fvermaut's own checkout
- * ([ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
- * D4) — or undefined when there is nothing to say. See
- * {@link readBreakdownSync}.
- *
- * **✏ 29g: the count comes off the tracker and the re-proposal comes off the
- * artifact, and they are two different facts from two different places.**
- *
- * - *How far it has got* is `done` step tickets out of the steps that exist,
- *   read by the daemon's own survey and cached in the ledger. Counting `done`
- *   runs against an approved list is gone with `chunkProgress`
- *   ([ADR-0040](../../doc/adr/0040-one-step-is-one-ticket-and-doneness-is-a-fact-about-a-ticket.md)).
- * - *Whether the list has grown since the human approved it* is still read
- *   from the **file**, and must be: the committed artifact is the gate
- *   ([ADR-0014](../../doc/adr/0014-artifact-first-gates.md),
- *   [ADR-0028](../../doc/adr/0028-the-breakdown-is-an-artifact-and-the-ticket-follows-it.md)
- *   D3), and no number of step tickets can tell you what a human agreed to.
- *
- * ✏ 2026-09-30: its twin that read the forge, for the cycle's standing call
- * to action, went with that call to action.
- */
-export function initiativeProgressSync(
-  source: SyncBreakdownSource,
-  ticket: number,
-  picture: InitiativeRecord | undefined,
-): InitiativeProgress | undefined {
-  return progressFrom(readBreakdownSync(ticket, source), picture);
-}
-
-/** The arithmetic of {@link initiativeProgressSync}, over a breakdown already read. */
-function progressFrom(
-  read: BreakdownRead,
-  picture: InitiativeRecord | undefined,
-): InitiativeProgress | undefined {
-  const progress = progressOf(picture);
-  const regrown = read.kind === "ok" && isReproposal(read.breakdown);
-
-  if (!regrown) return progress;
-  // No picture, and the list has regrown. `total` is the count the file lists
-  // and `done` is nought — both true statements about **step tickets**, of
-  // which this initiative has none yet. Neither is rendered: `timone status`
-  // answers on the regrown list before it reaches them, because what the
-  // human is being asked is a judgement rather than a number.
-  const listed = read.kind === "ok" ? read.breakdown.chunks.length : 0;
-  return { total: listed, done: 0, ...progress, reproposed: true };
-}
-
-/** {@link progressOfPicture}, tolerating a ticket no picture lists. */
-export function progressOf(
-  picture: InitiativeRecord | undefined,
-): InitiativeProgress | undefined {
-  return picture === undefined ? undefined : progressOfPicture(picture);
-}
-
-export function progressOfPicture(picture: InitiativeRecord): InitiativeProgress {
-  const position =
-    picture.next === undefined ? -1 : picture.steps.indexOf(picture.next);
-  return position < 0 || picture.next === undefined || picture.nextTitle === undefined
-    ? { total: picture.steps.length, done: picture.done }
-    : {
-        total: picture.steps.length,
-        done: picture.done,
-        next: { index: position + 1, title: picture.nextTitle },
-      };
-}
+// ✏ 2026-10-06 (#186): `timone status` no longer reads a project's checkout
+// for the list of pieces, so nothing here resolves a path under `projects/`.
 
 /**
  * What a ticket's approved list of pieces says about what happens after this

@@ -50,9 +50,6 @@ const EXEMPT: Record<string, string> = {
     "`workspace sync` is what materializes the checkouts. It is fvermaut's " +
     "own command, run from his terminal, and after 30d it is a convenience " +
     "for him and a prerequisite for nothing.",
-  "commands/status.ts":
-    "`timone status` reads his folder to say where an initiative stands. " +
-    "His command, his checkout, and `checkoutOf` lives here for that reason.",
   "daemon/hooks.ts":
     "The R15 guardrail bracket. It captures a baseline and collects evidence " +
     "with local, read-only git — `rev-parse`, `status --porcelain`, `log` — " +
@@ -91,10 +88,14 @@ const EXEMPT: Record<string, string> = {
  * either ban the first or excuse the second.
  */
 const GIT_USERS: Record<string, string> = {
-  // Direct use only — `commands/status.ts` reaches git *through*
-  // `daemon/breakdown.ts`'s `fromDefaultBranch` and is not listed here. That
-  // is not a hole: a file calling into a git-performing module still has to
-  // hand it a path under `projects/`, which is what {@link EXEMPT} catches.
+  // Direct use only. A file that calls into a git-performing module is not
+  // listed here, and that is not a hole: it still has to hand that module a
+  // path under `projects/`, which is what {@link EXEMPT} catches.
+  //
+  // ✏ 2026-10-06 (#186): `commands/status.ts` reached git that way, through
+  // `daemon/breakdown.ts`'s reader of the default branch on disk. It no longer
+  // reads a list of pieces, so it reaches no git and no checkout, and that
+  // reader is gone; `daemon/breakdown.ts` performs no git and left this list.
   "git.ts":
     "The module itself. Since 30c it has no machine caller: everything left " +
     "in it belongs to `workspace sync`, and 30l deletes `mergeIntoDefault`.",
@@ -103,10 +104,6 @@ const GIT_USERS: Record<string, string> = {
     "The R15 bracket's local, read-only reads. See its entry above.",
   "adapters/docker-preview.ts":
     "Worktrees for previews, on the host. See its entry above.",
-  "daemon/breakdown.ts":
-    "`fromDefaultBranch`, the on-disk source `timone status` builds. The " +
-    "machine's source is `fromForgeDefaultBranch`, in this same file, and it " +
-    "reaches no disk.",
   "commands/daemon.ts":
     "Asks whether the commit the daemon is standing on is on the remote, " +
     "before starting a boxed run that could not follow it (30k). The " +

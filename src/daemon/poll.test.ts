@@ -49,10 +49,9 @@ function breakdownIn(
   root: string,
   project = "scratch-app",
 ): { breakdownSource: SyncBreakdownSource } {
-  // `join(root, "projects", project)` is what `checkoutOf` used to supply on
-  // the caller's behalf, back when the loop was told a root. It is spelled
-  // here because the production default resolves no directory at all now: it
-  // reads the forge.
+  // The fixture's checkout sits at `projects/<project>` under `root`. The path
+  // is spelled here because the production default resolves no directory at
+  // all now: it reads the forge.
   return { breakdownSource: fromWorkingTree(join(root, "projects", project)) };
 }
 

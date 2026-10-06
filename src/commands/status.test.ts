@@ -1,37 +1,10 @@
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Manifest } from "../manifest.js";
-import {
-  breakdownPath, fromWorkingTree,
-  type SyncBreakdownSource,
-} from "../daemon/breakdown.js";
-
-/**
- * A fixture root and the breakdown source that reads it, together.
- *
- * The two must agree, and since 30d they are two separate values — a source
- * is built by whoever knows where to look, and the poll loop's production
- * default no longer knows about a directory at all. Spreading one helper is
- * what stops a test setting `root` here and reading a breakdown from
- * somewhere else.
- */
-function breakdownIn(
-  root: string,
-  project = "scratch-app",
-): { root: string; breakdownSource: SyncBreakdownSource } {
-  // `join(root, "projects", project)` is what `checkoutOf` used to supply on
-  // the caller's behalf. It is spelled here because the production default no
-  // longer resolves a directory at all: it reads the forge.
-  return {
-    root,
-    breakdownSource: fromWorkingTree(join(root, "projects", project)),
-  };
-}
-
 import type { Holder } from "../daemon/holder.js";
 import { stageLabel } from "../daemon/pipeline.js";
 import {
@@ -48,40 +21,6 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-/**
- * A workspace root holding `scratch-app`'s checkout with `body` as ticket
- * `ticket`'s breakdown — or no breakdown at all when `body` is absent, which
- * is what nearly every ticket in the live ledger looks like.
- */
-function rootWith(ticket: number, body?: string): string {
-  const root = mkdtempSync(join(tmpdir(), "timone-status-"));
-  tempDirs.push(root);
-  if (body !== undefined) {
-    const file = join(root, "projects", "scratch-app", breakdownPath(ticket));
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, body, "utf8");
-  }
-  return root;
-}
-
-/**
- * The artifact as a stage session writes it, spelled out rather than rendered
- * — `poll.test.ts` spells it out for the same reason: a fixture built by the
- * module under test could not catch the writer and the reader drifting apart.
- */
-function breakdown(titles: string[], pieces = titles.length): string {
-  return [
-    "# Breakdown",
-    "",
-    `**Status:** Approved by fvermaut 2026-08-15 — ${pieces} pieces`,
-    "",
-    ...titles.map(
-      (title, index) => `${index + 1}. **${title}** — what this piece delivers.`,
-    ),
-    "",
-  ].join("\n");
-}
 
 const manifest: Manifest = {
   projects: {
@@ -488,25 +427,25 @@ describe("renderStatus — what a run is costing right now", () => {
 });
 
 describe("renderStatus — who the closing line names", () => {
-  it("names a ticket once in its closing line however many pieces it has had", () => {
-    // A re-proposed initiative is the first state in which a *done* run is
-    // waiting on the human, and a ticket built in three pieces holds three of
-    // them. Naming the ticket once per finished piece would make the one line
-    // the reader is meant to act on read "scratch-app #6, scratch-app #6".
-    const root = rootWith(
-      6,
-      breakdown(["one", "two", "three", "four"], 2),
-    );
+  it("names a ticket once in its closing line however many runs it has had", () => {
+    // A ticket built in three pieces holds three runs, and the ledger can
+    // still hold more than one of them for one ticket. Naming the ticket once
+    // per run would make the one line the reader is meant to act on read
+    // "scratch-app #6, scratch-app #6".
     const runs = [
       run({ project: "scratch-app", ticket: 6, status: "done", stage: "delivery", pr: 9 }),
       run({ project: "scratch-app", ticket: 6, status: "done", stage: "delivery", pr: 12 }),
+      run({
+        project: "scratch-app",
+        ticket: 6,
+        status: "parked",
+        stage: "planning",
+        wait: { kind: "runner", on: "your answer on the ticket" },
+      }),
     ];
 
     const lastLine =
-      renderStatus(manifest, runs, { stateExists: true, ...breakdownIn(root) })
-        .trimEnd()
-        .split("\n")
-        .at(-1) ?? "";
+      renderStatus(manifest, runs, { stateExists: true }).trimEnd().split("\n").at(-1) ?? "";
 
     expect(lastLine).toBe(
       "**What I need from you:** answer on scratch-app #6 — each ticket says what it needs.",
@@ -540,6 +479,129 @@ describe("renderStatus — who the closing line names", () => {
     // parked one is named.
     expect(lastLine).toBe(
       "**What I need from you:** answer on scratch-app #6 — each ticket says what it needs.",
+    );
+  });
+});
+
+/**
+ * #186 — a finished run waits on nobody.
+ *
+ * A person is asked something only by the runner, which parks the run with
+ * the ask as its wait (ADR-0060). An initiative with steps left and none of
+ * them eligible is ordinary (ADR-0065 D6), and old initiative pictures stay in
+ * the ledger after their map ticket closes. So a done run is never named in
+ * the closing line, whatever picture sits beside it.
+ */
+describe("renderStatus — a finished run is never named (#186)", () => {
+  /** Steps left, none of them eligible: no `next`. */
+  const stalled: InitiativeRecord = {
+    project: "scratch-app",
+    initiative: 7,
+    title: "the lists could be smarter",
+    steps: [51, 52, 53],
+    done: 2,
+    at: "2026-10-06T10:00:00Z",
+  };
+
+  const pictures = (project: string): readonly InitiativeRecord[] =>
+    project === "scratch-app" ? [stalled] : [];
+
+  function closingLine(output: string): string {
+    return output.trimEnd().split("\n").at(-1) ?? "";
+  }
+
+  it("names nobody for the finished steps of an initiative with steps left", () => {
+    const runs = [
+      run({ project: "scratch-app", ticket: 51, status: "done", stage: "delivery" }),
+      run({ project: "scratch-app", ticket: 52, status: "done", stage: "delivery" }),
+    ];
+
+    expect(closingLine(renderStatus(manifest, runs, { stateExists: true, pictures }))).toBe(
+      "**What I need from you:** nothing — nothing is waiting on you right now.",
+    );
+  });
+
+  it("names nobody for a finished run on the map ticket itself", () => {
+    const runs = [
+      run({ project: "scratch-app", ticket: 7, status: "done", stage: "delivery" }),
+    ];
+
+    expect(closingLine(renderStatus(manifest, runs, { stateExists: true, pictures }))).toBe(
+      "**What I need from you:** nothing — nothing is waiting on you right now.",
+    );
+  });
+
+  it("names only the parked runs that asked, in a real ledger beside old pictures", () => {
+    // The ledger typed for 41c, read from a throwaway copy. Its done runs are
+    // scratch-app #12 and ivtrends #60; the two pictures below are old ones
+    // that still hold them, with steps left and nothing eligible.
+    const root = mkdtempSync(join(tmpdir(), "timone-status-"));
+    tempDirs.push(root);
+    const path = join(root, ".timone", "state.json");
+    mkdirSync(dirname(path), { recursive: true });
+    copyFileSync(
+      fileURLToPath(new URL("../daemon/fixtures/ledger-before-166.json", import.meta.url)),
+      path,
+    );
+    const both: Manifest = {
+      projects: {
+        "scratch-app": {
+          repo_url: "https://github.com/fvermaut/scratch-app.git",
+          path: "projects/scratch-app",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+        ivtrends: {
+          repo_url: "https://github.com/fvermaut/ivtrends.git",
+          path: "projects/ivtrends",
+          stack: [],
+          bindings: { ticketing: "github" },
+        },
+      },
+    };
+    const store = RunStore.open(path);
+    store.rememberInitiative({
+      project: "ivtrends",
+      initiative: 59,
+      title: "old work",
+      steps: [60, 62, 63],
+      done: 1,
+    });
+    store.rememberInitiative({
+      project: "scratch-app",
+      initiative: 11,
+      title: "old work",
+      steps: [12, 13],
+      done: 1,
+    });
+
+    const output = renderStatus(both, store.all(), {
+      stateExists: true,
+      pictures: (project) => store.initiativesFor(project),
+    });
+
+    expect(closingLine(output)).toBe(
+      "**What I need from you:** answer on scratch-app #24, ivtrends #90, " +
+        "ivtrends #91, ivtrends #92, ivtrends #93 — each ticket says what it needs.",
+    );
+  });
+
+  it("still names a parked step whose run asked for something, beside finished ones", () => {
+    // The only test that protects a real ask being named.
+    const runs = [
+      run({ project: "scratch-app", ticket: 51, status: "done", stage: "delivery" }),
+      run({ project: "scratch-app", ticket: 52, status: "done", stage: "delivery" }),
+      run({
+        project: "scratch-app",
+        ticket: 53,
+        status: "parked",
+        stage: "planning",
+        wait: { kind: "runner", on: "your answer on the ticket" },
+      }),
+    ];
+
+    expect(closingLine(renderStatus(manifest, runs, { stateExists: true, pictures }))).toBe(
+      "**What I need from you:** answer on scratch-app #53 — each ticket says what it needs.",
     );
   });
 });

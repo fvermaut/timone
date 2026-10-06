@@ -184,6 +184,7 @@
 
 - **Priority:** SHOULD
 - **Status:** verified
+    - ✏ 2026-10-06 checked again at [phase 54](../../plans/phases/phase-54.md)'s verification ([report](../../plans/phases/reports/phase-54-verification.md)), timone#186: all five parts of the sentence pass on this build, each seen to fail first. A finished run is not named as waiting, even when its initiative has steps left that cannot start; a run parked with a question is still named, once. Probe: [`prd-02.r9.mjs`](../../plans/phases/probes/prd-02.r9.mjs).
     - ✏ 2026-08-03 verified by fvermaut at [phase 11](../../plans/phases/phase-11.md)'s 11g gate. `timone status` was read at every transition of the live run and matched each one. The all-in-one-glance line at the end of the proof read: `scratch-app  #4 (triage) — waiting on you: the next stage to be built  ·  1 queued (#6)`, which answers all three of the criterion's questions — which ticket, which stage, who is waited on — plus queue depth. A run with a failed guardrail rendered `⚠ 1 automatic check(s) failed — see the ticket`. With no state file at all the command prints guidance naming `timone daemon`, not a stack trace.
 - **Verify-via:** api
 - **Criteria:** `timone status` lists every managed project with its active ticket, current stage, and any gate waiting for human input, in one glance.
