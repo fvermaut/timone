@@ -266,3 +266,132 @@ describe("what the guard judges: the file tools, the search tools and a helper (
     expect(probeGuardDecision({ toolName, toolInput, stage })).toBeUndefined();
   });
 });
+
+describe("what the guard judges: shell commands (PRD-10 R4, R5)", () => {
+  // Built from the constant, so no fixture here spells a folder out.
+  const p = PROBE_DIRECTORIES[0];
+  const shared = PROBE_DIRECTORIES[1];
+
+  /** Every kind of session: the stages a run can be at, and a person. */
+  const SESSIONS = [
+    "execution",
+    "remediation",
+    "verification",
+    "update",
+    "planning",
+    undefined,
+  ] as const;
+
+  /** A shell command, with the words a test calls it by. */
+  type Command = readonly [label: string, command: string];
+
+  /** Every command crossed with every kind of session. */
+  const everySession = (commands: readonly Command[]) =>
+    SESSIONS.flatMap((stage) => commands.map(([label, command]) => ({ label, command, stage })));
+
+  const decide = (command: string, stage: (typeof SESSIONS)[number]) =>
+    probeGuardDecision({ toolName: "Bash", toolInput: { command, description: "d" }, stage });
+
+  const phaseFile = "doc/plans/phases/phase-42.md";
+
+  /** A command's text written over several lines, as a session writes it. */
+  const lines = (...text: string[]) => text.join("\n");
+
+  /** Commands that only name a folder in text they write or send (R4). */
+  const onlyNames: readonly Command[] = [
+    ["a commit message", `git commit -m "Do not open ${p}"`],
+    [
+      "a commit message from a here-document",
+      lines(`git commit -m "$(cat <<'EOF'`, `docs: name ${shared}/README.md`, "EOF", `)"`),
+    ],
+    ["a ticket comment", `gh issue comment 87 --body "Do not open ${p}"`],
+    ["a pull request body", `gh pr create --title "t" --body "Do not open ${p}"`],
+    [
+      "a pull request body from a here-document",
+      lines(`gh pr create --title "t" --body "$(cat <<'EOF'`, `Keep out of ${p}.`, "EOF", `)"`),
+    ],
+    ["text appended to a plan", lines(`cat >> ${phaseFile} <<'EOF'`, `See ${shared}/README.md`, "EOF")],
+    ["text written to a plan", lines(`cat > ${phaseFile} <<'EOF'`, `See ${shared}/README.md`, "EOF")],
+    ["text written to a plan by tee", lines(`tee ${phaseFile} <<'EOF'`, `See ${shared}/README.md`, "EOF")],
+    ["text appended to a plan by tee", lines(`tee -a ${phaseFile} <<'EOF'`, `See ${shared}/README.md`, "EOF")],
+  ];
+
+  it.each(everySession(onlyNames))("is silent on $label, for stage $stage", ({ command, stage }) => {
+    expect(decide(command, stage)).toBeUndefined();
+  });
+
+  /** What the guard decides about a real read, by stage. */
+  const judged = {
+    execution: "deny",
+    remediation: "deny",
+    verification: "allow",
+    update: "allow",
+    planning: "ask",
+    person: "ask",
+  } as const;
+
+  /** Commands that really read, list, run or write a check script (R5). */
+  const reaches: readonly Command[] = [
+    ["a cat of a script", `cat ${p}/a.sh`],
+    ["a listing of a folder", `ls ${p}`],
+    ["a sed of a script", `sed -n 1,20p ${p}/a.sh`],
+    ["a head of a script", `head ${p}/a.sh`],
+    ["a script run by bash", `bash ${p}/a.sh`],
+    ["a script run by node", `node ${p}/a.mjs`],
+    ["a grep inside a folder", `grep -rn total ${p}`],
+    ["a copy of a script", `cp ${p}/a.sh /tmp/`],
+    ["a write into a folder", `echo x > ${p}/b.sh`],
+    ["a write into a folder with no space", `echo x >${p}/b.sh`],
+    ["a script read out of git", `git show HEAD:${p}/a.sh`],
+    ["the history of a folder", `git log -p -- ${p}`],
+    ["a cat by full path", `cat /workspace/timone/projects/timone/${p}/a.sh`],
+    ["a cat of a quoted path", `cat "${p}/my file.sh"`],
+  ];
+
+  /** A real read joined to a call that passes (R5). */
+  const joined: readonly Command[] = [
+    ["a read after a commit", `git commit -m "x" && cat ${p}/a.sh`],
+    ["a listing after a commit naming a folder", `git commit -m "Do not open ${p}"; ls ${p}`],
+    ["a read inside a substitution", `echo "$(cat ${p}/a.sh)"`],
+  ];
+
+  /** Code handed to an interpreter as text: the guard cannot tell what it does (R5). */
+  const interpreted: readonly Command[] = [
+    ["python reading a here-document", lines("python3 - <<'EOF'", `print(open("${p}/a.sh").read())`, "EOF")],
+    ["node -e", `node -e "require('fs').readFileSync('${p}/a.mjs')"`],
+    ["bash -c", `bash -c "cat ${p}/a.sh"`],
+    ["a command piped to sh", `echo "cat ${p}/a.sh" | sh`],
+    ["eval", `eval "cat ${p}/a.sh"`],
+    [
+      "python only printing a sentence that names a folder (the accepted cost of the rule)",
+      lines("python3 - <<'EOF'", `print("Do not open ${p}")`, "EOF"),
+    ],
+  ];
+
+  /** Commands the reader cannot finish fall back to all of the text. */
+  const unreadable: readonly Command[] = [
+    ["an unclosed quote", `cat "${p}/a.sh`],
+    ["a here-document with no closing line", lines(`git commit -m "$(cat <<'EOF'`, `docs: name ${p}`, `)"`)],
+  ];
+
+  it.each(everySession([...reaches, ...joined, ...interpreted, ...unreadable]))(
+    "judges $label, for stage $stage",
+    ({ command, stage }) => {
+      expect(decide(command, stage)?.permissionDecision).toBe(judged[stage ?? "person"]);
+    },
+  );
+
+  /** The commands almost every session runs, which must stay unanswered. */
+  const common: readonly Command[] = [
+    ["the tests", "npx vitest run"],
+    ["git status", "git status"],
+    ["a pipe", "cat src/index.ts | head"],
+    ["the cli", "node dist/cli.js number timone phase"],
+    ["python reading a here-document", lines("python3 - <<'EOF'", "print(1)", "EOF")],
+    ["an unclosed quote naming no folder", `echo "x`],
+  ];
+
+  it.each(everySession(common))("is silent on $label, for stage $stage", ({ command, stage }) => {
+    expect(decide(command, stage)).toBeUndefined();
+  });
+});

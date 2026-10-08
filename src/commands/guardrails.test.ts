@@ -1296,4 +1296,19 @@ describe("the guard judges only real reads and writes, for every kind of session
       hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: read },
     });
   });
+
+  /** #192's third call: a commit whose message names a folder, written as commits are. */
+  const commit = [`git commit -m "$(cat <<'EOF'`, `docs: name ${shared}/README.md`, "EOF", `)"`].join("\n");
+
+  it.each(KINDS)("lets $who commit a message that names a folder, $where", ({ stage, env }) => {
+    expect(judge(stage, env, "Bash", { command: commit, description: "d" })).toBeUndefined();
+  });
+
+  it.each(KINDS)("still judges a real read joined to a commit by $who, $where", ({ stage, env, read }) => {
+    const reply = judge(stage, env, "Bash", { command: `git commit -m "x" && cat ${p}/a.sh`, description: "d" });
+
+    expect(JSON.parse(reply ?? "{}")).toMatchObject({
+      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: read },
+    });
+  });
 });
