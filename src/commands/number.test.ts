@@ -2,10 +2,11 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Command } from "commander";
 
 import { registerNumberCommand } from "./number.js";
+import { withoutRunGitSettings } from "../test-support/run-git-settings.js";
 
 /**
  * `timone number <project> <kind>` as a session types it: from a folder
@@ -17,7 +18,18 @@ import { registerNumberCommand } from "./number.js";
 const tempDirs: string[] = [];
 const startedIn = process.cwd();
 
+/** Puts back the run's git settings this file's tests ran without (PRD-11). */
+let restoreRunGitSettings: () => void = () => {};
+
+// The command pushes to the throwaway bare repository that stands for the
+// forge. In a run's container the run's push guard would refuse that push, so
+// each test runs without the run's git settings.
+beforeEach(() => {
+  restoreRunGitSettings = withoutRunGitSettings();
+});
+
 afterEach(() => {
+  restoreRunGitSettings();
   process.chdir(startedIn);
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });

@@ -2,9 +2,10 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { reserveNumber } from "./numbers.js";
+import { withoutRunGitSettings } from "./test-support/run-git-settings.js";
 
 /**
  * `reserveNumber` against real git: a bare repository stands for the forge,
@@ -17,7 +18,18 @@ import { reserveNumber } from "./numbers.js";
 
 const tempDirs: string[] = [];
 
+/** Puts back the run's git settings this file's tests ran without (PRD-11). */
+let restoreRunGitSettings: () => void = () => {};
+
+// The tests here push to their throwaway bare repositories. In a run's
+// container the run's push guard would refuse those pushes, so each test runs
+// without the run's git settings.
+beforeEach(() => {
+  restoreRunGitSettings = withoutRunGitSettings();
+});
+
 afterEach(() => {
+  restoreRunGitSettings();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
