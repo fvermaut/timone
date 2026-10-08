@@ -357,3 +357,120 @@ Tests run at slice end: `src/commands/guardrails.test.ts` (121 tests; 76 passed,
 - `probeGuardDecision({ toolName, toolInput, stage, container: true })` refuses, in a container, any step that is neither `execution`/`remediation` (builder's reason) nor `verification`/`update` (allowed), and refuses when `stage` is `undefined`. The reason is one fixed text: `` `Refused: ${PROBE_DIRECTORIES.join(" and ")} hold the checks, and only the checking step uses them. This session runs in a container, where nobody can be asked, so the guard refuses rather than asks.` `` A call that reaches no check-script folder is still answered `undefined`, in a container or not. `container` absent or `false` keeps the old answers, including `ask`.
 - `runGuard` passes `container: true` whenever `containerStep(deps.env)` is defined, even when the ledger has a run. The ledger's run still decides the step when there is one.
 - A test that spawns the built guard command must remove `TIMONE_RUN_PROJECT`, `TIMONE_RUN_BRANCH` and `TIMONE_RUN_STAGE` from the copy of `process.env` it hands the child; see `containerEnv` in `src/commands/guardrails.guard-command.test.ts`. A test of `runGuard` must hand it an explicit `env`, never `process.env`: in a container `process.env` carries `TIMONE_RUN_PROJECT`, and the guard would then never ask.
+
+## 57c — `timone stage` says the truth in a container
+
+**Built.** `StageDeps` has a new required `env: NodeJS.ProcessEnv`, and the command's action passes `process.env`. `guardSays` now reads `containerStep(env)` (57b) first. For a container's session it hands off to a new `containerSays`, which names the container's step (or says it names none) and says the declaration changes nothing. For a declared step it then gives the guard's verdict. That verdict comes from `probeGuardDecision` with `container: true` and the container's step. For `none` it says taking a declaration back changes nothing. `runStage` still writes or clears the declaration and still returns 0. On the host every sentence is as before. The comment on `guardSays` no longer says "It assumes a session run by hand". It now says what the sentence does in a container. The description in `registerStageCommand` is unchanged.
+
+**Files touched.**
+
+- `src/commands/stage.ts` — `env` on `StageDeps`; `process.env` in the action; `containerStep` imported from `./guardrails.js`; `guardSays` takes `env` and checks the container before anything else; new `containerSays`; the `guardSays` comment.
+- `src/commands/stage.test.ts` — `env: {}` in the three existing calls, with no other change to them; new block "timone stage in a container (#87)" with cases (1)–(4) (five tests, since (4) runs twice through `it.each`).
+- `doc/plans/phases/reports/phase-57-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- The container check comes before the `none` branch. That way `none` in a container gets the container sentence and not the host's "the guard asks you".
+- In a container the guard should never answer `ask`, and should always have an answer about its own folder. `containerSays` treats `ask` and `undefined` as a bug in the guard and throws, as the host code already does for `undefined`. No test reaches that line: no input can.
+- Case (4) runs twice: once with the step `execution`, and once in a container that names no step. The excerpt asks for both forms of the first sentence. Both tests were red before the change.
+- Case (1) checks the whole sentence word for word, from the excerpt. It also checks the fragments the excerpt names: no "is now", no "checking step". It checks that the declaration is written (`verification`) and that the exit code is 0.
+- The new tests use the session id `session-box`, and each one passes its container names in `env`, never `process.env`. The new block is named for #87. The excerpt names no PRD-10 requirement for this slice.
+- What I would refactor (not done): `guardSays` and `containerSays` each build the same `probeGuardDecision` call (a `Read` of `x.mjs` in `PROBE_DIRECTORIES[0]`). A small `probeVerdict(stage, container)` would hold it once. The two endings "the guard lets it read and write the probes without asking." and "the guard refuses it the probes." are now written in both functions. `stage.ts` now imports the large `guardrails.ts` only for `containerStep`. `containerStep` could move to a smaller module, next to `sessionRun`'s reading of the environment.
+
+**Validation evidence.**
+
+Case (5), before any change (today's code, today's tests):
+
+```
+ ✓ src/commands/stage.test.ts (3 tests) 6ms
+      Tests  3 passed (3)
+```
+With `env: {}` added to the three existing calls, before any change to `stage.ts`: `Tests  3 passed (3)`. After each step below the three stayed green (shown as ✓ in each run), and at the end: `Tests  8 passed (8)`.
+
+Case (1): `timone stage in a container (#87) > names the container's step, not the declared one, and says the guard refuses a builder`. Red:
+
+```
+ × timone stage in a container (#87) > names the container's step, not the declared one, and says the guard refuses a builder 5ms
+AssertionError: expected 'Session session-box is now the checki…' not to contain 'is now'
+Received: "Session session-box is now the checking step: the guard lets it read and write the probes without asking."
+ ❯ src/commands/stage.test.ts:119:26
+      Tests  1 failed | 3 passed (4)
+```
+Green after adding `env`, the action's `process.env`, and a container sentence that always ended "the guard refuses it the probes.": `Tests  4 passed (4)`.
+
+Case (2): `… > names the checking step when the container names it, and says the guard lets it through`. Red:
+
+```
+ × … > names the checking step when the container names it, and says the guard lets it through
+-   "Session session-box runs in a container whose step is verification. In a container the step decides what the guard does, and this declaration changes nothing: the guard lets it read and write the probes without asking.",
++   "Session session-box runs in a container whose step is verification. In a container the step decides what the guard does, and this declaration changes nothing: the guard refuses it the probes.",
+ ❯ src/commands/stage.test.ts:140:18
+      Tests  1 failed | 4 passed (5)
+```
+Green after `containerSays` asks `probeGuardDecision` with `container: true` and the container's step: `Tests  5 passed (5)`.
+
+Case (3): `… > says a container that names no step is refused the probes`. Red:
+
+```
+ × … > says a container that names no step is refused the probes
+-   "Session session-box runs in a container that names no step Timone knows. In a container the step decides what the guard does, and this declaration changes nothing: the guard refuses it the probes.",
++   "Session session-box runs in a container whose step is undefined. In a container the step decides what the guard does, and this declaration changes nothing: the guard refuses it the probes.",
+ ❯ src/commands/stage.test.ts:160:18
+      Tests  1 failed | 5 passed (6)
+```
+Green after the "names no step" wording for a missing step: `Tests  6 passed (6)`.
+
+Case (4): `… > says taking a declaration back changes nothing, in a container 'whose step is execution'` and `… 'that names no step'`. Red:
+
+```
+ × … > says taking a declaration back changes nothing, in a container 'whose step is execution'
+ × … > says taking a declaration back changes nothing, in a container 'that names no step'
+-   "Session session-box runs in a container whose step is execution. In a container the step decides what the guard does, and taking a declaration back changes nothing.",
++   "Session session-box no longer declares a step: the guard asks you before it touches the probes.",
+ ❯ src/commands/stage.test.ts:198:18
+      Tests  2 failed | 6 passed (8)
+```
+Green after the container check moved before the `none` branch and `containerSays` gained the `none` ending: `Tests  8 passed (8)`.
+
+Validation commands, run from the project root:
+
+```
+$ npm run build; echo "exit: $?"
+> timone@0.1.0 build
+> tsc
+exit: 0
+
+$ npx vitest run src/commands/stage.test.ts; echo "exit: $?"
+ ✓ src/commands/stage.test.ts (8 tests) 10ms
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+exit: 0
+
+$ root=$(mktemp -d)
+$ env TIMONE_RUN_PROJECT=timone TIMONE_RUN_STAGE=execution node dist/cli.js stage verification --session s --root "$root"; echo "exit: $?"
+Session s runs in a container whose step is execution. In a container the step decides what the guard does, and this declaration changes nothing: the guard refuses it the probes.
+exit: 0
+
+$ env -u TIMONE_RUN_PROJECT -u TIMONE_RUN_STAGE node dist/cli.js stage verification --session s --root "$root"; echo "exit: $?"
+Session s is now the checking step: the guard lets it read and write the probes without asking.
+exit: 0
+```
+After both runs, `$root/.timone/declared-stages.json` holds `"s": { "stage": "verification", … }`: the declaration is written in both cases.
+
+Checkboxes:
+
+- [x] Cases (1)–(4) were each seen red before green; the red runs are above. Case (5) (the three existing tests, with `env: {}`) was green before any change and after each step.
+- [x] The two hand runs print the sentences named: the first names "execution", has no "is now", and exits 0. The second prints today's "Session s is now the checking step: …" and exits 0.
+
+Tests run at slice end: `src/commands/stage.test.ts` (8 passed). `src/commands/guardrails.test.ts -t "PRD-10"` and `src/cli.test.ts` were not run. `grep` finds no use of the stage command in either file. The only match is `guardrails.test.ts`'s import of `declared-stage.js`. The whole suite was not run, as asked.
+
+**What 57d must know.**
+
+In a container (when `TIMONE_RUN_PROJECT` or `TIMONE_RUN_STAGE` is set to a non-empty value), `timone stage <step> --session <id>` still writes the declaration and exits 0. It prints one of these sentences:
+
+- The container names `verification` or `update`: `Session <id> runs in a container whose step is <step>. In a container the step decides what the guard does, and this declaration changes nothing: the guard lets it read and write the probes without asking.`
+- The container names any other step Timone knows: `Session <id> runs in a container whose step is <step>. In a container the step decides what the guard does, and this declaration changes nothing: the guard refuses it the probes.`
+- The container's step is missing, empty or unknown: `Session <id> runs in a container that names no step Timone knows. In a container the step decides what the guard does, and this declaration changes nothing: the guard refuses it the probes.`
+- `timone stage none` in a container clears the declaration, exits 0, and prints `Session <id> runs in a container whose step is <step>. In a container the step decides what the guard does, and taking a declaration back changes nothing.` If the container names no step it prints `Session <id> runs in a container that names no step Timone knows. In a container the step decides what the guard does, and taking a declaration back changes nothing.`
+
+The declared step plays no part in any of these sentences. On the host the sentences are unchanged: "is now the checking step: …", "is now the <step> step, which builds code: …", "is now the <step> step, which neither builds nor checks: …", and "no longer declares a step: …". An unknown step is still refused with exit 1, in a container or not.

@@ -4,6 +4,7 @@ import type { Command } from "commander";
 import { clearStage, declareStage } from "../daemon/declared-stage.js";
 import { PIPELINE_STAGES, type PipelineStage } from "../daemon/pipeline.js";
 import { PROBE_DIRECTORIES, probeGuardDecision } from "../daemon/probeGuard.js";
+import { containerStep } from "./guardrails.js";
 
 /** What the person asked for: a step to declare, or to take one back. */
 type StageChoice = { kind: "declare"; stage: PipelineStage } | { kind: "clear" };
@@ -33,11 +34,22 @@ function parseStageChoice(
  * One sentence on what the guard will now do for this session.
  *
  * The answer is asked of the guard itself rather than written down a second
- * time here, so this sentence cannot drift from what the guard does. It
- * assumes a session run by hand: for a session the daemon drove, the ledger
- * decides and a declaration changes nothing.
+ * time here, so this sentence cannot drift from what the guard does.
+ *
+ * In a container (#87) the guard goes by the step the box names and never
+ * reads the declaration, so the sentence says that instead: it names the
+ * container's step, or says it names none, and gives the guard's verdict for
+ * a container's session. The declaration is still written or cleared. For a
+ * session the daemon drove on the host, the ledger decides and a declaration
+ * changes nothing; this sentence does not know about that case.
  */
-function guardSays(sessionId: string, choice: StageChoice): string {
+function guardSays(
+  sessionId: string,
+  choice: StageChoice,
+  env: NodeJS.ProcessEnv,
+): string {
+  const container = containerStep(env);
+  if (container !== undefined) return containerSays(sessionId, choice, container.step);
   if (choice.kind === "clear") {
     return (
       `Session ${sessionId} no longer declares a step: the guard asks you ` +
@@ -76,11 +88,57 @@ function guardSays(sessionId: string, choice: StageChoice): string {
   }
 }
 
+/**
+ * What the guard does for a session in a container, which a declaration
+ * cannot change: there the guard goes by the step the box names and never
+ * reads the declaration (#87). The verdict is asked of the guard, as a
+ * container's session would ask it.
+ */
+function containerSays(
+  sessionId: string,
+  choice: StageChoice,
+  step: PipelineStage | undefined,
+): string {
+  const where =
+    step === undefined
+      ? "a container that names no step Timone knows"
+      : `a container whose step is ${step}`;
+  const intro =
+    `Session ${sessionId} runs in ${where}. ` +
+    "In a container the step decides what the guard does, and ";
+  if (choice.kind === "clear") return `${intro}taking a declaration back changes nothing.`;
+  const opening = `${intro}this declaration changes nothing: `;
+  const verdict = probeGuardDecision({
+    toolName: "Read",
+    toolInput: { file_path: join(PROBE_DIRECTORIES[0], "x.mjs") },
+    stage: step,
+    container: true,
+  })?.permissionDecision;
+  switch (verdict) {
+    case "allow":
+      return `${opening}the guard lets it read and write the probes without asking.`;
+    case "deny":
+      return `${opening}the guard refuses it the probes.`;
+    case "ask":
+    case undefined:
+      // In a container the guard never asks, and it always has an opinion on
+      // its own probe directory. Either answer is a bug in the guard.
+      throw new Error(
+        `the probe guard answered ${String(verdict)} in a container for ${PROBE_DIRECTORIES[0]}`,
+      );
+    default:
+      verdict satisfies never;
+      return verdict;
+  }
+}
+
 export interface StageDeps {
   /** The timone root, where the declarations live. */
   root: string;
   /** The session the declaration is for — the id the session start hook gave it. */
   sessionId: string;
+  /** Where a container names its step; see {@link containerStep}. */
+  env: NodeJS.ProcessEnv;
   /** Injected so a test can fix the declaration's time. */
   now?: () => string;
   log?: (message: string) => void;
@@ -117,7 +175,7 @@ export function runStage(raw: string, deps: StageDeps): number {
     default:
       choice.value satisfies never;
   }
-  log(guardSays(deps.sessionId, choice.value));
+  log(guardSays(deps.sessionId, choice.value, deps.env));
   return 0;
 }
 
@@ -145,6 +203,7 @@ export function registerStageCommand(program: Command): void {
         process.exitCode = runStage(stage, {
           root: resolve(options.root),
           sessionId: options.session,
+          env: process.env,
         });
       } catch (error) {
         console.error(error instanceof Error ? error.message : String(error));

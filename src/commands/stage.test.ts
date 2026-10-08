@@ -30,6 +30,7 @@ describe("timone stage", () => {
     const code = runStage("verify", {
       root,
       sessionId: "session-hand",
+      env: {},
       log: (message) => said.push(message),
     });
 
@@ -63,6 +64,7 @@ describe("timone stage", () => {
     const code = runStage("verification", {
       root,
       sessionId: "session-hand",
+      env: {},
       log: (message) => said.push(message),
     });
 
@@ -82,6 +84,7 @@ describe("timone stage", () => {
     const code = runStage("none", {
       root,
       sessionId: "session-hand",
+      env: {},
       log: (message) => said.push(message),
     });
 
@@ -91,5 +94,107 @@ describe("timone stage", () => {
       "Session session-hand no longer declares a step: the guard asks you " +
         "before it touches the probes.",
     ]);
+  });
+});
+
+// #87: in a container the step the box names decides what the guard does,
+// and the declaration is never read. The command must say that, not the
+// host sentences. Each test hands `runStage` the container's names itself:
+// this file may run in a container, and `process.env` must not leak in.
+describe("timone stage in a container (#87)", () => {
+  it("names the container's step, not the declared one, and says the guard refuses a builder", () => {
+    const root = emptyRoot();
+    const said: string[] = [];
+
+    const code = runStage("verification", {
+      root,
+      sessionId: "session-box",
+      env: { TIMONE_RUN_PROJECT: "timone", TIMONE_RUN_STAGE: "execution" },
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(0);
+    expect(declaredStage(root, "session-box")).toBe("verification");
+    const sentence = said.join("\n");
+    expect(sentence).not.toContain("is now");
+    expect(sentence).not.toContain("checking step");
+    expect(said).toEqual([
+      "Session session-box runs in a container whose step is execution. " +
+        "In a container the step decides what the guard does, and this " +
+        "declaration changes nothing: the guard refuses it the probes.",
+    ]);
+  });
+
+  it("names the checking step when the container names it, and says the guard lets it through", () => {
+    const root = emptyRoot();
+    const said: string[] = [];
+
+    const code = runStage("verification", {
+      root,
+      sessionId: "session-box",
+      env: { TIMONE_RUN_PROJECT: "timone", TIMONE_RUN_STAGE: "verification" },
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(0);
+    expect(said).toEqual([
+      "Session session-box runs in a container whose step is verification. " +
+        "In a container the step decides what the guard does, and this " +
+        "declaration changes nothing: the guard lets it read and write the " +
+        "probes without asking.",
+    ]);
+  });
+
+  it("says a container that names no step is refused the probes", () => {
+    const root = emptyRoot();
+    const said: string[] = [];
+
+    const code = runStage("verification", {
+      root,
+      sessionId: "session-box",
+      env: { TIMONE_RUN_PROJECT: "timone" },
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(0);
+    expect(said).toEqual([
+      "Session session-box runs in a container that names no step Timone " +
+        "knows. In a container the step decides what the guard does, and " +
+        "this declaration changes nothing: the guard refuses it the probes.",
+    ]);
+  });
+
+  it.each([
+    {
+      label: "whose step is execution",
+      env: { TIMONE_RUN_PROJECT: "timone", TIMONE_RUN_STAGE: "execution" },
+      expected:
+        "Session session-box runs in a container whose step is execution. " +
+        "In a container the step decides what the guard does, and taking a " +
+        "declaration back changes nothing.",
+    },
+    {
+      label: "that names no step",
+      env: { TIMONE_RUN_PROJECT: "timone" },
+      expected:
+        "Session session-box runs in a container that names no step Timone " +
+        "knows. In a container the step decides what the guard does, and " +
+        "taking a declaration back changes nothing.",
+    },
+  ])("says taking a declaration back changes nothing, in a container $label", ({ env, expected }) => {
+    const root = emptyRoot();
+    declareStage(root, "session-box", "verification");
+    const said: string[] = [];
+
+    const code = runStage("none", {
+      root,
+      sessionId: "session-box",
+      env,
+      log: (message) => said.push(message),
+    });
+
+    expect(code).toBe(0);
+    expect(declaredStage(root, "session-box")).toBeUndefined();
+    expect(said).toEqual([expected]);
   });
 });
