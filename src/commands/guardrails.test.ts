@@ -378,7 +378,7 @@ describe("finding the run that drove a session", () => {
       },
       {
         runId: run.id,
-        request: sessionRequest({ cwd: dir, prompt: "go", model: "claude-opus-4-6" }),
+        request: sessionRequest({ cwd: dir, prompt: "go", model: "claude-opus-4-6", stage: "execution" }),
         label: `${run.id} (clarification)`,
       },
     );

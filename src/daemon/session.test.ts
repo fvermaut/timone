@@ -128,6 +128,7 @@ describe("the request builder", () => {
       cwd: "/root",
       prompt: "go",
       model: "claude-opus-4-6",
+      stage: "execution",
       workspace: {
         timone: { remote: TIMONE_REMOTE, commit: TIMONE_COMMIT },
         project,
@@ -147,6 +148,7 @@ describe("the request builder", () => {
         cwd: "/root",
         prompt: "go",
         model: "claude-opus-4-6",
+        stage: "execution",
         workspace: {
           timone: { remote: TIMONE_REMOTE, commit: "main" },
           project,
@@ -161,6 +163,7 @@ describe("the request builder", () => {
       cwd: "/root",
       prompt: "go",
       model: "claude-opus-4-6",
+      stage: "execution",
       workspace: {
         timone: { remote: TIMONE_REMOTE, commit: TIMONE_COMMIT },
         project,
@@ -180,14 +183,17 @@ describe("the request builder", () => {
       cwd: "/root",
       prompt: "go",
       model: "claude-opus-4-6",
+      stage: "execution",
     });
 
     // Strictly: a `workspace` key set to undefined is not the same request as
     // one without it, and the in-process runtime must see the second.
+    // ✏ 57a: a request now always names its step (PRD-10.R1, #87).
     expect(request).toStrictEqual({
       cwd: "/root",
       prompt: "go",
       model: "claude-opus-4-6",
+      stage: "execution",
     });
   });
 
@@ -196,10 +202,12 @@ describe("the request builder", () => {
       cwd: "/root",
       prompt: "go",
       model: "claude-haiku-4-5",
+      stage: "execution",
       effort: undefined,
     });
 
-    expect(Object.keys(request)).toEqual(["cwd", "prompt", "model"]);
+    // ✏ 57a: a request now always names its step (PRD-10.R1, #87).
+    expect(Object.keys(request)).toEqual(["cwd", "prompt", "model", "stage"]);
   });
 });
 
@@ -230,6 +238,7 @@ describe("the guard on an in-process session's pushes", () => {
       cwd,
       prompt: "go",
       model: "claude-opus-4-6",
+      stage: "execution",
       ...(workBranch === undefined ? {} : { workBranch }),
     });
     return { cwd, seen, session };
@@ -318,6 +327,7 @@ describe("the guard on an in-process session's gh calls", () => {
       cwd,
       prompt: "go",
       model: "claude-opus-4-6",
+      stage: "execution",
       workBranch: "timone/7-x",
     });
     const realGhGot = existsSync(called)

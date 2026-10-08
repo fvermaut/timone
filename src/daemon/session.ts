@@ -134,6 +134,12 @@ export interface SessionRequest {
    * The guard that holds it to that is installed by the runtime.
    */
   workBranch?: string;
+  /**
+   * The step this session runs, spelled as the ledger records it. A box is
+   * given it so that its checks know the step when the box's own ledger is
+   * empty, as it always is (PRD-10.R1, #87).
+   */
+  stage: PipelineStage;
 }
 
 /** What {@link sessionRequest} is given to assemble a request from. */
@@ -149,6 +155,8 @@ export interface SessionRequestInput {
   interactive?: true;
   /** Absent, or undefined, for a step that owns no branch. */
   workBranch?: string | undefined;
+  /** The step this session runs. See {@link SessionRequest.stage}. */
+  stage: PipelineStage;
 }
 
 /** A git object name as `git rev-parse` reports one: 40 hexadecimal digits. */
@@ -177,6 +185,7 @@ export function sessionRequest(input: SessionRequestInput): SessionRequest {
     cwd: input.cwd,
     prompt: input.prompt,
     model: input.model,
+    stage: input.stage,
     // Spread rather than assigned, so a stage with no effort produces a
     // request with no `effort` key — not one set to undefined, which the
     // runtime would have to tell apart from an intended value. The same
