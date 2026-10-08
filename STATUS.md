@@ -66,6 +66,10 @@
 
 **What I need from you:** run the replay on the branch and reply on #232 with its result line, then decide on the first requirements finding before you merge.
 
+**1n. Piece 2 of #87 ([#230](https://github.com/fvermaut/timone/issues/230)): checked, on the branch `timone/230-2-each-container-knows-its-step-and-the`; no pull request yet.** Each container now carries the name of its step, and a project's settings file cannot change it. In a container the guard uses that step when the ledger has no run: the checking step may use its check scripts, a builder is refused them, and the guard never asks. `timone stage` says so in a container. All five requirements pass; each new check failed on the code before this work. Not checked: the replay against the real model (`npm run --silent replay`, from a terminal signed in to Claude), which this container cannot run. Live gates are owed. The 70 failing tests are the old ones of #220. The [check report](doc/plans/phases/reports/phase-57-verification.md) has the detail. This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** run the replay on the branch and reply on #230 with its result line.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
