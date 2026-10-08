@@ -288,6 +288,11 @@ export interface ProbeGuardInput {
   toolInput: unknown;
   /** The stage of the run driving this session; undefined means a human is. */
   stage: PipelineStage | undefined;
+  /**
+   * Whether the session runs in a container, where nobody can answer a
+   * question (PRD-10 R3). Absent means a session on the host.
+   */
+  container?: boolean;
 }
 
 /**
@@ -326,8 +331,20 @@ export function probeGuardDecision(
     };
   }
 
-  // Neither a builder nor a stage that runs the checks: an interactive
-  // session, or a stage that does neither job. Asking is right where denying would be wrong — these
+  // Neither a builder nor a stage that runs the checks, in a container: nobody
+  // is there to answer a question, and the session would stop on it (#87,
+  // PRD-10 R3). The same answer whatever the step, or when it has none.
+  if (input.container === true) {
+    return {
+      permissionDecision: "deny",
+      permissionDecisionReason:
+        `Refused: ${where} hold the checks, and only the checking step uses them. ` +
+        "This session runs in a container, where nobody can be asked, so the guard refuses rather than asks.",
+    };
+  }
+
+  // The question stays for a person's own session, and for a run on the host
+  // of a stage that neither builds nor checks. Asking is right where denying would be wrong — these
   // are the human's own files, and a hook that refused them to the person who
   // owns the repository would be a bug wearing a guardrail's clothes.
   return {

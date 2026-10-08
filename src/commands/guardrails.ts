@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Command } from "commander";
+import { z } from "zod";
 
 import {
   baselinePath,
@@ -24,6 +25,7 @@ import {
   type ProbeGuardDecision,
 } from "../daemon/probeGuard.js";
 import { declaredStage } from "../daemon/declared-stage.js";
+import { PIPELINE_STAGES, type PipelineStage } from "../daemon/pipeline.js";
 import { RunStore, defaultStatePath, type Run } from "../daemon/runs.js";
 import {
   foreignCommits,
@@ -146,7 +148,7 @@ export interface GuardDeps {
   root?: string;
   store: RunStore;
   sessionId: string;
-  /** Where a boxed run declares itself; see {@link sessionRun}. */
+  /** Where a boxed run declares itself; see {@link sessionRun} and {@link containerStep}. */
   env: NodeJS.ProcessEnv;
   /** Which tool is about to run. Only `Bash` can switch off the push guard. */
   toolName?: string | undefined;
@@ -176,23 +178,37 @@ export interface GuardDeps {
  * `probeGuard.ts` gives: the guard stops the accident, not a builder working
  * to get around it.
  *
+ * **In a container the guard judges by the container's step**
+ * ([#87](https://github.com/fvermaut/timone/issues/87)), named by
+ * {@link containerStep}. A box clones Timone fresh, so its ledger is empty,
+ * and until the box named its step every session there was asked. Nobody can
+ * answer in a box, so a checking step stopped there, and a builder was asked
+ * instead of refused. The ledger still wins when it has a run. The
+ * declaration is not read in a container: a builder there must not declare
+ * itself the checker. And a container's session is never asked, run or no
+ * run: a step that neither builds nor checks is refused instead.
+ *
  * **It also refuses a run the commands that switch off the guard on its
  * pushes** (#85). See {@link pushGuardDecision}.
  */
 export function runGuard(deps: GuardDeps): string | undefined {
   const run = runForSession(deps.store, deps.sessionId);
+  const container = containerStep(deps.env);
   const stage =
     run !== undefined
       ? run.stage
-      : deps.root === undefined
-        ? undefined
-        : declaredStage(deps.root, deps.sessionId);
+      : container !== undefined
+        ? container.step
+        : deps.root === undefined
+          ? undefined
+          : declaredStage(deps.root, deps.sessionId);
   const decision =
     pushGuardDecision(deps) ??
     probeGuardDecision({
       toolName: deps.toolName,
       toolInput: deps.toolInput,
       stage,
+      container: container !== undefined,
     });
   if (decision === undefined) return undefined;
   return JSON.stringify({
@@ -302,6 +318,31 @@ export function sessionRun(
   return workBranch === undefined || workBranch === ""
     ? { project }
     : { project, workBranch };
+}
+
+/**
+ * The step a container's session runs, or undefined for a session on the
+ * host. The box names its step as `TIMONE_RUN_STAGE` (57a).
+ *
+ * **Either name marks a container**: `TIMONE_RUN_STAGE`, or the
+ * `TIMONE_RUN_PROJECT` that {@link sessionRun} reads. Only a box sets them.
+ * Reading either one is the safe direction: a session taken for a container
+ * is refused rather than asked, and a person who set one of them by hand can
+ * unset it.
+ *
+ * The step is undefined when the name is missing, empty or not a step the
+ * ledger knows. The session is still a container's, and is judged as one.
+ */
+export function containerStep(
+  env: NodeJS.ProcessEnv,
+): { step: PipelineStage | undefined } | undefined {
+  const project = env.TIMONE_RUN_PROJECT;
+  const named = env.TIMONE_RUN_STAGE;
+  if ((project === undefined || project === "") && (named === undefined || named === "")) {
+    return undefined;
+  }
+  const step = z.enum(PIPELINE_STAGES).safeParse(named);
+  return { step: step.success ? step.data : undefined };
 }
 
 /** What `Stop` decided, for the caller that has to act on it. */
