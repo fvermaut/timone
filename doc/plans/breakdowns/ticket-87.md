@@ -1,6 +1,6 @@
 # Breakdown
 
-**Status:** Awaiting approval
+**Status:** Approved by fvermaut 2026-10-08 — 2 pieces
 
 In this list, "the check folders" are the two `probes` folders listed in `PROBE_DIRECTORIES` in `src/daemon/probeGuard.ts`, as in [PRD-10](../../specs/prd/prd-10-the-probe-guard-knows-the-step-in-a-container.md).
 
