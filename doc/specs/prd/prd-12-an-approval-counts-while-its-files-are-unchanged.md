@@ -1,6 +1,6 @@
 # PRD-12: An approval counts while the files it approves are unchanged, and a terminal session's work becomes the run's
 
-> **Status:** Draft
+> **Status:** Active (approved by fvermaut at 2026-10-08T09:08:18Z)
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-12-an-approval-counts-while-its-files-are-unchanged.criteria.md](prd-12-an-approval-counts-while-its-files-are-unchanged.criteria.md)
 > **Phases:** none yet
