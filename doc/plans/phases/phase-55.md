@@ -1,6 +1,6 @@
 # Phase 55: Tests make their throwaway repositories without the run's git settings — the whole suite passes inside a run's container, and the push guard is unchanged
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-55-complete.md](reports/phase-55-complete.md).
 
 > **Companion phases:** [phase 52](phase-52.md) — its build and check reports ([phase-52-complete.md](reports/phase-52-complete.md), [phase-52-verification.md](reports/phase-52-verification.md)) are where the 70 failing tests and the 7 blocked checks were first recorded. [phase 54](phase-54.md) — the last one merged; it touched none of the files below. No other open phase changes these four test files. Governing decisions: [ADR-0041](../../adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md) — a run happens in a container, and that container is where the push guard is switched on, so the container is where the suite must pass. [ADR-0048](../../adr/0048-a-verification-probe-is-kept-proved-able-to-fail-and-hidden-from-the-builder.md) — the older checks are hidden from the step that builds; this phase's building step does not read, name or change them (PRD-11.R5). [ADR-0051](../../adr/0051-timone-verifies-itself-by-live-gate-and-a-regression-set-is-narrowed-by-what-it-depends-on.md) D4 — how the regression set below is derived. [ADR-0050](../../adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md) D5 — this project is Timone, so `src/` is committed here.
 
