@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Command } from "commander";
 
 import { clearStage, declareStage } from "../daemon/declared-stage.js";
@@ -46,7 +46,8 @@ function guardSays(sessionId: string, choice: StageChoice): string {
   }
   const { stage } = choice;
   const verdict = probeGuardDecision({
-    toolInput: PROBE_DIRECTORIES[0],
+    toolName: "Read",
+    toolInput: { file_path: join(PROBE_DIRECTORIES[0], "x.mjs") },
     stage,
   })?.permissionDecision;
   switch (verdict) {

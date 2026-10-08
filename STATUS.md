@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-06.
+**Last updated:** 2026-10-08.
 
 ---
 
@@ -61,6 +61,10 @@
 **1l. Piece 2 of #213 ([#218](https://github.com/fvermaut/timone/issues/218)), in Timone's own repository: pull request [#223](https://github.com/fvermaut/timone/pull/223) is open for your review, from the branch `timone/218-2-every-question-names-the-command`.** Every question the machine asks now ends, just above its last line, with "You can answer here in writing, or in your terminal by running `timone takeover <project>#<n>`", with the ticket's real number, also on a pull request. It is left out for a missing key, a misspelled "approve", and after a terminal session that did not settle things. The check found no fault. The review of the code style found 4 things, mostly repeated code. The review against the requirements found 3 small gaps: a question that already holds the command does not get the sentence, a wrong command next to the right one is not refused, and the delivery instructions name only one section of the pull request. Before you merge: the replay against the real model was not run (`npm run --silent replay`, from a logged-in terminal, on the branch), the whole test suite needs a run on your machine, and a watched run on scratch-app is owed. Both reviews are in the [delivery report](doc/plans/phases/reports/phase-53-delivery.md). This status file is on that branch and reaches `main` with the pull request.
 
 **What I need from you:** run the replay on the branch, then review and merge #223 if you agree.
+
+**1m. Piece 1 of #87 ([#229](https://github.com/fvermaut/timone/issues/229)): pull request [#232](https://github.com/fvermaut/timone/pull/232) is open for your review, from the branch `timone/229-1-the-guard-judges-only-real-reads-and-w`.** The guard that keeps a builder away from the check scripts now judges only real reads, lists, runs and writes. A helper's prompt, a commit message, or ticket text that only names the folders passes. Both requirements pass, after one fix. The review of the code style found 3 things: two unused fields, one long function, and a flag that switches what a function reads. The review against the requirements found 3: five reads that `main` refuses now pass, such as `npx tsx -e "…"` and `awk` or `sed` programs; a commit message that starts with the folder's path is still refused; and a search of the folder above the check scripts is not judged, as on `main`. Before you merge: the replay against the real model was not run (`npm run --silent replay`, from a terminal signed in to the model), and live gates are owed. Both reviews are in the [delivery report](doc/plans/phases/reports/phase-56-delivery.md). This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** run the replay on the branch and reply on #232 with its result line, then decide on the first requirements finding before you merge.
 
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 

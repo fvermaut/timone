@@ -76,7 +76,7 @@ In this register:
 ## R4 — Text that only names a check-script folder is not judged
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a building step's session, a checking step's session, and a person's session, on the host and in a container
@@ -97,7 +97,7 @@ In this register:
 ## R5 — A real read, list, run or write of a check script is still judged
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN a building step's session, in a container and on the host
