@@ -162,7 +162,9 @@ export function fixture(opts = {}) {
     forgePath: path.join(dir, 'forge.json'),
     env(port) {
       const env = { ...process.env };
-      for (const k of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT']) delete env[k];
+      for (const k of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SSE_PORT', 'TIMONE_RUN_STAGE']) delete env[k];
+      // ✏ 2026-10-08 (phase 57 verification): TIMONE_RUN_STAGE, the container's step, is not passed on to
+      // the fixture's daemon, so a verifier running in a container that carries one does not lend it out.
       Object.assign(env, {
         PATH: `${path.join(dir, 'bin')}:${process.env.PATH}`,
         FAKE_GH_LOG: path.join(dir, 'gh.log'),
