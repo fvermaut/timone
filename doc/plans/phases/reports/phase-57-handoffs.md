@@ -474,3 +474,70 @@ In a container (when `TIMONE_RUN_PROJECT` or `TIMONE_RUN_STAGE` is set to a non-
 - `timone stage none` in a container clears the declaration, exits 0, and prints `Session <id> runs in a container whose step is <step>. In a container the step decides what the guard does, and taking a declaration back changes nothing.` If the container names no step it prints `Session <id> runs in a container that names no step Timone knows. In a container the step decides what the guard does, and taking a declaration back changes nothing.`
 
 The declared step plays no part in any of these sentences. On the host the sentences are unchanged: "is now the checking step: …", "is now the <step> step, which builds code: …", "is now the <step> step, which neither builds nor checks: …", and "no longer declares a step: …". An unknown step is still refused with exit 1, in a container or not.
+
+## 57d — The skills say where a runner-started session's step comes from
+
+**Built.** The last sentence of the paragraph on declaring a step, in three skills, now says where a runner-started session's step comes from. The ledger knows it, or, in a container, the container does. In a container `node dist/cli.js stage` changes nothing. Each carries a dated marker for PRD-10 and phase 57. The PRD-10 header now names phase 56 and phase 57, linked. Nothing else changed.
+
+The new text, the same in all three skills: "A session the runner started does neither: the ledger knows its step or, in a container, the container does. In a container `node dist/cli.js stage` changes nothing", followed by `✏ 2026-10-08 ([PRD-10](../../../doc/specs/prd/prd-10-the-probe-guard-knows-the-step-in-a-container.md), phase 57)`.
+
+**Files touched.**
+
+- `.claude/skills/timone-verify/SKILL.md` — the last sentence of the paragraph at line 124; marker before the closing full stop.
+- `.claude/skills/timone-execute/SKILL.md` — the last sentence of the paragraph at line 49; marker after the full stop.
+- `.claude/skills/timone-update/SKILL.md` — the last sentence of the paragraph at line 46; marker before the closing full stop.
+- `doc/specs/prd/prd-10-the-probe-guard-knows-the-step-in-a-container.md` — `**Phases:**` changed from "none yet" to `[phase 56](../../plans/phases/phase-56.md) (piece 1, #192), [phase 57](../../plans/phases/phase-57.md) (piece 2, #87)`.
+- `doc/plans/phases/reports/phase-57-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- The excerpt says "`timone stage`". The paragraphs write the command as `node dist/cli.js stage`, a few words earlier. The new sentence uses that form, so the reader sees the same command twice and not two names for one thing.
+- The one old sentence became two short ones. The first keeps "does neither" and adds the container. The second says the command changes nothing there.
+- Each marker follows its own paragraph's style. The verify paragraph puts its ADR-0060 marker inside the sentence, before the full stop. The execute paragraph puts it after the full stop. The update paragraph had no marker, so it uses the verify form.
+- The PRD's `**Phases:**` line follows the form other PRDs use (`[phase 40](…) (piece 1, #165), …`). Phase 56's file names #192 throughout; phase 57's names #87.
+- The relative links were checked by listing them from each file's folder: `../../../doc/specs/prd/prd-10-…md` from each of the three skill folders, and `../../plans/phases/phase-56.md` and `phase-57.md` from `doc/specs/prd/`. All exist.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+Run from the project root:
+
+```
+$ grep -n "ledger already knows its step" .claude/skills/timone-verify/SKILL.md .claude/skills/timone-execute/SKILL.md .claude/skills/timone-update/SKILL.md; echo "exit: $?"
+exit: 1
+
+$ grep -c "container" .claude/skills/timone-verify/SKILL.md .claude/skills/timone-execute/SKILL.md .claude/skills/timone-update/SKILL.md
+.claude/skills/timone-verify/SKILL.md:3
+.claude/skills/timone-execute/SKILL.md:2
+.claude/skills/timone-update/SKILL.md:1
+
+$ grep -n "Phases:" doc/specs/prd/prd-10-the-probe-guard-knows-the-step-in-a-container.md
+7:> **Phases:** [phase 56](../../plans/phases/phase-56.md) (piece 1, #192), [phase 57](../../plans/phases/phase-57.md) (piece 2, #87)
+
+$ npx vitest run src/process-text.test.ts; echo "exit: $?"
+ ✓ src/process-text.test.ts (43 tests) 8ms
+ Test Files  1 passed (1)
+      Tests  43 passed (43)
+exit: 0
+
+$ git diff --stat
+ .claude/skills/timone-execute/SKILL.md                                | 2 +-
+ .claude/skills/timone-update/SKILL.md                                 | 2 +-
+ .claude/skills/timone-verify/SKILL.md                                 | 2 +-
+ doc/specs/prd/prd-10-the-probe-guard-knows-the-step-in-a-container.md | 2 +-
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+```
+
+`git diff --stat` was taken before this section was added; the handoff file is the fifth changed file. `git diff --word-diff` shows, in each skill, only `[-already-]` removed and the end of the sentence replaced. Nothing else in the three paragraphs changed.
+
+Checkboxes:
+
+- [x] Each of the three paragraphs says where the step comes from in a container, carries a dated marker, and is otherwise unchanged.
+- [x] The PRD header names both phases.
+- [x] No file outside these four was changed by this sub-phase, other than its own handoff section.
+
+Tests run at slice end: `src/process-text.test.ts` (43 passed). The whole suite was not run, as asked.
+
+**What delivery must know.**
+
+- The three skill sentences describe what 57b and 57c built: in a container the guard takes the step from the container, and `timone stage` writes the declaration but says it changes nothing. If either changes before merge, these sentences must change with it.
+- The copies of these skills at the Timone root (a different repository) were not touched.
