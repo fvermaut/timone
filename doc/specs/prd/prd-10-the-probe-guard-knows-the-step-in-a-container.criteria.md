@@ -31,7 +31,7 @@ In this register:
 ## R2 — In a container with no run in the ledger, the guard judges by the container's step
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN an empty ledger and a container session whose step is `verification`
@@ -58,7 +58,7 @@ In this register:
 ## R3 — In a container the guard never asks
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN an empty ledger and a container session whose step is any name in `PIPELINE_STAGES` that is neither a building nor a checking step (for example `requirements`, `planning`, `delivery`)
@@ -118,7 +118,7 @@ In this register:
 ## R6 — A test runs the guard command as a container session runs it
 
 - **Priority:** MUST
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN the project's test suite
@@ -133,7 +133,7 @@ In this register:
 ## R7 — `timone stage` does not claim a step in a container
 
 - **Priority:** SHOULD
-- **Status:** draft
+- **Status:** verified
 - **Verify-via:** api
 - **Criteria:** In a container session, `timone stage verification` says that the container's step decides what the guard does, names that step, and does not say that the session is now the checking step. A person's session gets the same sentences as today.
 - **Verification hint:** the sentence is built by `guardSays` in `src/commands/stage.ts`, which assumes a session run by hand.

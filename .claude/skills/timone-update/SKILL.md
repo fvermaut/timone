@@ -43,7 +43,7 @@ Run every git command on the project with `git -C projects/<name> …`. Run Timo
 - **The contents of the probe folder the check uses (see `timone-verify`).** You *run* the check scripts it holds. You never open, print or list them. `update-checks` gives you each script's path, and you pass that path to the program that runs it.
 - **What a fix context did, beyond what it returns**: never its transcript, never its diff.
 
-**In a session run by hand, declare this step before you run the first check script.** A hook in front of every tool call keeps the check scripts away from builders, and a session run by hand has no step in the ledger. Run `node dist/cli.js stage update --session <your session id>` first, and `node dist/cli.js stage none --session <your session id>` at the end. The session start hook told you the id. A session the runner started does neither: the ledger already knows its step.
+**In a session run by hand, declare this step before you run the first check script.** A hook in front of every tool call keeps the check scripts away from builders, and a session run by hand has no step in the ledger. Run `node dist/cli.js stage update --session <your session id>` first, and `node dist/cli.js stage none --session <your session id>` at the end. The session start hook told you the id. A session the runner started does neither: the ledger knows its step or, in a container, the container does. In a container `node dist/cli.js stage` changes nothing ✏ 2026-10-08 ([PRD-10](../../../doc/specs/prd/prd-10-the-probe-guard-knows-the-step-in-a-container.md), phase 57).
 
 ## The procedure
 

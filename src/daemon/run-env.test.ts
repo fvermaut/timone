@@ -104,6 +104,14 @@ describe("parseRunEnv", () => {
     );
   });
 
+  it("refuses TIMONE_RUN_STAGE, the step the checks believe the box runs", () => {
+    // A line that set it would choose which of the step's rules the guard
+    // inside the box applies (PRD-10.R1, #87).
+    expect(() => parseRunEnv("TIMONE_RUN_STAGE=verification\n", AT)).toThrow(
+      `${AT}:1 sets TIMONE_RUN_STAGE, which is the box's own`,
+    );
+  });
+
   it("refuses a value a shell and dotenv would read differently", () => {
     // The value is written into a `.env` that is both sourced by a shell and
     // parsed by dotenv, and there is no escaping of a quote or a backslash

@@ -51,11 +51,15 @@ export function runEnvPath(root: string, project: string): string {
  * branch a run's push may reach and the run the checks believe they belong
  * to, and at a step with no work branch the box sets no `TIMONE_RUN_BRANCH`
  * of its own, so a line in this file would have been the one the guard used.
+ * `TIMONE_RUN_STAGE` is here for the same reason (PRD-10.R1,
+ * [timone#87](https://github.com/fvermaut/timone/issues/87)): it names the
+ * step the box runs, and the guard inside the box applies that step's rules.
  */
 const RESERVED = new Set([
   "TIMONE_REMOTE",
   "TIMONE_RUN_BRANCH",
   "TIMONE_RUN_PROJECT",
+  "TIMONE_RUN_STAGE",
   "TIMONE_COMMIT",
   "TIMONE_PROMPT",
   "TIMONE_MODEL",

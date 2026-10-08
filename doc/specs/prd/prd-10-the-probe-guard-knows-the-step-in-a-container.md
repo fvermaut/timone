@@ -4,7 +4,7 @@
 > **Approved by:** fvermaut, 2026-10-07T06:38:36Z
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-10-the-probe-guard-knows-the-step-in-a-container.criteria.md](prd-10-the-probe-guard-knows-the-step-in-a-container.criteria.md)
-> **Phases:** none yet
+> **Phases:** [phase 56](../../plans/phases/phase-56.md) (piece 1, #192), [phase 57](../../plans/phases/phase-57.md) (piece 2, #87)
 
 ## Problem
 

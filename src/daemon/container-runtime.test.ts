@@ -27,6 +27,7 @@ function request(): SessionRequest {
     cwd: "/root",
     prompt: "do the thing",
     model: "claude-opus-5",
+    stage: "execution",
     workspace: {
       timone: { commit: TIMONE_COMMIT, remote: "https://github.com/fvermaut/timone.git" },
       project: {
@@ -435,6 +436,7 @@ describe("what the box is given, and what it is not", () => {
       cwd: "/root",
       prompt: "do the thing",
       model: "claude-opus-5",
+      stage: "execution",
     });
 
     await expect(runtimeWith(spawn).start(bare)).rejects.toThrow(/workspace/);
@@ -451,6 +453,7 @@ describe("what the box is given, and what it is not", () => {
       cwd: "/root",
       prompt: "do the thing",
       model: "claude-sonnet-5",
+      stage: "execution",
       workspace: {
         timone: {
           commit: TIMONE_COMMIT,
@@ -543,11 +546,14 @@ describe("the environment the box gets for the project", () => {
     const { call } = await boxed({
       GH_TOKEN: "ghp_someone_else",
       TIMONE_PROMPT: "do something else entirely",
+      TIMONE_RUN_STAGE: "triage",
     } as Record<string, string>);
 
     expect(call.env?.GH_TOKEN).toBe("ghs_boxed");
     expect(call.env?.TIMONE_PROMPT).toMatch(/do the thing$/);
     expect(call.env?.TIMONE_PROMPT).not.toContain("do something else entirely");
+    // ✏ 57a: the step the box runs is the box's own too (PRD-10.R1, #87).
+    expect(call.env?.TIMONE_RUN_STAGE).toBe("execution");
   });
 
   it("says which file it read, so a missing one is visible before the run", async () => {
@@ -1090,6 +1096,7 @@ describe("cloning a remote the box can actually reach", () => {
       cwd: "/root",
       prompt: "do the thing",
       model: "claude-opus-5",
+      stage: "execution",
       workspace: {
         // What `git remote get-url origin` answers on a machine set up with
         // SSH keys — which is fvermaut's, and is how his timone checkout is
@@ -1838,6 +1845,7 @@ describe("a box that can take a message while a step runs", () => {
       cwd: "/root",
       prompt: "do the thing",
       model: "claude-opus-5",
+      stage: "execution",
       interactive: true,
       workspace: {
         timone: { commit: TIMONE_COMMIT, remote: "https://github.com/fvermaut/timone.git" },
@@ -2052,11 +2060,14 @@ describe("a box that can take a message while a step runs", () => {
     const run = calls.find((call) => call.args[0] === "run")!;
     // ✏ 43c: the one change to the arguments since is the run's project,
     // forwarded by name after the project's branch.
+    // ✏ 57a: and the step the box runs, forwarded by name after the project.
     const branchAt = ARGS_BEFORE_40D.indexOf("PROJECT_BRANCH") + 1;
     expect(run.args.slice(0, -1)).toEqual([
       ...ARGS_BEFORE_40D.slice(0, branchAt),
       "-e",
       "TIMONE_RUN_PROJECT",
+      "-e",
+      "TIMONE_RUN_STAGE",
       ...ARGS_BEFORE_40D.slice(branchAt),
     ]);
     // ✏ 43a: the one change since is the push guard, installed just before
@@ -2219,6 +2230,20 @@ describe("what the box tells the checks about its run", () => {
     expect(run.args[at - 1]).toBe("-e");
     expect(run.env?.TIMONE_RUN_PROJECT).toBe("scratch-app");
     expect(run.args.join(" ")).not.toContain("TIMONE_RUN_PROJECT=");
+  });
+
+  it("names the step the box runs, by name (PRD-10.R1, #87)", async () => {
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({ image: "timone-box:test", spawn }).start({
+      ...request(),
+      stage: "verification",
+    });
+
+    const run = calls.find((call) => call.args[0] === "run")!;
+    const at = run.args.indexOf("TIMONE_RUN_STAGE");
+    expect(run.args[at - 1]).toBe("-e");
+    expect(run.env?.TIMONE_RUN_STAGE).toBe("verification");
+    expect(run.args.join(" ")).not.toContain("TIMONE_RUN_STAGE=");
   });
 });
 

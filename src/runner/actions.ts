@@ -966,6 +966,9 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         // not Timone's version is known, because the guard does not depend
         // on the workspace.
         workBranch: branch,
+        // The step the box runs, for the checks inside it (PRD-10.R1, #87):
+        // the same stage the ledger is given just below.
+        stage,
       });
 
       // **The ledger learns the step before the step starts** (40r), as the
@@ -1154,6 +1157,9 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         model: APPROVAL_RECORD_MODEL,
         ...workspaceFor(await deps.timonePin(), deps.project, branch),
         workBranch: branch,
+        // The step whose file it writes, for the checks inside the box
+        // (PRD-10.R1, #87).
+        stage,
       });
       let session: StepSession;
       try {

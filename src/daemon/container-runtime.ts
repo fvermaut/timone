@@ -1090,6 +1090,9 @@ export function containerRuntime(
         // (#85). The box's ledger is empty, so this is how they know the
         // session is a run's and not a person's.
         TIMONE_RUN_PROJECT: workspace.project.name,
+        // Which step the box runs, for the guard inside it (PRD-10.R1, #87).
+        // The box's ledger is empty, so it cannot read the step from there.
+        TIMONE_RUN_STAGE: request.stage,
         // The one branch this run's pushes may reach (#85). Absent at a step
         // that owns none, and then the guard lets nothing through.
         ...(request.workBranch === undefined

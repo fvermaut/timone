@@ -174,7 +174,8 @@ export function hookCli(cli, sub, fx, payload, env = {}) {
   try {
     const out = execFileSync(process.execPath, [cli, 'guardrails', sub, '--root', fx.dir, '--state', fx.statePath], {
       cwd: fx.dir, input: JSON.stringify(payload), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, TIMONE_RUN_PROJECT: '', TIMONE_RUN_BRANCH: '', ...env },
+      // ✏ 2026-10-08 (phase 57 verification): TIMONE_RUN_STAGE, the container's step, is cleared too.
+      env: { ...process.env, TIMONE_RUN_PROJECT: '', TIMONE_RUN_BRANCH: '', TIMONE_RUN_STAGE: '', ...env },
     });
     return { code: 0, out };
   } catch (e) {

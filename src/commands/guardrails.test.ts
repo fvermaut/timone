@@ -378,7 +378,7 @@ describe("finding the run that drove a session", () => {
       },
       {
         runId: run.id,
-        request: sessionRequest({ cwd: dir, prompt: "go", model: "claude-opus-4-6" }),
+        request: sessionRequest({ cwd: dir, prompt: "go", model: "claude-opus-4-6", stage: "execution" }),
         label: `${run.id} (clarification)`,
       },
     );
@@ -1256,13 +1256,27 @@ describe("the guard judges only real reads and writes, for every kind of session
   const SESSIONS = [
     { who: "an execution run", stage: "execution", read: "deny" },
     { who: "a verification run", stage: "verification", read: "allow" },
-    { who: "a person", stage: undefined, read: "ask" },
+    // ✏ 57b: a person's session is refused in a container, where nobody can be asked, PRD-10 R3.
+    { who: "a person", stage: undefined, read: "ask", readInContainer: "deny" },
   ] as const;
   const PLACES = [
     { where: "on the host", env: {} },
-    { where: "in a container", env: { TIMONE_RUN_PROJECT: "timone" } },
+    // ✏ 57b: a run's container also names the run's step, PRD-10 R3.
+    { where: "in a container", env: { TIMONE_RUN_PROJECT: "timone" }, namesStep: true },
   ] as const;
-  const KINDS = SESSIONS.flatMap((session) => PLACES.map((place) => ({ ...session, ...place })));
+  // ✏ 57b: the two marked rows above, applied to each kind, PRD-10 R3.
+  const KINDS = SESSIONS.flatMap((session) =>
+    PLACES.map((place) =>
+      "namesStep" in place
+        ? {
+            ...session,
+            ...place,
+            env: session.stage === undefined ? place.env : { ...place.env, TIMONE_RUN_STAGE: session.stage },
+            read: "readInContainer" in session ? session.readInContainer : session.read,
+          }
+        : { ...session, ...place },
+    ),
+  );
 
   const judge = (
     stage: "execution" | "verification" | undefined,
@@ -1310,5 +1324,144 @@ describe("the guard judges only real reads and writes, for every kind of session
     expect(JSON.parse(reply ?? "{}")).toMatchObject({
       hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: read },
     });
+  });
+});
+
+// The block below loads the list of steps the same way, next to its use.
+const { PIPELINE_STAGES } = await import("../daemon/pipeline.js");
+
+/**
+ * #87: a check run in a container was asked about its own check scripts, and
+ * nobody was there to answer. A builder there was asked too, not refused. The
+ * container now names its step (57a), and the guard judges by it. Every case
+ * has an empty ledger unless it says otherwise, because that is the state of
+ * every session in a container. Like the block above, this one never calls
+ * `workspace()`, so it runs in a container too (#220).
+ */
+describe("the guard in a container knows its step (PRD-10 R2, R3)", () => {
+  const probe = `${PROBE_DIRECTORIES[0]}/prd-10.r1.mjs`;
+  const sessionId = "session-87";
+
+  /** A root of its own, with nothing in it but what the test writes. */
+  const freshRoot = (): string => {
+    const root = mkdtempSync(join(tmpdir(), "timone-guard-container-"));
+    tempDirs.push(root);
+    return root;
+  };
+
+  /** A container's environment at `step`; undefined leaves the step out. */
+  const boxed = (step: string | undefined): NodeJS.ProcessEnv =>
+    step === undefined ? { TIMONE_RUN_PROJECT: "timone" } : { TIMONE_RUN_PROJECT: "timone", TIMONE_RUN_STAGE: step };
+
+  /** What the guard answers, or undefined when it says nothing. */
+  const judge = (
+    env: NodeJS.ProcessEnv,
+    toolName: string,
+    toolInput: unknown,
+    root: string = freshRoot(),
+    store: RunStore = newStore(root),
+  ): { permissionDecision?: string; permissionDecisionReason?: string } | undefined => {
+    const reply = runGuard({ root, store, sessionId, env, toolName, toolInput });
+    return reply === undefined ? undefined : JSON.parse(reply).hookSpecificOutput;
+  };
+
+  it("lets the checking step write a check script and run it", () => {
+    expect(judge(boxed("verification"), "Write", { file_path: probe, content: "x" })?.permissionDecision).toBe("allow");
+    expect(judge(boxed("verification"), "Bash", { command: `node ${probe}` })?.permissionDecision).toBe("allow");
+  });
+
+  it("lets the update read a check script", () => {
+    expect(judge(boxed("update"), "Read", { file_path: probe })?.permissionDecision).toBe("allow");
+  });
+
+  /** The builder's reason, word for word as on the host. */
+  const builderReason =
+    `Refused: ${PROBE_DIRECTORIES.join(" and ")} hold the checks that will be run against what you build. ` +
+    "A builder that reads them writes code to pass them, which is the same fault " +
+    "as a verifier checking against your own test suite, with the two parties " +
+    "swapped. Carry on without them. If you believe a probe is wrong, that is a " +
+    "finding for the human, not a file to open.";
+
+  it.each(["execution", "remediation"])("refuses a check script to the building step %s", (step) => {
+    expect(judge(boxed(step), "Read", { file_path: probe })).toEqual({
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: builderReason,
+    });
+  });
+
+  it("does not read a declaration in a container: a builder that declared the checking step is still refused", () => {
+    const root = freshRoot();
+    declareStage(root, sessionId, "verification");
+
+    expect(judge(boxed("execution"), "Read", { file_path: probe }, root)?.permissionDecision).toBe("deny");
+  });
+
+  it("goes by the ledger when it has a run for the session, whatever the container says", () => {
+    const root = freshRoot();
+    const store = newStore(root);
+    const { run } = store.register("timone", 230);
+    store.activate(run.id, sessionId);
+    store.setStage(run.id, "execution");
+
+    expect(judge(boxed("verification"), "Read", { file_path: probe }, root, store)?.permissionDecision).toBe("deny");
+  });
+
+  it("still asks a person with no declaration, and lets one through who declared the checking step", () => {
+    expect(judge({}, "Read", { file_path: probe })?.permissionDecision).toBe("ask");
+
+    const root = freshRoot();
+    declareStage(root, sessionId, "verification");
+    expect(judge({}, "Read", { file_path: probe }, root)?.permissionDecision).toBe("allow");
+  });
+
+  /** The one reason a container gets when its step neither builds nor checks. */
+  const containerReason =
+    `Refused: ${PROBE_DIRECTORIES.join(" and ")} hold the checks, and only the checking step uses them. ` +
+    "This session runs in a container, where nobody can be asked, so the guard refuses rather than asks.";
+
+  /** Steps a container may name that are not steps: missing, empty, unknown. */
+  const ODD = [
+    { step: undefined, label: "no step" },
+    { step: "", label: "an empty step" },
+    { step: "nonsense", label: "an unknown step" },
+  ];
+  const EVERY = [...PIPELINE_STAGES.map((step) => ({ step, label: step })), ...ODD];
+  const BUILDING: readonly string[] = ["execution", "remediation"];
+  const CHECKING: readonly string[] = ["verification", "update"];
+  const NEITHER = EVERY.filter(({ step }) => step === undefined || (!BUILDING.includes(step) && !CHECKING.includes(step)));
+
+  it.each(EVERY)("never asks about a check script, at $label", ({ step }) => {
+    expect(judge(boxed(step), "Read", { file_path: probe })?.permissionDecision).not.toBe("ask");
+  });
+
+  it.each(NEITHER)("refuses with the one container reason, at $label", ({ step }) => {
+    expect(judge(boxed(step), "Read", { file_path: probe })).toEqual({
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: containerReason,
+    });
+  });
+
+  it("refuses, not asks, a run the ledger has at planning, in a container", () => {
+    const root = freshRoot();
+    const store = newStore(root);
+    const { run } = store.register("timone", 230);
+    store.activate(run.id, sessionId);
+    store.setStage(run.id, "planning");
+
+    expect(judge(boxed("planning"), "Read", { file_path: probe }, root, store)).toEqual({
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: containerReason,
+    });
+  });
+
+  it.each([
+    { step: "execution", label: "execution" },
+    { step: "verification", label: "verification" },
+    { step: undefined, label: "no step" },
+  ])("says nothing about a call that names no folder, at $label", ({ step }) => {
+    expect(judge(boxed(step), "Read", { file_path: "src/cli.ts" })).toBeUndefined();
   });
 });

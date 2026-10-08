@@ -27,6 +27,9 @@ fs.writeFileSync(STATE, JSON.stringify({ version: 1, runs: [run('build-1', 'exec
 process.on('exit', () => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 // The kinds of session the register names. `box` sets TIMONE_RUN_PROJECT, as a container does.
+// ✏ 2026-10-08 (phase 57 verification): TIMONE_RUN_STAGE, the container's step since phase 57, is
+// cleared too, so a verifier running in a container that carries one does not pass it on to these
+// sessions. Every session here takes its step from the ledger.
 export const SESSIONS = {
   'building, host': { sid: 'build-1', box: false },
   'building, container': { sid: 'build-1', box: true },
@@ -38,7 +41,7 @@ export const SESSIONS = {
 // The guard's answer: 'deny' | 'allow' | 'ask' | 'silent'. Anything else throws.
 export function judge(session, tool, input, cli = CLI) {
   const { sid, box } = SESSIONS[session];
-  const env = { ...process.env, TIMONE_RUN_PROJECT: box ? 'fixture' : '', TIMONE_RUN_BRANCH: box ? `timone/${sid === 'build-1' ? 12 : 13}-x` : '' };
+  const env = { ...process.env, TIMONE_RUN_PROJECT: box ? 'fixture' : '', TIMONE_RUN_BRANCH: box ? `timone/${sid === 'build-1' ? 12 : 13}-x` : '', TIMONE_RUN_STAGE: '' };
   const payload = { session_id: sid, hook_event_name: 'PreToolUse', cwd: ROOT, tool_name: tool, tool_input: input };
   const out = execFileSync(process.execPath, [cli, 'guardrails', 'guard', '--root', ROOT, '--state', STATE], { input: JSON.stringify(payload), encoding: 'utf8', env, stdio: ['pipe', 'pipe', 'pipe'] });
   if (!out.trim()) return 'silent';

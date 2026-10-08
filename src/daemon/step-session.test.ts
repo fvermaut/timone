@@ -41,6 +41,7 @@ const request: SessionRequest = sessionRequest({
   cwd: "/root",
   prompt: "plan the next phase of scratch-app#7",
   model: "claude-opus-5-5",
+  stage: "execution",
 });
 
 /**

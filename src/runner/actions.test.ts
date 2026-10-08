@@ -1758,6 +1758,70 @@ describe("the work branch a step's session is given", () => {
   });
 });
 
+/**
+ * The step a session runs, given to its box (PRD-10.R1, #87, 57a). A box's
+ * own ledger is empty, so the checks inside it learn the step from the
+ * request alone. It is spelled as the run's ledger records it.
+ */
+describe("the step a step's session is given", () => {
+  it("is verification, for a check started at verification, as the ledger then says", async () => {
+    const { actions, store, run, wrote, steps } = world(choreTicket());
+    wrote(triageRan(run.id));
+
+    await actions.startStep({
+      stage: "verification",
+      instructions: "Check that the column is renamed everywhere.",
+      reason: "The work is built.",
+      skipReason: "The ticket already says what to check.",
+    });
+
+    expect(steps[0]?.input.request.stage).toBe("verification");
+    expect(store.get(run.id)?.stage).toBe("verification");
+  });
+
+  it("is execution, for a build started at execution, as the ledger then says", async () => {
+    const { actions, store, run, wrote, steps } = world(choreTicket());
+    wrote(triageRan(run.id));
+    store.decidePlanner(run.id, {
+      kind: "build",
+      at: "2026-09-27T11:00:00Z",
+      reason: "Nothing else on the project is being built.",
+    });
+
+    await actions.startStep({
+      stage: "execution",
+      instructions: "Rename the column in the task list.",
+      reason: "The change is one line.",
+      skipReason: "Renaming one column needs no plan.",
+    });
+
+    expect(steps[0]?.input.request.stage).toBe("execution");
+    expect(store.get(run.id)?.stage).toBe("execution");
+  });
+
+  it("is requirements, for the session that writes an approval of the requirements into their file", async () => {
+    const { actions, store, run, wrote, steps } = world(featureTicket(APPROVAL_THREAD));
+    store.claimBranch(run.id, BRANCH);
+    wrote({
+      kind: "step-ended",
+      at: "2026-09-27T11:58:00Z",
+      runId: run.id,
+      stage: "requirements",
+      sessionId: "c9d2-requirements",
+      ok: true,
+      costUsd: 2.4,
+    });
+
+    await actions.recordApproval({
+      what: "requirements",
+      commentAt: "2026-09-27T11:58:40Z",
+      reason: "fvermaut approved the requirements.",
+    });
+
+    expect(steps[0]?.input.request.stage).toBe("requirements");
+  });
+});
+
 /** What the runner is told when every place on scratch-app is taken, held as `holder` says. */
 function noPlace(holder: string): string {
   return (
