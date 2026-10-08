@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "commander";
 
 import type { Manifest } from "../manifest.js";
@@ -22,11 +22,23 @@ import {
   runGuard,
   sessionRun,
 } from "./guardrails.js";
+import { withoutRunGitSettings } from "../test-support/run-git-settings.js";
 
 /** Temp dirs created by the current test, removed in afterEach. */
 const tempDirs: string[] = [];
 
+/** Puts back the run's git settings this file's tests ran without (PRD-11). */
+let restoreRunGitSettings: () => void = () => {};
+
+// The tests push to throwaway bare repositories. In a run's container the
+// run's push guard would refuse those pushes, so each test runs without the
+// run's git settings.
+beforeEach(() => {
+  restoreRunGitSettings = withoutRunGitSettings();
+});
+
 afterEach(() => {
+  restoreRunGitSettings();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
