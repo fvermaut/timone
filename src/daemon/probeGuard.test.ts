@@ -143,3 +143,126 @@ describe("the probe guard and the update (ADR-0066 D4)", () => {
     expect(probeGuardDecision({ toolInput: probe, stage: undefined })?.permissionDecision).toBe("ask");
   });
 });
+
+describe("what the guard judges: the file tools, the search tools and a helper (PRD-10 R4, R5)", () => {
+  // Built from the constant, so no fixture here spells a folder out.
+  const p = PROBE_DIRECTORIES[0];
+  const shared = PROBE_DIRECTORIES[1];
+
+  /** Every kind of session: the stages a run can be at, and a person. */
+  const SESSIONS = [
+    "execution",
+    "remediation",
+    "verification",
+    "update",
+    "planning",
+    undefined,
+  ] as const;
+
+  /** A call as the hook carries it: the tool's name and its input. */
+  type Call = readonly [label: string, toolName: string | undefined, toolInput: unknown];
+
+  /** Every call crossed with every kind of session. */
+  const everySession = (calls: readonly Call[]) =>
+    SESSIONS.flatMap((stage) =>
+      calls.map(([label, toolName, toolInput]) => ({ label, toolName, toolInput, stage })),
+    );
+
+  const helperPrompt = `Do not open ${p} or ${shared}.`;
+  const phaseFile = "doc/plans/phases/phase-42.md";
+
+  /** Calls that only name a folder: text, not a read or a write (R4). */
+  const onlyNames: readonly Call[] = [
+    ["an Agent prompt", "Agent", { prompt: helperPrompt, description: "d", subagent_type: "claude" }],
+    ["a Task prompt (the older name)", "Task", { prompt: helperPrompt, description: "d" }],
+    [
+      "an Edit of a plan naming a folder",
+      "Edit",
+      { file_path: phaseFile, old_string: "x", new_string: `See ${shared}/README.md.` },
+    ],
+    ["a Write of a plan naming a folder", "Write", { file_path: phaseFile, content: `See ${shared}/README.md.` }],
+    ["a Grep for a folder name in src/", "Grep", { pattern: p, path: "src/" }],
+    ["a Grep for a folder name, no path", "Grep", { pattern: p }],
+  ];
+
+  it.each(everySession(onlyNames))("is silent on $label, for stage $stage", ({ toolName, toolInput, stage }) => {
+    expect(probeGuardDecision({ toolName, toolInput, stage })).toBeUndefined();
+  });
+
+  /** What the guard says about a real read or write, word for word, by stage. */
+  const where = PROBE_DIRECTORIES.join(" and ");
+  const refused = {
+    permissionDecision: "deny",
+    permissionDecisionReason:
+      `Refused: ${where} hold the checks that will be run against what you build. ` +
+      "A builder that reads them writes code to pass them, which is the same fault " +
+      "as a verifier checking against your own test suite, with the two parties " +
+      "swapped. Carry on without them. If you believe a probe is wrong, that is a " +
+      "finding for the human, not a file to open.",
+  };
+  const allowed = (name: string) => ({
+    permissionDecision: "allow",
+    permissionDecisionReason: `${name} runs the checks kept in ${where}, so it may read them.`,
+  });
+  const asked = {
+    permissionDecision: "ask",
+    permissionDecisionReason:
+      `This is ${where}, which belongs to the stage that checks the build. ` +
+      "Nothing that builds code may read it. Allow only if you are not building.",
+  };
+  const judged = {
+    execution: refused,
+    remediation: refused,
+    verification: allowed("Verification"),
+    update: allowed("Update"),
+    planning: asked,
+    person: asked,
+  };
+
+  const full = `/workspace/timone/projects/timone/${p}/a.sh`;
+
+  /** Calls that really read, list or write a check script (R5). */
+  const reaches: readonly Call[] = [
+    ["a Read of a script", "Read", { file_path: `${p}/a.sh` }],
+    ["a Read by full path", "Read", { file_path: full }],
+    ["a Write of a script", "Write", { file_path: `${p}/a.sh`, content: "echo" }],
+    ["a Write by full path", "Write", { file_path: full, content: "echo" }],
+    ["an Edit of a script", "Edit", { file_path: `${p}/a.sh`, old_string: "a", new_string: "b" }],
+    ["an Edit by full path", "Edit", { file_path: full, old_string: "a", new_string: "b" }],
+    ["a NotebookEdit of a notebook", "NotebookEdit", { notebook_path: `${p}/a.ipynb`, new_source: "x" }],
+    ["a Glob whose pattern is inside", "Glob", { pattern: `${p}/*.mjs` }],
+    ["a Glob whose path is a folder", "Glob", { pattern: "*.mjs", path: p }],
+    ["a Grep whose path is a folder", "Grep", { pattern: "total", path: p }],
+    ["a Grep whose glob is inside", "Grep", { pattern: "total", glob: `${shared}/**` }],
+  ];
+
+  /** Tools with no rule of their own keep the old rule: any text (R5). */
+  const noRule: readonly Call[] = [
+    ["a WebFetch whose prompt names one", "WebFetch", { url: "https://example.com", prompt: `Read ${p}` }],
+    ["an MCP tool with a nested field", "mcp__x__y", { options: { paths: [`${p}/a.sh`] } }],
+    ["a call with no tool name", undefined, { file_path: `${p}/a.sh` }],
+  ];
+
+  it.each(everySession([...reaches, ...noRule]))(
+    "judges $label, for stage $stage",
+    ({ toolName, toolInput, stage }) => {
+      expect(probeGuardDecision({ toolName, toolInput, stage })).toEqual(judged[stage ?? "person"]);
+    },
+  );
+
+  /** The calls almost every session makes, which must stay unanswered. */
+  const common: readonly Call[] = [
+    ["a Read of source", "Read", { file_path: "src/index.ts" }],
+    [
+      "a Write of a report",
+      "Write",
+      { file_path: "doc/plans/phases/reports/phase-42-complete.md", content: "# Phase 42\n\nDone." },
+    ],
+    ["an Agent prompt naming nothing", "Agent", { prompt: "Summarise src/index.ts.", description: "d" }],
+    ["a Glob of source", "Glob", { pattern: "src/**/*.ts" }],
+  ];
+
+  it.each(everySession(common))("is silent on $label, for stage $stage", ({ toolName, toolInput, stage }) => {
+    expect(probeGuardDecision({ toolName, toolInput, stage })).toBeUndefined();
+  });
+});

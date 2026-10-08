@@ -45,7 +45,10 @@ function strings(value: unknown, found: string[] = []): string[] {
 }
 
 /**
- * Whether a tool call names a probe directory.
+ * Whether a tool call names a probe directory anywhere in its input.
+ *
+ * This is the rule for a tool {@link reachesProbeDirectory} has no rule for,
+ * and for a call whose tool is not known.
  *
  * Substring matching on the directory path, which is blunt in one known
  * direction: a shell command that reaches the directory in two steps (`cd
@@ -60,6 +63,56 @@ export function mentionsProbeDirectory(toolInput: unknown): boolean {
   );
 }
 
+/**
+ * The fields of a tool's input that say what the tool opens, by tool name.
+ * Every other field of these tools is text: a prompt, a file's new content,
+ * the words a search looks for.
+ */
+const TARGET_FIELDS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["Read", ["file_path"]],
+  ["Write", ["file_path"]],
+  ["Edit", ["file_path"]],
+  ["NotebookEdit", ["notebook_path"]],
+  ["Glob", ["pattern", "path"]],
+  ["Grep", ["path", "glob"]],
+  // A helper's prompt is text. What the helper then opens is its own tool
+  // call, and the guard judges that call on its own.
+  ["Agent", []],
+  ["Task", []],
+]);
+
+/**
+ * Whether a tool call reads, lists or writes a probe directory.
+ *
+ * A tool is judged by what it opens, not by every word it carries
+ * ([#192](https://github.com/fvermaut/timone/issues/192)). Judging all of the
+ * text refused a builder's helper for a prompt that told it to keep out of
+ * the probes, and then refused the plan for naming them. Only the fields
+ * that name a target are looked at; a field that is missing or not a string
+ * is skipped.
+ *
+ * A tool with no rule here, or a call whose tool is not known, keeps the old
+ * rule, {@link mentionsProbeDirectory}: all of its input text. That was the
+ * choice approved with the list, so a new tool is covered the day it
+ * appears rather than the day someone adds it here. `Bash` is judged that
+ * way too for now.
+ */
+export function reachesProbeDirectory(
+  toolName: string | undefined,
+  toolInput: unknown,
+): boolean {
+  const fields = toolName === undefined ? undefined : TARGET_FIELDS.get(toolName);
+  if (fields === undefined) return mentionsProbeDirectory(toolInput);
+  if (typeof toolInput !== "object" || toolInput === null) return false;
+  return fields.some((field) => {
+    const value: unknown = Reflect.get(toolInput, field);
+    return (
+      typeof value === "string" &&
+      PROBE_DIRECTORIES.some((directory) => value.includes(directory))
+    );
+  });
+}
+
 /** What a `PreToolUse` hook may say back to the harness. */
 export interface ProbeGuardDecision {
   permissionDecision: "allow" | "deny" | "ask";
@@ -67,6 +120,11 @@ export interface ProbeGuardDecision {
 }
 
 export interface ProbeGuardInput {
+  /**
+   * The tool's name, as the hook payload carried it (`tool_name`); undefined
+   * when the caller does not know it, which judges all of the input's text.
+   */
+  toolName?: string | undefined;
   /** The tool's own input, as the hook payload carried it. */
   toolInput: unknown;
   /** The stage of the run driving this session; undefined means a human is. */
@@ -85,7 +143,7 @@ export interface ProbeGuardInput {
 export function probeGuardDecision(
   input: ProbeGuardInput,
 ): ProbeGuardDecision | undefined {
-  if (!mentionsProbeDirectory(input.toolInput)) return undefined;
+  if (!reachesProbeDirectory(input.toolName, input.toolInput)) return undefined;
 
   const where = PROBE_DIRECTORIES.join(" and ");
 

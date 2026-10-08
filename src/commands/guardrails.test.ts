@@ -1220,3 +1220,80 @@ describe("guardrails install-merge-rules", () => {
     expect(result.exitCode).toBe(1);
   });
 });
+
+// Loaded here rather than at the top of the file, so this block adds no import
+// line there. Every fixture below is built from it, so none spells a folder out.
+const { PROBE_DIRECTORIES } = await import("../daemon/probeGuard.js");
+
+/**
+ * #192: a builder's helper was refused for a prompt that told it to keep out
+ * of the check-script folders, and then the plan was refused for naming them.
+ * This block never calls `workspace()`, so it runs in a container too (#220).
+ */
+describe("the guard judges only real reads and writes, for every kind of session (PRD-10 R4, R5)", () => {
+  const p = PROBE_DIRECTORIES[0];
+  const shared = PROBE_DIRECTORIES[1];
+  const sessionId = "session-192";
+
+  /** A root of its own, with nothing in it but what the ledger writes. */
+  const freshRoot = (): string => {
+    const root = mkdtempSync(join(tmpdir(), "timone-guard-judges-"));
+    tempDirs.push(root);
+    return root;
+  };
+
+  /** A ledger holding a run for this session at `stage`, or no run at all. */
+  const ledger = (root: string, stage: "execution" | "verification" | undefined): RunStore => {
+    const store = newStore(root);
+    if (stage === undefined) return store;
+    const { run } = store.register("timone", 229);
+    store.activate(run.id, sessionId);
+    store.setStage(run.id, stage);
+    return store;
+  };
+
+  /** Each kind of session, on the host and in a container. */
+  const SESSIONS = [
+    { who: "an execution run", stage: "execution", read: "deny" },
+    { who: "a verification run", stage: "verification", read: "allow" },
+    { who: "a person", stage: undefined, read: "ask" },
+  ] as const;
+  const PLACES = [
+    { where: "on the host", env: {} },
+    { where: "in a container", env: { TIMONE_RUN_PROJECT: "timone" } },
+  ] as const;
+  const KINDS = SESSIONS.flatMap((session) => PLACES.map((place) => ({ ...session, ...place })));
+
+  const judge = (
+    stage: "execution" | "verification" | undefined,
+    env: NodeJS.ProcessEnv,
+    toolName: string,
+    toolInput: unknown,
+  ): string | undefined => {
+    const root = freshRoot();
+    return runGuard({ root, store: ledger(root, stage), sessionId, env, toolName, toolInput });
+  };
+
+  it.each(KINDS)("lets the helper of $who be told to keep out, $where", ({ stage, env }) => {
+    const prompt = `Do not open ${p} or ${shared}.`;
+    expect(judge(stage, env, "Agent", { prompt, description: "d", subagent_type: "claude" })).toBeUndefined();
+  });
+
+  it.each(KINDS)("lets $who edit a plan that names a folder, $where", ({ stage, env }) => {
+    expect(
+      judge(stage, env, "Edit", {
+        file_path: "doc/plans/phases/phase-42.md",
+        old_string: "x",
+        new_string: `See ${shared}/README.md.`,
+      }),
+    ).toBeUndefined();
+  });
+
+  it.each(KINDS)("still judges a real read by $who, $where", ({ stage, env, read }) => {
+    const reply = judge(stage, env, "Read", { file_path: `${p}/prd-10.r1.mjs` });
+
+    expect(JSON.parse(reply ?? "{}")).toMatchObject({
+      hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: read },
+    });
+  });
+});

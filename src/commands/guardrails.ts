@@ -190,6 +190,7 @@ export function runGuard(deps: GuardDeps): string | undefined {
   const decision =
     pushGuardDecision(deps) ??
     probeGuardDecision({
+      toolName: deps.toolName,
       toolInput: deps.toolInput,
       stage,
     });
