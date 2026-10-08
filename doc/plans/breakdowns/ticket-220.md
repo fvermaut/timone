@@ -1,6 +1,6 @@
 # Breakdown
 
-**Status:** Awaiting approval
+**Status:** Approved by fvermaut 2026-10-08T05:37:53Z — 1 piece
 
 1. **Tests and older checks make their test repositories without the run's git settings** — the whole test suite, and the 7 older checks that were blocked on #219, run inside a run's container and give a real answer, while the push guard stays as it is.
    - The four test files that failed on #219 (`src/commands/guardrails.test.ts`, `src/numbers.test.ts`, `src/workspace.test.ts`, `src/commands/number.test.ts`) run git without the run's git settings when they make and use their throwaway repositories, as `src/daemon/push-guard.git.test.ts` already does. No test is removed or skipped.
