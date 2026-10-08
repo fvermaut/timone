@@ -169,3 +169,91 @@ npx tsc --noEmit                                             → exit: 0
 - The block copies cleanly into a file that already has a top-level `afterEach`: add `beforeEach` to the vitest import, import the helper from `../test-support/run-git-settings.js` (from `src/<folder>/`), and call the restore first in `afterEach`.
 - A file that uses `vi.stubEnv` / `vi.unstubAllEnvs()` needs no extra care. `vi.unstubAllEnvs()` does not bring back the run's settings, because the helper does not go through `vi.stubEnv`.
 - `/tmp/55b.log` with the JSON reporter holds only git's stderr and the "JSON report written" line, so a `grep -c 'Refused'` on it is a fair count of refusals.
+
+## 55c — The whole suite in the container, the guard still refusing `main`, and PRD-11's phase line
+
+**Built.** No code. The `Phases:` line of PRD-11 now names this phase: `> **Phases:** [phase 55](../../plans/phases/phase-55.md) (piece 1, #228)`, in the same form as PRD-09's line. The whole suite was run inside this run's container and passed. A dry-run push to `main` was refused by the push guard.
+
+**Files touched.**
+
+- `doc/specs/prd/prd-11-tests-and-checks-run-inside-a-runs-container.md` — the one `Phases:` line, which said `none yet`.
+- `doc/plans/phases/reports/phase-55-handoffs.md` — this section appended.
+
+**Decisions taken inside the slice.**
+
+- The link is relative, `../../plans/phases/phase-55.md`, as in PRD-09. The file exists at that path.
+- The PRD line was changed while the first whole-suite run was in progress. To keep the evidence clean, the whole suite was run a second time on the final files. Both runs gave the same result. The numbers below are from the second run.
+
+**Validation evidence.**
+
+No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+```
+env | grep -c '^GIT_CONFIG'                                  → 9 (a run's container)
+
+# R1 — the whole suite
+npm run build && npx vitest run --reporter=json --outputFile=/tmp/55c.json > /tmp/55c.log 2>&1
+                                                             → exit: 0
+node -e '...'                                                → total 1988 failed 0 skipped 0
+   (77 test files; 1988 = 1984 on main + the helper's 4 new tests)
+grep -c 'Refused: this run may push only to' /tmp/55c.log    → 0, exit: 1
+   (the log holds only two git "cloned an empty repository" warnings and the "JSON report written" line)
+
+# R3 — the guard and the container settings are unchanged, and their tests pass
+git diff --quiet origin/main -- src/daemon/push-guard.ts src/daemon/container-runtime.ts \
+  src/daemon/push-guard.test.ts src/daemon/push-guard.git.test.ts      → exit: 0
+npx vitest run src/daemon/push-guard.test.ts src/daemon/push-guard.git.test.ts
+                                                             → Test Files 2 passed (2), Tests 42 passed (42), exit: 0
+
+# R3 — a push to main is still refused
+git log --oneline origin/main..HEAD | head -3
+  076c659 test: 55b — guardrails tests run without the run's git settings
+  9f4411a test: 55a — tests in three files run without the run's git settings
+  13c4d57 docs: plan phase 55 — tests make their throwaway repositories without the run's git settings
+git push --dry-run origin HEAD:main; echo "exit: $?"
+  Refused: this run may push only to `timone/228-1-tests-and-older-checks-make-their-test`, and this push goes to `refs/heads/main`. Nothing reaches the project's default branch without a person's yes. Commit on `timone/228-1-tests-and-older-checks-make-their-test` and push that.
+  error: failed to push some refs to 'https://github.com/fvermaut/timone.git'
+  exit: 1
+
+# R2 — only tests and the helper changed under src/
+git diff --name-only origin/main -- src | grep -v '\.test\.ts$'        → src/test-support/run-git-settings.ts, exit: 0
+git diff --quiet origin/main -- package.json vitest.config.ts          → exit: 0
+grep -rln 'test-support/run-git-settings' src | grep -v '\.test\.ts$'  → no output, exit: 1
+
+# The files this phase changed
+git diff --name-only origin/main | grep -vE '<allow-list>'             → no output, exit: 1
+git diff --name-only origin/main
+  doc/plans/phases/phase-55.md
+  doc/plans/phases/reports/phase-55-departures.md
+  doc/plans/phases/reports/phase-55-handoffs.md
+  doc/specs/prd/prd-11-tests-and-checks-run-inside-a-runs-container.md
+  src/commands/guardrails.test.ts
+  src/commands/number.test.ts
+  src/numbers.test.ts
+  src/test-support/run-git-settings.test.ts
+  src/test-support/run-git-settings.ts
+  src/workspace.test.ts
+git status --porcelain --untracked-files=all                 →  M doc/specs/prd/prd-11-...md
+   (plus this handoff file once written)
+```
+
+Time the whole suite took: 8.9 s by vitest's own start and end times in the JSON report (7.3 s on the first run). Build and suite together: 12 s of wall-clock time.
+
+*Checkboxes:*
+
+- [x] The whole suite passes in this container: 1988 tests, 0 failed, 0 skipped, and no guard refusal line in the log.
+- [x] The dry-run push to `main` was refused by the guard, with its `Refused:` line in the output, and exited 1. The output is copied above.
+- [x] `push-guard.ts`, `container-runtime.ts` and their two test files are unchanged against `origin/main`, and those tests pass (42 of 42).
+- [ ] The completion report says R1's second clause is shown by the `tests` workflow on the pull request — left to the completion report (orchestrator).
+- [ ] The completion report says R4 and R5 are left to the step that checks the build — left to the completion report (orchestrator).
+
+*Tests run at the end of the slice:*
+
+- The whole suite — 1988 of 1988 passed, 77 test files.
+- `src/daemon/push-guard.test.ts` and `src/daemon/push-guard.git.test.ts` — 42 of 42 passed.
+
+**What delivery must know.**
+
+- The skipped count is 0, so no check against `origin/main` for skips was needed.
+- `git diff --name-only origin/main` also lists `doc/plans/phases/reports/phase-55-departures.md`. It matches the allow-list (`phase-55-[a-z-]+\.md`). This slice did not touch it.
+- The suite was run only inside a run's container here. Whether it passes outside one must come from the `tests` workflow on the pull request.

@@ -3,7 +3,7 @@
 > **Status:** Active (approved by fvermaut on 2026-10-07T06:37:37Z)
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-11-tests-and-checks-run-inside-a-runs-container.criteria.md](prd-11-tests-and-checks-run-inside-a-runs-container.criteria.md)
-> **Phases:** none yet
+> **Phases:** [phase 55](../../plans/phases/phase-55.md) (piece 1, #228)
 
 ## Problem
 
