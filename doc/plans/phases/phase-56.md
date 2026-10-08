@@ -1,6 +1,6 @@
 # Phase 56: The guard judges only real reads and writes — text that only names the check folders passes
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-56-complete.md](reports/phase-56-complete.md).
 
 > **Companion phases:** [phase 54](phase-54.md), the last merged, touched none of these files; phase 55 is reserved by another ticket. The next piece of the same list, *each container knows its step* ([breakdown of #87](../breakdowns/ticket-87.md), piece 2), changes `runGuard` in `src/commands/guardrails.ts` and `guardSays` in `src/commands/stage.ts` again, and builds on what this phase leaves. Governing decisions: [ADR-0048](../../adr/0048-a-verification-probe-is-kept-proved-able-to-fail-and-hidden-from-the-builder.md) D4 — the builder is kept from the check scripts by this hook, so every real read, list, run or write must still be judged; this phase narrows only what counts as one. [ADR-0018](../../adr/0018-the-session-bracket-belongs-to-the-hooks.md) — the guard is a `PreToolUse` hook that must never break a session, so every new path through it stays inside the existing `try`, and a command it cannot read falls back to the old rule rather than throwing. [ADR-0050](../../adr/0050-timone-becomes-a-managed-project-once-the-run-path-is-fixed.md) D5 — this project is Timone, so `src/` is committed here.
 
