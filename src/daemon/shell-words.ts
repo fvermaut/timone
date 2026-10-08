@@ -9,8 +9,8 @@
  * the guard runs on every tool call, and a parsing library would be a fifth
  * runtime dependency for one job.
  *
- * It reads the shell's quoting, separators, groups, substitutions and
- * here-documents. It does not expand anything: a variable stays as written.
+ * It reads the shell's quoting (`$'…'` and `$"…"` among it), separators,
+ * groups, substitutions, here-strings and here-documents. It does not expand anything: a variable stays as written.
  * Anything it cannot finish makes the whole command unreadable, and the guard
  * then falls back to its old rule. It never throws, since a hook that throws
  * breaks the session it runs in (ADR-0018).
@@ -20,10 +20,16 @@
 export interface SimpleCommand {
   /**
    * The words, program first, with quotes and backslashes removed. The target
-   * of a redirection is a word too. A substitution adds nothing to the word it
-   * sits in: its output is not known, and its commands are read on their own.
+   * of a redirection is a word too, but a here-string is not. A substitution
+   * adds nothing to the word it sits in: its output is not known, and its
+   * commands are read on their own.
    */
   words: string[];
+  /**
+   * The words given after `<<<`, kept apart from the command's words: they
+   * are text the command reads, not its arguments.
+   */
+  herestrings: string[];
   /** The bodies of the command's here-documents, kept apart from its words. */
   heredocs: string[];
   /** The text inside each `$( … )` and `` ` … ` `` in the command. */
@@ -46,6 +52,15 @@ interface PendingHeredoc {
 /** Characters that end a word outside quotes. */
 const WORD_ENDS = " \t\n;&|<>()";
 
+/** The one-letter escapes of `$'…'` quoting and what each stands for. */
+const ANSI_C_ESCAPES: Readonly<Record<string, string>> = {
+  a: "\x07", b: "\b", e: "\x1b", E: "\x1b", f: "\f", n: "\n", r: "\r", t: "\t", v: "\v",
+  "\\": "\\", "'": "'", '"': '"', "?": "?",
+};
+
+/** The escapes of `$'…'` quoting that give a character by its number. */
+const ANSI_C_NUMBER = /[0-7]{1,3}|x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}|U[0-9A-Fa-f]{1,8}/y;
+
 class Reader {
   private at = 0;
 
@@ -55,7 +70,7 @@ class Reader {
   ) {}
 
   private newCommand(): SimpleCommand {
-    const command: SimpleCommand = { words: [], heredocs: [], substitutions: [] };
+    const command: SimpleCommand = { words: [], herestrings: [], heredocs: [], substitutions: [] };
     this.commands.push(command);
     return command;
   }
@@ -69,11 +84,20 @@ class Reader {
     let command = this.newCommand();
     let word = "";
     let inWord = false;
+    // The next word is the text after `<<<`.
+    let herestring = false;
     const pending: PendingHeredoc[] = [];
     const endWord = (): void => {
-      if (inWord) command.words.push(word);
+      if (inWord) {
+        (herestring ? command.herestrings : command.words).push(word);
+        herestring = false;
+      }
       word = "";
       inWord = false;
+    };
+    const startCommand = (): void => {
+      command = this.newCommand();
+      herestring = false;
     };
 
     while (this.at < src.length) {
@@ -87,6 +111,16 @@ class Reader {
           inWord = true;
         }
         this.at += 2;
+      } else if (c === "$" && next === "'") {
+        // `$'…'`: quoted, with backslash escapes that stand for characters.
+        this.at += 2;
+        word += this.readAnsiC();
+        inWord = true;
+      } else if (c === "$" && next === '"') {
+        // `$"…"`: double quotes whose text may be translated; read as written.
+        this.at += 2;
+        word += this.readDoubleQuoted(command, true);
+        inWord = true;
       } else if (c === "'") {
         const end = src.indexOf("'", this.at + 1);
         if (end === -1) throw new Unreadable();
@@ -115,7 +149,7 @@ class Reader {
         endWord();
         this.at += 1;
         this.readHeredocBodies(pending.splice(0));
-        command = this.newCommand();
+        startCommand();
       } else if (c === "&" && next === ">") {
         // `&>` and `&>>` send both outputs to the word that follows.
         endWord();
@@ -123,12 +157,12 @@ class Reader {
       } else if (c === ";" || c === "&" || c === "|") {
         endWord();
         this.at += 1;
-        command = this.newCommand();
+        startCommand();
       } else if (c === "(") {
         endWord();
         this.at += 1;
         this.readList(true);
-        command = this.newCommand();
+        startCommand();
       } else if (c === ")") {
         if (!inParens || pending.length > 0) throw new Unreadable();
         endWord();
@@ -143,6 +177,7 @@ class Reader {
         endWord();
         if (src.startsWith("<<<", this.at)) {
           this.at += 3;
+          herestring = true;
         } else if (src.startsWith("<<", this.at)) {
           this.at += 2;
           const stripTabs = src.charAt(this.at) === "-";
@@ -198,6 +233,50 @@ class Reader {
     }
     if (closed) throw new Unreadable();
     return text;
+  }
+
+  /**
+   * Read the text of a `$'…'` string, from just after its opening quote, with
+   * each backslash escape replaced by the character it stands for.
+   */
+  private readAnsiC(): string {
+    const src = this.src;
+    let text = "";
+    for (;;) {
+      if (this.at >= src.length) throw new Unreadable();
+      const c = src.charAt(this.at);
+      if (c === "'") {
+        this.at += 1;
+        return text;
+      }
+      if (c !== "\\") {
+        text += c;
+        this.at += 1;
+        continue;
+      }
+      const next = src.charAt(this.at + 1);
+      const letter = ANSI_C_ESCAPES[next];
+      ANSI_C_NUMBER.lastIndex = this.at + 1;
+      const number = ANSI_C_NUMBER.exec(src);
+      if (letter !== undefined) {
+        text += letter;
+        this.at += 2;
+      } else if (number !== null) {
+        const digits = number[0];
+        const code = /^[0-7]/.test(digits) ? parseInt(digits, 8) : parseInt(digits.slice(1), 16);
+        if (code > 0x10ffff) throw new Unreadable();
+        text += String.fromCodePoint(code);
+        this.at += 1 + digits.length;
+      } else if (next === "c" && this.at + 2 < src.length) {
+        // `\cX`: the control character for X.
+        text += String.fromCharCode(src.charCodeAt(this.at + 2) & 0x1f);
+        this.at += 3;
+      } else {
+        // An escape the shell does not know keeps its backslash.
+        text += c + next;
+        this.at += 2;
+      }
+    }
   }
 
   /** Read a `$( … )` from just after its `$(`; its commands join the list. */
@@ -288,7 +367,8 @@ export function readShellCommand(command: string): SimpleCommand[] | undefined {
     const commands: SimpleCommand[] = [];
     new Reader(command, commands).readList(false);
     return commands.filter(
-      (found) => found.words.length + found.heredocs.length + found.substitutions.length > 0,
+      (found) =>
+        found.words.length + found.herestrings.length + found.heredocs.length + found.substitutions.length > 0,
     );
   } catch {
     // Unreadable, or anything else that went wrong — a nesting too deep for
