@@ -1,6 +1,6 @@
 # PRD-13: A takeover is not asked about check scripts
 
-> **Status:** Draft
+> **Status:** Active (approved by fvermaut on 2026-10-09T08:59:28Z)
 > **Project:** timone — see [product-overview.md](../product-overview.md)
 > **Criteria register:** [prd-13-a-takeover-is-not-asked-about-check-scripts.criteria.md](prd-13-a-takeover-is-not-asked-about-check-scripts.criteria.md)
 > **Phases:** none yet
