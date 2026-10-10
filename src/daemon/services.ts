@@ -187,7 +187,22 @@ export async function bringUpServices(
   remove(source);
   const remote = remoteFor(options.project.repoUrl);
   const env = credentialEnv(options.token);
-  const shallow = ["clone", "--quiet", "--depth", "1"];
+  // **One commit, and only the files at the top of the repository.** This
+  // clone is read for two files, the compose file and `.env.example`, and both
+  // sit at the top. `--filter=blob:none` fetches no file contents until git
+  // checks a file out, and `--sparse` checks out only the top-level files.
+  //
+  // A whole tree at depth 1 was 333 MB on ivtrends, and it did not fit in the
+  // runner's 90 seconds, so the step never started
+  // ([#242](https://github.com/fvermaut/timone/issues/242)).
+  const shallow = [
+    "clone",
+    "--quiet",
+    "--depth",
+    "1",
+    "--filter=blob:none",
+    "--sparse",
+  ];
 
   // **The branch may not exist yet, and that is the ordinary case, not a
   // fault.** A run's work branch is cut by the first session that owns one and

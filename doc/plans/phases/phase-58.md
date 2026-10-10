@@ -46,6 +46,8 @@ Both faults are bugs against these lines, filed as [#238](https://github.com/fve
 
 **Seams under test (TDD):** `bringUpServices`, with the command runner injected as the existing tests do, and once with the real `execCommandRunner` against a local repository. Red-green: (1) the branch clone carries `--filter=blob:none` and `--sparse` besides `--depth 1`; (2) so does the fallback clone after the branch is not found; (3) with the real runner and a local bare repository holding `compose.yaml`, `.env.example` and a file under a subfolder, the clone in `.timone/stacks/<name>` holds the two top-level files and not the subfolder's file, and the compose file is found (the run gets a stack, or the next command it runs is the compose call). Build the bare repository in a temporary folder with plain `git` calls; clone it by its `file://` URL.
 
+> ✏ 2026-10-10 (build, timone#238): in case 3, "the real runner" is a runner that passes each `git` call to the real `execCommandRunner` and records every other command without running it. The real runner would start the compose stack in Docker, which this test must not do. The test reads the clone's folder before `bringUpServices` removes it: through the injected `remove`, or by reading the folder when the first non-`git` command is recorded.
+
 > No dependency on other sub-phases.
 
 #### Agent Validation Steps
