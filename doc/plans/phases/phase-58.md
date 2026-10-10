@@ -1,6 +1,6 @@
 # Phase 58: A long command is not a hung step — the check report names the command still running, and a step's clone takes only the top-level files
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-58-complete.md](reports/phase-58-complete.md).
 
 > **Companion phases:** [phase 40](phase-40.md) built the 15-minute check and its report (`src/runner/brief.ts` `runningStepSection`, `src/daemon/progress.ts` `activitySince`), and the replay set this phase adds two cases to (`src/runner/replay/cases.ts`). [Phase 57](phase-57.md) is the last merged phase; it shares no file with this one. Governing decisions: [ADR-0060](../../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md) binds slices b and c — the runner decides from what code writes for it, so a report that says less than the truth makes it decide wrong, and a change to its rules is replayed (PRD-05.R18 clause 2). [ADR-0043](../../adr/0043-the-humans-checkout-is-theirs-alone.md) binds slice a — the clone lives in `.timone/stacks/`, never under `projects/`.
 

@@ -231,3 +231,7 @@ exit: 0
 - **The replay's running call now sends the 30-second sign up to the wake**, so both new prompts show "last printed" at the wake, with no "silent since" line, as on ivtrends#178 and #177. The two cases differ for the runner only in how long the one command has run: 35 minutes against 233 minutes. The rule from 58b (more than two hours) is what tells them apart.
 - The brief says "Not held." for both new tickets, though they carry `timone:held`, as every step ticket does while its run lives. The #110 case shows the same. This is how the brief already reads a step ticket, and this slice did not change it.
 - A `start_step` call while a step runs is refused by the actions, so the long case's "no step started" check cannot be made to fail through the scripted runner. Only its "not stopped" check was seen to fail.
+
+### 58c — the human gate, as answered (added by the orchestrator, 2026-10-10)
+
+The real replay could not run from this session: every try failed with "OAuth session expired and could not be refreshed", at $0.00. fvermaut ran `npm run replay` from his own terminal on the branch at `66a7af7`: 23 of 24 cases passed, $2.97. Both #238 cases passed three tries of three. #132 failed three of three; its cause is older than this phase (see [phase-58-replay.md](phase-58-replay.md)).
