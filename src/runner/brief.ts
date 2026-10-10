@@ -41,9 +41,17 @@ export interface StepActivity {
   startedAt: string;
   /** The commands and tools it used since the last check, as `Bash(npm test)`. */
   tools: readonly string[];
-  /** When it last wrote anything, or undefined when it has written nothing yet. */
+  /**
+   * The calls it started and has had no result for yet, oldest first, each
+   * with the time it started. One may have started before the last check.
+   */
+  running: readonly { name: string; since: string }[];
+  /**
+   * When it last printed anything, a running command's 30-second sign
+   * included, or undefined when it has printed nothing yet.
+   */
   lastOutputAt?: string;
-  /** How much it has written, in tokens. */
+  /** How much it wrote since the last check, in tokens. */
   outputTokens: number;
   /** When it went quiet, when it is quiet now. */
   silentSince?: string;
@@ -162,6 +170,7 @@ const SYSTEM = [
   "- The newest comment on the ticket must say truthfully what the ticket needs now. A person reads that comment first. When it is the machine's and is no longer true, because it asks for something that is not needed, or offers a command that will not help, post a new comment that is true. Say what is needed now, or what the run does next. Do this even when there is nothing else to do.",
   "- When a named person asks for something, do it, or say on the ticket why you will not. When they ask for a change on the pull request, first reply there that the change is being made, then start the step that makes it.",
   "- When a running step repeats the same command without getting further, or is silent for a long time, you may send it a message or stop it.",
+  "- A command that is still running is not silence. Tests and checks can take an hour. Leave the step alone while one command runs, unless that one command has run for more than two hours; then you may send it a message or stop it.",
   "- A run that changed the project's files waits on its pull request. While the pull request is open, answer its review, and do not end the run. When it is merged, end the run and close the ticket. When it is closed without merging, follow the rule below for a pull request closed without merging.",
   "- When you are told that the ticket's branch is behind the default branch, and no step is running, start the update. Start it even while the pull request waits for review. When it ends, start nothing more for it: the top of the pull request says what a person needs to know. When the default branch moves again, you are told again.",
   `- A ticket that is still open, with the label ${MARK_LABEL}, and has no run, is picked up again as new work. So when a run's work is finished, end the run and close the ticket.`,
@@ -225,7 +234,7 @@ export function buildBrief(input: BriefInput): { system: string; prompt: string 
       orderSection(input),
       factsSection(input.facts, input.place, input.planner),
       pullRequestSection(input),
-      runningStepSection(input.activity),
+      runningStepSection(input.activity, input.now),
       limitSection(input),
       timoneIssuesSection(input),
     ]
@@ -491,17 +500,30 @@ function pullRequestSection(input: BriefInput): string {
  * What the running step has done since the last check, written by the
  * machine from the step's output. Its cost is not here: a step reports what
  * it cost only when it ends.
+ *
+ * **A command still running is named, with how long it has run.** While one
+ * command runs, the step uses no other tool and writes no token, so without
+ * this line a long test run reads the same as a step that hangs (timone#238).
  */
-function runningStepSection(activity: StepActivity | undefined): string {
+function runningStepSection(activity: StepActivity | undefined, now: string): string {
   if (activity === undefined) return ["## The running step", "", "No step is running."].join("\n");
   const lines = [
     "## The running step",
     "",
     `A step is running: ${stageLabel(activity.stage)}. It started at ${activity.startedAt}.`,
     `Commands and tools it used since the last check: ${listOrNone(activity.tools)}`,
+    ...(activity.running.length === 0
+      ? ["No command is running now."]
+      : activity.running.map(
+          (call) =>
+            `Still running: ${call.name}, started at ${call.since}, ${minutesAgo(call.since, now)}.`,
+        )),
+    // Said as a count since the last check, so 0 is not read as the step's
+    // total.
+    `Tokens it wrote since the last check: ${activity.outputTokens}.`,
     activity.lastOutputAt === undefined
-      ? "It has written nothing yet."
-      : `It last wrote something at ${activity.lastOutputAt}, and has written ${activity.outputTokens} tokens.`,
+      ? "It has printed nothing yet."
+      : `It last printed something at ${activity.lastOutputAt}. A command that is still running prints a short sign every 30 seconds, and that counts here.`,
   ];
   if (activity.silentSince !== undefined) {
     lines.push(`It has been silent since ${activity.silentSince}.`);
@@ -536,6 +558,15 @@ function timoneIssuesSection(input: BriefInput): string {
       ? ["There are no open Timone issues labelled bug."]
       : input.timoneIssues.map((issue) => `- #${issue.number}: ${issue.title} (${issue.url})`)),
   ].join("\n");
+}
+
+/**
+ * `35 minutes ago`, or `1 minute ago`: the whole minutes from `from` to
+ * `now`, both ISO times, counted down.
+ */
+function minutesAgo(from: string, now: string): string {
+  const minutes = Math.floor((Date.parse(now) - Date.parse(from)) / 60_000);
+  return minutes === 1 ? "1 minute ago" : `${minutes} minutes ago`;
 }
 
 /** The first line of `text`, without a closing full stop, to sit inside a sentence. */

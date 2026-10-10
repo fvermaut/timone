@@ -56,9 +56,13 @@ function dryReplay() {
 }
 
 const allPresent = (r) => { for (const c of CASES) assert(caseLine(r, c), `case ${c} is missing from the result`); };
+// ✏ 2026-10-10 (phase 58 verification): every case of the table is judged, and every one that
+// failed is named, not only the first. The result's own count line ("N of N cases passed.") is no
+// longer required: the replay now holds cases the table does not list, so that line counts them too.
 const allChosen = (r) => {
-  for (const c of CASES) assertChosen(r, c);
-  assert(new RegExp(`^${CASES.length} of ${CASES.length} cases passed\\.`, 'm').test(r), `the result does not say ${CASES.length} of ${CASES.length} cases passed`);
+  const failed = [];
+  for (const c of CASES) { try { assertChosen(r, c); } catch (e) { failed.push(e.message); } }
+  assert(failed.length === 0, `${failed.length} of the table's ${CASES.length} cases did not choose the table's action on three tries of three: ${failed.join(' || ')}`);
 };
 
 if (stale) {

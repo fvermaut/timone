@@ -31,7 +31,7 @@ import type { Call, Seen, Verdict } from "./recording.js";
 
 /**
  * The replay set of PRD-05 R18: the failures recorded between steps from 5
- * to 26 September, and five other cases, each set up as the moment it names.
+ * to 26 September, and seven other cases, each set up as the moment it names.
  *
  * **These cases are the specification of the runner, not a test of it.** When
  * a case fails, what changes is the runner's brief or its rules, never the
@@ -64,12 +64,15 @@ export interface ToolCall {
   input: Record<string, unknown>;
 }
 
-/** What a running step did so far, one tool call at a time. */
+/**
+ * What a running step did so far, one tool call at a time. A call marked
+ * `running` had no result yet at the moment: it was still running.
+ */
 export interface RunningStepAtMoment {
   stage: PipelineStage;
   sessionId: string;
   startedAt: string;
-  tools: readonly { at: string; name: string; input: Record<string, unknown> }[];
+  tools: readonly { at: string; name: string; input: Record<string, unknown>; running?: true }[];
 }
 
 /**
@@ -362,6 +365,19 @@ function wake(
   ];
 }
 
+/**
+ * The record of the 15-minute checks of a step that started at `startedAt`,
+ * oldest first, the last at `last`: one wake every 15 minutes, counted back
+ * from `last`, and none of them did anything.
+ */
+function checksUntil(run: string, startedAt: string, last: string): RecordEntry[] {
+  const times: string[] = [];
+  for (let at = Date.parse(last); at > Date.parse(startedAt); at -= 15 * 60 * 1000) {
+    times.unshift(new Date(at).toISOString());
+  }
+  return times.flatMap((at) => wake(run, at, [CHECK_EVENT]));
+}
+
 /** Sorting's closing comment. */
 function sorted(at: string, what: string): TicketComment {
   return byMachine(at, [STAGE_DONE_MARKER, "", `**I sorted this request.** ${what}`, "", NOTHING].join("\n"));
@@ -527,12 +543,16 @@ function messageCall(text: string, reason: string): ToolCall {
   return { name: "message_step", input: { text, reason } };
 }
 
+function stopStepCall(reason: string): ToolCall {
+  return { name: "stop_step", input: { reason } };
+}
+
 function endRunCall(closeTicket: boolean, reason: string): ToolCall {
   return { name: "end_run", input: { closeTicket, reason } };
 }
 
 // ---------------------------------------------------------------------------
-// The twenty-two cases
+// The twenty-four cases
 // ---------------------------------------------------------------------------
 
 /**
@@ -2662,6 +2682,262 @@ function aBuildThatRunsTheWholeSuiteAgain(): ReplayCase {
 }
 
 /**
+ * #238. On ivtrends #178 the runner stopped a checking step that was
+ * working. The 15-minute check came while one browser test command ran, for
+ * 35 minutes. The step made no tool call and wrote no token in that time, so
+ * the report said it had used nothing since the last check.
+ */
+function aLongTestCommandAtACheck(): ReplayCase {
+  const project = "ivtrends";
+  const title = "Short text for each position";
+  const branch = branchOf(178, title);
+  const run = runId(project, 178, 1);
+  const reports = "doc/plans/phases/reports";
+  const plan = "doc/plans/phases/phase-24.md";
+  const verification = `${reports}/phase-24-verification.md`;
+  const checking: StepRun = {
+    stage: "verification",
+    session: "8c41f0a7-verification",
+    at: "2026-10-09T07:11:40Z",
+    woken: stepEndedEvent("execution", { ok: true }),
+    instructions: "Check the work against R3 of prd-07-positions.md and the plan.",
+    reason: "The build is finished. Checking it is next.",
+  };
+  const startedAt = later(checking.at, 20);
+  return {
+    issues: ["#238"],
+    happened: "At a 15-minute check, the checking step is inside one browser test command that started 35 minutes ago.",
+    mustDo: "Leave the step running.",
+    moment: {
+      project,
+      context: STEP_TICKET,
+      ticket: ticketOf(project, 178, {
+        title,
+        body: [
+          `Piece 3 of #170, from its approved list of pieces ([ticket-170.md](${blob(project, "main", "doc/plans/breakdowns/ticket-170.md")})).`,
+          "",
+          'Each position on the positions page gets one line of short text that says what it is, like "Short put, SPY, 30 days". Covers R3 of prd-07-positions.md.',
+        ].join("\n"),
+        labels: ["timone", "triage:feature", HELD_LABEL],
+        createdAt: "2026-10-09T02:58:00Z",
+        comments: [
+          planned("2026-10-09T03:21:40Z", blob(project, branch, plan), "phase-24.md", "It has two slices: the text, and where it shows."),
+          built("2026-10-09T07:10:30Z", blob(project, branch, `${reports}/phase-24-complete.md`), "phase-24-complete.md", "Both slices are done, and all tests pass."),
+        ],
+      }),
+      run: {
+        status: "active",
+        stage: "verification",
+        branch,
+        step: {
+          stage: "verification",
+          sessionId: checking.session,
+          startedAt,
+          tools: [
+            { at: "2026-10-09T07:13:10Z", name: "Read", input: { file_path: plan } },
+            { at: "2026-10-09T07:14:00Z", name: "Read", input: { file_path: `${reports}/phase-24-complete.md` } },
+            { at: "2026-10-09T07:20:30Z", name: "Bash", input: { command: "npm test" } },
+            { at: "2026-10-09T07:41:00Z", name: "Bash", input: { command: "npx tsc --noEmit" } },
+            { at: "2026-10-09T07:45:20Z", name: "Read", input: { file_path: "src/components/PositionRow.tsx" } },
+            { at: "2026-10-09T08:02:00Z", name: "Bash", input: { command: "npx playwright test e2e/positions.spec.ts" } },
+            { at: "2026-10-09T08:55:00Z", name: "Bash", input: { command: "npx playwright test e2e/positions-sort.spec.ts" } },
+            { at: "2026-10-09T09:30:10Z", name: "Write", input: { file_path: verification } },
+            { at: "2026-10-09T09:42:00Z", name: "Bash", input: { command: "npx playwright test e2e/positions-filter.spec.ts" } },
+            { at: "2026-10-09T10:21:30Z", name: "Edit", input: { file_path: verification } },
+            { at: "2026-10-09T10:40:00Z", name: "Bash", input: { command: "npm run lint" } },
+            { at: "2026-10-09T10:58:20Z", name: "Edit", input: { file_path: verification } },
+            {
+              at: "2026-10-09T10:59:00Z",
+              name: "Bash",
+              input: { command: "npx playwright test e2e/positions-short-text.spec.ts" },
+              running: true,
+            },
+          ],
+        },
+      },
+      record: [
+        ...stepRun(run, {
+          stage: "planning",
+          session: "5f7a2c19-planning",
+          at: "2026-10-09T03:00:40Z",
+          woken: NEW_TICKET_EVENT,
+          instructions: "Prepare the work for piece 3 of #170: short text for each position.",
+          reason: "A new step ticket. Preparing the work comes first in its order.",
+          ended: { at: "2026-10-09T03:22:00Z", costUsd: 1.9 },
+        }),
+        ...stepRun(run, {
+          stage: "execution",
+          session: "b3e8d061-execution",
+          at: "2026-10-09T03:22:10Z",
+          woken: stepEndedEvent("planning", { ok: true }),
+          instructions: `Build the plan in ${plan}.`,
+          reason: "The plan is pushed. Building is next.",
+          ended: { at: "2026-10-09T07:11:00Z", costUsd: 9.4 },
+        }),
+        ...stepRun(run, checking),
+        ...checksUntil(run, startedAt, "2026-10-09T11:11:00Z"),
+      ],
+      files: {
+        main: {
+          "doc/specs/prd/prd-07-positions.md": requirementsFile(
+            "07",
+            "Positions",
+            "Active",
+            "## Requirements\n\n- R1: a page lists every open position.\n- R2: the list can be sorted by days to expiry.\n- R3: each position has one line of short text that says what it is.",
+          ),
+          "doc/plans/breakdowns/ticket-170.md":
+            "# The pieces of #170\n\n> **Status:** Approved\n\n1. The positions page (#176)\n2. Sort by days to expiry (#177)\n3. Short text for each position (#178)\n",
+          "doc/plans/phases/phase-23.md": phaseFile("23", "Sort the positions by days to expiry", "Complete"),
+        },
+        branch: {
+          [plan]: phaseFile("24", "Short text for each position", "Complete"),
+          [`${reports}/phase-24-complete.md`]: reportFile("Phase 24 — Completion Report", "Both slices are done."),
+        },
+      },
+      ahead: 5,
+      timoneIssues: OPEN_TIMONE_ISSUES,
+      events: [CHECK_EVENT],
+      now: "2026-10-09T11:34:00Z",
+      checkSince: "2026-10-09T11:11:00Z",
+    },
+    // Only a stop, or a step started in its place, throws away the work the
+    // step is doing.
+    judge: (seen) =>
+      allOf(
+        when(!seen.calls.some((call) => call.kind === "step-stopped"), "the step not stopped"),
+        when(stepsStarted(seen).length === 0, "no step started"),
+      ),
+    rightCalls: [],
+  };
+}
+
+/**
+ * #238, the moment of ivtrends #177 it records. One command of a checking
+ * step ran for 3 hours and 53 minutes, and the report of the 15-minute check
+ * looked the same as the one of a step running a long test command.
+ */
+function aCommandThatHangsAtACheck(): ReplayCase {
+  const project = "ivtrends";
+  const title = "Sort the positions by days to expiry";
+  const branch = branchOf(177, title);
+  const run = runId(project, 177, 1);
+  const reports = "doc/plans/phases/reports";
+  const plan = "doc/plans/phases/phase-23.md";
+  const verification = `${reports}/phase-23-verification.md`;
+  const checking: StepRun = {
+    stage: "verification",
+    session: "2d9b6e45-verification",
+    at: "2026-10-08T18:59:40Z",
+    woken: stepEndedEvent("execution", { ok: true }),
+    instructions: "Check the work against R2 of prd-07-positions.md and the plan.",
+    reason: "The build is finished. Checking it is next.",
+  };
+  const startedAt = later(checking.at, 20);
+  return {
+    issues: ["#238"],
+    happened: "At a 15-minute check, one command of the checking step has run for almost four hours.",
+    mustDo: "Send the step a message, or stop it.",
+    moment: {
+      project,
+      context: STEP_TICKET,
+      ticket: ticketOf(project, 177, {
+        title,
+        body: [
+          `Piece 2 of #170, from its approved list of pieces ([ticket-170.md](${blob(project, "main", "doc/plans/breakdowns/ticket-170.md")})).`,
+          "",
+          "The positions page can be sorted by days to expiry, the closest first. Covers R2 of prd-07-positions.md.",
+        ].join("\n"),
+        labels: ["timone", "triage:feature", HELD_LABEL],
+        createdAt: "2026-10-08T15:58:00Z",
+        comments: [
+          planned("2026-10-08T16:19:40Z", blob(project, branch, plan), "phase-23.md", "It has one slice."),
+          built("2026-10-08T18:58:30Z", blob(project, branch, `${reports}/phase-23-complete.md`), "phase-23-complete.md", "The slice is done, and all tests pass."),
+        ],
+      }),
+      run: {
+        status: "active",
+        stage: "verification",
+        branch,
+        step: {
+          stage: "verification",
+          sessionId: checking.session,
+          startedAt,
+          tools: [
+            { at: "2026-10-08T19:01:10Z", name: "Read", input: { file_path: plan } },
+            { at: "2026-10-08T19:02:00Z", name: "Read", input: { file_path: `${reports}/phase-23-complete.md` } },
+            { at: "2026-10-08T19:08:30Z", name: "Bash", input: { command: "npm test" } },
+            { at: "2026-10-08T19:31:00Z", name: "Bash", input: { command: "npx tsc --noEmit" } },
+            { at: "2026-10-08T19:40:20Z", name: "Read", input: { file_path: "src/lib/sort-positions.ts" } },
+            { at: "2026-10-08T19:52:00Z", name: "Bash", input: { command: "npx playwright test e2e/positions-sort.spec.ts" } },
+            { at: "2026-10-08T20:24:10Z", name: "Write", input: { file_path: verification } },
+            { at: "2026-10-08T20:41:00Z", name: "Bash", input: { command: "npm run lint" } },
+            { at: "2026-10-08T20:58:30Z", name: "Edit", input: { file_path: verification } },
+            { at: "2026-10-08T21:20:00Z", name: "Bash", input: { command: "npx playwright test" }, running: true },
+          ],
+        },
+      },
+      record: [
+        ...stepRun(run, {
+          stage: "planning",
+          session: "a6c3e8f2-planning",
+          at: "2026-10-08T16:00:40Z",
+          woken: NEW_TICKET_EVENT,
+          instructions: "Prepare the work for piece 2 of #170: sort the positions by days to expiry.",
+          reason: "A new step ticket. Preparing the work comes first in its order.",
+          ended: { at: "2026-10-08T16:20:00Z", costUsd: 1.7 },
+        }),
+        ...stepRun(run, {
+          stage: "execution",
+          session: "71f4b0d3-execution",
+          at: "2026-10-08T16:20:10Z",
+          woken: stepEndedEvent("planning", { ok: true }),
+          instructions: `Build the plan in ${plan}.`,
+          reason: "The plan is pushed. Building is next.",
+          ended: { at: "2026-10-08T18:59:00Z", costUsd: 6.8 },
+        }),
+        ...stepRun(run, checking),
+        ...checksUntil(run, startedAt, "2026-10-09T00:58:00Z"),
+      ],
+      files: {
+        main: {
+          "doc/specs/prd/prd-07-positions.md": requirementsFile(
+            "07",
+            "Positions",
+            "Active",
+            "## Requirements\n\n- R1: a page lists every open position.\n- R2: the list can be sorted by days to expiry.\n- R3: each position has one line of short text that says what it is.",
+          ),
+          "doc/plans/breakdowns/ticket-170.md":
+            "# The pieces of #170\n\n> **Status:** Approved\n\n1. The positions page (#176)\n2. Sort by days to expiry (#177)\n3. Short text for each position (#178)\n",
+          "doc/plans/phases/phase-22.md": phaseFile("22", "The positions page", "Complete"),
+        },
+        branch: {
+          [plan]: phaseFile("23", "Sort the positions by days to expiry", "Complete"),
+          [`${reports}/phase-23-complete.md`]: reportFile("Phase 23 — Completion Report", "The slice is done."),
+        },
+      },
+      ahead: 4,
+      timoneIssues: OPEN_TIMONE_ISSUES,
+      events: [CHECK_EVENT],
+      now: "2026-10-09T01:13:00Z",
+      checkSince: "2026-10-09T00:58:00Z",
+    },
+    // Either may get the step going again: a message, if it can still read
+    // one, or a stop, so that the runner can start the check again.
+    judge: (seen) =>
+      when(
+        seen.calls.some((call) => call.kind === "step-messaged" || call.kind === "step-stopped"),
+        "a message sent to the running step, or the step stopped",
+      ),
+    rightCalls: [
+      stopStepCall(
+        "One command, npx playwright test, has run since 21:20, almost four hours. That is more than two hours, so it " +
+          "has hung.",
+      ),
+    ],
+  };
+}
+
+/**
  * #202 (PRD-07.R7, ADR-0066 D2). Another pull request of the project merged,
  * and this run's open pull request, which nobody has reviewed yet, is now
  * behind the default branch.
@@ -3129,6 +3405,8 @@ export const CASES: readonly ReplayCase[] = [
   approveThemYourselfInMyName(),
   aServerErrorFromTheModelService(),
   aBuildThatRunsTheWholeSuiteAgain(),
+  aLongTestCommandAtACheck(),
+  aCommandThatHangsAtACheck(),
   anOpenPullRequestBehindTheDefaultBranch(),
   aPullRequestClosedWithNoReason(),
   aMisspelledApprovalWord(),

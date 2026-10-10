@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
 
-import type { CommandOptions, CommandRunner } from "../adapters/command-runner.js";
+import {
+  execCommandRunner,
+  type CommandOptions,
+  type CommandRunner,
+} from "../adapters/command-runner.js";
 import { bringUpServices, COMPOSE_FILES, type ServiceStack } from "./services.js";
 
 interface Invocation {
@@ -347,6 +356,64 @@ describe("getting the project's source without touching the human's checkout", (
     expect(clones[1].args.join(" ")).toContain("/root/.timone/stacks/");
   });
 
+  it("clones the branch with one commit and only the top-level files", async () => {
+    // The clone is read for two files, the compose file and `.env.example`,
+    // and both sit at the top of the repository. A whole tree at depth 1 was
+    // 333 MB on ivtrends and did not fit in the runner's 90 seconds (#242).
+    const runner = fakeRunner();
+
+    await bringUp({ run: runner.run });
+
+    const clone = runner.calls.find((call) => call.args.includes("clone"))!;
+    expect(clone.args).toContain("--branch");
+    expect(clone.args.join(" ")).toContain("--depth 1");
+    expect(clone.args).toContain("--filter=blob:none");
+    expect(clone.args).toContain("--sparse");
+  });
+
+  it("clones the default branch the same way when the run's branch does not exist yet", async () => {
+    // The fallback reads the same two files, so it needs no more than the
+    // first clone did.
+    const runner = fakeRunner();
+    runner.on(
+      (call) => call.args.includes("--branch"),
+      new Error("fatal: Remote branch timone/7-slow not found in upstream origin"),
+    );
+
+    await bringUp({ run: runner.run });
+
+    const clones = runner.calls.filter((call) => call.args.includes("clone"));
+    expect(clones).toHaveLength(2);
+    const fallback = clones[1];
+    expect(fallback.args).not.toContain("--branch");
+    expect(fallback.args.join(" ")).toContain("--depth 1");
+    expect(fallback.args).toContain("--filter=blob:none");
+    expect(fallback.args).toContain("--sparse");
+  });
+
+  it("clones the default branch the same way when the run names no branch", async () => {
+    // A step that owns no branch goes straight to the default branch, and
+    // reads the same two files.
+    const runner = fakeRunner();
+
+    await bringUpServices({
+      project,
+      runId: "scratch-app#7/1",
+      root: "/root",
+      run: runner.run,
+      exists: () => true,
+      write: () => {},
+      remove: () => {},
+    });
+
+    const clones = runner.calls.filter((call) => call.args.includes("clone"));
+    expect(clones).toHaveLength(1);
+    expect(clones[0].args).not.toContain("--branch");
+    expect(clones[0].args.join(" ")).toContain("--depth 1");
+    expect(clones[0].args).toContain("--filter=blob:none");
+    expect(clones[0].args).toContain("--sparse");
+  });
+
   it("reports the real reason when the fallback clone fails too", async () => {
     // The `catch` must not swallow a bad credential or a missing repository.
     // Both calls fail for the same reason, and the second one's message is
@@ -389,5 +456,112 @@ describe("getting the project's source without touching the human's checkout", (
     await stack!.down();
 
     expect(removed.some((path) => path.includes("/.timone/stacks/"))).toBe(true);
+  });
+});
+
+describe("the clone, made by real git against a real repository", () => {
+  /** Temp folders made by these tests, removed together afterwards. */
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * A bare repository standing for the forge. It holds the compose file and
+   * `.env.example` at the top, and one file under `app/`. The run's branch,
+   * `timone/7-slow`, exists in it.
+   *
+   * The fixture's own git calls run with a home folder inside the temp
+   * folder, no system config, and none of this process's `GIT_*` variables,
+   * so the machine's git settings cannot change what the fixture holds.
+   */
+  function forge(): { root: string; url: string } {
+    const root = mkdtempSync(join(tmpdir(), "timone-services-"));
+    tempDirs.push(root);
+    const home = join(root, "home");
+    mkdirSync(home);
+    const env: Record<string, string> = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] =>
+            entry[1] !== undefined && !entry[0].startsWith("GIT_"),
+        ),
+      ),
+      HOME: home,
+      XDG_CONFIG_HOME: join(home, ".config"),
+      GIT_CONFIG_NOSYSTEM: "1",
+    };
+    const git = (cwd: string, args: string[]): void => {
+      execFileSync("git", args, { cwd, env, stdio: "pipe" });
+    };
+
+    const seed = join(root, "seed");
+    const remote = join(root, "remote.git");
+    git(root, ["init", "--quiet", "--initial-branch=main", seed]);
+    writeFileSync(join(seed, "compose.yaml"), "services:\n  db:\n    image: postgres:17\n");
+    writeFileSync(join(seed, ".env.example"), "DATABASE_URL=postgres://db/app\n");
+    mkdirSync(join(seed, "app"));
+    writeFileSync(join(seed, "app", "page.ts"), "export const page = 1;\n");
+    git(seed, ["add", "--all"]);
+    git(seed, [
+      "-c",
+      "user.name=A Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      "first",
+    ]);
+    git(root, ["clone", "--quiet", "--bare", seed, remote]);
+    git(remote, ["branch", "timone/7-slow", "main"]);
+    // GitHub honours a clone's filter. A local repository does not unless
+    // told to, and then git only warns and sends every file's contents.
+    git(remote, ["config", "uploadpack.allowFilter", "true"]);
+
+    // By URL, not by path: git ignores `--depth` on a clone by plain path.
+    return { root, url: pathToFileURL(remote).href };
+  }
+
+  it("leaves only the top-level files on disk, and still finds the compose file", async () => {
+    const { root, url } = forge();
+
+    // Each `git` call runs for real. Every other command is recorded and not
+    // run: this test must not start a compose stack in Docker. The clone is
+    // read when the first such command arrives, which is the moment compose
+    // would read it.
+    const others: Invocation[] = [];
+    let seen: { folder: string; compose: boolean; env: boolean; nested: boolean } | undefined;
+    const run: CommandRunner = async (command, args, options) => {
+      if (command === "git") return execCommandRunner(command, args, options);
+      others.push({ command, args, options });
+      const folder = options?.cwd;
+      if (seen === undefined && folder !== undefined) {
+        seen = {
+          folder,
+          compose: existsSync(join(folder, "compose.yaml")),
+          env: existsSync(join(folder, ".env.example")),
+          nested: existsSync(join(folder, "app", "page.ts")),
+        };
+      }
+      return "";
+    };
+
+    const stack = await bringUpServices({
+      project: { name: "scratch-app", repoUrl: url },
+      branch: "timone/7-slow",
+      runId: "scratch-app#7/1",
+      root,
+      run,
+    });
+
+    expect(stack).toBeDefined();
+    expect(others[0]?.command).toBe("docker");
+    expect(others[0]?.args).toContain("compose");
+    expect(seen?.folder.startsWith(join(root, ".timone", "stacks"))).toBe(true);
+    expect(seen?.compose).toBe(true);
+    expect(seen?.env).toBe(true);
+    expect(seen?.nested).toBe(false);
   });
 });

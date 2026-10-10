@@ -146,7 +146,12 @@ export function boxReplay({ script, timoneCommit, projectRemote, branch = BR, pr
   const moved = script.split('/workspace/timone').join(`${box}/ws`).split('/usr/local/bin/gh').join(path.join(box, 'fakebin', 'gh'));
   const env = {
     HOME: path.join(box, 'home'),
-    PATH: `${path.join(box, 'fakebin')}:/usr/local/bin:/usr/bin:/bin`,
+    // ✏ 2026-10-10 (phase 58 verification): the folder of the node running this probe is added,
+    // after /usr/local/bin. On a host where node and npm are not in /usr/local/bin (nvm on a Mac),
+    // the box script's `npm ci` was not found and the box stopped before the agent, which the
+    // box clauses then read as a failure of the guard. In a container nothing changes: node is
+    // in /usr/local/bin there, which still comes first.
+    PATH: `${path.join(box, 'fakebin')}:/usr/local/bin:${path.dirname(process.execPath)}:/usr/bin:/bin`,
     TIMONE_REMOTE: REPO_ROOT,
     TIMONE_COMMIT: timoneCommit,
     PROJECT_REMOTE: projectRemote,

@@ -694,7 +694,8 @@ async function openTimoneIssues(deps: RunnerActionDeps): Promise<TimoneIssue[]> 
  *
  * The numbers come from the step's own output, which the runtimes record in
  * a {@link SessionProgress}. A step whose runtime records nothing is shown
- * with no tools and no output, which is all that is known about it.
+ * with no tools, no call running and no output, which is all that is known
+ * about it.
  */
 function activityOf(
   running: RunningSteps,
@@ -705,7 +706,9 @@ function activityOf(
   if (step === undefined) return undefined;
   const base = { stage: step.stage, startedAt: step.startedAt };
   const progress = step.session.progress;
-  if (!(progress instanceof SessionProgress)) return { ...base, tools: [], outputTokens: 0 };
+  if (!(progress instanceof SessionProgress)) {
+    return { ...base, tools: [], running: [], outputTokens: 0 };
+  }
   const since = checkSince ?? step.startedAt;
   const seen = progress.activitySince(since);
   const silent =
@@ -713,6 +716,7 @@ function activityOf(
   return {
     ...base,
     tools: seen.tools,
+    running: seen.running,
     outputTokens: seen.outputTokens,
     ...(seen.lastOutputAt === undefined ? {} : { lastOutputAt: seen.lastOutputAt }),
     ...(silent && seen.lastOutputAt !== undefined ? { silentSince: seen.lastOutputAt } : {}),

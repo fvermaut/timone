@@ -53,6 +53,13 @@ export interface Activity {
    */
   tools: string[];
   /**
+   * Each tool call the session started and has had no result for yet, oldest
+   * first, named as {@link tools} names it, with the ISO time it started.
+   * Whether or not it started after the moment: a command that started
+   * before the last look and still runs is what this is for (timone#238).
+   */
+  running: { name: string; since: string }[];
+  /**
    * When the session last printed anything at all, as an ISO instant, and
    * whether or not that was after the moment: a time before it says the
    * session has been silent since. Absent while it has printed nothing.
@@ -103,6 +110,11 @@ export class SessionProgress {
   private readonly liveSubAgents = new Set<string>();
   /** Every tool use seen, named, with the time it was seen. */
   private readonly toolUses: { at: number; name: string }[] = [];
+  /**
+   * The tool calls started and not ended, keyed by their tool-use id, in the
+   * order they started.
+   */
+  private readonly openCalls = new Map<string, { at: number; name: string }>();
   /** When anything at all was last seen on the stream. */
   private lastOutput: number | undefined;
   /**
@@ -137,18 +149,22 @@ export class SessionProgress {
       const parent = message.parent_tool_use_id;
       if (parent !== null) this.liveSubAgents.add(parent);
       const at = this.now();
-      for (const name of toolUseNames(message.message.content)) {
+      for (const { id, name } of toolUsesIn(message.message.content)) {
         this.toolUses.push({ at, name });
+        if (id !== undefined) this.openCalls.set(id, { at, name });
       }
       return;
     }
 
-    if (message.type === "user" && message.parent_tool_use_id === null) {
-      // A tool result arriving back on the main thread is a sub-agent
-      // finishing — again the only signal available, since the SDK reports no
-      // sub-agent lifecycle of its own.
+    if (message.type === "user") {
       for (const id of toolResultIds(message.message.content)) {
-        this.liveSubAgents.delete(id);
+        // A result ends the call of the same id, on the main thread or inside
+        // a sub-agent.
+        this.openCalls.delete(id);
+        // A tool result arriving back on the main thread is a sub-agent
+        // finishing — again the only signal available, since the SDK reports
+        // no sub-agent lifecycle of its own.
+        if (message.parent_tool_use_id === null) this.liveSubAgents.delete(id);
       }
       return;
     }
@@ -247,6 +263,10 @@ export class SessionProgress {
     }
     return {
       tools: this.toolUses.filter((use) => use.at > since).map((use) => use.name),
+      running: [...this.openCalls.values()].map((call) => ({
+        name: call.name,
+        since: new Date(call.at).toISOString(),
+      })),
       ...(this.lastOutput === undefined
         ? {}
         : { lastOutputAt: new Date(this.lastOutput).toISOString() }),
@@ -265,13 +285,13 @@ export class SessionProgress {
 }
 
 /**
- * Each tool_use block in a message's content, as `Bash(npm test)`. The
- * content is read defensively: in a box it arrived as text, and only its
- * `type` was checked on the way in.
+ * Each tool_use block in a message's content, named as `Bash(npm test)`,
+ * with its tool-use id when it has one. The content is read defensively: in
+ * a box it arrived as text, and only its `type` was checked on the way in.
  */
-function toolUseNames(content: unknown): string[] {
+function toolUsesIn(content: unknown): { id?: string; name: string }[] {
   if (!Array.isArray(content)) return [];
-  const names: string[] = [];
+  const uses: { id?: string; name: string }[] = [];
   for (const block of content) {
     if (
       typeof block === "object" &&
@@ -279,11 +299,14 @@ function toolUseNames(content: unknown): string[] {
       (block as { type?: unknown }).type === "tool_use" &&
       typeof (block as { name?: unknown }).name === "string"
     ) {
-      const { name, input } = block as { name: string; input?: unknown };
-      names.push(`${name}(${summarise(name, input)})`);
+      const { id, name, input } = block as { id?: unknown; name: string; input?: unknown };
+      const named = `${name}(${summarise(name, input)})`;
+      // A call with no id could never be matched to its result, and would
+      // be shown as running for ever; it is only listed among the tools.
+      uses.push(typeof id === "string" ? { id, name: named } : { name: named });
     }
   }
-  return names;
+  return uses;
 }
 
 /** The `tool_use_id`s of any tool_result blocks in a message's content. */

@@ -13,7 +13,17 @@ import { execFileSync } from 'node:child_process';
 import { REPO_ROOT } from './_lib.mjs';
 
 // A later phase that records its replay in another file points REPLAY_RECORD at it.
-export const RECORD = process.env.REPLAY_RECORD || 'doc/plans/phases/reports/phase-40-replay.md';
+// ✏ 2026-10-10 (phase 58 verification): without REPLAY_RECORD, the record is the replay file of
+// the highest phase in doc/plans/phases/reports/ (phase-NN-replay.md), not always phase 40's.
+// Phase 58 recorded its run in phase-58-replay.md, and the old default judged run 10 of phase 40.
+function newestRecord() {
+  const dir = path.join(REPO_ROOT, 'doc', 'plans', 'phases', 'reports');
+  const files = fs.readdirSync(dir).map((f) => [f, (f.match(/^phase-(\d+)-replay\.md$/) || [])[1]]).filter(([, n]) => n);
+  if (!files.length) return 'doc/plans/phases/reports/phase-40-replay.md';
+  const [f] = files.reduce((a, b) => (Number(b[1]) > Number(a[1]) ? b : a));
+  return `doc/plans/phases/reports/${f}`;
+}
+export const RECORD = process.env.REPLAY_RECORD || newestRecord();
 export const REGISTER = 'doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md';
 
 const git = (...a) => execFileSync('git', ['-C', REPO_ROOT, ...a], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -25,7 +35,9 @@ export function runsIn(text) {
   for (const sec of text.split(/\n(?=## Run \d+ )/).slice(1)) {
     const n = Number(sec.match(/^## Run (\d+) /)[1]);
     const heading = sec.split('\n')[0].replace(/^## /, '');
-    const result = (sec.match(/```\n([\s\S]*?)\n```/) || [])[1] ?? '';
+    // ✏ 2026-10-10 (phase 58 verification): blank lines at the top of the block are dropped.
+    // phase-58-replay.md's block starts with one, and the header check read "" as the first line.
+    const result = ((sec.match(/```\n([\s\S]*?)\n```/) || [])[1] ?? '').replace(/^\s*\n/, '');
     const commit = (sec.match(/\bat `([0-9a-f]{7,40})`/) || [])[1];
     runs.push({ n, heading, result, commit });
   }
@@ -60,7 +72,9 @@ export function assertRealModel(result, count) {
   const head = result.split('\n')[0] ?? '';
   const m = head.match(/^Replaying (\d+) cases, 3 tries each, on (\S+)\.$/);
   assert(m && !/--dry|scripted runner|no model/.test(head), `not a run of the real model with three tries each: "${head}"`);
-  assert(Number(m[1]) === count, `the replay ran ${m[1]} cases; the register's table has ${count}`);
+  // ✏ 2026-10-10 (phase 58 verification): at least the table's cases, not exactly. The replay
+  // has grown cases the table does not list (#202, #218, #238); the clause is about the table's.
+  assert(Number(m[1]) >= count, `the replay ran ${m[1]} cases; the register's table has ${count}`);
 }
 // The case chose the table's action on each of three tries.
 export function assertChosen(result, c) {
