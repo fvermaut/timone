@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-08.
+**Last updated:** 2026-10-10.
 
 ---
 
@@ -69,6 +69,10 @@
 **1n. Piece 2 of #87 ([#230](https://github.com/fvermaut/timone/issues/230)): a pull request is open for your review, from the branch `timone/230-2-each-container-knows-its-step-and-the`. Its address is on #230.** Each container now carries the name of its step, and a project's settings file cannot change it. In a container the guard uses that step when the ledger has no run: the checking step may use its check scripts, a builder is refused them, and the guard never asks. `timone stage` says so in a container. All five requirements pass. The review of the code style found 3 small things: one comment left out of date, and two pieces of repeated code. The review against the requirements found nothing, and judged the two changed tests sound. Before you merge: the replay against the real model was not run (`npm run --silent replay`, from a terminal signed in to Claude), and live gates are owed. The 70 failing tests are the old ones of #220. Both reviews are in the [delivery report](doc/plans/phases/reports/phase-57-delivery.md). This status file is on that branch and reaches `main` with the pull request.
 
 **What I need from you:** run the replay on the branch, look at the two changed tests, then review and merge the pull request.
+
+**1o. A long command is no longer read as a stuck step, and every ivtrends step can start again ([#238](https://github.com/fvermaut/timone/issues/238), [#242](https://github.com/fvermaut/timone/issues/242)), in Timone's own repository, on the branch `timone/238-a-long-command-is-not-a-hung-step`. No pull request is open yet.** The check is done ([report](https://github.com/fvermaut/timone/blob/timone/238-a-long-command-is-not-a-hung-step/doc/plans/phases/reports/phase-58-verification.md)). Every requirement it covers passes except one. In the replay you ran, case #132 failed 0 of 3: each time, the runner asked whether "aproved" meant approve. Another requirement, PRD-04.R1, asks for exactly that question. Both cannot hold, so nothing was changed. You need to choose: change what case #132 accepts, or drop that question from PRD-04.R1. Then the replay runs again. Also owed, and only you can start it: a watched run on ivtrends#178 after the merge.
+
+**What I need from you:** nothing now. The pull request will ask you to choose between the two requirements.
 
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
@@ -148,6 +152,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**10 October — a long command is not a stuck step ([#238](https://github.com/fvermaut/timone/issues/238)), and a step's clone takes only the top-level files ([#242](https://github.com/fvermaut/timone/issues/242)), on the branch `timone/238-a-long-command-is-not-a-hung-step`, no pull request yet.** The check found one requirement failing: replay case #132, where two requirements disagree. Everything else it covers passes. Item 1o says what is needed.
 
 **6 October — `timone status` no longer names finished tickets as waiting on you ([#186](https://github.com/fvermaut/timone/issues/186)): pull request [#225](https://github.com/fvermaut/timone/pull/225) is open for your review, from the branch `timone/186-timone-status-asks-you-to-answer-on-abou`.** The last line of `timone status` now names a ticket only when the machine asked you something on it. A separate check ran the built command: on the old build it named a finished ticket, on this branch it names nothing, and a ticket with an open question is still named. The 70 test failures in the container are the same 70 as on `main` (Timone issue #220). The review of the code style found 1 thing: a test named "names a ticket once" no longer has two runs that would be named. The review against the requirement found 1: a ticket whose list of pieces grew after approval is no longer named, though the daemon still holds it for a person. Both are in the [delivery report](doc/plans/phases/reports/phase-54-delivery.md). Still owed, and only you can run them: the replay against the real model (`npm run --silent replay`), and the checks with a real daemon listed in the [check report](doc/plans/phases/reports/phase-54-verification.md). This status file is on that branch and reaches `main` with the pull request. **What I need from you:** review and merge #225 when you are ready.
 
