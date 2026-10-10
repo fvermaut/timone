@@ -61,7 +61,9 @@ function standIn(fx) {
   fs.writeFileSync(path.join(fx.dir, 'closing.md'), CLOSING);
   fs.writeFileSync(path.join(fx.dir, 'bin', 'claude'), [
     '#!/bin/sh',
-    `date +%s%3N > "${path.join(fx.dir, 'opened-at')}"`,
+    // ✏ 2026-10-10 (phase 58 verification): the time is written by node, not by `date +%s%3N`.
+    // BSD date (a Mac) has no %N and printed "17916436183N", read as no session at all.
+    `"${process.execPath}" -e 'console.log(Date.now())' > "${path.join(fx.dir, 'opened-at')}"`,
     `printf '%s\\n' "$@" > "${path.join(fx.dir, 'takeover-prompt.txt')}"`,
     `FAKE_BOT_LOGIN=${OPERATOR} gh issue comment ${N} --repo probe-owner/fixture --body-file - < "${path.join(fx.dir, 'closing.md')}" > /dev/null`,
     'exit 0', '',

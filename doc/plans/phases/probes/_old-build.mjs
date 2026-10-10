@@ -23,6 +23,10 @@ export function oldBuild(sha = BEFORE_PHASE_41) {
   const dir = path.join(base, sha);
   const cli = path.join(dir, 'dist', 'cli.js');
   if (fs.existsSync(path.join(dir, '.built'))) return cli;
+  // ✏ 2026-10-10 (phase 58 verification): a folder left half-built by a run that was stopped has
+  // no `.built` mark, and the move into place below could never replace it, so every later run
+  // threw "could not build". It is removed first.
+  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(base, { recursive: true });
   // Built in a private folder, then moved into place, so probes running in parallel never see half a build.
   const work = fs.mkdtempSync(path.join(base, `${sha.slice(0, 7)}-`));
