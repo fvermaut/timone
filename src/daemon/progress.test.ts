@@ -59,11 +59,14 @@ function feed(progress: SessionProgress, messages: SDKMessage[]): void {
   for (const message of messages) progress.observe(message);
 }
 
-/** A tool result returning to the main thread, ending sub-agent `id`. */
-function toolResult(id: string): SDKMessage {
+/**
+ * The result of tool call `id`, back on the main thread, or inside sub-agent
+ * `parent` when one is given. On the main thread it also ends sub-agent `id`.
+ */
+function toolResult(id: string, parent: string | null = null): SDKMessage {
   return {
     type: "user",
-    parent_tool_use_id: null,
+    parent_tool_use_id: parent,
     message: {
       content: [{ type: "tool_result", tool_use_id: id, content: "done" }],
     },
@@ -457,13 +460,20 @@ describe("where the running token total comes from", () => {
   });
 });
 
-/** The agent reaching for a tool, on the main thread. */
-function toolUse(name: string, input: Record<string, unknown>): SDKMessage {
+/**
+ * The agent reaching for a tool, on the main thread, or inside sub-agent
+ * `parent` when one is given.
+ */
+function toolUse(
+  name: string,
+  input: Record<string, unknown>,
+  options: { id?: string; parent?: string | null } = {},
+): SDKMessage {
   return {
     type: "assistant",
-    parent_tool_use_id: null,
+    parent_tool_use_id: options.parent ?? null,
     message: {
-      content: [{ type: "tool_use", id: `toolu_${name}`, name, input }],
+      content: [{ type: "tool_use", id: options.id ?? `toolu_${name}`, name, input }],
       usage: { input_tokens: 25_000, output_tokens: 4 },
     },
     uuid: "assistant-uuid",
@@ -525,5 +535,85 @@ describe("what a session did since a given moment", () => {
     clock.advance(7_000);
     progress.observe(firstDelta!);
     expect(progress.activitySince(lookedAt).lastOutputAt).toBe("1970-01-01T00:16:52.000Z");
+  });
+});
+
+/**
+ * Which tool calls have started and not ended (timone#238). While one
+ * command runs, a step makes no other call and writes no token, so without
+ * this a long test run and a hung step look the same to the runner.
+ */
+describe("the tool calls still running", () => {
+  it("lists a call that has no result yet, with the time it was seen, though it started before the moment", () => {
+    const clock = fakeClock();
+    const progress = new SessionProgress({ now: clock.now });
+
+    // 1_000_000 ms after the epoch is 00:16:40.
+    progress.observe(toolUse("Bash", { command: "npx playwright test" }, { id: "toolu_1" }));
+    clock.advance(12 * 60_000);
+    const lookedAt = "1970-01-01T00:28:40.000Z";
+    clock.advance(23 * 60_000);
+
+    expect(progress.activitySince(lookedAt).running).toEqual([
+      { name: "Bash(npx playwright test)", since: "1970-01-01T00:16:40.000Z" },
+    ]);
+  });
+
+  it("drops a call once its result comes back on the main thread, and keeps the others", () => {
+    const clock = fakeClock();
+    const progress = new SessionProgress({ now: clock.now });
+
+    progress.observe(toolUse("Bash", { command: "npm test" }, { id: "toolu_1" }));
+    clock.advance(60_000);
+    progress.observe(toolUse("Read", { file_path: "/workspace/src/tasks.ts" }, { id: "toolu_2" }));
+    clock.advance(60_000);
+    progress.observe(toolResult("toolu_1"));
+
+    expect(progress.activitySince("1970-01-01T00:16:40.000Z").running).toEqual([
+      { name: "Read(src/tasks.ts)", since: "1970-01-01T00:17:40.000Z" },
+    ]);
+  });
+
+  it("drops a sub-agent's call once its result comes back inside that sub-agent", () => {
+    const clock = fakeClock();
+    const progress = new SessionProgress({ now: clock.now });
+
+    progress.observe(toolUse("Agent", { description: "Check the due dates" }, { id: "toolu_agent" }));
+    clock.advance(60_000);
+    progress.observe(
+      toolUse("Bash", { command: "npm test" }, { id: "toolu_inner", parent: "toolu_agent" }),
+    );
+    clock.advance(60_000);
+    progress.observe(toolResult("toolu_inner", "toolu_agent"));
+
+    // The sub-agent itself still works: only its own call has ended.
+    expect(progress.activitySince("1970-01-01T00:16:40.000Z").running).toEqual([
+      { name: "Agent(Check the due dates)", since: "1970-01-01T00:16:40.000Z" },
+    ]);
+  });
+
+  it("takes a running command's heartbeat as output, and leaves the command running", () => {
+    const clock = fakeClock();
+    const progress = new SessionProgress({ now: clock.now });
+
+    progress.observe(toolUse("Bash", { command: "npx playwright test" }, { id: "toolu_1" }));
+    clock.advance(16 * 60_000);
+    // What the SDK sends every 30 seconds while a command runs.
+    progress.observe({
+      type: "tool_progress",
+      tool_use_id: "toolu_1",
+      tool_name: "Bash",
+      parent_tool_use_id: null,
+      elapsed_time_seconds: 960,
+      heartbeat: true,
+      uuid: "progress-uuid",
+      session_id: "session-abc",
+    } as unknown as SDKMessage);
+
+    const activity = progress.activitySince("1970-01-01T00:28:40.000Z");
+    expect(activity.lastOutputAt).toBe("1970-01-01T00:32:40.000Z");
+    expect(activity.running).toEqual([
+      { name: "Bash(npx playwright test)", since: "1970-01-01T00:16:40.000Z" },
+    ]);
   });
 });

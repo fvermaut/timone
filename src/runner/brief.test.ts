@@ -300,6 +300,7 @@ describe("the brief the runner is given each time it wakes", () => {
           stage: "execution",
           startedAt: "2026-09-27T11:00:00Z",
           tools: ["Bash(npm test)", "Edit(src/tasks.ts)", "Bash(npm test)"],
+          running: [],
           lastOutputAt: "2026-09-27T11:40:00Z",
           outputTokens: 1830,
           silentSince: "2026-09-27T11:40:00Z",
@@ -308,11 +309,109 @@ describe("the brief the runner is given each time it wakes", () => {
     ).prompt;
     const idle = buildBrief(briefInput({ activity: undefined })).prompt;
 
-    expect(running).toContain("A step is running: building. It started at 2026-09-27T11:00:00Z.");
-    expect(running).toContain("Commands and tools it used since the last check: Bash(npm test); Edit(src/tasks.ts); Bash(npm test)");
-    expect(running).toContain("It last wrote something at 2026-09-27T11:40:00Z, and has written 1830 tokens.");
-    expect(running).toContain("It has been silent since 2026-09-27T11:40:00Z.");
+    expect(running).toContain(
+      [
+        "## The running step",
+        "",
+        "A step is running: building. It started at 2026-09-27T11:00:00Z.",
+        "Commands and tools it used since the last check: Bash(npm test); Edit(src/tasks.ts); Bash(npm test)",
+        "No command is running now.",
+        "Tokens it wrote since the last check: 1830.",
+        "It last printed something at 2026-09-27T11:40:00Z. A command that is still running prints a short sign every 30 seconds, and that counts here.",
+        "It has been silent since 2026-09-27T11:40:00Z.",
+        "",
+        "## The limit",
+      ].join("\n"),
+    );
+    // The count covers the time since the last check, and must not read as
+    // the step's total.
+    expect(running).not.toContain("has written");
     expect(idle).toContain("## The running step\n\nNo step is running.");
+  });
+
+  it("says a step that has printed nothing yet has printed nothing, after its token count", () => {
+    const prompt = buildBrief(
+      briefInput({
+        activity: {
+          stage: "execution",
+          startedAt: "2026-09-27T11:59:00Z",
+          tools: [],
+          running: [],
+          outputTokens: 0,
+        },
+      }),
+    ).prompt;
+
+    expect(prompt).toContain(
+      "No command is running now.\nTokens it wrote since the last check: 0.\nIt has printed nothing yet.",
+    );
+  });
+
+  it("names each command still running, when it started, and how many minutes ago", () => {
+    const prompt = buildBrief(
+      briefInput({
+        now: "2026-09-27T12:00:00Z",
+        activity: {
+          stage: "verification",
+          startedAt: "2026-09-27T09:00:00Z",
+          tools: [],
+          running: [
+            { name: "Agent(Check the due dates)", since: "2026-09-27T11:10:00Z" },
+            { name: "Bash(npx playwright test)", since: "2026-09-27T11:25:00Z" },
+          ],
+          lastOutputAt: "2026-09-27T11:59:30Z",
+          outputTokens: 0,
+        },
+      }),
+    ).prompt;
+
+    expect(prompt).toContain(
+      [
+        "Commands and tools it used since the last check: none",
+        "Still running: Agent(Check the due dates), started at 2026-09-27T11:10:00Z, 50 minutes ago.",
+        "Still running: Bash(npx playwright test), started at 2026-09-27T11:25:00Z, 35 minutes ago.",
+      ].join("\n"),
+    );
+  });
+
+  it("says one minute, not one minutes, for a command that started a minute ago", () => {
+    const prompt = buildBrief(
+      briefInput({
+        now: "2026-09-27T12:00:00Z",
+        activity: {
+          stage: "execution",
+          startedAt: "2026-09-27T11:00:00Z",
+          tools: ["Bash(npm test)"],
+          running: [{ name: "Bash(npm test)", since: "2026-09-27T11:59:00Z" }],
+          lastOutputAt: "2026-09-27T11:59:30Z",
+          outputTokens: 120,
+        },
+      }),
+    ).prompt;
+
+    expect(prompt).toContain(
+      "Still running: Bash(npm test), started at 2026-09-27T11:59:00Z, 1 minute ago.",
+    );
+  });
+
+  it("says no command is running when every call it started has ended", () => {
+    const prompt = buildBrief(
+      briefInput({
+        activity: {
+          stage: "execution",
+          startedAt: "2026-09-27T11:00:00Z",
+          tools: ["Bash(npm test)"],
+          running: [],
+          lastOutputAt: "2026-09-27T11:59:00Z",
+          outputTokens: 420,
+        },
+      }),
+    ).prompt;
+
+    expect(prompt).toContain(
+      "Commands and tools it used since the last check: Bash(npm test)\nNo command is running now.",
+    );
+    expect(prompt).not.toContain("Still running:");
   });
 
   it("shows an approval as given by its named person, in the comment at its time", () => {
@@ -787,6 +886,20 @@ describe("the planner's decision, as the runner is told it (ADR-0065 D2)", () =>
   it("has a rule under How you act: the build needs the planner's decision, and while it decides or holds, the build is not started nor said to have started", () => {
     expect(actRule("The build needs the planner's decision.")).toBe(
       "- The build needs the planner's decision. The planner is another agent: it looks at what else on the project is being built. While it decides, or while it holds this ticket, do not start the build, and do not say on the ticket that the work has started.",
+    );
+  });
+});
+
+describe("the runner's rule that a command still running is not silence (timone#238)", () => {
+  it("leaves a step alone while one command runs, unless that command has run for more than two hours, in the rule just below the one on silence", () => {
+    const rules = actRules();
+    const silence = rules.findIndex((line) =>
+      line.includes("When a running step repeats the same command without getting further"),
+    );
+
+    expect(silence).toBeGreaterThan(-1);
+    expect(rules[silence + 1]).toBe(
+      "- A command that is still running is not silence. Tests and checks can take an hour. Leave the step alone while one command runs, unless that one command has run for more than two hours; then you may send it a message or stop it.",
     );
   });
 });

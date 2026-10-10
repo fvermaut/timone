@@ -521,6 +521,11 @@ describe("a wake of the runner", () => {
     const prompt = runner.started[0]!.prompt;
     expect(prompt).toContain("A step is running: building. It started at 2026-09-27T11:30:00.000Z.");
     expect(prompt).toContain("Commands and tools it used since the last check: none");
+    // `npm test` has had no result: it started before the last check, and
+    // still runs.
+    expect(prompt).toContain(
+      "Still running: Bash(npm test), started at 2026-09-27T11:40:00.000Z, 20 minutes ago.",
+    );
     expect(prompt).toContain("It has been silent since 2026-09-27T11:40:00.000Z.");
   });
 
