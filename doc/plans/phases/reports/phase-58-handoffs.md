@@ -124,3 +124,110 @@ Whole suite: `npx vitest run` → `Test Files 77 passed (77)`, `Tests 2738 passe
 - N is the whole minutes, counted down, from `since` to the brief's `now`. In the replay, `now` is the case's wake time. For `aCommandThatHangsAtACheck` (21:20 → 01:13 the next day) that gives `233 minutes ago.`; for `aLongTestCommandAtACheck` (10:59 → 11:34) `35 minutes ago.`
 - A main-thread `Agent(…)`/`Task(…)` call stays in `running` until its own result comes back on the main thread. While a sub-agent works, it is listed as still running.
 - The new rule in `SYSTEM`, under "## How you act", just below the silence rule: `- A command that is still running is not silence. Tests and checks can take an hour. Leave the step alone while one command runs, unless that one command has run for more than two hours; then you may send it a message or stop it.`
+
+## 58c — The replay holds both moments of #238 — a long test command, and one that hangs
+
+**Built.** The replay now holds two more cases, just after the #110 case. Both are on ivtrends, on a step ticket whose build has ended and whose checking step runs, at a 15-minute check. In the first (ivtrends#178), the checking step is inside one browser test command that started 35 minutes ago; the runner must leave the step running, and a try passes when it neither stops the step nor starts one. Its right calls are none. In the second (ivtrends#177), one command has run for 233 minutes; the runner must send the step a message or stop it, and its right call is one stop. The replay's running steps now get a result for each tool call, so the runner is shown a call as ended once the next call came. Only a call the case marks `running` is shown as still running. Before this, every tool of the #110 case was shown as still running. A call marked `running` also sends the sign a real running command sends every 30 seconds, up to the wake. So the runner is shown the step as having printed something at the wake, and not as silent, as on ivtrends#178 and #177.
+
+**Files touched.**
+
+- `src/runner/replay/cases.ts` — `RunningStepAtMoment.tools` entries may carry `running?: true`. New helper `checksUntil(run, startedAt, last)`: the record of the 15-minute check wakes, one every 15 minutes counted back from the last check. New right-call helper `stopStepCall(reason)`. New cases `aLongTestCommandAtACheck()` and `aCommandThatHangsAtACheck()`, added to `CASES` after `aBuildThatRunsTheWholeSuiteAgain()`. The section heading now says twenty-four cases, and the file's opening comment says "seven other cases".
+- `src/runner/replay/recording.ts` — `progressOf` feeds, for each tool not marked `running`, a main-thread `user` message with a `tool_result` of the same id (`toolu_replay_${index}`), at the time of the next tool, or at the tool's own time for the last one. For each tool marked `running`, it feeds a `tool_progress` message (`heartbeat: true`, `elapsed_time_seconds` 30, 60, …) every 30 seconds from the call's start up to the wake, at those times, after the step's other calls. The signs of all running calls are fed in the order of their times. The clock ends at `now`, as before.
+- `src/runner/replay/harness.test.ts` — a fake `runQuery` that keeps the prompt, calls nothing and ends at once; three new tests (cases 1–3), and a fourth for the 30-second sign (the plan's ✏ 2026-10-10 note); the file's opening comment says it now also tests what the runner is shown at a case's moment (the old comment said "nineteen cases", which was out of date).
+
+**Decisions taken inside the slice.**
+
+- **The 30-second sign of a running call was decided by the orchestrator, not by this slice.** The first build followed the plan as written, and both new prompts said "It has been silent since <the command's start>". This slice reported it. The orchestrator then amended the plan (✏ 2026-10-10 under the `recording.ts` marker of 58c): a call marked `running` gets a `tool_progress` heartbeat every 30 seconds up to the wake, and the harness test checks that the long-command case's prompt last printed something within 30 seconds of the wake, with no "silent since" line. The orchestrator gave the message's fields. This slice made two small choices: the first sign comes 30 seconds after the call started (none at second 0), and a sign may fall on the wake itself ("up to the wake" is read as including it). In both cases this puts the last sign exactly at the wake, because both commands started a whole number of minutes before it.
+- **Dates and tickets.** The plan gives the times of day only. The long-command case is on 2026-10-09 (ivtrends#178, step started 07:12, wake 11:34). The hang case runs from 2026-10-08 19:00 to 2026-10-09 01:13 (ivtrends#177). Both tickets are pieces 3 and 2 of a made-up initiative #170 ("Positions"), with made-up session ids. Nothing is copied from the real sessions.
+- **The tools before the running command.** The plan says "used tools steadily". Each case lists 9 to 12 calls by hand (reads, `npm test`, `tsc`, single browser test files, the report written and edited), then the running call. The prompt shows none of them, because all came before the last check.
+- **The record holds every 15-minute check wake** from the step's start to the last check (16 and 24 wakes), as the #110 case lists its two. They count in "Spent on this ticket" ($14.08 and $12.40). A small helper writes them, so they are not typed out 40 times.
+- **Test 1 also checks there is exactly one `Still running:` line.** The checkbox says the long case's prompt "shows one". This made test 1 fail a second time after the case was added, until `progressOf` stopped giving the running call a result. That is the red that drove the `running` part of the change.
+- **Order of the red-green cases: 2, then 1, then 3.** Test 2 (#110) drove the results in `progressOf`. Written first, test 1 would have turned green when the case was added, because then every call showed as running.
+- **The new cases are found by their "happened" text**, word for word from the plan. Both cases have the issue `#238`, so the issue does not tell them apart.
+- **The stop's reason** in the hang case's right call refers to the new two-hour rule: "One command, npx playwright test, has run since 21:20, almost four hours. That is more than two hours, so it has hung."
+
+**Validation evidence.**
+
+Red then green, per case, with `npx vitest run src/runner/replay/harness.test.ts`:
+
+1. (2) "says no command is running when every call of the step has ended, and still lists the suite runs since the last check (#110)". Red: `AssertionError: expected '## Why you were woken\n\nIt is now 20…' to contain 'No command is running now.'`. The tools line passed; the prompt had 12 `Still running:` lines, one per tool. Green after `progressOf` fed a result for each tool (4 passed).
+2. (1) "names the one browser test command still running, and since when, inside a long check (#238)". Red: `Error: No case of the replay says: "At a 15-minute check, the checking step is inside one browser test command that started 35 minutes ago."`. After the case and the `running` field were added, red again: `AssertionError: expected '## Why you were woken\n\nIt is now 20…' to contain 'Still running: Bash(npx playwright te…'`, because the running call got a result. Green after `progressOf` gave no result to a call marked `running` (5 passed).
+3. (3) "holds both moments of #238 just after the #110 case: a long test command, and one that hangs". Red: `AssertionError: expected [ { issues: [ '#238' ], …(1) }, …(1) ] to deeply equal [ … ]`, the second slot holding the #202 case ("Another pull request of the project merged. …"). Green after the hang case was added (6 passed).
+4. (✏ amendment) "shows a step inside a long command as printing its 30-second sign, not as silent (#238)". It reads the time from `It last printed something at <time>.`, and checks it is at or before the case's `now` and at most 30 seconds before it, and that the prompt has no `It has been silent since`. Red: `AssertionError: expected 2100000 to be less than or equal to 30000` (the last output was the command's start, 35 minutes before the wake). Green after `progressOf` fed the 30-second sign for each call marked `running` (7 passed).
+
+The running-step section of the two new prompts, as built after the amendment. Neither has a "silent since" line. Before the amendment, each said `It last printed something at <the command's start>` and `It has been silent since <the command's start>.`
+
+```
+It is now 2026-10-09T11:34:00Z.
+…
+A step is running: checking the result. It started at 2026-10-09T07:12:00.000Z.
+Commands and tools it used since the last check: none
+Still running: Bash(npx playwright test e2e/positions-short-text.spec.ts), started at 2026-10-09T10:59:00.000Z, 35 minutes ago.
+Tokens it wrote since the last check: 0.
+It last printed something at 2026-10-09T11:34:00.000Z. A command that is still running prints a short sign every 30 seconds, and that counts here.
+
+It is now 2026-10-09T01:13:00Z.
+…
+A step is running: checking the result. It started at 2026-10-08T19:00:00.000Z.
+Commands and tools it used since the last check: none
+Still running: Bash(npx playwright test), started at 2026-10-08T21:20:00.000Z, 233 minutes ago.
+Tokens it wrote since the last check: 0.
+It last printed something at 2026-10-09T01:13:00.000Z. A command that is still running prints a short sign every 30 seconds, and that counts here.
+```
+
+A check outside the suite (a script in the scratchpad, not committed), run before the amendment, which does not touch the judges: the long case's judge fails a try that stops the step ("wanted: the step not stopped"), and the hang case's judge fails a try that does nothing ("wanted: a message sent to the running step, or the step stopped"). Both pass a try that sends a message.
+
+Validation block, as run from `projects/timone` after the amendment:
+
+```
+$ npx vitest run src/runner/replay/
+ ✓ src/runner/replay/harness.test.ts (7 tests)
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+exit: 0
+$ npm run replay -- --dry
+Replaying 24 cases, 3 tries each, with a scripted runner and no model (--dry).
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+PASS #140 — Read planning as done, and start the build. 3 of 3 tries.
+PASS #144 — Not wait on the person. Choose the next step. 3 of 3 tries.
+PASS #143, #161 — Try the start again. If it keeps failing, say so on the ticket. 3 of 3 tries.
+PASS #99 — End the run, and free the project. 3 of 3 tries.
+PASS #115 — Start nothing on it. 3 of 3 tries.
+PASS #142 — Clear the hold, then start the work. 3 of 3 tries.
+PASS #108 — Start a session that corrects the requirements, then check again. 3 of 3 tries.
+PASS #111 — Start again from that discussion, as PRD-03.R1 says. Do not ask. 3 of 3 tries.
+PASS #159 — Open the pull request with that check listed as not run. 3 of 3 tries.
+PASS #117 — List the skip as a departure, and carry on to the pull request. 3 of 3 tries.
+PASS #120 — Not offer the same command again. Say what is actually needed. 3 of 3 tries.
+PASS #125, #135 — Carry the question to the pull request, and open it. 3 of 3 tries.
+PASS #132 — Act on the word. 3 of 3 tries.
+PASS #147 — Say on the pull request that the change is being made, then start it. 3 of 3 tries.
+PASS #104 — Skip the interview and start planning. Post the departure on the ticket. 3 of 3 tries.
+PASS scratch-app#37 — Write the requirements. Record no approval. Post that the approval was skipped, and carry on. 3 of 3 tries.
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+PASS #238 — Leave the step running. 3 of 3 tries.
+PASS #238 — Send the step a message, or stop it. 3 of 3 tries.
+PASS #202 — Start the update, and ask nobody for anything. 3 of 3 tries.
+PASS #218 — Ask on the ticket whether to do the work again or to stop, and name the takeover command for the ticket once. 3 of 3 tries.
+PASS #218 — Record the approval and ask nothing, or ask what the word meant. Do not name the takeover command. 3 of 3 tries.
+24 of 24 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+$ npx tsc --noEmit
+(no output, exit 0)
+$ npx vitest run
+ Test Files  77 passed (77)
+      Tests  2742 passed (2742)
+exit: 0
+```
+
+- [x] The dry replay passes every case, the two new ones included. **PASS** — 24 of 24, both `#238` lines PASS 3 of 3.
+- [x] The #110 case's prompt shows no command still running; the #238 long-command case's prompt shows one. **PASS** — tests (2) and (1); the #110 prompt has `No command is running now.` and no `Still running:`; the long case's has exactly one `Still running:` line.
+- [x] The whole suite passes. **PASS** — 77 files, 2742 tests (2738 before this slice, plus the 4 new ones).
+- [ ] **Human gate:** the real replay. Not run by this slice: the orchestrator runs the real replay.
+
+**What delivery must know.**
+
+- **The replay's running call now sends the 30-second sign up to the wake**, so both new prompts show "last printed" at the wake, with no "silent since" line, as on ivtrends#178 and #177. The two cases differ for the runner only in how long the one command has run: 35 minutes against 233 minutes. The rule from 58b (more than two hours) is what tells them apart.
+- The brief says "Not held." for both new tickets, though they carry `timone:held`, as every step ticket does while its run lives. The #110 case shows the same. This is how the brief already reads a step ticket, and this slice did not change it.
+- A `start_step` call while a step runs is refused by the actions, so the long case's "no step started" check cannot be made to fail through the scripted runner. Only its "not stopped" check was seen to fail.

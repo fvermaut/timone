@@ -359,10 +359,17 @@ function runningStepOf(step: RunningStepAtMoment, log: CallLog, now: string) {
  * What the running step did, as the machine watched it: its tool calls fed,
  * at their own times, into the same {@link SessionProgress} a real step's
  * output is fed into. The brief reads the step's activity from it.
+ *
+ * Each call's result comes back at the time of the next call, or at its own
+ * time for the last one, so the brief shows it as ended. A call the case
+ * marks `running` gets no result, so the brief shows it as still running.
+ * It sends instead the sign a real running command sends every 30 seconds,
+ * up to the wake, so the step's last output is as recent as it was (#238).
  */
 function progressOf(step: RunningStepAtMoment, now: string): SessionProgress {
   let at = Date.parse(step.startedAt);
   const progress = new SessionProgress({ now: () => at });
+  const signs: { at: number; message: SDKMessage }[] = [];
   for (const [index, use] of step.tools.entries()) {
     at = Date.parse(use.at);
     progress.observe(sdkMessage({ type: "stream_event", parent_tool_use_id: null, event: { type: "message_start" } }));
@@ -383,6 +390,39 @@ function progressOf(step: RunningStepAtMoment, now: string): SessionProgress {
         session_id: step.sessionId,
       }),
     );
+    if (use.running === true) {
+      const started = Date.parse(use.at);
+      for (let seconds = 30; started + seconds * 1000 <= Date.parse(now); seconds += 30) {
+        signs.push({
+          at: started + seconds * 1000,
+          message: sdkMessage({
+            type: "tool_progress",
+            tool_use_id: `toolu_replay_${index}`,
+            tool_name: use.name,
+            parent_tool_use_id: null,
+            elapsed_time_seconds: seconds,
+            heartbeat: true,
+            session_id: step.sessionId,
+          }),
+        });
+      }
+      continue;
+    }
+    at = Date.parse(step.tools[index + 1]?.at ?? use.at);
+    progress.observe(
+      sdkMessage({
+        type: "user",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "tool_result", tool_use_id: `toolu_replay_${index}`, content: "" }] },
+        session_id: step.sessionId,
+      }),
+    );
+  }
+  // In the order of their times, so that the last one seen is the latest
+  // when more than one call is running.
+  for (const sign of signs.sort((first, second) => first.at - second.at)) {
+    at = sign.at;
+    progress.observe(sign.message);
   }
   at = Date.parse(now);
   return progress;
