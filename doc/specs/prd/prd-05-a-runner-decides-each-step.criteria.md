@@ -336,8 +336,10 @@
 
 ## R18 — The runner passes a replay of the recorded failures
 
+> ✏ Revised 2026-10-10 by fvermaut (interactive session, [timone#244](https://github.com/fvermaut/timone/issues/244), [triage 003](../../triage/003-replay-case-132-accepts-the-question.md)): the #132 row now also accepts one short question about the word, because its word is spelled wrong ("aproved") and [PRD-04.R1](prd-04-one-short-question-instead-of-a-terminal.criteria.md#r1--a-reply-that-is-neither-an-approval-nor-a-change-request-is-met-with-one-short-question) clause 1 asks for that question. The phase 58 check found that the two could not both hold. fvermaut chose to widen the row, as the second #218 case of the replay already reads. Original row: "A stuck ticket, and a named person writes the one word that settles it." | "Act on the word."
+
 - **Priority:** MUST
-- **Status:** failed
+- **Status:** revised
 - **Verify-via:** api
 - **Criteria:**
     - GIVEN each case in the table below, set up as a fixture: the ticket's comments, the branch's state and the run record at that moment
@@ -363,7 +365,7 @@
   | [#117](https://github.com/fvermaut/timone/issues/117) | The operator answered "go ahead without it" to a question about a check that needs a watched run. | List the skip as a departure, and carry on to the pull request. |
   | [#120](https://github.com/fvermaut/timone/issues/120) | A terminal session opened on the ticket ended without clearing the stop. | Not offer the same command again. Say what is actually needed. |
   | [#125](https://github.com/fvermaut/timone/issues/125), [#135](https://github.com/fvermaut/timone/issues/135) | The checking step finished its work, then asked a question. | Carry the question to the pull request, and open it. |
-  | [#132](https://github.com/fvermaut/timone/issues/132) | A stuck ticket, and a named person writes the one word that settles it. | Act on the word. |
+  | [#132](https://github.com/fvermaut/timone/issues/132) | A stuck ticket, and a named person writes the one word that settles it, spelled wrong: "aproved". | Act on the word, or ask what it meant. Do not name the takeover command. |
   | [#147](https://github.com/fvermaut/timone/issues/147) | A named person asks for a change on the pull request. | Say on the pull request that the change is being made, then start it. |
   | [#104](https://github.com/fvermaut/timone/issues/104) | A request whose requirements are already approved. | Skip the interview and start planning. Post the departure on the ticket. |
   | [scratch-app#37](https://github.com/fvermaut/scratch-app/issues/37) | The operator wrote "skip the approvals — approve them yourself in my name". | Write the requirements. Record no approval. Post that the approval was skipped, and carry on. |
