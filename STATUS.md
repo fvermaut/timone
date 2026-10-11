@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-10.
+**Last updated:** 2026-10-11.
 
 ---
 
@@ -73,6 +73,10 @@
 **1o. A long command is no longer read as a stuck step, and every ivtrends step can start again ([#238](https://github.com/fvermaut/timone/issues/238), [#242](https://github.com/fvermaut/timone/issues/242)), in Timone's own repository: [pull request #245](https://github.com/fvermaut/timone/pull/245) is open for your review, from the branch `timone/238-a-long-command-is-not-a-hung-step`.** The check passed everything it covers except one replay case, #132. There the runner asked whether "aproved" meant approve, which PRD-04.R1 asks for and the case does not accept. That is older than this work, and the choice is filed as [#244](https://github.com/fvermaut/timone/issues/244). The review of the code style found 4 small things, such as numbers written without a name. The review against the requirements found 4. Two of them are worth reading before the merge: the new rule "leave a running command alone" may keep the runner from sending its message to a step that runs the whole test suite again and again (the #110 rule), and a sub-agent that works for more than two hours looks like one hung command. Both are in the [delivery report](https://github.com/fvermaut/timone/blob/timone/238-a-long-command-is-not-a-hung-step/doc/plans/phases/reports/phase-58-delivery.md). Owed after the merge, and only you can start it: update and rebuild the Timone folder, restart the daemon, then comment on ivtrends#178 so its runner wakes. Then watch its next steps start, and its next check not be stopped during a long test command.
 
 **What I need from you:** review and merge #245, then restart the daemon and comment on ivtrends#178. Choose an option on #244 when you have time.
+
+**1p. Replay case #132 now accepts a question about "aproved" ([#244](https://github.com/fvermaut/timone/issues/244)), in Timone's own repository, on the branch `timone/244-replay-case-132-accepts-the-question`. No pull request is open yet; it opens next.** You chose option 1. The case now passes when the runner records your approval from "aproved", or asks you what the word meant, as long as no comment names the takeover command. A separate check found one fault, and it is fixed on the branch: the case also passed a question about something else. Before the fix, the real replay passed all 24 cases, three tries of three, in two runs (one by the build, one by the check, $2.17). The fix changed the replay's code, so one more real run is owed before this requirement can be marked as met. The 23 other requirements the check covered pass. Report: [phase-59-verification.md](https://github.com/fvermaut/timone/blob/timone/244-replay-case-132-accepts-the-question/doc/plans/phases/reports/phase-59-verification.md).
+
+**What I need from you:** when you can, run the replay once on that branch (`npm run --silent build && npm run --silent replay` in `projects/timone`, from a terminal signed in to Claude, about $3), and put its last line on the pull request.
 
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
@@ -152,6 +156,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**11 October — replay case #132 accepts a question about "aproved" ([#244](https://github.com/fvermaut/timone/issues/244)), on the branch `timone/244-replay-case-132-accepts-the-question`.** The check found that the case also passed a question about something else; that is fixed on the branch. One real replay run on the fixed branch is owed. Item 1p says what is needed.
 
 **10 October — a long command is not a stuck step ([#238](https://github.com/fvermaut/timone/issues/238)), and a step's clone takes only the top-level files ([#242](https://github.com/fvermaut/timone/issues/242)): [pull request #245](https://github.com/fvermaut/timone/pull/245) is open for your review, from the branch `timone/238-a-long-command-is-not-a-hung-step`.** The check found one requirement failing: replay case #132, where two requirements disagree ([#244](https://github.com/fvermaut/timone/issues/244)). Everything else it covers passes. The style review found 4 things and the review against the requirements found 4. Item 1o says what is needed.
 
