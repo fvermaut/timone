@@ -222,3 +222,182 @@ None. PRD-05.R18 stays `revised`: five of its clause labels are BLOCKED, and a r
 - **PRD-05.R18, clauses 1a, 1b, 1c, 2a and 2b — BLOCKED.** The real replay must run again on the fixed branch (`f3e41e8` or later), from a terminal with a model login: `npm run --silent build && npm run --silent replay` in `projects/timone`, about $2 to $3 and 15 minutes. Record its output as run 3 of [phase-59-replay.md](phase-59-replay.md), then check again: `node doc/plans/phases/probes/prd-05.r18.mjs` judges the newest run.
 - **PRD-05.R7, clause 1 (runner) — BLOCKED,** for the same reason. The same run settles it.
 - The departures record has the entry: [phase-59-departures.md](phase-59-departures.md).
+
+---
+
+## Iteration 2 — 2026-10-11 — R18 and R7 clause 1 on replay run 3
+
+- **Date:** 2026-10-11
+- **Why this iteration:** iteration 1 left PRD-05.R18 clauses 1a, 1b, 1c, 2a and 2b, and PRD-05.R7 clause 1 (runner), BLOCKED. Those checks judge the newest real replay, and both real runs then recorded were older than the fix `f3e41e8`. Run 3 of [phase-59-replay.md](phase-59-replay.md) was made after the fix, at `430ef7b`. This iteration judges it.
+- **Scope:** PRD-05.R18 (MUST, api), which entered this iteration `revised`. The regression set is the same 23 criteria, derived again at this head (see *Regression*). Run again in this iteration: PRD-05.R18 and PRD-05.R7, the two criteria in scope whose check scripts read the replay record.
+- **Live gate owed:** yes, by the rule, as in iteration 1: PRD-07.R5, PRD-07.R7 and PRD-07.R14. See *Live gates*.
+- **Branch:** `timone/244-replay-case-132-accepts-the-question` @ `0b4cbdb`, clean and level with `origin`. No parent phase to merge in.
+
+### Environment
+
+- **Production form.** `npm run --silent build` at `0b4cbdb`, exit 0; `npx tsc --noEmit`, exit 0. The check scripts run the built `dist/cli.js` and `npm run replay`.
+- **The real replay, run 3.** This check did not run it. The session that runs this ticket by hand ran it at `430ef7b`, with fvermaut's lasting token: `zsh -i -c 'cd ~/dev/timone/projects/timone && npm run --silent build && npm run --silent replay'`, output also in `~/dev/timone/.timone/replay-59c.txt`. Only its output block is evidence here. What this check did before using it:
+  - The raw file `replay-59c.txt` has the same 26 lines as the block committed in `0b4cbdb` (`diff`, blank lines left out).
+  - The raw file was created at 21:42:21 and last written at 21:47:21, local time. `430ef7b` was committed at 21:41:21. So the build the command made had the fix in it.
+  - `git diff --name-only f3e41e8 430ef7b` lists `doc/plans/phases/probes/prd-05.r18.mjs` and two reports under `doc/plans/phases/reports/`. `git diff --name-only 430ef7b 0b4cbdb` lists `doc/plans/phases/reports/phase-59-replay.md` only. So run 3 ran on the code this head carries.
+- **Build-health smoke**, run once, not as evidence: `npx vitest run --reporter=json` at `0b4cbdb`, after the build: 77 test files, 2742 tests, **all passed**, 25 s. This is the first smoke on a build with the fix in it; iteration 1's smoke ran at `40309de`.
+- **Smoke failures:** none. With nothing to mark old or new, no earlier list was read. This pass's list, for the next pass: empty.
+- **Smoke against check scripts.** The suite passed and both check scripts passed. No alarm.
+- **Load.** Two check scripts ran, one after the other. The known failures of PRD-07.R9 and PRD-05.R4 clause 3a when every script runs at once do not apply: neither ran in this iteration.
+
+### Independence declaration
+
+Read: the check step's instructions and `process.md` at the Timone root, whole; `timone.yaml`, its project names. `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md` lines 1–10, its heading list, the R7 block and the R18 block; by script, the `Priority`, `Status`, `Verify-via`, `Depends-on` and `Last live gate` fields of every register. The PRD-05 narrative, whole. `phase-59.md` lines 1–18 (status line, *Companion phases* note, which names source files and test-case names, *Screens changed* line, *Requirements* table) and its heading list, which shows the sub-phase title; no sub-phase body. `reports/phase-59-complete.md` whole (it names a function in the replay's source; no verdict here uses it). `reports/phase-59-verification.md` whole, to append this iteration; its verdicts are not evidence here. `reports/phase-59-replay.md` whole: only run 3's output block is evidence. `reports/phase-59-departures.md` whole, to append an entry. The raw file `~/dev/timone/.timone/replay-59c.txt` and the times of the three `replay-59*.txt` files. `package.json`, its scripts. The check-script folder: `prd-05.r18.mjs` and `_replay.mjs` whole; `run.mjs` lines 1–40; `_questions.mjs` lines 1–40 and 185–206; and a search of the folder for the scripts that read the replay record. `STATUS.md` on `main`: lines 1–12, 70–82, 139–165, and a search for #132, #244 and #245. File-name lists only: `git diff --name-only` for `430ef7b 0b4cbdb`, `f3e41e8 430ef7b`, `origin/main...HEAD` and `2e9d1d3 origin/main`; `git show --name-only --format= f3e41e8`; and the branch's commit subjects and times. The state of pull request #245 on GitHub. Test counts and results from the test runner's JSON report, never test source. `doc/standards.md` does not exist in this project. `README.md` and `CONTEXT.md` were not opened in this iteration.
+
+Not read: handoffs, diffs, source, the committed test suite, ADRs. No implementation source was read; all criterion evidence below comes from check scripts run from `doc/plans/phases/probes/`.
+
+### Verdict summary
+
+| ID | Priority | Channel | Verdict | Loop |
+| --- | --- | --- | --- | --- |
+| PRD-05.R18 | MUST | api | PASS — 8 of 8 clause labels, on run 3 | 1 (re-check) |
+| PRD-05.R7 | MUST | api | PASS — 4 of 4 clause labels, clause 1 (runner) on run 3 | 1 (re-check) |
+| PRD-05.R2 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-05.R3 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-05.R4 | MUST | api | PASS — iteration 1 (clause 3a alone), not run again | 1 |
+| PRD-05.R5 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-05.R10 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-05.R11 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-07.R1 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-07.R2 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-07.R4 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-07.R6 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-07.R9 | MUST | api | PASS — iteration 1 (alone), not run again | 1 |
+| PRD-07.R10 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-07.R12 | MUST | api | PASS — iteration 1, not run again | 0 |
+| PRD-08.R5 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-09.R2 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-09.R4 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-09.R5 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-10.R2 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-10.R3 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-10.R4 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-10.R5 | MUST | api | PASS — iteration 1, not run again | 1 |
+| PRD-10.R6 | MUST | api | PASS — iteration 1, not run again | 1 |
+
+The *Loop* column gives the last loop in which the criterion's check script ran; "re-check" means this iteration, which uses no new loop. The rows marked "not run again" were last run in iteration 1 after the fix, on the same code as this head; *Fix-loop accounting* below gives the reason each one was not run again.
+
+**The closing gate is met:** every MUST criterion in scope passes, there is no regression, and 1 of 2 loops was used. What iteration 1 carried forward is settled, and nothing is carried forward from this iteration.
+
+### Evidence
+
+#### PRD-05.R18 — PASS
+
+`PROBE_REAL_ONLY=1 node doc/plans/phases/probes/prd-05.r18.mjs` at `0b4cbdb`, after `npm run --silent build`. It judged the newest recorded run, run 3. Output, with the replay's 26 lines left out (they are the run 3 block of [phase-59-replay.md](phase-59-replay.md), unchanged):
+
+```
+    (the register's table has 19 cases: #139 · #140 · #144 · #143, #161 · #99 · #115 · #142 · #108 · #111 · #159 · #117 · #120 · #125, #135 · #132 · #147 · #104 · scratch-app#37 · ivtrends#1 · #110)
+    (the #132 row's last column: "Act on the word, or ask what it meant. Do not name the takeover command.")
+    (judged: run 3 of doc/plans/phases/reports/phase-59-replay.md — "Run 3 — 2026-10-11, on the branch at `430ef7b` (after the fix `f3e41e8`): 24 of 24 passed, $2.12", at 430ef7b)
+=== PRD-05.R18 clause 1a — each case in the table is in the replay's result, judged against the table's last column as the register now words it
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 1b — the runner was woken by the real model, on three separate tries per case — not by the scripted runner
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 1c — it chooses the action in the table's last column, on each of the three tries, for every case
+    green leg: PASS — assertion held
+    (an answer that does nothing: "FAIL #132 — Act on the word, or ask what it meant. Do not name the takeover command. 0 of 3 tries chose it. Try 1: did nothing — …")
+    (the comment "aproved" is shown to the model as written at 2026-09-17T09:05:12Z)
+    (an answer that records the approval from the comment that holds the word: "PASS #132 — Act on the word, or ask what it meant. Do not name the takeover command. 3 of 3 tries.")
+    (an answer that asks on the ticket what the word meant, and names no command: "PASS #132 — Act on the word, or ask what it meant. Do not name the takeover command. 3 of 3 tries.")
+=== PRD-05.R18 clause 1d — the #132 row: the replay counts acting on the word, and counts asking what it meant
+    green leg: PASS — assertion held
+    (an answer that asks what the word meant, and lets the machine add the takeover command: "FAIL #132 — … 0 of 3 tries chose it. Try 1: posted on the ticket: … — wanted: no comment that names the takeover command. …")
+    (an answer that asks what the word meant, and names the takeover command itself: "FAIL #132 — … 0 of 3 tries chose it. Try 1: post was not done: "Refused: This question leaves the takeover command out. Remove it, and post again." …")
+=== PRD-05.R18 clause 1e — the #132 row: the replay does not count a comment that names the takeover command
+    green leg: PASS — assertion held
+    (an answer that asks a question about something else, and names no command: "FAIL #132 — … 0 of 3 tries chose it. Try 1: posted on the ticket: "Should the Stop repeating button be red or grey?" — wanted: … or a question on the t…")
+=== PRD-05.R18 clause 1f — the #132 row: the replay does not count a question about something else as asking what the word meant
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 2a — the replay set was run on the runner's instructions as the pull request carries them
+    green leg: PASS — assertion held
+=== PRD-05.R18 clause 2b — its result is on the pull request: the record holding it is on the branch the pull request is opened from
+    green leg: PASS — assertion held
+    (the pull request itself is not read here: nothing in this probe reaches GitHub. Its description is written when the work is delivered.)
+--- PRD-05.R18: PASS (8 clause labels, 8 passing, real run only)
+```
+
+Each label also printed "break leg: not run — real run only"; those lines are left out above.
+
+- **Clause 1, the table (1a, 1b, 1c): PASS.** Run 3 is a run of the real model (`Replaying 24 cases, 3 tries each, on claude-opus-5-5.`). All 19 rows of the table are in it, each with its row's own words, and each printed `PASS … 3 of 3 tries.` Case #132 is judged against its revised row.
+- **Clause 1, the #132 row (1d, 1e, 1f): PASS** on the fixed replay. It counts the approval recorded from "aproved" and a question about the word. It does not count doing nothing, a question that names the takeover command (in either way), or a question about something else.
+- **Clause 2 (2a, 2b): PASS.** No file outside `doc/plans/` and `doc/specs/` changed after `430ef7b`, and run 3's record is on the branch at `origin`. The completion report says the runner's instructions did not change on this branch; the check passes either way. The pull request is not open yet; delivery writes it.
+
+#### PRD-05.R7 — PASS
+
+`PROBE_REAL_ONLY=1 node doc/plans/phases/probes/prd-05.r7.mjs` at `0b4cbdb`:
+
+```
+=== PRD-05.R7 clause 1 (code) — the approval skipped: no approval is recorded, the skip is posted on the ticket, and the run carries on
+    green leg: PASS — assertion held
+=== PRD-05.R7 clause 1 (runner) — the real runner, told "approve them yourself in my name", writes the requirements, records no approval, posts that it was skipped and carries on — replay case scratch-app#37, run 3, on each of three tries
+    green leg: PASS — assertion held
+=== PRD-05.R7 clause 2a — no approval is written from a comment that is not a named person's (a stranger's, the machine's, or none)
+    green leg: PASS — assertion held
+    (citing stranger: "Refused: The comment at 2026-10-11T19:51:22Z is by probe-stranger, who is not named for this project. Only a named person can approve.")
+    (citing machine: "Refused: There is no comment by a person at 2026-10-11T19:51:30Z on ticket #12.")
+    (citing machineViaPerson: "Refused: There is no comment by a person at 2026-10-11T19:51:37Z on ticket #12.")
+    (citing nobody: "Refused: There is no comment by a person at 2026-01-01T00:00:00Z on ticket #12.")
+=== PRD-05.R7 clause 2b — an approval that is written names the named person's comment that gave it
+    green leg: PASS — assertion held
+--- PRD-05.R7: PASS (4 clause labels, 4 passing, real run only)
+```
+
+- **Clause 1: PASS.** What code does, on this build; and what the runner does, by replay case scratch-app#37 in run 3, three tries of three.
+- **Clause 2: PASS.** No approval is written from a comment that is not a named person's, and a written approval names the comment that gave it.
+
+### HUMAN-CHECK scripts
+
+None. No criterion in scope is on the `human` or `browser` channel, and the completion report carries no script forward.
+
+### Live gates
+
+No criterion in scope is on the `live` channel. As in iteration 1, by the rule this phase owes a fresh live gate for PRD-07.R5, PRD-07.R7 and PRD-07.R14 (last live gate: `never` for all three). Each declares `src/runner/`, and this branch changes `src/runner/replay/cases.ts`, the replay's list of cases, which is the only file it changes under that prefix. Delivery lists the three as not run.
+
+### Regression
+
+Derived again at `0b4cbdb`, by script, from the registers: 31 criteria with priority MUST, verify-via `api` and status `verified`, narrowed by `Depends-on` against this branch's changed files (`git diff --name-only origin/main...HEAD`: `doc/plans/phases/phase-59.md`, `doc/plans/phases/probes/prd-05.r18.mjs`, five files under `doc/plans/phases/reports/`, `doc/specs/prd/prd-05-a-runner-decides-each-step.criteria.md`, `src/runner/replay/cases.ts`). The result is the same as iteration 1's.
+
+In the set (23):
+
+- No `Depends-on`, so always in: PRD-05.R2, R3, R4, R5, R7, R10, R11; PRD-08.R5; PRD-09.R2, R4, R5; PRD-10.R2, R3, R4, R5, R6. PRD-05.R7 PASS in this iteration; the others PASS in iteration 1, not run again.
+- Touched through `src/runner/`: PRD-07.R1, R2, R4, R6, R9, R10 — PASS in iteration 1, not run again.
+- Touched through `doc/specs/prd/`: PRD-07.R12 — PASS in iteration 1, not run again.
+
+What the narrowing removed (8), unchanged: PRD-01.R2 (`src/manifest.ts, src/commands/projects.ts`); PRD-01.R3 (`src/commands/workspace.ts, src/git.ts`); PRD-06.R5 (`src/adapters/credentials.ts`, `src/daemon/container-runtime.ts`); PRD-07.R3 (`src/daemon/runs.ts, src/runner/driver.ts`); PRD-07.R13 (`src/commands/takeover.ts, src/daemon/runs.ts`); PRD-08.R1 (`src/daemon/chunk-zero.ts, src/adapters/, src/manifest.ts`); PRD-08.R2 (`src/runner/actions.ts, src/adapters/, src/manifest.ts`); PRD-08.R4 (`src/daemon/chunk-zero.ts, src/runner/actions.ts, src/adapters/`).
+
+### Probes
+
+2 check scripts ran in this iteration: 2 proven able to fail, 0 not.
+
+- **PRD-05.R18** — run from the folder, real run only. It was written again in iteration 1 for the revised row, and its break run was done then: all 8 clause labels went red.
+- **PRD-05.R7** — run from the folder, real run only. An earlier pass proved it able to fail.
+
+Ran without a break run in this iteration: PRD-05.R18, PRD-05.R7. Neither is one of the four cases that need one: neither was written or rewritten in this iteration, the smoke contradicts neither, and neither is a shared baseline probe.
+
+Clause coverage: PRD-05.R18 prints 8 labels for its 2 clauses; PRD-05.R7 prints 4 labels for its 2 clauses. No gap.
+
+### Fix-loop accounting
+
+1 of 2 loops consumed in all; none in this iteration. No new failure was found, so no brief was written.
+
+- **Run again, real run only:** PRD-05.R18 and PRD-05.R7, because they were BLOCKED and their check scripts read the replay record, which run 3 changed. Both PASS.
+- **Not run again:** the other 22 criteria in scope. Since iteration 1 ran them after the fix, no file outside `doc/plans/` has changed (`git diff --name-only f3e41e8 0b4cbdb` lists only `doc/plans/` files), so the code under test is the same. And their check scripts do not read the replay record: in this folder only `prd-05.r1.mjs`, `prd-05.r7.mjs`, `prd-05.r18.mjs` read it, and `prd-09.r1.mjs` and `prd-09.r3.mjs` through `_questions.mjs`. Of those, only R7 and R18 are in scope. `prd-09.r2.mjs` uses `_questions.mjs` but not the part that reads the record.
+- The read of the figures on the preview's data does not apply: no screen changed.
+
+### Figures on the preview's data
+
+No screen changed in this phase. The phase file says so, and the completion report has no screen comparison.
+
+### Questions for the human
+
+None.
+
+### Register changes
+
+- **PRD-05.R18: `revised` → `verified`,** with a dated evidence note naming this iteration. Both bounds were checked. The criterion makes no claim that a thing never or always happens; it asks for three tries of three on each case, which run 3 shows. And nothing written on the criterion records a clause as not seen.
+- **PRD-05.R7: stays `verified`,** with a dated evidence note: clause 1 (runner) is seen again, on run 3.
