@@ -1,6 +1,6 @@
 # Phase 59: Replay case #132 accepts the question — the runner may record the approval from "aproved", or ask what it meant
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-59-complete.md](reports/phase-59-complete.md).
 
 > **Companion phases:** [phase 58](phase-58.md) ran the real replay that found case #132 failing, and recorded it in [reports/phase-58-replay.md](reports/phase-58-replay.md) and [reports/phase-58-verification.md](reports/phase-58-verification.md#carried-forward). [Phase 53](phase-53.md) added the rule to ask about a misspelled approval word, and the second #218 case (`aMisspelledApprovalWord` in `src/runner/replay/cases.ts`) whose judge this phase copies. [Phase 40](phase-40.md) built the replay set and case #132 (`theOneWordThatSettlesIt`). Governing decisions: [ADR-0060](../../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), because the replay judges the runner it defines; [ADR-0054](../../adr/0054-an-ask-check-stands-in-front-of-every-question-put-to-a-person.md) D5 is where case #132 comes from (ivtrends#90, the reply "aprrove"), and it is superseded by ADR-0060, which is why a question about the word is now a fair answer.
 
