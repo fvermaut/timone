@@ -2040,7 +2040,11 @@ function aCheckThatAskedAfterItFinished(): ReplayCase {
 
 /**
  * #132. A ticket stuck for two days, until the named person writes the one
- * word that settles it — spelt wrong, as people do.
+ * word that settles it — spelt wrong, as people do. Recording the approval is
+ * right, and so is asking what the word meant: the word is spelt wrong, and
+ * PRD-04.R1 asks one short question for such a word. A question about the
+ * word cannot be answered in a terminal, so it does not name the takeover
+ * command.
  */
 function theOneWordThatSettlesIt(): ReplayCase {
   const project = "scratch-app";
@@ -2053,8 +2057,8 @@ function theOneWordThatSettlesIt(): ReplayCase {
   const wordAt = "2026-09-17T09:05:12Z";
   return {
     issues: ["#132"],
-    happened: "A stuck ticket, and a named person writes the one word that settles it.",
-    mustDo: "Act on the word.",
+    happened: 'A stuck ticket, and a named person writes the one word that settles it, spelled wrong: "aproved".',
+    mustDo: "Act on the word, or ask what it meant. Do not name the takeover command.",
     moment: {
       project,
       ticket: ticketOf(project, 66, {
@@ -2146,20 +2150,50 @@ function theOneWordThatSettlesIt(): ReplayCase {
       events: [commentEvent({ author: OPERATOR, where: "ticket", createdAt: wordAt, body: word })],
       now: "2026-09-17T09:05:40Z",
     },
-    // The word approves the requirements: acting on it is recording that
-    // approval, from that comment, in fvermaut's name.
-    judge: (seen) =>
-      when(
-        seen.entries.some(
-          (entry) =>
-            entry.kind === "approval" &&
-            entry.what === "requirements" &&
-            entry.by === OPERATOR &&
-            entry.commentAt === wordAt,
+    // Two answers are right. Recording fvermaut's approval of the
+    // requirements from his comment, asking nothing: that is acting on the
+    // word. Or asking on the ticket what the word meant: it is spelt wrong,
+    // and PRD-04.R1 asks one short question for such a word. Whatever the try
+    // does, no comment may name the takeover command: a terminal session
+    // cannot tell what he meant by the word.
+    //
+    // "What the word meant" is read from the words: the comment that asks
+    // must name the word as he wrote it, or the approval it may mean. A
+    // question about anything else does not count.
+    judge: (seen) => {
+      const approved = seen.entries.some(
+        (entry) =>
+          entry.kind === "approval" &&
+          entry.what === "requirements" &&
+          entry.by === OPERATOR &&
+          entry.commentAt === wordAt,
+      );
+      const asked = postsOn(seen, "ticket").some(
+        (body) => asksSomething(body) && (body.toLowerCase().includes(word) || /approv/i.test(body)),
+      );
+      return allOf(
+        when(
+          (approved && !askedAnything(seen)) || asked,
+          `fvermaut's approval of the requirements recorded from his comment at ${wordAt} with nothing asked, or a question on the ticket about what "${word}" meant`,
         ),
-        `fvermaut's approval of the requirements recorded, from his comment at ${wordAt}`,
+        when(
+          ![...postsOn(seen, "ticket"), ...postsOn(seen, "pull-request")].some((body) => body.includes("timone takeover")),
+          "no comment that names the takeover command",
+        ),
+      );
+    },
+    rightCalls: [
+      postCall(
+        "ticket",
+        [
+          `**You wrote "${word}".** I think you mean that you approve the requirements, but I want to be sure before the work goes on.`,
+          "",
+          `${NEEDED_FROM_YOU} reply "approved" if you approve the requirements, or say what to change.`,
+        ].join("\n"),
+        `fvermaut wrote "${word}". It may mean approved, but it is spelt wrong, so I ask before I record his approval.`,
+        "approval-word",
       ),
-    rightCalls: [approvalCall("requirements", wordAt, "fvermaut approved the requirements in his comment, spelt aproved.")],
+    ],
   };
 }
 
