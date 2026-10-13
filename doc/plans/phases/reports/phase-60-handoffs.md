@@ -129,3 +129,148 @@ Tests run at the end:
 - `src/runner/session.test.ts`'s fake forge now answers `findPullRequest` with no pull request, so a case there can give the run a branch. Case (5) gives #12 the branch `timone/12-a-due-date-on-each-task`.
 - `wakeRunner`'s `watched` now wraps three actions: `post`, `startStep` and `recordApproval`.
 - An open point for the orchestrator, not for 60b to fix: when another run takes the place between the ask and the start (case (4)), the `approval` entry is already written, and the refusal tells the runner only that the ticket waits for its turn. The plan's decision (1) says an approval written before its session runs lets the brief show it as given while its file still waits for it. This path keeps that for one rare case (the gap is the time to read Timone's version and build the request). I followed the plan's order. Two ways to close it, both changes to the plan's text: write the entry only once the session has started, or say in that refusal that the approval is written down.
+
+## 60b — The brief says whether this ticket is in line, and that starting the build asks the planner
+
+**Built.** The brief's place line now says whether this ticket is in line for the place. When another run takes the place, or the place is given to another run, the line ends in one of two sentences. A ticket that asked for a place and was refused reads "This ticket waits for its turn." A ticket that is not in line reads "This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line." Which one is decided by the run's own `place.waitingSince` in the ledger at the time the brief is built, and never by what another run holds. This is the case of ivtrends#197 and #201: the place was given to ivtrends#200, the run had never asked, and the brief said it waited. The planner line, when the planner was not asked, now reads "not asked yet. Starting the build asks it." The `given` and `free` lines, and the rule under *How you act*, are unchanged.
+
+**Files touched.**
+
+- `src/runner/brief.ts` — `PlaceFact`'s `taken` and `given-to` kinds have `waiting: boolean`. `placeText` ends both lines with a new helper, `inLineText(waiting)`, which gives one of the two sentences. `plannerText`'s `not-asked` gives the new words. Doc comments on `PlaceFact`, `inLineText` and `plannerText` say why (#249).
+- `src/runner/session.ts` — `placeOf` reads the run's place once (`deps.store.get(run.id)?.place`), and sets `waiting` from its `waitingSince` for both `taken` and `given-to`. Its doc comment says the fact is the run's own (D2, #249).
+- `src/runner/brief.test.ts` — in "the project's place, as the runner is told it (ADR-0063)": `lineFor` moved up to the describe; the old test now holds only the `given` and `free` lines; three new tests, for cases (1), (2) and (3). In "the planner's decision …": the `not-asked` assertion has the new words (case (4)).
+- `src/runner/session.test.ts` — in "a place on the project after a wake (ADR-0063 D2, D3)": case (7) has the new `taken` words; two new tests, for cases (5) and (6).
+- `doc/plans/phases/reports/phase-60-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **One helper writes the two sentences for both kinds.** The plan gives the same two sentences to `taken` and `given-to`. They are written once, in `inLineText`, so the two kinds cannot drift apart.
+2. **The old "each state of the place" test was split.** It held all four kinds in one test. The `taken` and `given-to` lines now each have two forms, and the plan names them as separate cases, so the test keeps `given` and `free` only (renamed "writes one line under the facts for a place given to this ticket, and for a free place"), and cases (1), (2) and (3) are tests of their own.
+3. **Case (6) is driven through two wakes, not by calling `askPlace` in the test.** In the first wake the runner tries `start_step` and the ledger refuses it (#11's step takes the one place). The second wake's brief is checked. This is the real path that puts a run in line, and it also shows that a refused try keeps the run in line from one wake to the next (60a's `refusedForPlace`).
+4. **Case (5) gives the place to #13 by freeing it, as the orchestrator suggested.** `threeRuns` puts #13 in line behind #11's step. Parking #11 makes the ledger give the place to #13. #12 has never asked. A guard assertion checks that #13 has `givenAt` before the wake.
+5. **`plannerText`'s doc comment names ivtrends#197 and #201 only as the cases where the brief said "not asked yet" and the runner started nothing.** The bug report does not say which of the two lines the runner acted on, so the comment does not claim one.
+
+Deferred refactoring: none.
+
+**Validation evidence.**
+
+The cases were written one at a time, in the order (4), (1), (2), (5), (6), (3), (7). Red output is trimmed.
+
+*Case (4)* — the `not-asked` assertion in "writes one line under the facts for each state of the planner's decision". Red:
+
+```
+× the planner's decision, as the runner is told it (ADR-0065 D2) > writes one line under the facts for each state of the planner's decision
+Expected: "- The planner: not asked yet. Starting the build asks it."
+Received: "- The planner: not asked yet."
+Tests  1 failed | 51 skipped (52)
+```
+
+Green after `plannerText` changed: `src/runner/brief.test.ts (52 tests)`, all passed.
+
+*Case (1)* — "tells a ticket that is not in line that the place is given to another run, and that a step it tries now is refused and puts it in line (#249)". Red:
+
+```
+× … tells a ticket that is not in line that the place is given to another run, and that a step it tries now is refused and puts it in line (#249)
+Expected: "- The project's place: given to scratch-app#9/1. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line."
+Received: "- The project's place: given to scratch-app#9/1. This ticket waits for its turn."
+Tests  1 failed | 52 skipped (53)
+```
+
+Green after `given-to` got `waiting` and `inLineText`. At this step `placeOf` still gave `waiting: true` for `given-to`, to keep today's behaviour until case (5) asked for the ledger's fact. Both files: 80 passed; `tsc` exit 0.
+
+*Case (2)* — "tells a ticket that is in line that the place is given to another run, and that it waits for its turn". Its line is the line the brief gave before this slice, so it passed when first run (`1 passed | 53 skipped`). It cannot be driven red honestly. To show it is not empty, `inLineText` was changed for a moment to ignore `waiting` (`return false // MUTATION ? …`). Result:
+
+```
+× … tells a ticket that is in line that the place is given to another run, and that it waits for its turn
+Expected: "- The project's place: given to scratch-app#9/1. This ticket waits for its turn."
+Received: "- The project's place: given to scratch-app#9/1. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line."
+```
+
+The file was put back from a copy made before the change; `grep -c MUTATION src/runner/brief.ts` gave 0, and the file's 54 tests passed.
+
+*Case (5)* — "tells a run that never asked for a place that it is not in line, while the project's last place is given to another run (ivtrends#201, #249)", through `wakeRunner`. Red:
+
+```
+× a place on the project after a wake (ADR-0063 D2, D3) > tells a run that never asked for a place that it is not in line, while the project's last place is given to another run (ivtrends#201, #249)
+Expected: "- The project's place: given to scratch-app#13/1. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line."
+Received: "- The project's place: given to scratch-app#13/1. This ticket waits for its turn."
+Tests  1 failed | 27 skipped (28)
+```
+
+Green after `placeOf` read `waiting` from the run's `place.waitingSince`: both files, 82 passed; `tsc` exit 0.
+
+*Case (6)* — "tells a run whose try to start a step was refused for want of a place that it waits for its turn, on its next wake". Red:
+
+```
+× … tells a run whose try to start a step was refused for want of a place that it waits for its turn, on its next wake
+Expected: "- The project's place: taken: scratch-app#11/1 has a step running. This ticket waits for its turn."
+Received: "- The project's place: taken: scratch-app#11/1 has a step running."
+Tests  1 failed | 28 skipped (29)
+```
+
+Made green with the smallest change: `taken` got `waiting`, `placeOf` gave it the same value as `given-to`, and `placeText` added the waits sentence only when `waiting` was true. Both files: 83 passed; `tsc` exit 0.
+
+*Case (3)* — "says the same of a place taken by a run whose step runs: that this ticket waits for its turn, or that it is not in line and a step it tries now puts it in line". Its first assertion (waiting) was already true after case (6). Its second assertion was red:
+
+```
+× … says the same of a place taken by a run whose step runs: …
+Expected: "- The project's place: taken: scratch-app#7/1 has a step running. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line."
+Received: "- The project's place: taken: scratch-app#7/1 has a step running."
+Tests  1 failed | 54 skipped (55)
+```
+
+*Case (7)* — "tells the runner in its brief who takes the project's place, or that it is given to this ticket". In its first wake #12 has never asked for a place, so its first line is now the `taken` line for a ticket that is not in line. The expected value was changed to those words, and the test was run before the code change. Red:
+
+```
+× … tells the runner in its brief who takes the project's place, or that it is given to this ticket
+-   "- The project's place: taken: scratch-app#11/1 has a step running. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line.",
++   "- The project's place: taken: scratch-app#11/1 has a step running.",
+```
+
+Cases (3) and (7) went green when `placeText`'s `taken` line used `inLineText(place.waiting)`: both files, 84 passed; `tsc` exit 0.
+
+*Against the code before this slice.* `brief.ts` and `session.ts` were copied aside, the HEAD versions were put in their place with `git show HEAD:src/runner/<file>.ts`, the two test files were run, and the copies were put back. `git diff --stat` afterwards showed the work in place. Result: `Tests  6 failed | 78 passed (84)`. The six were cases (1), (3), (4), (5), (6) and (7). Case (2) passed, as its line is unchanged.
+
+The validation block, run from `projects/timone`:
+
+```
+$ npx vitest run src/runner/brief.test.ts src/runner/session.test.ts
+ ✓ src/runner/brief.test.ts (55 tests) 6ms
+ ✓ src/runner/session.test.ts (29 tests) 232ms
+ Test Files  2 passed (2)
+      Tests  84 passed (84)
+exit: 0
+$ npx tsc --noEmit
+exit: 0
+$ grep -n "This ticket waits for its turn" src/runner/brief.ts | grep -v '^\s*[0-9]*:\s*//\|^\s*[0-9]*:\s*\*'; echo "exit: $? (0 expected: the sentence is still used, for a waiting ticket)"
+463:    ? "This ticket waits for its turn."
+exit: 0 (0 expected: the sentence is still used, for a waiting ticket)
+$ npm run --silent replay -- --dry
+Replaying 24 cases, 3 tries each, with a scripted runner and no model (--dry).
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+… (24 lines, every one PASS, 3 of 3 tries)
+24 of 24 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+$ npx vitest run
+ Test Files  77 passed (77)
+      Tests  2752 passed (2752)
+   Duration  22.06s
+exit: 0
+```
+
+- [x] Cases (1), (5) and (4) failed before the change (red, above), and pass after.
+- [x] The dry replay passes every case: 24 of 24.
+- [x] The whole suite passes: 77 files, 2752 tests.
+- [ ] **Human gate:** the real replay on the model. Not run by this slice; left for the orchestrator.
+
+Tests run at the end:
+
+- `src/runner/brief.test.ts` — 55 passed (52 before this slice, plus cases (1), (2) and (3)).
+- `src/runner/session.test.ts` — 29 passed (27 before this slice, plus cases (5) and (6)).
+- Whole suite, `npx vitest run` — 77 files, 2752 tests passed (2747 at 60a's close, plus 5), 22.06 s. An earlier run in this slice: 2752 passed, 22.77 s.
+
+**What 60c must know.**
+
+- `PlaceFact`'s `taken` and `given-to` kinds now require `waiting`. Any new code that builds a `PlaceFact` must set it. Only `placeOf` in `src/runner/session.ts` builds one today.
+- `placeOf` reads `waiting` from the ledger when the brief is built, at the start of a wake. A run that is refused during the wake is in line from the next wake on; this wake's brief still says what was true when it started.
+- The sentence "This ticket waits for its turn." is now written in one place only, `inLineText` in `src/runner/brief.ts`. The refusal words in `src/runner/actions.ts` ("This ticket now waits for its turn, …") are separate and were not changed.

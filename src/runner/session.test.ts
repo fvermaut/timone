@@ -1136,9 +1136,64 @@ describe("a place on the project after a wake (ADR-0063 D2, D3)", () => {
     const placeLine = (prompt: string) =>
       prompt.split("\n").find((line) => line.startsWith("- The project's place:"));
     expect(runner.started.map((session) => placeLine(session.prompt))).toEqual([
-      "- The project's place: taken: scratch-app#11/1 has a step running.",
+      "- The project's place: taken: scratch-app#11/1 has a step running. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line.",
       "- The project's place: given to this ticket — a step you start now will not be refused.",
     ]);
+  });
+
+  it("tells a run that never asked for a place that it is not in line, while the project's last place is given to another run (ivtrends#201, #249)", async () => {
+    const w = world();
+    const { first, next } = threeRuns(w);
+    // #11's step ends, and the ledger gives the place to #13, which waits.
+    // #12 never asked for a place.
+    w.store.park(first.id, RUNNER_WAIT);
+    expect(w.store.get(next.id)?.place?.givenAt).toBeDefined();
+    const runner = scriptedRunner([quiet()]);
+
+    await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+      w.store.get(w.run.id)!,
+      ["Planning committed and pushed its plan."],
+    );
+
+    const prompt = runner.started[0]?.prompt ?? "";
+    expect(prompt.split("\n").find((line) => line.startsWith("- The project's place:"))).toBe(
+      "- The project's place: given to scratch-app#13/1. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line.",
+    );
+    expect(prompt).not.toContain("This ticket waits for its turn.");
+  });
+
+  it("tells a run whose try to start a step was refused for want of a place that it waits for its turn, on its next wake", async () => {
+    const w = world();
+    threeRuns(w);
+    // In the first wake #12 tries to start a step, and is refused: #11's step
+    // takes the one place. The second wake starts nothing.
+    const runner = scriptedRunner([
+      {
+        kind: "calls",
+        calls: [
+          {
+            name: "start_step",
+            input: {
+              stage: "triage",
+              instructions: "Sort the request.",
+              reason: "A new ticket starts with sorting.",
+            },
+          },
+        ],
+        costUsd: 0.1,
+      },
+      quiet(),
+    ]);
+    const wake = (events: string[]) =>
+      wakeRunner({ runQuery: runner.runQuery, actionsFor: w.actionDeps }, w.store.get(w.run.id)!, events);
+
+    await wake(["A new ticket was picked up. Nothing has been done on it yet."]);
+    await wake(["fvermaut commented on the ticket at 2026-09-27T11:58:40Z."]);
+
+    expect(
+      runner.started[1]?.prompt.split("\n").find((line) => line.startsWith("- The project's place:")),
+    ).toBe("- The project's place: taken: scratch-app#11/1 has a step running. This ticket waits for its turn.");
   });
 
   it("tells the runner the place is free while one of the project's two places is taken (PRD-07.R2)", async () => {

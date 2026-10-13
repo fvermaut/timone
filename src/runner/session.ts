@@ -629,17 +629,23 @@ async function briefFor(
  * given to it, free, or taken. It is free while fewer runs take a place than
  * the project has places (PRD-07.R2). A taken place names the run given it,
  * when one is, and else the run whose step runs.
+ *
+ * **Whether the run waits for its turn is the run's own fact** (D2): its
+ * `place.waitingSince`, as the ledger holds it now. A place given to another
+ * run says nothing of it (#249).
  */
 function placeOf(deps: RunnerActionDeps, run: Run): PlaceFact {
-  if (deps.store.get(run.id)?.place?.givenAt !== undefined) return { kind: "given" };
+  const own = deps.store.get(run.id)?.place;
+  if (own?.givenAt !== undefined) return { kind: "given" };
   const holders = deps.store.placeHolders(run.project);
   const holder = holders.find((one) => one.place?.givenAt !== undefined) ?? holders[0];
   if (holder === undefined || holders.length < deps.store.placesOf(run.project)) {
     return { kind: "free" };
   }
+  const waiting = own?.waitingSince !== undefined;
   return holder.place?.givenAt !== undefined
-    ? { kind: "given-to", to: holder.id }
-    : { kind: "taken", by: holder.id };
+    ? { kind: "given-to", to: holder.id, waiting }
+    : { kind: "taken", by: holder.id, waiting };
 }
 
 /**
