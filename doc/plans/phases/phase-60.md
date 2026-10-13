@@ -1,6 +1,6 @@
 # Phase 60: A ticket refused a place waits in line — recording an approval asks for a place, and the brief says whether the ticket is in line
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-60-complete.md](reports/phase-60-complete.md).
 
 > **Companion phases:** [phase 47](phase-47.md) built places and the line for them (ADR-0063), including `askPlace`, `leaveTurn`, the `refusedForPlace` watch in `src/runner/session.ts` and the place line of the brief; this phase changes those. [Phase 49](phase-49.md) added the number of places and the planner, and verified PRD-07.R2 with [`prd-07.r2.mjs`](probes/prd-07.r2.mjs). [Phase 59](phase-59.md) is the last run of the real replay (run 3, 2026-10-11). Governing decisions: [ADR-0063](../../adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md), because D2 says a run refused for want of a place waits for its turn, and both faults break that; [ADR-0065](../../adr/0065-the-planner-is-a-session-of-its-own-asked-when-a-build-would-start.md) D2, because the build asks the planner before the place, which is why the brief's planner line matters here; [ADR-0060](../../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), because the runner chooses each step from the brief, so a false line in the brief is a wrong choice.
 
