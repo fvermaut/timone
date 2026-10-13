@@ -189,3 +189,96 @@ describe("the update section of a pull request (ADR-0066)", () => {
     expect(withUpdate(once, section)).toBe(once);
   });
 });
+
+describe("the update record's time and joined check scripts (ADR-0068)", () => {
+  it("reads the time of an entry from its heading, and none when the heading has no time or a time that is not a date", () => {
+    const fields = [
+      "",
+      "- **Level with:** main at 1630843",
+      "- **Arrived:** phase 49 (pull request #215)",
+      "- **Result:** passes",
+    ];
+
+    expect(newest(["## Update 3 — 2026-10-13T12:38:51Z", ...fields].join("\n")).at).toBe("2026-10-13T12:38:51Z");
+    expect(newest(["## Update 3", ...fields].join("\n")).at).toBeUndefined();
+    expect(newest(["## Update 3 — not a time", ...fields].join("\n")).at).toBeUndefined();
+  });
+
+  it("reads the joined check scripts whole, with every requirement and how each was joined", () => {
+    const record = [
+      "## Update 3 — 2026-10-13T12:38:51Z",
+      "",
+      "- **Level with:** main at 1630843",
+      "- **Arrived:** phase 49 (pull request #215)",
+      "- **Check scripts joined:** PRD-17.R3: kept the version that fails wherever the other would; PRD-18.R12: kept both sides' checks",
+      "- **Result:** passes",
+    ].join("\n");
+
+    expect(newest(record).checkScriptsJoined).toBe(
+      "PRD-17.R3: kept the version that fails wherever the other would; PRD-18.R12: kept both sides' checks",
+    );
+  });
+
+  it("says which check scripts were joined and how, under what had to change, and leaves the heading as it was", () => {
+    const withoutJoined = [
+      "## Update 3 — 2026-10-13T12:38:51Z",
+      "",
+      "- **Level with:** main at 1630843",
+      "- **Arrived:** phase 49 (pull request #215)",
+      "- **Whole test suite:** passed — 1262 tests passed",
+      "- **Check scripts of this ticket:** passed — PRD-17.R3",
+      "- **Check scripts of the work that arrived:** passed — PRD-18.R12",
+      "- **Fixes:** 0",
+      "- **Code changed:** `src/runner/driver.ts` now reads the place from `ledger.places`, because phase 49 renamed `ledger.slots` to it.",
+      "- **Result:** passes",
+    ];
+    const withJoined = [
+      ...withoutJoined.slice(0, 9),
+      "- **Check scripts joined:** PRD-17.R3: kept the version that fails wherever the other would; PRD-18.R12: kept both sides' checks",
+      ...withoutJoined.slice(9),
+    ];
+
+    expect(updateSection(newest(withJoined.join("\n")), "main")).toBe(
+      [
+        "<!-- timone:update -->",
+        "### Brought level with main",
+        "",
+        "What arrived on main: phase 49 (pull request #215).",
+        "",
+        "What had to change: `src/runner/driver.ts` now reads the place from `ledger.places`, because phase 49 renamed `ledger.slots` to it.",
+        "",
+        "Check scripts joined: PRD-17.R3: kept the version that fails wherever the other would; PRD-18.R12: kept both sides' checks.",
+        "",
+        "- The whole test suite: passed — 1262 tests passed.",
+        "- The check scripts of this ticket: passed — PRD-17.R3.",
+        "- The check scripts of the work that arrived: passed — PRD-18.R12.",
+        "<!-- /timone:update -->",
+      ].join("\n"),
+    );
+    expect(updateSection(newest(withoutJoined.join("\n")), "main").split("\n")[1]).toBe(
+      "### Brought level with main",
+    );
+  });
+
+  it("says nothing about joined check scripts when the record says none, or has no such line", () => {
+    const withoutJoined = [
+      "## Update 3 — 2026-10-13T12:38:51Z",
+      "",
+      "- **Level with:** main at 1630843",
+      "- **Arrived:** phase 49 (pull request #215)",
+      "- **Whole test suite:** passed — 1262 tests passed",
+      "- **Check scripts of this ticket:** passed — PRD-17.R3",
+      "- **Check scripts of the work that arrived:** passed — PRD-18.R12",
+      "- **Fixes:** 0",
+      "- **Code changed:** none",
+      "- **Result:** passes",
+    ];
+    const joinedNone = [...withoutJoined.slice(0, 9), "- **Check scripts joined:** none", ...withoutJoined.slice(9)];
+
+    for (const record of [joinedNone, withoutJoined]) {
+      const lines = updateSection(newest(record.join("\n")), "main").split("\n");
+
+      expect(lines.some((line) => line.startsWith("Check scripts joined"))).toBe(false);
+    }
+  });
+});

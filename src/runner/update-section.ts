@@ -25,6 +25,8 @@ export interface TestSet {
  * has in a form not read here, is undefined: it is never guessed.
  */
 export interface UpdateEntry {
+  /** The time in the heading, `## Update <k> — <ISO time>`, when it reads as a date. */
+  at: string | undefined;
   /** `<default> at <sha>`. */
   levelWith: string | undefined;
   /** The pull requests that arrived, as the record words them. */
@@ -35,6 +37,12 @@ export interface UpdateEntry {
   fixes: number | undefined;
   /** `none`, or plain sentences saying what changed and why. */
   codeChanged: string | undefined;
+  /**
+   * `none`, or `<ID>: <how>; <ID>: <how>`: the check scripts the update
+   * joined after a merge, and how (ADR-0068 D2). An entry written before
+   * that line existed has none.
+   */
+  checkScriptsJoined: string | undefined;
   result: { passes: true } | { passes: false; failure: string | undefined } | undefined;
 }
 
@@ -60,6 +68,7 @@ export function latestUpdate(recordText: string): UpdateEntry | undefined {
     if (field?.[1] !== undefined && field[2] !== undefined) fields.set(field[1], field[2].trim());
   }
   return {
+    at: timeOf(lines[start] ?? ""),
     levelWith: fields.get("Level with"),
     arrived: fields.get("Arrived"),
     wholeSuite: testSetOf(fields.get("Whole test suite"), ["passed", "failed"]),
@@ -71,8 +80,15 @@ export function latestUpdate(recordText: string): UpdateEntry | undefined {
     ]),
     fixes: fixesOf(fields.get("Fixes")),
     codeChanged: fields.get("Code changed"),
+    checkScriptsJoined: fields.get("Check scripts joined"),
     result: resultOf(fields.get("Result")),
   };
+}
+
+/** The time after the dash of an entry's heading, when it reads as a date. */
+function timeOf(heading: string): string | undefined {
+  const time = /^## Update .*? — (.+)$/.exec(heading.trim())?.[1]?.trim();
+  return time !== undefined && !Number.isNaN(Date.parse(time)) ? time : undefined;
 }
 
 /** A test set's value, `<result>` or `<result> — <detail>`, when its result is one of `allowed`. */
@@ -129,6 +145,9 @@ export function updateSection(entry: UpdateEntry, defaultBranch: string): string
     entry.codeChanged === "none" ? "No code had to change." : `What had to change: ${entry.codeChanged ?? ""}`,
     "",
   );
+  if (entry.checkScriptsJoined !== undefined && entry.checkScriptsJoined !== "none") {
+    lines.push(`Check scripts joined: ${sentence(entry.checkScriptsJoined)}`, "");
+  }
   for (const { name, set } of testSets(entry)) {
     lines.push(
       set === undefined

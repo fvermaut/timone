@@ -15,3 +15,10 @@
 **Agreed:** 61b's validation runs `node dist/cli.js update-conflicts timone` and expects exit 2 because no merge is in progress.
 **Did instead:** It is run from the Timone root, as `node projects/timone/dist/cli.js update-conflicts timone`.
 **Why:** The command finds the project at `projects/<name>` under the folder it runs in, as `update-checks` does. From inside the project it exits 2 for a different reason: the project is not found.
+
+## 2026-10-13 — timone#234, build
+
+**Kind:** check not run
+**Agreed:** The build's rule: at the end of each sub-phase, every suite that takes under a minute runs whole. Timone's one suite took 34.3 s at phase 60's close, so 61a and 61b each ran it whole at their end.
+**Did instead:** From 61c on, each sub-phase runs only the tests of the files it changes and the tests its own validation names. The whole suite runs once, at the close.
+**Why:** The person asked for this during the build on 2026-10-13: the whole suite had been run about five times, and it is slow.

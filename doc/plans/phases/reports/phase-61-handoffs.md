@@ -164,3 +164,56 @@ Whole suite (`npm test`): **77 files, 2769 tests: 2698 passed, 71 failed; 8.02 s
 - `dist/` was rebuilt after the command was added. The command tests in `src/update-checks.git.test.ts` run the built `dist/cli.js`.
 - The guard's pattern list in `checkouts.test.ts` matches `execFileSync("git"` but not `spawnSync("git"`. The command uses both. It is caught today only through `execFileSync`. This is a gap in that guard, noted here and not changed.
 - Refactor ideas, not done: `gitIn` and the manifest lookup are now the same in `commands/update-checks.ts` and `commands/update-conflicts.ts`; one shared helper would remove the copy. The module comment at the top of `src/update-checks.ts` still describes only the three test sets, not `mergeConflicts`.
+
+## 61c — The record says which check scripts were joined, and when the entry was written
+
+**Built.** `UpdateEntry` has two new fields. `at` is the time after the dash of the entry's heading, `## Update <k> — <ISO time>`, as written there, when `Date.parse` reads it as a date; otherwise undefined. `checkScriptsJoined` is the value of the field line `- **Check scripts joined:** ...`, read whole, or undefined when the entry has no such line. `updateSection` adds one line, "Check scripts joined: <value>.", with a blank line after it, right after the "What had to change" (or "No code had to change.") line, when the field is there and is not `none`. The field is not read by `failuresOf`, so it never decides whether the work passes. An entry with no such line gives the same section as before.
+
+**Files touched.**
+
+- `src/runner/update-section.ts` — `at` and `checkScriptsJoined` on `UpdateEntry`; new private `timeOf`; the new line in `updateSection`.
+- `src/runner/update-section.test.ts` — a new `describe` with four tests (cases 1–4). The six existing tests are unchanged (case 5).
+- `doc/plans/phases/reports/phase-61-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- The section line goes through the file's `sentence` helper: it adds a full stop only when the value does not already end with `.`, `!` or `?`. So a value that ends with a full stop does not get a second one. No test covers that, since the plan lists no such case.
+- The line comes after the code line in both its forms ("What had to change: …" and "No code had to change."), followed by a blank line, as the code line is.
+- `at` keeps the heading's text as written; it is not turned into a `Date` or rewritten. "Parses as a date" is `!Number.isNaN(Date.parse(time))`, as the plan words it. `Date.parse` is lenient: some text that is not an ISO time also reads as a date (for example a bare number). A stricter ISO pattern was not added, because the plan does not ask for one.
+- Nothing reads `at` yet in this slice.
+
+**Validation evidence.** All tests are in `src/runner/update-section.test.ts`, under `the update record's time and joined check scripts (ADR-0068)`.
+
+- Case 1, `reads the time of an entry from its heading, and none when the heading has no time or a time that is not a date`: red `expected undefined to be '2026-10-13T12:38:51Z'`. Green after `timeOf`: 7 passed. The "not a date" part was shown not to be vacuous: a mutation returning the text with no date test gave `expected 'not a time' to be undefined`, and was reverted (7 passed again).
+- Case 2, `reads the joined check scripts whole, with every requirement and how each was joined`: red `expected undefined to be 'PRD-17.R3: kept the version that fail…'`. Green after the field was read: 8 passed.
+- Case 3, `says which check scripts were joined and how, under what had to change, and leaves the heading as it was` (the whole block, hand-written; and the same entry without the line keeps `### Brought level with main`): red `expected '<!-- timone:update -->\n### Brought l…' to be '<!-- timone:update -->\n### Brought l…'`. Green after the line was added for any value that is there: 9 passed.
+- Case 4, `says nothing about joined check scripts when the record says none, or has no such line`: red on `none`, `expected true to be false`. Green after the `none` test: 10 passed. The "no such line" half was green on arrival. A mutation dropping the `!== undefined` test made it fail (`expected true to be false`), and the first existing test failed too; reverted, 10 passed.
+- Case 5, the six existing tests: unchanged and green at every step above.
+
+Validation commands, as run:
+
+```
+$ npx vitest run src/runner/update-section.test.ts src/runner/driver.test.ts
+ ✓ src/runner/update-section.test.ts (10 tests)
+ ✓ src/runner/driver.test.ts (34 tests)
+ Test Files  2 passed (2)
+      Tests  44 passed (44)
+```
+**Result: pass.**
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+```
+**Result: pass.**
+
+- [x] Red→green evidence for every case is above. Case 4's "no such line" half and case 5 were green on arrival; the mutations that made them fail are recorded.
+- [x] `src/runner/driver.test.ts` passes unchanged (34 passed; `git status` shows only the two `update-section` files changed). Its update block is built from an old entry with no `Check scripts joined:` line, and it is the same.
+
+At slice end: `src/runner/update-section.test.ts` 10 passed, `src/runner/driver.test.ts` 34 passed. Whole suite (`npm test`): **77 files, 2773 tests: 2702 passed, 71 failed; 8.05 s.** Failing: `guardrails.test.ts` 45, `numbers.test.ts` 16, `workspace.test.ts` 6, `number.test.ts` 3 (all the push guard's refusal of `git push … main`), and `register.test.ts` 1 ("this repository's own registers > claim nothing they have not established"). This is exactly the known list. No failure is new.
+
+**What the next slice must know.**
+
+- `entry.at` is the heading's text, not a `Date`. Compare times with `Date.parse(entry.at)`. It is undefined for a heading with no time or with text that does not read as a date.
+- The field label code reads is exactly `Check scripts joined` (capital C, the rest lower case). The update's instructions (`.claude/skills/timone-update/SKILL.md`, "The record entry") do not have that line yet; a later slice must add it in that exact form, inside the bold with the colon, for example `- **Check scripts joined:** none`.
+- The value must be one line, as for every other field.
