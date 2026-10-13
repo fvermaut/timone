@@ -36,17 +36,37 @@ export function claimedRequirements(phaseText: string): string[] {
 /**
  * The check script of one requirement: the file in `files` that lies directly
  * in the project's probe folder and whose name is the lowercased ID plus an
- * extension. `files` are paths from the repository's root, as git lists them.
+ * extension. The name may also have a dash for the ID's dot
+ * (`prd-18-r12.mjs`); when both names are there, the dotted one is the
+ * script. `files` are paths from the repository's root, as git lists them.
  */
 export function checkScriptOf(id: string, files: readonly string[]): string | undefined {
   const folder = `${PROBE_DIRECTORIES[0]}/`;
   const name = id.toLowerCase();
-  return files.find((file) => {
-    if (!file.startsWith(folder)) return false;
-    const fileName = file.slice(folder.length);
-    const dot = fileName.lastIndexOf(".");
-    return !fileName.includes("/") && dot > 0 && fileName.slice(0, dot) === name;
-  });
+  const named = (wanted: string) =>
+    files.find((file) => {
+      if (!file.startsWith(folder)) return false;
+      const fileName = file.slice(folder.length);
+      const dot = fileName.lastIndexOf(".");
+      return !fileName.includes("/") && dot > 0 && fileName.slice(0, dot) === wanted;
+    });
+  return named(name) ?? named(name.replace(".", "-"));
+}
+
+/** A check script's file name: `prd-18.r12` or `prd-18-r12`, plus an extension. */
+const CHECK_SCRIPT_NAME = /^prd-(\d+)[.-]r(\d+)\.[^.]+$/;
+
+/**
+ * The requirement a check script checks, read from its path: `PRD-18.R12`
+ * for `prd-18.r12.mjs` or `prd-18-r12.mjs` directly in either probe folder.
+ * Undefined for any other file, such as a helper or a file in a sub-folder.
+ */
+export function requirementOfCheckScript(path: string): string | undefined {
+  const slash = path.lastIndexOf("/");
+  const folder = path.slice(0, slash);
+  if (!PROBE_DIRECTORIES.some((probes) => probes === folder)) return undefined;
+  const match = CHECK_SCRIPT_NAME.exec(path.slice(slash + 1));
+  return match === null ? undefined : `PRD-${match[1]}.R${match[2]}`;
 }
 
 /** Runs one git command in the project and returns what it printed; throws when git fails. */
@@ -63,8 +83,8 @@ export interface PlanChecks {
 
 /** The three test sets an update runs. */
 export interface UpdateChecks {
-  /** The project's `scripts.test` in `package.json`, when it has one. */
-  testCommand: string | undefined;
+  /** The commands that run the project's tests, in the order to run them; none when it has none. */
+  testCommands: string[];
   own: PlanChecks | undefined;
   arrived: PlanChecks[];
 }
@@ -75,8 +95,21 @@ const PHASE_FILE = /^doc\/plans\/phases\/phase-[^/]+\.md$/;
 /** The pull request number in a merge commit's subject: `… (#215)` or `Merge pull request #215 …`. */
 const PULL_REQUEST = [/\(#(\d+)\)\s*$/, /^Merge pull request #(\d+)/];
 
-/** The part of `package.json` the test command is read from. */
+/** The part of `package.json` the test commands are read from. */
 const PackageJson = z.object({ scripts: z.record(z.string(), z.string()).optional() });
+
+/**
+ * The commands that run the project's tests, from its `package.json` scripts:
+ * `npm test` when it has `scripts.test`. Otherwise `npm run <name>` for each
+ * script whose name starts with `test:`, in the order the file lists them,
+ * leaving out any with a `watch` part, which does not end.
+ */
+function testCommandsOf(scripts: Record<string, string>): string[] {
+  if (scripts["test"] !== undefined) return ["npm test"];
+  return Object.keys(scripts)
+    .filter((name) => name.startsWith("test:") && !name.split(":").includes("watch"))
+    .map((name) => `npm run ${name}`);
+}
 
 /** The phase files `git diff --diff-filter=A <range>` adds. */
 function addedPhases(git: RunGit, range: string): string[] {
@@ -136,10 +169,11 @@ export function updateChecks(
   const arrived = addedPhases(git, `${before}...${target}`).map((phase) =>
     planChecks(target, phase, numbers.get(phase)),
   );
+  const scripts = branchFiles.includes("package.json")
+    ? (PackageJson.parse(JSON.parse(git(["show", `${before}:package.json`]))).scripts ?? {})
+    : {};
   return {
-    testCommand: branchFiles.includes("package.json")
-      ? PackageJson.parse(JSON.parse(git(["show", `${before}:package.json`]))).scripts?.["test"]
-      : undefined,
+    testCommands: testCommandsOf(scripts),
     own: ownPhase === undefined ? undefined : planChecks(before, ownPhase),
     arrived,
   };

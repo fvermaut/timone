@@ -9,7 +9,7 @@ import { updateChecks, type PlanChecks, type RunGit, type UpdateChecks } from ".
 /**
  * `timone update-checks <project> [--before <commit>] [--json]` — print the
  * three test sets an update runs on the project's checked-out branch: the
- * project's test command, the check scripts of the branch's own plan, and
+ * project's test commands, the check scripts of the branch's own plan, and
  * those of each plan that arrived on the default branch since `--before`.
  * The update asks it before it merges, so `--before` is `HEAD` by default.
  *
@@ -74,9 +74,9 @@ function gitIn(dir: string): RunGit {
 /** The three sets as a person reads them, one block each. */
 function plainText(checks: UpdateChecks, defaultBranch: string, before: string): string {
   const blocks = [
-    checks.testCommand === undefined
-      ? "The project has no test command: there is no scripts.test in its package.json."
-      : `The project's tests: ${checks.testCommand}`,
+    checks.testCommands.length === 0
+      ? "The project has no test command: its package.json has no scripts.test and no test: script."
+      : `The project's tests: ${checks.testCommands.join(", then ")}.`,
     checks.own === undefined
       ? "This branch adds no plan."
       : planBlock(`This branch's plan, ${checks.own.phase}:`, checks.own),

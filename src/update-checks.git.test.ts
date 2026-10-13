@@ -245,16 +245,16 @@ function levelWithNoTestScript() {
 }
 
 describe("the project's test command", () => {
-  it("is the project's scripts.test", () => {
+  it("is npm test when the project has a scripts.test", () => {
     const { inClone } = behindAfterPhase49();
 
-    expect(updateChecks(inClone, { defaultBranch: "main", before: "HEAD" }).testCommand).toBe("vitest run");
+    expect(updateChecks(inClone, { defaultBranch: "main", before: "HEAD" }).testCommands).toEqual(["npm test"]);
   });
 
-  it("is undefined when package.json has no scripts.test", () => {
+  it("is none when package.json has no scripts.test", () => {
     const { inClone } = levelWithNoTestScript();
 
-    expect(updateChecks(inClone, { defaultBranch: "main", before: "HEAD" }).testCommand).toBeUndefined();
+    expect(updateChecks(inClone, { defaultBranch: "main", before: "HEAD" }).testCommands).toEqual([]);
   });
 
   it("is said to be missing in the command's plain output", () => {
@@ -265,7 +265,7 @@ describe("the project's test command", () => {
     expect(ran.stderr).toBe("");
     expect(ran.status).toBe(0);
     expect(ran.stdout).toBe(
-      "The project has no test command: there is no scripts.test in its package.json.\n" +
+      "The project has no test command: its package.json has no scripts.test and no test: script.\n" +
         "\n" +
         "This branch's plan, doc/plans/phases/phase-50.md:\n" +
         "  PRD-07.R7: no check script\n" +
@@ -273,5 +273,73 @@ describe("the project's test command", () => {
         "\n" +
         "No plan arrived on main since HEAD.\n",
     );
+  });
+});
+
+/** A branch `b` level with `main`, whose package.json has `scripts`. */
+function levelWithScripts(scripts: Record<string, string>) {
+  const world = forge();
+  const { seed, mustGit, commit } = world;
+  commit({ "package.json": JSON.stringify({ name: "app", scripts }) }, "first");
+  mustGit(seed, ["push", "--quiet", "origin", "main"]);
+  mustGit(seed, ["checkout", "--quiet", "-b", "b"]);
+  mustGit(seed, ["push", "--quiet", "origin", "b"]);
+  world.cloneOn("b");
+  return world;
+}
+
+describe("the project's test commands", () => {
+  it("are each test: script but the watch one, in the order package.json lists them, when it has no scripts.test", () => {
+    const { inClone } = levelWithScripts({
+      build: "tsc",
+      "test:unit": "vitest run",
+      "test:integration": "vitest run --project integration",
+      "test:watch": "vitest",
+      "test:e2e": "playwright test",
+    });
+
+    expect(updateChecks(inClone, { defaultBranch: "main", before: "HEAD" }).testCommands).toEqual([
+      "npm run test:unit",
+      "npm run test:integration",
+      "npm run test:e2e",
+    ]);
+  });
+
+  it("are npm test alone when package.json has scripts.test, even with test: scripts", () => {
+    const { inClone } = levelWithScripts({ test: "vitest run", "test:unit": "vitest run --project unit" });
+
+    expect(updateChecks(inClone, { defaultBranch: "main", before: "HEAD" }).testCommands).toEqual(["npm test"]);
+  });
+
+  it("are none when package.json has neither scripts.test nor a test: script", () => {
+    const { inClone } = levelWithScripts({ build: "tsc", lint: "eslint ." });
+
+    expect(updateChecks(inClone, { defaultBranch: "main", before: "HEAD" }).testCommands).toEqual([]);
+  });
+});
+
+describe("updateChecks on a branch whose check script has a dash for the dot", () => {
+  it("lists the dashed script under the plan's requirement", () => {
+    const world = forge();
+    const { seed, mustGit, commit, inClone } = world;
+    commit({ "package.json": PACKAGE_JSON }, "first");
+    mustGit(seed, ["push", "--quiet", "origin", "main"]);
+    mustGit(seed, ["checkout", "--quiet", "-b", "b"]);
+    commit(
+      {
+        "doc/plans/phases/phase-61.md": plan("Phase 61: Dashed names", ["PRD-18.R12"]),
+        [probe("prd-18-r12.mjs")]: "// checks R12\n",
+      },
+      "docs: plan phase 61",
+    );
+    mustGit(seed, ["push", "--quiet", "origin", "b"]);
+    world.cloneOn("b");
+
+    const checks = updateChecks(inClone, { defaultBranch: "main", before: "HEAD" });
+
+    expect(checks.own).toEqual({
+      phase: "doc/plans/phases/phase-61.md",
+      checks: [{ id: "PRD-18.R12", script: probe("prd-18-r12.mjs") }],
+    });
   });
 });
