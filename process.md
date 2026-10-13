@@ -86,8 +86,10 @@ doc/
   plans/phases/reports/phase-NN-departures.md build-stage departures — one dated entry per plan step,
                                               requirement, check or workaround the build, check or
                                               delivery stage could not follow as agreed (ADR-0052)
-  plans/phases/probes/<criterion-id>.<ext>    stage-7 probes — one per criterion, written and run only by
-                                              stage 7, unreadable to stage 6 and blocked by a hook
+  plans/phases/probes/<criterion-id>.<ext>    stage-7 probes — one per criterion, written by stage 7.
+                                              The update also runs them, and joins one that a merge
+                                              left in conflict (ADR-0068). Unreadable to stage 6 and
+                                              blocked by a hook
   triage/NNN-<slug>.md           stage-1 classification records for requests with no ticket home
   feedback/NNN-<slug>.md         stage-9 feedback records — triage, decisions, amendments, dispatch trace
   wayfinder/NN-<slug>/…          stage-2 at-scale map + tickets — fallback when the repo is not GitHub-hosted
