@@ -669,9 +669,20 @@ describe("the runner's rule for a branch behind the default branch (ADR-0066 D2)
     );
     expect(rule).toContain("Start it even while the pull request waits for review.");
     expect(rule).toContain(
-      "When it ends, start nothing more for it: the top of the pull request says what a person needs to know.",
+      "When it succeeded, start nothing more for it: the top of the pull request says what a person needs to know.",
     );
-    expect(rule).toContain("When the default branch moves again, you are told again.");
+  });
+
+  it("says a failed update leaves the branch behind, asks a named person to bring it level, and is not started again until the default branch moves (ADR-0068 D4)", () => {
+    const rule = actRule("behind the default branch");
+
+    expect(rule).toContain(
+      "When it failed, the branch is still behind: say on the ticket in plain words what stopped it, " +
+        "and ask a named person to bring the branch level.",
+    );
+    expect(rule).toContain("Do not start the update again until you are told the default branch moved again.");
+    expect(rule).toContain("When it moves again, you are told again.");
+    expect(rule).not.toContain("When it ends, start nothing more for it");
   });
 
   it("comes after the rule on a run that waits on its pull request", () => {

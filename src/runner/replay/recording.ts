@@ -499,6 +499,9 @@ function recordingForge(moment: Moment, project: TicketingProject, log: CallLog)
     async behindDefault() {
       return { behind: 0, defaultHead: "4f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39" };
     },
+    async branchHolds() {
+      return true;
+    },
     async readFile(_on, branch, path) {
       return filesOn(branch)?.[path];
     },

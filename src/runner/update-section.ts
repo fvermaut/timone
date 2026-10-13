@@ -204,3 +204,42 @@ export function withUpdate(body: string, section: string): string {
       : body.slice(0, start) + body.slice(end + UPDATE_END.length).replace(/^\r?\n(\r?\n)?/, "");
   return rest.trim() === "" ? section : `${section}\n\n${rest}`;
 }
+
+/**
+ * Why an update step that ended cleanly did not do its work, or undefined
+ * when it did (ADR-0068 D4).
+ */
+export function unfinishedUpdate(facts: {
+  /** The newest entry on the branch after the step. */
+  entry: UpdateEntry | undefined;
+  /** When the step started. */
+  startedAt: string;
+  /** Whether the branch holds the entry's `Level with` commit. */
+  holds: boolean | undefined;
+  /** How far the branch is behind the default branch now. */
+  behind: number | undefined;
+  defaultBranch: string;
+}): string | undefined {
+  const { entry, startedAt, holds, behind, defaultBranch } = facts;
+  // **An answer the forge did not give never makes a failure.** Each branch
+  // below needs one answer, and without it the step is taken as done.
+  if (entry !== undefined && isNewSince(entry, startedAt)) {
+    if (holds !== false) return undefined;
+    const failure = entry.result?.passes === false ? entry.result.failure : undefined;
+    const unfinished = `the merge of ${defaultBranch} at ${levelWithCommit(entry) ?? ""} was not finished`;
+    return failure === undefined ? unfinished : `${unfinished}: ${failure}`;
+  }
+  if (behind === undefined || behind === 0) return undefined;
+  const commits = behind === 1 ? "commit" : "commits";
+  return `it wrote no record entry, and the branch is still ${behind} ${commits} behind ${defaultBranch}`;
+}
+
+/** Whether `entry` was written at `startedAt` or after it: an entry with no time is not. */
+export function isNewSince(entry: UpdateEntry, startedAt: string): boolean {
+  return entry.at !== undefined && Date.parse(entry.at) >= Date.parse(startedAt);
+}
+
+/** The commit in an entry's `Level with:` value, `<default> at <sha>`, or undefined when it names none. */
+export function levelWithCommit(entry: UpdateEntry): string | undefined {
+  return / at ([0-9a-f]{7,40})$/.exec(entry.levelWith ?? "")?.[1];
+}

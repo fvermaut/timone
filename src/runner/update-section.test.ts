@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { latestUpdate, updateSection, withUpdate } from "./update-section.js";
+import { latestUpdate, unfinishedUpdate, updateSection, withUpdate } from "./update-section.js";
 
 /** The newest entry of `recordText`, or the test fails. */
 function newest(recordText: string) {
@@ -280,5 +280,80 @@ describe("the update record's time and joined check scripts (ADR-0068)", () => {
 
       expect(lines.some((line) => line.startsWith("Check scripts joined"))).toBe(false);
     }
+  });
+});
+
+/** An update entry written at `at`, level with main at 9b1e0d2, whose result is `result`. */
+function entryAt(at: string, result: string) {
+  return newest(
+    [
+      `## Update 2 — ${at}`,
+      "",
+      "- **Level with:** main at 9b1e0d2",
+      "- **Arrived:** phase 49 (pull request #215)",
+      "- **Whole test suite:** failed — 3 tests failed in src/runner/driver.test.ts",
+      "- **Check scripts of this ticket:** passed — PRD-07.R7",
+      "- **Check scripts of the work that arrived:** none — phase 49 claims no requirement",
+      "- **Fixes:** 2",
+      "- **Code changed:** none",
+      `- **Result:** ${result}`,
+    ].join("\n"),
+  );
+}
+
+/** When the update step in these cases started. */
+const STARTED_AT = "2026-10-13T14:00:00.000Z";
+
+describe("why an update step that ended cleanly did not do its work (ADR-0068 D4)", () => {
+  it("finds nothing wrong when the step wrote a new entry and the branch holds its commit, also when the work does not pass", () => {
+    for (const result of ["passes", "does not pass — 3 tests failed in src/runner/driver.test.ts"]) {
+      const entry = entryAt("2026-10-13T14:20:00Z", result);
+
+      expect(
+        unfinishedUpdate({ entry, startedAt: STARTED_AT, holds: true, behind: 2, defaultBranch: "main" }),
+        result,
+      ).toBeUndefined();
+    }
+  });
+
+  it("says the merge was not finished, naming the commit and the failure the entry gives, when the branch does not hold that commit", () => {
+    const entry = entryAt(
+      "2026-10-13T14:20:00Z",
+      "does not pass — main could not be merged in: src/runner/driver.ts is left in conflict",
+    );
+
+    expect(unfinishedUpdate({ entry, startedAt: STARTED_AT, holds: false, behind: 2, defaultBranch: "main" })).toBe(
+      "the merge of main at 9b1e0d2 was not finished: main could not be merged in: src/runner/driver.ts is left in conflict",
+    );
+  });
+
+  it("finds nothing wrong when the only entry is older than the step and the branch is level, whatever that old entry says", () => {
+    // Written by an earlier update, an hour before this step started. Its
+    // commit is not on the branch, but this step did not write it.
+    const entry = entryAt("2026-10-13T13:00:00Z", "does not pass — main could not be merged in: a conflict");
+
+    expect(
+      unfinishedUpdate({ entry, startedAt: STARTED_AT, holds: false, behind: 0, defaultBranch: "main" }),
+    ).toBeUndefined();
+  });
+
+  it("says the step wrote no entry and how far the branch is still behind, when there is no entry and the branch is behind", () => {
+    expect(
+      unfinishedUpdate({ entry: undefined, startedAt: STARTED_AT, holds: undefined, behind: 3, defaultBranch: "main" }),
+    ).toBe("it wrote no record entry, and the branch is still 3 commits behind main");
+    expect(
+      unfinishedUpdate({ entry: undefined, startedAt: STARTED_AT, holds: undefined, behind: 1, defaultBranch: "main" }),
+    ).toBe("it wrote no record entry, and the branch is still 1 commit behind main");
+  });
+
+  it("finds nothing wrong when the forge did not say whether the branch holds the commit, or how far it is behind", () => {
+    const entry = entryAt("2026-10-13T14:20:00Z", "does not pass — main could not be merged in: a conflict");
+
+    expect(
+      unfinishedUpdate({ entry, startedAt: STARTED_AT, holds: undefined, behind: 3, defaultBranch: "main" }),
+    ).toBeUndefined();
+    expect(
+      unfinishedUpdate({ entry: undefined, startedAt: STARTED_AT, holds: false, behind: undefined, defaultBranch: "main" }),
+    ).toBeUndefined();
   });
 });

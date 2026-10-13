@@ -113,6 +113,11 @@ export const noFiles = {
  * 50), so a throw would turn every driver test about something else into an
  * error. Level is the answer that tells the runner nothing, which is what
  * those tests had before.
+ *
+ * **And `branchHolds`, which answers "the branch holds it"**, for the same
+ * reason: the runner's actions ask it when an update step ends (phase 61),
+ * and an update that brought the branch level is what those tests had
+ * before.
  */
 export const noRunnerCalls = {
   async removeLabel(): Promise<void> {
@@ -132,5 +137,8 @@ export const noRunnerCalls = {
   },
   async behindDefault(): Promise<{ behind: number; defaultHead: string } | undefined> {
     return { behind: 0, defaultHead: "4f2a9c1d8e7b6a5f4e3d2c1b0a9f8e7d6c5b4a39" };
+  },
+  async branchHolds(): Promise<boolean | undefined> {
+    return true;
   },
 };

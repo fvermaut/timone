@@ -217,3 +217,100 @@ At slice end: `src/runner/update-section.test.ts` 10 passed, `src/runner/driver.
 - `entry.at` is the heading's text, not a `Date`. Compare times with `Date.parse(entry.at)`. It is undefined for a heading with no time or with text that does not read as a date.
 - The field label code reads is exactly `Check scripts joined` (capital C, the rest lower case). The update's instructions (`.claude/skills/timone-update/SKILL.md`, "The record entry") do not have that line yet; a later slice must add it in that exact form, inside the bold with the colon, for example `- **Check scripts joined:** none`.
 - The value must be one line, as for every other field.
+
+## 61d — An update that did not bring the branch level ends as failed, and the runner asks a person
+
+**Built.** When an update step's session ends cleanly, the runner's actions now check, before they write the `step-ended` entry, whether the step really brought the branch level (ADR-0068 D4). They read the newest entry of the branch's update record. When that entry was written at or after the step's start, they ask the forge whether the branch holds the commit in its `Level with:` line. When there is no such new entry, they ask how far the branch is behind the default branch. The pure rule `unfinishedUpdate` turns those answers into a reason, or none. With a reason, the entry is written with `ok: false` and the reason as `error`, and the driver tells the runner "The step bringing the work up to date ended: it failed: <reason>." A forge that fails on the way is logged, and the step is written as its session ended. Every other stage, and an update whose session already failed, is written as before and asks the forge nothing. The port has a new call, `branchHolds(project, branch, commit)`, through `gh api repos/<slug>/compare/<commit>...<branch> --jq .behind_by`. `newestUpdateEntry` moved out of the driver's `updateOf` into `facts.ts`. The runner's rule for a branch behind the default branch now says what to do when the update failed.
+
+**Files touched.**
+
+- `src/adapters/ticketing.ts` — `branchHolds` on the port.
+- `src/adapters/github-tickets.ts` — `branchHolds`: true when `behind_by` is 0, undefined on a 404, any other error thrown.
+- `src/adapters/github-tickets.test.ts` — case 6 (three tests), and `branchHolds` added to the list in "names a repository in every argument vector it builds".
+- `src/adapters/ticketing.stubs.ts` — `noRunnerCalls.branchHolds` answers true, with a comment saying why.
+- `src/runner/replay/recording.ts` — the replay's forge answers `branchHolds` with true, as it answers "level" to `behindDefault`.
+- `src/runner/facts.ts` — new `newestUpdateEntry(adapter, project, branch)`.
+- `src/runner/driver.ts` — `updateOf` calls `newestUpdateEntry`, then reads the default branch's name for `updateSection`; the section is the same as before.
+- `src/runner/update-section.ts` — new `unfinishedUpdate`, and two small exported helpers it and the actions share: `isNewSince(entry, startedAt)` and `levelWithCommit(entry)`.
+- `src/runner/update-section.test.ts` — cases 1–5 (five tests).
+- `src/runner/actions.ts` — `updateUnfinished`, called in `watchStep`'s `ended` for a clean update; the step's start time is kept in a local, used for the running step too; `afterwards` and `stepEnded` get the result with the outcome as written.
+- `src/runner/actions.test.ts` — the fake forge answers `branchHolds` with true. No case here (see the decisions).
+- `src/runner/driver.test.ts` — cases 7–10 (four tests) in a new `describe`, with a helper `updatingChore`.
+- `src/runner/brief.ts` — the update bullet of `SYSTEM`, word for word as the plan gives it.
+- `src/runner/brief.test.ts` — the existing update test now expects "When it succeeded, start nothing more for it: …"; a new test for the failed-update sentences (case 11).
+- `doc/plans/phases/reports/phase-61-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- Case (4)'s "commit(s)": the reason says "1 commit" for one and "<n> commits" for more. Case 4's test checks both 3 and 1.
+- An entry is new when `Date.parse(entry.at) >= Date.parse(startedAt)`. An entry with no readable time (`at` undefined) is never new, so the step is then judged by how far the branch is behind.
+- The commit is the hex text after the last " at " of the `Level with:` value (`/ at ([0-9a-f]{7,40})$/`). A new entry whose `Level with:` names no such commit gets no forge question, so `holds` is undefined and the step is not made a failure.
+- When the entry gives no failure (its result passes, or says "does not pass" with nothing after it), the reason is "the merge of main at <sha> was not finished", with no colon.
+- `startedAt` is the clock reading when the actions write the running step. The `step-started` entry reads the clock once more, just before; both readings are taken in the same moment.
+- `afterwards` and the driver's `stepEnded` are given the result with the outcome as written. So the driver's fallback, used only when the record cannot be read, tells the runner the same thing as the record. For any step but a failed check of an update, this is the same result as before.
+- Cases 7–10 are in `driver.test.ts`, not `actions.test.ts`. They start the step through `runnerActions(driver.actionsFor(run), run).startStep`, as the existing driver tests do, so each test sees both the record's `step-ended` entry and the event the runner is woken with. The fake world of `actions.test.ts` has a stand-in for the driver and no wake, and its forge throws on `listFiles`. Case 9 lets the run build first (`store.decidePlanner(... "build" ...)`), because the build needs the planner's decision.
+- Case 3's test gives `holds: false` with the old entry, so it checks that an old entry is not judged by whether the branch holds its commit. The actions never ask that question for an old entry.
+- The log line for case 10 is: "runner <run> — whether the update brought the branch level could not be read, so its end is written as its session ended: <error>".
+
+**Validation evidence.**
+
+- Case 1, `update-section.test.ts > why an update step … > finds nothing wrong when the step wrote a new entry and the branch holds its commit, also when the work does not pass`: red `TypeError: (0 , unfinishedUpdate) is not a function`. Green after a stub that answers undefined: 11 passed.
+- Case 2, `… > says the merge was not finished, naming the commit and the failure the entry gives, when the branch does not hold that commit`: red `AssertionError: expected undefined to be 'the merge of main at 9b1e0d2 was not …'`. Green after the `holds === false` branch and `levelWithCommit`: 12 passed.
+- Case 3, `… > finds nothing wrong when the only entry is older than the step and the branch is level, whatever that old entry says`: red `AssertionError: expected 'the merge of main at 9b1e0d2 was not …' to be undefined`. Green after `isNewSince`: 13 passed.
+- Case 4, `… > says the step wrote no entry and how far the branch is still behind, when there is no entry and the branch is behind`: red `AssertionError: expected undefined to be 'it wrote no record entry, and the bra…'`. Green after the `behind` branch: 14 passed.
+- Case 5, `… > finds nothing wrong when the forge did not say whether the branch holds the commit, or how far it is behind`: green on arrival. Two mutations each made it fail, and each was reverted. (a) `if (holds === true) return undefined;` gave `expected 'the merge of main at 9b1e0d2 was not …' to be undefined`. (b) `if (behind === 0) return undefined;` gave `expected 'it wrote no record entry, and the bra…' to be undefined`. Then 15 passed.
+- Case 6, `github-tickets.test.ts > the forge calls the runner needs > says a branch holds a commit when …`, `… > answers undefined when the compare knows neither the commit nor the branch`, `… > reports a failed compare other than a 404, and never renders it as an answer`: all three red `TypeError: adapter.branchHolds is not a function` (and the repository-scope test failed the same way once `branchHolds` was in its list). Green after `branchHolds`: 88 passed.
+- Case 7, `driver.test.ts > RunnerDriver — an update step that ended cleanly but did not bring the branch level (ADR-0068 D4) > writes the step as failed, with why, and tells the runner so, when the branch does not hold the commit its new entry names`: red `AssertionError: expected [] to deeply equal [ Array(1) ]` (the forge was never asked). Green after `updateUnfinished` in `actions.ts`: 35 passed. The wake is "The step bringing the work up to date ended: it failed: the merge of main at abc1234 was not finished: main could not be merged in: the check script of PRD-07.R7 is left in conflict."
+- Case 8, `… > writes the step as succeeded, and tells the runner so, when the branch holds the commit its new entry names`: green on arrival, from case 7's code. A mutation that turned the forge's answer round (`!(await deps.adapter.branchHolds(...))`) made it fail (`expected { kind: 'step-ended', …(7) } to match object { stage: 'update', ok: true, …(1) }`), and case 7 too; reverted, 36 passed.
+- Case 9, `… > asks the forge nothing when a step other than the update ends cleanly`: green on arrival. A mutation dropping `stage === "update" &&` made it fail (`expected [ Array(1) ] to deeply equal []`), and also the existing test "does not ask about a run with a step running …"; reverted, 37 passed.
+- Case 10, `… > writes the update as its session ended, and logs why, when the forge fails to say whether the branch holds the commit`: green on arrival. Two mutations each made it fail, and each was reverted. (a) A `catch` with no log: `expected [] to include 'runner scratch-app#12/1 — whether the…'`. (b) A `catch` that returns a reason: `expected { kind: 'step-ended', …(7) } to match object { stage: 'update', ok: true }`. Then 38 passed.
+- Case 11, `brief.test.ts > the runner's rule for a branch behind the default branch (ADR-0066 D2) > starts the update when told …` (changed to "When it succeeded, …") and the new `… > says a failed update leaves the branch behind, asks a named person to bring it level, and is not started again until the default branch moves (ADR-0068 D4)`: both red, `expected '- When you are told that the ticket\'…' to contain 'When it succeeded, start nothing more…'` and `… to contain 'When it failed, the branch is still b…'`. Green after the bullet was changed: 56 passed.
+- Case 12: the dry replay, below.
+- The move of `newestUpdateEntry` was checked by the two existing tests of the update block in `driver.test.ts` ("puts the update block at the top …", "gives the body that the departures alone give …"). They passed unchanged before and after.
+
+Validation commands, as run from `/workspace/timone/projects/timone`:
+
+```
+$ npx vitest run src/runner src/adapters
+ ✓ src/adapters/github-tickets.test.ts (88 tests)
+ ✓ src/runner/brief.test.ts (56 tests)
+ ✓ src/runner/facts.test.ts (13 tests)
+ ✓ src/runner/update-section.test.ts (15 tests)
+ ✓ src/runner/actions.test.ts (91 tests)
+ ✓ src/runner/driver.test.ts (38 tests)
+ … (12 more files, all passed)
+ Test Files  18 passed (18)
+      Tests  486 passed (486)
+```
+**Result: pass.**
+
+```
+$ npx tsc --noEmit; echo "exit: $?"
+exit: 0
+```
+**Result: pass.**
+
+```
+$ npm run --silent replay -- --dry; echo "exit: $?"
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+…
+PASS #202 — Start the update, and ask nobody for anything. 3 of 3 tries.
+PASS #218 — Ask on the ticket whether to do the work again or to stop, and name the takeover command for the ticket once. 3 of 3 tries.
+PASS #218 — Record the approval and ask nothing, or ask what the word meant. Do not name the takeover command. 3 of 3 tries.
+24 of 24 cases passed. The runner's sessions cost $0.00 in all.
+exit: 0
+```
+**Result: pass.** The replay runs from `src` through `tsx`.
+
+- [x] Red→green evidence for every case is above. Cases 5, 8, 9 and 10 were green on arrival; for each, the mutation that made it fail is recorded.
+- [x] The dry replay passes every case: 24 of 24.
+- [ ] **Human gate**, the real replay on the model: left to the orchestrator. It was not run here.
+
+At slice end: the 18 test files under `src/runner` and `src/adapters` were run, as above: 486 passed, none failed. The whole suite was not run, as the preamble asks.
+
+**What 61e must know.**
+
+- The runner's rule now tells it, after a failed update, to say on the ticket what stopped it and to ask a named person to bring the branch level, and not to start the update again until it is told that the default branch moved again. The update's instructions should match this: an update that stops a merge it could not finish fails the step when the record entry it writes names a commit the branch does not hold.
+- The check reads the entry's `Level with:` line as `<default> at <sha>`, with the sha as 7 to 40 lower-case hex characters at the end of the line, and the time in the heading, `## Update <k> — <ISO time>`. An entry written before the step's start is ignored. The instructions must keep both in that form; otherwise the step is not made a failure.
+- `dist/` was not rebuilt in this slice. No command changed.
+- Refactor idea, not done: `updateUnfinished` in `actions.ts` and `updateOf` in `driver.ts` each ask `readBranches` twice, once inside `newestUpdateEntry` and once for the default branch's name. `newestUpdateEntry` could take the default branch's name, but the plan gives its signature without it.
