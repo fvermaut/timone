@@ -1379,6 +1379,7 @@ describe("every call this adapter makes can be scoped to a repository", () => {
       () => adapter.setPullRequestBody(project, 9, "b"),
       () => adapter.aheadOfDefault(project, "b"),
       () => adapter.behindDefault(project, "b"),
+      () => adapter.branchHolds(project, "b", "abc1234"),
     ];
 
     for (const call of calls) {
@@ -1625,6 +1626,44 @@ describe("the forge calls the runner needs", () => {
     await expect(
       new GitHubTicketingAdapter({ run }).behindDefault(alpha, "timone/7-x"),
     ).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it("says a branch holds a commit when the compare from that commit finds the branch 0 behind, and not when it finds it behind", async () => {
+    const { run, calls } = fakeRunnerWithOptions("0\n", "4\n");
+    const adapter = new GitHubTicketingAdapter({ run });
+
+    const holds = await adapter.branchHolds(alpha, "timone/7-x", "abc1234");
+    const holdsNot = await adapter.branchHolds(alpha, "timone/7-x", "def5678");
+
+    expect(holds).toBe(true);
+    expect(holdsNot).toBe(false);
+    expect(calls.map((call) => call.args)).toEqual([
+      ["api", "repos/fvermaut/scratch-app/compare/abc1234...timone/7-x", "--jq", ".behind_by"],
+      ["api", "repos/fvermaut/scratch-app/compare/def5678...timone/7-x", "--jq", ".behind_by"],
+    ]);
+    expect(calls[0]?.options?.repository).toBe("fvermaut/scratch-app");
+  });
+
+  it("answers undefined when the compare knows neither the commit nor the branch", async () => {
+    const { run } = fakeRunnerFailing(
+      new Error(
+        "gh api repos/fvermaut/scratch-app/compare/abc1234...timone/7-x --jq ... failed: gh: Not Found (HTTP 404)",
+      ),
+    );
+
+    const holds = await new GitHubTicketingAdapter({ run }).branchHolds(alpha, "timone/7-x", "abc1234");
+
+    expect(holds).toBeUndefined();
+  });
+
+  it("reports a failed compare other than a 404, and never renders it as an answer", async () => {
+    const { run } = fakeRunnerFailing(
+      new Error("gh api repos/... failed: gh: Server Error (HTTP 500)"),
+    );
+
+    await expect(
+      new GitHubTicketingAdapter({ run }).branchHolds(alpha, "timone/7-x", "abc1234"),
+    ).rejects.toThrow(/HTTP 500/);
   });
 
   it("hands gh the new description in a file that holds exactly the body", async () => {

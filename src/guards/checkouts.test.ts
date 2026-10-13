@@ -133,6 +133,12 @@ const GIT_USERS: Record<string, string> = {
     "checkout it is pointed at. It runs only read-only git there: " +
     "`symbolic-ref`, `ls-tree`, `diff --name-only`, `log` and `show`. It " +
     "does not fetch and changes no file, branch or ref (50c, ADR-0066 D4).",
+  "commands/update-conflicts.ts":
+    "`timone update-conflicts`, which lists the files the update's merge left " +
+    "in conflict. A session in the box runs it, never the daemon, against the " +
+    "project's checkout it is pointed at. It runs only read-only git there: " +
+    "`rev-parse -q --verify MERGE_HEAD` and `diff --name-only --diff-filter=U`. " +
+    "It does not fetch and changes no file, branch or ref (61b, ADR-0068 D1).",
 };
 
 /** Every `.ts` file under `src`, excluding tests, as paths relative to `src`. */

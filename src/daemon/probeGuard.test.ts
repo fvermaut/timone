@@ -214,7 +214,12 @@ describe("what the guard judges: the file tools, the search tools and a helper (
     execution: refused,
     remediation: refused,
     verification: allowed("Verification"),
-    update: allowed("Update"),
+    update: {
+      permissionDecision: "allow",
+      permissionDecisionReason:
+        `Update runs the checks kept in ${where}, and joins one that a merge left in conflict, ` +
+        "so it may read them and edit them.",
+    },
     planning: asked,
     person: asked,
   };

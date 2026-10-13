@@ -63,7 +63,9 @@ import {
 import { sinceLastBuild } from "./departures.js";
 import { isNamedPerson, untilMergedOrClosed } from "./brief.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
+import { newestUpdateEntry } from "./facts.js";
 import { appendEntry, readRecord, startsAStep, type RecordEntry } from "./record.js";
+import { isNewSince, levelWithCommit, unfinishedUpdate } from "./update-section.js";
 import type {
   CommentTimoneIssueInput,
   EndRunInput,
@@ -796,6 +798,37 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
     };
 
   /**
+   * Why an update step that started at `startedAt` and ended cleanly did not
+   * bring the run's branch level, or undefined when it did (ADR-0068 D4).
+   *
+   * It asks the forge one question: whether the branch holds the commit the
+   * step's new record entry names, or, when the step wrote no new entry,
+   * how far the branch is behind. **A forge that fails here never makes the
+   * step a failure**: the failure is logged, and the step ends as its session
+   * did.
+   */
+  const updateUnfinished = async (startedAt: string): Promise<string | undefined> => {
+    const branch = current().branch;
+    if (branch === undefined) return undefined;
+    try {
+      const { defaultBranch } = await deps.adapter.readBranches(deps.project);
+      const entry = await newestUpdateEntry(deps.adapter, deps.project, branch);
+      const isNew = entry !== undefined && isNewSince(entry, startedAt);
+      const commit = isNew ? levelWithCommit(entry) : undefined;
+      const holds =
+        commit === undefined ? undefined : await deps.adapter.branchHolds(deps.project, branch, commit);
+      const behind = isNew ? undefined : (await deps.adapter.behindDefault(deps.project, branch))?.behind;
+      return unfinishedUpdate({ entry, startedAt, holds, behind, defaultBranch });
+    } catch (error) {
+      deps.log(
+        `runner ${run.id} — whether the update brought the branch level could not be read, ` +
+          `so its end is written as its session ended: ${oneLine(error)}`,
+      );
+      return undefined;
+    }
+  };
+
+  /**
    * Write down that a step started, count it as running, and arrange for
    * its end to be written down too.
    *
@@ -825,11 +858,20 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       instructions,
       ...(records === undefined ? {} : { records }),
     });
-    deps.running.set(run.id, { stage, session, startedAt: deps.clock() });
+    const startedAt = deps.clock();
+    deps.running.set(run.id, { stage, session, startedAt });
 
     const ended = async (result: StepResult): Promise<void> => {
-      const { outcome, summary } = result;
+      const { summary } = result;
+      let { outcome } = result;
       const stopped = deps.running.get(run.id)?.stopRequested !== undefined;
+      // An update can end cleanly and still leave the branch behind
+      // (ADR-0068 D4). Asked before the end is written, so the record and
+      // the runner are told the same thing.
+      if (stage === "update" && outcome.ok) {
+        const reason = await updateUnfinished(startedAt);
+        if (reason !== undefined) outcome = { ...outcome, ok: false, error: reason };
+      }
       write({
         kind: "step-ended",
         at: deps.clock(),
@@ -846,12 +888,12 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
         // Whatever happens here, the driver is still told the step ended: a
         // run whose driver is never told waits for ever, with nothing running.
         try {
-          await afterwards(result);
+          await afterwards({ ...result, outcome });
         } catch (error) {
           deps.log(`runner ${run.id} — after ${stage} ended: ${oneLine(error)}`);
         }
       }
-      await deps.stepEnded(run.id, stage, result);
+      await deps.stepEnded(run.id, stage, { ...result, outcome });
     };
 
     // Nothing awaits this promise, so nothing may escape it: a failure here

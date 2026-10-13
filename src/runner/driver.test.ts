@@ -1764,3 +1764,189 @@ describe("RunnerDriver — a step ends on a run a terminal waits for (ADR-0067 D
     ]);
   });
 });
+
+describe("RunnerDriver — an update step that ended cleanly but did not bring the branch level (ADR-0068 D4)", () => {
+  /** The phase file the chore's branch added, beside one the default branch already has. */
+  const PHASE_49 = "doc/plans/phases/phase-49.md";
+  const PHASE_61 = "doc/plans/phases/phase-61.md";
+
+  /** Where the update writes its record for phase 61. */
+  const UPDATE_RECORD = "doc/plans/phases/reports/phase-61-update.md";
+
+  /** The update's record with one entry written at `at`, level with main at abc1234, whose result is `result`. */
+  function recordOf61(at: string, result: string): string {
+    return [
+      "# Phase 61 — updates",
+      "",
+      `## Update 1 — ${at}`,
+      "",
+      "- **Level with:** main at abc1234",
+      "- **Arrived:** phase 60 (pull request #251)",
+      "- **Whole test suite:** passed — 1262 tests passed",
+      "- **Check scripts of this ticket:** passed — PRD-07.R7",
+      "- **Check scripts of the work that arrived:** none — phase 60 claims no requirement",
+      "- **Fixes:** 0",
+      "- **Code changed:** none",
+      `- **Result:** ${result}`,
+      "",
+    ].join("\n");
+  }
+
+  /**
+   * The chore's run on its branch, which added phase 61, and the driver over
+   * it, whose steps run until the test ends them. `forge.record` is the
+   * update's record on the branch (none when undefined), `forge.holds` what
+   * the forge says about whether the branch holds a commit (an error is
+   * thrown), and `forge.asked` every question about the branch it was asked.
+   */
+  function updatingChore() {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-unfinished-"));
+    tempDirs.push(root);
+    const store = RunStore.open(join(root, ".timone", "state.json"), {
+      now: () => "2026-10-13T14:00:00Z",
+    });
+    const run = builtChore(store, root);
+    const state = {
+      record: undefined as string | undefined,
+      holds: false as boolean | undefined | Error,
+      behind: 0,
+      asked: [] as string[],
+    };
+    const adapter: TicketingAdapter = {
+      ...forge("## What changed").adapter,
+      async listFiles(_project, branch, directory) {
+        if (directory !== "doc/plans/phases") return undefined;
+        return branch === BRANCH ? [PHASE_49, PHASE_61] : [PHASE_49];
+      },
+      async readFile(_project, branch, path) {
+        return branch === BRANCH && path === UPDATE_RECORD ? state.record : undefined;
+      },
+      async branchHolds(_project, branch, commit) {
+        state.asked.push(`does ${branch} hold ${commit}`);
+        if (state.holds instanceof Error) throw state.holds;
+        return state.holds;
+      },
+      async behindDefault(_project, branch) {
+        state.asked.push(`how far is ${branch} behind`);
+        return { behind: state.behind, defaultHead: "abc1234def5678abc1234def5678abc1234def56" };
+      },
+    };
+    const { sessions, wakes } = fakeWakes();
+    const step = fakeStep(store);
+    const logged: string[] = [];
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: step.startStep,
+      timonePin: async () => undefined,
+      clock: () => "2026-10-13T14:00:00Z",
+      log: (line) => logged.push(line),
+    });
+    /** Start a step at `stage` through the runner's actions, and end it cleanly once `during` has run. */
+    const stepEndsCleanly = async (
+      stage: "update" | "execution",
+      during: () => void = () => {},
+    ): Promise<void> => {
+      const started = await runnerActions(driver.actionsFor(run), run).startStep({
+        stage,
+        instructions: "Bring the branch level with main, which moved 1 commit ahead.",
+        reason: "The default branch moved on while the pull request is open.",
+      });
+      expect(started.ok).toBe(true);
+      during();
+      step.end({
+        outcome: { sessionId: "step-session-4", ok: true },
+        summary: { durationMs: 600_000, turns: 40, costUsd: 1.5, models: [] },
+      });
+      await vi.waitFor(() => expect(wakes).toHaveLength(1));
+      await driver.drain();
+    };
+    /** The newest `step-ended` entry of the chore's record. */
+    const lastEnded = () => recordOf(root).filter((entry) => entry.kind === "step-ended").at(-1);
+    return { store, run, state, wakes, logged, stepEndsCleanly, lastEnded };
+  }
+
+  it("writes the step as failed, with why, and tells the runner so, when the branch does not hold the commit its new entry names", async () => {
+    const w = updatingChore();
+    w.state.holds = false;
+
+    await w.stepEndsCleanly("update", () => {
+      w.state.record = recordOf61(
+        "2026-10-13T14:20:00Z",
+        "does not pass — main could not be merged in: the check script of PRD-07.R7 is left in conflict",
+      );
+    });
+
+    const reason =
+      "the merge of main at abc1234 was not finished: main could not be merged in: " +
+      "the check script of PRD-07.R7 is left in conflict";
+    expect(w.state.asked).toEqual([`does ${BRANCH} hold abc1234`]);
+    expect(w.lastEnded()).toMatchObject({ stage: "update", ok: false, error: reason, costUsd: 1.5 });
+    expect(w.wakes).toEqual([
+      {
+        runId: w.run.id,
+        events: [`The step bringing the work up to date ended: it failed: ${reason}.`],
+        options: {},
+      },
+    ]);
+  });
+
+  it("writes the step as succeeded, and tells the runner so, when the branch holds the commit its new entry names", async () => {
+    const w = updatingChore();
+    w.state.holds = true;
+
+    await w.stepEndsCleanly("update", () => {
+      w.state.record = recordOf61("2026-10-13T14:20:00Z", "passes");
+    });
+
+    expect(w.state.asked).toEqual([`does ${BRANCH} hold abc1234`]);
+    expect(w.lastEnded()).toMatchObject({ stage: "update", ok: true, costUsd: 1.5 });
+    expect(w.lastEnded()).not.toHaveProperty("error");
+    expect(w.wakes).toEqual([
+      { runId: w.run.id, events: ["The step bringing the work up to date ended: it succeeded."], options: {} },
+    ]);
+  });
+
+  it("asks the forge nothing when a step other than the update ends cleanly", async () => {
+    const w = updatingChore();
+    w.store.decidePlanner(w.run.id, {
+      kind: "build",
+      at: "2026-10-13T13:50:00Z",
+      reason: "Nothing else on the project is being built.",
+    });
+    w.state.behind = 3;
+
+    await w.stepEndsCleanly("execution");
+
+    expect(w.state.asked).toEqual([]);
+    expect(w.lastEnded()).toMatchObject({ stage: "execution", ok: true });
+    expect(w.wakes).toEqual([
+      { runId: w.run.id, events: ["The step building ended: it succeeded."], options: {} },
+    ]);
+  });
+
+  it("writes the update as its session ended, and logs why, when the forge fails to say whether the branch holds the commit", async () => {
+    const w = updatingChore();
+    w.state.holds = new Error("gh api repos/... failed after 3 attempts: ECONNRESET");
+
+    await w.stepEndsCleanly("update", () => {
+      w.state.record = recordOf61("2026-10-13T14:20:00Z", "passes");
+    });
+
+    expect(w.state.asked).toEqual([`does ${BRANCH} hold abc1234`]);
+    expect(w.lastEnded()).toMatchObject({ stage: "update", ok: true });
+    expect(w.lastEnded()).not.toHaveProperty("error");
+    expect(w.wakes).toEqual([
+      { runId: w.run.id, events: ["The step bringing the work up to date ended: it succeeded."], options: {} },
+    ]);
+    expect(w.logged).toContain(
+      "runner scratch-app#12/1 — whether the update brought the branch level could not be read, " +
+        "so its end is written as its session ended: gh api repos/... failed after 3 attempts: ECONNRESET",
+    );
+  });
+});

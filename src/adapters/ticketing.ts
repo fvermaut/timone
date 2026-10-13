@@ -426,6 +426,21 @@ export interface TicketingAdapter {
   ): Promise<{ behind: number; defaultHead: string } | undefined>;
 
   /**
+   * Whether `branch` holds `commit`, or undefined when the forge knows
+   * neither of them.
+   *
+   * Phase 61's widening, for
+   * [ADR-0068](../../doc/adr/0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md)
+   * D4: an update step that ended cleanly but whose merge never reached the
+   * branch is a failed step, and the record entry it wrote names the commit
+   * it was meant to bring in.
+   *
+   * **An unknown commit or branch is `undefined`**, as in
+   * {@link behindDefault}. A failure to ask throws.
+   */
+  branchHolds(project: TicketingProject, branch: string, commit: string): Promise<boolean | undefined>;
+
+  /**
    * One file's content on `branch`, or undefined when the branch does not
    * carry it.
    *

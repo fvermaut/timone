@@ -614,6 +614,39 @@ export class GitHubTicketingAdapter implements TicketingAdapter {
   }
 
   /**
+   * Whether `branch` holds `commit`, through a compare from that commit:
+   * the branch holds it when the compare finds the branch nothing behind.
+   */
+  async branchHolds(
+    project: TicketingProject,
+    branch: string,
+    commit: string,
+  ): Promise<boolean | undefined> {
+    const slug = repoSlug(project.repoUrl);
+
+    let raw: string;
+    try {
+      raw = await this.run(
+        "gh",
+        ["api", `repos/${slug}/compare/${commit}...${branch}`, "--jq", ".behind_by"],
+        { repository: slug },
+      );
+    } catch (error) {
+      // For aheadOfDefault's reason: only the 404 is an answer.
+      const said = error instanceof Error ? error.message : String(error);
+      if (/\(HTTP 404\)/.test(said)) return undefined;
+      throw error;
+    }
+
+    const behind = parseGhJson(
+      z.number().int().nonnegative(),
+      raw,
+      `comparing ${branch} with ${commit} on ${slug}`,
+    );
+    return behind === 0;
+  }
+
+  /**
    * One file's content on a branch, through GraphQL's `object(expression:)`.
    *
    * GraphQL again, and for the reason `readBranches` gives: an absent path

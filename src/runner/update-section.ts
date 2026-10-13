@@ -25,6 +25,8 @@ export interface TestSet {
  * has in a form not read here, is undefined: it is never guessed.
  */
 export interface UpdateEntry {
+  /** The time in the heading, `## Update <k> — <ISO time>`, when it reads as a date. */
+  at: string | undefined;
   /** `<default> at <sha>`. */
   levelWith: string | undefined;
   /** The pull requests that arrived, as the record words them. */
@@ -35,6 +37,12 @@ export interface UpdateEntry {
   fixes: number | undefined;
   /** `none`, or plain sentences saying what changed and why. */
   codeChanged: string | undefined;
+  /**
+   * `none`, or `<ID>: <how>; <ID>: <how>`: the check scripts the update
+   * joined after a merge, and how (ADR-0068 D2). An entry written before
+   * that line existed has none.
+   */
+  checkScriptsJoined: string | undefined;
   result: { passes: true } | { passes: false; failure: string | undefined } | undefined;
 }
 
@@ -60,6 +68,7 @@ export function latestUpdate(recordText: string): UpdateEntry | undefined {
     if (field?.[1] !== undefined && field[2] !== undefined) fields.set(field[1], field[2].trim());
   }
   return {
+    at: timeOf(lines[start] ?? ""),
     levelWith: fields.get("Level with"),
     arrived: fields.get("Arrived"),
     wholeSuite: testSetOf(fields.get("Whole test suite"), ["passed", "failed"]),
@@ -71,8 +80,15 @@ export function latestUpdate(recordText: string): UpdateEntry | undefined {
     ]),
     fixes: fixesOf(fields.get("Fixes")),
     codeChanged: fields.get("Code changed"),
+    checkScriptsJoined: fields.get("Check scripts joined"),
     result: resultOf(fields.get("Result")),
   };
+}
+
+/** The time after the dash of an entry's heading, when it reads as a date. */
+function timeOf(heading: string): string | undefined {
+  const time = /^## Update .*? — (.+)$/.exec(heading.trim())?.[1]?.trim();
+  return time !== undefined && !Number.isNaN(Date.parse(time)) ? time : undefined;
 }
 
 /** A test set's value, `<result>` or `<result> — <detail>`, when its result is one of `allowed`. */
@@ -129,6 +145,9 @@ export function updateSection(entry: UpdateEntry, defaultBranch: string): string
     entry.codeChanged === "none" ? "No code had to change." : `What had to change: ${entry.codeChanged ?? ""}`,
     "",
   );
+  if (entry.checkScriptsJoined !== undefined && entry.checkScriptsJoined !== "none") {
+    lines.push(`Check scripts joined: ${sentence(entry.checkScriptsJoined)}`, "");
+  }
   for (const { name, set } of testSets(entry)) {
     lines.push(
       set === undefined
@@ -184,4 +203,43 @@ export function withUpdate(body: string, section: string): string {
       ? body
       : body.slice(0, start) + body.slice(end + UPDATE_END.length).replace(/^\r?\n(\r?\n)?/, "");
   return rest.trim() === "" ? section : `${section}\n\n${rest}`;
+}
+
+/**
+ * Why an update step that ended cleanly did not do its work, or undefined
+ * when it did (ADR-0068 D4).
+ */
+export function unfinishedUpdate(facts: {
+  /** The newest entry on the branch after the step. */
+  entry: UpdateEntry | undefined;
+  /** When the step started. */
+  startedAt: string;
+  /** Whether the branch holds the entry's `Level with` commit. */
+  holds: boolean | undefined;
+  /** How far the branch is behind the default branch now. */
+  behind: number | undefined;
+  defaultBranch: string;
+}): string | undefined {
+  const { entry, startedAt, holds, behind, defaultBranch } = facts;
+  // **An answer the forge did not give never makes a failure.** Each branch
+  // below needs one answer, and without it the step is taken as done.
+  if (entry !== undefined && isNewSince(entry, startedAt)) {
+    if (holds !== false) return undefined;
+    const failure = entry.result?.passes === false ? entry.result.failure : undefined;
+    const unfinished = `the merge of ${defaultBranch} at ${levelWithCommit(entry) ?? ""} was not finished`;
+    return failure === undefined ? unfinished : `${unfinished}: ${failure}`;
+  }
+  if (behind === undefined || behind === 0) return undefined;
+  const commits = behind === 1 ? "commit" : "commits";
+  return `it wrote no record entry, and the branch is still ${behind} ${commits} behind ${defaultBranch}`;
+}
+
+/** Whether `entry` was written at `startedAt` or after it: an entry with no time is not. */
+export function isNewSince(entry: UpdateEntry, startedAt: string): boolean {
+  return entry.at !== undefined && Date.parse(entry.at) >= Date.parse(startedAt);
+}
+
+/** The commit in an entry's `Level with:` value, `<default> at <sha>`, or undefined when it names none. */
+export function levelWithCommit(entry: UpdateEntry): string | undefined {
+  return / at ([0-9a-f]{7,40})$/.exec(entry.levelWith ?? "")?.[1];
 }

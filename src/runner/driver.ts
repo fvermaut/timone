@@ -30,11 +30,11 @@ import { isNamedPerson } from "./brief.js";
 import { limitNotice } from "./comments.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
 import { departureSection, departuresOf, DEPARTURES_END, DEPARTURES_START } from "./departures.js";
-import { filesAddedOnBranch, PHASES } from "./facts.js";
+import { newestUpdateEntry } from "./facts.js";
 import { defaultOrder, standingOf, ticketKindOf, type TicketContext } from "./order.js";
 import { appendEntry, readRecord, type RecordEntry } from "./record.js";
 import { RUNNER_DEFAULT_WAIT, type RunnerSessions, type WakeOptions } from "./session.js";
-import { latestUpdate, updateSection, withUpdate } from "./update-section.js";
+import { updateSection, withUpdate } from "./update-section.js";
 
 /**
  * The runner's driver: what the poll cycle calls, once a cycle, for every
@@ -1188,13 +1188,10 @@ export class RunnerDriver {
    */
   private async updateOf(project: TicketingProject, branch: string): Promise<string | undefined> {
     const { adapter } = this.deps;
+    const entry = await newestUpdateEntry(adapter, project, branch);
+    if (entry === undefined) return undefined;
     const { defaultBranch } = await adapter.readBranches(project);
-    const [phase, ...more] = await filesAddedOnBranch(adapter, project, defaultBranch, branch, PHASES);
-    if (phase === undefined || more.length > 0) return undefined;
-    const name = phase.slice(phase.lastIndexOf("/") + 1).replace(/\.md$/, "");
-    const record = await adapter.readFile(project, branch, `${PHASES}/reports/${name}-update.md`);
-    const entry = record === undefined ? undefined : latestUpdate(record);
-    return entry === undefined ? undefined : updateSection(entry, defaultBranch);
+    return updateSection(entry, defaultBranch);
   }
 
   /**

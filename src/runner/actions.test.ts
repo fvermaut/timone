@@ -115,6 +115,7 @@ function fakeForge(ticket: TicketThread, calls: string[]) {
     },
     aheadOfDefault: async () => state.ahead,
     behindDefault: async () => ({ behind: 0, defaultHead: state.defaultHead }),
+    branchHolds: async () => true,
     readFile: async (_project, branch, path) =>
       branch === "main" ? state.files.get(path) : undefined,
     listFiles: unused("listFiles"),

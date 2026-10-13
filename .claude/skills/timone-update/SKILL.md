@@ -1,12 +1,12 @@
 ---
 name: timone-update
-description: A step of an open pull request on a managed project, not a stage of its own — bring the pull request's branch level with the project's default branch after another pull request merged, or when the pull request opened behind it. It merges the default branch into the branch, runs the whole test suite and the check scripts of both tickets, hands a failure to a fresh fix context at most twice, and writes one record entry. The runner starts it when it is told the branch is behind; use it when a session's prompt points here, or when the user says "bring this pull request up to date" or "the branch is behind main".
+description: A step of an open pull request on a managed project, not a stage of its own — bring the pull request's branch level with the project's default branch after another pull request merged, or when the pull request opened behind it. It merges the default branch into the branch, joins any check script the merge left in conflict, runs the whole test suite and the check scripts of both tickets, hands a failure to a fresh fix context at most twice, and writes one record entry. The runner starts it when it is told the branch is behind; use it when a session's prompt points here, or when the user says "bring this pull request up to date" or "the branch is behind main".
 argument-hint: <project-name> <ticket>
 ---
 
 # Timone — Bringing an open pull request level with the default branch
 
-Another pull request of the project merged, or this pull request opened behind the default branch. Your job is to bring this pull request's branch level with the default branch, find out whether the work still passes, and write down what you found. You merge, you run the tests and the check scripts, and you hand every fix to a fresh context. You never change code with your own hands, and you ask nobody anything. [ADR-0066](../../../doc/adr/0066-the-update-is-a-step-the-runner-starts-when-an-open-pull-request-falls-behind.md) is the decision behind this step; [ADR-0064](../../../doc/adr/0064-status-md-and-the-registers-are-merged-by-timones-own-rule-in-the-box.md) D3 is why it merges and never rebases.
+Another pull request of the project merged, or this pull request opened behind the default branch. Your job is to bring this pull request's branch level with the default branch, find out whether the work still passes, and write down what you found. You merge, you run the tests and the check scripts, and you hand every fix to a fresh context. You never change code with your own hands, except one thing: you join a check script that the merge left in conflict (step 3) ✏ 2026-10-13 ([ADR-0068](../../../doc/adr/0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md)). You ask nobody anything. [ADR-0066](../../../doc/adr/0066-the-update-is-a-step-the-runner-starts-when-an-open-pull-request-falls-behind.md) is the decision behind this step, and [ADR-0068](../../../doc/adr/0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md) amends it for check scripts and for a merge that could not be finished; [ADR-0064](../../../doc/adr/0064-status-md-and-the-registers-are-merged-by-timones-own-rule-in-the-box.md) D3 is why it merges and never rebases.
 
 **The record entry you write is read by a person**, because code copies it to the top of the pull request. Write it as [Writing to the human](../../../process.md#writing-to-the-human) says: short sentences, plain words, no process words, no metaphors.
 
@@ -40,7 +40,7 @@ Run every git command on the project with `git -C projects/<name> …`. Run Timo
 **Never read:**
 
 - **Code diffs**: no `git diff` of contents, no `git show` of code, no `git log -p`. A list of changed file names is not a diff: `git show --name-only --format= <sha>` prints names only, and you may read that.
-- **The contents of the probe folder the check uses (see `timone-verify`).** You *run* the check scripts it holds. You never open, print or list them. `update-checks` gives you each script's path, and you pass that path to the program that runs it.
+- **The contents of the probe folder the check uses (see `timone-verify`).** You *run* the check scripts it holds. You never open, print or list them. `update-checks` gives you each script's path, and you pass that path to the program that runs it. **One exception:** a check script that `update-conflicts` names as left in conflict by the merge. You open that file to join it (step 3), and only that file ✏ 2026-10-13 ([ADR-0068](../../../doc/adr/0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md)).
 - **What a fix context did, beyond what it returns**: never its transcript, never its diff.
 
 **In a session run by hand, declare this step before you run the first check script.** A hook in front of every tool call keeps the check scripts away from builders, and a session run by hand has no step in the ledger. Run `node dist/cli.js stage update --session <your session id>` first, and `node dist/cli.js stage none --session <your session id>` at the end. The session start hook told you the id. A session the runner started does neither: the ledger knows its step or, in a container, the container does. In a container `node dist/cli.js stage` changes nothing ✏ 2026-10-08 ([PRD-10](../../../doc/specs/prd/prd-10-the-probe-guard-knows-the-step-in-a-container.md), phase 57).
@@ -60,7 +60,7 @@ Read what the list above allows, and nothing else.
 3. Note the branch's commit as `<before>`: `git -C projects/<name> rev-parse HEAD`.
 4. If `origin/<default>` is already part of the branch (`git -C projects/<name> merge-base --is-ancestor origin/<default> HEAD` exits 0), there is nothing to bring level. Commit nothing and write no entry. End with the ending for a branch that is not what the run says, and say that the branch already holds `<default>` at its current commit.
 5. At the Timone root, run `node dist/cli.js update-checks <name> --before <before>`, and keep its whole output. It names:
-   - the project's test command, or says the project has none;
+   - the project's test commands, in the order to run them, or says the project has none;
    - the branch's own phase file, and for each requirement that plan claims, its check script or "no check script";
    - each phase file that arrived on the default branch since `<before>`, with its pull request number when one was found, and the same list for each.
 
@@ -76,14 +76,29 @@ When it finishes with no conflict, add the trailers to the merge commit it made,
 
 - **Merge only.** Never rebase. Never force-push. Never use GitHub's "Update branch" (`gh pr update-branch`), and never merge the pull request.
 - **`STATUS.md` and the requirement registers are merged by Timone's own rule**, which the box switches on (ADR-0064). Do not edit them by hand. A conflict the rule still leaves in one of them goes to the fix context, as any other conflict does.
-- **A conflict left in any file goes to a fresh fix context.** List the files with `git -C projects/<name> diff --name-only --diff-filter=U`. Give the fix context the brief below. It resolves the conflict, finishes the merge commit, and returns the commit and two or three plain sentences. Keep those sentences for the record entry. **A conflict fix is not counted as one of the two fixes.**
-- If the merge still is not finished when the fix context returns, do not finish it yourself. Run `git -C projects/<name> merge --abort`, so the branch is back at `<before>`. Run none of the test sets. Write the entry with every test set as `none — the merge could not be finished`, and the result `does not pass — <default> could not be merged in: <the files still in conflict>`. Then go to step 6.
+
+**When the merge leaves conflicts** ✏ 2026-10-13 ([ADR-0068](../../../doc/adr/0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md)):
+
+1. **Ask which files are check scripts.** At the Timone root, run `node dist/cli.js update-conflicts <name>`. It prints two lists: the check scripts left in conflict, each with its requirement ID, and the other files left in conflict.
+2. **Join every check script it lists, yourself.** Open only the files in that list, and only to join them. Join each one by these five rules:
+   1. **Keep every check from both sides.** When each side added its own checks, the joined script has all of them.
+   2. **When both sides changed the same check in two ways, keep the one that fails wherever the other would.** That is the stricter of the two.
+   3. **When both sides wrote a whole script for the same requirement** (git shows the file as added on both sides), put both in one script, each as its own part, and keep every clause of both.
+   4. **Keep how each check finds what it compares with.** Where both sides pin the same commit, keep that pin once. Add no pin where a side had none. Know this: after the merge, a check that compares with "where the branch left the default branch" compares with the default branch itself, so a check of the work that arrived compares that work with itself. A pinned commit avoids this, but the join does not add one: that fault is [timone#240](https://github.com/fvermaut/timone/issues/240), and it is not yours to fix here.
+   5. **When you cannot tell which of two versions is stricter, do not guess.** Stop the merge as the last bullet of this step says, and in the entry's `Result:` line write which check and why.
+
+   Then `git -C projects/<name> add` each joined script. Never write a new check, and never change what a check asserts beyond choosing the stricter of two versions.
+3. **Finish the merge.** When `update-conflicts` listed other files, give only those to a fresh fix context, with the brief below. It resolves them, finishes the merge commit, and returns the commit and two or three plain sentences. Keep those sentences for the record entry. When it listed no other file, finish the merge commit yourself: `git -C projects/<name> commit --no-edit --trailer "Timone-Stage: update" --trailer "Timone-Run: <name>#<ticket>" --trailer "Timone-Session: <your session id>"`.
+
+- **A conflict left in any other file goes to a fresh fix context**, as above. You may also list the files with `git -C projects/<name> diff --name-only --diff-filter=U`. **A conflict fix is not counted as one of the two fixes, and neither is a join.**
+- **A joined script does a real run only**, in step 4, as every check script does. It never does a break run: each part of it was proved able to fail when it was written.
+- If the merge still is not finished when the fix context returns, do not finish it yourself. Run `git -C projects/<name> merge --abort`, so the branch is back at `<before>`. Run none of the test sets. Write the entry with every test set as `none — the merge could not be finished`, and the result `does not pass — <default> could not be merged in: <the files still in conflict>`. Then go to step 6. Do the same when you stop the merge because you could not tell which version of a check is stricter. Then the result is `does not pass — <default> could not be merged in: <ID>: <why you could not tell which check is stricter>`.
 
 ### 4 — Run the three test sets
 
 Run each set on the merged branch. Every run is a real run.
 
-1. **The whole test suite, once.** Run the project's test command from the project's root, as `npm test` when the command comes from `package.json`'s `scripts.test`. When the app has to be running for the tests, start it as the completion report says. Keep the summary line the suite prints (how many passed and how many failed) and the names of the tests that failed.
+1. **The whole test suite, once.** Run every command `update-checks` lists as the project's tests, one after another, in its order, from the project's root: for example `npm test`, or `npm run test:unit`, then `npm run test:integration`. The whole suite passes only when each command passes. When the app has to be running for the tests, start it as the completion report says. Keep the summary line each command prints (how many passed and how many failed) and the names of the tests that failed. ✏ 2026-10-13 ([ADR-0068](../../../doc/adr/0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md), phase 61)
 2. **The check scripts of this ticket**: every script `update-checks` listed under the branch's own plan.
 3. **The check scripts of the work that arrived**: every script it listed under each plan that arrived.
 
@@ -103,7 +118,7 @@ Then run again:
 - everything that failed; and
 - everything the fix's changed files can affect. Get the file names with `git -C projects/<name> show --name-only --format= <sha>`. A fix that changes any file outside `doc/` sends the whole test suite again. Compare the names with the requirements each check script checks. When you cannot tell whether the fix can affect a script, run it again.
 
-**Two fixes at most, counted over the whole update.** Conflict fixes do not count; fixes for a failing test or script do. After the second fix, if anything still fails, stop fixing. That is a result to write down, not a reason to ask anyone.
+**Two fixes at most, counted over the whole update.** Conflict fixes and joins do not count; fixes for a failing test or script do. After the second fix, if anything still fails, stop fixing. That is a result to write down, not a reason to ask anyone.
 
 ### 6 — Append the entry, commit and push
 
@@ -132,6 +147,7 @@ Nothing in this step waits for a person. A result that does not pass is written 
 - **Check scripts of the work that arrived:** the same three forms
 - **Fixes:** 0 | 1 | 2
 - **Code changed:** none | <plain sentences: what and why>
+- **Check scripts joined:** none | <ID>: <how>; …
 - **Result:** passes | does not pass — <the failure>
 ```
 
@@ -140,13 +156,14 @@ Nothing in this step waits for a person. A result that does not pass is written 
 - **The heading.** `<k>` is the number of `## Update` headings already in the file, plus one. `<ISO time>` is now, in UTC: `date -u +%Y-%m-%dT%H:%M:%SZ`.
 - **`Level with:`** the default branch's name, `at`, and the first 7 characters of the `origin/<default>` commit you merged, or tried to merge.
 - **`Arrived:`** each plan that arrived, in the order `update-checks` printed them: `phase 51 (pull request #218)`, separated by `, `. Leave out the brackets when no pull request number was found. When no plan arrived, say what did in plain words, for example `3 commits with no plan`.
-- **`Whole test suite:`** `passed` or `failed`, then ` — ` and one line: the count the suite printed, and for a failure the first test that failed. **When the project has no test command**, write `none — the project has no test command`. This is the only true line for that case. Code reads it as a suite that did not run, so the work does not pass, and the result says so (below).
+- **`Whole test suite:`** `passed` or `failed`, then ` — ` and one line: the count each test command printed, and for a failure the first test that failed. **When `update-checks` lists no test command for the project**, write `none — the project has no test command`. This is the only true line for that case. Code reads it as a suite that did not run, so the work does not pass, and the result says so (below).
 - **`Check scripts of this ticket:`** and **`Check scripts of the work that arrived:`** one of three forms:
   - `passed — <IDs>`: every script passed. List the IDs, separated by `, `. Add any requirement with no script after a `; `, for example `passed — PRD-07.R7; no check script for PRD-07.R14`.
   - `failed — <ID>: <one line>`: at least one script still fails after the fixes. Give the clause line it printed. When more than one fails, separate them with `; `.
   - `none — <why>`: there was no script to run, for example `none — phase 51 claims no requirement`, `none — no requirement of this ticket has a check script`, or `none — no plan arrived`.
 - **`Fixes:`** the number of fixes for a failing test or script: `0`, `1` or `2`. Conflict fixes are not counted.
 - **`Code changed:`** `none`, exactly, when no fix context changed anything. Otherwise, plain sentences on what each fix context changed and why, conflict fixes included, taken from what they returned. No file paths of check scripts, no process words.
+- **`Check scripts joined:`** `none`, exactly, when you joined no check script, or when you stopped the merge, which undoes every join. Otherwise, for each script you joined: its requirement ID, `: `, and one plain sentence on how you joined it, separated by `; `. For example `PRD-07.R7: kept the checks each side added, all in one script; PRD-07.R14: kept this ticket's version of the date check, which fails wherever the other one would`. Never the script's path. A file with no requirement ID, such as code the checks share, is named in plain words, for example `the code the checks share: kept both functions`. ✏ 2026-10-13 ([ADR-0068](../../../doc/adr/0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md) D2)
 - **`Result:`** `passes` only when no set says `failed`, the whole test suite says `passed`, and the merge is finished. Otherwise `does not pass — <the failure>`, naming in plain words what fails or did not run, for example `does not pass — the test "keeps both lines" still fails after two fixes`, or `does not pass — the project has no test command, so the whole test suite could not run`.
 
 **Every value is one line.** Code reads one line per field and drops the rest. Labels that differ by one letter, a hyphen in place of the em dash, or a line left out all make the section say the set did not run.
@@ -160,15 +177,16 @@ An entry, filled in:
 - **Arrived:** phase 51 (pull request #218)
 - **Whole test suite:** passed — 1270 tests passed
 - **Check scripts of this ticket:** passed — PRD-07.R7, PRD-07.R14
-- **Check scripts of the work that arrived:** none — phase 51 claims no requirement
+- **Check scripts of the work that arrived:** passed — PRD-07.R7
 - **Fixes:** 0
 - **Code changed:** none
+- **Check scripts joined:** PRD-07.R7: kept the checks each side added, all in one script
 - **Result:** passes
 ```
 
 ## The fix context's brief
 
-The fix context is a sub-agent you start from this session, with a brief and nothing of your own reasoning. It is not you: you never edit code. Give it this brief, filled in:
+The fix context is a sub-agent you start from this session, with a brief and nothing of your own reasoning. It is not you: you never edit code, and the check scripts you join in step 3 are the one exception. Give it this brief, filled in:
 
 ```markdown
 ## Fix brief — update of <project> #<ticket>, <conflict | fix 1 | fix 2>
@@ -202,3 +220,5 @@ End with one of the two endings the session's prompt gives:
 - **The branch or the pull request is not what the run says**: the checkout was on another branch or not clean, the branch already held the default branch, `update-checks` failed, or the push was refused. Follow it with what you found.
 
 Nothing else follows. The runner starts no other step after this one, and nobody is asked anything.
+
+**Code reads the branch after the step** ✏ 2026-10-13 ([ADR-0068](../../../doc/adr/0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md) D4). It asks whether the branch holds the commit in your entry's `Level with:` line. An update whose merge was not finished is recorded as a step that failed, and the runner then asks a person to bring the branch level. You still end with your ordinary ending: **Done**, when the entry is committed and pushed. So keep the entry's heading and its `Level with:` line exactly in the form above: code reads the time in the heading and the commit at the end of that line.

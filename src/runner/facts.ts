@@ -5,6 +5,7 @@ import type {
 } from "../adapters/ticketing.js";
 import { breakdownPath } from "../daemon/breakdown.js";
 import type { Run } from "../daemon/runs.js";
+import { latestUpdate, type UpdateEntry } from "./update-section.js";
 
 /**
  * The facts about a run's work that the runner is given each time it wakes:
@@ -239,6 +240,26 @@ export async function filesAddedOnBranch(
   );
   const onBranch = (await adapter.listFiles(project, branch, directory)) ?? [];
   return onBranch.filter((path) => !onDefault.has(path));
+}
+
+/**
+ * The newest entry of the update record on `branch`, or undefined when there
+ * is none: the branch added no phase file or more than one, as the planner
+ * reads a branch's plan, or its update record is missing or has no entry.
+ * The record is `<phase>-update.md`, beside the reports of the phase file the
+ * branch added (ADR-0066).
+ */
+export async function newestUpdateEntry(
+  adapter: Pick<FactsAdapter, "readBranches" | "listFiles" | "readFile">,
+  project: TicketingProject,
+  branch: string,
+): Promise<UpdateEntry | undefined> {
+  const { defaultBranch } = await adapter.readBranches(project);
+  const [phase, ...more] = await filesAddedOnBranch(adapter, project, defaultBranch, branch, PHASES);
+  if (phase === undefined || more.length > 0) return undefined;
+  const name = phase.slice(phase.lastIndexOf("/") + 1).replace(/\.md$/, "");
+  const record = await adapter.readFile(project, branch, `${REPORTS}/${name}-update.md`);
+  return record === undefined ? undefined : latestUpdate(record);
 }
 
 /**
