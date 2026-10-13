@@ -289,3 +289,159 @@ export async function afterStepAsks({ cli, places = 1, timeoutMs = 60000 }) {
   await m.stop();
   return { fx, bRefused: refusals(fx, B).map((e) => e.detail), bStarted: started(fx, B).length > 0, aRunnerOpen, aStepEnded: aEnded, answeredAt, runs: runsLine(fx), aPlace: fx.run(A)?.place };
 }
+
+// ---------------------------------------------------------------- recording an approval with every place taken
+//
+// ✏ 2026-10-13 (phase 60 verification), for PRD-07.R2 clause 3 and PRD-07.R3 clause 3, on the step
+// that writes a named person's approval into the requirements. One place (`places` in timone.yaml).
+// Ticket 13 (created 2026-09-01, the oldest) writes its requirements while the place is free; a
+// draft requirements file is then pushed to its branch, between two daemon runs. Ticket 12
+// (created 2026-09-20) is put on the forge and starts a step that ends after `holdMs`; ticket 14
+// (created 2026-09-05) is put on the forge once that step runs, asks to start a step and is refused. While
+// ticket 12's step runs, the operator writes "looks right" on ticket 13, and ticket 13's runner asks
+// to record the approval citing that comment. When it is woken with a place given, it asks again.
+// The session that writes the approval is recognised by its instructions, "set the PRD's status to
+// Active" (what PRD-05.R7's probe was seen to receive); it does not end, so ticket 13 keeps the
+// place it was given. Ticket 14's runner starts nothing when woken later, so a place given to it
+// would show as a wake only.
+//
+// What the built app was seen to do, on this branch, and what these helpers read: a refused try is
+// a `decision` with `action: 'record_approval'` whose `detail` starts "Refused:"; the ledger's run
+// then carries `place.waitingSince`; a place given is a wake whose event says a place is free.
+// On the build from just before phase 60 (main at 534b4dd), the try was refused with "The approval
+// is written down, but the step that writes it into the file did not start: No place is free …",
+// the run carried no `waitingSince`, and the freed place went to ticket 14.
+export const BEFORE_PHASE_60 = '534b4dd7e558a19c99af0a24424fe046869ab84c';
+export const before60 = () => oldBuild(BEFORE_PHASE_60);
+export const HOLDER = 12, APPROVER = 13, OTHER = 14;
+const PRD_DRAFT = '# PRD-01: A count of open to-dos\n\n> **Status:** Draft\n\nShow how many to-dos are open.\n';
+const isWriter = (s) => /set the PRD's status to Active/.test(s.brief);
+export const approvalDecisions = (fx, t = APPROVER) => fx.record(t).filter((e) => e.kind === 'decision' && e.action === 'record_approval');
+export async function approvalAsks({ cli, holdMs = 25000, timeoutMs = 150000 }) {
+  const fx = fixture({ projects: { fixture: { places: 1 } }, issues: { fixture: { [APPROVER]: { title: 'Requirements to approve', createdAt: '2026-09-01T10:00:00.000Z' } } }, cli });
+  const T = {};
+  const m = await model({
+    runner: (c) => {
+      if (c.turn > 0) return say();
+      const t = tk(c), w = whyOf(c);
+      if (t === APPROVER) {
+        if (w.includes('picked up')) return act('start_step', { stage: 'requirements', instructions: 'write it down', reason: 'probe', skipReason: 'probe: the request is clear' });
+        if (w.includes('"looks right"') || (/place/i.test(w) && /free/i.test(w))) return act('record_approval', { what: 'requirements', commentAt: T.ok, reason: 'probe: the operator approved' });
+        return say();
+      }
+      if (t === HOLDER || t === OTHER) return w.includes('picked up') ? act('start_step', { stage: 'planning', instructions: 'probe: plan it', reason: 'probe', skipReason: 'probe' }) : say();
+      return say();
+    },
+    step: (c) => {
+      if (c.turn > 0) return say('done');
+      if (isWriter(c)) return { hang: true };
+      const holder = fx.state().runs.find((r) => r.ticket === HOLDER && r.status === 'active');
+      const approver = fx.state().runs.find((r) => r.ticket === APPROVER && r.status === 'active');
+      if (holder && !approver && !T.holderStep) { T.holderStep = new Date().toISOString(); return { delayMs: holdMs, blocks: [{ type: 'text', text: 'done' }] }; }
+      if (approver && !T.ok) return say('done');
+      return { hang: true };
+    },
+  });
+  // The approver's requirements, written while the place is free.
+  await daemon(fx, m, { until: () => fx.record(APPROVER).some((e) => e.kind === 'step-ended') && ['runner-ended', 'seen'].includes(fx.record(APPROVER).at(-1)?.kind), timeoutMs: 40000, settleMs: 1500 });
+  const branch = fx.run(APPROVER)?.branch;
+  if (branch) fx.pushBranch(branch, { 'doc/specs/prd/prd-01-count.md': PRD_DRAFT }, 'requirements');
+  addTicket(fx, HOLDER, { title: 'The ticket building', createdAt: '2026-09-20T10:00:00.000Z' });
+  let atRefusal = null;
+  await daemon(fx, m, {
+    until: () => {
+      // The other ticket is put on the forge only once the holder's step runs, so the two are never
+      // picked up in the same cycle, where either could take the place first.
+      if (!T.otherAdded && started(fx, HOLDER).length) { T.otherAdded = true; addTicket(fx, OTHER, { title: 'Another waiting ticket', createdAt: '2026-09-05T10:00:00.000Z' }); }
+      if (!T.ok && started(fx, HOLDER).length && decisions(fx, OTHER).some((d) => /^Refused/.test(d.detail ?? ''))) {
+        T.ok = fx.comment(APPROVER, OPERATOR, 'looks right');
+        T.holderRunning = runsLine(fx);
+      }
+      if (!atRefusal && approvalDecisions(fx).length) atRefusal = { runs: runsLine(fx), run: fx.run(APPROVER), writers: m.steps().filter(isWriter).length };
+      const holderEnded = fx.record(HOLDER).some((e) => e.kind === 'step-ended');
+      const done = m.steps().some(isWriter) || approvalDecisions(fx).length >= 2;
+      if (!holderEnded) return false;
+      return Date.now() - (fx._afterEnd ??= Date.now()) > (done ? 6000 : 20000);
+    },
+    timeoutMs, settleMs: 1500,
+  });
+  await m.stop();
+  const holderEndedAt = fx.record(HOLDER).find((e) => e.kind === 'step-ended')?.at;
+  const per = {};
+  for (const n of [APPROVER, OTHER]) {
+    per[n] = {
+      tells: fx.record(n).filter(isPlaceWake).map((e) => e.at),
+      approvals: approvalDecisions(fx, n).map((e) => ({ at: e.at, detail: e.detail ?? 'accepted' })),
+      steps: decisions(fx, n).map((e) => ({ at: e.at, detail: e.detail ?? 'accepted' })),
+    };
+  }
+  const writers = m.steps().filter(isWriter).map((s) => s.at);
+  return {
+    fx, T, atRefusal, holderEndedAt, per, writers,
+    approvalsRecorded: fx.record(APPROVER).filter((e) => e.kind === 'approval').map((e) => e.at),
+    runs: runsLine(fx),
+  };
+}
+
+// ---------------------------------------------------------------- sorted while another ticket has the place
+//
+// ✏ 2026-10-13 (phase 60 verification), for PRD-05.R1 clause 1. One place. Ticket 13, a feature,
+// is picked up and its runner starts sorting, which takes the place for `sortMs`. Ticket 12 is put
+// on the forge then, asks to start a step, and is refused: it waits for its turn. When sorting
+// ends, the place is given to ticket 12, whose runner starts a step that ends after `holdMs`. Ticket
+// 13's runner, woken by the end of sorting, has never asked for a place and been refused, so it is
+// not in line. It starts the interview ("clarification"), the next step of the default order; and
+// again whenever it is woken with a place given. Returns what ticket 13's runner was told when it
+// woke after sorting, the ledger's view of ticket 13 at that moment, and what became of the
+// interview it chose.
+// On the build from just before phase 60 the brief said, at that wake, "The project's place: given
+// to fixture#12/1. This ticket waits for its turn." while the ticket was not in line.
+export async function sortedWhileTaken({ cli, sortMs = 8000, holdMs = 10000, timeoutMs = 120000 }) {
+  const fx = fixture({ projects: { fixture: { places: 1 } }, issues: { fixture: { [B]: { title: 'Add a count of open to-dos', createdAt: '2026-09-02T10:00:00.000Z' } } }, cli });
+  let addedA = false, atSorted = null;
+  const m = await model({
+    runner: (c) => {
+      if (c.turn > 0) return say();
+      const t = tk(c), w = whyOf(c);
+      if (t === B) {
+        if (w.includes('picked up')) return act('start_step', { stage: 'triage', instructions: 'sort it', reason: 'probe' });
+        if (w.includes('sorting the request ended')) {
+          atSorted ??= { brief: c.brief, run: fx.run(B), runs: runsLine(fx) };
+          return act('start_step', { stage: 'clarification', instructions: 'ask what is needed', reason: 'probe: the next step of the default order' });
+        }
+        if (/place/i.test(w) && /free/i.test(w)) return act('start_step', { stage: 'clarification', instructions: 'ask what is needed', reason: 'probe: the next step of the default order' });
+        return say();
+      }
+      if (t === A) return w.includes('picked up') || (/place/i.test(w) && /free/i.test(w)) ? act('start_step', { stage: 'planning', instructions: 'probe: plan it', reason: 'probe', skipReason: 'probe' }) : say();
+      return say();
+    },
+    step: (c) => {
+      if (c.turn > 0) return say('done');
+      const stage = (c.brief.match(/Timone-Stage: (\S+)/) || [])[1];
+      if (stage === 'triage') return { delayMs: sortMs, blocks: [{ type: 'text', text: 'sorted: a feature' }] };
+      if (stage === 'planning') return { delayMs: holdMs, blocks: [{ type: 'text', text: 'done' }] };
+      return { hang: true };
+    },
+  });
+  let afterRefusal = null;
+  await daemon(fx, m, {
+    until: () => {
+      if (!addedA && started(fx, B).length) { addedA = true; addTicket(fx, A, { title: 'The other ticket', createdAt: '2026-09-01T10:00:00.000Z' }); }
+      if (!afterRefusal && atSorted && refusals(fx, B).length) afterRefusal = { run: fx.run(B), runs: runsLine(fx) };
+      return fx.record(B).some((e) => e.kind === 'step-started' && e.stage === 'clarification');
+    },
+    timeoutMs, settleMs: 1500,
+  });
+  await m.stop();
+  const interview = decisions(fx, B).filter((e) => atSorted && e.at >= fx.record(B).find((x) => x.kind === 'step-ended' && x.stage === 'triage')?.at);
+  return {
+    fx, atSorted,
+    placeLine: (atSorted?.brief.split('\n').find((l) => /The project's place/i.test(l)) ?? '').trim(),
+    interviewTries: interview.map((e) => ({ at: e.at, detail: e.detail ?? 'accepted' })),
+    interviewStarted: fx.record(B).filter((e) => e.kind === 'step-started' && e.stage === 'clarification').map((e) => e.at),
+    tells: fx.record(B).filter(isPlaceWake).map((e) => e.at),
+    otherStarted: started(fx, A).map((e) => e.at),
+    runs: runsLine(fx),
+    afterRefusal,
+  };
+}

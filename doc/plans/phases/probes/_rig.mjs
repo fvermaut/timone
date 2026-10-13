@@ -438,21 +438,29 @@ export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // because the one command does real runs only; a probe owed a break run is run
 // on its own, without it. The output says which.
 export const REAL_ONLY = process.env.PROBE_REAL_ONLY === '1';
+// ✏ 2026-10-13 (phase 60 verification): PROBE_BREAK_FOR names clause labels, separated by `|`,
+// that do their break leg even with PROBE_REAL_ONLY=1. A probe that gains a label this pass owes
+// that label a break run (case 1 of the skill's four), while its older labels, already proved able
+// to fail, do their real run only. A probe asks breakRunFor(label) before it builds the fixture a
+// break leg needs, so a label that does no break run costs nothing for it.
+const BREAK_FOR = (process.env.PROBE_BREAK_FOR ?? '').split('|').map((s) => s.trim()).filter(Boolean);
+export const breakRunFor = (id) => !REAL_ONLY || BREAK_FOR.includes(id);
 const results = [];
 export async function clause(id, wording, { broken, correct, unproven }) {
+  const realOnly = !breakRunFor(id);
   let redOk = false, redDetail = '';
   if (unproven) {
     redDetail = `NO BREAK STEP — ${unproven}`;
-  } else if (REAL_ONLY) {
+  } else if (realOnly) {
     redDetail = 'real run only (PROBE_REAL_ONLY=1); this probe was proved able to fail by an earlier check';
   } else {
     try { await broken(); redDetail = 'the assertion still held on the broken setup'; } catch (e) { redOk = true; redDetail = e.message; }
   }
   let greenOk = false, greenDetail = '';
   try { await correct(); greenOk = true; greenDetail = 'assertion held'; } catch (e) { greenDetail = e.message; }
-  const verdict = unproven ? (greenOk ? 'PASS-UNPROVEN' : 'FAIL') : REAL_ONLY ? (greenOk ? 'PASS' : 'FAIL') : !redOk ? 'INSTRUMENT-BROKEN' : greenOk ? 'PASS' : 'FAIL';
+  const verdict = unproven ? (greenOk ? 'PASS-UNPROVEN' : 'FAIL') : realOnly ? (greenOk ? 'PASS' : 'FAIL') : !redOk ? 'INSTRUMENT-BROKEN' : greenOk ? 'PASS' : 'FAIL';
   console.log(`=== ${id} — ${wording}`);
-  console.log(`    break leg: ${unproven ? 'none' : REAL_ONLY ? 'not run' : redOk ? 'RED (as required)' : 'GREEN — instrument broken'} — ${oneLine(redDetail)}`);
+  console.log(`    break leg: ${unproven ? 'none' : realOnly ? 'not run' : redOk ? 'RED (as required)' : 'GREEN — instrument broken'} — ${oneLine(redDetail)}`);
   console.log(`    green leg: ${greenOk ? 'PASS' : 'FAIL'} — ${oneLine(greenDetail)}`);
   results.push({ id, verdict });
   return verdict;

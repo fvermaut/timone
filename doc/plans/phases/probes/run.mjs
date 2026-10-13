@@ -16,6 +16,11 @@
 // ✏ 2026-10-05 (phase 53 verification, ADR-0051 D4): --only=ID,ID runs just the
 // named criteria of the derived set — the set as narrowed by `Depends-on`
 // against the phase's diff, which the verifier computes and lists in its report.
+//
+// ✏ 2026-10-13 (phase 60 verification): --jobs=N runs at most N probes at once. With
+// every probe started together (27 in phase 60's pass, each running several daemons),
+// five probes failed only because their waits ran out, and each passed when run on its
+// own. Without --jobs every probe still starts at once, as before.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -59,16 +64,22 @@ const run = (file) =>
     );
   });
 
-const results = await Promise.all(
-  set.map(async (c) => {
-    const file = path.join(PROBE_DIR, `${c.id.toLowerCase()}.mjs`);
-    if (!fs.existsSync(file)) return { ...c, verdict: 'NO PROBE', out: '' };
-    const r = await run(file);
-    // A probe exits 3 when none of its clauses could be judged: all were BLOCKED (_rig.mjs's finish()).
-    // ✏ 2026-10-02 (phase 41 verification): that used to be counted as FAIL here.
-    return { ...c, verdict: r.code === 0 ? 'PASS' : r.code === 3 ? 'BLOCKED' : 'FAIL', out: r.out };
-  }),
-);
+const jobsArg = process.argv.find((a) => a.startsWith('--jobs='));
+const jobs = jobsArg ? Math.max(1, Number(jobsArg.slice('--jobs='.length)) || 1) : set.length || 1;
+if (jobsArg) console.log(`At most ${jobs} probes at once (--jobs).\n`);
+const one = async (c) => {
+  const file = path.join(PROBE_DIR, `${c.id.toLowerCase()}.mjs`);
+  if (!fs.existsSync(file)) return { ...c, verdict: 'NO PROBE', out: '' };
+  const r = await run(file);
+  // A probe exits 3 when none of its clauses could be judged: all were BLOCKED (_rig.mjs's finish()).
+  // ✏ 2026-10-02 (phase 41 verification): that used to be counted as FAIL here.
+  return { ...c, verdict: r.code === 0 ? 'PASS' : r.code === 3 ? 'BLOCKED' : 'FAIL', out: r.out };
+};
+const results = new Array(set.length);
+let next = 0;
+await Promise.all(Array.from({ length: Math.min(jobs, set.length) }, async () => {
+  while (next < set.length) { const i = next++; results[i] = await one(set[i]); }
+}));
 
 for (const r of results.filter((r) => r.out)) {
   console.log(r.out.trimEnd());

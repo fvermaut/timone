@@ -31,6 +31,8 @@
 
 ## R2 — Each project has a number of places, 2 unless `timone.yaml` says otherwise
 
+> ✏ 2026-10-13 — checked again in [phase-60-verification.md](../../plans/phases/reports/phase-60-verification.md), with its probe [`prd-07.r2.mjs`](../../plans/phases/probes/prd-07.r2.mjs): all six clauses pass on this build. Clause 3 was also checked for the step that writes a named person's approval: with the only place taken by another ticket's step, that step did not start, and the ticket waited for its turn. This check went red on the build from just before phase 60, where the ticket was refused but never put in line. The status stays `verified`.
+
 > ✏ 2026-10-05 — verified in [phase-49-verification.md](../../plans/phases/reports/phase-49-verification.md), with its probe [`prd-07.r2.mjs`](../../plans/phases/probes/prd-07.r2.mjs): all six clauses passed, clauses 1 and 2 with no `places` line (2 places) and with `places: 3` and `places: 1`, clauses 3 and 4 with two places. Clause 6 also for the runner session a step's end wakes, which took a place until the fix `074ec45` on this branch. The note below is history: what it said was still owed has now been seen.
 
 > ✏ 2026-10-04 — partial evidence: clauses 3 to 6 passed in [phase-47-verification.md](../../plans/phases/reports/phase-47-verification.md), with its probe [`prd-07.r2.mjs`](../../plans/phases/probes/prd-07.r2.mjs). ~~Clause 4 was seen only as far as one place allows: its words "while the other steps keep running" need two places. Clauses 1 and 2, the number of places, are not built yet (piece 5), so the status stays `draft`.~~
@@ -62,6 +64,8 @@
 - **Verification hint:** test it on the run store with fake steps. Two tickets of one project each start a step; a third is refused; the first step ends and the third may start. The key name in `timone.yaml` is the build's choice.
 
 ## R3 — A freed place goes to one ticket: `priority:high` first, then the oldest
+
+> ✏ 2026-10-13 — checked in [phase-60-verification.md](../../plans/phases/reports/phase-60-verification.md), with its probe [`prd-07.r3.mjs`](../../plans/phases/probes/prd-07.r3.mjs): all four clauses pass on this build. Clause 3 was also checked for a ticket refused a place when its runner asked to record an approval: the freed place went to it, its next try was not refused, the step that writes the approval started, and the other waiting ticket was not told. This check went red on the build from just before phase 60, where that ticket was never woken and the place went to the other one. The status stays `verified`.
 
 - **Priority:** MUST
 - **Status:** verified
