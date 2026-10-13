@@ -22,3 +22,10 @@
 **Agreed:** The build's rule: at the end of each sub-phase, every suite that takes under a minute runs whole. Timone's one suite took 34.3 s at phase 60's close, so 61a and 61b each ran it whole at their end.
 **Did instead:** From 61c on, each sub-phase runs only the tests of the files it changes and the tests its own validation names. The whole suite runs once, at the close.
 **Why:** The person asked for this during the build on 2026-10-13: the whole suite had been run about five times, and it is slow.
+
+## 2026-10-13 — timone#234, build
+
+**Kind:** check not run
+**Agreed:** After 61d, the real replay (`npm run replay`, every case, three tries each, on the model) runs on this branch, and its output goes into `phase-61-replay.md` as run 1 (PRD-05.R18 clause 2).
+**Did instead:** It was not run. One case was tried (`npm run replay -- --case 139`): all three tries ended "Not logged in · Please run /login", at $0.00. The dry replay passed 24 of 24.
+**Why:** The container this build ran in has no model login. As the plan says, the replay rides to the pull request; fvermaut runs it from his own terminal: `cd ~/dev/timone/projects/timone && npm run build && npm run replay 2>&1 | tee ~/dev/timone/.timone/replay-61.txt`.

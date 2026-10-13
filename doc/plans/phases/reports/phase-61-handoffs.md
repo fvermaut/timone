@@ -314,3 +314,85 @@ At slice end: the 18 test files under `src/runner` and `src/adapters` were run, 
 - The check reads the entry's `Level with:` line as `<default> at <sha>`, with the sha as 7 to 40 lower-case hex characters at the end of the line, and the time in the heading, `## Update <k> — <ISO time>`. An entry written before the step's start is ignored. The instructions must keep both in that form; otherwise the step is not made a failure.
 - `dist/` was not rebuilt in this slice. No command changed.
 - Refactor idea, not done: `updateUnfinished` in `actions.ts` and `updateOf` in `driver.ts` each ask `readBranches` twice, once inside `newestUpdateEntry` and once for the default branch's name. `newestUpdateEntry` could take the default branch's name, but the plan gives its signature without it.
+
+## 61e — The update's instructions, `process.md` and the check's instructions say the update joins check scripts
+
+**Built.** The update's instructions now tell the session to join, with its own hands, every check script a merge left in conflict, by the five rules of ADR-0068 D1, stated in one place in step 3. They name `node dist/cli.js update-conflicts <name>` as the way to tell check scripts from other files. Other files still go to the fix context, whose brief is unchanged. When no other file is left, the session finishes the merge commit itself. Step 4.1 runs every command `update-checks` lists as the project's tests. The record entry has the line `- **Check scripts joined:** ...`, in the form and in the filled-in example, and says how to fill it. The closing says code reads the branch after the step, and that an update whose merge was not finished is a step that failed. `process.md`, the check's instructions and `CONTEXT.md` say the same, each with a dated ✏ 2026-10-13 marker. This slice carries no behaviour-carrying code, so there was no TDD loop: validation is by checklist.
+
+**Files touched.**
+
+- `.claude/skills/timone-update/SKILL.md` — the description (one clause: it joins any check script the merge left in conflict); the intro (the exception, and ADR-0068 linked beside ADR-0066); *Never read* (the one exception for a check script `update-conflicts` names); step 2.5 ("test commands, in the order to run them"); step 3 (the join, the five rules, the note on timone#240, `git add`, who finishes the merge, joins not counted, real run only, and stopping the merge when it cannot tell which check is stricter); step 4.1 (every test command, in order); step 5 (joins do not count); the record entry's form, filled-in example and how to fill `Check scripts joined:` and `Whole test suite:`; the sentence before the fix brief; the closing. The fix brief itself is unchanged.
+- `process.md` — the update paragraph: two ✏ 2026-10-13 ([ADR-0068]) notes, one after "It does not fix code itself." (the join; every other conflict and every failing test still go to a fresh fix context), one after "pushes it with the merge and the fixes." (a step that failed; the runner asks a person). Stage 7's "only stage 7 writes there": a ✏ note in brackets that the update's join is the one other writer, and that it writes no new check (D3). Nothing struck.
+- `.claude/skills/timone-verify/SKILL.md` — line 43, after "only this stage writes there …": one ✏ 2026-10-13 ([ADR-0068] D3) sentence with the same exception.
+- `CONTEXT.md` — the **Update** entry: one ✏ 2026-10-13 clause, that it joins a check script both sides changed itself. The entry said only "fixes any conflict", so it did not cover the join.
+- `doc/plans/phases/reports/phase-61-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+- The update skill already marks its own amendments with an inline ✏ date and link at the end of a sentence (lines 20 and 46). The changed passages carry the same marker. The intro and the bullet before the brief were rewritten in place, not struck, as the file does elsewhere.
+- In the filled-in example, `Check scripts joined:` is `PRD-07.R7: kept the checks each side added, all in one script`. For that to be true, the example's work that arrived now has `passed — PRD-07.R7` in place of `none — phase 51 claims no requirement`. The `none — <why>` form is still shown in the how-to-fill text.
+- When the session stops the merge, `Check scripts joined:` is `none`, because `git merge --abort` undoes every join. Which check, and why, goes in the `Result:` line: `does not pass — <default> could not be merged in: <ID>: <why>`. This keeps the failure in the line code turns into the step's failure reason (61d).
+- A file in conflict with no requirement ID (code the checks share) is named in plain words in `Check scripts joined:`, since `update-conflicts` lists it as "(no requirement)".
+- The timone#240 sentence sits inside rule 4. It states the fact and says the join adds no pin. It does not tell the session to pin.
+- The closing tells the session to keep the heading and the `Level with:` line in their form, since 61d reads the time and the commit from them.
+- The plan's search found no other file outside ADRs, reports and old phase files that says the update never opens or edits a check script. `manual/` has no text on the update. `.claude/skills/README.md` mentions the update but says nothing about check scripts. Not changed.
+- `doc/plans/phases/reports/phase-61-departures.md` shows as changed in the working tree. This slice did not touch it; the change (the "check not run" entry for the replay) was there before.
+
+**Validation evidence.** All commands run from `/workspace/timone/projects/timone`.
+
+```
+$ grep -n "update-conflicts\|Check scripts joined\|ADR-0068" .claude/skills/timone-update/SKILL.md
+9:   … except one thing: you join a check script that the merge left in conflict (step 3) ✏ 2026-10-13 ([ADR-0068](…)) …
+43:  … **One exception:** a check script that `update-conflicts` names as left in conflict … ✏ 2026-10-13 ([ADR-0068](…)).
+80:  **When the merge leaves conflicts** ✏ 2026-10-13 ([ADR-0068](…)):
+82:  1. **Ask which files are check scripts.** At the Timone root, run `node dist/cli.js update-conflicts <name>`. …
+91:  3. **Finish the merge.** When `update-conflicts` listed other files, …
+101: 1. **The whole test suite, once.** … ✏ 2026-10-13 ([ADR-0068](…), phase 61)
+150: - **Check scripts joined:** none | <ID>: <how>; …
+166: - **`Check scripts joined:`** `none`, exactly, when you joined no check script, …
+183: - **Check scripts joined:** PRD-07.R7: kept the checks each side added, all in one script
+224: **Code reads the branch after the step** ✏ 2026-10-13 ([ADR-0068](…) D4). …
+```
+**Result: pass.** Each of the three appears.
+
+```
+$ grep -n "ADR-0068" process.md .claude/skills/timone-verify/SKILL.md
+process.md:46:  (stage 7: "only stage 7 writes there (✏ 2026-10-13 ([ADR-0068](…) D3): the update is the one other writer …")
+process.md:56:  (the update paragraph: two ✏ 2026-10-13 notes)
+.claude/skills/timone-verify/SKILL.md:43:  ("only this stage writes there … ✏ 2026-10-13 ([ADR-0068](…) D3): the one other writer is the update …")
+```
+**Result: pass.** Both files.
+
+```
+$ grep -rn -i "never edits code itself\|does not fix code itself\|never change code with your own hands" process.md .claude CONTEXT.md manual; echo "exit: $?"
+.claude/skills/timone-update/SKILL.md:9: …
+process.md:56: …
+exit: 0
+```
+Two hits, as expected. Each is followed in the same paragraph by the ADR-0068 exception:
+- `process.md:56`: "It does not fix code itself. ✏ 2026-10-13 ([ADR-0068](…)): one exception — when the merge leaves a conflict in a check script, the update joins that script itself, keeping every check from both sides."
+- `SKILL.md:9`: "You never change code with your own hands, except one thing: you join a check script that the merge left in conflict (step 3) ✏ 2026-10-13 ([ADR-0068](…))."
+
+**Result: pass.**
+
+```
+$ npx vitest run src/daemon/prompts.test.ts src/update-checks.git.test.ts
+ ✓ src/daemon/prompts.test.ts (255 tests)
+ ✓ src/update-checks.git.test.ts (19 tests)
+ Test Files  2 passed (2)
+      Tests  274 passed (274)
+```
+**Result: pass.** `src/` was not changed.
+
+- [x] The update's instructions say, in one place (step 3, item 2, rules 1–5), the five join rules of ADR-0068 D1: keep every check from both sides; keep the one that fails wherever the other would; both whole scripts in one, each as its own part, every clause kept; keep how each check finds what it compares with, a shared pin kept once, no pin added; do not guess, stop the merge, and say which check and why.
+- [x] The fix context's brief is unchanged: `git diff` shows no change inside the brief's block, and it still says "**Never open the folder the check keeps its scripts in.**"
+- [x] No file this slice changed writes a probe folder's path as text. The count of `probes/` in each changed file is the same before and after (`process.md` 5/5, the verify skill 9/9, the update skill 0/0, `CONTEXT.md` 1/1). Those are old text, on lines this slice added to; the new text says "the probe folder" or "check script".
+- [x] The record entry's form and its filled-in example both carry `- **Check scripts joined:** …`, which matches the field pattern `latestUpdate` reads (`/^- \*\*(.+?):\*\* (.*)$/`, label `Check scripts joined`, 61c).
+- [x] No process artifact under `doc/` was changed by this slice other than its own handoff section (`git status`: the four files above, this file, and `phase-61-departures.md`, which this slice did not touch).
+
+At slice end: `src/daemon/prompts.test.ts` 255 passed, `src/update-checks.git.test.ts` 19 passed, and `src/process-text.test.ts` (it reads `process.md`) passed: 317 in all, none failed. The whole suite was not run, as the preamble asks.
+
+**What the close must know.**
+
+- No code changed, and `dist/` was not rebuilt.
+- `phase-61-departures.md` was changed in the working tree before this slice. Commit it with whichever commit it belongs to; it is not part of 61e.
