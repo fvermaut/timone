@@ -29,3 +29,10 @@
 **Agreed:** After 61d, the real replay (`npm run replay`, every case, three tries each, on the model) runs on this branch, and its output goes into `phase-61-replay.md` as run 1 (PRD-05.R18 clause 2).
 **Did instead:** It was not run. One case was tried (`npm run replay -- --case 139`): all three tries ended "Not logged in · Please run /login", at $0.00. The dry replay passed 24 of 24.
 **Why:** The container this build ran in has no model login. As the plan says, the replay rides to the pull request; fvermaut runs it from his own terminal: `cd ~/dev/timone/projects/timone && npm run build && npm run replay 2>&1 | tee ~/dev/timone/.timone/replay-61.txt`.
+
+## 2026-10-13 — timone#234, verification
+
+**Kind:** check not run
+**Agreed:** PRD-05.R18 clause 2: a change to the runner's instructions is proposed with the replay set run on it, and its result on the pull request. Phase 61 changes the runner's rule for an update that failed, so the check runs the replay on this build.
+**Did instead:** The replay was not run. PRD-05.R18 is BLOCKED in [phase-61-verification.md](phase-61-verification.md): its clause 1 on the real model and its clause 2. Its parts judged with a stand-in model pass. Its register line is unchanged (`verified`, from phase 60).
+**Why:** This container has no model login, and the runner's instructions said not to try to get one and to record the replay as not run, so the pull request lists it. fvermaut runs it from his own terminal: `cd ~/dev/timone/projects/timone && npm run build && npm run replay 2>&1 | tee ~/dev/timone/.timone/replay-61.txt`, and its output goes into `phase-61-replay.md` as run 1.
