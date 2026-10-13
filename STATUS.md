@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-11.
+**Last updated:** 2026-10-13.
 
 ---
 
@@ -74,9 +74,13 @@
 
 **What I need from you:** nothing.
 
-**1p. Replay case #132 now accepts a question about "aproved" ([#244](https://github.com/fvermaut/timone/issues/244)), in Timone's own repository: [pull request #247](https://github.com/fvermaut/timone/pull/247) is open for your review, from the branch `timone/244-replay-case-132-accepts-the-question`.** You chose option 1. The case now passes when the runner records your approval from "aproved", or asks you what the word meant, as long as no comment names the takeover command. The real replay passed all 24 cases, three tries each, on the final code, and the replay requirement (PRD-05.R18) is met again. The review of the code style found 1 thing: one check is now written out three times. The review against the requirements found 2: the replay's check for #132 is still too loose, because almost any question passes it, and so does a try that both asks and acts. That is about the replay, not about what Timone does. By the rule, three requirements that only a watched run with the real daemon can check (PRD-07.R5, R7 and R14) are listed as not run; the branch changes only the replay's list of cases. Details: [delivery report](https://github.com/fvermaut/timone/blob/timone/244-replay-case-132-accepts-the-question/doc/plans/phases/reports/phase-59-delivery.md).
+**1p. Replay case #132 now accepts a question about "aproved" ([#244](https://github.com/fvermaut/timone/issues/244)), in Timone's own repository: [pull request #247](https://github.com/fvermaut/timone/pull/247) was merged on 12 October.** You chose option 1. The case now passes when the runner records your approval from "aproved", or asks you what the word meant, as long as no comment names the takeover command. The real replay passed all 24 cases, three tries each, on the final code, and the replay requirement (PRD-05.R18) is met again. The review of the code style found 1 thing: one check is now written out three times. The review against the requirements found 2: the replay's check for #132 is still too loose, because almost any question passes it, and so does a try that both asks and acts. That is about the replay, not about what Timone does. By the rule, three requirements that only a watched run with the real daemon can check (PRD-07.R5, R7 and R14) are listed as not run; the branch changes only the replay's list of cases. Details: [delivery report](https://github.com/fvermaut/timone/blob/timone/244-replay-case-132-accepts-the-question/doc/plans/phases/reports/phase-59-delivery.md).
 
-**What I need from you:** review and merge #247 when you are ready.
+**What I need from you:** nothing.
+
+**1q. Four ivtrends tickets stood still for up to three days, and the fix is checked ([#248](https://github.com/fvermaut/timone/issues/248), [#249](https://github.com/fvermaut/timone/issues/249)), in Timone's own repository, on the branch `timone/248-a-refused-ticket-waits-in-line`. No pull request is open yet; it opens next.** Two faults kept a ticket out of the line for a place, so nothing woke it. First, writing your approval into its file did not ask for a place: on ivtrends#182 and #189 your "approve" of 9 October was never written. Second, the machine was told "This ticket waits for its turn" when the ticket had never asked: on ivtrends#197 and #201 it started nothing after planning. A comment on each woke all four on 13 October, and they are moving. On the branch, the approval now asks for a place like any step, and the machine is told the truth about its turn. A separate check passed all 4 requirements the fix claims and the 26 it could break, with no fix needed. The real replay passed 24 of 24 twice. One part is open: nothing has seen what the real model does with the new words; a new replay case would show it, and that needs your yes. Nine requirements that only a watched run can check are owed one, because the branch changes the runner. Report: [phase-60-verification.md](https://github.com/fvermaut/timone/blob/timone/248-a-refused-ticket-waits-in-line/doc/plans/phases/reports/phase-60-verification.md).
+
+**What I need from you:** nothing now. The pull request opens next; review and merge it there.
 
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
@@ -157,7 +161,9 @@ One promise lost its tick on 4 September — the one about a job being picked up
 
 ## What changed recently
 
-**11 October — replay case #132 accepts a question about "aproved" ([#244](https://github.com/fvermaut/timone/issues/244)): [pull request #247](https://github.com/fvermaut/timone/pull/247) is open for your review, from the branch `timone/244-replay-case-132-accepts-the-question`.** The real replay passed 24 of 24 on the final code. The style review found 1 thing and the review against the requirements found 2. Item 1p says what is needed.
+**13 October — a ticket refused a place on its project now waits in line ([#248](https://github.com/fvermaut/timone/issues/248), [#249](https://github.com/fvermaut/timone/issues/249)), on the branch `timone/248-a-refused-ticket-waits-in-line`.** Four ivtrends tickets had stood still; a comment on each woke them. The fix is built and checked: every claimed requirement passes, no regression, the real replay 24 of 24. The pull request opens next. Item 1q has the detail.
+
+**11 October — replay case #132 accepts a question about "aproved" ([#244](https://github.com/fvermaut/timone/issues/244)): [pull request #247](https://github.com/fvermaut/timone/pull/247), merged on 12 October.** The real replay passed 24 of 24 on the final code. The style review found 1 thing and the review against the requirements found 2. Item 1p says what is needed.
 
 **10 October — a long command is not a stuck step ([#238](https://github.com/fvermaut/timone/issues/238)), and a step's clone takes only the top-level files ([#242](https://github.com/fvermaut/timone/issues/242)): [pull request #245](https://github.com/fvermaut/timone/pull/245) was merged on 10 October.** The check found one requirement failing: replay case #132, where two requirements disagree ([#244](https://github.com/fvermaut/timone/issues/244)). Everything else it covers passes. The style review found 4 things and the review against the requirements found 4. Item 1o says what is still owed.
 
