@@ -1,6 +1,6 @@
 # ADR-0066: The update is a step the runner starts when an open pull request falls behind the default branch, and it runs the check scripts while its fixes stay away from them
 
-- **Status:** accepted
+- **Status:** accepted — **amended 2026-10-13 by [ADR-0068](0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md)** on two points: D4, for check scripts alone, because the update session now joins a conflict in a check script itself; and D2, because an update that did not bring the branch level is now a step that failed, and the runner says so on the ticket. The rest stands; the body is untouched.
 - **Date:** 2026-10-05
 - **Source:** planning of [timone#202](https://github.com/fvermaut/timone/issues/202), piece 4 of [timone#197](https://github.com/fvermaut/timone/issues/197). The decision was made while planning that piece; the plan is [phase 50](../plans/phases/phase-50.md).
 - **Requirements:** [PRD-07](../specs/prd/prd-07-several-tickets-of-one-project-at-once.criteria.md) R7 and R14
