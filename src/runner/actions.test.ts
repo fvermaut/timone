@@ -2025,6 +2025,99 @@ describe("a step asks for a place on the project (ADR-0063 D2)", () => {
   });
 });
 
+/** The try to record fvermaut's approval of ticket 12's list of pieces, given at 11:58:40. */
+const PIECES_APPROVED = {
+  what: "pieces" as const,
+  commentAt: "2026-09-27T11:58:40Z",
+  reason: "fvermaut approved the list of pieces.",
+};
+
+/**
+ * The session that writes an approval into its file takes a place, as a
+ * step does, so it asks for one first (ADR-0063 D2, timone#248). On
+ * ivtrends#182 and #189 it did not: the ledger refused the session, and the
+ * ticket was never put in line, so nothing woke it again.
+ */
+describe("recording an approval asks for a place on the project (ADR-0063 D2, #248)", () => {
+  it("refuses to record an approval while another ticket's step runs, naming that run, and writes that the run waits", async () => {
+    const { actions, store, run, wrote } = placeWorld(featureTicket(APPROVAL_THREAD), (store) => {
+      stepRunning(store, 7);
+    });
+    store.claimBranch(run.id, BRANCH);
+    wrote(breakdownEnded(run.id));
+
+    const result = await actions.recordApproval(PIECES_APPROVED);
+
+    expect(result).toEqual({ ok: false, refused: noPlace("run scratch-app#7/1 has a step running") });
+    const waiting = store.waitingForPlace(PROJECT.name);
+    expect(waiting.map((each) => each.id)).toEqual([run.id]);
+    expect(waiting[0]?.place).toMatchObject({ priority: false, openedAt: "2026-09-27T09:00:00Z" });
+  });
+
+  it("writes no approval and starts no session when it is refused for want of a place", async () => {
+    const { actions, store, run, steps, record, wrote } = placeWorld(
+      featureTicket(APPROVAL_THREAD),
+      (store) => {
+        stepRunning(store, 7);
+      },
+    );
+    store.claimBranch(run.id, BRANCH);
+    wrote(breakdownEnded(run.id));
+
+    await actions.recordApproval(PIECES_APPROVED);
+
+    expect(record().filter((entry) => entry.kind === "approval")).toEqual([]);
+    expect(steps).toEqual([]);
+  });
+
+  it("records the approval and starts its session when the place is given to this run, and the run takes the place", async () => {
+    const { actions, store, run, steps, wrote } = placeWorld(
+      featureTicket(APPROVAL_THREAD),
+      (store) => {
+        const other = stepRunning(store, 7);
+        store.askPlace("scratch-app#12/1", { priority: false, openedAt: "2026-09-27T09:00:00Z" });
+        store.park(other.id, { waitingOn: "fvermaut's answer", resolvableBy: ["planning"] });
+      },
+    );
+    store.claimBranch(run.id, BRANCH);
+    wrote(breakdownEnded(run.id));
+    expect(store.get(run.id)?.place?.givenAt).toBeDefined();
+
+    const result = await actions.recordApproval(PIECES_APPROVED);
+
+    expect(result).toEqual({
+      ok: true,
+      said:
+        "Recorded fvermaut's approval of the list of pieces, and started the step that writes it " +
+        "into the file. You are woken when it ends.",
+    });
+    expect(steps.map((step) => step.input.label)).toEqual([
+      "scratch-app#12/1 (recording the approval)",
+    ]);
+    expect(store.waitingForPlace(PROJECT.name)).toEqual([]);
+    expect(store.placeHolders(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+
+  it("refuses to record an approval whose place was taken between the ask and the start, in the same words, and writes that the run waits", async () => {
+    const { actions, store, run, steps, wrote } = placeWorld(
+      featureTicket(APPROVAL_THREAD),
+      () => {},
+      (store) => {
+        if (store.get("scratch-app#7/1") === undefined) stepRunning(store, 7);
+      },
+    );
+    store.claimBranch(run.id, BRANCH);
+    wrote(breakdownEnded(run.id));
+
+    const result = await actions.recordApproval(PIECES_APPROVED);
+
+    expect(result).toEqual({ ok: false, refused: noPlace("run scratch-app#7/1 has a step running") });
+    expect(steps).toEqual([]);
+    expect(store.get(run.id)?.status).toBe("parked");
+    expect(store.waitingForPlace(PROJECT.name).map((each) => each.id)).toEqual([run.id]);
+  });
+});
+
 /** The record's entry for the planning step of run `runId`, starting at 09:10. */
 function planningStarted(runId: string): RecordEntry {
   return {

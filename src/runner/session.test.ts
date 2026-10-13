@@ -83,6 +83,9 @@ function fakeForge(ticket: TicketThread) {
         fromTimone: true,
       });
     },
+    // A run's branch has no pull request yet. The brief asks for one only
+    // when the run has a branch.
+    findPullRequest: async () => undefined,
   };
   const adapter = new Proxy(known, {
     get(target, name) {
@@ -997,6 +1000,66 @@ describe("a place on the project after a wake (ADR-0063 D2, D3)", () => {
         isError: true,
       },
     ]);
+    expect(waiting(w)).toEqual([w.run.id, next.id]);
+  });
+
+  it("leaves a run waiting for its turn, in its place in the line, when its try to record an approval in the wake was refused for want of a place (#248)", async () => {
+    const w = world();
+    const { next } = threeRuns(w);
+    // #12's list of pieces was written by a step that ended at 11:50, and
+    // fvermaut approved it at 11:58:40.
+    w.store.claimBranch(w.run.id, "timone/12-a-due-date-on-each-task");
+    appendEntry(w.root, PROJECT.name, 12, {
+      kind: "step-ended",
+      at: "2026-09-27T11:50:00Z",
+      runId: w.run.id,
+      stage: "breakdown",
+      sessionId: "e3f8b1a6-breakdown",
+      ok: true,
+      costUsd: 1.6,
+    });
+    w.forge.thread.comments.push({
+      author: "fvermaut",
+      body: "ok go ahead with the pieces",
+      createdAt: "2026-09-27T11:58:40Z",
+      fromTimone: false,
+    });
+    const runner = scriptedRunner([
+      {
+        kind: "calls",
+        calls: [
+          {
+            name: "record_approval",
+            input: {
+              what: "pieces",
+              commentAt: "2026-09-27T11:58:40Z",
+              reason: "fvermaut approved the list of pieces.",
+            },
+          },
+        ],
+        costUsd: 0.1,
+      },
+    ]);
+
+    await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+      w.store.get(w.run.id)!,
+      ["fvermaut commented on the ticket at 2026-09-27T11:58:40Z."],
+    );
+
+    expect(runner.answers).toEqual([
+      {
+        content: [
+          {
+            type: "text",
+            text: expect.stringMatching(/^Refused: No place is free on scratch-app: run scratch-app#11\/1 has a step running\./),
+          },
+        ],
+        isError: true,
+      },
+    ]);
+    // #12 was opened before #13, so it comes first, as it would have from a
+    // refused try to start a step.
     expect(waiting(w)).toEqual([w.run.id, next.id]);
   });
 

@@ -1133,6 +1133,19 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
       const blocked = await stepBlocked(record.entries);
       if (blocked !== undefined) return blocked;
 
+      // The session below takes a place, so it asks for one as a step does
+      // (ADR-0063 D2, #248): after every other rule, so a try refused for
+      // another reason does not wait, and before the approval is written, so
+      // a refused try writes nothing. The runner records the approval when it
+      // is woken with the place. Written first, the brief would show the
+      // approval as given while its file still waits for it.
+      const turn = {
+        priority: ticket.labels.includes(PRIORITY_LABEL),
+        openedAt: ticket.createdAt,
+      };
+      const place = deps.store.askPlace(run.id, turn);
+      if (!place.ok) return noPlace(place.holder);
+
       write({
         kind: "approval",
         at: deps.clock(),
@@ -1144,9 +1157,11 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
 
       // The approval goes into the file it approves, by a short session of
       // its own on the run's branch: the file is the record the next steps
-      // read (ADR-0006), and the ticket is not. It is counted as running, and
-      // its cost counts toward the limit, as a step's does. But it is written
-      // down as recording the approval, not as a step of the order (40v).
+      // read (ADR-0006), and the ticket is not. It is counted as running, it
+      // takes a place on the project and asks for one as a step does (above;
+      // ADR-0063 D2, #248), and its cost counts toward the limit, as a
+      // step's does. But it is written down as recording the approval, not
+      // as a step of the order (40v).
       const stage = APPROVED_STAGE[what];
       const request = sessionRequest({
         cwd: deps.root,
@@ -1170,6 +1185,14 @@ export function runnerActions(deps: RunnerActionDeps, run: Run): RunnerActions {
           announce: () => `record ${run.id} — ${comment.author} approved ${stage}`,
         });
       } catch (error) {
+        // Another run took the place between the ask and the start, as in
+        // `startStep`: the run asks once more, and that writes that it waits.
+        // The approval is written down by then, as for any other failure to
+        // start below.
+        if (error instanceof NoPlaceError) {
+          const again = deps.store.askPlace(run.id, turn);
+          if (!again.ok) return noPlace(again.holder);
+        }
         return {
           ok: false,
           refused:

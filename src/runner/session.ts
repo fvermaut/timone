@@ -234,8 +234,9 @@ export async function wakeRunner(
   // it posted there. Watched at the action, so it is what the runner really
   // posted, not what it meant to.
   let asked: string | undefined;
-  // Whether a try to start a step in this wake was refused for want of a
-  // place, which leaves the run waiting for its turn (ADR-0063 D2).
+  // Whether a try in this wake to start a step, or to record an approval —
+  // whose session takes a place as a step does (#248) — was refused for want
+  // of a place, which leaves the run waiting for its turn (ADR-0063 D2).
   let refusedForPlace = false;
   const watched: RunnerActions = {
     ...actions,
@@ -246,6 +247,13 @@ export async function wakeRunner(
     },
     startStep: async (input) => {
       const result = await actions.startStep(input);
+      if (!result.ok && result.refused.startsWith(noPlaceRefusal(actionDeps.project.name))) {
+        refusedForPlace = true;
+      }
+      return result;
+    },
+    recordApproval: async (input) => {
+      const result = await actions.recordApproval(input);
       if (!result.ok && result.refused.startsWith(noPlaceRefusal(actionDeps.project.name))) {
         refusedForPlace = true;
       }
@@ -301,6 +309,11 @@ function noPlaceRefusal(project: string): string {
  * goes on. A session that failed or was stopped decided nothing, so only a
  * place given to the run goes back. A run with a step running uses its
  * place, and a run that is over holds none: the ledger cleared it.
+ *
+ * A try is one to start a step, or one to record an approval: the session
+ * that writes an approval into its file takes a place too, and asks for one
+ * as a step does (#248). On ivtrends#182 and #189 that refusal was not
+ * counted, the run left its turn, and nothing woke it again.
  *
  * ✏ 2026-10-04: **a try refused for want of a place keeps the run's turn.**
  * The run waits, and a place given to it later in the same wake (the step

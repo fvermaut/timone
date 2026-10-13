@@ -61,14 +61,13 @@ npx vitest run src/runner/actions.test.ts src/runner/session.test.ts
 npx tsc --noEmit
 npx vitest run src/daemon/runs.test.ts
 npm run --silent build
-node doc/plans/phases/probes/prd-07.r2.mjs; echo "exit: $? (0 expected)"
-node doc/plans/phases/probes/prd-07.r3.mjs; echo "exit: $? (0 expected)"
 ```
+
+> ✏ 2026-10-13 (build, timone#248): the two runs of the PRD-07 R2 and R3 checks moved to verification. They are the checks verification runs against the build, and the build may not use them; the plan put them here by mistake. Their two checkboxes went with them.
 
 - [ ] Cases (1), (2) and (5) failed before the change to `actions.ts` and `session.ts` (red, in the handoff), and pass after.
 - [ ] A refused `recordApproval` leaves no `approval` entry and no session.
-- [ ] Both probes pass, on the build made just before them.
-- [ ] No process the probes started is still running after them (`pgrep -fl prd07` and `pgrep -fl "probe-owner/fixture"` print nothing new). Stray fake `gh` processes from older probe runs are already running on this machine; do not count those.
+- [ ] `npm run build` ends with exit 0.
 
 ---
 
