@@ -274,3 +274,40 @@ Tests run at the end:
 - `PlaceFact`'s `taken` and `given-to` kinds now require `waiting`. Any new code that builds a `PlaceFact` must set it. Only `placeOf` in `src/runner/session.ts` builds one today.
 - `placeOf` reads `waiting` from the ledger when the brief is built, at the start of a wake. A run that is refused during the wake is in line from the next wake on; this wake's brief still says what was true when it started.
 - The sentence "This ticket waits for its turn." is now written in one place only, `inLineText` in `src/runner/brief.ts`. The refusal words in `src/runner/actions.ts` ("This ticket now waits for its turn, …") are separate and were not changed.
+
+## 60c — ADR-0063 says that recording an approval asks for a place, and that the brief says whether a ticket is in line
+
+**Built.** A dated note, `✏ 2026-10-13`, at the end of D2 in ADR-0063, before D3. It is a blockquote in the form other ADRs use for dated notes (ADR-0034, ADR-0041, ADR-0049). It has two paragraphs. The first, for [#248](https://github.com/fvermaut/timone/issues/248): recording an approval asks for a place before the approval is written, as a step does; a try refused for want of a place writes nothing, the ticket waits in line, and its runner is woken when a place is given to it. It names ivtrends#182 and #189, which stood still from 2026-10-09 to 2026-10-13. The second, for [#249](https://github.com/fvermaut/timone/issues/249): since 2026-10-05 a run whose step has just ended does not wait for a place (PRD-07.R2 clause 6), ADR-0063 was not changed then, so the second paragraph of D2 no longer holds as written. That is why the brief's old sentence became false on ivtrends#197 and #201. The note then says what the brief says now: whether the ticket is in line, and that starting the build asks the planner. The note links phase 60, both issues, the four ivtrends issues and PRD-07.R2.
+
+**Files touched.**
+
+- `doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md` — the dated note under D2. Six lines added, none removed.
+- `doc/plans/phases/reports/phase-60-handoffs.md` — this section.
+
+**Decisions taken inside the slice.**
+
+1. **The second paragraph of D2 is not struck through.** The note says it no longer holds as written and why. The plan asks for a note only, and nothing else in the ADR changes.
+2. **The note names the rare case of 60a's open point.** The plan's words are "a refused try writes nothing". That is true for a try refused at the ask. When another run takes the place between the ask and the start, the approval is already written (60a, case (4)). The note says so in two sentences, so that it does not claim more than the code does.
+3. **The ivtrends issues are written `ivtrends#N` and linked.** A bare `#189` in a Timone ADR would read as Timone's own #189, which was a pull request.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based.
+
+```
+$ grep -n "#248\|#249" doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md; echo "exit: $? (0 expected)"
+41:> **Recording an approval asks for a place, as a step does** ([#248](https://github.com/fvermaut/timone/issues/248)). …
+43:> **The second paragraph of D2 no longer holds as written** ([#249](https://github.com/fvermaut/timone/issues/249)). …
+exit: 0 (0 expected)
+$ git diff --stat main -- doc/adr/
+ .../0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md | 6 ++++++
+ 1 file changed, 6 insertions(+)
+$ git diff main -- doc/adr/ | grep -c '^-[^-]'
+0
+```
+
+- [x] The note is under D2, dated, and names both issues — lines 39 to 43, after D2's last paragraph and before the D3 heading; dated `✏ 2026-10-13`; #248 on line 41, #249 on line 43.
+- [x] No other part of the ADR changed, other than this note — six lines added, none removed, one file under `doc/adr/`.
+
+**What delivery must know.**
+
+- The note's two sentences on the rare case follow the order 60a built: ask, write the approval, start the session. If the orchestrator closes 60a's open point by writing the approval only once the session has started, those two sentences must go.
+- D2's second paragraph is still in the ADR as written on 2026-10-04. The note marks it as no longer holding. A later change may want to rewrite D2, or record the change of 2026-10-05 in its own ADR; this slice did neither.
