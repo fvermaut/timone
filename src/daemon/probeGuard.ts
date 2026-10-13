@@ -22,8 +22,10 @@ const BUILD_STAGES: readonly PipelineStage[] = ["execution", "remediation"];
  * owns them and writes them. The update runs them after it brings a branch
  * level with the default branch
  * ([ADR-0066](../../doc/adr/0066-the-update-is-a-step-the-runner-starts-when-an-open-pull-request-falls-behind.md)
- * D4); the fix context it hands a failure to is kept out by its brief, not
- * by this hook, as the check's own fix context is.
+ * D4), and joins one that the merge left in conflict
+ * ([ADR-0068](../../doc/adr/0068-the-update-joins-a-conflict-in-a-check-script-itself-and-a-merge-it-could-not-finish-is-a-step-that-failed.md)
+ * D1). The fix context it hands any other conflict or a failure to is kept
+ * out by its brief, not by this hook, as the check's own fix context is.
  */
 const CHECKING_STAGES: readonly PipelineStage[] = ["verification", "update"];
 
@@ -327,7 +329,11 @@ export function probeGuardDecision(
     const name = input.stage.charAt(0).toUpperCase() + input.stage.slice(1);
     return {
       permissionDecision: "allow",
-      permissionDecisionReason: `${name} runs the checks kept in ${where}, so it may read them.`,
+      permissionDecisionReason:
+        input.stage === "update"
+          ? `${name} runs the checks kept in ${where}, and joins one that a merge left in conflict, ` +
+            "so it may read them and edit them."
+          : `${name} runs the checks kept in ${where}, so it may read them.`,
     };
   }
 

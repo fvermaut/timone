@@ -106,6 +106,8 @@ with "none" under a heading that has no file. When no merge is in progress (`git
 
 **[MODIFY]** `src/update-checks.git.test.ts` — the cases below, on the existing fixture.
 
+**[MODIFY]** `src/guards/checkouts.test.ts` — ✏ 2026-10-13 (build, timone#234): add `commands/update-conflicts.ts` to `GIT_USERS`, beside `commands/update-checks.ts`, saying what it runs git on. That test lists every source file that runs git, and the new command runs git, so without the entry the whole suite fails one test. The plan did not list the file; phase 50 added `update-checks` there the same way.
+
 **Seams under test (TDD):** `mergeConflicts`, on the git fixture with a real merge of `origin/main` into the work branch — the boundary the update session will call through the command; and the command's output and exit code. Red-green: (1) **both sides changed one check script**: the base has a check script for `PRD-07.R7` with one check; main adds a second check, the branch adds a third, both at the end of the file; the branch also changes one line of `src/a.ts` that main changed too. After `git merge --no-edit origin/main` fails, `mergeConflicts` gives `checkScripts: [{ path: <the script>, id: "PRD-07.R7" }]` and `others: ["src/a.ts"]`; (2) continuing that merge as the update will: the test writes the script with all three checks (the join) and `src/a.ts` with either side, `git add`s both and `git commit --no-edit`; the merge is finished (`MERGE_HEAD` gone), `mergeConflicts` gives two empty lists, the joined script holds all three checks, and `updateChecks(git, { defaultBranch: "main", before })` lists that script under both the branch's plan and the plan that arrived when both claim `PRD-07.R7`; (3) **both sides added a whole script** named with a dash, `prd-23-r8.mjs`, with nothing in common (git: added by both): listed under `checkScripts` with `id: "PRD-23.R8"`; (4) a conflicted helper file in the probe folder is listed under `checkScripts` with no `id`, never under `others`; (5) a conflict in a file under `PROBE_DIRECTORIES[1]` is listed under `checkScripts`; (6) a merge with no conflict left gives two empty lists; (7) the command, with no merge in progress, exits 2 with its sentence; with case (1)'s merge in progress it prints the two headings with the files under each.
 
 > Sub-phase 61a must be complete before starting this sub-phase (it uses `requirementOfCheckScript`, and both change `src/update-checks.ts` and its git test).
@@ -117,6 +119,8 @@ npx vitest run src/update-checks.test.ts src/update-checks.git.test.ts src/daemo
 npx tsc --noEmit; echo "exit: $?"   # expect 0
 npm run --silent build && node dist/cli.js update-conflicts timone; echo "exit: $?"   # expect 2: no merge is in progress here
 ```
+
+> ✏ 2026-10-13 (build, timone#234): the command finds the project's checkout at `projects/<name>` under the folder it runs in, as `update-checks` does, so the third line is run from the Timone root, as `node projects/timone/dist/cli.js update-conflicts timone`. Run from inside the project, it exits 2 with "The project \"timone\" is not checked out at …" instead.
 
 - [ ] Case (1) is the test for an update where both sides changed one check script, and it is red before `mergeConflicts` exists.
 - [ ] Red→green evidence for every case is in the handoff.

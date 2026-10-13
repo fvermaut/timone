@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { PROBE_DIRECTORIES } from "./daemon/probeGuard.js";
-import { updateChecks } from "./update-checks.js";
+import { mergeConflicts, updateChecks } from "./update-checks.js";
 
 /**
  * `updateChecks` against a real repository: a bare repository standing for
@@ -341,5 +341,204 @@ describe("updateChecks on a branch whose check script has a dash for the dot", (
       phase: "doc/plans/phases/phase-61.md",
       checks: [{ id: "PRD-18.R12", script: probe("prd-18-r12.mjs") }],
     });
+  });
+});
+
+/** A check script with one check per line in `checks`. */
+function checkScript(checks: string[]): string {
+  return checks.map((check) => `check(${JSON.stringify(check)});\n`).join("");
+}
+
+/**
+ * Both sides changed one check script: the base has `PRD-07.R7`'s script
+ * with one check. `main` gained phase 49, which claims `PRD-07.R7`, and added
+ * a second check at the end, as pull request 230. Branch `b` added phase 50,
+ * which claims it too, and a third check at the end. Both changed the same
+ * line of `src/a.ts`. The clone is on `b`, and `before` is its commit.
+ */
+function bothChangedOneCheckScript() {
+  const world = forge();
+  const { seed, clone, mustGit, commit } = world;
+  commit(
+    {
+      "package.json": PACKAGE_JSON,
+      "src/a.ts": "export const a = 1;\n",
+      [probe("prd-07.r7.mjs")]: checkScript(["one"]),
+    },
+    "first",
+  );
+  mustGit(seed, ["push", "--quiet", "origin", "main"]);
+  mustGit(seed, ["checkout", "--quiet", "-b", "b"]);
+  commit(
+    {
+      "doc/plans/phases/phase-50.md": plan("Phase 50: The update", ["PRD-07.R7"]),
+      "src/a.ts": "export const a = 3;\n",
+      [probe("prd-07.r7.mjs")]: checkScript(["one", "three"]),
+    },
+    "docs: plan phase 50",
+  );
+  mustGit(seed, ["push", "--quiet", "origin", "b"]);
+  mustGit(seed, ["checkout", "--quiet", "main"]);
+  commit(
+    {
+      "doc/plans/phases/phase-49.md": plan("Phase 49: Two places", ["PRD-07.R7"]),
+      "src/a.ts": "export const a = 2;\n",
+      [probe("prd-07.r7.mjs")]: checkScript(["one", "two"]),
+    },
+    "feat: phase 49 — two places (#230)",
+  );
+  mustGit(seed, ["push", "--quiet", "origin", "main"]);
+  world.cloneOn("b");
+  const before = mustGit(clone, ["rev-parse", "HEAD"]).trim();
+  return { ...world, before };
+}
+
+describe("mergeConflicts while the update merges the default branch into the branch", () => {
+  it("lists a check script both sides changed, with its requirement, apart from the other files", () => {
+    const { clone, mustGit, inClone } = bothChangedOneCheckScript();
+    expect(() => mustGit(clone, ["merge", "--no-edit", "origin/main"])).toThrow(/CONFLICT/);
+
+    expect(mergeConflicts(inClone)).toEqual({
+      checkScripts: [{ path: probe("prd-07.r7.mjs"), id: "PRD-07.R7" }],
+      others: ["src/a.ts"],
+    });
+  });
+
+  it("lists nothing once the update joined the check script and finished the merge, and the joined script counts for both plans", () => {
+    const { clone, mustGit, inClone, before } = bothChangedOneCheckScript();
+    expect(() => mustGit(clone, ["merge", "--no-edit", "origin/main"])).toThrow(/CONFLICT/);
+    writeFileSync(join(clone, probe("prd-07.r7.mjs")), checkScript(["one", "two", "three"]));
+    writeFileSync(join(clone, "src/a.ts"), "export const a = 2;\n");
+    mustGit(clone, ["add", probe("prd-07.r7.mjs"), "src/a.ts"]);
+    mustGit(clone, ["commit", "--quiet", "--no-edit"]);
+
+    expect(existsSync(join(clone, ".git", "MERGE_HEAD"))).toBe(false);
+    expect(mergeConflicts(inClone)).toEqual({ checkScripts: [], others: [] });
+    expect(readFileSync(join(clone, probe("prd-07.r7.mjs")), "utf8")).toBe(
+      'check("one");\ncheck("two");\ncheck("three");\n',
+    );
+    const checks = updateChecks(inClone, { defaultBranch: "main", before });
+    expect(checks.own).toEqual({
+      phase: "doc/plans/phases/phase-50.md",
+      checks: [{ id: "PRD-07.R7", script: probe("prd-07.r7.mjs") }],
+    });
+    expect(checks.arrived).toEqual([
+      {
+        phase: "doc/plans/phases/phase-49.md",
+        pullRequest: 230,
+        checks: [{ id: "PRD-07.R7", script: probe("prd-07.r7.mjs") }],
+      },
+    ]);
+  });
+});
+
+/**
+ * A base of `base` files on `main`, branch `b` writing `branch` on it, and
+ * `main` then writing `main`. The clone is on `b`.
+ */
+function merging(files: {
+  base: Record<string, string>;
+  branch: Record<string, string>;
+  main: Record<string, string>;
+}) {
+  const world = forge();
+  const { seed, commit } = world;
+  commit({ "package.json": PACKAGE_JSON, ...files.base }, "first");
+  world.mustGit(seed, ["push", "--quiet", "origin", "main"]);
+  world.mustGit(seed, ["checkout", "--quiet", "-b", "b"]);
+  commit(files.branch, "work on b");
+  world.mustGit(seed, ["push", "--quiet", "origin", "b"]);
+  world.mustGit(seed, ["checkout", "--quiet", "main"]);
+  commit(files.main, "work on main");
+  world.mustGit(seed, ["push", "--quiet", "origin", "main"]);
+  world.cloneOn("b");
+  return world;
+}
+
+describe("mergeConflicts on other conflicts in the probe folders", () => {
+  it("lists a script both sides added, named with a dash, with its requirement", () => {
+    const { clone, mustGit, inClone } = merging({
+      base: {},
+      branch: { [probe("prd-23-r8.mjs")]: checkScript(["the branch's way"]) },
+      main: { [probe("prd-23-r8.mjs")]: checkScript(["main's way"]) },
+    });
+    expect(() => mustGit(clone, ["merge", "--no-edit", "origin/main"])).toThrow(/CONFLICT \(add\/add\)/);
+
+    expect(mergeConflicts(inClone)).toEqual({
+      checkScripts: [{ path: probe("prd-23-r8.mjs"), id: "PRD-23.R8" }],
+      others: [],
+    });
+  });
+
+  it("lists a helper file in the probe folder with the check scripts, with no requirement, never with the other files", () => {
+    const { clone, mustGit, inClone } = merging({
+      base: { [probe("_shared.mjs")]: "export const tolerance = 1;\n" },
+      branch: { [probe("_shared.mjs")]: "export const tolerance = 2;\n" },
+      main: { [probe("_shared.mjs")]: "export const tolerance = 3;\n" },
+    });
+    expect(() => mustGit(clone, ["merge", "--no-edit", "origin/main"])).toThrow(/CONFLICT/);
+
+    expect(mergeConflicts(inClone)).toStrictEqual({
+      checkScripts: [{ path: probe("_shared.mjs") }],
+      others: [],
+    });
+  });
+
+  it("lists a file in the other probe folder with the check scripts", () => {
+    const baseline = posix.join(PROBE_DIRECTORIES[1], "contrast.mjs");
+    const { clone, mustGit, inClone } = merging({
+      base: { [baseline]: checkScript(["one"]) },
+      branch: { [baseline]: checkScript(["one", "three"]) },
+      main: { [baseline]: checkScript(["one", "two"]) },
+    });
+    expect(() => mustGit(clone, ["merge", "--no-edit", "origin/main"])).toThrow(/CONFLICT/);
+
+    expect(mergeConflicts(inClone)).toStrictEqual({ checkScripts: [{ path: baseline }], others: [] });
+  });
+});
+
+describe("mergeConflicts once no conflict is left", () => {
+  it("gives two empty lists while the merge is still in progress", () => {
+    const { clone, mustGit, inClone } = merging({
+      base: { "src/a.ts": "export const a = 1;\n" },
+      branch: { "src/a.ts": "export const a = 3;\n" },
+      main: { "src/a.ts": "export const a = 2;\n" },
+    });
+    expect(() => mustGit(clone, ["merge", "--no-edit", "origin/main"])).toThrow(/CONFLICT/);
+    writeFileSync(join(clone, "src/a.ts"), "export const a = 2;\n");
+    mustGit(clone, ["add", "src/a.ts"]);
+
+    expect(existsSync(join(clone, ".git", "MERGE_HEAD"))).toBe(true);
+    expect(mergeConflicts(inClone)).toEqual({ checkScripts: [], others: [] });
+  });
+});
+
+describe("the update-conflicts command", () => {
+  it("exits 2 with one sentence when no merge is in progress", () => {
+    const { root } = bothChangedOneCheckScript();
+    writeFileSync(join(root, "timone.yaml"), MANIFEST);
+
+    const ran = spawnSync(process.execPath, [CLI, "update-conflicts", "app"], { cwd: root, encoding: "utf8" });
+
+    expect(ran.stdout).toBe("");
+    expect(ran.stderr).toBe("No merge is in progress in app: there is nothing to join.\n");
+    expect(ran.status).toBe(2);
+  });
+
+  it("prints the check scripts and the other files left in conflict under their headings", () => {
+    const { root, clone, mustGit } = bothChangedOneCheckScript();
+    writeFileSync(join(root, "timone.yaml"), MANIFEST);
+    expect(() => mustGit(clone, ["merge", "--no-edit", "origin/main"])).toThrow(/CONFLICT/);
+
+    const ran = spawnSync(process.execPath, [CLI, "update-conflicts", "app"], { cwd: root, encoding: "utf8" });
+
+    expect(ran.stderr).toBe("");
+    expect(ran.status).toBe(0);
+    expect(ran.stdout).toBe(
+      "Check scripts left in conflict — join these yourself, keeping every check from both sides:\n" +
+        `- PRD-07.R7: ${probe("prd-07.r7.mjs")}\n` +
+        "Other files left in conflict — give these to the fix context:\n" +
+        "- src/a.ts\n",
+    );
   });
 });

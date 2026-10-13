@@ -72,6 +72,33 @@ export function requirementOfCheckScript(path: string): string | undefined {
 /** Runs one git command in the project and returns what it printed; throws when git fails. */
 export type RunGit = (args: readonly string[]) => string;
 
+/** The files a merge left in conflict, in two lists: the update joins the first itself. */
+export interface MergeConflicts {
+  /** Files left in conflict under a probe folder: the update session joins these itself (ADR-0068 D1). */
+  checkScripts: { path: string; id?: string }[];
+  /** Every other file left in conflict: these go to the fresh fix context. */
+  others: string[];
+}
+
+/**
+ * The files the merge in progress left in conflict, from
+ * `git diff --name-only --diff-filter=U`, each list in git's order. A file
+ * under a probe folder is a check script, with its requirement when its name
+ * gives one; every other file is in `others`.
+ */
+export function mergeConflicts(git: RunGit): MergeConflicts {
+  const conflicts: MergeConflicts = { checkScripts: [], others: [] };
+  for (const path of lines(git(["diff", "--name-only", "--diff-filter=U"]))) {
+    if (PROBE_DIRECTORIES.some((probes) => path.startsWith(`${probes}/`))) {
+      const id = requirementOfCheckScript(path);
+      conflicts.checkScripts.push(id === undefined ? { path } : { path, id });
+    } else {
+      conflicts.others.push(path);
+    }
+  }
+  return conflicts;
+}
+
 /** One plan's requirements, each with its check script when it has one. */
 export interface PlanChecks {
   /** The phase file's path in the repository. */

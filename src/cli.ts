@@ -17,6 +17,7 @@ import { registerStatusCommand } from "./commands/status.js";
 import { registerTranscriptCommand } from "./commands/transcript.js";
 import { registerTakeoverCommand } from "./commands/takeover.js";
 import { registerUpdateChecksCommand } from "./commands/update-checks.js";
+import { registerUpdateConflictsCommand } from "./commands/update-conflicts.js";
 import { registerWorkspaceCommand } from "./commands/workspace.js";
 
 /**
@@ -97,6 +98,7 @@ export function buildProgram(): Command {
   registerBreakdownCommand(program);
   registerMergeFileCommand(program);
   registerUpdateChecksCommand(program);
+  registerUpdateConflictsCommand(program);
 
   return program;
 }
