@@ -46,9 +46,16 @@
 // Clause 3's break leg reuses the no-step fixture with its setup check told the step runs, so
 // the leg exercises the outcome checks (refused, not started, waiting in the ledger) on a
 // project where nothing takes the place.
-import { secondAsks, assertNotRefused, said, freedPlace, manyAsk, afterStepAsks, before47, A, B, runsLine } from './_places.mjs';
+//
+// ✏ 2026-10-13 (phase 60 verification): clause 3 gains a label for the step that writes a named
+// person's approval into the requirements, which phase 60 claims ("whatever those steps are"
+// answered from the side of the step that asks). _places.mjs's approvalAsks(): one place, held by
+// another ticket's step; the runner asks to record the approval; the writing step must not start,
+// and the ticket must wait for its turn. Break leg: the same fixture on the build from just before
+// phase 60 (main at 534b4dd), where the try was refused but the ticket was never put in line.
+import { secondAsks, assertNotRefused, said, freedPlace, manyAsk, afterStepAsks, before47, approvalAsks, before60, A, B, runsLine } from './_places.mjs';
 import { oldBuild } from './_old-build.mjs';
-import { clause, assert, finish } from './_rig.mjs';
+import { clause, assert, finish, breakRunFor } from './_rig.mjs';
 
 const REAL_ONLY = process.env.PROBE_REAL_ONLY === '1';
 
@@ -141,6 +148,28 @@ for (const [r, stage] of [[running, 'building'], [runningTriage, 'sorting the re
   console.log(`    (refused with: "${r.bRefused[0] ?? 'nothing'}"; the second ticket in the ledger: ${JSON.stringify(r.fx.run(B)?.place)})`);
 }
 
+// Clause 3 for the step that writes an approval. The label is new in phase 60's verification.
+const APPROVAL3 = 'PRD-07.R2 clause 3 (recording an approval)';
+const [approval, approvalOld] = await Promise.all([
+  approvalAsks({}),
+  breakRunFor(APPROVAL3) ? approvalAsks({ cli: before60() }) : null,
+]);
+function assertApprovalWaits(r) {
+  assert(r.T.ok && r.atRefusal, `setup: the approver's runner never asked to record the approval while the other ticket's step ran (${r.runs})`);
+  assert(/fixture#12\/1 active/.test(r.atRefusal.runs), `setup: the other ticket's step was not running when the approval was asked for (${r.atRefusal.runs})`);
+  const first = r.per[13].approvals[0];
+  assert(/^Refused/.test(first?.detail ?? '') && /place/i.test(first.detail), `the step that writes the approval was not refused for want of a place: "${first?.detail}"`);
+  assert(r.atRefusal.writers === 0 && !r.writers.some((at) => !r.holderEndedAt || at < r.holderEndedAt), `the step that writes the approval started while the only place was taken (started at ${r.writers.join(', ')}; the other step ended at ${r.holderEndedAt})`);
+  const run = r.atRefusal.run;
+  assert(run && run.status !== 'active' && run.place?.waitingSince, `the ticket does not wait for its turn in the ledger after the refusal: ${run?.status} ${JSON.stringify(run?.place)}`);
+}
+await clause(APPROVAL3, 'a project with one place and a step of another ticket running: a ticket\'s runner asks to record a named person\'s approval, and the step that writes it does not start, and the ticket waits for its turn', {
+  broken: async () => assertApprovalWaits(approvalOld),
+  correct: async () => assertApprovalWaits(approval),
+});
+console.log(`    (refused with: "${approval.per[13].approvals[0]?.detail}"; the ticket in the ledger after it: ${approval.atRefusal?.run?.status} ${JSON.stringify(approval.atRefusal?.run?.place)}; the writing step started at ${approval.writers.join(', ') || 'never'}, after the other step ended at ${approval.holderEndedAt})`);
+if (approvalOld) console.log(`    (break leg, the build before phase 60: refused with "${approvalOld.per[13].approvals[0]?.detail}"; the ticket in the ledger after it: ${approvalOld.atRefusal?.run?.status} ${JSON.stringify(approvalOld.atRefusal?.run?.place)})`);
+
 await clause('PRD-07.R2 clause 4', 'fewer running steps than places (none of one): a step of a ticket asks to start, nothing else stops it, and it starts', {
   broken: async () => assertNotRefused(running, assert),
   correct: async () => { assertNotRefused(idle, assert); assertNotRefused(prOpen, assert); },
@@ -217,5 +246,5 @@ await clause('PRD-07.R2 clause 6 (runner session after a step)', 'a runner sessi
 console.log(`    (the first ticket's step ended ${afterStep.aStepEnded?.slice(11, 23)}; its runner session still open when the second ticket was answered at ${afterStep.answeredAt?.slice(11, 23)}: ${afterStep.aRunnerOpen}; the second ticket was refused: ${JSON.stringify(afterStep.bRefused)}; its step started: ${afterStep.bStarted}; the first ticket's place: ${JSON.stringify(afterStep.aPlace)})`);
 
 for (const r of [afterStep, afterStepOld]) r?.fx.cleanup();
-for (const r of [idle, running, prOpen, asks, runningTriage, runningDelivery, runner, takeover, turn, turnOld, byDefault, setOne, setThree]) r?.fx.cleanup();
+for (const r of [idle, running, prOpen, asks, runningTriage, runningDelivery, runner, takeover, turn, turnOld, byDefault, setOne, setThree, approval, approvalOld]) r?.fx.cleanup();
 finish('PRD-07.R2');

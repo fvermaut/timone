@@ -69,12 +69,15 @@ export interface TimoneIssue {
  * ([ADR-0063](../../doc/adr/0063-a-ticket-takes-a-place-only-while-one-of-its-steps-runs.md)):
  * given to this ticket, free, taken by a run with a step running, or given
  * to another run. Runs are named by their run id.
+ *
+ * `waiting`, on a place another run takes, says whether this ticket is in
+ * line for it: it asked for a place, was refused, and still waits (D2).
  */
 export type PlaceFact =
   | { kind: "given" }
   | { kind: "free" }
-  | { kind: "taken"; by: string }
-  | { kind: "given-to"; to: string };
+  | { kind: "taken"; by: string; waiting: boolean }
+  | { kind: "given-to"; to: string; waiting: boolean };
 
 /**
  * The planner's decision on this run, as the runner sees it
@@ -440,17 +443,38 @@ function placeText(place: PlaceFact): string {
     case "free":
       return "free.";
     case "taken":
-      return `taken: ${place.by} has a step running.`;
+      return `taken: ${place.by} has a step running. ${inLineText(place.waiting)}`;
     case "given-to":
-      return `given to ${place.to}. This ticket waits for its turn.`;
+      return `given to ${place.to}. ${inLineText(place.waiting)}`;
   }
 }
 
-/** What the facts say of the planner's decision. */
+/**
+ * Whether this ticket is in line for the place, when another run takes it.
+ *
+ * **A ticket that never asked is not in line, and is told so** (#249). On
+ * ivtrends#197 and #201 the brief said "This ticket waits for its turn." to
+ * runs that had never asked for a place. The runner started nothing and
+ * waited to be woken, which never happened: a freed place goes only to a
+ * ticket in line.
+ */
+function inLineText(waiting: boolean): string {
+  return waiting
+    ? "This ticket waits for its turn."
+    : "This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line.";
+}
+
+/**
+ * What the facts say of the planner's decision.
+ *
+ * **Not asked yet says who asks it: starting the build does** (ADR-0065 D2).
+ * On ivtrends#197 and #201 the brief said only "not asked yet", and the
+ * runner started nothing (#249).
+ */
 function plannerText(planner: PlannerFact): string {
   switch (planner.kind) {
     case "not-asked":
-      return "not asked yet.";
+      return "not asked yet. Starting the build asks it.";
     case "deciding":
       return "deciding.";
     case "holds":

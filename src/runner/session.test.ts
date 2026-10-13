@@ -83,6 +83,9 @@ function fakeForge(ticket: TicketThread) {
         fromTimone: true,
       });
     },
+    // A run's branch has no pull request yet. The brief asks for one only
+    // when the run has a branch.
+    findPullRequest: async () => undefined,
   };
   const adapter = new Proxy(known, {
     get(target, name) {
@@ -1000,6 +1003,66 @@ describe("a place on the project after a wake (ADR-0063 D2, D3)", () => {
     expect(waiting(w)).toEqual([w.run.id, next.id]);
   });
 
+  it("leaves a run waiting for its turn, in its place in the line, when its try to record an approval in the wake was refused for want of a place (#248)", async () => {
+    const w = world();
+    const { next } = threeRuns(w);
+    // #12's list of pieces was written by a step that ended at 11:50, and
+    // fvermaut approved it at 11:58:40.
+    w.store.claimBranch(w.run.id, "timone/12-a-due-date-on-each-task");
+    appendEntry(w.root, PROJECT.name, 12, {
+      kind: "step-ended",
+      at: "2026-09-27T11:50:00Z",
+      runId: w.run.id,
+      stage: "breakdown",
+      sessionId: "e3f8b1a6-breakdown",
+      ok: true,
+      costUsd: 1.6,
+    });
+    w.forge.thread.comments.push({
+      author: "fvermaut",
+      body: "ok go ahead with the pieces",
+      createdAt: "2026-09-27T11:58:40Z",
+      fromTimone: false,
+    });
+    const runner = scriptedRunner([
+      {
+        kind: "calls",
+        calls: [
+          {
+            name: "record_approval",
+            input: {
+              what: "pieces",
+              commentAt: "2026-09-27T11:58:40Z",
+              reason: "fvermaut approved the list of pieces.",
+            },
+          },
+        ],
+        costUsd: 0.1,
+      },
+    ]);
+
+    await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+      w.store.get(w.run.id)!,
+      ["fvermaut commented on the ticket at 2026-09-27T11:58:40Z."],
+    );
+
+    expect(runner.answers).toEqual([
+      {
+        content: [
+          {
+            type: "text",
+            text: expect.stringMatching(/^Refused: No place is free on scratch-app: run scratch-app#11\/1 has a step running\./),
+          },
+        ],
+        isError: true,
+      },
+    ]);
+    // #12 was opened before #13, so it comes first, as it would have from a
+    // refused try to start a step.
+    expect(waiting(w)).toEqual([w.run.id, next.id]);
+  });
+
   it("lets a run keep a place given to it after its try was refused in the same wake, so it is woken for it next (ADR-0063 D3)", async () => {
     const w = world();
     const { first, next } = threeRuns(w);
@@ -1073,9 +1136,64 @@ describe("a place on the project after a wake (ADR-0063 D2, D3)", () => {
     const placeLine = (prompt: string) =>
       prompt.split("\n").find((line) => line.startsWith("- The project's place:"));
     expect(runner.started.map((session) => placeLine(session.prompt))).toEqual([
-      "- The project's place: taken: scratch-app#11/1 has a step running.",
+      "- The project's place: taken: scratch-app#11/1 has a step running. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line.",
       "- The project's place: given to this ticket — a step you start now will not be refused.",
     ]);
+  });
+
+  it("tells a run that never asked for a place that it is not in line, while the project's last place is given to another run (ivtrends#201, #249)", async () => {
+    const w = world();
+    const { first, next } = threeRuns(w);
+    // #11's step ends, and the ledger gives the place to #13, which waits.
+    // #12 never asked for a place.
+    w.store.park(first.id, RUNNER_WAIT);
+    expect(w.store.get(next.id)?.place?.givenAt).toBeDefined();
+    const runner = scriptedRunner([quiet()]);
+
+    await wakeRunner(
+      { runQuery: runner.runQuery, actionsFor: w.actionDeps },
+      w.store.get(w.run.id)!,
+      ["Planning committed and pushed its plan."],
+    );
+
+    const prompt = runner.started[0]?.prompt ?? "";
+    expect(prompt.split("\n").find((line) => line.startsWith("- The project's place:"))).toBe(
+      "- The project's place: given to scratch-app#13/1. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line.",
+    );
+    expect(prompt).not.toContain("This ticket waits for its turn.");
+  });
+
+  it("tells a run whose try to start a step was refused for want of a place that it waits for its turn, on its next wake", async () => {
+    const w = world();
+    threeRuns(w);
+    // In the first wake #12 tries to start a step, and is refused: #11's step
+    // takes the one place. The second wake starts nothing.
+    const runner = scriptedRunner([
+      {
+        kind: "calls",
+        calls: [
+          {
+            name: "start_step",
+            input: {
+              stage: "triage",
+              instructions: "Sort the request.",
+              reason: "A new ticket starts with sorting.",
+            },
+          },
+        ],
+        costUsd: 0.1,
+      },
+      quiet(),
+    ]);
+    const wake = (events: string[]) =>
+      wakeRunner({ runQuery: runner.runQuery, actionsFor: w.actionDeps }, w.store.get(w.run.id)!, events);
+
+    await wake(["A new ticket was picked up. Nothing has been done on it yet."]);
+    await wake(["fvermaut commented on the ticket at 2026-09-27T11:58:40Z."]);
+
+    expect(
+      runner.started[1]?.prompt.split("\n").find((line) => line.startsWith("- The project's place:")),
+    ).toBe("- The project's place: taken: scratch-app#11/1 has a step running. This ticket waits for its turn.");
   });
 
   it("tells the runner the place is free while one of the project's two places is taken (PRD-07.R2)", async () => {

@@ -12,8 +12,18 @@
 //      AND the skip is a departure, handled as R5 and R6 say
 //   3. GIVEN any run WHEN code decides which session to start
 //      THEN the choice comes from the runner's decision, and no table in code picks the next step
-import { fixture, model, daemon, act, say, clause, blocked, assert, finish } from './_rig.mjs';
+//
+// ✏ 2026-10-13 (phase 60 verification): clause 1's code part gains a label for a feature sorted
+// while another ticket has the project's one place (_places.mjs's sortedWhileTaken()). Nothing
+// is unusual about the request, and the ticket never asked for a place, so it is not in line. The
+// runner must not be told that the ticket waits for its turn: a runner told so has a reason to
+// start nothing, and nothing would wake it. The interview it starts is then refused for want of a
+// place, the ticket waits for its turn, and the interview starts when a place is given to it.
+// Break leg: the same fixture on the build from just before phase 60 (main at 534b4dd), whose
+// brief said "This ticket waits for its turn." at that wake.
+import { fixture, model, daemon, act, say, clause, blocked, assert, finish, breakRunFor } from './_rig.mjs';
 import { recordedRun, staleness, assertChosen } from './_replay.mjs';
+import { sortedWhileTaken, before60 } from './_places.mjs';
 
 const N = 12;
 const whyOf = (q) => q.brief.split('## The ticket')[0];
@@ -45,6 +55,29 @@ await clause('PRD-05.R1 clause 1 (code)', 'after sorting, the runner is shown th
   broken: async () => assertInterviewNext(await afterSorting({ sort: false })),
   correct: async () => assertInterviewNext(await afterSorting()),
 });
+const TAKEN1 = 'PRD-05.R1 clause 1 (code, another ticket has the place)';
+const [taken, takenOld] = await Promise.all([
+  sortedWhileTaken({}),
+  breakRunFor(TAKEN1) ? sortedWhileTaken({ cli: before60() }) : null,
+]);
+function assertNotToldItWaits(r) {
+  assert(r.atSorted, `setup: the runner was never woken after sorting (${r.runs})`);
+  assert(!r.atSorted.run?.place?.waitingSince, `setup: the ticket was already in line when it woke after sorting: ${JSON.stringify(r.atSorted.run?.place)}`);
+  assert(/fixture#12/.test(r.placeLine), `setup: the place was not with the other ticket when the runner woke after sorting: "${r.placeLine}" (${r.atSorted.runs})`);
+  assert(!/waits for its turn/i.test(r.atSorted.brief), `the runner is told the ticket waits for its turn, though it never asked for a place: "${r.placeLine}"`);
+  const first = r.interviewTries[0];
+  assert(/^Refused/.test(first?.detail ?? '') && /place/i.test(first.detail), `setup: the interview's first try was not refused for want of a place: "${first?.detail}"`);
+  assert(r.afterRefusal?.run?.place?.waitingSince && r.afterRefusal.run.status !== 'active', `after the refusal the ticket does not wait for its turn in the ledger: ${JSON.stringify(r.afterRefusal?.run?.place)} (${r.afterRefusal?.run?.status})`);
+  assert(r.tells.length > 0 && r.interviewStarted.length > 0 && r.interviewStarted[0] >= r.tells[0], `the interview did not start once a place was given to the ticket (told: ${r.tells.join(', ') || 'never'}; interview started: ${r.interviewStarted.join(', ') || 'never'}; ${r.runs})`);
+}
+await clause(TAKEN1, 'a feature just sorted, while another ticket has the project\'s one place: the runner is not told the ticket waits for its turn, since it never asked for one; the interview it starts waits for a place, and starts when one is given to it', {
+  broken: async () => assertNotToldItWaits(takenOld),
+  correct: async () => assertNotToldItWaits(taken),
+});
+console.log(`    (told after sorting: "${taken.placeLine}"; the interview's tries: ${JSON.stringify(taken.interviewTries.map((d) => d.detail))}; in the ledger after the refusal: ${JSON.stringify(taken.afterRefusal?.run?.place)}; place given at ${taken.tells.map((t) => t.slice(11, 19)).join(', ')}; interview started at ${taken.interviewStarted.map((t) => t.slice(11, 19)).join(', ')})`);
+if (takenOld) console.log(`    (break leg, the build before phase 60: told after sorting: "${takenOld.placeLine}"; the ticket in line then: ${Boolean(takenOld.atSorted?.run?.place?.waitingSince)})`);
+for (const r of [taken, takenOld]) r?.fx.cleanup();
+
 blocked('PRD-05.R1 clause 1 (runner)', 'the real runner then starts the interview',
   'needs a real model, and no case of the replay (PRD-05.R18) is a plain feature just sorted. Seen live once on scratch-app#62 (sorting, then four questions at 12:41:38 on 2026-09-28), on the build before 40s and 40t.');
 

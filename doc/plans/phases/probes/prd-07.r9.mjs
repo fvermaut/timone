@@ -37,7 +37,12 @@ async function earlierPullRequest({ event, cli }) {
   const commentsBefore = fx.issue(N).comments.length;
   const m = await model({ runner: () => say() });
   // The daemon reads the project's tickets: three cycles at its 2 s interval.
-  await daemon(fx, m, { until: () => false, timeoutMs: 8000 });
+  // ✏ 2026-10-13 (phase 60 verification): the read used to be a fixed 8 s. With 27 probes started
+  // at once, the daemon had not finished one cycle in 8 s: the ledger held nothing for the ticket,
+  // clause 1 passed on a read that never happened, and clause 2 then failed on its setup. The read
+  // now lasts until the ledger holds a run for the ticket, plus 6 s (three more cycles), and clause
+  // 1 checks that it did.
+  await daemon(fx, m, { until: () => fx.state().runs.some((r) => r.ticket === N), timeoutMs: 40000, settleMs: 6000 });
   const afterRead = {
     runs: fx.state().runs.filter((r) => r.ticket === N),
     posted: fx.issue(N).comments.slice(commentsBefore).map((c) => c.body),
@@ -61,6 +66,7 @@ const old = REAL_ONLY ? [] : await Promise.all(['merge', 'close', 'review'].map(
 const facts = (brief) => (brief.match(/## Facts about the work\n([\s\S]*?)\n## /) || [])[1] ?? '';
 function assertNotNewWork(r) {
   const a = r.afterRead;
+  assert(a.runs.length > 0, 'setup: the daemon did not read the ticket: the ledger holds no run for it');
   assert(!a.posted.some((b) => /Picked this up/i.test(b)), `the ticket was told it was picked up as new work: "${(a.posted.find((b) => /Picked this up/i.test(b)) ?? "").slice(0, 160).replace(/\n/g, " ")}"`);
   assert(!a.wakes.some((w) => /new ticket was picked up/i.test(w)), 'a runner was woken on "A new ticket was picked up"');
   assert(!a.briefs.some((b) => /Branch: none yet/i.test(facts(b))), 'a runner was given facts that say the branch is none yet');

@@ -234,8 +234,9 @@ export async function wakeRunner(
   // it posted there. Watched at the action, so it is what the runner really
   // posted, not what it meant to.
   let asked: string | undefined;
-  // Whether a try to start a step in this wake was refused for want of a
-  // place, which leaves the run waiting for its turn (ADR-0063 D2).
+  // Whether a try in this wake to start a step, or to record an approval —
+  // whose session takes a place as a step does (#248) — was refused for want
+  // of a place, which leaves the run waiting for its turn (ADR-0063 D2).
   let refusedForPlace = false;
   const watched: RunnerActions = {
     ...actions,
@@ -246,6 +247,13 @@ export async function wakeRunner(
     },
     startStep: async (input) => {
       const result = await actions.startStep(input);
+      if (!result.ok && result.refused.startsWith(noPlaceRefusal(actionDeps.project.name))) {
+        refusedForPlace = true;
+      }
+      return result;
+    },
+    recordApproval: async (input) => {
+      const result = await actions.recordApproval(input);
       if (!result.ok && result.refused.startsWith(noPlaceRefusal(actionDeps.project.name))) {
         refusedForPlace = true;
       }
@@ -301,6 +309,11 @@ function noPlaceRefusal(project: string): string {
  * goes on. A session that failed or was stopped decided nothing, so only a
  * place given to the run goes back. A run with a step running uses its
  * place, and a run that is over holds none: the ledger cleared it.
+ *
+ * A try is one to start a step, or one to record an approval: the session
+ * that writes an approval into its file takes a place too, and asks for one
+ * as a step does (#248). On ivtrends#182 and #189 that refusal was not
+ * counted, the run left its turn, and nothing woke it again.
  *
  * ✏ 2026-10-04: **a try refused for want of a place keeps the run's turn.**
  * The run waits, and a place given to it later in the same wake (the step
@@ -616,17 +629,23 @@ async function briefFor(
  * given to it, free, or taken. It is free while fewer runs take a place than
  * the project has places (PRD-07.R2). A taken place names the run given it,
  * when one is, and else the run whose step runs.
+ *
+ * **Whether the run waits for its turn is the run's own fact** (D2): its
+ * `place.waitingSince`, as the ledger holds it now. A place given to another
+ * run says nothing of it (#249).
  */
 function placeOf(deps: RunnerActionDeps, run: Run): PlaceFact {
-  if (deps.store.get(run.id)?.place?.givenAt !== undefined) return { kind: "given" };
+  const own = deps.store.get(run.id)?.place;
+  if (own?.givenAt !== undefined) return { kind: "given" };
   const holders = deps.store.placeHolders(run.project);
   const holder = holders.find((one) => one.place?.givenAt !== undefined) ?? holders[0];
   if (holder === undefined || holders.length < deps.store.placesOf(run.project)) {
     return { kind: "free" };
   }
+  const waiting = own?.waitingSince !== undefined;
   return holder.place?.givenAt !== undefined
-    ? { kind: "given-to", to: holder.id }
-    : { kind: "taken", by: holder.id };
+    ? { kind: "given-to", to: holder.id, waiting }
+    : { kind: "taken", by: holder.id, waiting };
 }
 
 /**

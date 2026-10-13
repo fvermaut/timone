@@ -26,6 +26,12 @@
 //   node doc/plans/phases/probes/prd-05.r18.mjs            break run, then real run
 //   PROBE_REAL_ONLY=1 node …/prd-05.r18.mjs                 real run only
 //   --run N   judges run N of the record instead of the newest.
+//   --ref R   clause 2b reads the record at ref R instead of origin/<branch>.
+//
+// ✏ 2026-10-13 (phase 60 verification): --ref was added for a run of the replay the verifier made
+// itself. Its record is committed on the branch before the report, and both are pushed together
+// after the report's commit, so clause 2b is judged on the local commit that is then pushed
+// (`--ref HEAD`). Without --ref nothing changes.
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
@@ -181,6 +187,7 @@ await clause('PRD-05.R18 clause 1f', 'the #132 row: the replay does not count a 
 // changed since its commit), and its record must be on the branch the pull request is opened from,
 // as this clone last saw the remote.
 const branch = execFileSync('git', ['-C', REPO_ROOT, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
+const PR_REF = typeof arg('--ref') === 'string' ? arg('--ref') : `origin/${branch}`;
 function assertOnThisCode(r) {
   assert(r?.commit, `run ${r?.n ?? '(none)'} does not name the commit it ran on`);
   const changed = changedSince(r.commit);
@@ -205,8 +212,9 @@ if (stale) {
   await clause('PRD-05.R18 clause 2b', 'its result is on the pull request: the record holding it is on the branch the pull request is opened from', {
     // Break: the branch as it was before the run's own commit, where the run is not recorded yet.
     broken: async () => assertOnTheBranch(`${run.commit}^`, run),
-    correct: async () => assertOnTheBranch(`origin/${branch}`, run),
+    correct: async () => assertOnTheBranch(PR_REF, run),
   });
+  console.log(`    (clause 2b read the record at ${PR_REF})`);
   console.log('    (the pull request itself is not read here: nothing in this probe reaches GitHub. Its description is written when the work is delivered.)');
 }
 

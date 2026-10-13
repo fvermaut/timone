@@ -1,0 +1,75 @@
+# Phase 60 — The replay on the real model
+
+> The runner woken three times on each of the 24 cases of the replay ([harness](../../../../src/runner/replay/harness.ts)), on the real model. 60b changed the runner's brief (the place line and the planner line), and PRD-05.R18 clause 2 asks for the replay on any change to the runner's instructions.
+
+## Run 1 — 2026-10-13, at `3402ea7`
+
+> Run by the orchestrating session with fvermaut's lasting token, through `zsh -i -c` so that his `~/.zshrc` was read; the token itself was never read or printed. Command: `zsh -i -c 'cd ~/dev/timone/projects/timone && npm run --silent build && npm run --silent replay'`. Output also in `~/dev/timone/.timone/replay-60.txt`. 60c (a note in ADR-0063, no code) was committed while it ran. The block below is that output, unedited.
+
+```
+Replaying 24 cases, 3 tries each, on claude-opus-5-5.
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+PASS #140 — Read planning as done, and start the build. 3 of 3 tries.
+PASS #144 — Not wait on the person. Choose the next step. 3 of 3 tries.
+PASS #143, #161 — Try the start again. If it keeps failing, say so on the ticket. 3 of 3 tries.
+PASS #99 — End the run, and free the project. 3 of 3 tries.
+PASS #115 — Start nothing on it. 3 of 3 tries.
+PASS #142 — Clear the hold, then start the work. 3 of 3 tries.
+PASS #108 — Start a session that corrects the requirements, then check again. 3 of 3 tries.
+PASS #111 — Start again from that discussion, as PRD-03.R1 says. Do not ask. 3 of 3 tries.
+PASS #159 — Open the pull request with that check listed as not run. 3 of 3 tries.
+PASS #117 — List the skip as a departure, and carry on to the pull request. 3 of 3 tries.
+PASS #120 — Not offer the same command again. Say what is actually needed. 3 of 3 tries.
+PASS #125, #135 — Carry the question to the pull request, and open it. 3 of 3 tries.
+PASS #132 — Act on the word, or ask what it meant. Do not name the takeover command. 3 of 3 tries.
+PASS #147 — Say on the pull request that the change is being made, then start it. 3 of 3 tries.
+PASS #104 — Skip the interview and start planning. Post the departure on the ticket. 3 of 3 tries.
+PASS scratch-app#37 — Write the requirements. Record no approval. Post that the approval was skipped, and carry on. 3 of 3 tries.
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+PASS #238 — Leave the step running. 3 of 3 tries.
+PASS #238 — Send the step a message, or stop it. 3 of 3 tries.
+PASS #202 — Start the update, and ask nobody for anything. 3 of 3 tries.
+PASS #218 — Ask on the ticket whether to do the work again or to stop, and name the takeover command for the ticket once. 3 of 3 tries.
+PASS #218 — Record the approval and ask nothing, or ask what the word meant. Do not name the takeover command. 3 of 3 tries.
+24 of 24 cases passed. The runner's sessions cost $2.93 in all.
+exit: 0
+```
+
+**Result:** 24 of 24 cases passed, each three tries of three. Cost: $2.93.
+
+## Run 2 — 2026-10-13, at `03b5c13`
+
+> Run by the checking session, on the code this branch carries after 60c (`03b5c13`; only an ADR and documents under `doc/plans/` changed after run 1). It used fvermaut's lasting token, through `zsh -i -c` so that his `~/.zshrc` was read; the token itself was never read or printed. Command: `zsh -i -c 'cd ~/dev/timone/projects/timone && npm run --silent build && npm run --silent replay'`. The block below is that output, unedited.
+
+```
+Replaying 24 cases, 3 tries each, on claude-opus-5-5.
+PASS #139 — Read planning as finished, and start the build. 3 of 3 tries.
+PASS #140 — Read planning as done, and start the build. 3 of 3 tries.
+PASS #144 — Not wait on the person. Choose the next step. 3 of 3 tries.
+PASS #143, #161 — Try the start again. If it keeps failing, say so on the ticket. 3 of 3 tries.
+PASS #99 — End the run, and free the project. 3 of 3 tries.
+PASS #115 — Start nothing on it. 3 of 3 tries.
+PASS #142 — Clear the hold, then start the work. 3 of 3 tries.
+PASS #108 — Start a session that corrects the requirements, then check again. 3 of 3 tries.
+PASS #111 — Start again from that discussion, as PRD-03.R1 says. Do not ask. 3 of 3 tries.
+PASS #159 — Open the pull request with that check listed as not run. 3 of 3 tries.
+PASS #117 — List the skip as a departure, and carry on to the pull request. 3 of 3 tries.
+PASS #120 — Not offer the same command again. Say what is actually needed. 3 of 3 tries.
+PASS #125, #135 — Carry the question to the pull request, and open it. 3 of 3 tries.
+PASS #132 — Act on the word, or ask what it meant. Do not name the takeover command. 3 of 3 tries.
+PASS #147 — Say on the pull request that the change is being made, then start it. 3 of 3 tries.
+PASS #104 — Skip the interview and start planning. Post the departure on the ticket. 3 of 3 tries.
+PASS scratch-app#37 — Write the requirements. Record no approval. Post that the approval was skipped, and carry on. 3 of 3 tries.
+PASS ivtrends#1 — Start it again after a wait, and post nothing unless it keeps failing. 3 of 3 tries.
+PASS #110 — Send the step a message to run only the tests its change affects. 3 of 3 tries.
+PASS #238 — Leave the step running. 3 of 3 tries.
+PASS #238 — Send the step a message, or stop it. 3 of 3 tries.
+PASS #202 — Start the update, and ask nobody for anything. 3 of 3 tries.
+PASS #218 — Ask on the ticket whether to do the work again or to stop, and name the takeover command for the ticket once. 3 of 3 tries.
+PASS #218 — Record the approval and ask nothing, or ask what the word meant. Do not name the takeover command. 3 of 3 tries.
+24 of 24 cases passed. The runner's sessions cost $2.14 in all.
+exit: 0
+```
+
+**Result:** 24 of 24 cases passed, each three tries of three. Cost: $2.14.

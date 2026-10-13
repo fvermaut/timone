@@ -828,21 +828,40 @@ describe("the steps the brief shows, once an approval is written into its file (
 });
 
 describe("the project's place, as the runner is told it (ADR-0063)", () => {
-  it("writes one line under the facts for each state of the place", () => {
-    const lineFor = (place: BriefInput["place"]): string | undefined =>
-      buildBrief(briefInput({ place }))
-        .prompt.split("\n")
-        .find((line) => line.startsWith("- The project's place:"));
+  /** The line the brief writes under the facts for `place`. */
+  const lineFor = (place: BriefInput["place"]): string | undefined =>
+    buildBrief(briefInput({ place }))
+      .prompt.split("\n")
+      .find((line) => line.startsWith("- The project's place:"));
 
+  it("writes one line under the facts for a place given to this ticket, and for a free place", () => {
     expect(lineFor({ kind: "given" })).toBe(
       "- The project's place: given to this ticket — a step you start now will not be refused.",
     );
     expect(lineFor({ kind: "free" })).toBe("- The project's place: free.");
-    expect(lineFor({ kind: "taken", by: "scratch-app#7/1" })).toBe(
-      "- The project's place: taken: scratch-app#7/1 has a step running.",
+  });
+
+  it("tells a ticket that is not in line that the place is given to another run, and that a step it tries now is refused and puts it in line (#249)", () => {
+    const place = { kind: "given-to", to: "scratch-app#9/1", waiting: false } as const;
+
+    expect(lineFor(place)).toBe(
+      "- The project's place: given to scratch-app#9/1. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line.",
     );
-    expect(lineFor({ kind: "given-to", to: "scratch-app#9/1" })).toBe(
+    expect(buildBrief(briefInput({ place })).prompt).not.toContain("This ticket waits for its turn.");
+  });
+
+  it("tells a ticket that is in line that the place is given to another run, and that it waits for its turn", () => {
+    expect(lineFor({ kind: "given-to", to: "scratch-app#9/1", waiting: true })).toBe(
       "- The project's place: given to scratch-app#9/1. This ticket waits for its turn.",
+    );
+  });
+
+  it("says the same of a place taken by a run whose step runs: that this ticket waits for its turn, or that it is not in line and a step it tries now puts it in line", () => {
+    expect(lineFor({ kind: "taken", by: "scratch-app#7/1", waiting: true })).toBe(
+      "- The project's place: taken: scratch-app#7/1 has a step running. This ticket waits for its turn.",
+    );
+    expect(lineFor({ kind: "taken", by: "scratch-app#7/1", waiting: false })).toBe(
+      "- The project's place: taken: scratch-app#7/1 has a step running. This ticket is not in line for it: a step you try now is refused, and the refusal puts the ticket in line.",
     );
   });
 
@@ -871,7 +890,9 @@ describe("the planner's decision, as the runner is told it (ADR-0065 D2)", () =>
         .find((line) => line.startsWith("- The planner:"));
     };
 
-    expect(lineFor({ kind: "not-asked" })).toBe("- The planner: not asked yet.");
+    expect(lineFor({ kind: "not-asked" })).toBe(
+      "- The planner: not asked yet. Starting the build asks it.",
+    );
     expect(lineFor({ kind: "deciding" })).toBe("- The planner: deciding.");
     expect(
       lineFor({ kind: "holds", waitsFor: [7, 9], reason: "Both tickets change the task list." }),
