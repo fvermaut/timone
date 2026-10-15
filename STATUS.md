@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-13.
+**Last updated:** 2026-10-15.
 
 ---
 
@@ -86,6 +86,10 @@
 
 **What I need from you:** run the replay and the watched update, then review and merge #253.
 
+**1s. A comment on a map ticket now gets one answer ([#254](https://github.com/fvermaut/timone/issues/254)), in Timone's own repository, on the branch `timone/254-a-comment-on-a-map-ticket-gets-no-answer`; no pull request yet.** A named person who writes on a map ticket gets one reply. It says the ticket is not read any more and lists its open step tickets. The check passed: on the built program with a fake GitHub, comments by the machine or by people not named got no reply, two comments at once got one reply, and a restart did not post it again. All 23 older requirements it re-checked still pass. One thing only you can do: write on a real scratch-app map ticket and see one reply. Details: [check report](https://github.com/fvermaut/timone/blob/timone/254-a-comment-on-a-map-ticket-gets-no-answer/doc/plans/phases/reports/phase-62-verification.md). This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** nothing yet. The pull request comes next.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
@@ -164,6 +168,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**15 October — a comment on a map ticket gets one answer ([#254](https://github.com/fvermaut/timone/issues/254)), checked, on the branch `timone/254-a-comment-on-a-map-ticket-gets-no-answer`.** Both requirements it claims pass or wait for your live check, and no older requirement broke. Item 1s says what is needed.
 
 **13 October — a ticket refused a place on its project now waits in line ([#248](https://github.com/fvermaut/timone/issues/248), [#249](https://github.com/fvermaut/timone/issues/249)), [pull request #251](https://github.com/fvermaut/timone/pull/251) is open for your review.** Four ivtrends tickets had stood still; a comment on each woke them. The fix is built and checked: every claimed requirement passes except one part no replay case covers, no regression, the real replay 24 of 24. The style review found 2 things and the review against the requirements found 2. Item 1q says what is needed.
 
