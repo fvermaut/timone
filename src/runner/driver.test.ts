@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   MergeOutcome,
   PullRequest,
+  Step,
   TicketComment,
   TicketingAdapter,
   TicketingProject,
@@ -552,6 +553,7 @@ describe("RunnerDriver — a place on the project is given to one waiting run (A
         ticket: () => adapter.getTicket(PROJECT, ticket),
         pullRequest: (pr) => adapter.getPullRequestThread(PROJECT, pr),
       }),
+      maps: [],
     };
   }
 
@@ -1131,6 +1133,7 @@ describe("RunnerDriver — a run that waits for the planner (ADR-0065 D2, D5)", 
           ticket: async () => thread,
           pullRequest: async () => ({ ...PULL_REQUEST_21, comments: [] }),
         }),
+        maps: [],
       });
       await driver.drain();
     };
@@ -1347,6 +1350,7 @@ describe("RunnerDriver — an open pull request whose branch falls behind the de
           ticket: () => adapter.getTicket(PROJECT, ticket),
           pullRequest: (pr) => adapter.getPullRequestThread(PROJECT, pr),
         }),
+        maps: [],
       });
       await driver.drain();
       return errors;
@@ -1948,5 +1952,266 @@ describe("RunnerDriver — an update step that ended cleanly but did not bring t
       "runner scratch-app#12/1 — whether the update brought the branch level could not be read, " +
         "so its end is written as its session ended: gh api repos/... failed after 3 attempts: ECONNRESET",
     );
+  });
+});
+
+describe("a comment on a map ticket", () => {
+  /** When the machine last marked the map ticket's comments read, and two moments after it. */
+  const T0 = "2026-10-15T09:00:00Z";
+  const T1 = "2026-10-15T10:00:00Z";
+  const T2 = "2026-10-15T11:00:00Z";
+
+  /** scratch-app #7: an initiative's map ticket, split into three step tickets. */
+  const MAP: TicketThread = {
+    number: 7,
+    title: "Make sign-up easier",
+    body: "- #51\n- #52\n- #53",
+    labels: ["timone", "timone:map"],
+    url: "https://github.com/fvermaut/scratch-app/issues/7",
+    author: "fvermaut",
+    createdAt: "2026-10-01T09:00:00Z",
+    comments: [],
+  };
+
+  /** One step ticket of the map, as the listing gives it. */
+  function step(number: number, title: string, state: "open" | "closed"): Step {
+    return { number, title, state, labels: ["timone"], assignees: [], blockedBy: [], dependenciesIncomplete: false };
+  }
+
+  /** #51 and #53 are open, #52 is closed. */
+  const STEPS: Step[] = [
+    step(51, "1. Ask for the email first", "open"),
+    step(52, "2. Drop the second password field", "closed"),
+    step(53, "3. Say what went wrong", "open"),
+  ];
+
+  /** A comment on #7 by `author` at `at`. */
+  function comment(author: string, at: string, fromTimone = false): TicketComment {
+    return { author, body: "Can the email field come first after all?", createdAt: at, fromTimone };
+  }
+
+  /**
+   * Map #7 with `comments` on it, its `steps`, a run on it that is `done` or
+   * `parked` waiting for the planner, and a record holding a `seen` mark for
+   * its ticket thread at `seenAt` (none when null); and a driver over it.
+   */
+  function aMap({
+    comments,
+    steps = STEPS,
+    seenAt = T0,
+    run = "done",
+  }: {
+    comments: TicketComment[];
+    steps?: Step[];
+    seenAt?: string | null;
+    run?: "done" | "parked";
+  }) {
+    const root = mkdtempSync(join(tmpdir(), "timone-driver-map-"));
+    tempDirs.push(root);
+    const clock = () => "2026-10-15T12:00:00Z";
+    const store = RunStore.open(join(root, ".timone", "state.json"), { now: clock });
+    const { run: mapRun } = store.register("scratch-app", 7);
+    store.park(mapRun.id, {
+      waitingOn: "the planner to decide whether this ticket may be built now",
+      kind: "runner",
+      resolvableBy: ["execution"],
+    });
+    if (run === "done") {
+      store.complete(mapRun.id);
+    } else {
+      store.askPlanner(mapRun.id, { priority: false, openedAt: MAP.createdAt });
+      store.decidePlanner(mapRun.id, {
+        kind: "hold",
+        at: "2026-10-15T08:00:00Z",
+        reason: "Another ticket is being built.",
+        waitsFor: [12],
+      });
+    }
+    if (seenAt !== null) {
+      appendEntry(root, "scratch-app", 7, { kind: "seen", at: seenAt, thread: "ticket", until: seenAt });
+    }
+    const forgeState = { down: false };
+    const posted: { ticket: number; body: string }[] = [];
+    const adapter: TicketingAdapter = {
+      ...forge("").adapter,
+      async postComment(_project, ticket, body) {
+        if (forgeState.down) throw new Error("the forge is down");
+        posted.push({ ticket, body });
+      },
+    };
+    const { sessions, wakes } = fakeWakes();
+    const driver = new RunnerDriver({
+      store,
+      adapter,
+      manifest: MANIFEST,
+      root,
+      sessionsFor: () => sessions,
+      running: new RunningSteps(),
+      consult: async () => undefined,
+      startStep: async () => {
+        throw new Error("no step starts in this test");
+      },
+      timonePin: async () => undefined,
+      clock,
+      log: () => {},
+    });
+    const thread: TicketThread = { ...MAP, comments };
+    const tick = async (): Promise<string[]> => {
+      const errors = await driver.tick(PROJECT, MANIFEST.projects["scratch-app"]!, {
+        tickets: [MAP],
+        isStep: (ticket) => steps.some((one) => one.number === ticket),
+        threads: () => ({
+          ticket: async () => thread,
+          pullRequest: async () => {
+            throw new Error("no pull request in this test");
+          },
+        }),
+        maps: [{ number: 7, steps }],
+      });
+      await driver.drain();
+      return errors;
+    };
+    /** Each `seen` mark of #7's ticket thread, oldest first. */
+    const seenMarks = (): string[] => {
+      const read = readRecord(root, "scratch-app", 7);
+      if (!read.ok) throw new Error(read.error.message);
+      return read.value.flatMap((entry) =>
+        entry.kind === "seen" && entry.thread === "ticket" ? [entry.until] : [],
+      );
+    };
+    return { root, posted, wakes, forgeState, tick, seenMarks };
+  }
+
+  it("answers a named person's comment once, listing the open step tickets, and does not wake the runner", async () => {
+    const m = aMap({ comments: [comment("fvermaut", T1)] });
+
+    expect(await m.tick()).toEqual([]);
+
+    expect(m.posted.map((post) => post.ticket)).toEqual([7]);
+    const lines = m.posted[0]?.body.split("\n");
+    expect(lines).toContain("- #51 — 1. Ask for the email first");
+    expect(lines).toContain("- #53 — 3. Say what went wrong");
+    expect(m.posted[0]?.body).not.toContain("#52");
+    expect(m.wakes).toEqual([]);
+    expect(m.seenMarks().at(-1)).toBe(T1);
+  });
+
+  it("does not answer again when the next tick reads the same thread", async () => {
+    const m = aMap({ comments: [comment("fvermaut", T1)] });
+
+    await m.tick();
+    await m.tick();
+
+    expect(m.posted.map((post) => post.ticket)).toEqual([7]);
+    expect(m.wakes).toEqual([]);
+  });
+
+  it("answers two named comments that came since the last mark with one reply", async () => {
+    const m = aMap({ comments: [comment("fvermaut", T1), comment("fvermaut", T2)] });
+
+    await m.tick();
+
+    expect(m.posted.map((post) => post.ticket)).toEqual([7]);
+    expect(m.wakes).toEqual([]);
+    expect(m.seenMarks().at(-1)).toBe(T2);
+  });
+
+  it("does not answer the machine's own comment, nor one by a login not named for the project, and marks both read (R10)", async () => {
+    const machine = aMap({ comments: [comment("fvermaut", T1, true)] });
+    const stranger = aMap({ comments: [comment("someone-else", T1)] });
+
+    await machine.tick();
+    await stranger.tick();
+
+    expect(machine.posted).toEqual([]);
+    expect(machine.seenMarks().at(-1)).toBe(T1);
+    expect(stranger.posted).toEqual([]);
+    expect(stranger.seenMarks().at(-1)).toBe(T1);
+    expect([...machine.wakes, ...stranger.wakes]).toEqual([]);
+  });
+
+  it("posts nothing on the map ticket when a run on it is still live", async () => {
+    // The run waits for the planner, which holds it: its own look leaves the
+    // ticket's comments unread and wakes nobody, so only the map's answer
+    // could post anything here.
+    const m = aMap({ comments: [comment("fvermaut", T1)], run: "parked" });
+
+    expect(await m.tick()).toEqual([]);
+
+    expect(m.posted).toEqual([]);
+    expect(m.wakes).toEqual([]);
+  });
+
+  it("reads from the machine's last comment when the record has no mark, and answers nothing before it", async () => {
+    const after = aMap({
+      comments: [comment("fvermaut", T0), comment("fvermaut", T1, true), comment("fvermaut", T2)],
+      seenAt: null,
+    });
+    const before = aMap({
+      comments: [comment("fvermaut", T0), comment("fvermaut", T1, true)],
+      seenAt: null,
+    });
+    // With no mark and no comment of the machine's, there is nothing to read
+    // from: the comments are only marked read.
+    const unmarked = aMap({ comments: [comment("fvermaut", T0)], seenAt: null });
+
+    await after.tick();
+    await before.tick();
+    await unmarked.tick();
+
+    expect(after.posted.map((post) => post.ticket)).toEqual([7]);
+    expect(after.seenMarks()).toEqual([T2]);
+    expect(before.posted).toEqual([]);
+    expect(unmarked.posted).toEqual([]);
+    expect(unmarked.seenMarks()).toEqual([T0]);
+    expect([...after.wakes, ...before.wakes, ...unmarked.wakes]).toEqual([]);
+  });
+
+  it("answers once with the words for no open step when every step ticket is closed", async () => {
+    const m = aMap({
+      comments: [comment("fvermaut", T1)],
+      steps: [
+        step(51, "1. Ask for the email first", "closed"),
+        step(52, "2. Drop the second password field", "closed"),
+      ],
+    });
+
+    await m.tick();
+
+    expect(m.posted.map((post) => post.ticket)).toEqual([7]);
+    expect(m.posted[0]?.body).toContain("Every piece of its work is finished or was dropped.");
+    expect(m.posted[0]?.body).not.toContain("#5");
+    expect(m.wakes).toEqual([]);
+  });
+
+  it("marks the comment read before it answers, so an answer that fails is not posted on the next tick", async () => {
+    const m = aMap({ comments: [comment("fvermaut", T1)] });
+    m.forgeState.down = true;
+
+    const errors = await m.tick();
+
+    expect(errors).toEqual(["scratch-app: could not answer on map #7: the forge is down"]);
+    expect(m.seenMarks().at(-1)).toBe(T1);
+
+    m.forgeState.down = false;
+    expect(await m.tick()).toEqual([]);
+
+    expect(m.posted).toEqual([]);
+    expect(m.wakes).toEqual([]);
+  });
+
+  it("answers nothing, and says why, when the map ticket's record cannot be read", async () => {
+    const m = aMap({ comments: [comment("fvermaut", T1)] });
+    // The mark at T0 is line 1; line 2 is cut short.
+    appendFileSync(join(m.root, ".timone", "records", "scratch-app", "7.jsonl"), '{"kind":"se\n');
+
+    const errors = await m.tick();
+
+    expect(errors).toEqual([
+      "scratch-app: could not answer on map #7: " +
+        "The run record .timone/records/scratch-app/7.jsonl cannot be read: line 2 is not JSON.",
+    ]);
+    expect(m.posted).toEqual([]);
+    expect(m.wakes).toEqual([]);
   });
 });
