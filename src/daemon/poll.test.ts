@@ -2276,23 +2276,38 @@ describe("the frontier decides which step is taken", () => {
     };
   }
 
+  /**
+   * A forge holding `marked` and the map's `steps`. The map ticket carries
+   * `map.comments`, and listing its steps fails when `map.stepsFail` is set.
+   */
   function trackerFor(
     marked: Ticket[],
     steps: Step[],
-  ): { adapter: TicketingAdapter; labelled: { number: number; label: string }[] } {
+    map: { comments?: TicketThread["comments"]; stepsFail?: boolean } = {},
+  ): {
+    adapter: TicketingAdapter;
+    labelled: { number: number; label: string }[];
+    posted: PostedComment[];
+  } {
     const base = fakeAdapter({ alpha: marked });
     const labelled: { number: number; label: string }[] = [];
     return {
       adapter: {
         ...base.adapter,
         async listSteps(): Promise<Step[]> {
+          if (map.stepsFail === true) throw new Error("gh could not list the sub-issues");
           return steps.map((step) => ({ ...step }));
+        },
+        async getTicket(project, number): Promise<TicketThread> {
+          const thread = await base.adapter.getTicket(project, number);
+          return number === MAP ? { ...thread, comments: map.comments ?? [] } : thread;
         },
         async applyLabel(_project, number, label): Promise<void> {
           labelled.push({ number, label });
         },
       },
       labelled,
+      posted: base.comments,
     };
   }
 
@@ -2405,6 +2420,54 @@ describe("the frontier decides which step is taken", () => {
 
     await pollOnce({ manifest, store, adapter, runner });
 
+    expect(store.runsForTicket("alpha", MAP)).toEqual([]);
+  });
+
+  /**
+   * #254: a named person's comment on the map ticket gets one answer, which
+   * names the step tickets still open. The map still gets no run.
+   */
+  it("answers a named person's comment on the map ticket with the open step tickets, and opens no run on it", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const { tickets, steps } = initiative([{}, { state: "closed" }, {}]);
+    const { adapter, posted } = trackerFor(tickets, steps, {
+      comments: [
+        { author: "timone-bot", body: "The list of pieces is approved.", createdAt: "2026-10-15T09:00:00Z", fromTimone: true },
+        personSaid("fvermaut", "Can the email field come first after all?", "2026-10-15T10:00:00Z"),
+      ],
+    });
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, runner });
+
+    const onMap = posted.filter((comment) => comment.number === MAP);
+    expect(onMap).toHaveLength(1);
+    expect(onMap[0]?.body.split("\n")).toEqual(
+      expect.arrayContaining(["- #51 — 1. Piece 1", "- #53 — 3. Piece 3"]),
+    );
+    expect(store.runsForTicket("alpha", MAP)).toEqual([]);
+  });
+
+  /** #254: with no step tickets read, there is nothing true to answer with this cycle. */
+  it("posts nothing on the map ticket in a cycle where its step tickets could not be listed", async () => {
+    const store = newStore();
+    const manifest = manifestWith("alpha");
+    const { tickets, steps } = initiative([{}, { state: "closed" }, {}]);
+    const { adapter, posted } = trackerFor(tickets, steps, {
+      comments: [
+        { author: "timone-bot", body: "The list of pieces is approved.", createdAt: "2026-10-15T09:00:00Z", fromTimone: true },
+        personSaid("fvermaut", "Can the email field come first after all?", "2026-10-15T10:00:00Z"),
+      ],
+      stepsFail: true,
+    });
+    const { sessions } = fakeWakes();
+    const { runner } = runnerFor({ store, adapter, manifest, sessions });
+
+    await pollOnce({ manifest, store, adapter, runner });
+
+    expect(posted.filter((comment) => comment.number === MAP)).toEqual([]);
     expect(store.runsForTicket("alpha", MAP)).toEqual([]);
   });
 

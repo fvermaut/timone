@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type {
   PullRequestThread,
+  Step,
   TicketingAdapter,
   TicketingProject,
   Ticket,
@@ -27,7 +28,7 @@ import {
   type RunningSteps,
 } from "./actions.js";
 import { isNamedPerson } from "./brief.js";
-import { limitNotice } from "./comments.js";
+import { limitNotice, mapTicketReply } from "./comments.js";
 import { allowanceOf, isOverLimit, spentOn } from "./limit.js";
 import { departureSection, departuresOf, DEPARTURES_END, DEPARTURES_START } from "./departures.js";
 import { newestUpdateEntry } from "./facts.js";
@@ -100,6 +101,11 @@ export interface RunnerCycle {
   isStep(ticket: number): boolean;
   /** The cycle's own reader for a ticket's threads, so nothing is fetched twice. */
   threads(ticket: number): CycleThreads;
+  /**
+   * The map tickets of this cycle whose step tickets were read, each with its
+   * steps as the listing gave them. A map whose listing failed is not here.
+   */
+  maps: readonly { number: number; steps: readonly Step[] }[];
 }
 
 /**
@@ -355,6 +361,15 @@ function ms(instant: string): number {
   return Date.parse(instant);
 }
 
+/** When the newest of `comments` was written, or undefined when there is none. */
+function newestOf(comments: readonly { createdAt: string }[]): string | undefined {
+  let newest: string | undefined;
+  for (const comment of comments) {
+    if (newest === undefined || ms(comment.createdAt) > ms(newest)) newest = comment.createdAt;
+  }
+  return newest;
+}
+
 /**
  * How far a thread's comments have been read for this ticket, from the latest
  * `seen` mark that names it, or undefined when none does.
@@ -486,7 +501,58 @@ export class RunnerDriver {
         errors.push(`${project.name}: the runner could not look at #${run.ticket}: ${oneLine(error)}`);
       }
     }
+    // A map ticket with a run still live on it is that run's to read. One
+    // map that cannot be answered does not stop the others.
+    for (const map of cycle.maps) {
+      if (this.deps.store.liveRunForTicket(project.name, map.number) !== undefined) continue;
+      try {
+        await this.answerMap(project, map, cycle);
+      } catch (error) {
+        errors.push(`${project.name}: could not answer on map #${map.number}: ${oneLine(error)}`);
+      }
+    }
     return errors;
+  }
+
+  /**
+   * Answer a named person who wrote on map ticket `map`: nothing reads it any
+   * more, so they are told once where their words are read — the step tickets
+   * still open. The runner is not woken; no run is ever opened on a map
+   * ticket.
+   */
+  private async answerMap(
+    project: TicketingProject,
+    map: RunnerCycle["maps"][number],
+    cycle: RunnerCycle,
+  ): Promise<void> {
+    const read = readRecord(this.deps.root, project.name, map.number);
+    if (!read.ok) throw new Error(read.error.message);
+    const { comments } = await cycle.threads(map.number).ticket();
+    // With no mark yet, the map is read from the machine's last word on it:
+    // what came before was said while the map was still worked on. With no
+    // word of the machine's either, there is nothing to read from, and the
+    // comments are only marked read.
+    const since =
+      seenUntil(read.value, "ticket") ?? newestOf(comments.filter((comment) => comment.fromTimone));
+    const fresh =
+      since === undefined
+        ? comments
+        : comments.filter((comment) => ms(comment.createdAt) > ms(since));
+    const newest = newestOf(fresh);
+    if (newest === undefined) return;
+    // Marked before the answer is posted: an answer that fails is not tried
+    // again, rather than risk a second one.
+    appendEntry(this.deps.root, project.name, map.number, {
+      kind: "seen",
+      at: this.deps.clock(),
+      thread: "ticket",
+      until: newest,
+    });
+    if (since === undefined) return;
+    const people = namedPeople(this.deps.manifest, project.name);
+    if (!fresh.some((comment) => !comment.fromTimone && isNamedPerson(people, comment.author))) return;
+    const open = map.steps.filter((step) => step.state === "open");
+    await this.deps.adapter.postComment(project, map.number, mapTicketReply(open));
   }
 
   /**

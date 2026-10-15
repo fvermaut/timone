@@ -1009,6 +1009,12 @@ interface Frontier {
   isEligible(ticket: number): boolean;
   /** The tickets a step ticket is blocked by, as its listing gave them; none for any other ticket. */
   blockedBy(ticket: number): readonly Dependency[];
+  /**
+   * Every map ticket whose steps were read, with its steps as the listing
+   * gave them. A map whose listing failed is not here, so nothing answers on
+   * it this cycle.
+   */
+  maps: { number: number; steps: readonly Step[] }[];
 }
 
 /**
@@ -1038,6 +1044,7 @@ async function surveyInitiatives(
   const steps = new Set<number>();
   const eligible = new Set<number>();
   const blockers = new Map<number, readonly Dependency[]>();
+  const maps: { number: number; steps: readonly Step[] }[] = [];
   let complete = true;
 
   for (const map of tickets.filter((t) => t.labels.includes(MAP_LABEL))) {
@@ -1053,6 +1060,7 @@ async function surveyInitiatives(
       continue;
     }
 
+    maps.push({ number: map.number, steps: children });
     for (const child of children) {
       steps.add(child.number);
       blockers.set(child.number, child.blockedBy);
@@ -1078,6 +1086,7 @@ async function surveyInitiatives(
     isStep: (ticket) => steps.has(ticket),
     isEligible: (ticket) => eligible.has(ticket),
     blockedBy: (ticket) => blockers.get(ticket) ?? [],
+    maps,
   };
 }
 
@@ -1235,7 +1244,13 @@ async function pollProject(
   // work does not hold up the next (R15). ✏ 2026-10-04: nothing is promoted
   // here any more. The ledger gives a freed place in the write that frees it
   // (ADR-0063 D3).
-  const cycle = { tickets, isStep: frontier.isStep, blockedBy: frontier.blockedBy, threads };
+  const cycle = {
+    tickets,
+    isStep: frontier.isStep,
+    blockedBy: frontier.blockedBy,
+    threads,
+    maps: frontier.maps,
+  };
   for (const line of await runner.tick(project, config, cycle)) {
     result.errors.push(line);
     log(`error  ${line}`);

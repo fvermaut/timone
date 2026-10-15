@@ -164,6 +164,40 @@ export function piecesFailedNotice(failure: PiecesFailure, on: PostedOn): string
   return withTwoWaysToAnswer(text, on.project, on.ticket);
 }
 
+/**
+ * The answer a named person gets when they write on a map ticket: nothing
+ * reads it any more, and their words belong on one of the step tickets still
+ * open, linked here in the order the listing gave them, or on a new ticket.
+ * No run is ever opened on a map ticket, so the answer names no command:
+ * there is nothing on it to take over.
+ *
+ * With no step ticket open, there is nowhere to send the words but a new
+ * ticket, and the answer says only that.
+ */
+export function mapTicketReply(openSteps: readonly { number: number; title: string }[]): string {
+  if (openSteps.length === 0) {
+    return [
+      "**This ticket is not read any more.** Every piece of its work is finished or was dropped.",
+      "",
+      "Nothing will be done with a comment written here. If it is a new request, open a new ticket.",
+      "",
+      `${NEEDED_FROM_YOU} nothing on this ticket. To get an answer, open a new ticket.`,
+    ].join("\n");
+  }
+  return [
+    "**This ticket is not read any more.** Its work was split into smaller tickets, and each " +
+      "of them is read on its own:",
+    "",
+    ...openSteps.map((step) => `- #${step.number} — ${step.title}`),
+    "",
+    "Nothing will be done with a comment written here. If it is about one of those pieces, " +
+      "write it again on that ticket. If it is a new request, open a new ticket.",
+    "",
+    `${NEEDED_FROM_YOU} nothing on this ticket. To get an answer, write on one of the tickets ` +
+      "above, or open a new ticket.",
+  ].join("\n");
+}
+
 /** Dollars as a person reads them: `$150.40`. */
 function usd(amount: number): string {
   return `$${amount.toFixed(2)}`;
