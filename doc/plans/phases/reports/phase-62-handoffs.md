@@ -91,3 +91,29 @@ Test files run at slice end: `src/runner/comments.test.ts` (3 passed), `src/runn
 - `tick` answers maps only after the loop over runs, and only for maps with no live run.
 - `answerMap` reads its own copy of the record. It does not share entries with `look`.
 - Possible refactor, not done: `newComments` could use `newestOf` instead of its own `reduce`.
+
+## 62b — The glossary says what happens to a comment written on a map ticket
+
+**Built.** Added one marked line to the **Map ticket** entry in `CONTEXT.md`, saying what a named person's comment on it now gets: one reply from the machine saying the ticket is not read any more, with links to its open step tickets as the place to write instead. The entry still says no run is ever opened on the ticket. No code changed.
+
+**Files touched.**
+
+- `CONTEXT.md` — appended the marked line to the **Map ticket** entry.
+
+**Decisions taken inside the slice.** Appended the amendment to the end of the entry's own line, the form most of the file's other marked amendments use (`Approval`, `Place`, `Chunk zero`), rather than an indented continuation. Kept the entry's existing words unchanged.
+
+**Validation evidence.** No behaviour-carrying code in this slice, so no seams were declared and there is no red-green trace; validation is checklist-based. No test file was run: the slice changes no code.
+
+```
+$ grep -n "timone#254" CONTEXT.md; echo "exit: $?"
+26:- **Map ticket** — the initiative's own ticket, once its pieces have been agreed. Its body is a list of links to its step tickets and nothing else, and it carries the `timone:map` label. No run is ever opened on it: the work belongs to the tickets it points at. ✏ 2026-10-15 ([timone#254](https://github.com/fvermaut/timone/issues/254)): a named person who writes on it gets one reply from the machine. The reply says the ticket is not read any more, and links its open step tickets as the place to write. Nothing else is done with the comment.
+exit: 0
+$ git diff --stat main -- CONTEXT.md
+ CONTEXT.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+```
+
+- The **Map ticket** entry still says no run is ever opened on it, and now also says what a comment there gets: confirmed, both sentences stand in the same entry above.
+- Plain words; no stage names or process words: confirmed, the added sentence uses only "named person", "machine", "reply", "ticket", "step tickets" — words already used elsewhere in the glossary.
+
+**What delivery must know.** This slice is glossary text only. It records in words what 62a's code already does; nothing here changes behaviour or needs a live check.
