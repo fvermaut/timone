@@ -1,6 +1,6 @@
 # Phase 64: The verified-status check reads only what a note admits — "was never" about an old build is not a clause never seen to hold, and the advice offers only what clears the finding
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-64-complete.md](reports/phase-64-complete.md).
 
 > **Companion phases:** none edits the same lines. The check was built outside a phase file, in [#131](https://github.com/fvermaut/timone/pull/131) (commit `860c332`, for timone#129), and has not changed since. [Phase 60](phase-60.md) wrote the PRD-07.R3 note this check misreads; [phase 63](phase-63.md) ran its suite with `src/daemon/register.test.ts` left out because of this fault (its departures record says so). Governing decisions: [ADR-0055](../../adr/0055-a-universal-claim-is-not-established-by-watching.md), because D2 is the rule the check enforces ("a criterion carrying a written record that one of its clauses was never observed is not `verified`") and D1 is the only rule a `Falsified-by:` line answers; [ADR-0027](../../adr/0027-a-guardrail-finding-is-addressed-to-the-session-that-caused-it.md), because a finding goes first to the session that caused it, so a false one costs that session a round.
 
