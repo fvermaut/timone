@@ -94,6 +94,10 @@
 
 **What I need from you:** nothing yet. When the pull request opens, run the replay and the watched step, then review and merge it.
 
+**1u. The check at the end of a session no longer reports PRD-07.R3 by mistake ([#250](https://github.com/fvermaut/timone/issues/250)), in Timone's own repository, on the branch `timone/250-the-verified-status-check-reads-was-neve`. No pull request is open yet.** The check read the words "was never" in PRD-07.R3's note as "a part was never seen to work", and asked the session to fix a register that was right. It no longer does. Notes that say "never seen", "never observed" or "never triggered" are still reported. Each finding now gives its own advice, and a note of that kind is no longer told to add a `Falsified-by:` line, which would not clear it. A check written without watching the build confirmed all of this, and found no fault. The 20 older checks this change could affect passed wherever they could run. Parts of three could not run in the container: two need the replay against the real model (`npm run --silent replay`, from a terminal signed in to Claude), and one needs a GitHub login that can read scratch-app. 70 tests fail in the container because it refuses their pushes to `main` ([#220](https://github.com/fvermaut/timone/issues/220)); they fail the same way without this change. Details: [check report](https://github.com/fvermaut/timone/blob/timone/250-the-verified-status-check-reads-was-neve/doc/plans/phases/reports/phase-64-verification.md). This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** nothing yet. When the pull request opens, run the replay and the 70 tests on your machine, then review and merge it.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
@@ -172,6 +176,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**18 October — the check at the end of a session no longer reports PRD-07.R3 by mistake ([#250](https://github.com/fvermaut/timone/issues/250)), on the branch `timone/250-the-verified-status-check-reads-was-neve`.** The check of the fix found no fault. Parts of three older checks need the replay or a GitHub login that this container does not have. Item 1u says what is needed.
 
 **18 October — a step that writes a file for your approval now asks for it ([#209](https://github.com/fvermaut/timone/issues/209)), on the branch `timone/209-a-step-that-asks-for-approval-ends-its-c`, open for your review as [pull request #256](https://github.com/fvermaut/timone/pull/256).** It was built by hand in a terminal, at your request. The check found no fault: 18 of 20 older checks passed in full, and the other 2 passed except for the parts that need the replay against the real model. The two reviews found 3 small things and 1 small thing. Item 1t says what is needed.
 
