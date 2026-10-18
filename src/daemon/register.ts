@@ -75,6 +75,12 @@ const UNIVERSALS = [
  * These are quotations, not guesses: each is a phrase this repository's own
  * registers used to record a hole while the status line above it said the
  * requirement was established.
+ *
+ * ✏ 2026-10-18 (timone#250): "was never" removed. It is two common words, not
+ * an admission: PRD-07.R3's note used it about the build before a fix ("where
+ * that ticket was never woken"), while saying every clause passes on this one.
+ * "was never seen", "observed" and "triggered" are still caught by the phrases
+ * above.
  */
 const ADMISSIONS = [
   /\bnever triggered\b/i,
@@ -82,7 +88,6 @@ const ADMISSIONS = [
   /\bnever seen\b/i,
   /\bnot observed\b/i,
   /\bowed a (direct )?sighting\b/i,
-  /\bwas never\b/i,
 ];
 
 export type RegisterFaultKind = "watched-only" | "status-outruns-notes";
@@ -95,6 +100,11 @@ export interface RegisterFault {
   detail: string;
   /** The words that tripped it, quoted so the reader can judge the call. */
   quoted: string;
+  /**
+   * What clears this finding, in the human's terms. It differs by rule,
+   * because a `Falsified-by:` line answers D1 and nothing in D2.
+   */
+  remedy: string;
 }
 
 /** Split a register into its requirement blocks. */
@@ -170,6 +180,9 @@ export function registerFaults(source: string): RegisterFault[] {
         detail:
           `${block.id} is marked verified, and its own notes say a clause was ` +
           `never seen to hold.`,
+        remedy:
+          "Either put the status back to `draft`, or, once that clause has been " +
+          "seen to hold, say so in the note in place of the words quoted.",
       });
       continue;
     }
@@ -188,6 +201,9 @@ export function registerFaults(source: string): RegisterFault[] {
       detail:
         `${block.id} claims something about every case and is verified by ` +
         `watching, which establishes the cases that were watched.`,
+      remedy:
+        "Either put the status back to `draft`, or name what would go red if it " +
+        "stopped holding in a `- **Falsified-by:**` line.",
     });
   }
 
