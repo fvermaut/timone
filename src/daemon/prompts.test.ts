@@ -15,6 +15,8 @@ import {
 import { stageLabel } from "./pipeline.js";
 import {
   PROMPTED_STAGES,
+  SKIPPED_PIECES_APPROVAL,
+  SKIPPED_REQUIREMENTS_APPROVAL,
   approvalRecordPrompt,
   stagePrompt,
   takeoverPrompt,
@@ -764,6 +766,91 @@ describe("the breakdown prompt's list of pieces (45d)", () => {
     expect(prompt).toContain(
       "Say the order of the pieces in the same words as the `**Order:**` line.",
     );
+  });
+});
+
+/**
+ * timone#209. The requirements step and the step that works out the pieces
+ * were told not to ask for the approval, because something else posted the
+ * request after their comment. Nothing has posted it since ADR-0060, so the
+ * steps ended on "What I need from you: nothing" while the run waited for an
+ * approval nobody had been asked for.
+ */
+describe("the step that writes a file for approval asks for it (timone#209)", () => {
+  const approvalContext: PromptContext = {
+    ...context,
+    branch: "timone/6-typing-in-the-box",
+  };
+
+  it("tells the requirements step to end its comment asking for the approval of the requirements", () => {
+    const prompt = stagePrompt("requirements", approvalContext).replace(/\s+/g, " ");
+    const line =
+      '**What I need from you:** read the requirements and reply "approved", or say what to change.';
+
+    expect(prompt).toContain(line);
+    expect(prompt.split(line).length - 1, "the closing line appears once").toBe(1);
+  });
+
+  it("tells the step that works out the pieces to end its comment asking for the approval of the list of pieces", () => {
+    const prompt = stagePrompt("breakdown", approvalContext).replace(/\s+/g, " ");
+    const line =
+      '**What I need from you:** read the list of pieces and reply "approved", or say what to change.';
+
+    expect(prompt).toContain(line);
+    expect(prompt.split(line).length - 1, "the closing line appears once").toBe(1);
+  });
+
+  it.each(["requirements", "breakdown"] as const)(
+    "%s neither says something else posts the approval request nor tells the step not to ask",
+    (stage) => {
+      const prompt = stagePrompt(stage, approvalContext).replace(/\s+/g, " ");
+
+      expect(prompt).not.toMatch(/posts the approval request/i);
+      expect(prompt).not.toMatch(/do (\*\*)?not(\*\*)? ask them to approve/i);
+    },
+  );
+
+  it.each(PROMPTED_STAGES)("%s does not say something else posts the approval request", (stage) => {
+    // The false claim must not come back in another stage's prompt.
+    const prompt = stagePrompt(stage, approvalContext).replace(/\s+/g, " ");
+
+    expect(prompt).not.toMatch(/posts the approval request/i);
+  });
+
+  it.each([
+    ["requirements", "the requirements"],
+    ["breakdown", "the list of pieces"],
+  ] as const)(
+    "%s says in words that nobody is asked when the runner skipped the approval of %s, without the sentence the skills read",
+    (stage, approvalOf) => {
+      const prompt = stagePrompt(stage, approvalContext).replace(/\s+/g, " ");
+      const sentence = prompt
+        .split(/(?<=[.!?])\s+/)
+        .find(
+          (each) =>
+            each.includes("runner's instructions") &&
+            each.includes("skipped") &&
+            each.includes(approvalOf),
+        );
+
+      expect(
+        sentence,
+        `no sentence names the runner's instructions, "skipped" and ${approvalOf}`,
+      ).toBeDefined();
+      // The skills look for these sentences word for word, in the runner's
+      // instructions. A copy in the step's own text would read as a skip.
+      expect(prompt).not.toContain(SKIPPED_REQUIREMENTS_APPROVAL);
+      expect(prompt).not.toContain(SKIPPED_PIECES_APPROVAL);
+    },
+  );
+
+  it.each([
+    ["requirements", /link the requirements[^.]*on the branch/i],
+    ["breakdown", /link the list[^.]*on the branch/i],
+  ] as const)("%s tells the comment to link the file on the branch", (stage, link) => {
+    const prompt = stagePrompt(stage, approvalContext).replace(/\s+/g, " ");
+
+    expect(prompt).toMatch(link);
   });
 });
 

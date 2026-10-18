@@ -839,6 +839,47 @@ export function workBranch(ticket: TicketThread, seq: number): string {
 }
 
 /**
+ * What the step that wrote a file for approval says about that approval, in
+ * its own comment ([timone#209](https://github.com/fvermaut/timone/issues/209)).
+ *
+ * **The step's comment is the only thing on the ticket that asks.** These
+ * steps used to be told not to ask, because the machinery put up the request
+ * after their comment. That code went when the runner replaced it
+ * ([ADR-0060](../../doc/adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md)),
+ * so a step that obeyed ended on "nothing" while the run waited for an
+ * approval nobody had been asked for.
+ *
+ * The closing line is given word for word, built from {@link NEEDED_FROM_YOU},
+ * because `askedFor` takes what a step asked for from that line, and the
+ * runner's wait says those words.
+ *
+ * **The exception is said in words, never in the runner's sentence.**
+ * {@link SKIPPED_REQUIREMENTS_APPROVAL} and {@link SKIPPED_PIECES_APPROVAL}
+ * are looked for word for word by the skills; a copy here would read as a
+ * skip on every run.
+ */
+function approvalAskBlock(what: "requirements" | "pieces"): string {
+  const approvalOf = what === "requirements" ? "the requirements" : "the list of pieces";
+
+  return [
+    `**The run now waits for their approval of ${approvalOf}, and this comment`,
+    "is what asks for it.** Nothing else on the ticket asks. End the comment",
+    "with this line, word for word:",
+    "",
+    `${NEEDED_FROM_YOU} read ${approvalOf} and reply "approved", or say what to change.`,
+    "",
+    "A question that is still open goes above that line. A comment that ends",
+    'with "nothing" here is false: the work waits for their answer, and they',
+    "would not know they were asked.",
+    "",
+    "**One exception.** When the runner's instructions for this step, at the",
+    `end of this prompt, say that it skipped the approval of ${approvalOf},`,
+    "nobody is asked. Then say in the comment that the work goes on without",
+    'it, and end the comment with the closing line saying "nothing".',
+  ].join("\n");
+}
+
+/**
  * Stage 3: write down what is being asked for, and commit it where the human
  * can read it.
  *
@@ -847,6 +888,8 @@ export function workBranch(ticket: TicketThread, seq: number): string {
  * both skills used to gate before writing, and the disagreement between that
  * and PRD-02.R4 was settled by grilling it rather than by whichever session
  * happened to read which instruction first.
+ *
+ * ✏ 2026-10-18 (timone#209): the step asks for the approval itself; nothing else posts the request since ADR-0060.
  */
 function requirementsPrompt(context: PromptContext): string {
   const { ticket, branch } = context;
@@ -876,10 +919,10 @@ function requirementsPrompt(context: PromptContext): string {
     "this stage is not finished until it is on the remote.",
     "",
     "Then post one comment on the ticket summarizing, in plain words, what you",
-    "understood they want — the substance, not a file listing. Do **not** ask",
-    "them to approve it and do not invent an approval instruction: the",
-    "machinery posts the approval request itself, immediately after yours, and",
-    "two different sets of instructions would tell them two different things.",
+    "understood they want — the substance, not a file listing — and link the",
+    "requirements on the branch, since those files are what they approve.",
+    "",
+    approvalAskBlock("requirements"),
     "",
     writingBlock(context),
     "",
@@ -1135,6 +1178,8 @@ function wayfindingPrompt(context: PromptContext): string {
  * - **The `Status:` and chunk lines are shown rather than described.** Anything
  *   the parser does not recognise is `malformed`, which is the same silence
  *   wearing a different hat.
+ *
+ * ✏ 2026-10-18 (timone#209): the step asks for the approval itself; nothing else posts the request since ADR-0060.
  */
 function breakdownPrompt(context: PromptContext): string {
   const { ticket, branch } = context;
@@ -1205,10 +1250,10 @@ function breakdownPrompt(context: PromptContext): string {
     "Then post one comment on the ticket describing, in plain words, the shape",
     "of the work — what gets built first, what that gets them, and what",
     "follows. The shape, not the list read back and not a file listing. Say",
-    "the order of the pieces in the same words as the `**Order:**` line. Do",
-    "**not** ask them to approve it: the machinery posts the approval request",
-    "itself, immediately after yours, and two sets of instructions would tell",
-    "them two different things.",
+    "the order of the pieces in the same words as the `**Order:**` line. Link",
+    "the list on the branch, since that file is what they approve.",
+    "",
+    approvalAskBlock("pieces"),
     "",
     writingBlock(context),
     "",

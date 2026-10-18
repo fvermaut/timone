@@ -81,7 +81,11 @@ npx tsc --noEmit ; echo "exit: $?"            # expect exit: 0
 grep -n "posts the approval request" src/daemon/prompts.ts ; echo "exit: $?"
 
 # The tests that read these prompts elsewhere still pass. Expect exit: 0.
-npx vitest run src/daemon src/runner src/commands/takeover.test.ts ; echo "exit: $?"
+# ✏ 2026-10-18 (build, timone#209): src/daemon/register.test.ts is left out.
+# It fails on main before this phase (the PRD-07 R3 register finding,
+# timone#250) and reads a register, not a prompt; with it in, the command
+# can only exit 1. It still runs in the whole suite at the close.
+npx vitest run src/daemon src/runner src/commands/takeover.test.ts --exclude src/daemon/register.test.ts ; echo "exit: $?"
 ```
 
 - [ ] The new block's red run is in the handoff, naming which cases failed before the change.
