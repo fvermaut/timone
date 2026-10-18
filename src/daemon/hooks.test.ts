@@ -1491,6 +1491,74 @@ describe("a register that claims more than it established", () => {
     );
   });
 
+  // timone#250. The advice under each finding is the one that clears it: a
+  // `Falsified-by:` line answers a watched-only claim and nothing in an
+  // admission, and the block below already has one.
+  describe("the advice under each finding (timone#250)", () => {
+    // A frozen copy of PRD-07.R3 as the register had it on 2026-10-18. Its
+    // note says "was never" about the build before a fix.
+    const PRD_07_R3 = [
+      "## R3 — A freed place goes to one ticket: `priority:high` first, then the oldest",
+      "",
+      "> ✏ 2026-10-13 — checked in [phase-60-verification.md](../../plans/phases/reports/phase-60-verification.md), with its probe [`prd-07.r3.mjs`](../../plans/phases/probes/prd-07.r3.mjs): all four clauses pass on this build. Clause 3 was also checked for a ticket refused a place when its runner asked to record an approval: the freed place went to it, its next try was not refused, the step that writes the approval started, and the other waiting ticket was not told. This check went red on the build from just before phase 60, where that ticket was never woken and the place went to the other one. The status stays `verified`.",
+      "",
+      "- **Priority:** MUST",
+      "- **Status:** verified",
+      "- **Verify-via:** api",
+      "- **Falsified-by:** a test with two tickets waiting for one place, which frees it and fails if both are woken, or if the woken one's step is refused for want of a place",
+      "- **Depends-on:** `src/daemon/runs.ts, src/runner/driver.ts`",
+      "- **Criteria:**",
+      "    - GIVEN tickets waiting for a place on a project, one of them labelled `priority:high`",
+      "      WHEN a place frees",
+      "      THEN the place goes to the ticket labelled `priority:high`",
+      "    - GIVEN tickets waiting for a place on a project, none labelled `priority:high`, or several",
+      "      WHEN a place frees",
+      "      THEN the place goes to the oldest of them",
+      "    - GIVEN a place given to one ticket",
+      "      WHEN its runner wakes and starts a step",
+      "      THEN the step is not refused for want of a place",
+      "      AND no other ticket of the project was told that a place is free ([#184](https://github.com/fvermaut/timone/issues/184))",
+      "    - GIVEN a place given to one ticket whose runner decides to start no step",
+      "      WHEN that runner session ends",
+      "      THEN the place goes to the next ticket by the same order",
+      "- **Verification hint:** this is [#184](https://github.com/fvermaut/timone/issues/184). Today `PROJECT_FREE_EVENT` in `src/runner/driver.ts` is sent to every run that was refused, whenever the project is free, so two runs can be told and only one can start. \"Oldest\" is the ticket's creation time on the forge, unless the build has a reason to choose another; it says so in its departures.",
+      "",
+    ].join("\n");
+
+    const ADMITTED = [
+      "## R1 — A requirement",
+      "",
+      "> clause 3 was never seen to hold",
+      "",
+      "- **Priority:** MUST",
+      "- **Status:** verified",
+      "- **Verify-via:** api",
+      "- **Falsified-by:** a test that goes red",
+      "- **Criteria:**",
+      "    - GIVEN a thing WHEN it happens THEN it works",
+      "",
+    ].join("\n");
+
+    it("says nothing about PRD-07.R3, so a clean session stays silent", () => {
+      expect(checkRegisterClaims(registered(PRD_07_R3))).toEqual([]);
+    });
+
+    it("advises the status or the note for an admission, not a Falsified-by line", () => {
+      const violations = checkRegisterClaims(registered(ADMITTED));
+
+      expect(violations).toHaveLength(1);
+      expect(violations[0]?.rule).toBe("register-claims");
+      expect(violations[0]?.detail.join("\n")).toContain("draft");
+      expect(violations[0]?.detail.join("\n")).not.toContain("Falsified-by");
+    });
+
+    it("still advises a Falsified-by line for a universal closed by watching", () => {
+      const violations = checkRegisterClaims(registered(UNIVERSAL));
+
+      expect(violations[0]?.detail.join("\n")).toContain("Falsified-by");
+    });
+  });
+
   describe("when Timone is also a managed project", () => {
     // `projects/timone/` is a second clone of this repository, and both are
     // labelled "timone". On 2026-09-22 a session edited PRD-03's register at

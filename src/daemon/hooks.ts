@@ -734,9 +734,10 @@ export function checkRegisterClaims(evidence: SessionEvidence): Violation[] {
       summary: `${register.repo}: ${register.path} marks ${faults.length} requirement(s) verified on more than it established`,
       detail: [
         "A requirement is verified when something stands behind it. These say more than that:",
-        ...faults.map((fault) => `- ${fault.detail} It says: \`${fault.quoted}\`.`),
-        "",
-        "Either put the status back to `draft`, or name what would go red if it stopped holding in a `- **Falsified-by:**` line.",
+        ...faults.flatMap((fault) => [
+          `- ${fault.detail} It says: \`${fault.quoted}\`.`,
+          `  ${fault.remedy}`,
+        ]),
       ],
     });
   }
