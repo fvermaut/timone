@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-15.
+**Last updated:** 2026-10-18.
 
 ---
 
@@ -90,6 +90,10 @@
 
 **What I need from you:** run the scratch-app check, then review and merge #255.
 
+**1t. A step that writes a file for your approval now asks for it ([#209](https://github.com/fvermaut/timone/issues/209)), in Timone's own repository, on the branch `timone/209-a-step-that-asks-for-approval-ends-its-c`. There is no pull request yet.** You asked for this fix in a terminal session on 18 October. The step that writes the requirements and the step that writes the list of pieces now end their comment by asking you to approve, with a link to the file. Before, they were told that the machine would ask. The machine no longer does that, so they wrote "nothing", and the runner had to post a second comment. A separate check ran the 20 older checks this change could affect. 18 passed and none failed. The other 2 passed in part: their remaining parts need the replay against the real model on this branch (`npm run --silent replay`, from a terminal signed in to Claude). Also owed, and only you can run it: a watched requirements step on scratch-app. Its own comment should ask for the approval, and the runner should post nothing after it. Details: [check report](https://github.com/fvermaut/timone/blob/timone/209-a-step-that-asks-for-approval-ends-its-c/doc/plans/phases/reports/phase-63-verification.md). The pull request is the next step, and it will list both checks.
+
+**What I need from you:** nothing yet. When the pull request opens, run the replay and the watched step, then review and merge it.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
@@ -168,6 +172,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**18 October — a step that writes a file for your approval now asks for it ([#209](https://github.com/fvermaut/timone/issues/209)), on the branch `timone/209-a-step-that-asks-for-approval-ends-its-c`. There is no pull request yet.** It was built by hand in a terminal, at your request. The check found no fault: 18 of 20 older checks passed in full, and the other 2 passed except for the parts that need the replay against the real model. Item 1t says what is needed.
 
 **15 October — a comment on a map ticket gets one answer ([#254](https://github.com/fvermaut/timone/issues/254)): [pull request #255](https://github.com/fvermaut/timone/pull/255) is open for your review.** The check passed with a fake GitHub; a real check on scratch-app is owed. The style review found 2 things and the review against the requirements found 3. Item 1s says what is needed.
 
