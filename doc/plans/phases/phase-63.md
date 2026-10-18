@@ -1,6 +1,6 @@
 # Phase 63: The step that writes a file for approval asks for it — the requirements step and the step that works out the pieces end their comment by asking for the approval the run waits on
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-63-complete.md](reports/phase-63-complete.md).
 
 > **Companion phases:** [phase 45](phase-45.md) — last to edit the breakdown prompt (the `Needs:` and `**Order:**` lines); this phase changes the closing paragraph of the same prompt and leaves those lines alone. [Phase 23](phase-23.md) (23b) and [phase 12](phase-12.md) (12e) wrote the two paragraphs this phase replaces, at a time when code between steps posted the approval request. Governing decisions: [ADR-0060](../../adr/0060-a-runner-decides-each-step-and-nothing-merges-without-a-persons-yes.md), because it removed that code and gave the runner only a rule to correct a newest comment that is false; [ADR-0014](../../adr/0014-artifact-first-gates.md), because the approval is asked against the committed file, so the comment links it.
 
