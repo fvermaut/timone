@@ -72,6 +72,25 @@ reloaded between planting and scanning. Nothing reaches the project's files.
 | `keyboard.mjs` | full keyboard-only pass: every interactive element reachable by Tab, focus always visible, no trap | makes one focusable control `tabindex="-1"`, which must show up as unreachable |
 | `reflow.mjs` | reflow to 320 CSS px with no horizontal scroll (1.4.10); no fixed-height text containers (1.4.12) | injects a fixed 900 px-wide block, which must show up as horizontal scroll |
 
+`keyboard.mjs` presses Tab as many times as the page has tab stops, twice
+over plus 50, and stops early when focus comes back to where it started. No
+page gets more than 10,000 presses, so a page that traps focus still ends.
+`reflow.mjs` does not count text hidden for screen readers as clipped: an
+absolutely placed box of 1 px or less with its overflow hidden, or a `clip` or
+`clip-path`. It reads that from the computed styles, never from a class name.
+
+## Test pages
+
+✏ 2026-10-22 ([timone#127](https://github.com/fvermaut/timone/issues/127)).
+[`test-pages/`](test-pages/) holds pages these two probes must pass and pages
+they must fail: 547 controls all reachable, the same with one taken out of the
+tab order, a focus trap, text for screen readers only, and visible clipped
+text. One command runs every probe on its pages and checks each exit code:
+
+```
+node standards/baseline/probes/test-pages/run.mjs --modules <a node_modules holding playwright>
+```
+
 **The screen-reader smoke test is not here and cannot be.** The baseline requires
 VoiceOver + Safari, which no probe drives. It stays a HUMAN-CHECK with a written
 script, as it always was.

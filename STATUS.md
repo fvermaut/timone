@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-18.
+**Last updated:** 2026-10-22.
 
 ---
 
@@ -116,7 +116,7 @@ The review of the code style found nothing. The review against the requirements 
 
 - [#121](https://github.com/fvermaut/timone/issues/121): whether it is built by hand in a terminal.
 - [scratch-app #47](https://github.com/fvermaut/scratch-app/issues/47): three questions about moving a row; [#46](https://github.com/fvermaut/scratch-app/issues/46) waits on it.
-- [#127](https://github.com/fvermaut/timone/issues/127): two shared accessibility checks are broken.
+- [#127](https://github.com/fvermaut/timone/issues/127): the two broken shared accessibility checks are fixed on the branch `timone/127-two-shared-accessibility-checks-cannot-g-chunk-2`, open for review as a pull request (linked from the ticket). Test pages show each check passes a sound page and fails a broken one; see the [report](doc/plans/phases/reports/timone-127-baseline-probes.md). The code-style review and the requirements review both found nothing, but neither could read the changed code: a guard blocks them from those files. Before merging, you need to read the diff yourself and run the whole test suite on your machine. See the [delivery report](doc/plans/phases/reports/timone-127-delivery.md).
 - Faults found on the way: see item 6.
 
 **What I need from you:** nothing until you want one of them.

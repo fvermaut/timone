@@ -6,6 +6,13 @@
  *
  * 320x256 is the viewport 1.4.10 is written against — 1280x1024 at 400% zoom.
  *
+ * Text hidden on purpose for screen readers is not clipped text. The usual
+ * pattern (often class `sr-only`) is an absolutely placed box of 1 px or less
+ * with its overflow hidden or a `clip` / `clip-path`. Nobody sees it, so it is
+ * not reported (timone#127). It is told apart by those computed styles, never
+ * by its class name: a box called `sr-only` that is visible and clipped is
+ * still reported.
+ *
  * Break step: inject a block 900 px wide, which cannot fit and must be
  * reported as horizontal scroll.
  */
@@ -54,10 +61,32 @@ await onPage(options, async (page) => {
       }
     }
 
+    // Placed out of the flow, 1px or less on both sides, and cut off: the
+    // visually hidden pattern, read from what the browser computed.
+    const visuallyHidden = (el) => {
+      const style = getComputedStyle(el);
+      if (style.position !== "absolute" && style.position !== "fixed") return false;
+      const box = el.getBoundingClientRect();
+      if (box.width > 1 || box.height > 1) return false;
+      return (
+        style.overflow.includes("hidden") ||
+        style.overflow.includes("clip") ||
+        style.clip !== "auto" ||
+        style.clipPath !== "none"
+      );
+    };
+    const insideVisuallyHidden = (el) => {
+      for (let at = el; at !== null && at !== document.body; at = at.parentElement) {
+        if (visuallyHidden(at)) return true;
+      }
+      return false;
+    };
+
     for (const el of document.querySelectorAll("body *")) {
       const style = getComputedStyle(el);
       const text = (el.textContent ?? "").trim();
       if (text === "" || el.children.length > 0) continue;
+      if (insideVisuallyHidden(el)) continue;
       const fixed = style.height !== "auto" && /^\d+(\.\d+)?px$/.test(style.height);
       if (fixed && el.scrollHeight > el.clientHeight + 1) {
         out.push(
