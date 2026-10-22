@@ -15,3 +15,10 @@
 **Agreed:** 66c: the `grep -n "stopOnSignal(" src/commands/daemon.ts` step should give "one line inside the process.once handler".
 **Did instead:** The grep gives two lines: `580:export function stopOnSignal(` (the definition the same slice is told to add) and `800:          stopOnSignal(signal, {` (the one call, inside the `process.once` handler). The step was read as "the definition plus one call", and the phase file is amended at that step. The code was not reshaped to make the grep give one line.
 **Why:** The plan's own wording for the function's signature makes the definition match the grep; a correct implementation cannot give one line.
+
+## 2026-10-22 — timone#73, execution
+
+**Kind:** plan step
+**Agreed:** 66d: "Cases 1–16 must be seen to fail before the change."
+**Did instead:** Fourteen cases were seen red against the code before the change. Cases 13 (no `ledger` gives no `--label`) and 15 (a refused second daemon never sweeps) passed there; each was proved by a mutation that turned it red, then reverted. The phase file is amended at that line.
+**Why:** Both cases assert that something does not happen, and the old code does neither thing, so no honest red was possible.

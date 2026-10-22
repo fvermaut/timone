@@ -124,6 +124,13 @@ export interface ContainerRuntimeOptions {
    */
   removeNow?: (names: readonly string[]) => void;
   /**
+   * The absolute path of the state file of the daemon that starts the box.
+   * Put on the box as its {@link LEDGER_LABEL}, so a daemon that starts later
+   * removes its own leftovers and no other box (timone#73). Absent means no
+   * label, which is what a test wants.
+   */
+  ledger?: string;
+  /**
    * Stands the project's services up beside the box, and answers the network
    * the box joins ([ADR-0041](../../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md)
    * D3, and 30i).
@@ -356,6 +363,13 @@ const BASH_MAX_TIMEOUT_MS = 30 * 60 * 1000;
 export const NAME_TAKEN = /Conflict\. The container name "[^"]*" is already in use/;
 
 /**
+ * The label every box carries: the absolute path of the state file of the
+ * daemon that started it. A starting daemon removes the boxes labelled with
+ * its own ledger, and only those (timone#73).
+ */
+export const LEDGER_LABEL = "timone.ledger";
+
+/**
  * The remote as a URL the box can actually open.
  *
  * **The box holds a forge token and no SSH key, and it never will** — a key is
@@ -404,7 +418,7 @@ export function parseSessionMessage(text: string): SDKMessage | undefined {
 }
 
 /** The real spawner: `docker`, with its stdout read a line at a time. */
-const dockerSpawn: ContainerSpawn = (command, args, options) => {
+export const dockerSpawn: ContainerSpawn = (command, args, options) => {
   const child = spawnProcess(command, args, {
     env: options?.env === undefined ? process.env : { ...process.env, ...options.env },
     stdio: [options?.stdin === "pipe" ? "pipe" : "ignore", "pipe", "pipe"],
@@ -843,6 +857,7 @@ function runArgs(
   network: string | undefined,
   env: readonly string[],
   interactive: boolean,
+  ledger: string | undefined,
 ): string[] {
   return [
     "run",
@@ -851,6 +866,9 @@ function runArgs(
     // path (including the ones `--rm` would not cover).
     "--name",
     name,
+    // Whose box this is, so a daemon that starts later can remove its own
+    // leftovers and nothing else (timone#73).
+    ...(ledger === undefined ? [] : ["--label", `${LEDGER_LABEL}=${ledger}`]),
     "--init",
     // Keeps the container's stdin open to the daemon, for a box that is
     // spoken to while it runs. No `-t`: the stream is JSON, not a terminal.
@@ -1195,6 +1213,7 @@ export function containerRuntime(
           stack?.network,
           Object.keys(env),
           interactive,
+          options.ledger,
         ),
         interactive ? { env, stdin: "pipe" } : { env },
       );

@@ -316,6 +316,8 @@ At `runDaemon`:
 
 Cases 1–16 must be seen to fail before the change (the module, options and labels do not exist). Record the red run in the handoff.
 
+> ✏ 2026-10-22 (build, timone#73): cases 13 (no `ledger`, no `--label`) and 15 (a refused second daemon never sweeps) cannot be seen to fail before the change — the old code never adds a label and never calls a sweep. They are proved by a mutation instead, recorded in the handoff. The other fourteen must be seen red.
+
 > Sub-phase 66c must be complete before starting this sub-phase (both change `runArgs`' callers in `container-runtime.ts` and the action in `src/commands/daemon.ts`).
 
 #### Agent Validation Steps

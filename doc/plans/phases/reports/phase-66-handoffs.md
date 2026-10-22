@@ -150,3 +150,72 @@ The checkboxes:
 The affected test files: `npx vitest run src/daemon src/commands/daemon.test.ts src/runner` gave `Test Files 42 passed (42)`, `Tests 2120 passed (2120)`, exit 0.
 
 **What 66d must know.** `SessionRuntime.stopAllNow` is optional. `agentSdkRuntime` does not have it, and a stand-in runtime in a test does not need it. A `containerRuntime` built with an injected `spawn` and no `removeNow` has a `stopAllNow` that removes nothing but still returns and forgets the live names. A test that wants to see the removal must inject `removeNow`. `stopOnSignal` calls `process.exit` only through its `exit` dependency, so it can be called in a test.
+
+## 66d — Each box names its ledger, and a starting daemon removes the leftovers of its own ledger and says what it removed
+
+**Built.** Every box a daemon starts now carries the label `timone.ledger=<absolute path of that daemon's state file>`. When a boxed daemon starts, it takes the ledger lock, and then, before the first cycle, it lists every container with `docker ps -a`. It removes, in one `docker rm -f`, the boxes labelled with its own ledger, and the unlabelled boxes named exactly `timone-<project>-<digits>` for one of its manifest's projects (the old naming). Then it logs `removed <n> box(es) left by an earlier daemon: <names>`. It removes nothing else: not a box labelled with another ledger, not a preview, not a service container, not a box of a project the manifest does not name, and not an unlabelled box with the new name. A daemon refused the lock never lists or removes anything. When docker cannot list or remove, the daemon logs why and starts anyway.
+
+**Files touched.**
+
+- `src/daemon/container-runtime.ts` — new exported `LEDGER_LABEL = "timone.ledger"`, beside `NAME_TAKEN`. `dockerSpawn` is exported, and is otherwise unchanged. New option `ledger?: string`. `runArgs` has a new last parameter `ledger`, and adds `--label timone.ledger=<ledger>` right after `--name <name>` when it is given. `start` passes `options.ledger`.
+- `src/daemon/leftover-boxes.ts` — new. The module comment cites R23 clause 1, ADR-0041 D1 and timone#73, and says why a label is used and not the `timone-` prefix. It has `ListedBox`, `LISTING_FORMAT`, `parseListing`, `leftoverBoxes` and `sweepLeftoverBoxes`, with the plan's signatures. It also has four private helpers: `escapeForRegExp`, `listContainers`, `removeContainers` and `failureOf`. The last one gives one line from stderr, or says how docker ended when stderr is empty.
+- `src/daemon/leftover-boxes.test.ts` — new. Cases 1–6 in `describe("the boxes a starting daemon removes (timone#73)")`. Case 7 in `describe("reading the listing docker gives")`. Cases 8–11, plus one more (see below), in `describe("a starting daemon removes the boxes an earlier one left (timone#73)")`, with a local fake `fakeDocker(listing, listed, removed)`.
+- `src/commands/daemon.ts` — `RuntimeChoice.ledger?`, passed to `containerRuntime` as `ledger`. `RunDaemonOptions.sweep?: () => Promise<void>`, with the doc comment from the plan. In `runDaemon`, inside the `withStateLock` callback, after the "took the ledger back" log and before `regivePlaces()`, the sweep is called in a `try`. When it throws, the daemon logs `could not remove leftover boxes: <message>` and goes on. In the action: `ledger: statePath` is passed to `runtimeFor`. A `boxed` constant now holds the existing runtime check, and the model-login line uses it. `runDaemon` gets `sweep` only when `boxed` is true.
+- `src/daemon/container-runtime.test.ts` — cases 12 and 13 added at the end of `describe("what the box is given, and what it is not")`. `--numstat` gives `20 0`. No import changed and no test was edited.
+- `src/commands/daemon.test.ts` — new `describe("runDaemon — a starting daemon removes its leftover boxes first (timone#73)")` at the end of the file, with cases 14–16. `--numstat` gives `117 0` for this slice. No import changed and no test was edited.
+
+**Decisions taken inside the slice.**
+
+- The `could not list …` reason is the first line of docker's stderr. When stderr is empty, it is `docker exited <code>` or `docker was killed by <signal>`. When the spawn throws, it is the first line of the error's message. The `could not remove …` message uses the same reason.
+- When the `rm` exits non-zero, `sweepLeftoverBoxes` returns `[]`, not the names. `docker rm -f a b` removes what it can and exits 1 for the rest, so which boxes are gone is not known. The plan says only "the promise resolves". Nothing reads the return value today.
+- The plan says the sweep "never throws". So a `docker rm` spawn that throws is caught as well and logged as `could not remove every leftover box (…)`. I added one test for this at the same seam: `says it could not remove every leftover box, and does not reject, when the removal cannot be started`. It was not in the plan's list.
+- Case 10 is two tests, one for each condition: a listing that exits 1, and a spawn that throws.
+- The tests write the listing format as the literal `{{.ID}}\t{{.Names}}\t{{.Label "timone.ledger"}}`. They do not import `LISTING_FORMAT`, so the expected value does not come from the code under test.
+- Case 14 records `listMarkedTickets` and `listOpenTickets`, the forge reads a cycle makes on an empty ledger. It checks that `sweep` is first, appears once, and that a forge call follows it.
+- The sweep comment in `runDaemon` cites ADR-0025 by its real file name, `0025-a-lock-holders-proof-of-life-is-its-process.md`.
+
+**Validation evidence.**
+
+The cases, one at a time:
+
+1. `removes a box labelled with its own ledger, whatever its name`. Red: `Cannot find module './leftover-boxes.js'`. Green with a first `leftoverBoxes` that returned the whole list.
+2. `keeps a box labelled with another daemon's ledger`. Red: `expected [ { …(3) } ] to deeply equal []`. Green after the filter on `box.ledger === owner.ledger`.
+3. `removes an unlabelled box with the old name of one of its projects`. Red: `expected [] to deeply equal [ { …(3) }, { …(3) } ]`. Green with a first rule: unlabelled and starting with `timone-`.
+4. `keeps the previews and the service containers that share the prefix`. Red: `expected [ { …(3) }, { …(3) }, { …(3) } ] to deeply equal []`. Green after the exact rule `^timone-<escaped project>-\d+$`.
+5. `keeps an unlabelled box with the old name of a project it does not manage`. **Green at once** after case 4's code. Mutation: I made the rule match any project (`^timone-[a-z]+-\d+$`). The test failed with `expected [ { …(3) } ] to deeply equal []`. Reverted.
+6. `keeps an unlabelled box with the new name, which only a label can claim`. **Green at once** after case 4's code. Mutation: I dropped the `$` anchor. The test failed with `expected [ { …(3) } ] to deeply equal []`. Reverted.
+7. `reads each line's id, name and label, and skips a blank line`. Red: `(0 , parseListing) is not a function`. Green after `parseListing`.
+8. `lists every container, removes its leftovers in one call, and says which`. Red: `(0 , sweepLeftoverBoxes) is not a function`. Green after `LEDGER_LABEL`, `LISTING_FORMAT` and a first `sweepLeftoverBoxes`.
+9. `asks docker to remove nothing, and says nothing, when nothing is left`. Red: `expected [ 'ps', 'rm' ] to deeply equal [ 'ps' ]`. Green after the empty check.
+10. `says it could not list the containers, and removes nothing, when the listing fails`. Red: `expected 'removed 1 box(es) left by an earlier …' to match /^could not list containers/`. Green after the exit-code check. Then `… and does not reject, when docker cannot be started`. Red: the test failed on the thrown `spawn docker ENOENT`. Green after `listContainers` caught it.
+11. `says it could not remove every leftover box when the removal fails, and resolves`. Red: `expected 'removed 1 box(es) left by an earlier …' to match /^could not remove every leftover box/`. Green after `removeContainers`. The extra test (`rm` spawn throws) was green at once. Mutation: I took the `try` out of `removeContainers`. The test failed with `spawn docker EAGAIN`. Reverted.
+12. `labels the box with the ledger of the daemon that started it (timone#73)`. Red: `expected 'run' to be 'timone.ledger=/x/state.json'`. Green after the `ledger` option and the `runArgs` parameter.
+13. `gives the box no label when the runtime is told no ledger`. **Green at once**, and also green at `HEAD`, which never adds a label. Mutation: I made `runArgs` always add `--label timone.ledger=<ledger ?? "">`. The test failed with `expected [ 'run', '--name', …(29) ] to not include '--label'`. Reverted.
+14. `removes them once, under the lock, before the first cycle asks the forge anything`. Red: `expected [] to have a length of 1 but got +0`. Green after `await options.sweep?.()` was added before `regivePlaces()`.
+15. `never removes anything when it is refused, because the boxes are a live daemon's`. **Green at once**, and also green at `HEAD`, which never calls a sweep. Mutation: I moved the sweep call out of the lock callback, to just before `withStateLock`. The test failed with `expected 1 to be +0`. Reverted.
+16. `says why it could not remove them, and polls anyway`. Red: the test failed on the thrown `docker is not running`. Green after the `try`/`catch` with its log line.
+
+The validation block:
+
+- `npm run build` gave `exit: 0`.
+- Red run. The new tests were kept, `container-runtime.ts` and `daemon.ts` were put back as they are at `HEAD`, and `leftover-boxes.ts` was removed. Then `npx vitest run src/daemon/leftover-boxes.test.ts src/daemon/container-runtime.test.ts src/commands/daemon.test.ts` gave `Test Files 3 failed (3)`, `Tests 3 failed | 155 passed (158)`, `exit: 1`. `leftover-boxes.test.ts` failed to import (`Cannot find module './leftover-boxes.js'`), so cases 1–11 and the extra test could not run. Case 12 failed with `expected 'run' to be 'timone.ledger=/x/state.json'`. Case 14 failed with `expected [] to have a length of 1 but got +0`. Case 16 failed with `expected 'waiting not checking for dead runs — …' to contain 'docker is not running'`. Cases 13 and 15 passed, for the reasons given above, and each was shown to fail by a mutation. Every other test passed. The source files were then put back.
+- Green: `npx vitest run src/daemon/leftover-boxes.test.ts src/daemon/container-runtime.test.ts src/commands/daemon.test.ts src/daemon/step-session.test.ts` gave `Test Files 4 passed (4)`, `Tests 177 passed (177)`, `exit: 0`.
+- `npx tsc --noEmit` gave `exit: 0`.
+- `grep -n "withStateLock(\|options.sweep" src/commands/daemon.ts` gave:
+  ```
+  445:  const held = await withStateLock(
+  466:        await options.sweep?.();
+  ```
+  and `exit: 0`. 466 is greater than 445, and line 466 is inside the `withStateLock` callback in `runDaemon`.
+- `grep -rn 'spawnSync("docker"\|dockerSpawn' src --include=*.test.ts` gave no output, `exit: 1`.
+- `npx vitest run` (the whole suite) was **not run here**, on the orchestrator's instruction. It is run once at the close of the phase, and that run is this step's evidence.
+
+The checkboxes:
+
+- [x] The red run is in the handoff (above). Cases 5, 6, 13 and 15 were not red during the loop, and 13 and 15 are not red at `HEAD` either. Each was shown to fail by a mutation, recorded above.
+- [x] Cases 2, 4, 5, 6 and 15 are in the suite. Cases 2, 4, 5 and 6 are in `src/daemon/leftover-boxes.test.ts`, and case 15 is in `src/commands/daemon.test.ts`.
+- [x] `git diff --stat main` lists only `doc/plans/phases/phase-66.md`, `doc/plans/phases/reports/phase-66-departures.md`, `doc/plans/phases/reports/phase-66-handoffs.md`, `src/commands/daemon.test.ts`, `src/commands/daemon.ts`, `src/daemon/container-runtime.test.ts`, `src/daemon/container-runtime.ts`, `src/daemon/session.ts`, `src/daemon/step-session.test.ts` and `src/daemon/step-session.ts`. The two new files, `src/daemon/leftover-boxes.ts` and `src/daemon/leftover-boxes.test.ts`, are untracked until the commit. Both are on the allowed list.
+
+The affected test files: `npx vitest run src/daemon src/commands/daemon.test.ts src/runner` gave `Test Files 43 passed (43)`, `Tests 2138 passed (2138)`, `exit: 0`.
+
+**What delivery must know.** No test reaches the sweep's real wiring in the action, where `dockerSpawn`, `statePath` and the manifest's project names are passed. That wiring was checked by reading it and by `tsc`. `runDaemon` is tested through its `sweep` option only. A box from before this phase has no label, and only its exact old name `timone-<project>-<digits>` lets a daemon remove it. docker prints an empty string for `{{.Label "timone.ledger"}}` when a container has no such label, and `parseListing` reads that as `""`. Nothing in this machine could check that against a real docker, so a live run should confirm it. The in-process runtime gets no label and no sweep. A refactor idea for later: `failureOf` and `reasonFor` in `container-runtime.ts` both turn a `ContainerExit` into words, in slightly different ways.

@@ -943,6 +943,26 @@ describe("what the box is given, and what it is not", () => {
     );
     expect(script).not.toContain("$PROJECT_BRANCH");
   });
+
+  it("labels the box with the ledger of the daemon that started it (timone#73)", async () => {
+    // So a daemon that starts later can tell its own leftovers from another
+    // daemon's boxes, a preview, or a run's database.
+    const { spawn, calls } = fakeContainer([started, result()]);
+    await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      ledger: "/x/state.json",
+    }).start(request());
+
+    const args = calls.find((call) => call.args[0] === "run")!.args;
+    expect(args[args.indexOf("--label") + 1]).toBe("timone.ledger=/x/state.json");
+    expect(args).not.toContain("-v");
+    expect(args.some((arg) => arg.startsWith("--mount"))).toBe(false);
+  });
+
+  it("gives the box no label when the runtime is told no ledger", async () => {
+    expect(runArgs()).not.toContain("--label");
+  });
 });
 
 describe("the environment the box gets for the project", () => {
