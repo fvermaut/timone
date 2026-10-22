@@ -8,13 +8,21 @@
  * goes is a fact, not a judgement — which is the only reason this check can be
  * automated at all.
  *
+ * How many presses: the page's own number of tab stops, plus a margin, and
+ * the walk ends early once focus comes back round to where it started. A fixed
+ * number of presses (it was 400) gives a false fault for every control past
+ * it on a page with more controls than that (timone#127). `HARD_STOP` still
+ * caps the walk, so a page that traps focus cannot keep it going forever.
+ *
  * Break step: take one visible control out of the tab order with
  * `tabindex="-1"`. It must come back as unreachable.
  */
 import { args, onPage } from "./_shared.mjs";
 
-/** Enough presses to cross a dense page, and a stop for a trap. */
-const MAX_TABS = 400;
+/** Presses allowed beyond the page's own count of tab stops. */
+const MARGIN = 50;
+/** The most presses any page gets, however many tab stops it has. */
+const HARD_STOP = 10_000;
 
 const options = args();
 
@@ -43,14 +51,32 @@ await onPage(options, async (page) => {
     return visible.length;
   }, selector);
 
+  // Every element the browser puts in the tab order, not only the ones the
+  // selector names: a scrollable region or a `contenteditable` takes a press
+  // too, and a budget that left them out would run short.
+  const tabStops = await page.evaluate(
+    () =>
+      [...document.querySelectorAll("*")].filter(
+        (el) => el.tabIndex >= 0 && el.getClientRects().length > 0,
+      ).length,
+  );
+  const budget = Math.min(Math.max(tabStops, expected) * 2 + MARGIN, HARD_STOP);
+
   await page.evaluate(() => document.body.focus());
   const reached = new Set();
   const outlines = [];
-  for (let press = 0; press < MAX_TABS; press += 1) {
+  let presses = 0;
+  let wrapped = false;
+  while (presses < budget) {
     await page.keyboard.press("Tab");
+    presses += 1;
     const landed = await page.evaluate(() => {
       const el = document.activeElement;
       if (el === null || el === document.body) return undefined;
+      // The first element focus lands on is where the walk started; landing
+      // there again means the walk has been all the way round.
+      if (window.__timoneKbFirst === undefined) window.__timoneKbFirst = el;
+      else if (window.__timoneKbFirst === el) return { back: true };
       const style = getComputedStyle(el);
       return {
         mark: el.getAttribute("data-timone-kb"),
@@ -62,13 +88,23 @@ await onPage(options, async (page) => {
       };
     });
     if (landed === undefined) continue;
+    if (landed.back) {
+      wrapped = true;
+      break;
+    }
     if (landed.mark !== null) reached.add(landed.mark);
     if (!landed.outline) outlines.push(`<${landed.name}> takes focus with nothing visible`);
     if (reached.size >= expected) break;
   }
 
+  const ended =
+    reached.size >= expected
+      ? "every control reached"
+      : wrapped
+        ? "focus came back to the first control"
+        : `stopped at the limit of ${budget} presses`;
   console.log(
-    `=== keyboard on ${options.url} — ${reached.size} of ${expected} controls reached by Tab`,
+    `=== keyboard on ${options.url} — ${reached.size} of ${expected} controls reached by Tab (${presses} presses, ${tabStops} tab stops; ${ended})`,
   );
 
   const unreachable = await page.evaluate(

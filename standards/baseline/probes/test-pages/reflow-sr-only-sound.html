@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text for screen readers only</title>
+<style>
+  body { font: 16px/1.4 sans-serif; margin: 1rem; }
+  /* The common pattern, with the old clip property. */
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  /* The same idea with clip-path, under another name. */
+  .visually-hidden {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+  .card { border: 1px solid #555; padding: 0.5rem; margin: 0.5rem 0; }
+</style>
+</head>
+<body>
+<h1>Text for screen readers only</h1>
+<p>A sound page for the reflow check. The text in the hidden boxes below is
+there for screen readers. Nobody sees it, so it is not clipped text.</p>
+<div class="card">
+  <p>Open orders <span class="sr-only">for the account ending 4321, sorted by date, newest first</span></p>
+</div>
+<div class="card">
+  <button type="button">Close <span class="visually-hidden">the dialog that lists every open order and its state</span></button>
+</div>
+<div class="card">
+  <div class="sr-only"><p>A whole paragraph kept for screen readers, inside a hidden box, long enough to need far more than one pixel of height.</p></div>
+  <p>Visible text that is free to grow.</p>
+</div>
+</body>
+</html>

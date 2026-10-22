@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Focus caught in a loop of three controls</title>
+<style>
+  body { font: 16px/1.4 sans-serif; margin: 1rem; }
+  :focus-visible { outline: 3px solid #0050b3; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<h1>Focus caught in a loop of three controls</h1>
+<p>A broken page for the keyboard check's safety stop. Once focus enters the
+three buttons below, Tab moves it round those three and never lets it out, so
+it never comes back to the first link. The check must still finish, and report
+the two links after the loop as unreachable.</p>
+<p><a href="#start">Before the loop</a></p>
+<div id="loop">
+  <button type="button">Loop 1</button>
+  <button type="button">Loop 2</button>
+  <button type="button">Loop 3</button>
+</div>
+<p><a href="#after-1">After the loop, first</a></p>
+<p><a href="#after-2">After the loop, second</a></p>
+<script>
+  const loop = [...document.querySelectorAll("#loop button")];
+  for (const [at, button] of loop.entries()) {
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Tab") return;
+      event.preventDefault();
+      const step = event.shiftKey ? loop.length - 1 : 1;
+      loop[(at + step) % loop.length].focus();
+    });
+  }
+</script>
+</body>
+</html>
