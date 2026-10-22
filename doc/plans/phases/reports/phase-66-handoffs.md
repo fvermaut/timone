@@ -48,3 +48,48 @@ The checkboxes:
 The affected test files: `npx vitest run src/daemon src/commands/daemon.test.ts src/runner` gave `Test Files 42 passed (42)`, `Tests 2106 passed (2106)`, exit 0.
 
 **What 66b must know.** Names are no longer predictable without the `nameFor` seam. A test that needs to know a box's name must inject `nameFor`, as the existing stop test does with `timone-scratch-app-1`. Or it can read the `--name` argument from the `run` call that the fake spawn recorded. Every name the default makes starts `timone-` and matches docker's rule `/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/`. `SessionRequest.runId` is set only on the `startStepSession` path. A request built by `sessionRequest` alone has no `runId`.
+
+## 66b — The end of a box waits for its removal, and a start refused for a taken name removes nothing
+
+**Built.** A box's session now ends only after `docker rm -f <name>` has exited. A services stack is taken down only after that, so its network is never taken down while the box is still on it. Each start has one removal: `stop()` and the ending it causes wait on the same `docker rm`, so docker is asked once. When `docker run` printed no line, exited 125 and wrote the "Conflict. The container name … is already in use" error, the start made no box. So nothing is removed, because the box under that name may be a live run's (timone#73). The stack is still taken down, and the outcome is the usual `the box exited 125 …` reason.
+
+**Files touched.**
+
+- `src/daemon/container-runtime.ts` — `destroy` is `async` and returns `Promise<void>`. It waits for the `rm` process's exit, and still never throws or rejects. Its comment has the plan's added line. New exported `NAME_TAKEN` regex. Inside `start`: `removal` and `remove()`, built with `??=` as the plan words it. The interactive-without-stdin path and `completed` now `await remove()`. `stop` is `() => { void remove(); }`. `completed` has a `read` flag, set on the first line, and skips `remove()` when no line was read, `exit.code === 125` and `NAME_TAKEN` matches stderr. The "destroyed on every path" comment and the stop comment were adjusted to say what is now true.
+- `src/daemon/container-runtime.test.ts` — new `describe("the end of a box waits for its removal, and removes only its own box (timone#73)")`, placed right after 66a's describe, with cases 1–6. It has a local helper `boxWithRemoval(lines, exit)`, whose `rm` exit the test resolves by hand, and `settle()` (a 10 ms timer). No import was added and no existing line changed.
+
+**Decisions taken inside the slice.**
+
+- "No line was ever read" is a `read` flag set at the top of the `for await` loop. That means any line, even one that does not parse, not just a parsed message.
+- `NAME_TAKEN` sits with the module's other constants, near `BASH_MAX_TIMEOUT_MS`. The tests use the literal stderr from the plan and do not import the regex.
+- Case 4: with no line printed, `start()` gets no session id until `completed` has passed the removal. So the test must finish the `rm` before it calls `start()`, or it waits for ever. This is how the code already worked (the session id falls back to `resolveId(id)` after teardown), and the slice does not change it. The test says so in a comment.
+- Case 6 builds its own spawn, the same way the ADR-0047 stop test does (removing the box ends the line stream), and counts only `rm` calls.
+
+**Validation evidence.**
+
+The cases, one at a time:
+
+1. `does not report the session ended until the box has been removed`. Red: `expected true to be false` (`completed` had already resolved while the `rm` was still running). Green once `destroy` returned a promise and `completed` waited for it.
+2. `takes the stack's network down only after the box has left it`. Already green after case 1's change, because the wait on `destroy` comes before `stack.down()`. I saw it red against the source as it is at `HEAD`: `expected [ 'run', …(3) ] to deeply equal [ 'run', …(3) ]` (the old order was `run`, `rm -f …`, `down`, `rm -f … exited`).
+3. `removes nothing when docker refused the start because the name was taken (timone#73)`. Red after case 1's change: `Test timed out in 20000ms` (the runtime asked for an `rm` the test never finishes). Red against `HEAD`: `expected [ 'rm -f timone-scratch-app-1' ] to deeply equal []`. Green after `NAME_TAKEN` and the `read` flag were added.
+4. `still removes the box when docker refused the start for another reason`. Passes before and after, as the plan says. Mutation: I dropped `NAME_TAKEN.test(exit.stderr)` from the check, and the test failed with `expected [ 'run' ] to include 'rm -f timone-scratch-app-1'`. Reverted.
+5. `keeps the session's own outcome when the removal itself fails`. Passes before and after, as the plan says. Mutation: I made `destroy` reject when the `rm` exits non-zero, and the test failed with `Error response from daemon: removal already in progress`. Reverted.
+6. `removes the box once when a stop is followed by the ending it causes`. Red: `expected [ 'rm -f timone-scratch-app-1', …(1) ] to deeply equal [ 'rm -f timone-scratch-app-1' ]`. Green after `remove()` was added.
+
+The validation block:
+
+- `npm run build` gave exit 0.
+- Red run, `npx vitest run src/daemon/container-runtime.test.ts`, with the new tests and `container-runtime.ts` as it is at `HEAD`: `Tests 4 failed | 115 passed (119)`, exit 1. Cases 1, 2, 3 and 6 failed with the messages above. Cases 4 and 5 passed, and so did every other test.
+- Green, `npx vitest run src/daemon/container-runtime.test.ts src/daemon/step-session.test.ts`: `Test Files 2 passed (2)`, `Tests 125 passed (125)`, exit 0.
+- `npx tsc --noEmit` gave exit 0.
+- `npx vitest run src/daemon/container-runtime.test.ts -t "stops a session by removing the container"` gave `Tests 1 passed | 118 skipped (119)`, exit 0.
+
+The checkboxes:
+
+- [x] The red run is in the handoff, naming each case and its result before the change (above).
+- [x] Case 3 is in the suite and names timone#73, in its test name and in its describe.
+- [x] `git diff main -- src/daemon/container-runtime.test.ts` gives `317 0` in `--numstat`, so 0 removed lines. It has two hunks: the import (66a's `boxName`), and one block that holds 66a's and 66b's describes, each with its doc comment.
+
+The affected test files: `npx vitest run src/daemon src/commands/daemon.test.ts src/runner` gave `Test Files 42 passed (42)`, `Tests 2112 passed (2112)`, exit 0.
+
+**What 66c must know.** `destroy(spawn, name)` is still private. It now returns a promise that never rejects, so a caller can wait on it. `NAME_TAKEN` is exported from `container-runtime.ts` if 66c needs to recognise the same docker error. A box that prints no line resolves `start()` only after its whole ending, the removal included. So a test of such a box whose `rm` it controls must finish the `rm` before it waits on `start()`. `StartedSession.stop` still returns `void`. The removal it starts is waited for by `completed`, not by `stop`.

@@ -400,6 +400,226 @@ describe("a box's name belongs to its run (timone#73)", () => {
   });
 });
 
+/**
+ * A box's end is the next step's start: a session that reports it has ended
+ * while `docker rm -f` is still running hands the next step a name and a
+ * network that are still in use. And a start that docker refused because the
+ * name was taken never made a box, so the box under that name is somebody
+ * else's — maybe a live run's — and must not be removed (timone#73).
+ */
+describe("the end of a box waits for its removal, and removes only its own box (timone#73)", () => {
+  /**
+   * A box that prints `lines` and ends with `exit`, and a `docker rm` whose
+   * exit the test resolves by hand. Every call goes into `order`, as
+   * `args.join(" ")` and, for the removal, again when it has exited.
+   */
+  function boxWithRemoval(
+    lines: string[],
+    exit: Partial<ContainerExit> = {},
+  ): {
+    spawn: ContainerSpawn;
+    order: string[];
+    finishRemoval: (exit?: Partial<ContainerExit>) => void;
+  } {
+    const order: string[] = [];
+    let resolveRemoval!: (value: ContainerExit) => void;
+    const removal = new Promise<ContainerExit>((resolve) => {
+      resolveRemoval = resolve;
+    });
+
+    const spawn: ContainerSpawn = (_command, args) => {
+      order.push(args[0] === "run" ? "run" : args.join(" "));
+      if (args[0] === "rm") {
+        return {
+          lines: (async function* () {})(),
+          exit: removal.then((value) => {
+            order.push(`${args.join(" ")} exited`);
+            return value;
+          }),
+          kill: () => {},
+        };
+      }
+      if (args[0] !== "run") return oneShot();
+
+      let resolveExit!: (value: ContainerExit) => void;
+      const finished = new Promise<ContainerExit>((resolve) => {
+        resolveExit = resolve;
+      });
+      return {
+        lines: (async function* () {
+          for (const text of lines) yield text;
+          resolveExit({ code: 0, signal: null, stderr: "", ...exit });
+        })(),
+        exit: finished,
+        kill: () => {},
+      };
+    };
+
+    return {
+      spawn,
+      order,
+      finishRemoval: (value = {}) =>
+        resolveRemoval({ code: 0, signal: null, stderr: "", ...value }),
+    };
+  }
+
+  /** Let every promise that can settle now settle. */
+  function settle(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  it("does not report the session ended until the box has been removed", async () => {
+    const { spawn, finishRemoval } = boxWithRemoval([started, result()]);
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: () => "timone-scratch-app-1",
+    }).start(request());
+    let ended = false;
+    void session.completed.then(() => {
+      ended = true;
+    });
+
+    await settle();
+    expect(ended).toBe(false);
+
+    finishRemoval();
+    await settle();
+    expect(ended).toBe(true);
+  });
+
+  it("takes the stack's network down only after the box has left it", async () => {
+    const { spawn, order, finishRemoval } = boxWithRemoval([started, result()]);
+    const stack: ServiceStack = {
+      network: "timone-scratch-app-7-1_default",
+      project: "timone-scratch-app-7-1",
+      services: ["db"],
+      down: async () => {
+        order.push("down");
+      },
+    };
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: () => "timone-scratch-app-1",
+      services: async () => stack,
+    }).start(request());
+
+    await settle();
+    finishRemoval();
+    await session.completed;
+
+    expect(order).toEqual([
+      "run",
+      "rm -f timone-scratch-app-1",
+      "rm -f timone-scratch-app-1 exited",
+      "down",
+    ]);
+  });
+
+  it("removes nothing when docker refused the start because the name was taken (timone#73)", async () => {
+    // The ticket's worse case: the box under that name is not this start's,
+    // and may be a live run's.
+    const { spawn, order } = boxWithRemoval([], {
+      code: 125,
+      stderr:
+        'docker: Error response from daemon: Conflict. The container name "/timone-scratch-app-1" is already in use by container "9620e0a0708b". You have to remove (or rename) that container to be able to reuse that name.',
+    });
+    let downs = 0;
+    const stack: ServiceStack = {
+      network: "timone-scratch-app-7-1_default",
+      project: "timone-scratch-app-7-1",
+      services: ["db"],
+      down: async () => {
+        downs += 1;
+      },
+    };
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: () => "timone-scratch-app-1",
+      services: async () => stack,
+    }).start(request());
+
+    const outcome = await session.completed;
+
+    expect(order.filter((call) => call.startsWith("rm"))).toEqual([]);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toContain("already in use");
+    expect(downs).toBe(1);
+  });
+
+  it("still removes the box when docker refused the start for another reason", async () => {
+    const { spawn, order, finishRemoval } = boxWithRemoval([], {
+      code: 125,
+      stderr:
+        "Unable to find image 'timone-box:test' locally\ndocker: Error response from daemon: pull access denied for timone-box.",
+    });
+    // Up front: a box that printed no line has no session id, so `start`
+    // returns only once the ending, the removal included, has run.
+    finishRemoval();
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: () => "timone-scratch-app-1",
+    }).start(request());
+
+    await session.completed;
+
+    expect(order).toContain("rm -f timone-scratch-app-1");
+  });
+
+  it("keeps the session's own outcome when the removal itself fails", async () => {
+    const { spawn, finishRemoval } = boxWithRemoval([started, result()]);
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: () => "timone-scratch-app-1",
+    }).start(request());
+
+    await settle();
+    finishRemoval({ code: 1, stderr: "Error response from daemon: removal already in progress" });
+    const outcome = await session.completed;
+
+    expect(outcome.ok).toBe(true);
+  });
+
+  it("removes the box once when a stop is followed by the ending it causes", async () => {
+    // As in the stop test above: removing the container ends its line
+    // stream, and the ending that follows waits on the same removal.
+    const removals: string[] = [];
+    let end!: () => void;
+    const ending = new Promise<void>((resolve) => {
+      end = resolve;
+    });
+    const spawn: ContainerSpawn = (_command, args) => {
+      if (args[0] !== "run") {
+        if (args[0] === "rm") removals.push(args.join(" "));
+        end();
+        return oneShot();
+      }
+      return {
+        lines: (async function* () {
+          yield started;
+          await ending;
+        })(),
+        exit: Promise.resolve({ code: 137, signal: null, stderr: "" }),
+        kill: () => {},
+      };
+    };
+    const session = await containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: () => "timone-scratch-app-1",
+    }).start(request());
+
+    session.stop!();
+    await session.completed;
+
+    expect(removals).toEqual(["rm -f timone-scratch-app-1"]);
+  });
+});
+
 describe("what the box is given, and what it is not", () => {
   function runCall(): { args: string[]; env?: Record<string, string> } {
     const { spawn, calls } = fakeContainer([started, result()]);

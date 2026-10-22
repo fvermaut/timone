@@ -343,6 +343,13 @@ const BASH_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const BASH_MAX_TIMEOUT_MS = 30 * 60 * 1000;
 
 /**
+ * What docker writes to stderr when it refuses a `docker run` because another
+ * container already has the name. Such a start made no container, so the one
+ * under that name is not its to remove (timone#73).
+ */
+export const NAME_TAKEN = /Conflict\. The container name "[^"]*" is already in use/;
+
+/**
  * The remote as a URL the box can actually open.
  *
  * **The box holds a forge token and no SSH key, and it never will** — a key is
@@ -1098,6 +1105,10 @@ export function containerRuntime(
       }
 
       const name = nameFor(request);
+      // One removal per box: a stop and the ending it causes wait on the
+      // same one, so neither asks docker twice.
+      let removal: Promise<void> | undefined;
+      const remove = (): Promise<void> => (removal ??= destroy(spawn, name));
       const interactive = request.interactive === true;
       // The stage's prompt, with what the box knows about itself in front of
       // it. A run that does not know it is in a container reports the
@@ -1172,7 +1183,7 @@ export function containerRuntime(
       if (interactive && stdin === undefined) {
         // A spawner that ignored `stdin: "pipe"`: a wiring fault, not
         // anything a run did. Nothing is left running behind it.
-        destroy(spawn, name);
+        await remove();
         if (stack !== undefined) await stack.down().catch(() => undefined);
         throw new Error(
           "an interactive box was started without a stdin to write its messages to",
@@ -1216,9 +1227,11 @@ export function containerRuntime(
         let id = "unknown";
         let lastApiError: string | undefined;
         let outcome: SessionOutcome | undefined;
+        let read = false;
 
         try {
           for await (const text of container.lines) {
+            read = true;
             const message = parseSessionMessage(text);
 
             // The session id comes off the first message, so it is known
@@ -1283,11 +1296,16 @@ export function containerRuntime(
         refresh?.stop();
 
         const exit = await container.exit;
-        // Destroyed on **every** path, including this one — a leaked container
-        // holds a name, a network and a gigabyte of shared memory, and the
-        // next run on the same project cannot take the name back. The stack
-        // goes with it, for the same reason and on the same paths.
-        destroy(spawn, name);
+        // A start docker refused because the name was taken: this start did
+        // not make that container, and it may be a live run's (timone#73).
+        const madeNoBox =
+          !read && exit.code === 125 && NAME_TAKEN.test(exit.stderr);
+        // Destroyed on **every** path that made it, including this one — a
+        // leaked container holds a name, a network and a gigabyte of shared
+        // memory, and the next run on the same project cannot take the name
+        // back. The stack goes down on every path, the refused start's too,
+        // because this start stood it up.
+        if (!madeNoBox) await remove();
         if (stack !== undefined) await stack.down().catch(() => undefined);
         resolveId(id);
 
@@ -1310,9 +1328,10 @@ export function containerRuntime(
         // [#69](https://github.com/fvermaut/timone/issues/69) exactly. With
         // the container gone the client exits by itself, the line stream
         // ends, and `completed` settles down the ordinary path — including
-        // the `destroy` below, which is content to remove what is already
-        // gone.
-        stop: () => destroy(spawn, name),
+        // its removal, which is this same one, waited for.
+        stop: () => {
+          void remove();
+        },
         ...(stdin === undefined ? {} : { send: say }),
       };
     },
@@ -1340,10 +1359,14 @@ function userMessageLine(text: string): string {
   return `${JSON.stringify(message)}\n`;
 }
 
-/** Remove the container, whatever state it is in. Never throws. */
-function destroy(spawn: ContainerSpawn, name: string): void {
+/**
+ * Remove the container, whatever state it is in. Never throws, and never
+ * rejects. It is waited for, so the next step never finds the name or the
+ * network still in use (timone#73, comment of 2026-09-07).
+ */
+async function destroy(spawn: ContainerSpawn, name: string): Promise<void> {
   try {
-    void spawn("docker", ["rm", "-f", name]).exit.catch(() => undefined);
+    await spawn("docker", ["rm", "-f", name]).exit.catch(() => undefined);
   } catch {
     // A teardown that fails is not a reason to lose the run's outcome. The
     // leak is visible in `docker ps -a`, which 30h's own gate reads.
