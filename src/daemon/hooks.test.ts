@@ -1305,6 +1305,97 @@ describe("checkProvenance", () => {
     const [violation] = checkProvenance(evidence);
     expect(violation.summary).toContain("2 commit(s)");
   });
+
+  it("ignores a squash merge GitHub built, which has one parent", () => {
+    // timone#90: every pull request here lands as a squash merge. GitHub's
+    // servers build it, with one parent, and no session made it.
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "ddd4444",
+        branch: "main",
+        files: ["src/x.ts"],
+        trailers: [],
+        committerEmail: "noreply@github.com",
+        parentCount: 1,
+      },
+    ];
+
+    expect(checkProvenance(evidence)).toEqual([]);
+  });
+
+  it("ignores a commit GitHub built when its evidence has no parent count", () => {
+    // Evidence built before `parentCount` existed carries only the committer.
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "eee5555",
+        branch: "main",
+        files: ["src/x.ts"],
+        trailers: [],
+        committerEmail: "noreply@github.com",
+      },
+    ];
+
+    expect(checkProvenance(evidence)).toEqual([]);
+  });
+
+  it("still flags a commit by a users.noreply.github.com address, which is a person's or a bot's", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "fff6666",
+        branch: "main",
+        files: ["src/x.ts"],
+        trailers: [],
+        committerEmail: "319428833+timone-agent[bot]@users.noreply.github.com",
+        parentCount: 1,
+      },
+      {
+        sha: "ggg7777",
+        branch: "main",
+        files: ["src/y.ts"],
+        trailers: [],
+        committerEmail: "43007270+fvermaut@users.noreply.github.com",
+        parentCount: 1,
+      },
+    ];
+
+    const violations = checkProvenance(evidence);
+
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("provenance");
+    expect(violations[0].detail.join("\n")).toContain("fff6666");
+    expect(violations[0].detail.join("\n")).toContain("ggg7777");
+  });
+
+  it("counts only the session's own commit when it sits beside a one-parent commit GitHub built", () => {
+    const evidence = cleanEvidence();
+    projectRepo(evidence).commits = [
+      {
+        sha: "hhh8888",
+        branch: "main",
+        files: ["src/x.ts"],
+        trailers: [],
+        committerEmail: "noreply@github.com",
+        parentCount: 1,
+      },
+      {
+        sha: "iii9999",
+        branch: "main",
+        files: ["src/y.ts"],
+        trailers: [],
+        committerEmail: "someone@example.com",
+        parentCount: 1,
+      },
+    ];
+
+    const [violation] = checkProvenance(evidence);
+
+    expect(violation.summary).toContain("1 commit(s)");
+    expect(violation.detail.join("\n")).toContain("iii9999");
+    expect(violation.detail.join("\n")).not.toContain("hhh8888");
+  });
 });
 
 /**

@@ -33,12 +33,15 @@ export interface CommitEvidence {
   /** The commit message's trailer lines, verbatim (ADR-0019). */
   trailers: string[];
   /**
-   * The committer's email. `noreply@github.com` on a merge the GitHub merge
-   * button made — see {@link isPlatformMerge}. Optional so evidence built
-   * before this field existed still type-checks.
+   * The committer's email. `noreply@github.com` on any commit GitHub's
+   * servers built, such as a squash merge — see {@link isPlatformMerge}.
+   * Optional so evidence built before this field existed still type-checks.
    */
   committerEmail?: string;
-  /** How many parents the commit has. Two or more means a merge. */
+  /**
+   * How many parents the commit has. Two or more means a merge. No rule
+   * reads it since timone#90.
+   */
   parentCount?: number;
   /**
    * Whether this commit is an ancestor of the remote's default branch — that
@@ -614,25 +617,30 @@ export function checkPathContainment(evidence: SessionEvidence): Violation[] {
  * nothing about existing history, and this rule never claims otherwise.
  */
 /**
- * A merge commit the hosting platform made on the session's behalf — the
- * GitHub merge button, not a session.
+ * A commit GitHub's servers built, not a session. That is the Merge button's
+ * merge commit, its **squash merge** (one parent, the shape this repository
+ * uses), a rebase merge, or a file edited on GitHub's web page. Each has
+ * `noreply@github.com` as its committer.
  *
- * **Nothing can satisfy this rule for such a commit.** It is created
- * server-side, by a person clicking Merge, and there is no stage that made it;
- * the only way to stamp one is to force-push the branch it landed on and
- * rewrite published history, which is worse than the finding. Every pull
- * request this repository has ever merged has this shape, so reporting them
- * trains a reader to ignore the check — and the next genuine missing trailer
- * gets ignored with it.
+ * **Nothing can satisfy this rule for such a commit.** No session made it,
+ * and there is no stage to name. The only way to stamp one is to force-push
+ * the branch it landed on and rewrite published history, which is worse than
+ * the finding. Every pull request this repository has ever merged has this
+ * shape, so reporting them trains a reader to ignore the check — and the next
+ * genuine missing trailer gets ignored with it.
  *
- * Deliberately narrow: a merge a *session* makes locally has the session as
- * its committer and is still reported. Two parents alone is not enough.
+ * The committer alone decides. A merge, or any other commit, that a session
+ * makes on its own machine has the session's committer and is still
+ * reported. So is a `…@users.noreply.github.com` address: that is a person's
+ * or a bot's address, not GitHub's servers'. The match is exact for that
+ * reason.
+ *
+ * ✏ 2026-10-22 (timone#90): the parent-count clause is gone. It excused
+ * GitHub's merge commits and missed its squash merges, which have one parent
+ * and are how every pull request here lands (#101, #231).
  */
 function isPlatformMerge(commit: CommitEvidence): boolean {
-  return (
-    (commit.parentCount ?? 0) > 1 &&
-    commit.committerEmail === "noreply@github.com"
-  );
+  return commit.committerEmail === "noreply@github.com";
 }
 
 export function checkProvenance(evidence: SessionEvidence): Violation[] {

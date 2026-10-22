@@ -872,6 +872,23 @@ describe("the journal", () => {
 });
 
 describe("the provenance trailer, read back off real commits", () => {
+  /** `git`, with the committer set for this one call. */
+  function gitAs(
+    dir: string,
+    committer: { name: string; email: string },
+    ...args: string[]
+  ): string {
+    return execFileSync("git", args, {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_COMMITTER_NAME: committer.name,
+        GIT_COMMITTER_EMAIL: committer.email,
+      },
+    });
+  }
+
   it("accepts a trailed commit and flags an untrailed one", async () => {
     // The parsing is the part that can silently break: the message is
     // multi-line and the file list follows it in the same `git log` output.
@@ -917,6 +934,96 @@ describe("the provenance trailer, read back off real commits", () => {
 
     expect(printed.join("\n")).toContain("where they came from");
     expect(printed.join("\n")).toContain("Timone-Stage: interactive");
+  });
+
+  it("says nothing about a squash merge GitHub built, with one parent, that the session only pulled", async () => {
+    // #231: a session ran `git pull --ff-only` and was blamed for the squash
+    // merges it brought in. The second clone stands for GitHub's servers.
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const github = join(root, "..", "github-clone");
+    const remote = git(projectDir, "remote", "get-url", "origin").trim();
+    // The fixture's clone is on git's default branch name, with no upstream.
+    // A real checkout is on `main`, tracking `origin/main`, and that is the
+    // branch the pull moves.
+    git(projectDir, "checkout", "-q", "-B", "main", "origin/main");
+
+    const { first, printed } = await bracket(
+      root,
+      "session-pulled",
+      store,
+      () => {
+        git(join(root, ".."), "clone", "-q", "-b", "main", remote, github);
+        git(github, "config", "user.email", "author@example.com");
+        git(github, "config", "user.name", "author");
+        writeFileSync(join(github, "squashed.txt"), "a\n");
+        git(github, "add", "-A");
+        gitAs(
+          github,
+          { name: "GitHub", email: "noreply@github.com" },
+          "commit",
+          "-q",
+          "-m",
+          "Something (#12)",
+        );
+        git(github, "push", "-q", "origin", "HEAD:main");
+        git(projectDir, "pull", "-q", "--ff-only");
+      },
+    );
+
+    // One parent: this is a squash merge, not a merge commit.
+    expect(
+      git(projectDir, "rev-list", "--parents", "-n", "1", "HEAD").trim().split(" "),
+    ).toHaveLength(2);
+    expect(first.returned.filter((v) => v.rule === "provenance")).toEqual([]);
+    expect(printed.join("\n")).not.toContain("where they came from");
+  });
+
+  // The part of #231 this phase does not cover, kept on purpose. A person
+  // pushes an untrailed commit straight to `main` from their own machine, and
+  // a session pulls it: the session is still blamed. `onDefaultBranch` is read
+  // when the session ends, so it is true both for a commit the session pulled
+  // and for one it pushed to `main` itself, and an untrailed commit carries
+  // nothing else to tell them apart. Excusing every untrailed commit on `main`
+  // would excuse a session that pushed one, which is what the rule is for.
+  // See "What #101 and #231 asked for" in doc/plans/phases/phase-65.md,
+  // point 1.
+  it("still flags an untrailed commit a person pushed to main, when the session only pulled it", async () => {
+    const { root, projectDir } = workspace();
+    const store = newStore(root);
+    const elsewhere = join(root, "..", "person-clone");
+    const remote = git(projectDir, "remote", "get-url", "origin").trim();
+    // The fixture's clone is on git's default branch name, with no upstream.
+    // A real checkout is on `main`, tracking `origin/main`, and that is the
+    // branch the pull moves.
+    git(projectDir, "checkout", "-q", "-B", "main", "origin/main");
+
+    const { printed } = await bracket(
+      root,
+      "session-pulled",
+      store,
+      () => {
+        git(join(root, ".."), "clone", "-q", "-b", "main", remote, elsewhere);
+        git(elsewhere, "config", "user.email", "someone@example.com");
+        git(elsewhere, "config", "user.name", "Someone");
+        writeFileSync(join(elsewhere, "direct.txt"), "a\n");
+        git(elsewhere, "add", "-A");
+        gitAs(
+          elsewhere,
+          { name: "Someone", email: "someone@example.com" },
+          "commit",
+          "-q",
+          "-m",
+          "Something (#12)",
+        );
+        git(elsewhere, "push", "-q", "origin", "HEAD:main");
+        git(projectDir, "pull", "-q", "--ff-only");
+      },
+    );
+
+    const report = printed.join("\n");
+    expect(report).toContain("where they came from");
+    expect(report).toContain(git(projectDir, "rev-parse", "--short", "HEAD").trim());
   });
 
   it("tells the session its own id and what it owes, at SessionStart", async () => {

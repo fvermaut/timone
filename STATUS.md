@@ -2,7 +2,7 @@
 
 **Written for fvermaut, in plain language.** Agents write this file. They never read it as a source of truth — the requirements, plans and reports are. Everything below is about the Timone repository unless it names a project.
 
-**Last updated:** 2026-10-18.
+**Last updated:** 2026-10-22.
 
 ---
 
@@ -100,6 +100,10 @@ The review of the code style found nothing. The review against the requirements 
 
 **What I need from you:** run the replay, the scratch-app check and the 70 tests on your machine, then review and merge #257.
 
+**1v. The check at the end of a session no longer blames a session for GitHub's squash merges ([#90](https://github.com/fvermaut/timone/issues/90), with [#101](https://github.com/fvermaut/timone/issues/101) and [#231](https://github.com/fvermaut/timone/issues/231)), in Timone's own repository: pull request [#260](https://github.com/fvermaut/timone/pull/260) is open for your review, from the branch `timone/90-the-platform-merge-carve-out-misses-squa-chunk-2`.** GitHub's squash merges have one parent, and the check excused only GitHub's merges with two. Now it excuses every commit whose committer is GitHub. The check of the fix found no fault: a session that pulls GitHub's squash merges, or branches from them, gets no finding, and a session's own commit without a trailer is still reported. The review of the code style found 2 things: the function's name still says "merge", and a field nobody reads is still collected. The review against the requirements found 1: a session that sets GitHub's address on its own commit is not reported. That is the pull request's one question. Neither review could read the check script, because the guard lets only the checking step open its folder. Before you merge: the 2 new tests on real git did not run in the container, and 7 parts of older checks need the replay (`npm run --silent replay`, from a terminal signed in to Claude) or a GitHub login that can read scratch-app. Merging closes #90 and #101. #231 is covered but stays open until you close it. Details: [delivery report](https://github.com/fvermaut/timone/blob/timone/90-the-platform-merge-carve-out-misses-squa-chunk-2/doc/plans/phases/reports/phase-65-delivery.md). This status file is on that branch and reaches `main` with the pull request.
+
+**What I need from you:** run the 2 new tests and the replay on your machine, answer the question on #260, then review and merge it.
+
 **2. On scratch-app, from the watched run.** [Pull request #73](https://github.com/fvermaut/scratch-app/pull/73) adds a button that removes every finished to-do at once. The machine built it from your two approvals, for $33.25. It asks one question: merge now, or wait for [#53](https://github.com/fvermaut/scratch-app/issues/53), the count in the browser tab, which was never merged. [#70](https://github.com/fvermaut/scratch-app/pull/70) is still open with its own question.
 
 **What I need from you:** nothing, unless you want #73 or #70 merged.
@@ -178,6 +182,8 @@ One promise lost its tick on 4 September — the one about a job being picked up
 ---
 
 ## What changed recently
+
+**22 October — the check at the end of a session no longer blames a session for GitHub's squash merges ([#90](https://github.com/fvermaut/timone/issues/90)), on the branch `timone/90-the-platform-merge-carve-out-misses-squa-chunk-2`, open for your review as [pull request #260](https://github.com/fvermaut/timone/pull/260).** The check of the fix found no fault. The two reviews found 2 things and 1 thing. The pull request asks one question. Item 1v says what is needed.
 
 **18 October — the check at the end of a session no longer reports PRD-07.R3 by mistake ([#250](https://github.com/fvermaut/timone/issues/250)), on the branch `timone/250-the-verified-status-check-reads-was-neve`, open for your review as [pull request #257](https://github.com/fvermaut/timone/pull/257).** The check of the fix found no fault, and the two reviews found nothing. Parts of three older checks need the replay or a GitHub login that this container does not have. Item 1u says what is needed.
 
