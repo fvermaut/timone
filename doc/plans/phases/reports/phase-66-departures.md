@@ -22,3 +22,10 @@
 **Agreed:** 66d: "Cases 1–16 must be seen to fail before the change."
 **Did instead:** Fourteen cases were seen red against the code before the change. Cases 13 (no `ledger` gives no `--label`) and 15 (a refused second daemon never sweeps) passed there; each was proved by a mutation that turned it red, then reverted. The phase file is amended at that line.
 **Why:** Both cases assert that something does not happen, and the old code does neither thing, so no honest red was possible.
+
+## 2026-10-22 — timone#73, execution
+
+**Kind:** check not run
+**Agreed:** 66d's last step: `npx vitest run` (the whole suite), expect exit 0.
+**Did instead:** It was run once, at the close, and it exits 1: 79 files, 2867 tests, 2797 passed, 70 failed. All 70 fail on the container's refusal of a `git push … main` inside the tests' own temporary repositories (`guardrails.test.ts` 45, `numbers.test.ts` 16, `workspace.test.ts` 6, `commands/number.test.ts` 3). These are the same 70 that phase 64's close recorded on the code before this phase.
+**Why:** This container refuses every push to `main`, the tests' own pushes included. The whole suite has to be run once on a machine without that refusal.
