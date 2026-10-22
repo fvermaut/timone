@@ -1,4 +1,5 @@
 import { spawn as spawnProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createInterface } from "node:readline";
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -110,7 +111,11 @@ export interface ContainerRuntimeOptions {
    * production run must never have.
    */
   credentials?: CredentialProvider;
-  /** Names the container. Behind a seam so a test is not clock-dependent. */
+  /**
+   * Names the container. Behind a seam so a test can know the name in
+   * advance. The default is {@link boxName} with a random suffix, new at
+   * every start.
+   */
   nameFor?: (request: SessionRequest) => string;
   /**
    * Stands the project's services up beside the box, and answers the network
@@ -975,17 +980,41 @@ function writeForgeToken(
 }
 
 /**
+ * The name a box is started under: `timone`, the project, the run's ticket and
+ * sequence, the stage, and `suffix`, joined with `-` (timone#73).
+ *
+ * Each part is lowercased and every run of characters docker would refuse
+ * becomes one `-`, so a project named `Scratch App` still gets a name docker
+ * takes. The suffix is what makes the name new at every start; the rest is
+ * what lets a human reading `docker ps` tell which run a box is.
+ */
+export function boxName(request: SessionRequest, suffix: string): string {
+  const run = /#(\d+)\/(\d+)$/.exec(request.runId ?? "");
+  return [
+    "timone",
+    request.workspace?.project.name ?? "session",
+    ...(run === null ? [] : [run[1], run[2]]),
+    request.stage,
+    suffix,
+  ]
+    .map((part) => part.toLowerCase().replace(/[^a-z0-9_.]+/g, "-"))
+    .join("-");
+}
+
+/**
  * A {@link SessionRuntime} that runs each session in its own container.
  */
 export function containerRuntime(
   options: ContainerRuntimeOptions,
 ): SessionRuntime {
   const spawn = options.spawn ?? dockerSpawn;
-  let sequence = 0;
+  // A random part rather than a counter: a counter starts again at 1 with
+  // every daemon, and a box an earlier daemon left behind still holds the
+  // name it would ask for (timone#73).
   const nameFor =
     options.nameFor ??
     ((request: SessionRequest) =>
-      `timone-${request.workspace?.project.name ?? "session"}-${++sequence}`);
+      boxName(request, randomBytes(4).toString("hex")));
 
   return {
     async start(request: SessionRequest): Promise<StartedSession> {

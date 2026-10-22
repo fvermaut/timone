@@ -91,6 +91,8 @@ runId?: string;
 
 Cases 1–6 must be seen to fail before the change (1–3 because `boxName` does not exist; run the red step with vitest, which does not type-check). Record the red run in the handoff.
 
+> ✏ 2026-10-22 (build, timone#73): case 5 cannot be seen to fail before the change — the old counter already gave one runtime two different names (`timone-ivtrends-1`, then `timone-ivtrends-2`). Cases 1–4 and 6 must be seen red; case 5 is proved by a mutation instead (a fixed suffix in the default `nameFor` turns it red), recorded in the handoff.
+
 > No dependency on other sub-phases.
 
 #### Agent Validation Steps

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { githubAppCredentials, type MintCall } from "../adapters/credentials.js";
 import {
+  boxName,
   containerRuntime,
   gitConfigExport,
   keepForgeTokenFresh,
@@ -300,6 +301,102 @@ describe("a session that runs in a box", () => {
 
     expect(outcome.ok).toBe(false);
     expect(removed.some((call) => call.startsWith("rm -f"))).toBe(true);
+  });
+});
+
+/**
+ * A box's name has to be new at every start. The old name was the project and
+ * a counter that began at 1 each time the daemon started, so a daemon that
+ * restarted after a box was left behind asked docker for a name it already
+ * had, and the run failed before it began (timone#73).
+ */
+describe("a box's name belongs to its run (timone#73)", () => {
+  it("names the box after the project, the ticket, the run's sequence, the stage and the suffix", () => {
+    expect(
+      boxName({ ...request(), runId: "scratch-app#7/1" }, "0a1b2c3d"),
+    ).toBe("timone-scratch-app-7-1-execution-0a1b2c3d");
+  });
+
+  it("leaves the ticket and the sequence out for a session no run started", () => {
+    expect(boxName(request(), "0a1b2c3d")).toBe(
+      "timone-scratch-app-execution-0a1b2c3d",
+    );
+  });
+
+  it("gives a project whose name docker would refuse a name docker takes", () => {
+    const base = request();
+    const named = boxName(
+      {
+        ...base,
+        workspace: {
+          ...base.workspace!,
+          project: { ...base.workspace!.project, name: "Scratch App" },
+        },
+      },
+      "0a1b2c3d",
+    );
+
+    expect(named.startsWith("timone-scratch-app-")).toBe(true);
+    // Docker's own rule for a container name.
+    expect(named).toMatch(/^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/);
+  });
+
+  /** A request for ivtrends#37's first run, the run timone#73 was found on. */
+  function ivtrendsRequest(): SessionRequest {
+    return {
+      ...sessionRequest({
+        cwd: "/root",
+        prompt: "do the thing",
+        model: "claude-opus-5",
+        stage: "execution",
+        workspace: {
+          timone: { commit: TIMONE_COMMIT, remote: "https://github.com/fvermaut/timone.git" },
+          project: {
+            name: "ivtrends",
+            repoUrl: "https://github.com/fvermaut/ivtrends.git",
+          },
+          branch: "timone/37-a-chart-that-never-loads",
+        },
+      }),
+      runId: "ivtrends#37/1",
+    };
+  }
+
+  /** The `--name` the runtime asked docker for, on its one `docker run`. */
+  function nameAskedFor(calls: { args: string[] }[]): string | undefined {
+    const run = calls.find((call) => call.args[0] === "run");
+    return run?.args[run.args.indexOf("--name") + 1];
+  }
+
+  it("asks docker for a new name after the daemon restarts (timone#73)", async () => {
+    // The ticket's case: the same run started by two daemons, the second
+    // after a restart, with the first one's box still there. Before the fix
+    // both were `timone-ivtrends-1` and docker refused the second.
+    const first = fakeContainer([started, result()]);
+    await (await runtimeWith(first.spawn).start(ivtrendsRequest())).completed;
+    const second = fakeContainer([started, result()]);
+    await (await runtimeWith(second.spawn).start(ivtrendsRequest())).completed;
+
+    const firstName = nameAskedFor(first.calls);
+    const secondName = nameAskedFor(second.calls);
+    expect(firstName).toMatch(/^timone-ivtrends-37-1-execution-[0-9a-f]{8}$/);
+    expect(secondName).toMatch(/^timone-ivtrends-37-1-execution-[0-9a-f]{8}$/);
+    expect(secondName).not.toBe(firstName);
+  });
+
+  it("asks docker for a new name each time one runtime starts the same run", async () => {
+    // The same run started twice by one daemon, as a retry does.
+    const { spawn, calls } = fakeContainer([started, result()]);
+    const runtime = runtimeWith(spawn);
+
+    await (await runtime.start(ivtrendsRequest())).completed;
+    await (await runtime.start(ivtrendsRequest())).completed;
+
+    const names = calls
+      .filter((call) => call.args[0] === "run")
+      .map((call) => call.args[call.args.indexOf("--name") + 1]);
+    expect(names).toHaveLength(2);
+    expect(names[1]).not.toBe(names[0]);
   });
 });
 

@@ -140,6 +140,12 @@ export interface SessionRequest {
    * empty, as it always is (PRD-10.R1, #87).
    */
   stage: PipelineStage;
+  /**
+   * The run this session belongs to, as the ledger writes it:
+   * `<project>#<ticket>/<seq>`. A box is named after it (timone#73). Absent
+   * for a session no run started.
+   */
+  runId?: string;
 }
 
 /** What {@link sessionRequest} is given to assemble a request from. */
