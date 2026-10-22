@@ -620,6 +620,155 @@ describe("the end of a box waits for its removal, and removes only its own box (
   });
 });
 
+/**
+ * A daemon stopped with Ctrl-C used to leave its boxes running. They kept
+ * working and pushing with nobody watching, and the next daemon found their
+ * names taken (timone#73). So the runtime removes, at once, every box it
+ * started that has not ended.
+ */
+describe("a stopping daemon removes the boxes still running (timone#73)", () => {
+  /**
+   * Boxes that say they started and then keep running until `finish(i)` ends
+   * the i-th one started. Every call but `run` goes into `others`.
+   */
+  function boxesThatKeepRunning(): {
+    spawn: ContainerSpawn;
+    others: string[];
+    finish: (index: number) => void;
+  } {
+    const others: string[] = [];
+    const finishers: (() => void)[] = [];
+
+    const spawn: ContainerSpawn = (_command, args) => {
+      if (args[0] !== "run") {
+        others.push(args.join(" "));
+        return oneShot();
+      }
+      let resolveExit!: (value: ContainerExit) => void;
+      const exit = new Promise<ContainerExit>((resolve) => {
+        resolveExit = resolve;
+      });
+      let finish!: () => void;
+      const finished = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      finishers.push(finish);
+      return {
+        lines: (async function* () {
+          yield started;
+          await finished;
+          resolveExit({ code: 0, signal: null, stderr: "" });
+        })(),
+        exit,
+        kill: () => {},
+      };
+    };
+
+    return { spawn, others, finish: (index) => finishers[index]?.() };
+  }
+
+  /** Names the boxes `names`, in the order they start. */
+  function namesInTurn(...names: string[]): () => string {
+    let next = 0;
+    return () => names[next++] ?? "timone-unexpected";
+  }
+
+  it("removes every box still running, in one call, and returns their names", async () => {
+    const { spawn } = boxesThatKeepRunning();
+    const removedNow: (readonly string[])[] = [];
+    const runtime = containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: namesInTurn("timone-a", "timone-b"),
+      removeNow: (names) => {
+        removedNow.push(names);
+      },
+    });
+    await runtime.start(request());
+    await runtime.start(request());
+
+    const names = runtime.stopAllNow!();
+
+    expect(removedNow).toEqual([["timone-a", "timone-b"]]);
+    expect(names).toEqual(["timone-a", "timone-b"]);
+  });
+
+  it("leaves out a box whose session has already ended", async () => {
+    const { spawn, finish } = boxesThatKeepRunning();
+    const removedNow: (readonly string[])[] = [];
+    const runtime = containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: namesInTurn("timone-a", "timone-b"),
+      removeNow: (names) => {
+        removedNow.push(names);
+      },
+    });
+    const first = await runtime.start(request());
+    await runtime.start(request());
+    finish(0);
+    await first.completed;
+
+    const names = runtime.stopAllNow!();
+
+    expect(removedNow).toEqual([["timone-b"]]);
+    expect(names).toEqual(["timone-b"]);
+  });
+
+  it("asks docker for nothing when no box is running", () => {
+    const { spawn } = boxesThatKeepRunning();
+    const removedNow: (readonly string[])[] = [];
+    const runtime = containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      removeNow: (names) => {
+        removedNow.push(names);
+      },
+    });
+
+    const names = runtime.stopAllNow!();
+
+    expect(removedNow).toEqual([]);
+    expect(names).toEqual([]);
+  });
+
+  it("leaves out a start docker refused because the name was taken", async () => {
+    // That box is not this runtime's: it may be a live run's.
+    const { spawn } = fakeContainer([], {
+      code: 125,
+      stderr:
+        'docker: Error response from daemon: Conflict. The container name "/timone-a" is already in use by container "9620e0a0708b". You have to remove (or rename) that container to be able to reuse that name.',
+    });
+    const runtime = containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: namesInTurn("timone-a"),
+      removeNow: () => {},
+    });
+    const session = await runtime.start(request());
+    await session.completed;
+
+    expect(runtime.stopAllNow!()).toEqual([]);
+  });
+
+  it("never reaches the real docker from a runtime given a fake spawn", async () => {
+    // No `removeNow`: the default for a runtime with an injected spawn
+    // removes nothing, so a test that forgets one cannot reach docker.
+    const { spawn, others } = boxesThatKeepRunning();
+    const runtime = containerRuntime({
+      image: "timone-box:test",
+      spawn,
+      nameFor: namesInTurn("timone-a"),
+    });
+    await runtime.start(request());
+
+    const names = runtime.stopAllNow!();
+
+    expect(names).toEqual(["timone-a"]);
+    expect(others).toEqual([]);
+  });
+});
+
 describe("what the box is given, and what it is not", () => {
   function runCall(): { args: string[]; env?: Record<string, string> } {
     const { spawn, calls } = fakeContainer([started, result()]);

@@ -219,6 +219,9 @@ npx tsc --noEmit ; echo "exit: $?"              # expect exit: 0
 
 # The handler calls stopOnSignal and nothing else (comments excluded).
 # Expect one line inside the process.once handler, exit: 0.
+# ✏ 2026-10-22 (build, timone#73): the grep also matches the definition
+# `export function stopOnSignal(` this slice is told to add. Expect that line
+# plus exactly one call, inside the process.once handler.
 grep -n "stopOnSignal(" src/commands/daemon.ts | grep -v '^\s*[0-9]*:\s*\(//\|\*\)' ; echo "exit: $?"
 
 # No test file reaches the real docker. Expect no output, exit: 1.

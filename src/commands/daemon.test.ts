@@ -32,8 +32,9 @@ import {
   machineAdapter,
   runDaemon,
   runtimeFor,
+  stopOnSignal,
 } from "./daemon.js";
-import { agentSdkRuntime } from "../daemon/session.js";
+import { agentSdkRuntime, type SessionRuntime } from "../daemon/session.js";
 import { enqueue } from "../daemon/requests.js";
 import { RunnerDriver } from "../runner/driver.js";
 import { RunningSteps } from "../runner/actions.js";
@@ -730,5 +731,67 @@ describe("the daemon says when its own process is running old code", () => {
   it("asks nothing when no version probe is wired, and keeps polling", async () => {
     const { said } = await cycle(async () => undefined);
     expect(said.join("\n")).not.toMatch(/old copy/i);
+  });
+});
+
+/**
+ * What the daemon does on Ctrl-C, or on a SIGTERM. A box left running after
+ * the daemon stopped kept working and pushing, and the next daemon found its
+ * name taken (timone#73).
+ */
+describe("stopOnSignal", () => {
+  it("releases the locks, removes the boxes still running, says which, then exits 130", () => {
+    const calls: string[] = [];
+    const runtime: SessionRuntime = {
+      start: () => Promise.reject(new Error("no session is started here")),
+      stopAllNow: () => {
+        calls.push("stopAllNow");
+        return ["timone-a", "timone-b"];
+      },
+    };
+
+    stopOnSignal("SIGINT", {
+      releaseLocks: () => calls.push("releaseLocks"),
+      runtime,
+      log: (message) => calls.push(`log: ${message}`),
+      exit: (code) => calls.push(`exit: ${code}`),
+    });
+
+    expect(calls).toEqual([
+      "releaseLocks",
+      "stopAllNow",
+      "log: stopped: removed 2 box(es) still running: timone-a, timone-b",
+      "exit: 130",
+    ]);
+  });
+
+  it("exits 143 on a SIGTERM", () => {
+    const codes: number[] = [];
+    const runtime: SessionRuntime = {
+      start: () => Promise.reject(new Error("no session is started here")),
+      stopAllNow: () => ["timone-a"],
+    };
+
+    stopOnSignal("SIGTERM", {
+      releaseLocks: () => {},
+      runtime,
+      log: () => {},
+      exit: (code) => codes.push(code),
+    });
+
+    expect(codes).toEqual([143]);
+  });
+
+  it("only releases the locks and exits for a runtime whose sessions die with the process", () => {
+    const calls: string[] = [];
+
+    stopOnSignal("SIGINT", {
+      releaseLocks: () => calls.push("releaseLocks"),
+      runtime: agentSdkRuntime,
+      log: (message) => calls.push(`log: ${message}`),
+      exit: (code) => calls.push(`exit: ${code}`),
+    });
+
+    expect(calls).toEqual(["releaseLocks", "exit: 130"]);
   });
 });

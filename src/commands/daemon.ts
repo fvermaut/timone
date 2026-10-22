@@ -573,6 +573,29 @@ async function sayIfOutOfDate(
   if (notice !== undefined) say(notice);
 }
 
+/**
+ * The whole of what the daemon does on Ctrl-C or a SIGTERM: give the locks
+ * back, remove the boxes still running, say which, and exit (timone#73).
+ */
+export function stopOnSignal(
+  signal: "SIGINT" | "SIGTERM",
+  deps: {
+    releaseLocks: () => void;
+    runtime: SessionRuntime;
+    log: (message: string) => void;
+    exit: (code: number) => void;
+  },
+): void {
+  deps.releaseLocks();
+  const names = deps.runtime.stopAllNow?.() ?? [];
+  if (names.length > 0) {
+    deps.log(
+      `stopped: removed ${names.length} box(es) still running: ${names.join(", ")}`,
+    );
+  }
+  deps.exit(signal === "SIGINT" ? 130 : 143);
+}
+
 /** Register the `daemon` command on the program. */
 export function registerDaemonCommand(program: Command): void {
   program
@@ -766,11 +789,21 @@ export function registerDaemonCommand(program: Command): void {
       // steps can run for an hour, and a Ctrl-C that waited for them would not
       // stop the daemon. A step cut short this way is found by the next
       // daemon's reclaim, which hands its run back to the runner and says why.
+      //
+      // ✏ The boxes still running are removed here, synchronously, so no
+      // step's ending is handled between their removal and the exit; the
+      // steps they ran are still found by the next daemon's reclaim. A box
+      // left running after the daemon stopped kept working and pushing
+      // (timone#73).
       for (const signal of ["SIGINT", "SIGTERM"] as const) {
-        process.once(signal, () => {
-          releaseHeldLocks();
-          process.exit(signal === "SIGINT" ? 130 : 143);
-        });
+        process.once(signal, () =>
+          stopOnSignal(signal, {
+            releaseLocks: releaseHeldLocks,
+            runtime,
+            log,
+            exit: (code) => process.exit(code),
+          }),
+        );
       }
 
       process.exitCode = await runDaemon({

@@ -387,6 +387,14 @@ export function intervalTicker(onTick: () => void, intervalMs: number): Ticker {
  */
 export interface SessionRuntime {
   start(request: SessionRequest): Promise<StartedSession>;
+  /**
+   * Remove every box this runtime started that has not ended yet, and return
+   * when they are gone. **Synchronous on purpose**: it is called just before
+   * the process exits on a signal, and nothing else may run in between — no
+   * step's ending, no ledger write, no ticket comment (timone#73). Returns the
+   * names it removed. Absent for a runtime whose sessions die with the process.
+   */
+  stopAllNow?(): string[];
 }
 
 /**

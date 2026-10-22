@@ -1,4 +1,4 @@
-import { spawn as spawnProcess } from "node:child_process";
+import { spawn as spawnProcess, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createInterface } from "node:readline";
 
@@ -117,6 +117,12 @@ export interface ContainerRuntimeOptions {
    * every start.
    */
   nameFor?: (request: SessionRequest) => string;
+  /**
+   * Removes the named boxes and returns once they are gone: the synchronous
+   * removal used when the daemon exits on a signal (timone#73). The real
+   * `docker rm -f` when absent and {@link spawn} is absent too.
+   */
+  removeNow?: (names: readonly string[]) => void;
   /**
    * Stands the project's services up beside the box, and answers the network
    * the box joins ([ADR-0041](../../doc/adr/0041-a-run-happens-in-a-container-built-from-the-remotes.md)
@@ -1022,8 +1028,25 @@ export function containerRuntime(
     options.nameFor ??
     ((request: SessionRequest) =>
       boxName(request, randomBytes(4).toString("hex")));
+  // The real docker only when the runtime's own spawn is the real one too. A
+  // test runtime injects its spawn, and must never reach the real docker
+  // because it forgot this one: on fvermaut's machine that would remove a
+  // live run's box.
+  const removeNow =
+    options.removeNow ??
+    (options.spawn === undefined ? dockerRemoveNow : () => undefined);
+  // Every box this runtime started that has not ended, by name.
+  const live = new Set<string>();
 
   return {
+    stopAllNow(): string[] {
+      const names = [...live];
+      if (names.length === 0) return [];
+      removeNow(names);
+      live.clear();
+      return names;
+    },
+
     async start(request: SessionRequest): Promise<StartedSession> {
       const workspace = request.workspace;
       if (workspace === undefined) {
@@ -1162,6 +1185,7 @@ export function containerRuntime(
             }),
       };
 
+      live.add(name);
       const container = spawn(
         "docker",
         runArgs(
@@ -1184,6 +1208,7 @@ export function containerRuntime(
         // A spawner that ignored `stdin: "pipe"`: a wiring fault, not
         // anything a run did. Nothing is left running behind it.
         await remove();
+        live.delete(name);
         if (stack !== undefined) await stack.down().catch(() => undefined);
         throw new Error(
           "an interactive box was started without a stdin to write its messages to",
@@ -1305,7 +1330,11 @@ export function containerRuntime(
         // memory, and the next run on the same project cannot take the name
         // back. The stack goes down on every path, the refused start's too,
         // because this start stood it up.
+        //
+        // Out of the live set only once it is gone, so a stop arriving while
+        // the removal runs still removes it. A refused start made nothing.
         if (!madeNoBox) await remove();
+        live.delete(name);
         if (stack !== undefined) await stack.down().catch(() => undefined);
         resolveId(id);
 
@@ -1370,6 +1399,22 @@ async function destroy(spawn: ContainerSpawn, name: string): Promise<void> {
   } catch {
     // A teardown that fails is not a reason to lose the run's outcome. The
     // leak is visible in `docker ps -a`, which 30h's own gate reads.
+  }
+}
+
+/**
+ * Remove the named containers, and return only when docker has. Synchronous,
+ * because it runs just before the process exits on a signal. Never throws: a
+ * removal that fails must not stop the exit.
+ */
+function dockerRemoveNow(names: readonly string[]): void {
+  try {
+    spawnSync("docker", ["rm", "-f", ...names], {
+      stdio: "ignore",
+      timeout: 20_000,
+    });
+  } catch {
+    // What is left behind is visible in `docker ps -a`.
   }
 }
 
