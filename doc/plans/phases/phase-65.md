@@ -1,6 +1,6 @@
 # Phase 65: GitHub's squash merges are no longer blamed on a session — the commit check excuses every commit GitHub's servers built, whatever its parent count
 
-> **Status:** Planned.
+> **Status:** Complete — see [reports/phase-65-complete.md](reports/phase-65-complete.md).
 
 > **Companion phases:** none edits the same lines. The carve-out was added outside a phase file, in commit `0df9d93` ("fix: the provenance check stops reporting what nobody can fix"), and `isPlatformMerge` has not changed since. [Phase 64](phase-64.md) changed `checkRegisterClaims` in the same file, `src/daemon/hooks.ts`, a hundred lines below; it does not touch `checkProvenance` or `isPlatformMerge`. Governing decisions: [ADR-0019](../../adr/0019-timone-authored-commits-carry-a-provenance-trailer.md), because it is the rule `checkProvenance` enforces — every commit a session makes carries a `Timone-Stage:` trailer — and a commit no session made is outside it; [ADR-0027](../../adr/0027-a-guardrail-finding-is-addressed-to-the-session-that-caused-it.md), because a finding goes first to the session that caused it, so a false one costs an innocent session a round and asks it to rewrite published history.
 
